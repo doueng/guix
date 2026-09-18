@@ -1,0 +1,108 @@
+#!/usr/bin/env bb
+
+(ns herdr-agent-pick
+  (:require [babashka.fs :as fs]
+            [babashka.process :as process]
+            [cheshire.core :as json]
+            [clojure.string :as str]))
+
+(defn bin-path [name]
+  (let [home (System/getProperty "user.home")
+        candidates [(str "/run/current-system/sw/bin/" name)
+                    (str home "/.nix-profile/bin/" name)
+                    (str home "/.local/bin/" name)]]
+    (or (some #(when (fs/executable? %) %) candidates)
+        name)))
+
+(def herdr-bin (or (System/getenv "HERDR_BIN_PATH")
+                   (bin-path "herdr")))
+
+(defn eprintln [& values]
+  (binding [*out* *err*]
+    (apply println values)))
+
+(defn run! [argv options]
+  (let [result (try
+                 @(process/process argv options)
+                 (catch Exception error
+                   {:exit 127
+                    :out ""
+                    :err (.getMessage error)}))]
+    (if (zero? (:exit result))
+      result
+      (do
+        (when (seq (:err result))
+          (eprintln (:err result)))
+        (System/exit (:exit result))))))
+
+(defn agents []
+  (let [output (:out (run! [herdr-bin "agent" "list"]
+                          {:out :string :err :string}))]
+    (get-in (json/parse-string output true)
+            [:result :agents]
+            [])))
+
+(defn current-workspace-id [items]
+  (or (System/getenv "HERDR_WORKSPACE_ID")
+      (some (fn [{:keys [focused workspace_id]}]
+              (when focused workspace_id))
+            items)))
+
+(def agent-state-order
+  ;; Keep attention-worthy agents at the top, matching Herdr's priority view.
+  {"blocked" 0
+   "done" 1
+   "working" 2
+   "idle" 3
+   "unknown" 4})
+
+(defn state-key [value]
+  (str/lower-case (str (or value "unknown"))))
+
+(defn agent-sort-key [{:keys [agent agent_status pane_id]}]
+  [(get agent-state-order (state-key agent_status) 99)
+   (state-key agent)
+   (str pane_id)])
+
+(defn clean-text [value]
+  (-> (str value)
+      (str/replace #"[\t\r\n]+" " ")))
+
+(defn row-data [{:keys [agent agent_status focused cwd pane_id tab_id]}]
+  {:id pane_id
+   :display (format "%s %-8s %-24s %s%s"
+                    (if focused "*" " ")
+                    (clean-text (or agent_status "unknown"))
+                    (clean-text (or agent "unnamed"))
+                    (clean-text (or cwd ""))
+                    (if tab_id (str "  [" tab_id "]") ""))})
+
+(defn pick [rows]
+  (let [input (str/join "\n" (map #(str (:id %) "\t" (:display %)) rows))
+        result (run! ["fzf"
+                      "--border"
+                      "--delimiter" "\t"
+                      "--header" "Agent                 Status    Working directory"
+                      "--layout" "reverse"
+                      "--no-multi"
+                      "--no-sort"
+                      "--prompt" "Agent> "
+                      "--with-nth" "2"]
+                     {:in input :out :string :err :string})]
+    (some-> (:out result)
+            str/trim
+            (str/split #"\t" 2)
+            first)))
+
+(let [items (vec (agents))
+      workspace-id (current-workspace-id items)
+      rows (->> items
+                (filter #(or (nil? workspace-id)
+                             (= workspace-id (:workspace_id %))))
+                (sort-by agent-sort-key)
+                (map row-data)
+                vec)]
+  (when (seq rows)
+    (when-let [selected-id (pick rows)]
+      (run! [herdr-bin "agent" "focus" selected-id]
+            {:out :string :err :string}))))

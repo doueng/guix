@@ -1,0 +1,77 @@
+(use-modules (engstrand asahi)
+             (engstrand bootloader)
+             (gnu)
+             (gnu home)
+             (gnu services base)
+             (gnu services guix)
+             (gnu system shadow)
+             (guix channels)
+             (guix gexp)
+             (guix packages)
+             (ice-9 textual-ports)
+             (srfi srfi-1))
+
+(define (check value message)
+  (unless value (error message)))
+
+(define channels
+  (primitive-load (cadr (command-line))))
+
+(define os
+  (make-ssd-os #:root-uuid "11111111-2222-3333-4444-555555555555"
+               #:esp-uuid "1234-ABCD"
+               #:channels channels))
+
+(define users (operating-system-users os))
+(define services (operating-system-services os))
+(define (find-service name)
+  (find (lambda (s) (eq? name (service-type-name (service-kind s)))) services))
+
+(check (equal? '("guix" "asahi")
+               (map (compose symbol->string channel-name) channels))
+       "Unexpected channels")
+(check (every (lambda (c) (and (= 40 (string-length (channel-commit c)))
+                               (channel-introduction c))) channels)
+       "Unpinned/unauthenticated channel")
+(check (not (member "guest" (map user-account-name users))) "Guest account leaked")
+(let ((root (find (lambda (u) (string=? "root" (user-account-name u))) users))
+      (engstrand (find (lambda (u) (string=? "engstrand" (user-account-name u))) users)))
+  (check (and root (equal? "" (user-account-password root)))
+         "Root must use the documented empty initial password; set it at first boot")
+  (check (and engstrand (equal? "*" (user-account-password engstrand)))
+         "engstrand must start locked; set its password as root at first boot"))
+(for-each (lambda (name) (check (find-service name) "Missing Asahi/desktop service"))
+          '(asahi-firmware asahi-substitutes speakersafetyd rtkit sddm network-manager iwd guix-home))
+(check (not (find-service 'openssh)) "SSH should not listen during the trial")
+(check (equal? '("engstrand")
+               (map car (service-value (find-service 'guix-home))))
+       "Audio Home must belong to engstrand")
+(check (equal? channels
+               (guix-configuration-channels (service-value (find-service 'guix))))
+       "Daemon channel defaults are not pinned")
+(check (equal? '("/boot/efi")
+               (bootloader-configuration-targets (operating-system-bootloader os)))
+       "Wrong bootloader mount target")
+(check (eq? m1n1-u-boot-grub-bootloader-os-prepare
+            (bootloader-configuration-bootloader (operating-system-bootloader os)))
+       "OS must use the OS_PREPARE-patched bootloader")
+(check (let* ((patch (car (origin-patches (package-source asahi-u-boot-os-prepare))))
+              (module-dir (dirname (search-path %load-path "engstrand/bootloader.scm")))
+              (patch-path (string-append module-dir "/u-boot-xhci-dwc3-os-prepare.patch")))
+         (and (local-file? patch)
+              (string-suffix? "u-boot-xhci-dwc3-os-prepare.patch" (local-file-file patch))
+              (string-contains
+               (call-with-input-file patch-path get-string-all)
+               "DM_FLAG_OS_PREPARE")))
+       "Patched U-Boot must carry the OS_PREPARE patch")
+(check (member "uas" (operating-system-initrd-modules os))
+       "Initrd must include UAS for the USB SSD")
+(check (catch #t
+         (lambda ()
+           (make-ssd-os #:root-uuid "11111111-2222-3333-4444-555555555555"
+                        #:esp-uuid "5CDF-1DF4" #:channels channels)
+           #f)
+         (lambda args #t))
+       "Current NixOS ESP must be refused")
+(fold-services services #:target-type activation-service-type)
+(display "PASS: channel pins, OS records, users, service graph, audio ownership, boot target, patched bootloader.\n")

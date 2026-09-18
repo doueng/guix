@@ -1,0 +1,15 @@
+Tear the DWC3 xHCI controller down at OS handoff. Without this, U-Boot
+leaves the Apple Type-C xHCI running and Linux does not enumerate a USB
+device attached at boot until it is replugged.
+https://github.com/AsahiLinux/linux/issues/554
+
+--- a/drivers/usb/host/xhci-dwc3.c
++++ b/drivers/usb/host/xhci-dwc3.c
+@@ -251,6 +251,6 @@
+ 	.ops = &xhci_usb_ops,
+ 	.priv_auto	= sizeof(struct xhci_ctrl),
+ 	.plat_auto	= sizeof(struct xhci_dwc3_plat),
+-	.flags = DM_FLAG_ALLOC_PRIV_DMA,
++	.flags = DM_FLAG_OS_PREPARE | DM_FLAG_ALLOC_PRIV_DMA,
+ };
+ #endif

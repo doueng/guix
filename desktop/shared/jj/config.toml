@@ -1,0 +1,289 @@
+[user]
+name = "engstrand"
+email = "doueng@users.noreply.github.com"
+
+[ui]
+editor = "nvim"
+pager = "less"
+default-command = "status"
+paginate = "never"
+diff-formatter = ":git"
+conflict-marker-style = "diff-experimental"
+diff-editor = ":builtin"
+merge-editor = ":builtin"
+
+[templates]
+log = 'separate(" ", change_id.shortest(8), committer.timestamp().local().format("%Y-%m-%d"), if(local_bookmarks, "[" ++ local_bookmarks.map(|b| b.name()).join(",") ++ "]", ""), description.first_line())'
+
+[colors]
+"muted" = { fg = "black" }
+
+"empty" = { fg = "red" }
+"description placeholder" = { fg = "red" }
+"empty description placeholder" = { fg = "red" }
+"working_copy empty" = { fg = "red" }
+"working_copy empty description placeholder" = { fg = "red" }
+
+"author self" = { fg = "green", underline = true }
+"author other" = { fg = "bright blue" }
+
+"diff removed token" = { underline = false }
+"diff added token" = { underline = false }
+
+"bookmark" = { fg = "bright yellow" }
+"bookmarks" = { fg = "bright yellow" }
+"tag" = { fg = "bright yellow" }
+"tags" = { fg = "bright yellow" }
+
+[operation]
+username = "engstrand"
+
+[aliases]
+# Makes jj jj log work
+jj = []
+# "New Trunk"
+nt = ["new", "trunk()"]
+publish-master = ["util", "exec", "--", "bash", "-c", """
+set -euo pipefail
+jj commit "$@"
+jj bookmark set master -r @-
+jj git push --remote origin --bookmark master
+""", ""]
+track-status = ["file", "track", "all()"]
+# lg -- just a nice short non-overwhelming log command
+lg = ["log", "-n", "10", "--config", "revsets.log=rlog"]
+# lgf/showf -- faster read-only variants for large repos
+lgf = ["--ignore-working-copy", "log", "-n", "10", "--config", "revsets.log=rlog"]
+showf = ["--ignore-working-copy", "show"]
+# id -- show the change-id of a revision
+id = ["util", "exec", "--", "bash", "-euo", "pipefail", "-c", '''
+  jj --ignore-working-copy log -n 1 -GT 'self.change_id()' -r "${1:-@}"
+''', ""]
+# sha -- show the commit-id of a revision
+sha = ["util", "exec", "--", "bash", "-euo", "pipefail", "-c", '''
+  jj --ignore-working-copy log -n 1 -GT 'self.commit_id()' -r "${1:-@}"
+''', ""]
+f = ["file"]
+# tug -- pull up the most recent bookmark using jj's builtin advance command
+tug = ["bookmark", "advance"]
+# -- diff-formatter options --
+diff-git = ["diff", "--config", "ui.diff-formatter=:git"]
+diff-jj = ["diff", "--config", "ui.diff-formatter=:color-words"]
+diff-difft = ["diff", "--tool", "difft"]
+jjui-show-fancy = ["util", "exec", "--", "bash", "-uo", "pipefail", "-c", '''
+  pierre="$(command -v pierre-diff-ansi || true)"
+  if [[ -x "$pierre" ]]; then
+    jj show --git --color never --ignore-working-copy -r "$1" | "$pierre" --width "${COLUMNS:-120}"
+    exit 0
+  fi
+
+  dsf="$(command -v diff-so-fancy || true)"
+  if [[ ! -x "$dsf" ]]; then
+    jj show --git --color always --ignore-working-copy -r "$1"
+    exit 0
+  fi
+  export GIT_CONFIG_COUNT=6
+  export GIT_CONFIG_KEY_0=color.diff-highlight.newnormal
+  export GIT_CONFIG_VALUE_0="green bold"
+  export GIT_CONFIG_KEY_1=color.diff-highlight.newhighlight
+  export GIT_CONFIG_VALUE_1="green bold 22"
+  export GIT_CONFIG_KEY_2=color.diff-highlight.newreset
+  export GIT_CONFIG_VALUE_2="reset"
+  export GIT_CONFIG_KEY_3=color.diff-highlight.oldnormal
+  export GIT_CONFIG_VALUE_3="red bold"
+  export GIT_CONFIG_KEY_4=color.diff-highlight.oldhighlight
+  export GIT_CONFIG_VALUE_4="red bold 52"
+  export GIT_CONFIG_KEY_5=color.diff-highlight.oldreset
+  export GIT_CONFIG_VALUE_5="reset"
+  jj show --git --color never --ignore-working-copy -r "$1" | "$dsf"
+''', ""]
+jjui-file-fancy = ["util", "exec", "--", "bash", "-uo", "pipefail", "-c", '''
+  pierre="$(command -v pierre-diff-ansi || true)"
+  if [[ -x "$pierre" ]]; then
+    jj diff --git --color never --ignore-working-copy -r "$1" -- "$2" | "$pierre" --width "${COLUMNS:-120}"
+    exit 0
+  fi
+
+  dsf="$(command -v diff-so-fancy || true)"
+  if [[ ! -x "$dsf" ]]; then
+    jj diff --git --color always --ignore-working-copy -r "$1" -- "$2"
+    exit 0
+  fi
+  export GIT_CONFIG_COUNT=6
+  export GIT_CONFIG_KEY_0=color.diff-highlight.newnormal
+  export GIT_CONFIG_VALUE_0="green bold"
+  export GIT_CONFIG_KEY_1=color.diff-highlight.newhighlight
+  export GIT_CONFIG_VALUE_1="green bold 22"
+  export GIT_CONFIG_KEY_2=color.diff-highlight.newreset
+  export GIT_CONFIG_VALUE_2="reset"
+  export GIT_CONFIG_KEY_3=color.diff-highlight.oldnormal
+  export GIT_CONFIG_VALUE_3="red bold"
+  export GIT_CONFIG_KEY_4=color.diff-highlight.oldhighlight
+  export GIT_CONFIG_VALUE_4="red bold 52"
+  export GIT_CONFIG_KEY_5=color.diff-highlight.oldreset
+  export GIT_CONFIG_VALUE_5="reset"
+  jj diff --git --color never --ignore-working-copy -r "$1" -- "$2" | "$dsf"
+''', ""]
+cascade = ["rebase", "-s", "roots(mutable() & (trunk().. & ~descendants(trunk())))", "-d", "trunk()"]
+chainify = ["util", "exec", "--", "bash", "-c", """
+  set -euo pipefail
+
+  usage() {
+    echo "Usage: jj chainify <task> [base] [leaf]"
+    echo "Example: jj chainify MOWP-123 master @"
+  }
+
+  rev_exists() {
+    jj --ignore-working-copy log -r "$1" -n 1 >/dev/null 2>&1
+  }
+
+  revset_for() {
+    local rev="$1"
+    if jj --ignore-working-copy log -r "bookmarks(\"$rev\")" -n 1 >/dev/null 2>&1; then
+      printf 'bookmarks(\"%s\")' "$rev"
+    else
+      printf '%s' "$rev"
+    fi
+  }
+
+  default_base() {
+    if rev_exists main; then
+      echo main
+    elif rev_exists master; then
+      echo master
+    else
+      echo "Neither 'main' nor 'master' bookmark found" >&2
+      return 1
+    fi
+  }
+
+  if [[ $# -lt 1 || $# -gt 3 ]]; then
+    usage
+    exit 1
+  fi
+
+  task=${1#engstrand/}
+  task=${task%/}
+  if [[ -z "$task" ]]; then
+    echo "Task/prefix cannot be empty"
+    usage
+    exit 1
+  fi
+
+  base="${2:-}"
+  leaf="${3:-@}"
+  if [[ -z "$base" ]]; then
+    base=$(default_base)
+  fi
+
+  if ! rev_exists "$base" && ! jj --ignore-working-copy log -r "bookmarks(\"$base\")" -n 1 >/dev/null 2>&1; then
+    echo "Unknown base revision: $base"
+    exit 1
+  fi
+
+  if ! rev_exists "$leaf" && ! jj --ignore-working-copy log -r "bookmarks(\"$leaf\")" -n 1 >/dev/null 2>&1; then
+    echo "Unknown leaf revision: $leaf"
+    exit 1
+  fi
+
+  base_rev=$(revset_for "$base")
+  leaf_rev=$(revset_for "$leaf")
+
+  mapfile -t changes < <(
+    jj --ignore-working-copy log -r "(($base_rev)::($leaf_rev) ~ ($base_rev)) & mutable() & ~empty()" \
+      --no-graph --reversed -T 'change_id ++ "\n"'
+  )
+
+  if [[ ${#changes[@]} -eq 0 ]]; then
+    echo "No non-empty mutable changes found between $base and $leaf"
+    exit 1
+  fi
+
+  echo "Creating one bookmark per jj change:"
+  bookmarks=()
+  i=1
+  for change in "${changes[@]}"; do
+    branch="engstrand/${task}_branch-${i}"
+    title=$(jj --ignore-working-copy log -r "$change" -n 1 --no-graph -T 'description.first_line().trim()')
+    echo "$change -> $branch"
+    if [[ -n "$title" ]]; then
+      echo "  $title"
+    fi
+
+    if jj --ignore-working-copy log -r "bookmarks(\"$branch\")" -n 1 >/dev/null 2>&1; then
+      jj bookmark set "$branch" -r "$change"
+    else
+      jj bookmark create "$branch" -r "$change"
+    fi
+    bookmarks+=("$branch")
+    ((i++))
+  done
+
+  echo
+  echo "Configuring ARH upstream chain:"
+  prev="$base"
+  for branch in "${bookmarks[@]}"; do
+    git branch "$branch" --set-upstream-to="$prev"
+    echo "$prev -> $branch"
+    prev="$branch"
+  done
+
+  echo
+  echo "ARH stack is chainified. To publish:"
+  echo "  git checkout $prev"
+  echo "  arh publish --full-stack"
+""", ""]
+prepare-branch = ["util", "exec", "--", "bash", "-c", """
+  set -euo pipefail
+  branch="$USER/${1:?Need branch name}"
+  echo "$branch"
+
+  if [[ $(jj isempty) == "false" ]]; then
+    jj new
+  fi
+  jj bookmark create "$branch" -r @-
+  git branch "$branch" --set-upstream-to=${2:-main}
+  git checkout "$branch"
+  """, ""]
+isempty = [ "log", "-r", "@", "-T", """if(empty && description.first_line() == "", "true", "false")""", "--no-graph" ]
+
+[merge-tools.difft]
+diff-args = ["--color=always", "$left", "$right"]
+
+[merge-tools.difft-jjui]
+program = "difft"
+diff-args = ["--color=always", "--display", "inline", "--syntax-highlight", "off", "--width", "$width", "--byte-limit", "250000", "--graph-limit", "1000000", "$left", "$right"]
+
+[git]
+subprocess = true
+
+[remotes.origin]
+auto-track-bookmarks = "main"
+
+[fsmonitor]
+backend = "watchman"
+watchman.register-snapshot-trigger = true
+
+[snapshot]
+# auto-track allows specifying which changes to track automatically
+auto-track = "all()" # or "none()"
+auto-update-stale = true
+
+[revset-aliases]
+# Helper: Closest bookmark to the commit
+# https://github.com/jj-vcs/jj/discussions/5568
+'closest_bookmark(to)' = 'heads(::to & bookmarks())'
+'closest_pushable(to)' = 'heads(::to & ~description(exact:"") & (~empty() | merges()))'
+
+# -- log revsets --
+
+# log -- show the log of the current revision (default log expression)
+# connected() includes revisions between selected endpoints so jj/jjui do not show
+# "(elided revisions)" for the current stack.
+'log' = 'connected(present(@) | ancestors(immutable_heads().., 2) | present(trunk()))'
+
+# rlog -- show the ancestors and descendants of the current revision (up to 3 in each direction)
+'rlog' = 'connected(ancestors(trunk()..@, 2) | descendants(@, 3) | @)'
+
+# hlog -- show just the ancestors of the current revision (same as git log --oneline HEAD)
+'hlog' = '::@'

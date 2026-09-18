@@ -1,0 +1,178 @@
+# Herdr is the project multiplexer. Sesh for Herdr supplies workspace picking;
+# these bindings keep the shell, Emacs, pi, and jjui tabs easy to reach.
+onboarding = false
+
+[update]
+version_check = false
+
+[terminal]
+default_shell = "fish"
+new_cwd = "follow"
+shell_mode = "auto"
+
+[session]
+resume_agents_on_restore = true
+
+[ui.toast]
+# Send Herdr background-agent notifications to the desktop notification service.
+delivery = "system"
+
+[keys]
+# Keep the tmux-style prefix familiar while adding direct project-tab chords.
+# previous_tab is unbound: prefix+p is taken over by herdr-annotate (annotate.capture).
+prefix = "ctrl+b"
+new_tab = "prefix+c"
+next_tab = "prefix+n"
+switch_tab = "prefix+1..9"
+
+# Open Spaces navigation with prefix+w or prefix+e, then move the selection
+# with w (up) and e (down); enter focuses the workspace, esc leaves.
+workspace_picker = ["prefix+w", "prefix+e"]
+navigate_workspace_up = "w"
+navigate_workspace_down = "e"
+
+# These are the Alt+Ctrl chords emitted by Ghostty. Tab order is shell,
+# Emacs, pi, jjui.
+[[keys.command]]
+key = "ctrl+alt+q"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus shell"
+description = "focus shell tab"
+
+[[keys.command]]
+key = "ctrl+alt+w"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus emacs"
+description = "focus Emacs tab"
+
+[[keys.command]]
+key = "ctrl+alt+e"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus pi"
+description = "focus pi tab"
+
+[[keys.command]]
+key = "ctrl+alt+r"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus jjui"
+description = "focus jjui tab"
+
+[[keys.command]]
+key = "ctrl+alt+t"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus 5"
+description = "focus tab 5"
+
+[[keys.command]]
+key = "ctrl+alt+y"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus 6"
+description = "focus tab 6"
+
+[[keys.command]]
+key = "ctrl+alt+u"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus 7"
+description = "focus tab 7"
+
+[[keys.command]]
+key = "ctrl+alt+p"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus 8"
+description = "focus tab 8"
+
+[[keys.command]]
+key = "ctrl+alt+o"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus 9"
+description = "focus tab 9"
+
+# Pick an agent in the focused workspace with an fzf selector.
+[[keys.command]]
+key = "prefix+a"
+type = "popup"
+command = "$HOME/.local/bin/herdr-agent-pick"
+description = "focus an agent"
+width = "70%"
+height = "50%"
+
+# Pick an open Herdr workspace with a workspace-only fzf selector.
+[[keys.command]]
+key = "prefix+b"
+type = "popup"
+command = "$HOME/.local/bin/herdr-workspace-pick"
+description = "focus an open workspace"
+width = "70%"
+height = "50%"
+
+# Pick a workspace from Herdr, configured sessions, or zoxide history.
+[[keys.command]]
+key = "prefix+shift+o"
+type = "plugin_action"
+command = "fullerzz.sesh.open-picker"
+description = "choose a project workspace"
+
+# Return to the previously focused workspace.
+[[keys.command]]
+key = "prefix+shift+b"
+type = "plugin_action"
+command = "fullerzz.sesh.last"
+description = "switch to the previous workspace"
+
+# Cmd+g is an existing jjui alias in Ghostty/Hyprland.
+[[keys.command]]
+key = "ctrl+alt+g"
+type = "shell"
+command = "$HOME/.local/bin/herdr-tab-focus jjui"
+description = "focus jjui tab (Cmd+g alias)"
+
+# Show letter hints for URLs, paths, SHAs, and other visible text, then copy
+# the selected match to the clipboard.
+[[keys.command]]
+key = "ctrl+s"
+type = "plugin_action"
+command = "hotchpotch.herdr-tiny-fingers.open"
+description = "copy visible text by hint"
+
+# herdr-annotate: comment on terminal selections, review documents and agent
+# replies, send feedback back to the agent. prefix+a is taken by the agent
+# picker and prefix+e is edit-scrollback, so capture lives on prefix+p.
+[[keys.command]]
+key = "prefix+p"
+type = "plugin_action"
+command = "annotate.capture"
+description = "annotate selection"
+
+[[keys.command]]
+key = "prefix+shift+p"
+type = "plugin_action"
+command = "annotate.copy-context"
+description = "paste annotations as context"
+
+[[keys.command]]
+key = "prefix+m"
+type = "plugin_action"
+command = "annotate.manage"
+description = "manage annotations"
+
+[[keys.command]]
+key = "prefix+o"
+type = "plugin_action"
+command = "annotate.open"
+description = "review documents in this folder"
+
+# annotate.last (review the agent's last reply) is available but unbound;
+# add a chord here if wanted.
+
+[ui]
+# Sort the agent panel as an attention queue (blocked/done before idle agents).
+agent_panel_sort = "spaces"
+show_agent_labels_on_pane_borders = false
+
+# Keep the Spaces sidebar focused on Herdr workspaces rather than Git branches
+# and worktree status.
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace"]]
+
+[ui.sound]
+enabled = false
