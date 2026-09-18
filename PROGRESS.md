@@ -1,5 +1,9 @@
 # Guix SSD installation checkpoint
 
+## Pre-publish scrub and GitHub CLI
+
+Scrubbed the shared jj email to the GitHub noreply address and made `ssh_openclaw` argument-only (the real host belongs in private ssh config); both folded into the initial commit before any push, so the pushed history never contained them. Added `github-cli` (provides `gh`) to the Guix home profile so the native system can manage the GitHub remote; it resolves in the pinned-era package set (Guix names the package `github-cli`, not `gh`). Verified: 30 Python tests, both Scheme checks against a fresh `make stage` snapshot. The package lands on the system at the next reviewed reconfigure.
+
 ## Makefile for clone-and-apply
 
 Added a root `Makefile` wrapping the desktop apply flow for a fresh clone on the running Guix system: `make stage` (snapshot from `BASE`, default `/etc/guix-ssd`, into `local/current`), `make build`/`make dry-run` (pinned time-machine system build), `make apply` (the native-destination guards and reviewed reconfigure from desktop/README.md), plus `make test`, `make eval`, `make eval-desktop`, `make archive`. No formatting, mounting, `guix system init`, or ESP-write automation was added; `apply` still requires an explicit successful build and sudo. `make -n` expansion and all 30 Python tests verified; README.md and desktop/README.md point to it.

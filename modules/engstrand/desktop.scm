@@ -53,7 +53,7 @@
     (packages (cons* pi-coding-agent herdr curl
                      (map specification->package
                           '("fish" "jujutsu" "difftastic" "tmux" "fzf" "zoxide"
-                            "direnv" "ripgrep" "fd" "jq" "bat" "btop"
+                            "direnv" "github-cli" "ripgrep" "fd" "jq" "bat" "btop"
                             "python" "node" "make" "gcc-toolchain" "pkg-config"
                             "unzip" "zip" "tree" "wl-clipboard"))))
     (services
