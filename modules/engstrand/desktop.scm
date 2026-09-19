@@ -57,7 +57,7 @@
             ("DOOMDIR" . "/home/engstrand/.config/doom")
             ("COLORTERM" . "truecolor")
             ("TERM_PROGRAM" . "kitty")
-            ("XCURSOR_THEME" . "macOS")
+            ("XCURSOR_THEME" . "Adwaita")
             ("XCURSOR_SIZE" . "20")
             ("GTK_THEME" . "Adwaita:dark")
             ("RAYON_NUM_THREADS" . "4")))
@@ -74,7 +74,7 @@
         (append (map specification->package
                             '("hyprland" "wofi" "hyprlock" "hypridle"
                               "polkit-gnome" "grim" "slurp" "keyd"
-                              "font-jetbrains-mono" "font-google-noto-emoji"))
+                              "font-jetbrains-mono" "font-google-noto-emoji" "adwaita-icon-theme"))
                        (remove (lambda (package)
                                  (member (package-name package) '("sway" "foot")))
                                (operating-system-packages base))))

@@ -17,6 +17,7 @@ hl.config({
   animations = { enabled = false },
   dwindle = { force_split = 2, preserve_split = true },
   cursor = { inactive_timeout = 2, enable_hyprcursor = false },
+  env = { "XCURSOR_THEME,Adwaita", "XCURSOR_SIZE,20" },
   input = { repeat_delay = 250, repeat_rate = 30, sensitivity = 0.3,
     accel_profile = "adaptive", scroll_method = "2fg",
     touchpad = { tap_to_click = false, natural_scroll = true,
