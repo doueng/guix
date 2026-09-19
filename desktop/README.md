@@ -5,17 +5,17 @@ Opt-in native Guix configuration for the existing SSD installation. This is a fi
 ## Included
 
 - Hyprland with the current monitor scale, gaps, rounded windows, touchpad settings and workspace/window controls. Sway and Foot are removed; SDDM starts the Hyprland session.
-- **Pi** (`pi-coding-agent`, official aarch64 release binary packaged with a patched loader) and **Herdr** (official static release binary), with the shared Herdr configuration and the `herdr-tab-focus`, `herdr-workspace-pick` and `herdr-agent-pick` helpers. Pi's `settings.json` points `shellPath` at the Guix system Bash. These two private packages build locally in seconds (binary copies); everything else comes from substitutes. The npm-based Pi packages, extensions and Herdr plugins from NixOS are not preinstalled; install them on first use with `pi install …`.
+- **Pi** (`pi-coding-agent`), **Herdr** and **jjui** (official aarch64 release binaries), with the shared Herdr configuration and the `herdr-tab-focus`, `herdr-workspace-pick` and `herdr-agent-pick` helpers. Pi's `settings.json` points `shellPath` at the Guix system Bash. These private packages build locally in seconds; everything else comes from substitutes. The npm-based Pi packages, extensions and Herdr plugins from NixOS are not preinstalled; install them on first use with `pi install …`.
 - The existing keyd Caps/Escape/Control, Shift/parenthesis and Command layers, managed by Shepherd with `uinput` loaded first. `sudo herd stop keyd` temporarily restores raw keyboard input if a mapping causes trouble.
 - Kitty with Fish, JetBrains Mono and Catppuccin Mocha colors; Waybar with workspaces, network, battery and clock; Wofi launcher; `nmtui` network controls.
 - The shared Fish prompt, vi bindings, aliases and functions. A Guix-specific PATH file preserves inherited paths and adds Guix profiles and `/run/privileged/bin`. The Nix/UWSM login files and supervisor autostart are not copied.
-- Shared Git/JJ configuration, with Watchman disabled because it is unavailable in the evaluated Guix runtime. Jujutsu, difftastic, tmux, fzf, zoxide, direnv, the GitHub CLI (`github-cli`, `gh`), ripgrep, fd, jq, bat, btop, curl, Python, Node and basic build tools.
+- Shared Git/JJ configuration, with Watchman disabled because it is unavailable in the evaluated Guix runtime. Jujutsu, jjui, difftastic, tmux, fzf, zoxide, direnv, ripgrep, fd, jq, bat, btop, curl, Python, Node and basic build tools.
 - **Chromium via Flatpak**: the `flatpak` package (fully substitutable) behind the ported `chrome-unified` launcher with the shared Wayland flags. Guix's `ungoogled-chromium` has no aarch64 substitute and would need a multi-hour source build. Install the browser once after first boot (commands below). Old Reddit extension loading looks under `~/.config/chromium/extensions/`.
 - The ported **custom launcher**: Noctalia `dmenu` when Noctalia is present, otherwise Wofi; entries for the terminal, Chromium (normal/incognito), Herdr and Pi.
 - Neovim with the existing core Fennel options/keymaps compiled by Guix, Wayland clipboard, matching colors and plugin-free file/buffer/grep fallbacks. It starts without network access or plugin downloads.
 - Hyprlock PAM integration (empty passwords rejected), a manual lock binding and a ten-minute idle lock. No automatic suspend is added. Test unlocking and lock-before-sleep on this machine before trusting it.
 
-The kernel, initrd/UAS, filesystem UUIDs, bootloader definition, account declarations, channel pins and Asahi audio/D-Bus services are inherited unchanged. Normal reconfiguration still updates the Guix generation and its boot menu/bootloader on the new ESP; it is not a home-only operation.
+The Asahi kernel is inherited with the uinput module enabled for keyd; initrd/UAS, filesystem UUIDs, bootloader definition, account declarations, channel pins and audio/D-Bus services remain preserved. Normal reconfiguration still updates the Guix generation and its boot menu/bootloader on the new ESP; it is not a home-only operation.
 
 Internal speakers remain unverified. There are deliberately no volume/unmute bindings or audio widgets, and Kitty's audio bell is disabled. Do not enable playback until the existing speaker-safety gate passes.
 
@@ -23,7 +23,7 @@ Internal speakers remain unverified. There are deliberately no volume/unmute bin
 
 **Ghostty and Noctalia are not installable on Guix today.** Neither exists in Guix's package collection. A from-source Ghostty packaging was attempted and abandoned: it needs Zig 0.15.2 (available), 36 vendored dependencies (staged), but repeatedly broke on sandbox/pkg-config integration; Noctalia needs a Quickshell package first. Kitty is the terminal; Waybar the bar; the launcher falls back from Noctalia to Wofi. The Ghostty package draft remains in `modules/engstrand/packages.scm` for a future attempt.
 
-The full LazyVim/FFF/Java/LSP Neovim setup, Pi's extension tree (jj-guard, tokenjuice, vent, autoresearch), Herdr's plugin set (annotate, tiny-fingers, sesh), Babashka-based repo scripts, jjui and Tailscale are also not ported yet. The copied Herdr tab helpers now call `herdr` directly; the keyd Command layer and Ghostty chord binds have Alt/Super equivalents in Hyprland.
+The full LazyVim/FFF/Java/LSP Neovim setup, Pi's extension tree (jj-guard, tokenjuice, vent, autoresearch), Herdr's plugin set (annotate, tiny-fingers, sesh), Babashka-based repo scripts and Tailscale are also not ported yet. The copied Herdr tab helpers now call `herdr` directly; the keyd Command layer and Ghostty chord binds have Alt/Super equivalents in Hyprland.
 
 Useful controls with keyd active:
 
