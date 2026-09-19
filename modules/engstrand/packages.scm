@@ -4,7 +4,6 @@
   #:use-module (gnu packages elf)
   #:use-module (gnu packages fontutils)
   #:use-module (gnu packages freedesktop)
-  #:use-module (gnu packages golang-web)
   #:use-module (gnu packages glib)
   #:use-module (gnu packages gnome)
   #:use-module (gnu packages gtk)
@@ -15,37 +14,44 @@
   #:use-module (gnu packages xml)
   #:use-module (gnu packages xdisorg)
   #:use-module (gnu packages zig)
-  #:use-module ((gnu packages version-control) #:prefix upstream:)
   #:use-module (guix build-system copy)
   #:use-module (guix build-system gnu)
   #:use-module (guix download)
   #:use-module (guix git-download)
   #:use-module (guix gexp)
   #:use-module (guix packages)
-  #:use-module (guix utils)
   #:use-module ((guix licenses) #:prefix license:)
   #:export (github-cli pi-coding-agent herdr jjui ghostty))
 
+(define github-cli-version "2.83.2")
 (define pi-version "0.85.1")
 (define herdr-version "0.9.0")
 (define jjui-version "0.10.10")
 
-;; goresctrl 0.12.0 ships its generated SST bindings only for amd64, but
-;; Guix's package runs its complete test suite on aarch64 as well.  The
-;; failure is in an unused transitive dependency of github-cli, so retain the
-;; package while disabling only that dependency's broken test phase.
-(define goresctrl-no-tests
-  (package
-    (inherit go-github-com-intel-goresctrl)
-    (name "go-github-com-intel-goresctrl-no-tests")
-    (arguments
-     (substitute-keyword-arguments (package-arguments go-github-com-intel-goresctrl)
-       ((#:tests? tests? #t) #f)))))
-
+;; The collection package pulls a large Go dependency tree and currently
+;; fails in goresctrl's aarch64 tests.  GitHub publishes the same CLI as a
+;; signed release binary, which is the appropriate small native package here.
 (define-public github-cli
-  ((package-input-rewriting
-    `((,go-github-com-intel-goresctrl . ,goresctrl-no-tests)))
-   upstream:github-cli))
+  (package
+    (name "github-cli")
+    (version github-cli-version)
+    (source
+     (origin
+       (method url-fetch)
+       (uri (string-append "https://github.com/cli/cli/releases/download/v"
+                           version "/gh_" version "_linux_arm64.tar.gz"))
+       (sha256
+        (base32 "13m3fnx0zqiz40vcivsd07nma8q65b4xvjlnd7ij91gizjhc185i"))))
+    (build-system copy-build-system)
+    (supported-systems '("aarch64-linux"))
+    (arguments
+     (list #:install-plan
+           #~'(("bin/gh" "bin/gh")
+               ("share" "share"))))
+    (synopsis "GitHub's official command-line tool")
+    (description "GitHub's official command-line tool.")
+    (home-page "https://cli.github.com/")
+    (license license:expat)))
 
 (define-public pi-coding-agent
   (package
