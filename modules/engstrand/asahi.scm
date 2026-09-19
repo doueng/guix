@@ -19,6 +19,7 @@
     (error "Refusing the existing NixOS ESP"))
   (operating-system
     (inherit asahi-sway-os)
+    (kernel asahi-linux-keyd)
     (host-name "asahi-guix")
     (timezone "Europe/Amsterdam")
     (locale "en_US.utf8")

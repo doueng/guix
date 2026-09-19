@@ -9,11 +9,19 @@
   #:use-module (gnu packages bash)
   #:use-module (gnu packages compression)
   #:use-module (gnu packages guile)
+  #:use-module (gnu packages linux)
   #:use-module (guix gexp)
   #:use-module (guix modules)
   #:use-module (guix packages)
   #:export (asahi-u-boot-os-prepare
             m1n1-u-boot-grub-bootloader-os-prepare))
+
+(define-public asahi-linux-keyd
+  (customize-linux
+   #:name "asahi-linux-keyd"
+   #:linux asahi-linux
+   #:configs '("CONFIG_INPUT_UINPUT=m")
+   #:extra-version "keyd"))
 
 (define-public asahi-u-boot-os-prepare
   (package
@@ -46,4 +54,4 @@
   (efi-bootloader-chain
    grub-efi-removable-bootloader
    #:installer m1n1-u-boot-grub-installer
-   #:packages (list asahi-linux asahi-m1n1 asahi-u-boot-os-prepare)))
+   #:packages (list asahi-linux-keyd asahi-m1n1 asahi-u-boot-os-prepare)))
