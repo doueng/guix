@@ -9,13 +9,14 @@ ESP_UUID ?= 77C4-10EC
 ESP_PARTUUID ?= 5408cbd2-dc6c-49c6-bee9-c51c5f3a29fc
 STAMP := $(shell date +%Y%m%d-%H%M%S)
 
-.PHONY: help test eval eval-desktop stage archive dry-run build apply clean
+.PHONY: help test eval eval-desktop stage archive dry-run build apply switch clean
 
 help:
 	@echo 'stage         snapshot BASE (default /etc/guix-ssd) into local/current'
 	@echo 'build         pinned guix system build of local/current'
 	@echo 'dry-run       show what build would fetch or build'
 	@echo 'apply         guarded native reconfigure (sudo; build and review first)'
+	@echo 'switch        stage, build, and apply sequentially'
 	@echo 'archive       tarball of a fresh snapshot'
 	@echo 'test          offline Python checks'
 	@echo 'eval          base Scheme checks (needs guix + ASAHI source)'
@@ -52,6 +53,11 @@ build:
 	@test -d local/current || { echo 'run make stage first'; exit 1; }
 	guix time-machine -C local/current/channels.scm -- \
 	  system build -L local/current/modules local/current/system.scm
+
+switch:
+	$(MAKE) stage
+	$(MAKE) build
+	$(MAKE) apply
 
 apply:
 	@test -d local/current || { echo 'run make stage and make build first'; exit 1; }
