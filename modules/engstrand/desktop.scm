@@ -33,6 +33,67 @@
                        #:log-file "/var/log/keyd.log"))
             (stop #~(make-kill-destructor))))))
 
+;; Live files are deliberately not home-files-service entries: that service
+;; always adds a store indirection.  Install direct links during activation.
+;; Also remove old store-backed tree links before creating child links; Guix's
+;; symlink manager otherwise follows such a parent into the checkout.
+(define %familiar-direct-home-links
+  (simple-service 'familiar-direct-home-links home-activation-service-type
+    #~(begin
+        (use-modules (guix build utils) (ice-9 ftw) (srfi srfi-13))
+        (define roots
+          '(".config/fish" ".config/nvim" ".config/doom"
+            ".config/hypr" ".config/waybar" ".pi/agent"
+            ".local/share/catppuccin-mocha/wallpapers"
+            ".local/share/herdr/tiny-fingers"))
+        (define links '#$%desktop-direct-home-links)
+        (define (symlink-target path)
+          (catch 'system-error
+            (lambda ()
+              (and (eq? 'symlink (stat:type (lstat path)))
+                   (readlink path)))
+            (lambda _ #f)))
+        (define (legacy-tree-link? path)
+          (let ((target (symlink-target path)))
+            (and target
+                 (string-prefix? "/gnu/store/" target)
+                 (string-suffix? "-familiar-live-file" target))))
+        (define (path-exists? path)
+          (catch 'system-error
+            (lambda () (lstat path) #t)
+            (lambda _ #f)))
+        ;; Hyprland prefers hyprland.lua when both files exist.  This stale
+        ;; generated file must not shadow the native config.
+        (for-each
+         (lambda (relative)
+           (let ((path (string-append (getenv "HOME") "/" relative)))
+             (when (path-exists? path)
+               (format #t "Removing stale Home config ~a~%" path)
+               (delete-file path))))
+         '(".config/hypr/hyprland.lua"))
+        (for-each
+         (lambda (root)
+           (let ((path (string-append (getenv "HOME") "/" root)))
+             (when (legacy-tree-link? path)
+               (format #t "Removing legacy Home tree link ~a~%" path)
+               (delete-file path))))
+         roots)
+        (for-each
+         (lambda (link)
+           (let* ((relative (car link))
+                  (source (cdr link))
+                  (target (string-append (getenv "HOME") "/" relative))
+                  (old (symlink-target target)))
+             (mkdir-p (dirname target))
+             (when (and old
+                        (or (string=? old source)
+                            (and (string-prefix? "/gnu/store/" old)
+                                 (string-suffix? "-familiar-live-file" old))))
+               (delete-file target))
+             (unless (path-exists? target)
+               (symlink source target))))
+         links))))
+
 (define %familiar-home
   (home-environment
     (packages (cons* pi-coding-agent herdr jjui github-cli babashka noctalia curl
@@ -51,6 +112,7 @@
                             "unzip" "zip" "tree" "wl-clipboard"))))
     (services
       (cons*
+        %familiar-direct-home-links
         (service home-bash-service-type)
         (simple-service 'familiar-environment home-environment-variables-service-type
           '(("EDITOR" . "nvim") ("VISUAL" . "nvim")
@@ -62,7 +124,7 @@
             ("GTK_THEME" . "Adwaita:dark")
             ("RAYON_NUM_THREADS" . "4")))
         (simple-service 'familiar-files home-files-service-type
-          %desktop-live-home-files)
+          %desktop-home-files)
         %asahi-desktop-home-services))))
 
 (define* (make-familiar-os #:key root-uuid esp-uuid channels)

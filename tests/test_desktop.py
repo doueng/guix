@@ -43,6 +43,9 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual((self.output / "channels.scm").read_bytes(),
                          (HERE / "channels.scm").read_bytes())
         self.assertIn("make-familiar-os", (self.output / "system.scm").read_text())
+        system = (self.output / "system.scm").read_text()
+        self.assertIn(self.saved["root"]["uuid"], system)
+        self.assertIn(self.saved["esp"]["uuid"], system)
         hashes = json.loads((self.output / "sources.json").read_text())
         for name, digest in hashes.items():
             self.assertEqual(hashlib.sha256((self.output / name).read_bytes()).hexdigest(), digest)
@@ -150,6 +153,12 @@ contains -- /guix-test-sentinel $PATH; or exit 1
         self.assertTrue((nvim / "init.fnl").is_file())
         self.assertTrue((nvim / "fnl/config/lazy.fnl").is_file())
         self.assertTrue((nvim / "lua/config/options.lua").is_file())
+        hypr = files / ".config/hypr"
+        self.assertTrue((hypr / "hyprland.conf").is_file())
+        self.assertFalse((hypr / "hyprland.lua").exists())
+        scm = (self.output / "modules/engstrand/desktop-files.scm").read_text()
+        self.assertIn('(cons ".config/hypr/hyprland.conf" "/home/', scm)
+        self.assertNotIn("live-desktop-file", scm)
         doom = files / ".config/doom"
         self.assertTrue((doom / "init.el").is_file())
         self.assertTrue((doom / "config.el").is_file())

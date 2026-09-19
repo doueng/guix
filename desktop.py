@@ -29,6 +29,23 @@ def stage(base, output):
         raise ValueError("Refusing the protected NixOS ESP")
     if (base / "channels.scm").read_bytes() != (HERE / "channels.scm").read_bytes():
         raise ValueError("Installed channel pins differ; review before staging")
+
+    # The live links below point out of the store to this checkout.  A link
+    # left behind by a previous Home generation must never become part of that
+    # checkout: Guix's symlink manager can follow an old directory link while
+    # replacing child files and turn it into a store<->checkout loop.
+    live_roots = (
+        "desktop/home",
+        "desktop/shared/shell/fish",
+        "desktop/shared/neovim",
+        "desktop/shared/doom",
+        "desktop/shared/pi/assets/agent",
+        "desktop/shared/theme/wallpapers",
+        "desktop/shared/herdr/tiny-fingers")
+    for live_root in live_roots:
+        for path in (HERE / live_root).rglob("*"):
+            if path.is_symlink():
+                raise ValueError(f"Live source contains a symlink: {path}")
     if output.exists():
         raise ValueError("Output exists; choose a fresh directory")
     output.mkdir(parents=True, mode=0o700)
@@ -80,7 +97,6 @@ def stage(base, output):
     copy(FEATURES / "pi/assets/agent", ".pi/agent")
     copy(FEATURES / "jjui/config.toml", ".config/jjui/config.toml")
     paths = sorted(p.relative_to(files).as_posix() for p in files.rglob("*") if p.is_file())
-    entries = "\n".join("      " + json.dumps(p) for p in paths)
     live_sources = [
         (".config/git/config", "desktop/shared/git/config"),
         (".config/jj/config.toml", "desktop/shared/jj/config.toml"),
@@ -93,6 +109,10 @@ def stage(base, output):
         (".config/ghostty/themes/catppuccin-mocha", "desktop/shared/ghostty/themes/catppuccin-mocha"),
         (".config/btop/themes/catppuccin-mocha.theme", "desktop/shared/theme/btop.theme"),
         (".pi/README.md", "desktop/shared/pi/README.md")]
+    # Keep live trees as per-file entries.  This lets Guix Home update an
+    # individual file without making the checkout itself a Home target.  The
+    # activation migration in desktop.scm removes legacy whole-tree links
+    # before the symlink manager can follow them.
     for target_root, source_root in (
             (".config/fish", "desktop/shared/shell/fish"),
             (".config/nvim", "desktop/shared/neovim"),
@@ -112,32 +132,32 @@ def stage(base, output):
             if source.is_file():
                 live_sources.append((".local/bin/" + source.name,
                                      str(source.relative_to(HERE))))
-    live_entries = "\n".join(
-        "      (list " + json.dumps(target) + " (live-desktop-file " +
-        json.dumps(source) + "))"
+    live_targets = {target for target, _ in live_sources}
+    entries = "\n".join(
+        "      " + json.dumps(path)
+        for path in paths if path not in live_targets)
+    direct_entries = "\n".join(
+        "      (cons " + json.dumps(target) + " " +
+        json.dumps(str(HERE / source)) + ")"
         for target, source in live_sources)
 
     (module / "desktop-files.scm").write_text(f'''(define-module (engstrand desktop-files)
   #:use-module (guix gexp)
-  #:export (desktop-file live-desktop-file %desktop-home-files
-            %desktop-live-home-files %desktop-keyd-config))
+  #:export (desktop-file %desktop-home-files
+            %desktop-direct-home-links %desktop-keyd-config))
 
 (define %directory
   (dirname (canonicalize-path (search-path %load-path "engstrand/desktop-files.scm"))))
 (define (desktop-file path)
   (local-file (string-append %directory "/desktop-files/" path)))
-(define %live-root {json.dumps(str(HERE))})
-(define (live-desktop-file path)
-  (computed-file "familiar-live-file"
-    #~(symlink (string-append #$%live-root "/" #$path) #$output)))
 (define %desktop-keyd-config
   (local-file (string-append %directory "/desktop-keyd.conf")))
 (define %desktop-home-files
   (map (lambda (path) (list path (desktop-file path)))
     '(\n{entries})))
-(define %desktop-live-home-files
+(define %desktop-direct-home-links
   (list
-{live_entries}))
+{direct_entries}))
 ''')
     (output / "system.scm").write_text(f'''(use-modules (engstrand desktop) (guix channels))
 

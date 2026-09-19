@@ -62,7 +62,7 @@ python3 "$KIT/desktop.py" --base "$KIT/local/install" --output "$CFG"
 tar -C "$CFG" -czf "$CFG.tar.gz" .
 ```
 
-`desktop.py` only writes a new local snapshot. It refuses existing output, malformed UUIDs, the protected NixOS ESP and channel drift. `devices.json` is carried forward, not regenerated or treated as fresh approval. `sources.json` records hashes of the staged files. The generated Home configuration uses out-of-store symlink targets back to the checkout that ran `desktop.py` (normally `~/guix`), so Fish, Doom, Neovim, Pi and the desktop assets can be edited without rebuilding Guix. Keep that checkout at the same path; do not edit the generated snapshot's copied files.
+`desktop.py` only writes a new local snapshot. It refuses existing output, malformed UUIDs, the protected NixOS ESP and channel drift. `devices.json` is carried forward, not regenerated or treated as fresh approval. `sources.json` records hashes of the staged files. The generated Home configuration creates direct, out-of-store per-file symlinks back to the checkout that ran `desktop.py` (normally `~/guix`), so Fish, Doom, Neovim, Pi and the desktop assets can be edited without rebuilding Guix. The Home layer removes legacy whole-directory live links before Guix's symlink manager runs; this prevents an old directory link from being followed back into the checkout and turned into a store/checkout loop. Keep that checkout at the same path; do not edit the generated snapshot's copied files.
 
 For a fresh clone, run staging and building from that clone on the Guix system so its live-link root is correct. An archive made on another machine is still useful for review, but its live links intentionally point to the source checkout that created it and are not self-contained.
 
@@ -128,7 +128,7 @@ python3 -m unittest discover -s "$KIT/tests" -v
 guix time-machine -C "$CFG/channels.scm" -- repl \
   -L "$CFG/modules" \
   "$KIT/tests/evaluate-desktop.scm" "$CFG/channels.scm"
-Hyprland --verify-config -c "$CFG/modules/engstrand/desktop-files/.config/hypr/hyprland.lua"
+Hyprland --verify-config -c "$CFG/modules/engstrand/desktop-files/.config/hypr/hyprland.conf"
 ```
 
 The Python suite checks staging safety, portable shell/JJ settings and Fish syntax/PATH. The pinned Scheme test checks both service graphs and preservation of the working system's storage/kernel/accounts/audio/pins. The full pinned system build remains the meaningful validation for Neovim and Doom package/runtime integration. A successful parser check does not establish graphics, keyd, locking or suspend behavior.
