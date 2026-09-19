@@ -223,7 +223,10 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
       #:install-plan #~'(("herdr" "bin/herdr"))
       #:phases
       #~(modify-phases %standard-phases
-          (delete 'strip))))
+          (delete 'strip)
+          (add-after 'install 'make-executable
+            (lambda* (#:key outputs #:allow-other-keys)
+              (chmod (string-append (assoc-ref outputs "out") "/bin/herdr") #o555))))))
     (synopsis "Terminal workspace multiplexer")
     (description "Herdr terminal multiplexer from the herdrdev/herdr release binaries.")
     (home-page "https://github.com/herdrdev/herdr")
