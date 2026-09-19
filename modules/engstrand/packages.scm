@@ -21,10 +21,11 @@
   #:use-module (guix gexp)
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:)
-  #:export (pi-coding-agent herdr ghostty))
+  #:export (pi-coding-agent herdr jjui ghostty))
 
 (define pi-version "0.85.1")
 (define herdr-version "0.9.0")
+(define jjui-version "0.10.10")
 
 (define-public pi-coding-agent
   (package
@@ -51,23 +52,24 @@
                      (loader #$(file-append glibc "/lib/ld-linux-aarch64.so.1"))
                      (rpath #$(file-append glibc "/lib"))
                      (patchelf-bin #$(file-append patchelf "/bin/patchelf"))
-                     (real (string-append output "/share/pi/pi/pi"))
+                     (real (string-append output "/share/pi/pi"))
                      (bin-dir (string-append output "/bin"))
                      (wrapper (string-append bin-dir "/pi")))
                 (for-each
                  (lambda (file)
-                   (when (elf-file? file)
-                     (if (string-suffix? "/pi/pi" file)
-                         (invoke patchelf-bin
-                                 "--set-interpreter" loader
-                                 "--set-rpath" rpath file)
-                         (invoke patchelf-bin "--set-rpath" rpath file))))
+                   (when (and (elf-file? file)
+                              (string-suffix? "/pi/pi" file))
+                     ;; patchelf --set-rpath corrupts this large Bun binary.
+                     ;; Supply its glibc directory through the wrapper instead.
+                     (invoke patchelf-bin
+                             "--set-interpreter" loader file)))
                  (find-files output))
                 (mkdir-p bin-dir)
                 (call-with-output-file wrapper
                   (lambda (port)
                     (format port
-                            "#!/bin/sh\nexport PI_SKIP_VERSION_CHECK=1\nexec ~a \"$@\"\n"
+                            "#!/bin/sh\nexport PI_SKIP_VERSION_CHECK=1\nexport LD_LIBRARY_PATH=~a${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\nexec ~a \"$@\"\n"
+                            rpath
                             real)))
                 (chmod wrapper #o555)
                 (patch-shebang wrapper)))))))
@@ -100,6 +102,28 @@
     (description "Herdr terminal multiplexer from the herdrdev/herdr release binaries.")
     (home-page "https://github.com/herdrdev/herdr")
     (license license:asl2.0)))
+(define-public jjui
+  (package
+    (name "jjui")
+    (version jjui-version)
+    (source
+     (origin
+       (method url-fetch)
+       (uri (string-append "https://github.com/idursun/jjui/releases/download/v"
+                           version "/jjui-" version "-linux-arm64.zip"))
+       (sha256
+        (base32 "0p7g2b3sdi43r0k48a386v8qh66i48mkrrzais9d0bfkfc27fxqy"))))
+    (build-system copy-build-system)
+    (supported-systems '("aarch64-linux"))
+    (native-inputs (list unzip))
+    (arguments
+     (list #:install-plan
+           #~'(("jjui-0.10.10-linux-arm64" "bin/jjui"))))
+    (synopsis "Terminal user interface for Jujutsu")
+    (description "A terminal user interface for the Jujutsu version control system.")
+    (home-page "https://github.com/idursun/jjui")
+    (license license:expat)))
+
 (define breakpad-origin
   (origin
     (method url-fetch)
