@@ -71,6 +71,9 @@
 (check (member "jjui" (map package-name (home-environment-packages
                                          (cadar (service-value (find-service 'guix-home))))))
        "jjui must be a Home package")
+(check (member "github-cli" (map package-name (home-environment-packages
+                                               (cadar (service-value (find-service 'guix-home))))))
+       "GitHub CLI must be a Home package")
 (check (equal? channels (guix-configuration-channels (service-value (find-service 'guix))))
        "Desktop changed channel pins")
 (check (equal? '("engstrand") (map car (service-value (find-service 'guix-home))))
@@ -88,6 +91,8 @@
          "Herdr must be a Home package")
   (check (member "jjui" (map package-name (home-environment-packages home)))
          "jjui must be a Home package")
+  (check (member "github-cli" (map package-name (home-environment-packages home)))
+         "GitHub CLI must be a Home package")
   (fold-services (home-environment-services home) #:target-type home-activation-service-type))
 (let ((locker (service-value (find-service 'screen-locker))))
   (check (not (screen-locker-configuration-allow-empty-password? locker))

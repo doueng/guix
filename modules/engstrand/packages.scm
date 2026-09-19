@@ -4,6 +4,7 @@
   #:use-module (gnu packages elf)
   #:use-module (gnu packages fontutils)
   #:use-module (gnu packages freedesktop)
+  #:use-module (gnu packages golang-web)
   #:use-module (gnu packages glib)
   #:use-module (gnu packages gnome)
   #:use-module (gnu packages gtk)
@@ -14,18 +15,37 @@
   #:use-module (gnu packages xml)
   #:use-module (gnu packages xdisorg)
   #:use-module (gnu packages zig)
+  #:use-module ((gnu packages version-control) #:prefix upstream:)
   #:use-module (guix build-system copy)
   #:use-module (guix build-system gnu)
   #:use-module (guix download)
   #:use-module (guix git-download)
   #:use-module (guix gexp)
   #:use-module (guix packages)
+  #:use-module (guix utils)
   #:use-module ((guix licenses) #:prefix license:)
-  #:export (pi-coding-agent herdr jjui ghostty))
+  #:export (github-cli pi-coding-agent herdr jjui ghostty))
 
 (define pi-version "0.85.1")
 (define herdr-version "0.9.0")
 (define jjui-version "0.10.10")
+
+;; goresctrl 0.12.0 ships its generated SST bindings only for amd64, but
+;; Guix's package runs its complete test suite on aarch64 as well.  The
+;; failure is in an unused transitive dependency of github-cli, so retain the
+;; package while disabling only that dependency's broken test phase.
+(define goresctrl-no-tests
+  (package
+    (inherit go-github-com-intel-goresctrl)
+    (name "go-github-com-intel-goresctrl-no-tests")
+    (arguments
+     (substitute-keyword-arguments (package-arguments go-github-com-intel-goresctrl)
+       ((#:tests? tests? #t) #f)))))
+
+(define-public github-cli
+  ((package-input-rewriting
+    `((,go-github-com-intel-goresctrl . ,goresctrl-no-tests)))
+   upstream:github-cli))
 
 (define-public pi-coding-agent
   (package

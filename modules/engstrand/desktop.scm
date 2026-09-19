@@ -50,7 +50,7 @@
 
 (define %familiar-home
   (home-environment
-    (packages (cons* pi-coding-agent herdr jjui curl
+    (packages (cons* pi-coding-agent herdr jjui github-cli curl
                      (map specification->package
                           '("fish" "jujutsu" "difftastic" "tmux" "fzf" "zoxide"
                             "direnv" "ripgrep" "fd" "jq" "bat" "btop"
