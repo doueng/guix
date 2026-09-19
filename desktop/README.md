@@ -22,7 +22,7 @@ Internal speakers remain unverified. There are deliberately no volume/unmute bin
 
 ## Deliberate gaps
 
-Ghostty is packaged from source and installed in the Home profile. Its configuration and Catppuccin theme are staged from `desktop/shared/ghostty`; Wofi remains available as a launcher fallback.
+Kitty remains available as the working terminal while Ghostty packaging is being fixed. Ghostty configuration and its Catppuccin theme are staged from `desktop/shared/ghostty` for later activation; Wofi remains available as a launcher fallback.
 
 Neovim's Guix runtime plugin dependencies (LazyVim, Java tooling and unavailable language servers), Herdr's plugin set (annotate, tiny-fingers, sesh) and Tailscale are not ported yet. Babashka is included as `bb`, so `.bb` scripts can run directly; the NixOS-only `nixdiag` service script remains with NixOS because it depends on systemd/journald/NixOS paths. The copied Herdr tab helpers now call `herdr` directly; the keyd Command layer and Ghostty chord binds have Alt/Super equivalents in Hyprland.
 

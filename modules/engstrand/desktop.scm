@@ -56,7 +56,7 @@
           '(("EDITOR" . "nvim") ("VISUAL" . "nvim")
             ("DOOMDIR" . "/home/engstrand/.config/doom")
             ("COLORTERM" . "truecolor")
-            ("TERM_PROGRAM" . "ghostty")
+            ("TERM_PROGRAM" . "kitty")
             ("XCURSOR_THEME" . "macOS")
             ("XCURSOR_SIZE" . "20")
             ("GTK_THEME" . "Adwaita:dark")
@@ -76,7 +76,7 @@
                               "polkit-gnome" "grim" "slurp" "keyd"
                               "font-jetbrains-mono" "font-google-noto-emoji"))
                        (remove (lambda (package)
-                                 (member (package-name package) '("sway" "foot" "kitty")))
+                                 (member (package-name package) '("sway" "foot")))
                                (operating-system-packages base))))
       (services
         (cons*
