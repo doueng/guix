@@ -35,7 +35,7 @@ def main():
     mode = ["--incognito"] if args and args[0] == "--incognito" else []
     rest = args[1:] if mode else args
     extension = ["--load-extension=" + EXTENSION_PATH] if os.path.isdir(EXTENSION_PATH) else []
-    os.execvp("flatpak", ["flatpak", "run", "org.chromium.Chromium"]
+    os.execvp("flatpak", ["flatpak", "run", "com.google.Chrome"]
               + CHROME_FLAGS + extension + mode + rest)
 
 
