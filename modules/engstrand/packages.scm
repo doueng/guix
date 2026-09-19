@@ -459,7 +459,7 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
                            (string-append (assoc-ref inputs in) "/lib")))
                  (pkgconfig '("gtk" "libadwaita" "libxkbcommon" "libpng" "zlib"
                               "bzip2" "expat" "fontconfig-minimal" "freetype" "harfbuzz"
-                              "pixman" "libxml2" "oniguruma" "glib-out")))
+                              "pixman" "libxml2" "oniguruma" "glib" "glib-out")))
             (setenv "ZIG_GLOBAL_CACHE_DIR" zcache)
             (setenv "ZIG_LOCAL_CACHE_DIR"
                     (string-append (getcwd) "/.zig-cache-local"))
@@ -506,6 +506,7 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
                     "--search-prefix" (search "gtk")
                     "--search-prefix" (search "libadwaita")
                     "--search-prefix" (search "libxkbcommon")
+                    "--search-prefix" (search "glib")
                     "--search-prefix" (search "fontconfig-minimal")
                     "--search-prefix" (search "freetype")
                     "--search-prefix" (search "harfbuzz")))))
