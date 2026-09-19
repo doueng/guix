@@ -1,5 +1,16 @@
+-- SDDM starts Hyprland outside the Fish session, so ~/.local/bin is not
+-- guaranteed to be on PATH. Use the Guix profile and Home-installed helper
+-- explicitly for bindings invoked by keyd.
+local profile = "/run/current-system/profile/bin/"
+local terminal = profile .. "kitty"
+local launcher = os.getenv("HOME") .. "/.local/bin/custom-launcher"
+
+-- Use a Lua callback rather than the string dispatcher. This is reliable on
+-- the Guix-packaged Hyprland and also keeps the command's absolute path.
 local function command(value)
-  return hl.dsp.exec_cmd(value)
+  return function()
+    hl.exec_cmd(value)
+  end
 end
 
 hl.monitor({ output = "eDP-1", mode = "2560x1600", position = "auto", scale = 1 })
@@ -23,27 +34,27 @@ hl.on("hyprland.start", function()
   hl.exec_cmd("/run/current-system/profile/libexec/polkit-gnome-authentication-agent-1")
   hl.exec_cmd("waybar")
   hl.exec_cmd("hypridle")
-  hl.exec_cmd("kitty")
+  hl.exec_cmd(terminal)
 end)
 
-hl.bind("SUPER + RETURN", command("kitty"))
-hl.bind("SUPER + SPACE", command("custom-launcher"))
+hl.bind("SUPER + RETURN", command(terminal))
+hl.bind("SUPER + SPACE", command(launcher))
 hl.bind("SUPER + U", hl.dsp.focus({ workspace = 2 }))
 hl.bind("SUPER + SHIFT + U", hl.dsp.focus({ workspace = 3 }))
-hl.bind("SUPER + E", command("kitty nvim"))
-hl.bind("SUPER + D", command("kitty"))
-hl.bind("SUPER + G", command("kitty fish -C 'jj status'"))
+hl.bind("SUPER + E", command(terminal .. " nvim"))
+hl.bind("SUPER + D", command(terminal))
+hl.bind("SUPER + G", command(terminal .. " fish -C 'jj status'"))
 hl.bind("SUPER + S", command("herdr"))
-hl.bind("SUPER + COMMA", command("ghostty -e nvim ~/.config/hypr/hyprland.lua"))
+hl.bind("SUPER + COMMA", command(terminal .. " nvim ~/.config/hypr/hyprland.lua"))
 hl.bind("SUPER + SHIFT + L", command("/run/privileged/bin/hyprlock"))
 hl.bind("CTRL + ALT + L", command("/run/privileged/bin/hyprlock"))
-hl.bind("ALT + RETURN", command("kitty"))
-hl.bind("ALT + SPACE", command("custom-launcher"))
+hl.bind("ALT + RETURN", command(terminal))
+hl.bind("ALT + SPACE", command(launcher))
 hl.bind("ALT + U", hl.dsp.focus({ workspace = 2 }))
 hl.bind("ALT + SHIFT + U", hl.dsp.focus({ workspace = 3 }))
-hl.bind("ALT + E", command("kitty nvim"))
-hl.bind("ALT + D", command("kitty"))
-hl.bind("ALT + G", command("kitty fish -C 'jj status'"))
+hl.bind("ALT + E", command(terminal .. " nvim"))
+hl.bind("ALT + D", command(terminal))
+hl.bind("ALT + G", command(terminal .. " fish -C 'jj status'"))
 hl.bind("ALT + W", hl.dsp.window.close())
 hl.bind("ALT + F", hl.dsp.window.fullscreen({ action = "toggle" }))
 for _, direction in ipairs({ "left", "down", "up", "right" }) do
