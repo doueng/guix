@@ -1,0 +1,30 @@
+{
+  "name": "pi-tokenjuice-vendored",
+  "version": "0.4.0-vendored",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./src/extension.ts"]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build-test": "rm -rf .test-dist && tsc --outDir .test-dist --module NodeNext --target ES2022 --moduleResolution NodeNext",
+    "test": "npm run build-test && node ./.test-dist/test.js"
+  },
+  "files": [
+    "src",
+    "test.ts"
+  ],
+  "dependencies": {
+    "diff": "^7.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.1",
+    "@types/node": "^24.7.0",
+    "typescript": "^5.9.3"
+  }
+}

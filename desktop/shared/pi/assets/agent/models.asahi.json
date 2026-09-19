@@ -1,0 +1,45 @@
+{
+  "providers": {
+    "fireworks": {
+      "models": [
+        {
+          "id": "accounts/fireworks/models/glm-5p3-flash",
+          "name": "GLM 5.3 Flash",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 1048576,
+          "maxTokens": 131072,
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true,
+            "supportsLongCacheRetention": false
+          },
+          "thinkingLevelMap": {
+            "off": "none",
+            "minimal": null,
+            "low": "high",
+            "medium": "high",
+            "high": "high",
+            "xhigh": null,
+            "max": "max"
+          }
+        },
+        {
+          "id": "accounts/fireworks/models/deepseek-v4p1-flash",
+          "name": "DeepSeek V4.1 Flash",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 1040000,
+          "maxTokens": 131072,
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true,
+            "supportsLongCacheRetention": false
+          }
+        }
+      ]
+    }
+  }
+}
