@@ -1,2 +1,8 @@
 [core]
 	excludesfile = ~/.config/git/ignore
+
+# Guix Home manages this file as a read-only store link. Keep GitHub's
+# credential helper declarative instead of letting gh try to edit it.
+[credential "https://github.com"]
+	helper =
+	helper = !gh auth git-credential

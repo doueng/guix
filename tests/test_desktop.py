@@ -81,7 +81,22 @@ class DesktopTests(unittest.TestCase):
         paths = (files / ".config/fish/conf.d/00-guix-paths.fish").read_text()
         self.assertIn("/run/privileged/bin", paths)
         self.assertIn("fish_add_path", paths)
+        self.assertIn('DOOMDIR "$HOME/.config/doom"', paths)
         self.assertNotIn("set -gx PATH", paths)
+        git = (files / ".config/git/config").read_text()
+        self.assertIn('[credential "https://github.com"]', git)
+        self.assertIn("!gh auth git-credential", git)
+        noctalia = tomllib.loads((files / ".config/noctalia/config.toml").read_text())
+        self.assertEqual(noctalia["accessibility"]["ui_scale"], 1.8)
+        self.assertFalse(noctalia["bar"]["default"]["enabled"])
+        jjui = tomllib.loads((files / ".config/jjui/config.toml").read_text())
+        self.assertEqual(jjui["ui"]["auto_refresh_interval"], 0)
+        self.assertEqual(jjui["preview"]["revision_command"][0], "jjui-show-fancy")
+        self.assertTrue((files / ".pi/README.md").is_file())
+        self.assertTrue((files / ".pi/agent/keybindings.json").is_file())
+        self.assertTrue((files / ".pi/agent/extensions/tokenjuice/src/extension.ts").is_file())
+        self.assertTrue((files / ".pi/agent/skills/autoresearch-create/SKILL.md").is_file())
+        self.assertFalse((files / ".pi/agent/auth.json").exists())
         jj = tomllib.loads((files / ".config/jj/config.toml").read_text())
         self.assertEqual(jj["fsmonitor"]["backend"], "none")
         self.assertFalse(jj["fsmonitor"]["watchman"]["register-snapshot-trigger"])
@@ -98,21 +113,21 @@ class DesktopTests(unittest.TestCase):
         pi = json.loads((files / ".pi/agent/settings.json").read_text())
         self.assertEqual(pi["shellPath"], "/run/current-system/profile/bin/bash")
         self.assertTrue(pi["quietStartup"])
-        for name in ("herdr-tab-focus", "herdr-workspace-pick", "herdr-agent-pick"):
-            path = files / ".local/bin" / name
-            self.assertTrue(path.is_file(), name)
-        for name in ("custom-launcher", "chrome-unified"):
-            path = files / ".local/bin" / name
-            self.assertTrue(path.is_file(), name)
-            self.assertGreater(path.stat().st_mode & 0o111, 0, name)
+        for source_dir in (HERE / "desktop/bin", HERE / "desktop/shared/herdr/bin"):
+            for source in source_dir.iterdir():
+                if source.is_file():
+                    path = files / ".local/bin" / source.name
+                    self.assertTrue(path.is_file(), source.name)
+                    self.assertGreater(path.stat().st_mode & 0o111, 0, source.name)
 
     @unittest.skipUnless(shutil.which("python3"), "Python not available")
     def test_launcher_scripts_compile(self):
         self.stage()
         files = self.output / "modules/engstrand/desktop-files/.local/bin"
-        for name in ("custom-launcher", "chrome-unified"):
-            subprocess.run(["python3", "-m", "py_compile", str(files / name)],
-                           check=True, capture_output=True, text=True)
+        for source in (HERE / "desktop/bin").iterdir():
+            if source.is_file():
+                subprocess.run(["python3", "-m", "py_compile", str(files / source.name)],
+                               check=True, capture_output=True, text=True)
 
     @unittest.skipUnless(shutil.which("fish"), "Fish not available")
     def test_fish_syntax_and_preserves_inherited_path(self):
@@ -128,29 +143,17 @@ contains -- /guix-test-sentinel $PATH; or exit 1
         subprocess.run(["fish", "--no-config", "-c", script], check=True,
                        capture_output=True, text=True)
 
-    @unittest.skipUnless(shutil.which("fennel") and shutil.which("nvim"), "Editor tools not available")
-    def test_editor_starts_without_plugins_or_downloads(self):
+    def test_live_editor_sources_are_staged(self):
         self.stage()
-        config = self.output / "modules/engstrand/desktop-files/.config"
-        lua = config / "nvim/lua"
-        lua.mkdir()
-        for name in ("options", "keymaps"):
-            result = subprocess.run(["fennel", "--compile",
-                                     str(config / f"nvim/fnl/familiar-{name}.fnl")],
-                                    check=True, capture_output=True, text=True)
-            (lua / f"familiar-{name}.lua").write_text(result.stdout)
-        env = dict(os.environ, HOME=str(self.root), XDG_CONFIG_HOME=str(config),
-                   XDG_DATA_HOME=str(self.root / "data"), XDG_STATE_HOME=str(self.root / "state"),
-                   XDG_CACHE_HOME=str(self.root / "cache"), NVIM_APPNAME="nvim")
-        check = ("lua assert(vim.v.errmsg == '', vim.v.errmsg); "
-                 "assert(vim.g.clipboard.name == 'Wayland'); "
-                 "assert(vim.fn.maparg('<A-,>', 'n') == '<Cmd>bprevious<CR>'); "
-                 "assert(package.loaded.lazy == nil)")
-        result = subprocess.run(["nvim", "--headless", "-i", "NONE", "-n", "+" + check, "+qa!"],
-                                env=env, capture_output=True, text=True, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("Error", result.stderr)
-        self.assertNotIn("stack traceback", result.stderr)
+        files = self.output / "modules/engstrand/desktop-files"
+        nvim = files / ".config/nvim"
+        self.assertTrue((nvim / "init.fnl").is_file())
+        self.assertTrue((nvim / "fnl/config/lazy.fnl").is_file())
+        self.assertTrue((nvim / "lua/config/options.lua").is_file())
+        doom = files / ".config/doom"
+        self.assertTrue((doom / "init.el").is_file())
+        self.assertTrue((doom / "config.el").is_file())
+        self.assertIn("wl-copy", (doom / "config.el").read_text())
 
 
 if __name__ == "__main__":

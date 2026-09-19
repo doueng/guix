@@ -1,0 +1,23 @@
+# jjui performance config for large repos
+# See: https://github.com/idursun/jjui
+
+[revisions]
+# jjui defaults to jj's revsets.log if this is unset. Keep this explicit so the
+# graph includes connector revisions instead of showing "(elided revisions)".
+revset = "connected(log)"
+log_batching = true
+log_batch_size = 20
+
+[ui]
+# Disable timer-driven refreshes; focus changes still refresh when needed.
+auto_refresh_interval = 0
+mouse_support = false
+set_window_title = false
+
+[preview]
+show_at_start = true
+show_at_bottom = true
+revision_command = ["jjui-show-fancy", "$change_id"]
+evolog_command = ["jjui-show-fancy", "$commit_id"]
+oplog_command = ["--ignore-working-copy", "op", "show", "$operation_id", "--color", "always"]
+file_command = ["jjui-file-fancy", "$change_id", "$file"]

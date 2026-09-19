@@ -1,0 +1,57 @@
+[accessibility]
+ui_scale = 1.8
+
+[shell]
+corner_radius_scale = 1.3
+
+[shell.animation]
+enabled = false
+
+[shell.panel]
+transparency_mode = "glass"
+borders = true
+shadow = true
+
+[shell.screenshot]
+save_to_file = true
+copy_to_clipboard = true
+freeze_screen = true
+confirm_region = true
+remember_last_region = true
+show_cursor = false
+
+[notification]
+layer = "overlay"
+show_app_name = false
+show_actions = false
+background_opacity = 0.6
+
+[osd]
+background_opacity = 0.6
+
+[osd.kinds]
+media = false
+
+[lockscreen]
+# Do not lock the session before suspend; waking from sleep will not show Noctalia's password prompt.
+lock_before_suspend = false
+
+[wallpaper]
+enabled = true
+fill_mode = "crop"
+transition = ["fade", "wipe", "zoom"]
+transition_duration = 1500
+transition_on_startup = true
+directory = "~/.local/share/catppuccin-mocha/wallpapers"
+
+[wallpaper.default]
+path = "~/.local/share/catppuccin-mocha/wallpapers/wallhaven-jeey2y.png"
+
+[theme]
+mode = "dark"
+source = "builtin"
+builtin = "Catppuccin"
+pure_black_dark = false
+
+[bar.default]
+enabled = false

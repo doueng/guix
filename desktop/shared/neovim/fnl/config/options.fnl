@@ -97,14 +97,11 @@
         (table.remove lines (length lines)))
       (values lines regtype))))
 
-(local clipboard-copy (vim.fn.expand "~/nixos/scripts/clipboard-copy"))
-(local clipboard-paste (vim.fn.expand "~/nixos/scripts/clipboard-paste"))
-
-(set vim.g.clipboard {:name "system clipboard"
-                      :copy {:+ (command-copy clipboard-copy "+")
-                             :* (command-copy clipboard-copy "*")}
-                      :paste {:+ (command-paste clipboard-paste "+")
-                              :* (command-paste clipboard-paste "*")}
+(set vim.g.clipboard {:name "Wayland"
+                      :copy {:+ [:wl-copy "--type" "text/plain"]
+                             :* [:wl-copy "--primary" "--type" "text/plain"]}
+                      :paste {:+ [:wl-paste "--no-newline"]
+                              :* [:wl-paste "--primary" "--no-newline"]}
                       :cache_enabled 0})
 
 (vim.api.nvim_create_autocmd :TextYankPost

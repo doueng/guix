@@ -60,6 +60,9 @@
 (let ((names (map package-name (operating-system-packages os))))
   (for-each (lambda (name) (check (member name names) "Missing compositor/terminal/browser"))
             '("hyprland" "kitty" "flatpak" "neovim" "git" "keyd"))
+  (check (member "emacs-no-x" (map package-name (home-environment-packages
+                                                   (cadar (service-value (find-service 'guix-home))))))
+         "Terminal-only Emacs must be a Home package")
   (for-each (lambda (name) (check (not (member name names)) "Sway fallback must be dropped"))
             '("sway" "foot" "ghostty" "ungoogled-chromium")))
 (check (member "pi-coding-agent" (map package-name (home-environment-packages
@@ -74,6 +77,20 @@
 (check (member "github-cli" (map package-name (home-environment-packages
                                                (cadar (service-value (find-service 'guix-home))))))
        "GitHub CLI must be a Home package")
+(check (member "babashka" (map package-name (home-environment-packages
+                                             (cadar (service-value (find-service 'guix-home))))))
+       "Babashka must be a Home package")
+(check (member "noctalia" (map package-name (home-environment-packages
+                                             (cadar (service-value (find-service 'guix-home))))))
+       "Noctalia must be a Home package")
+(let ((home-packages (map package-name
+                          (home-environment-packages
+                           (cadar (service-value (find-service 'guix-home)))))))
+  (for-each (lambda (name)
+              (check (member name home-packages)
+                     "Missing migrated development package"))
+            '("babashka" "cmake" "fennel" "gopls" "nixfmt" "noctalia"
+              "shellcheck" "typst" "uv")))
 (check (equal? channels (guix-configuration-channels (service-value (find-service 'guix))))
        "Desktop changed channel pins")
 (check (equal? '("engstrand") (map car (service-value (find-service 'guix-home))))
@@ -100,6 +117,9 @@
 (for-each (lambda (entry)
             (check (file-exists? (local-file-file (cadr entry))) "Missing staged Home source"))
           %desktop-home-files)
+(for-each (lambda (entry)
+            (check (file-like? (cadr entry)) "Missing live Home source"))
+          %desktop-live-home-files)
 (fold-services services #:target-type activation-service-type)
 (fold-services services #:target-type shepherd-root-service-type)
 (display "PASS: desktop services/Home graph, sources, Sway fallback, unchanged storage/kernel/audio/pins.\n")

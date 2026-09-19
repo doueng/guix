@@ -33,41 +33,36 @@
                        #:log-file "/var/log/keyd.log"))
             (stop #~(make-kill-destructor))))))
 
-(define %editor-lua
-  (computed-file "familiar-editor-lua"
-    (with-imported-modules '((guix build utils))
-      #~(begin
-          (use-modules (guix build utils))
-          (mkdir #$output)
-          (for-each
-            (lambda (name source)
-              (with-output-to-file (string-append #$output "/" name ".lua")
-                (lambda ()
-                  (invoke #$(file-append fennel "/bin/fennel") "--compile" source))))
-            '("familiar-options" "familiar-keymaps")
-            (list #$(desktop-file ".config/nvim/fnl/familiar-options.fnl")
-                  #$(desktop-file ".config/nvim/fnl/familiar-keymaps.fnl")))))))
-
 (define %familiar-home
   (home-environment
-    (packages (cons* pi-coding-agent herdr jjui github-cli curl
+    (packages (cons* pi-coding-agent herdr jjui github-cli babashka noctalia curl
                      (map specification->package
-                          '("fish" "jujutsu" "difftastic" "tmux" "fzf" "zoxide"
+                          '("fish" "jujutsu" "clojure" "clojure-tools" "emacs-clojure-mode" "emacs-cider"
+ "difftastic" "tmux" "fzf" "zoxide"
                             "direnv" "ripgrep" "fd" "jq" "bat" "btop"
-                            "python" "node" "make" "gcc-toolchain" "pkg-config"
+                            "python" "python-black" "python-boto3" "python-pyopenssl"
+                            "python-pytest" "python-pyyaml"
+                            "emacs-no-x" "emacs-fish-mode"
+                            "node" "make" "gcc-toolchain" "pkg-config"
+                            "cmake" "dasel" "diff-so-fancy" "diffstat" "entr" "exercism"
+                            "file" "fennel" "fnlfmt" "go" "gopls" "gore" "hyperfine"
+                            "jless" "lua" "nixfmt" "pandoc" "qpdf" "shellcheck"
+                            "shfmt" "sox" "typst" "uv" "xxd" "yq"
                             "unzip" "zip" "tree" "wl-clipboard"))))
     (services
       (cons*
         (service home-bash-service-type)
         (simple-service 'familiar-environment home-environment-variables-service-type
           '(("EDITOR" . "nvim") ("VISUAL" . "nvim")
+            ("DOOMDIR" . "/home/engstrand/.config/doom")
+            ("COLORTERM" . "truecolor")
+            ("TERM_PROGRAM" . "kitty")
+            ("XCURSOR_THEME" . "macOS")
+            ("XCURSOR_SIZE" . "20")
+            ("GTK_THEME" . "Adwaita:dark")
             ("RAYON_NUM_THREADS" . "4")))
         (simple-service 'familiar-files home-files-service-type
-          (append %desktop-home-files
-            `((".config/nvim/lua/familiar-options.lua"
-               ,(file-append %editor-lua "/familiar-options.lua"))
-              (".config/nvim/lua/familiar-keymaps.lua"
-               ,(file-append %editor-lua "/familiar-keymaps.lua")))))
+          %desktop-live-home-files)
         %asahi-desktop-home-services))))
 
 (define* (make-familiar-os #:key root-uuid esp-uuid channels)
@@ -76,14 +71,13 @@
     (operating-system
       (inherit base)
       (packages
-        (cons* flatpak
-               (append (map specification->package
-                            '("hyprland" "waybar" "wofi" "hyprlock" "hypridle"
+        (append (map specification->package
+                            '("hyprland" "wofi" "hyprlock" "hypridle"
                               "polkit-gnome" "grim" "slurp" "keyd"
                               "font-jetbrains-mono" "font-google-noto-emoji"))
                        (remove (lambda (package)
                                  (member (package-name package) '("sway" "foot")))
-                               (operating-system-packages base)))))
+                               (operating-system-packages base))))
       (services
         (cons*
           %keyd-service

@@ -3,7 +3,6 @@
 # `guix system init`, or touches the protected NixOS ESP.
 
 BASE ?= /etc/guix-ssd
-ASAHI ?= $(HOME)/.cache/checkouts/codeberg.org/asahi-guix/channel
 ROOT_UUID ?= c694c1fc-a241-459a-a60d-1c829f1b9c30
 ESP_UUID ?= 77C4-10EC
 ESP_PARTUUID ?= 5408cbd2-dc6c-49c6-bee9-c51c5f3a29fc
@@ -19,7 +18,7 @@ help:
 	@echo 'switch        stage, build, and apply sequentially'
 	@echo 'archive       tarball of a fresh snapshot'
 	@echo 'test          offline Python checks'
-	@echo 'eval          base Scheme checks (needs guix + ASAHI source)'
+	@echo 'eval          base pinned Scheme checks'
 	@echo 'eval-desktop  desktop Scheme checks over local/current'
 	@echo 'clean         remove the local/current symlink only'
 
@@ -28,12 +27,12 @@ test:
 
 eval:
 	@command -v guix >/dev/null || { echo 'guix not available; skipping Scheme checks'; exit 0; }
-	guix repl -L $(ASAHI)/modules -L modules tests/evaluate.scm channels.scm
+	guix time-machine -C channels.scm -- repl -L modules tests/evaluate.scm channels.scm
 
 eval-desktop:
 	@test -d local/current || { echo 'run make stage first'; exit 1; }
-	guix repl -L $(ASAHI)/modules -L local/current/modules \
-	  tests/evaluate-desktop.scm local/current/channels.scm
+	guix time-machine -C local/current/channels.scm -- repl \
+	  -L local/current/modules tests/evaluate-desktop.scm local/current/channels.scm
 
 stage:
 	@test -f $(BASE)/devices.json || { echo "STOP: no devices.json under BASE=$(BASE)"; exit 1; }

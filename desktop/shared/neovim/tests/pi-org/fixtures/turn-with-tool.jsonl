@@ -1,0 +1,12 @@
+# Fixture: a complete assistant turn with streaming text, thinking, a tool
+# call, and a tool result. Emitted by stub-pi after a `prompt` command.
+# Lines starting with `#` are comments (ignored by stub-pi).
+{"type":"agent_start"}
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Let me "}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"check the file."}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end"}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_end","content":"The user wants me to check the file."}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","toolCall":{"id":"call_1","name":"read","arguments":{"path":"src/main.rs"}}}}
+{"type":"tool_execution_end","toolCallId":"call_1","result":{"content":[{"type":"text","text":"fn main() {\n    println!(\"hello\");\n}"}]}}
+{"type":"agent_end"}

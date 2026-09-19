@@ -55,47 +55,83 @@ def stage(base, output):
         else:
             shutil.copy2(source, destination)
 
-    copy(FEATURES / "shell/fish/config.fish", ".config/fish/config.fish")
-    copy(FEATURES / "shell/fish/functions", ".config/fish/functions")
-    for name in ("00-direnv-mode.fish", "10-theme-none.fish", "aliases.fish"):
-        copy(FEATURES / "shell/fish/conf.d" / name, ".config/fish/conf.d/" + name)
+    copy(FEATURES / "shell/fish", ".config/fish")
+    copy(FEATURES / "neovim", ".config/nvim")
+    copy(FEATURES / "doom", ".config/doom")
     copy(FEATURES / "git/config", ".config/git/config")
     copy(FEATURES / "jj/config.toml", ".config/jj/config.toml")
     copy(FEATURES / "herdr/config.toml", ".config/herdr/config.toml")
-    for name in ("herdr-tab-focus", "herdr-workspace-pick", "herdr-agent-pick"):
-        copy(FEATURES / "herdr/bin" / name, ".local/bin/" + name)
-    for name in ("custom-launcher", "chrome-unified"):
-        destination = files / ".local/bin" / name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(HERE / "desktop/bin" / name, destination)
-        destination.chmod(0o755)
-    pi_settings = json.loads((FEATURES / "pi/assets/agent/settings.json").read_text())
-    pi_settings["shellPath"] = "/run/current-system/profile/bin/bash"
-    pi_target = files / ".pi/agent/settings.json"
-    pi_target.parent.mkdir(parents=True, exist_ok=True)
-    pi_target.write_text(json.dumps(pi_settings, indent=2) + "\n")
-    jj = files / ".config/jj/config.toml"
-    jj.write_text(jj.read_text().replace('backend = "watchman"', 'backend = "none"')
-                  .replace("watchman.register-snapshot-trigger = true",
-                           "watchman.register-snapshot-trigger = false"))
-    for name in ("options", "keymaps"):
-        copy(FEATURES / f"neovim/assets/fnl/config/{name}.fnl",
-             f".config/nvim/fnl/familiar-{name}.fnl")
+    copy(FEATURES / "herdr/sesh.toml", ".config/herdr/sesh.toml")
+    copy(FEATURES / "herdr/tiny-fingers", ".local/share/herdr/tiny-fingers")
+    copy(HERE / "desktop/shared/noctalia/config.toml", ".config/noctalia/config.toml")
+    copy(HERE / "desktop/shared/theme/btop.theme", ".config/btop/themes/catppuccin-mocha.theme")
+    copy(HERE / "desktop/shared/theme/wallpapers", ".local/share/catppuccin-mocha/wallpapers")
+    for source_dir in (FEATURES / "herdr/bin", HERE / "desktop/bin"):
+        for source in sorted(source_dir.iterdir()):
+            if source.is_file():
+                destination = files / ".local/bin" / source.name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+                destination.chmod(source.stat().st_mode & 0o777)
+    copy(FEATURES / "pi/README.md", ".pi/README.md")
+    copy(FEATURES / "pi/assets/agent", ".pi/agent")
+    copy(FEATURES / "jjui/config.toml", ".config/jjui/config.toml")
     paths = sorted(p.relative_to(files).as_posix() for p in files.rglob("*") if p.is_file())
     entries = "\n".join("      " + json.dumps(p) for p in paths)
+    live_sources = [
+        (".config/git/config", "desktop/shared/git/config"),
+        (".config/jj/config.toml", "desktop/shared/jj/config.toml"),
+        (".config/jjui/config.toml", "desktop/shared/jjui/config.toml"),
+        (".config/herdr/config.toml", "desktop/shared/herdr/config.toml"),
+        (".config/herdr/sesh.toml", "desktop/shared/herdr/sesh.toml"),
+        (".config/noctalia/config.toml", "desktop/shared/noctalia/config.toml"),
+        (".config/btop/themes/catppuccin-mocha.theme", "desktop/shared/theme/btop.theme"),
+        (".pi/README.md", "desktop/shared/pi/README.md")]
+    for target_root, source_root in (
+            (".config/fish", "desktop/shared/shell/fish"),
+            (".config/nvim", "desktop/shared/neovim"),
+            (".config/doom", "desktop/shared/doom"),
+            (".config/hypr", "desktop/home/.config/hypr"),
+            (".config/waybar", "desktop/home/.config/waybar"),
+            (".pi/agent", "desktop/shared/pi/assets/agent"),
+            (".local/share/catppuccin-mocha/wallpapers", "desktop/shared/theme/wallpapers"),
+            (".local/share/herdr/tiny-fingers", "desktop/shared/herdr/tiny-fingers")):
+        source_dir = HERE / source_root
+        for source in sorted(path for path in source_dir.rglob("*") if path.is_file()):
+            relative = source.relative_to(source_dir).as_posix()
+            live_sources.append((target_root + "/" + relative,
+                                 str(source.relative_to(HERE))))
+    for source_dir in (HERE / "desktop/bin", FEATURES / "herdr/bin"):
+        for source in sorted(source_dir.iterdir()):
+            if source.is_file():
+                live_sources.append((".local/bin/" + source.name,
+                                     str(source.relative_to(HERE))))
+    live_entries = "\n".join(
+        "      (list " + json.dumps(target) + " (live-desktop-file " +
+        json.dumps(source) + "))"
+        for target, source in live_sources)
+
     (module / "desktop-files.scm").write_text(f'''(define-module (engstrand desktop-files)
   #:use-module (guix gexp)
-  #:export (desktop-file %desktop-home-files %desktop-keyd-config))
+  #:export (desktop-file live-desktop-file %desktop-home-files
+            %desktop-live-home-files %desktop-keyd-config))
 
 (define %directory
   (dirname (canonicalize-path (search-path %load-path "engstrand/desktop-files.scm"))))
 (define (desktop-file path)
   (local-file (string-append %directory "/desktop-files/" path)))
+(define %live-root {json.dumps(str(HERE))})
+(define (live-desktop-file path)
+  (computed-file "familiar-live-file"
+    #~(symlink (string-append #$%live-root "/" #$path) #$output)))
 (define %desktop-keyd-config
   (local-file (string-append %directory "/desktop-keyd.conf")))
 (define %desktop-home-files
   (map (lambda (path) (list path (desktop-file path)))
     '(\n{entries})))
+(define %desktop-live-home-files
+  (list
+{live_entries}))
 ''')
     (output / "system.scm").write_text(f'''(use-modules (engstrand desktop) (guix channels))
 

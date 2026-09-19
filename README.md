@@ -6,7 +6,7 @@ See [REVIEW.md](REVIEW.md) for the extraction review and outstanding acceptance 
 
 **Before running commands, review [INSTALLATION-PLAN.md](INSTALLATION-PLAN.md).** It details internal-disk and NixOS changes, backup requirements, and separate approval checkpoints. It takes precedence on operation order: verify bootstrap/build feasibility before committing to internal partition changes. This runbook is a command reference, not authorization to execute every step.
 
-**Current state: [PROGRESS.md](PROGRESS.md).** Native Guix now boots with the UAS fix, and the user has set both passwords. Do not rerun formatting or initialization. Hardware acceptance remains incomplete. An opt-in [familiar desktop layer](desktop/README.md) is prepared separately; it must be built and reviewed before activation.
+**Current state: [PROGRESS.md](PROGRESS.md).** Native Guix now boots with the UAS fix, and the user has set both passwords. Do not rerun formatting or initialization. Hardware acceptance remains incomplete. The opt-in [familiar desktop layer](desktop/README.md) now includes the migrated Pi resources and development tools and has a successful pinned build; activation still requires review.
 
 Prepared 2026-09-14 for this M1 MacBook Air. The inventory and validation notes below describe that initial preparation unless stated otherwise; use the checkpoint above for completed steps. This is not a hardware-tested image.
 
@@ -238,20 +238,20 @@ Offline checks from the repository root:
 
 ```sh
 make test   # or: python3 -m unittest discover -s tests -v
-make eval   # or the guix repl invocation below
+make eval   # or the pinned time-machine invocation below
 ```
 
 ```sh
 python3 -m unittest discover -s tests -v
-ASAHI="$HOME/.cache/checkouts/codeberg.org/asahi-guix/channel"
-guix repl -L "$ASAHI/modules" -L modules tests/evaluate.scm channels.scm
+guix time-machine -C channels.scm -- repl \
+  -L modules tests/evaluate.scm channels.scm
 ```
 
 Completed during preparation: all 12 Python safety tests; live read-only inventory with all eight internal partitions correctly nested; generated `system.scm` evaluation; the Scheme service-graph test; `make fmt`, `make bb-test`, `make bb-check`, and `make eval`. A separate `extendModules` evaluation of the opt-in bootstrap feature also passed all NixOS assertions and verified standard store/state paths, SSD temporary storage, substitute URLs, and daemon mount dependencies. That initial disabled-host observation is historical; consult PROGRESS.md for subsequent activation and installation.
 
 Direct `guix git authenticate` was also attempted on both librarian checkouts. Both stopped with `Git error: object not found` because these caches use `partialclonefilter=blob:none`; Guix's libgit2 path could not read missing historical objects. This is **not** a successful authentication, nor evidence of a bad signature. Use Guix's normal fresh authenticated time-machine checkout (step 5), or a complete source checkout if doing independent verification; do not pass the partial source caches as an authentication workaround.
 
-The Scheme test uses Nix's available Guix runtime plus the cached Asahi source at the pinned commit. It checks records/service composition, locked accounts, no guest/SSH, channel pins and audio ownership **without a daemon**. It is not a complete pinned time-machine build or a signature-authentication test. The source cache is a validation input, not required by the self-contained install configuration.
+The Scheme test runs through the authenticated pinned time-machine and checks records/service composition, locked accounts, no guest/SSH, channel pins and audio ownership **without a daemon**. It is still not a complete system build or hardware test.
 
 Historical preparation gates (subsequently progressed; see PROGRESS.md): independent backups; new UEFI environment and pairing; firmware inspection; actual partition UUIDs; explicit NixOS bootstrap activation; channel authentication/time-machine realization; complete system build/init; password initialization; actual USB-root boot and all hardware/recovery tests. If these do not pass, stop at that gate instead of treating this document as proof of compatibility.
 

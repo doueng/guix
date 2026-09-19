@@ -1,5 +1,23 @@
 # Guix SSD installation checkpoint
 
+## Desktop parity continuation — staged, not activated
+
+Migrated the remaining portable Pi resources from the NixOS setup into the
+Guix-owned desktop snapshot: prompts, skills, keybindings, and local
+extensions (jj-guard, usage, autoresearch, vent, prompt-editor, tokenjuice).
+Added the native jjui configuration and the available development tools from
+`home-base` (Python helpers, Go/Lua/Fennel tooling, formatters, shell tools,
+Pandoc/Typst and related CLI utilities). The staging script keeps Pi
+credentials out of the snapshot and retains Guix's system Bash path. Home
+entries now use out-of-store symlink chains back to this checkout for Fish,
+Neovim, Doom, Pi and desktop configs, so edits do not require a Guix rebuild.
+A fresh snapshot was built successfully; the latest pinned desktop system
+build produced `/gnu/store/0y1yxkpwfgv3yiz6bpcc1g0bd4iqwxkb-system`.
+Noctalia 5.1.0 is included as the opt-in Hyprland shell/launcher, and
+Babashka 1.13.223 is included as `bb`. All user-facing desktop/Herdr scripts
+are staged and linked generically rather than by a fixed name. It is still not
+activated; native reconfigure remains a reviewed step.
+
 ## Pre-publish scrub and GitHub CLI
 
 Scrubbed the shared jj email to the GitHub noreply address and made `ssh_openclaw` argument-only (the real host belongs in private ssh config); both folded into the initial commit before any push, so the pushed history never contained them. Added `github-cli` (provides `gh`) to the Guix home profile so the native system can manage the GitHub remote; it resolves in the pinned-era package set (Guix names the package `github-cli`, not `gh`). Verified: 30 Python tests, both Scheme checks against a fresh `make stage` snapshot. The package lands on the system at the next reviewed reconfigure.

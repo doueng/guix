@@ -9,11 +9,16 @@ import sys
 HOME = os.path.expanduser("~")
 
 
+def executable(name):
+    """Find Home-profile commands even when SDDM starts Hyprland without PATH."""
+    return shutil.which(name) or os.path.join(HOME, ".guix-home", "profile", "bin", name)
+
+
 def apps():
     return [
         ("kitty", ["kitty"]),
-        ("chrome-incognito", [shutil.which("chrome-unified") or "chrome-unified", "--incognito"]),
-        ("chrome", [shutil.which("chrome-unified") or "chrome-unified"]),
+        ("chrome-incognito", [executable("chrome-unified"), "--incognito"]),
+        ("chrome", [executable("chrome-unified")]),
         ("herdr", ["herdr"]),
         ("pi", ["pi"]),
     ]
@@ -24,7 +29,9 @@ def run(argv, **kwargs):
 
 
 def ensure_noctalia():
-    noctalia = shutil.which("noctalia")
+    noctalia = executable("noctalia")
+    if not os.path.isfile(noctalia) or not os.access(noctalia, os.X_OK):
+        noctalia = None
     if not noctalia:
         return None
     if run([noctalia, "msg", "status"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:

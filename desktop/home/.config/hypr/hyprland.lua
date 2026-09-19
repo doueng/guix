@@ -2,8 +2,11 @@
 -- guaranteed to be on PATH. Use the Guix profile and Home-installed helper
 -- explicitly for bindings invoked by keyd.
 local profile = "/run/current-system/profile/bin/"
+local home = os.getenv("HOME")
+local home_profile = home .. "/.guix-home/profile/bin/"
 local terminal = profile .. "kitty"
-local launcher = os.getenv("HOME") .. "/.local/bin/custom-launcher"
+local noctalia = home_profile .. "noctalia"
+local launcher = home .. "/.local/bin/custom-launcher"
 
 local function command(value)
   return hl.dsp.exec_cmd(value)
@@ -28,7 +31,7 @@ hl.config({
 hl.on("hyprland.start", function()
   hl.exec_cmd("dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
   hl.exec_cmd("/run/current-system/profile/libexec/polkit-gnome-authentication-agent-1")
-  hl.exec_cmd("waybar")
+  hl.exec_cmd(noctalia .. " --daemon")
   hl.exec_cmd("hypridle")
   hl.exec_cmd(terminal)
 end)

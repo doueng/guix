@@ -1,28 +1,45 @@
 (define-module (engstrand packages)
+  #:use-module (gnu packages audio)
   #:use-module (gnu packages base)
+  #:use-module (gnu packages calendar)
   #:use-module (gnu packages compression)
+  #:use-module (gnu packages crypto)
+  #:use-module (gnu packages cpp)
+  #:use-module (gnu packages curl)
   #:use-module (gnu packages elf)
   #:use-module (gnu packages fontutils)
   #:use-module (gnu packages freedesktop)
+  #:use-module (gnu packages gl)
   #:use-module (gnu packages glib)
   #:use-module (gnu packages gnome)
   #:use-module (gnu packages gtk)
   #:use-module (gnu packages image)
+  #:use-module (gnu packages jemalloc)
+  #:use-module (gnu packages linux)
+  #:use-module (gnu packages markup)
+  #:use-module (gnu packages maths)
+  #:use-module (gnu packages multiprecision)
   #:use-module (gnu packages ncurses)
   #:use-module (gnu packages pkg-config)
+  #:use-module (gnu packages polkit)
+  #:use-module (gnu packages pulseaudio)
   #:use-module (gnu packages regex)
   #:use-module (gnu packages xml)
   #:use-module (gnu packages xdisorg)
+  #:use-module (gnu packages stb)
   #:use-module (gnu packages zig)
   #:use-module (guix build-system copy)
+  #:use-module (guix build-system meson)
   #:use-module (guix build-system gnu)
   #:use-module (guix download)
   #:use-module (guix git-download)
   #:use-module (guix gexp)
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:)
-  #:export (github-cli pi-coding-agent herdr jjui ghostty))
+  #:export (babashka noctalia github-cli pi-coding-agent herdr jjui ghostty))
 
+(define babashka-version "1.13.223")
+(define noctalia-version "5.1.0")
 (define github-cli-version "2.83.2")
 (define pi-version "0.85.1")
 (define herdr-version "0.9.0")
@@ -31,6 +48,89 @@
 ;; The collection package pulls a large Go dependency tree and currently
 ;; fails in goresctrl's aarch64 tests.  GitHub publishes the same CLI as a
 ;; signed release binary, which is the appropriate small native package here.
+;; Guix's pinned channel does not provide Babashka yet.  Use the upstream
+;; native aarch64 release so the .bb scripts and #!/usr/bin/env bb helpers
+;; work without a Clojure/JVM dependency tree.
+(define-public babashka
+  (package
+    (name "babashka")
+    (version babashka-version)
+    (source
+     (origin
+       (method url-fetch)
+       (uri (string-append "https://github.com/babashka/babashka/releases/download/v"
+                           version "/babashka-" version "-linux-aarch64-static.tar.gz"))
+       (sha256
+        (base32 "0qasmgb9zmvjz9ib5dxx62ak0hyxh8f0q2b548pk9w2vs18n0b05"))))
+    (build-system copy-build-system)
+    (supported-systems '("aarch64-linux"))
+    (arguments
+     (list
+      #:install-plan #~'(("bb" "bin/bb"))
+      #:phases
+      #~(modify-phases %standard-phases
+          (delete 'strip)
+          (add-after 'install 'patch-interpreter-and-rpath
+            (lambda _
+              (invoke #$(file-append patchelf "/bin/patchelf")
+                      "--set-interpreter"
+                      #$(file-append glibc "/lib/ld-linux-aarch64.so.1")
+                      "--set-rpath" #$(file-append glibc "/lib")
+                      (string-append #$output "/bin/bb")))))))
+    (synopsis "Native Clojure scripting runtime")
+    (description "Babashka, a fast native Clojure scripting runtime.")
+    (home-page "https://babashka.org/")
+    (license license:epl1.0)))
+
+(define-public noctalia
+  (package
+    (name "noctalia")
+    (version noctalia-version)
+    (source
+     (origin
+       (method url-fetch)
+       (uri (string-append "https://github.com/noctalia-dev/noctalia/releases/download/v"
+                           version "/noctalia-v" version ".tar.gz"))
+       (sha256
+        (base32 "05h83s88i039jjh5fl86gkr685kjzf1m2y0abwnajar7xv99nnn8"))))
+    (build-system meson-build-system)
+    (native-inputs (list pkg-config))
+    (inputs
+     (list cairo curl fontconfig freetype glib harfbuzz jemalloc libical libjxl
+           libepoxy libqalculate libsecret libsndfile libsodium libwebp
+           libxkbcommon libxml2 librsvg linux-pam md4c nlohmann-json pango
+           pipewire polkit sdbus-c++ gmp mpfr
+           stb tomlplusplus wayland wayland-protocols wireplumber))
+    (arguments
+     (list
+      #:configure-flags #~'("-Dtests=disabled" "-Djemalloc=enabled"
+                             "-Dc_args=-I." "-Dcpp_args=-I.")
+      #:phases
+      #~(modify-phases %standard-phases
+          (add-after 'unpack 'namespace-stb-headers
+            (lambda _
+              (mkdir "stb")
+              (copy-file #$(file-append stb "/stb_image_resize2.h")
+                         "stb/stb_image_resize2.h")
+              (copy-file #$(file-append stb "/stb_image_write.h")
+                         "stb/stb_image_write.h")
+              (setenv "C_INCLUDE_PATH"
+                      (string-append (getcwd) ":"
+                                     #$(file-append gmp "/include") ":"
+                                     #$(file-append mpfr "/include") ":"
+                                     (or (getenv "C_INCLUDE_PATH") "")))
+              (setenv "CPLUS_INCLUDE_PATH"
+                      (string-append (getcwd) ":"
+                                     #$(file-append gmp "/include") ":"
+                                     #$(file-append mpfr "/include") ":"
+                                     (or (getenv "CPLUS_INCLUDE_PATH") ""))))))))
+    (supported-systems '("aarch64-linux"))
+    (synopsis "Wayland desktop shell")
+    (description "Noctalia is a configurable Wayland desktop shell with bars,
+notifications, a launcher, wallpaper management, lock screen and settings UI.")
+    (home-page "https://github.com/noctalia-dev/noctalia")
+    (license license:expat)))
+
 (define-public github-cli
   (package
     (name "github-cli")

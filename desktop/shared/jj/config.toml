@@ -261,8 +261,8 @@ subprocess = true
 auto-track-bookmarks = "main"
 
 [fsmonitor]
-backend = "watchman"
-watchman.register-snapshot-trigger = true
+backend = "none"
+watchman.register-snapshot-trigger = false
 
 [snapshot]
 # auto-track allows specifying which changes to track automatically
