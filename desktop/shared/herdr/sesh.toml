@@ -1,0 +1,36 @@
+# Sesh-style configuration for fullerzz.sesh. The plugin's workspace picker
+# combines live Herdr workspaces with zoxide history and creates these tabs for
+# new projects.
+cache = false
+strict_mode = true
+sort_order = ["herdr", "config", "zoxide", "dir"]
+dir_length = 1
+separator_aware = true
+
+[default_session]
+preview_command = "ls -1 {}"
+
+[tui]
+show_icons = true
+prompt = "Sesh> "
+placeholder = "Search workspaces"
+
+# The workspace's initial tab is the shell tab. These are the additional tabs
+# created for a newly discovered or direct-path project.
+[[window]]
+name = "emacs"
+startup_script = "emacs-project-start"
+
+[[window]]
+name = "pi"
+startup_script = "pi"
+
+[[window]]
+name = "jjui"
+startup_script = "jjui"
+
+# Apply the project layout to every absolute path discovered by zoxide or
+# supplied directly to `herdr-sesh connect`.
+[[wildcard]]
+pattern = "/**"
+windows = ["emacs", "pi", "jjui"]
