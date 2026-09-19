@@ -66,6 +66,8 @@
        "Patched U-Boot must carry the OS_PREPARE patch")
 (check (member "uas" (operating-system-initrd-modules os))
        "Initrd must include UAS for the USB SSD")
+(check (member "ncurses" (map package-name (operating-system-packages os)))
+       "System profile must include ncurses")
 (check (catch #t
          (lambda ()
            (make-ssd-os #:root-uuid "11111111-2222-3333-4444-555555555555"

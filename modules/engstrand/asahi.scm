@@ -5,6 +5,7 @@
   #:use-module (engstrand bootloader)
   #:use-module (gnu)
   #:use-module (gnu home)
+  #:use-module (gnu packages ncurses)
   #:use-module (gnu packages version-control)
   #:use-module (gnu packages vim)
   #:use-module (gnu services base)
@@ -58,7 +59,7 @@
               (options "umask=0077"))
             %base-file-systems))
     (packages
-     (cons* git neovim
+     (cons* ncurses git neovim
             (operating-system-packages asahi-sway-os)))
     (services
      (modify-services (operating-system-user-services asahi-sway-os)
