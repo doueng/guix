@@ -35,7 +35,7 @@
 
 (define %familiar-home
   (home-environment
-    (packages (cons* pi-coding-agent herdr jjui github-cli babashka noctalia ghostty curl
+    (packages (cons* pi-coding-agent herdr jjui github-cli babashka noctalia curl
                      (map specification->package
                           '("fish" "jujutsu" "clojure" "clojure-tools" "emacs-clojure-mode" "emacs-cider"
  "difftastic" "tmux" "fzf" "zoxide"

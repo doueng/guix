@@ -22,7 +22,7 @@ def apps():
     return [
         ("cosmic-files", ["cosmic-files"]),
         ("wezterm", ["wezterm", "connect", "persistent"]),
-        ("ghostty", [executable("ghostty")]),
+        ("kitty", [executable("kitty")]),
         ("chrome-incognito", chrome + ["--incognito"]),
         ("chrome", chrome),
     ]
