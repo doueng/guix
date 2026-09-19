@@ -5,12 +5,8 @@ local profile = "/run/current-system/profile/bin/"
 local terminal = profile .. "kitty"
 local launcher = os.getenv("HOME") .. "/.local/bin/custom-launcher"
 
--- Use a Lua callback rather than the string dispatcher. This is reliable on
--- the Guix-packaged Hyprland and also keeps the command's absolute path.
 local function command(value)
-  return function()
-    hl.exec_cmd(value)
-  end
+  return hl.dsp.exec_cmd(value)
 end
 
 hl.monitor({ output = "eDP-1", mode = "2560x1600", position = "auto", scale = 1 })
