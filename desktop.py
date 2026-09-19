@@ -64,6 +64,9 @@ def stage(base, output):
     copy(FEATURES / "herdr/sesh.toml", ".config/herdr/sesh.toml")
     copy(FEATURES / "herdr/tiny-fingers", ".local/share/herdr/tiny-fingers")
     copy(HERE / "desktop/shared/noctalia/config.toml", ".config/noctalia/config.toml")
+    copy(FEATURES / "ghostty/config", ".config/ghostty/config")
+    copy(FEATURES / "ghostty/config.asahi", ".config/ghostty/config.asahi")
+    copy(FEATURES / "ghostty/themes", ".config/ghostty/themes")
     copy(HERE / "desktop/shared/theme/btop.theme", ".config/btop/themes/catppuccin-mocha.theme")
     copy(HERE / "desktop/shared/theme/wallpapers", ".local/share/catppuccin-mocha/wallpapers")
     for source_dir in (FEATURES / "herdr/bin", HERE / "desktop/bin"):
@@ -85,6 +88,9 @@ def stage(base, output):
         (".config/herdr/config.toml", "desktop/shared/herdr/config.toml"),
         (".config/herdr/sesh.toml", "desktop/shared/herdr/sesh.toml"),
         (".config/noctalia/config.toml", "desktop/shared/noctalia/config.toml"),
+        (".config/ghostty/config", "desktop/shared/ghostty/config"),
+        (".config/ghostty/config.asahi", "desktop/shared/ghostty/config.asahi"),
+        (".config/ghostty/themes/catppuccin-mocha", "desktop/shared/ghostty/themes/catppuccin-mocha"),
         (".config/btop/themes/catppuccin-mocha.theme", "desktop/shared/theme/btop.theme"),
         (".pi/README.md", "desktop/shared/pi/README.md")]
     for target_root, source_root in (

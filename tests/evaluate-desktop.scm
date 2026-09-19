@@ -59,12 +59,12 @@
 (check (equal? (accounts base) (accounts os)) "Desktop must not change account declarations")
 (let ((names (map package-name (operating-system-packages os))))
   (for-each (lambda (name) (check (member name names) "Missing compositor/terminal/browser"))
-            '("hyprland" "kitty" "flatpak" "neovim" "git" "keyd"))
+            '("hyprland" "flatpak" "neovim" "git" "keyd"))
   (check (member "emacs-no-x" (map package-name (home-environment-packages
                                                    (cadar (service-value (find-service 'guix-home))))))
          "Terminal-only Emacs must be a Home package")
   (for-each (lambda (name) (check (not (member name names)) "Sway fallback must be dropped"))
-            '("sway" "foot" "ghostty" "ungoogled-chromium")))
+            '("sway" "foot" "kitty" "ungoogled-chromium")))
 (check (member "pi-coding-agent" (map package-name (home-environment-packages
                                                   (cadar (service-value (find-service 'guix-home))))))
        "Pi must be a Home package")

@@ -15,12 +15,16 @@ def executable(name):
 
 
 def apps():
+    # Keep this list and its labels aligned with ~/nixos/scripts/custom-launcher.
+    # Invoke Chrome through Flatpak directly so stale Home-profile symlinks cannot
+    # select an old launcher or Chromium application ID.
+    chrome = ["flatpak", "run", "com.google.Chrome"]
     return [
-        ("kitty", ["kitty"]),
-        ("chrome-incognito", [executable("chrome-unified"), "--incognito"]),
-        ("chrome", [executable("chrome-unified")]),
-        ("herdr", ["herdr"]),
-        ("pi", ["pi"]),
+        ("cosmic-files", ["cosmic-files"]),
+        ("wezterm", ["wezterm", "connect", "persistent"]),
+        ("ghostty", [executable("ghostty")]),
+        ("chrome-incognito", chrome + ["--incognito"]),
+        ("chrome", chrome),
     ]
 
 
@@ -64,7 +68,11 @@ def main():
     noctalia = ensure_noctalia()
     command = choose(noctalia)
     if command:
-        subprocess.Popen(command)
+        try:
+            subprocess.Popen(command)
+        except FileNotFoundError as error:
+            print(f"Unable to launch {command[0]}: {error}", file=sys.stderr)
+            return 1
     return 0
 
 

@@ -22,7 +22,7 @@ Internal speakers remain unverified. There are deliberately no volume/unmute bin
 
 ## Deliberate gaps
 
-**Ghostty remains unavailable on Guix.** A from-source Ghostty packaging was attempted and abandoned: it needs Zig 0.15.2 (available), 36 vendored dependencies (staged), and repeatedly broke on sandbox/pkg-config integration. Noctalia 5.1.0 is now packaged from its upstream release tarball with the required Wayland/Qt-adjacent libraries; its package build has passed on native aarch64. Kitty remains the terminal, while Waybar and Wofi remain available as fallbacks. The Ghostty package draft remains in `modules/engstrand/packages.scm` for a future attempt.
+Ghostty is packaged from source and installed in the Home profile. Its configuration and Catppuccin theme are staged from `desktop/shared/ghostty`; Wofi remains available as a launcher fallback.
 
 Neovim's Guix runtime plugin dependencies (LazyVim, Java tooling and unavailable language servers), Herdr's plugin set (annotate, tiny-fingers, sesh) and Tailscale are not ported yet. Babashka is included as `bb`, so `.bb` scripts can run directly; the NixOS-only `nixdiag` service script remains with NixOS because it depends on systemd/journald/NixOS paths. The copied Herdr tab helpers now call `herdr` directly; the keyd Command layer and Ghostty chord binds have Alt/Super equivalents in Hyprland.
 
