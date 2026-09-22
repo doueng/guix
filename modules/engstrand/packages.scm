@@ -46,7 +46,7 @@
 (define babashka-version "1.13.223")
 (define noctalia-version "5.1.0")
 (define github-cli-version "2.83.2")
-(define pi-version "0.85.1")
+(define pi-version "0.87.1")
 (define herdr-version "0.9.0")
 (define jjui-version "0.10.10")
 (define herdr-sesh-version "0.7.0")
@@ -170,7 +170,7 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
        (uri (string-append "https://github.com/earendil-works/pi/releases/download/v"
                            version "/pi-linux-arm64.tar.gz"))
        (sha256
-        (base32 "1m74x8qcb34h6x0dwi7vx6r7ghv2p6034pw10aqz7r2yi2p20b84"))))
+        (base32 "129vpk5n1s3km1vc2888g6bgdfhdg0y4wzc5lhkhnicihjglljrn"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (arguments
