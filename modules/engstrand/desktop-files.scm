@@ -17,12 +17,19 @@
 (define (relative-to root path)
   (substring path (string-length root)))
 
+(define (generated-source? path)
+  (or (string-suffix? ".pyc" path)
+      (string-suffix? ".pyo" path)
+      (string-contains path "/__pycache__/")))
+
 (define (source-files relative)
   (let* ((root (repo-file relative))
          (prefix (if (string-suffix? "/" root) root (string-append root "/"))))
     (map (lambda (path)
            (cons (relative-to prefix path) path))
-         (sort (find-files root #:directories? #f) string<?))))
+         (sort (filter (lambda (path) (not (generated-source? path)))
+                       (find-files root #:directories? #f))
+               string<?))))
 
 (define (tree-entries target-root source-root)
   (map (lambda (entry)
@@ -49,6 +56,8 @@
                   "desktop/shared/herdr/tiny-fingers")
    (list (file-entry ".config/noctalia/config.toml"
                       "desktop/shared/noctalia/config.toml"))
+   (list (file-entry ".local/share/icons/transparent.svg"
+                      "desktop/shared/noctalia/transparent.svg"))
    (list (file-entry ".config/ghostty/config" "desktop/shared/ghostty/config"))
    (list (file-entry ".config/ghostty/config.asahi"
                       "desktop/shared/ghostty/config.asahi"))
@@ -73,6 +82,8 @@
     (file-entry ".config/herdr/sesh.toml" "desktop/shared/herdr/sesh.toml")
     (file-entry ".config/noctalia/config.toml"
                  "desktop/shared/noctalia/config.toml")
+    (file-entry ".local/share/icons/transparent.svg"
+                 "desktop/shared/noctalia/transparent.svg")
     (file-entry ".config/ghostty/config" "desktop/shared/ghostty/config")
     (file-entry ".config/ghostty/config.asahi"
                  "desktop/shared/ghostty/config.asahi")

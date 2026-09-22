@@ -144,12 +144,12 @@
  "difftastic" "tmux" "fzf" "zoxide"
                             "direnv" "ripgrep" "fd" "jq" "bat" "btop"
                             "python" "python-black" "python-boto3" "python-pyopenssl"
-                            "python-pytest" "python-pyyaml"
+                            "python-pyyaml"
                             "emacs-no-x" "emacs-fish-mode"
                             "node" "make" "gcc-toolchain" "pkg-config"
                             "cmake" "dasel" "diff-so-fancy" "diffstat" "entr" "exercism"
                             "file" "fennel" "fnlfmt" "go" "gopls" "gore" "hyperfine"
-                            "jless" "lua" "nixfmt" "pandoc" "qpdf" "shellcheck"
+                            "jless" "libnotify" "lua" "nixfmt" "pandoc" "qpdf" "shellcheck"
                             "shfmt" "sox" "typst" "uv" "xxd" "yq"
                             "unzip" "zip" "tree" "wl-clipboard"))))
     (services

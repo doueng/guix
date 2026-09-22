@@ -98,8 +98,8 @@
   (for-each (lambda (name)
               (check (member name home-packages)
                      "Missing migrated development package"))
-            '("babashka" "cmake" "fennel" "ghostty" "gopls" "nixfmt" "noctalia"
-              "shellcheck" "typst" "uv")))
+            '("babashka" "cmake" "fennel" "ghostty" "gopls" "libnotify" "nixfmt"
+              "noctalia" "shellcheck" "typst" "uv")))
 (check (equal? channels (guix-configuration-channels (service-value (find-service 'guix))))
        "Desktop changed channel pins")
 (check (equal? '("engstrand") (map car (service-value (find-service 'guix-home))))

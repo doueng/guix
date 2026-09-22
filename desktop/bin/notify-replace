@@ -1,0 +1,36 @@
+#!/usr/bin/env bb
+
+(require '[babashka.fs :as fs]
+         '[babashka.process :as p]
+         '[clojure.string :as str])
+
+(defn ensure-noctalia-running []
+  (let [status @(p/process ["noctalia" "msg" "status"] {:out :string :err :string})]
+    (when-not (zero? (:exit status))
+      @(p/process ["noctalia" "--daemon"] {:out :string :err :string}))))
+
+(defn -main [& args]
+  (when (< (count args) 2)
+    (binding [*out* *err*]
+      (println "usage: notify-replace <key> <notify-send args...>"))
+    (System/exit 2))
+
+  (ensure-noctalia-running)
+
+  (let [[key & notify-args] args
+        state-dir (str (or (System/getenv "XDG_STATE_HOME")
+                           (str (System/getProperty "user.home") "/.local/state"))
+                       "/noctalia-notifications")
+        state-file (str state-dir "/" key ".id")]
+    (fs/create-dirs state-dir)
+
+    (let [replace-id (when (fs/exists? state-file) (str/trim (slurp state-file)))
+          final-args (cond-> []
+                       (seq replace-id) (into ["-r" replace-id])
+                       true (into notify-args))
+          result @(p/process (into ["notify-send" "-p"] final-args)
+                             {:out :string :err :string})
+          id (str/trim (or (:out result) ""))]
+      (spit state-file (str id "\n")))))
+
+(apply -main *command-line-args*)
