@@ -15,7 +15,7 @@
   (string-append %repo "/" relative))
 
 (define (relative-to root path)
-  (substring path (+ 1 (string-length root))))
+  (substring path (string-length root)))
 
 (define (source-files relative)
   (let* ((root (repo-file relative))

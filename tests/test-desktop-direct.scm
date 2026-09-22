@@ -22,4 +22,19 @@
 
 (check (file-exists? (local-file-file %desktop-keyd-config))
        "Missing keyd configuration")
+
+(for-each
+ (lambda (entry)
+   (check (assoc entry %desktop-direct-home-links)
+          (string-append "Missing exact Home destination: " entry)))
+ '(".config/hypr/hyprland.conf"
+   ".config/nvim/init.lua"
+   ".local/bin/custom-launcher"))
+
+(for-each
+ (lambda (entry)
+   (check (assoc entry %desktop-home-files)
+          (string-append "Missing exact generated Home destination: " entry)))
+ '(".config/ghostty/themes/catppuccin-mocha"))
+
 (display "PASS: direct Scheme desktop sources\n")
