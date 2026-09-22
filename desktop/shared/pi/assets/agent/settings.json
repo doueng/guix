@@ -14,6 +14,6 @@
   "theme": "dark",
   "defaultThinkingLevel": "high",
   "shellPath": "/run/current-system/profile/bin/bash",
-  "lastChangelogVersion": "0.85.1",
+  "lastChangelogVersion": "0.87.1",
   "hideThinkingBlock": true
 }
