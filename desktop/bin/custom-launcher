@@ -20,8 +20,6 @@ def apps():
     # flags stay consistent with the documented browser installation.
     chrome = [executable("chrome-unified")]
     return [
-        ("cosmic-files", ["cosmic-files"]),
-        ("wezterm", ["wezterm", "connect", "persistent"]),
         ("kitty", [executable("kitty")]),
         ("ghostty", [executable("ghostty")]),
         ("chrome-incognito", chrome + ["--incognito"]),
