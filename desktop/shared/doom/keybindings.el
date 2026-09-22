@@ -1,4 +1,8 @@
-;;; keybindings.el --- Clojure feature keybindings -*- lexical-binding: t; -*-
+;;; keybindings.el --- Doom keybindings -*- lexical-binding: t; -*-
+
+;; Global leader bindings
+(map! :leader
+      :desc "Toggle Treemacs" "e" #'treemacs)
 
 (after! clojure-mode
   (map! :map clojure-mode-map
