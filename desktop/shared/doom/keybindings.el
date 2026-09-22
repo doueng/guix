@@ -10,11 +10,47 @@
       (call-interactively #'lsp-rename)
     (user-error "No LSP rename backend available")))
 
+(defun eng/scheme-guix-record-definition ()
+  "Jump to Guix's generated PACKAGE or ORIGIN record constructor."
+  (let* ((symbol (thing-at-point 'symbol t))
+         (source (locate-file "guix/packages.scm"
+                              (split-string (or (getenv "GUILE_LOAD_PATH") "")
+                                            path-separator t)))
+         (pattern (cdr (assoc symbol
+                              '(("package" . "^[[:space:]]+package make-package")
+                                ("origin" . "^[[:space:]]+%origin make-origin"))))))
+    (when (and source pattern)
+      (find-file source)
+      (goto-char (point-min))
+      (when (re-search-forward pattern nil t)
+        (beginning-of-line)
+        t))))
+
+(defun eng/scheme-find-definition ()
+  "Find the Scheme definition at point using Guix source or Geiser."
+  (interactive)
+  (unless (eng/scheme-guix-record-definition)
+    (require 'geiser)
+    (require 'geiser-guile)
+    (setq geiser-default-implementation 'guile
+          geiser-mode-start-repl-p t)
+    (unless (bound-and-true-p geiser-mode)
+      (geiser-mode 1))
+    (call-interactively #'geiser-edit-symbol-at-point)))
+
 (defun eng/lsp-find-definition ()
   (interactive)
-  (if (bound-and-true-p lsp-mode)
-      (call-interactively #'lsp-find-definition)
-    (call-interactively #'xref-find-definitions)))
+  (cond
+   ((bound-and-true-p lsp-mode)
+    (call-interactively #'lsp-find-definition))
+   ((derived-mode-p 'scheme-mode)
+    (call-interactively #'eng/scheme-find-definition))
+   (t
+    (call-interactively #'xref-find-definitions))))
+
+(with-eval-after-load 'scheme
+  (define-key scheme-mode-map (kbd "M-.") #'eng/scheme-find-definition)
+  (map! :map scheme-mode-map :n "gd" #'eng/scheme-find-definition))
 
 (defun eng/lsp-find-references ()
   (interactive)

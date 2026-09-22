@@ -290,6 +290,37 @@ This is a lightweight way to apply config changes without restarting Emacs."
                      process-environment))))
 
 ;; Doom LSP using lsp-mode with nixd, fish-lsp, gopls.
+;; Doom's Scheme module adds a Nix-only Guix path. In the Guix profile, use
+;; the active Guile module paths so Geiser can resolve Guix sources.
+(after! geiser-guile
+  (dolist (path (split-string (or (getenv "GUILE_LOAD_PATH") "")
+                              path-separator t))
+    (when (file-directory-p path)
+      (add-to-list 'geiser-guile-load-path path))))
+
+(defun eng/start-guile-geiser-for-scm ()
+  "Start a Guile Geiser REPL automatically in .scm buffers."
+  (when (and buffer-file-name (string-suffix-p ".scm" buffer-file-name))
+    (require 'geiser)
+    (require 'geiser-guile)
+    (setq geiser-default-implementation 'guile
+          geiser-mode-start-repl-p t)
+    (geiser-mode 1)
+    (unless (geiser-repl--connection*)
+      (geiser 'guile))))
+
+(add-hook 'scheme-mode-hook #'eng/start-guile-geiser-for-scm)
+
+(defconst eng/guix-font-lock-keywords
+  '(("\\_<\\(package\\|origin\\)\\_>" . font-lock-keyword-face)
+    ("^[ \t]*(\\(name\\|version\\|source\\|build-system\\|arguments\\|inputs\\|native-inputs\\|propagated-inputs\\|outputs\\|supported-systems\\|synopsis\\|description\\|home-page\\|license\\|properties\\)\\_>"
+     1 font-lock-variable-name-face)))
+
+(defun eng/scheme-enable-guix-font-lock ()
+  (font-lock-add-keywords nil eng/guix-font-lock-keywords 'append))
+
+(add-hook 'scheme-mode-hook #'eng/scheme-enable-guix-font-lock)
+
 (after! lsp-mode
   (setq lsp-use-plists t
         lsp-idle-delay 0.3
