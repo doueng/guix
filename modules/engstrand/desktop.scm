@@ -62,12 +62,15 @@
           (catch 'system-error
             (lambda () (lstat path) #t)
             (lambda _ #f)))
-        ;; Hyprland prefers hyprland.lua when both files exist.  This stale
-        ;; generated file must not shadow the native config.
+        ;; Hyprland prefers hyprland.lua when both files exist.  Remove only
+        ;; the old store-backed link that this configuration created; never
+        ;; delete an unmanaged regular file during Home activation.
         (for-each
          (lambda (relative)
            (let ((path (string-append (getenv "HOME") "/" relative)))
              (when (path-exists? path)
+               (unless (legacy-tree-link? path)
+                 (error "Refusing to remove unmanaged Home file" path))
                (format #t "Removing stale Home config ~a~%" path)
                (delete-file path))))
          '(".config/hypr/hyprland.lua"))
@@ -97,8 +100,18 @@
 (define %familiar-herdr-plugins
   (simple-service 'familiar-herdr-plugins home-activation-service-type
     #~(begin
-        (use-modules (guix build utils) (ice-9 popen) (ice-9 rdelim)
-                     (srfi srfi-13))
+        (use-modules (guix build utils) (ice-9 ftw) (ice-9 popen)
+                     (ice-9 rdelim) (srfi srfi-13))
+        (define (symlink-target path)
+          (catch 'system-error
+            (lambda ()
+              (and (eq? 'symlink (stat:type (lstat path)))
+                   (readlink path)))
+            (lambda _ #f)))
+        (define (path-exists? path)
+          (catch 'system-error
+            (lambda () (lstat path) #t)
+            (lambda _ #f)))
         (let* ((herdr #$(file-append herdr "/bin/herdr"))
                (sesh #$(file-append herdr-sesh ""))
                (tiny #$(file-append herdr-tiny-fingers "")))
@@ -113,8 +126,13 @@
             (unless (zero? status)
               (error "Could not determine Herdr sesh plugin config directory"))
             (mkdir-p config-dir)
-            (when (file-exists? target)
-              (delete-file-recursively target))
+            (when (path-exists? target)
+              (let ((old (symlink-target target)))
+                (unless (and old
+                             (or (string=? old config)
+                                 (string-prefix? "/gnu/store/" old)))
+                  (error "Refusing to replace unmanaged Herdr config" target))
+                (delete-file target)))
             (symlink config target))))))
 
 (define %familiar-home
