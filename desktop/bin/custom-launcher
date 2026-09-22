@@ -1,79 +1,70 @@
-#!/usr/bin/env python3
-"""Custom application launcher: Noctalia dmenu when present, otherwise Wofi."""
+#!/usr/bin/env bb
 
-import os
-import shutil
-import subprocess
-import sys
+(require '[babashka.fs :as fs]
+         '[babashka.process :as p]
+         '[clojure.string :as str])
 
-HOME = os.path.expanduser("~")
+(def home (System/getProperty "user.home"))
 
+(defn find-executable [name]
+  (or (some-> (fs/which name) str)
+      (some (fn [directory]
+              (let [candidate (str directory "/" name)]
+                (when (fs/executable? candidate) candidate)))
+            [(str home "/.local/bin")
+             (str home "/.guix-home/profile/bin")])))
 
-def executable(name):
-    """Find Home-profile commands even when SDDM starts Hyprland without PATH."""
-    return shutil.which(name) or os.path.join(HOME, ".guix-home", "profile", "bin", name)
+(defn executable [name]
+  (or (find-executable name) name))
 
+(defn apps []
+  ;; Keep this list and its labels aligned with ~/nixos/scripts/custom-launcher.
+  ;; Reuse the checked-in launcher so its Flatpak application ID and Wayland
+  ;; flags stay consistent with the documented browser installation.
+  (let [chrome [(executable "chrome-unified")]]
+    [["kitty" [(executable "kitty")]]
+     ["ghostty" [(executable "ghostty")]]
+     ["chrome-incognito" (conj chrome "--incognito")]
+     ["chrome" chrome]]))
 
-def apps():
-    # Keep this list and its labels aligned with ~/nixos/scripts/custom-launcher.
-    # Reuse the checked-in launcher so its Flatpak application ID and Wayland
-    # flags stay consistent with the documented browser installation.
-    chrome = [executable("chrome-unified")]
-    return [
-        ("kitty", [executable("kitty")]),
-        ("ghostty", [executable("ghostty")]),
-        ("chrome-incognito", chrome + ["--incognito"]),
-        ("chrome", chrome),
-    ]
+(defn run [command options]
+  @(p/process command options))
 
+(defn ensure-noctalia []
+  (when-let [noctalia (find-executable "noctalia")]
+    (let [status (run [noctalia "msg" "status"]
+                      {:out :string :err :string})]
+      (when-not (zero? (:exit status))
+        (p/process [noctalia "--daemon"]
+                   {:out :string :err :string})))
+    noctalia))
 
-def run(argv, **kwargs):
-    return subprocess.run(argv, **kwargs)
+(defn choose [noctalia]
+  (let [entries (str (str/join "\n" (map first (apps))) "\n")
+        result (if noctalia
+                 (run [noctalia "dmenu" "-p" ""]
+                      {:in entries :out :string :err :string})
+                 (if-let [wofi (find-executable "wofi")]
+                   (run [wofi "--dmenu" "-p" "launch"]
+                        {:in entries :out :string :err :string})
+                   (do
+                     (binding [*out* *err*]
+                       (println "No dmenu or wofi found"))
+                     nil)))]
+    (when result
+      (if-not (zero? (:exit result))
+        (System/exit (:exit result))
+        (some (fn [[name command]]
+                (when (= name (str/trim (:out result))) command))
+              (apps))))))
 
+(defn main []
+  (when-let [command (choose (ensure-noctalia))]
+    (try
+      (p/process command)
+      (catch Exception error
+        (binding [*out* *err*]
+          (println "Unable to launch" (first command) ":" (.getMessage error)))
+        (System/exit 1)))))
 
-def ensure_noctalia():
-    noctalia = executable("noctalia")
-    if not os.path.isfile(noctalia) or not os.access(noctalia, os.X_OK):
-        noctalia = None
-    if not noctalia:
-        return None
-    if run([noctalia, "msg", "status"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
-        run([noctalia, "--daemon"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return noctalia
-
-
-def choose(noctalia):
-    entries = "\n".join(name for name, _ in apps()) + "\n"
-    if noctalia:
-        result = run([noctalia, "dmenu", "-p", ""], input=entries, text=True,
-                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    else:
-        wofi = shutil.which("wofi")
-        if not wofi:
-            print("No dmenu or wofi found", file=sys.stderr)
-            return None
-        result = run([wofi, "--dmenu", "-p", "launch"], input=entries, text=True,
-                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    if result.returncode != 0:
-        sys.exit(result.returncode)
-    selection = result.stdout.strip()
-    for name, command in apps():
-        if selection == name:
-            return command
-    return None
-
-
-def main():
-    noctalia = ensure_noctalia()
-    command = choose(noctalia)
-    if command:
-        try:
-            subprocess.Popen(command)
-        except FileNotFoundError as error:
-            print(f"Unable to launch {command[0]}: {error}", file=sys.stderr)
-            return 1
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+(main)

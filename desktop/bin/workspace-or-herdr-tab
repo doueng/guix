@@ -1,51 +1,46 @@
-#!/usr/bin/env python3
-"""Focus the workspace Ghostty window or select its requested Herdr tab."""
+#!/usr/bin/env bb
 
-import json
-import os
-import subprocess
-import sys
+(require '[babashka.process :as p]
+         '[cheshire.core :as json]
+         '[clojure.string :as str])
 
+(def workspace 1)
+(def home (System/getProperty "user.home"))
 
-WORKSPACE = 1
+(defn hyprctl [& args]
+  (let [result @(p/process (into ["hyprctl"] args)
+                           {:out :string :err :string})]
+    (if (zero? (:exit result))
+      (json/parse-string (:out result) true)
+      (throw (ex-info "hyprctl failed" {:args args :result result})))))
 
+(defn ghostty? [window]
+  (some #(str/includes? (str/lower-case (str (get window % ""))) "ghostty")
+        [:class :initialClass :title]))
 
-def hyprctl(*args):
-    result = subprocess.run(["hyprctl", *args], check=True,
-                            capture_output=True, text=True)
-    return json.loads(result.stdout)
+(defn main [& args]
+  (if (not= 1 (count args))
+    (do
+      (binding [*out* *err*]
+        (println "Usage: workspace-or-herdr-tab <herdr-tab>"))
+      2)
+    (let [tab (first args)
+          target (some (fn [window]
+                         (let [window-workspace (:workspace window)]
+                           (when (and (= workspace (:id window-workspace))
+                                      (ghostty? window))
+                             (:address window))))
+                       (hyprctl "clients" "-j"))
+          active (:address (hyprctl "activewindow" "-j"))]
+      (cond
+        (nil? target)
+        (p/shell "hyprctl" "dispatch" "workspace" (str workspace))
 
+        (= active target)
+        (p/shell (str home "/.local/bin/herdr-tab-focus") tab)
 
-def is_ghostty(window):
-    return any("ghostty" in str(window.get(field, "")).lower()
-               for field in ("class", "initialClass", "title"))
+        :else
+        (p/shell "hyprctl" "dispatch" "focuswindow" (str "address:" target)))
+      0)))
 
-
-def main():
-    if len(sys.argv) != 2:
-        print(f"Usage: {os.path.basename(sys.argv[0])} <herdr-tab>",
-              file=sys.stderr)
-        return 2
-
-    tab = sys.argv[1]
-    target = None
-    for window in hyprctl("clients", "-j"):
-        workspace = window.get("workspace", {})
-        if workspace.get("id") == WORKSPACE and is_ghostty(window):
-            target = window.get("address")
-
-    active = hyprctl("activewindow", "-j").get("address")
-    if not target:
-        subprocess.run(["hyprctl", "dispatch", "workspace", str(WORKSPACE)],
-                       check=True)
-    elif active == target:
-        subprocess.run([os.path.expanduser("~/.local/bin/herdr-tab-focus"),
-                        tab], check=True)
-    else:
-        subprocess.run(["hyprctl", "dispatch", "focuswindow",
-                        f"address:{target}"], check=True)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+(System/exit (apply main *command-line-args*))
