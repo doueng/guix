@@ -13,5 +13,6 @@
   "quietStartup": true,
   "theme": "dark",
   "defaultThinkingLevel": "high",
-  "shellPath": "/run/current-system/profile/bin/bash"
+  "shellPath": "/run/current-system/profile/bin/bash",
+  "lastChangelogVersion": "0.85.1"
 }
