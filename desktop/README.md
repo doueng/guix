@@ -22,9 +22,7 @@ Volume keys control the protected PipeWire default sink through `wpctl`; they do
 
 ## Deliberate gaps
 
-Ghostty is the default terminal and is also available from the custom launcher alongside Kitty. Its configuration and Catppuccin theme are staged from `desktop/shared/ghostty`; Wofi remains available as a launcher fallback.
-
-Neovim's Java tooling and unavailable language servers, Herdr's annotate plugin and Tailscale are not ported yet; LazyVim and its runtime plugins are fetched by lazy.nvim on first launch. Babashka is included as `bb`, so `.bb` scripts can run directly; the NixOS-only `nixdiag` service script remains with NixOS because it depends on systemd/journald/NixOS paths. The copied Herdr tab helpers now call `herdr` directly; Hyprland's terminal bindings mirror NixOS by focusing the existing Ghostty window and selecting its Herdr tab when it is already focused.
+This is a first usability port, not full NixOS parity. Native activation and hardware acceptance are still pending; package availability/build success does not establish that the desktop works on this machine. Automatic idle/suspend locking is disabled. Neovim Java tooling, some language servers, Herdr's annotate plugin and Tailscale are not ported. LazyVim and its runtime plugins are fetched by lazy.nvim on first launch. Babashka is available as `bb`; the NixOS-only `nixdiag` script remains with NixOS because it depends on systemd/journald/NixOS paths. The Herdr tab helpers call `herdr` directly, and terminal bindings focus the existing Ghostty window/select its tab when appropriate.
 
 Useful controls with keyd active:
 
