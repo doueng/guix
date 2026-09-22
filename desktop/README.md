@@ -18,7 +18,7 @@ Opt-in native Guix configuration for the existing SSD installation. This is a fi
 
 The Asahi kernel is inherited with the uinput module enabled for keyd; initrd/UAS, filesystem UUIDs, bootloader definition, account declarations, channel pins and audio/D-Bus services remain preserved. Normal reconfiguration still updates the Guix generation and its boot menu/bootloader on the new ESP; it is not a home-only operation.
 
-Internal speakers remain unverified. There are deliberately no volume/unmute bindings or audio widgets, and Kitty's audio bell is disabled. Do not enable playback until the existing speaker-safety gate passes.
+Volume keys control the protected PipeWire default sink through `wpctl`; they do not bypass Asahi speaker safety. Internal speakers remain unverified, and Kitty's audio bell is disabled. Do not enable playback until the existing speaker-safety gate passes.
 
 ## Deliberate gaps
 
@@ -40,6 +40,7 @@ Useful controls with keyd active:
 | Alt+W / Alt+F | Close / fullscreen |
 | Ctrl+Alt+L | Lock |
 | Ctrl+Shift+T / Ctrl+Tab in Kitty | New / next Kitty tab |
+| Volume keys / mute | Protected PipeWire default sink |
 | Brightness keys | Brightness |
 | Ctrl+Shift+4 / Print | Region to clipboard / screenshot to Pictures |
 

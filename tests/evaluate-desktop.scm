@@ -50,7 +50,8 @@
   '("/" "/boot/efi") '("11111111-2222-3333-4444-555555555555" "1234-ABCD"))
 (for-each (lambda (name) (check (find-service name) "Missing retained/new desktop service"))
           '(asahi-firmware speakersafetyd rtkit sddm network-manager iwd guix-home
-            familiar-keyd familiar-keyd-config familiar-uinput screen-locker))
+            backlight-udev-rules familiar-keyd familiar-keyd-config familiar-uinput
+            screen-locker))
 (check (not (find-service 'openssh)) "Desktop must not enable SSH")
 (define (accounts system)
   (map (lambda (user) (list (user-account-name user) (user-account-uid user)
@@ -59,7 +60,8 @@
 (check (equal? (accounts base) (accounts os)) "Desktop must not change account declarations")
 (let ((names (map package-name (operating-system-packages os))))
   (for-each (lambda (name) (check (member name names) "Missing compositor/terminal/browser"))
-            '("hyprland" "kitty" "flatpak" "neovim" "git" "keyd"))
+            '("hyprland" "kitty" "flatpak" "neovim" "git" "keyd"
+              "brightnessctl"))
   (check (member "emacs-no-x" (map package-name (home-environment-packages
                                                    (cadar (service-value (find-service 'guix-home))))))
          "Terminal-only Emacs must be a Home package")

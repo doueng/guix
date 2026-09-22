@@ -154,7 +154,14 @@ contains -- /guix-test-sentinel $PATH; or exit 1
         self.assertTrue((nvim / "fnl/config/lazy.fnl").is_file())
         self.assertTrue((nvim / "lua/config/options.lua").is_file())
         hypr = files / ".config/hypr"
-        self.assertTrue((hypr / "hyprland.conf").is_file())
+        hyprland = hypr / "hyprland.conf"
+        self.assertTrue(hyprland.is_file())
+        config = hyprland.read_text()
+        self.assertIn("XF86AudioRaiseVolume", config)
+        self.assertIn("XF86AudioLowerVolume", config)
+        self.assertIn("XF86AudioMute", config)
+        self.assertIn("XF86MonBrightnessUp", config)
+        self.assertIn("XF86MonBrightnessDown", config)
         self.assertFalse((hypr / "hyprland.lua").exists())
         scm = (self.output / "modules/engstrand/desktop-files.scm").read_text()
         self.assertIn('(cons ".config/hypr/hyprland.conf" "/home/', scm)

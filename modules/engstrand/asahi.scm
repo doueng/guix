@@ -1,5 +1,6 @@
 (define-module (engstrand asahi)
   #:use-module (asahi guix initrd)
+  #:use-module (asahi guix services udev)
   #:use-module (asahi guix systems desktop)
   #:use-module (asahi guix systems sway)
   #:use-module (engstrand bootloader)
@@ -63,7 +64,8 @@
      (cons* flatpak ncurses git neovim
             (operating-system-packages asahi-sway-os)))
     (services
-     (modify-services (operating-system-user-services asahi-sway-os)
+     (cons* %udev-backlight-service
+            (modify-services (operating-system-user-services asahi-sway-os)
        (delete openssh-service-type)
        (guix-home-service-type
         homes => `(("engstrand" ,(home-environment
@@ -72,4 +74,4 @@
         config => (guix-configuration
                     (inherit config)
                     (channels channels)
-                    (extra-options '("--max-jobs=1" "--cores=4"))))))))
+                    (extra-options '("--max-jobs=1" "--cores=4")))))))))
