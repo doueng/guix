@@ -239,9 +239,12 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
     (home-page "https://github.com/herdrdev/herdr")
     (license license:asl2.0)))
 (define %herdr-module-dir
-  (dirname (search-path %load-path "engstrand/packages.scm")))
+  (dirname (canonicalize-path
+            (search-path %load-path "engstrand/packages.scm"))))
+(define %repo-dir
+  (dirname (dirname %herdr-module-dir)))
 (define %herdr-sesh-vendor
-  (local-file (string-append %herdr-module-dir "/herdr-sesh-vendor.tar.gz")))
+  (local-file (string-append %repo-dir "/desktop/shared/herdr/sesh/vendor.tar.gz")))
 (define %herdr-sesh-manifest
   (local-file (string-append %herdr-module-dir "/herdr-sesh-plugin.toml")))
 (define %herdr-tiny-fingers-manifest

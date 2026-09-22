@@ -1,8 +1,8 @@
 # Guix on the Samsung T7
 
-Standalone configuration repository at `~/guix`, extracted from `~/nixos` revision `07cf158e`. Desktop staging assets are owned here under `desktop/shared/`; staging no longer reads the NixOS checkout. Ignored `local/` contains private installation snapshots and diagnostics, not portable source. NixOS bootstrap and AWS infrastructure remain in `~/nixos`.
+Standalone configuration repository at `~/guix`, extracted from `~/nixos` revision `07cf158e`. Desktop assets are owned here under `desktop/shared/`; the direct Guix configuration no longer reads the NixOS checkout. Ignored `local/` contains private installation snapshots and diagnostics, not portable source. NixOS bootstrap and AWS infrastructure remain in `~/nixos`.
 
-See [REVIEW.md](REVIEW.md) for the extraction review and outstanding acceptance gates. The existing guarded transfer helper is now `transfer-desktop.sh`; older progress entries call it `rofl.sh`.
+See [REVIEW.md](REVIEW.md) for the extraction review and outstanding acceptance gates. The desktop configuration builds directly from this checkout; no transfer or staging helper is required.
 
 **Before running commands, review [INSTALLATION-PLAN.md](INSTALLATION-PLAN.md).** It details internal-disk and NixOS changes, backup requirements, and separate approval checkpoints. It takes precedence on operation order: verify bootstrap/build feasibility before committing to internal partition changes. This runbook is a command reference, not authorization to execute every step.
 

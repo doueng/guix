@@ -1,5 +1,17 @@
 # Guix SSD installation checkpoint
 
+## Doom Emacs and Neovim host fixes — native smoke-tested
+
+Ported the missing NixOS editor bootstrap details. Neovim now has a tracked
+Lua Fennel bootstrap, bootstraps lazy.nvim under `~/.local/share/nvim/lazy`,
+and falls back to the upstream FFF plugin when the Nix-only plugin path is
+absent. Doom uses the existing terminal Emacs package through an editable
+launcher that selects `~/.config/emacs`; the current Doom checkout was
+bootstrapped and synced on the native host. Both editors pass headless startup
+smoke tests, and the 30-test Python suite passes. The source changes still
+need the reviewed desktop reconfigure to install the generated Home links on
+future generations.
+
 ## Ghostty packaged and launcher-enabled — activation pending
 
 Added the native `ghostty` 1.3.1 package with its vendored Zig dependencies, GTK4 layer-shell input, runtime data wrapper and Guix build fixes. Added it to the familiar desktop Home profile and the custom launcher alongside Kitty. The pinned time-machine build succeeds on aarch64; the desktop service-graph evaluation and all 30 Python tests pass. Native desktop reconfigure remains pending.
@@ -24,15 +36,15 @@ activated; native reconfigure remains a reviewed step.
 
 ## Pre-publish scrub and GitHub CLI
 
-Scrubbed the shared jj email to the GitHub noreply address and made `ssh_openclaw` argument-only (the real host belongs in private ssh config); both folded into the initial commit before any push, so the pushed history never contained them. Added `github-cli` (provides `gh`) to the Guix home profile so the native system can manage the GitHub remote; it resolves in the pinned-era package set (Guix names the package `github-cli`, not `gh`). Verified: 30 Python tests, both Scheme checks against a fresh `make stage` snapshot. The package lands on the system at the next reviewed reconfigure.
+Scrubbed the shared jj email to the GitHub noreply address and made `ssh_openclaw` argument-only (the real host belongs in private ssh config); both folded into the initial commit before any push, so the pushed history never contained them. Added `github-cli` (provides `gh`) to the Guix home profile so the native system can manage the GitHub remote; it resolves in the pinned-era package set (Guix names the package `github-cli`, not `gh`). Verified: 30 Python tests and both Scheme checks directly from the checkout. The package lands on the system at the next reviewed reconfigure.
 
 ## Makefile for clone-and-apply
 
-Added a root `Makefile` wrapping the desktop apply flow for a fresh clone on the running Guix system: `make stage` (snapshot from `BASE`, default `/etc/guix-ssd`, into `local/current`), `make build`/`make dry-run` (pinned time-machine system build), `make apply` (the native-destination guards and reviewed reconfigure from desktop/README.md), plus `make test`, `make eval`, `make eval-desktop`, `make archive`. No formatting, mounting, `guix system init`, or ESP-write automation was added; `apply` still requires an explicit successful build and sudo. `make -n` expansion and all 30 Python tests verified; README.md and desktop/README.md point to it.
+Added a root `Makefile` wrapping the direct desktop apply flow for a fresh clone on the running Guix system: `make build`/`make dry-run` (pinned time-machine system build), `make apply` (the native-destination guards and reviewed reconfigure from desktop/README.md), plus `make test`, `make eval`, and `make eval-desktop`. No formatting, mounting, `guix system init`, or ESP-write automation was added; `apply` still requires an explicit successful build and sudo. `make -n` expansion and all Python tests verified; README.md and desktop/README.md point to it.
 
 ## Standalone repository extraction and source review
 
-The kit now lives at `/home/engstrand/guix` in its own jj repository. All ignored `local/` artifacts moved intact. Desktop staging inputs formerly read from NixOS features are owned here under `desktop/shared/`. The old root `rofl.sh` transfer script is now `transfer-desktop.sh`. NixOS bootstrap/AWS infrastructure and the original migration assessment remain in `/home/engstrand/nixos`; references were updated.
+The kit now lives at `/home/engstrand/guix` in its own jj repository. All ignored `local/` artifacts moved intact. Desktop inputs formerly read from NixOS features are owned here under `desktop/shared/`. NixOS bootstrap/AWS infrastructure and the original migration assessment remain in `/home/engstrand/nixos`; references were updated.
 
 Review findings: [REVIEW.md](REVIEW.md). Fixed fail-fast activation instructions and clarified that Sway recovery uses the previous generation. No Scheme configuration, channels, existing snapshots or installed system were changed. The patched U-Boot build and native acceptance remain pending as recorded below.
 
@@ -76,7 +88,7 @@ Next: transfer the snapshot to the running Guix system and reconfigure there (gu
 
 ## Earlier desktop preparation — superseded by the entry above
 
-At the user's request, added an opt-in `make-familiar-os` layer, a snapshot exporter (`desktop.py`), feature-owned desktop assets and tests. Details and native build/reconfigure instructions are in [desktop/README.md](desktop/README.md). The base `make-ssd-os` remains unchanged by this desktop work. The layer inherits the working kernel/UAS, storage, bootloader, account declarations, pinned channels and exact Asahi Home audio/D-Bus services. Sway/Foot are dropped; SDDM starts Hyprland.
+At the user's request, added an opt-in `make-familiar-os` layer, direct Scheme desktop sources, feature-owned desktop assets and tests. Details and native build/reconfigure instructions are in [desktop/README.md](desktop/README.md). The base `make-ssd-os` remains unchanged by this desktop work. The layer inherits the working kernel/UAS, storage, bootloader, account declarations, pinned channels and exact Asahi Home audio/D-Bus services. Sway/Foot are dropped; SDDM starts Hyprland.
 
 Ported from NixOS: Hyprland controls/layout, the existing keyd layers with Shepherd/uinput integration, Kitty/Fish, Waybar/Wofi, shared Fish/Git/JJ settings with Guix-safe PATH and no Watchman, basic developer tools, and plugin-free Neovim using the shared core Fennel options/keymaps. New binary-release Guix packages in `modules/engstrand/packages.scm`: **Pi 0.85.1** (loader patched to Guix glibc, `PI_SKIP_VERSION_CHECK` wrapper) and **Herdr 0.9.0** (static), both from the official aarch64 release artifacts with recorded hashes; Herdr's config and tab helpers are staged, and Pi's `settings.json` uses the Guix system Bash. **Chromium** (`ungoogled-chromium`, native Guix package — Google Chrome is not packaged for Guix) behind the ported Flatpak-free `chrome-unified` script, and the **custom launcher** ported to Python: Noctalia dmenu when present, Wofi fallback, entries for terminal/Chromium/Herdr/Pi. Hyprlock has PAM support and a ten-minute idle lock, still requiring native lock/unlock testing.
 

@@ -128,7 +128,7 @@
   (check (not (screen-locker-configuration-allow-empty-password? locker))
          "Locker must reject empty passwords"))
 (for-each (lambda (entry)
-            (check (file-exists? (local-file-file (cadr entry))) "Missing staged Home source"))
+            (check (file-exists? (local-file-file (cadr entry))) "Missing Home source"))
           %desktop-home-files)
 (for-each (lambda (entry)
             (check (and (string? (car entry)) (string? (cdr entry)))

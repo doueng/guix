@@ -1,7 +1,6 @@
-# Private staged snapshots and local test artifacts.
+# Private installation records, diagnostics, and local test artifacts.
 local/
 __pycache__/
 
-# Large personal wallpaper assets are copied into staged Home snapshots but
-# remain outside the repository history.
+# Large personal wallpaper assets remain outside the repository history.
 desktop/shared/theme/wallpapers/
