@@ -16,9 +16,9 @@ def executable(name):
 
 def apps():
     # Keep this list and its labels aligned with ~/nixos/scripts/custom-launcher.
-    # Invoke Chrome through Flatpak directly so stale Home-profile symlinks cannot
-    # select an old launcher or Chromium application ID.
-    chrome = ["flatpak", "run", "com.google.Chrome"]
+    # Reuse the checked-in launcher so its Flatpak application ID and Wayland
+    # flags stay consistent with the documented browser installation.
+    chrome = [executable("chrome-unified")]
     return [
         ("cosmic-files", ["cosmic-files"]),
         ("wezterm", ["wezterm", "connect", "persistent"]),
