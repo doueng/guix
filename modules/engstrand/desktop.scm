@@ -178,7 +178,7 @@
       (packages
         (append (map specification->package
                             '("hyprland" "wofi" "hyprlock" "hypridle"
-                              "polkit-gnome" "grim" "slurp" "keyd"
+                              "polkit-gnome" "grim" "slurp" "keyd" "libnotify"
                               "font-jetbrains-mono" "font-google-noto-emoji" "adwaita-icon-theme"))
                        (remove (lambda (package)
                                  (member (package-name package) '("sway" "foot")))

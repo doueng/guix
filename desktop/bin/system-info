@@ -5,9 +5,11 @@
          '[babashka.fs :as fs])
 
 (def home (System/getProperty "user.home"))
-(def notify-replace-bin (str home "/.local/bin/notify-replace"))
-(def transparent-icon (str home "/.local/share/icons/transparent.svg"))
-
+(def notify-replace-bin
+  (let [installed (str home "/.local/bin/notify-replace")
+        adjacent (str (fs/path (fs/parent (fs/real-path *file*))
+                               "notify-replace"))]
+    (if (fs/exists? installed) installed adjacent)))
 (defn notification-id-file []
   (str (or (System/getenv "XDG_STATE_HOME")
            (str home "/.local/state"))
@@ -75,24 +77,18 @@
       "🔊 Audio info unavailable")))
 
 (defn show-notification [message]
-  (let [notify-send (p/shell {:continue true :out :string :err :string}
-                             "which" "notify-send")]
-    (if (= (:exit notify-send) 0)
-      (do
-        (p/shell notify-replace-bin
-                 "system-info"
-                 "--app-name="
-                 (str "--icon=" transparent-icon)
-                 "--expire-time=0"
-                 "--hint=boolean:transient:true"
-                 message)
-        (close-system-info-later!))
-      (p/shell "sh" "-c" (str "echo '" message "' | head -20")))))
+  (p/shell notify-replace-bin
+           "system-info"
+           "--app-name="
+           "--expire-time=0"
+           "--hint=boolean:transient:true"
+           message)
+  (close-system-info-later!))
 
 (defn main []
   (show-notification (str/join "\n" [(get-date-time)
-                                      (get-bluetooth-connection)
-                                      (get-battery)
-                                      (get-volume)])))
+                                     (get-bluetooth-connection)
+                                     (get-battery)
+                                     (get-volume)])))
 
 (main)

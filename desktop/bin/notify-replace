@@ -4,10 +4,29 @@
          '[babashka.process :as p]
          '[clojure.string :as str])
 
+(def home (System/getProperty "user.home"))
+(def profile-bin (str home "/.guix-home/profile/bin"))
+
+(defn executable [name]
+  (or (some-> (fs/which name) str)
+      (some (fn [path] (when (fs/exists? path) path))
+            [(str profile-bin "/" name)
+             (str "/run/current-system/profile/bin/" name)])
+      (throw (ex-info (str "Executable not found: " name) {:name name}))))
+
+(defn noctalia [& args]
+  @(p/process (into [(executable "noctalia")] args)
+              {:out :string :err :string :continue true}))
+
 (defn ensure-noctalia-running []
-  (let [status @(p/process ["noctalia" "msg" "status"] {:out :string :err :string})]
-    (when-not (zero? (:exit status))
-      @(p/process ["noctalia" "--daemon"] {:out :string :err :string}))))
+  (when-not (zero? (:exit (noctalia "msg" "status")))
+    (noctalia "--daemon")
+    (loop [attempt 0]
+      (let [status (noctalia "msg" "status")]
+        (cond
+          (zero? (:exit status)) nil
+          (< attempt 50) (do (Thread/sleep 100) (recur (inc attempt)))
+          :else (throw (ex-info "Noctalia did not become ready" {})))))))
 
 (defn -main [& args]
   (when (< (count args) 2)
@@ -28,7 +47,7 @@
           final-args (cond-> []
                        (seq replace-id) (into ["-r" replace-id])
                        true (into notify-args))
-          result @(p/process (into ["notify-send" "-p"] final-args)
+          result @(p/process (into [(executable "notify-send") "-p"] final-args)
                              {:out :string :err :string})
           id (str/trim (or (:out result) ""))]
       (spit state-file (str id "\n")))))
