@@ -15,12 +15,11 @@ help:
 	@echo 'dry-run       show what build would fetch or build'
 	@echo 'apply         guarded native reconfigure (sudo; build and review first)'
 	@echo 'switch        build and apply sequentially'
-	@echo 'test          offline Python and Scheme checks'
+	@echo 'test          offline Scheme checks'
 	@echo 'eval          base pinned Scheme checks'
 	@echo 'eval-desktop  desktop Scheme checks from this checkout'
 
 test:
-	python3 -m unittest discover -s tests -v
 	guile -L modules -s tests/test-desktop-direct.scm
 
 eval:

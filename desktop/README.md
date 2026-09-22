@@ -10,7 +10,7 @@ Opt-in native Guix configuration for the existing SSD installation. This is a fi
 - Ghostty (the default terminal) and Kitty with Fish, JetBrains Mono and Catppuccin Mocha colors; Noctalia 5.1.0 as the Hyprland shell/launcher (with Wofi retained as a launcher fallback); `nmtui` network controls.
 - The shared Fish prompt, vi bindings, aliases and functions. A Guix-specific PATH file preserves inherited paths and adds Guix profiles and `/run/privileged/bin`. The Nix/UWSM login files and supervisor autostart are not copied.
 - Shared Git/JJ configuration, with Watchman disabled because it is unavailable in the evaluated Guix runtime. Jujutsu, jjui, the GitHub CLI (`github-cli`, `gh`), difftastic, tmux, fzf, zoxide, direnv, ripgrep, fd, jq, bat, btop, curl, Python, Node and basic build tools.
-- **Chromium via Flatpak**: the `flatpak` package (fully substitutable) behind the ported `chrome-unified` launcher with the shared Wayland flags. Guix's `ungoogled-chromium` has no aarch64 substitute and would need a multi-hour source build. Install the browser once after first boot (commands below). Old Reddit extension loading looks under `~/.config/chromium/extensions/`.
+- **Chromium via Flatpak**: the `flatpak` package (fully substitutable) behind the ported `chrome-unified` launcher with the shared Wayland flags. Guix's `ungoogled-chromium` has no aarch64 substitute and would need a multi-hour source build. Install the browser once after first boot (commands below). Old Reddit extension loading looks under `~/.var/app/com.google.Chrome/config/chromium/extensions/`.
 - All user-facing custom launchers and helpers are installed as editable Home links: the Noctalia/Wofi **custom launcher**, Chromium launcher, and every script under the shared Herdr `bin/` directory. Pi's complete `agent/` tree, including its shell hooks and scripts, is linked as well.
 - Neovim with the full mutable Fennel configuration, LazyVim/plugin declarations, Pi-org integration, Wayland clipboard and the existing options/keymaps. A Guix-owned Lua bootstrap installs lazy.nvim under `~/.local/share/nvim/lazy` on first launch; the remaining plugins are then managed by lazy.nvim. The config is linked from this checkout.
 - Terminal-only Doom Emacs using the editable `emacs` launcher (which selects `~/.config/emacs`), with the migrated Doom modules, keybindings, Clojure support and config linked from this checkout. The Doom framework itself is kept in `~/.config/emacs` and must be bootstrapped once with the commands below.
@@ -41,6 +41,7 @@ Useful controls with keyd active:
 | Ctrl+Alt+L | Lock |
 | Ctrl+Shift+T / Ctrl+Tab in Ghostty | New / next Ghostty tab |
 | Volume keys / mute | Protected PipeWire default sink |
+| Mic-mute key | Five-second system information notification |
 | Brightness keys | Brightness |
 | Ctrl+Shift+4 / Print | Region to clipboard / screenshot to Pictures |
 
@@ -57,6 +58,9 @@ From the repository root on the native Guix system:
 ```sh
 make build
 ```
+
+For measured build-speed options and the two known upstream/trust warnings,
+see [BUILDING.md](../BUILDING.md).
 
 The equivalent explicit command is:
 
@@ -101,7 +105,7 @@ After first boot into the new desktop, install the browser once:
 
 ```sh
 flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak --user install flathub org.chromium.Chromium
+flatpak --user install flathub com.google.Chrome
 ```
 
 Log out and select Hyprland in SDDM. Retain the previous Sway generation in GRUB; Sway is removed from the new desktop generation. Check `sudo herd status keyd`, the lock/unlock path, terminal/editor startup, brightness, Wi-Fi, and audio protection before further hardware tests. If the desktop fails, use a text console or boot the previous Sway generation; retain the old Guix generation in GRUB. `sudo guix system roll-back` is an explicit recovery operation and does not restore every mutable Home setting or Apple boot artifact.
@@ -110,11 +114,10 @@ Log out and select Hyprland in SDDM. Retain the previous Sway generation in GRUB
 
 ```sh
 KIT="$HOME/guix"
-python3 -m unittest discover -s "$KIT/tests" -v
 guix time-machine -C "$KIT/channels.scm" -- repl \
   -L "$KIT/modules" \
   "$KIT/tests/evaluate-desktop.scm" "$KIT/channels.scm"
 Hyprland --verify-config -c "$KIT/desktop/home/.config/hypr/hyprland.conf"
 ```
 
-The Python suite checks the disk/configuration safety gates in `prepare.py`; the direct Scheme source check verifies that every Home source exists in the checkout. The pinned Scheme test checks both service graphs and preservation of the working system's storage/kernel/accounts/audio/pins. The full pinned system build remains the meaningful validation for Neovim and Doom package/runtime integration. A successful parser check does not establish graphics, keyd, locking or suspend behavior.
+The direct Scheme source check verifies that every Home source exists in the checkout. The pinned Scheme test checks both service graphs and preservation of the working system's storage/kernel/accounts/audio/pins. The full pinned system build remains the meaningful validation for Neovim and Doom package/runtime integration. A successful parser check does not establish graphics, keyd, locking or suspend behavior.

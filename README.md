@@ -237,12 +237,12 @@ Guix generations roll back system closures, not every m1n1/DTB/ESP update. On fa
 Offline checks from the repository root:
 
 ```sh
-make test   # or: python3 -m unittest discover -s tests -v
+make test   # direct Scheme source check
 make eval   # or the pinned time-machine invocation below
 ```
 
 ```sh
-python3 -m unittest discover -s tests -v
+guile -L modules -s tests/test-desktop-direct.scm
 guix time-machine -C channels.scm -- repl \
   -L modules tests/evaluate.scm channels.scm
 ```

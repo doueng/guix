@@ -8,5 +8,5 @@ Personal Guix configuration for an Apple M1 MacBook Air with Samsung T7 USB root
 - Keep `local/` private and ignored. Do not commit firmware, credentials, password hashes or machine backups.
 - Author Scheme in `modules/`, desktop assets in `desktop/`. `desktop/shared/` is independently owned here, not synced automatically from NixOS.
 - Use jj, not git. Keep comments minimal.
-- Run `python3 -m unittest discover -s tests -v`; optional editor/Fish checks require host tools. Scheme checks require Guix and the pinned Asahi channel modules; see README.md and desktop/README.md.
+- Run `make test`; optional editor/Fish checks require host tools. Scheme checks require Guix and the pinned Asahi channel modules; see README.md and desktop/README.md.
 - NixOS bootstrap and AWS infrastructure are owned by `~/nixos`, not this repository.
