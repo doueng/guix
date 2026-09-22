@@ -60,6 +60,8 @@ def stage(base, output):
     shutil.copy2(HERE / "desktop/README.md", output / "README.md")
     shutil.copytree(HERE / "modules", output / "modules")
     module = output / "modules/engstrand"
+    shutil.copy2(FEATURES / "herdr/sesh/vendor.tar.gz",
+                 module / "herdr-sesh-vendor.tar.gz")
     files = module / "desktop-files"
     shutil.copytree(HERE / "desktop/home", files)
     shutil.copy2(HERE / "desktop/keyd.conf", module / "desktop-keyd.conf")

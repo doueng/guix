@@ -1,0 +1,24 @@
+id = "fullerzz.sesh"
+name = "Sesh for Herdr"
+version = "0.7.0"
+min_herdr_version = "0.8.0"
+description = "Sesh-style smart workspace/session manager for Herdr"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "open-picker"
+title = "Open Sesh Picker"
+contexts = ["workspace", "pane"]
+command = ["./bin/herdr-sesh", "plugin", "open-picker"]
+
+[[actions]]
+id = "last"
+title = "Switch to Previous Workspace"
+contexts = ["workspace", "pane"]
+command = ["./bin/herdr-sesh", "last"]
+
+[[panes]]
+id = "picker"
+title = "Sesh Picker"
+placement = "overlay"
+command = ["./bin/herdr-sesh", "picker"]

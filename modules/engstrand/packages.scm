@@ -28,15 +28,20 @@
   #:use-module (gnu packages xdisorg)
   #:use-module (gnu packages stb)
   #:use-module (gnu packages zig)
+  #:use-module (guix build-system cargo)
   #:use-module (guix build-system copy)
-  #:use-module (guix build-system meson)
   #:use-module (guix build-system gnu)
+  #:use-module (guix build-system go)
+  #:use-module (guix build-system meson)
   #:use-module (guix download)
+  #:use-module (engstrand herdr-tiny-crates)
   #:use-module (guix git-download)
   #:use-module (guix gexp)
   #:use-module (guix packages)
+  #:use-module (guix utils)
   #:use-module ((guix licenses) #:prefix license:)
-  #:export (babashka noctalia github-cli pi-coding-agent herdr jjui ghostty))
+  #:export (babashka noctalia github-cli pi-coding-agent herdr herdr-sesh
+            herdr-tiny-fingers jjui ghostty))
 
 (define babashka-version "1.13.223")
 (define noctalia-version "5.1.0")
@@ -44,6 +49,8 @@
 (define pi-version "0.85.1")
 (define herdr-version "0.9.0")
 (define jjui-version "0.10.10")
+(define herdr-sesh-version "0.7.0")
+(define herdr-tiny-fingers-version "0.1.0")
 
 ;; The collection package pulls a large Go dependency tree and currently
 ;; fails in goresctrl's aarch64 tests.  GitHub publishes the same CLI as a
@@ -231,6 +238,86 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
     (description "Herdr terminal multiplexer from the herdrdev/herdr release binaries.")
     (home-page "https://github.com/herdrdev/herdr")
     (license license:asl2.0)))
+(define %herdr-module-dir
+  (dirname (search-path %load-path "engstrand/packages.scm")))
+(define %herdr-sesh-vendor
+  (local-file (string-append %herdr-module-dir "/herdr-sesh-vendor.tar.gz")))
+(define %herdr-sesh-manifest
+  (local-file (string-append %herdr-module-dir "/herdr-sesh-plugin.toml")))
+(define %herdr-tiny-fingers-manifest
+  (local-file (string-append %herdr-module-dir "/herdr-tiny-fingers-plugin.toml")))
+
+(define-public herdr-tiny-fingers
+  (package
+    (name "herdr-tiny-fingers")
+    (version herdr-tiny-fingers-version)
+    (source
+     (origin
+       (method url-fetch)
+       (uri (string-append
+             "https://github.com/hotchpotch/herdr-tiny-fingers/archive/"
+             "2270f872d22297806a92f72ddb76b10f5983fce0.tar.gz"))
+       (file-name (string-append name "-" version ".tar.gz"))
+       (sha256
+        (base32
+         "099bz2aw419rkbnliwvzpj48156j35igf7p4jbdrmc230j8p8iim"))))
+    (build-system cargo-build-system)
+    (inputs herdr-tiny-fingers-crate-inputs)
+    (arguments
+     (list
+      #:tests? #f
+      #:install-source? #f
+      #:phases
+      #~(modify-phases %standard-phases
+          (add-after 'install 'install-plugin
+            (lambda* (#:key outputs #:allow-other-keys)
+              (let ((manifest (string-append (assoc-ref outputs "out")
+                                             "/herdr-plugin.toml")))
+                (copy-file #$(file-append %herdr-tiny-fingers-manifest "") manifest)))))))
+    (synopsis "tmux-fingers style copy hints for Herdr")
+    (description "Visible-screen copy hints plugin for Herdr.")
+    (home-page "https://github.com/hotchpotch/herdr-tiny-fingers")
+    (license license:expat)))
+
+(define-public herdr-sesh
+  (package
+    (name "herdr-sesh")
+    (version herdr-sesh-version)
+    (source
+     (origin
+       (method url-fetch)
+       (uri (string-append
+             "https://github.com/fullerzz/herdr-plugin-sesh/archive/refs/tags/v"
+             version ".tar.gz"))
+       (file-name (string-append name "-" version ".tar.gz"))
+       (sha256
+        (base32 "15wk7fpls5pc3m7lyvh9jc896192r2iw9v0kspq9c06450vibzyp"))))
+    (build-system go-build-system)
+    (arguments
+     (list
+      #:import-path "github.com/fullerzz/herdr-plugin-sesh/cmd/herdr-sesh"
+      #:unpack-path "github.com/fullerzz/herdr-plugin-sesh"
+      #:install-source? #f
+      #:tests? #f
+      #:phases
+      #~(modify-phases %standard-phases
+          (add-before 'build 'unpack-vendor
+            (lambda* (#:key inputs #:allow-other-keys)
+              (let ((source (string-append (getcwd) "/src/"
+                                           "github.com/fullerzz/herdr-plugin-sesh")))
+                (invoke "tar" "-xzf"
+                        #$(file-append %herdr-sesh-vendor "")
+                        "-C" source))))
+          (add-after 'install 'install-plugin
+            (lambda* (#:key outputs #:allow-other-keys)
+              (let ((manifest (string-append (assoc-ref outputs "out")
+                                             "/herdr-plugin.toml")))
+                (copy-file #$(file-append %herdr-sesh-manifest "") manifest)))))))
+    (synopsis "Sesh-style workspace picker for Herdr")
+    (description "Sesh-style workspace picker and session manager for Herdr.")
+    (home-page "https://github.com/fullerzz/herdr-plugin-sesh")
+    (license license:expat)))
+
 (define-public jjui
   (package
     (name "jjui")

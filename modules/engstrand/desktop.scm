@@ -94,9 +94,33 @@
                (symlink source target))))
          links))))
 
+(define %familiar-herdr-plugins
+  (simple-service 'familiar-herdr-plugins home-activation-service-type
+    #~(begin
+        (use-modules (guix build utils) (ice-9 popen) (ice-9 rdelim)
+                     (srfi srfi-13))
+        (let* ((herdr #$(file-append herdr "/bin/herdr"))
+               (sesh #$(file-append herdr-sesh ""))
+               (tiny #$(file-append herdr-tiny-fingers "")))
+          (invoke herdr "plugin" "link" sesh "--enabled")
+          (invoke herdr "plugin" "link" tiny "--enabled")
+          (let* ((pipe (open-input-pipe
+                        (string-append herdr " plugin config-dir fullerzz.sesh")))
+                 (config-dir (string-trim-both (read-line pipe)))
+                 (status (close-pipe pipe))
+                 (target (string-append config-dir "/sesh.toml"))
+                 (config (string-append (getenv "HOME") "/.config/herdr/sesh.toml")))
+            (unless (zero? status)
+              (error "Could not determine Herdr sesh plugin config directory"))
+            (mkdir-p config-dir)
+            (when (file-exists? target)
+              (delete-file-recursively target))
+            (symlink config target))))))
+
 (define %familiar-home
   (home-environment
-    (packages (cons* pi-coding-agent herdr jjui github-cli babashka noctalia ghostty curl
+    (packages (cons* pi-coding-agent herdr herdr-sesh herdr-tiny-fingers jjui
+                     github-cli babashka noctalia ghostty curl
                      (map specification->package
                           '("fish" "jujutsu" "clojure" "clojure-tools" "emacs-clojure-mode" "emacs-cider"
  "difftastic" "tmux" "fzf" "zoxide"
@@ -113,6 +137,7 @@
     (services
       (cons*
         %familiar-direct-home-links
+        %familiar-herdr-plugins
         (service home-bash-service-type)
         (simple-service 'familiar-environment home-environment-variables-service-type
           '(("EDITOR" . "nvim") ("VISUAL" . "nvim")

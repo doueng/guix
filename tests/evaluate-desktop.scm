@@ -70,9 +70,13 @@
 (check (member "pi-coding-agent" (map package-name (home-environment-packages
                                                   (cadar (service-value (find-service 'guix-home))))))
        "Pi must be a Home package")
-(check (member "herdr" (map package-name (home-environment-packages
-                                           (cadar (service-value (find-service 'guix-home))))))
-       "Herdr must be a Home package")
+(let ((home-packages (map package-name
+                          (home-environment-packages
+                           (cadar (service-value (find-service 'guix-home)))))))
+  (for-each (lambda (name)
+              (check (member name home-packages)
+                     "Missing Herdr plugin package"))
+            '("herdr" "herdr-sesh" "herdr-tiny-fingers")))
 (check (member "jjui" (map package-name (home-environment-packages
                                          (cadar (service-value (find-service 'guix-home))))))
        "jjui must be a Home package")
@@ -104,6 +108,8 @@
        (kinds (map (compose service-type-name service-kind) (home-environment-services home))))
   (check (memq 'familiar-direct-home-links kinds)
          "Missing direct Home links")
+  (check (memq 'familiar-herdr-plugins kinds)
+         "Missing Herdr plugin activation")
   (check (memq 'home-dbus kinds) "Missing Home D-Bus")
   (check (memq 'pipewire kinds) "Missing Asahi Home audio")
   (check (every (lambda (s) (memq s (home-environment-services home)))
