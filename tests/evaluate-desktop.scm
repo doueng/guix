@@ -85,13 +85,16 @@
 (check (member "noctalia" (map package-name (home-environment-packages
                                              (cadar (service-value (find-service 'guix-home))))))
        "Noctalia must be a Home package")
+(check (member "ghostty" (map package-name (home-environment-packages
+                                            (cadar (service-value (find-service 'guix-home))))))
+       "Ghostty must be a Home package")
 (let ((home-packages (map package-name
                           (home-environment-packages
                            (cadar (service-value (find-service 'guix-home)))))))
   (for-each (lambda (name)
               (check (member name home-packages)
                      "Missing migrated development package"))
-            '("babashka" "cmake" "fennel" "gopls" "nixfmt" "noctalia"
+            '("babashka" "cmake" "fennel" "ghostty" "gopls" "nixfmt" "noctalia"
               "shellcheck" "typst" "uv")))
 (check (equal? channels (guix-configuration-channels (service-value (find-service 'guix))))
        "Desktop changed channel pins")

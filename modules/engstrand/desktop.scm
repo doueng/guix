@@ -96,7 +96,7 @@
 
 (define %familiar-home
   (home-environment
-    (packages (cons* pi-coding-agent herdr jjui github-cli babashka noctalia curl
+    (packages (cons* pi-coding-agent herdr jjui github-cli babashka noctalia ghostty curl
                      (map specification->package
                           '("fish" "jujutsu" "clojure" "clojure-tools" "emacs-clojure-mode" "emacs-cider"
  "difftastic" "tmux" "fzf" "zoxide"
@@ -118,7 +118,7 @@
           '(("EDITOR" . "nvim") ("VISUAL" . "nvim")
             ("DOOMDIR" . "/home/engstrand/.config/doom")
             ("COLORTERM" . "truecolor")
-            ("TERM_PROGRAM" . "kitty")
+            ("TERM_PROGRAM" . "ghostty")
             ("XCURSOR_THEME" . "Adwaita")
             ("XCURSOR_SIZE" . "20")
             ("GTK_THEME" . "Adwaita:dark")

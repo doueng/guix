@@ -7,7 +7,7 @@ Opt-in native Guix configuration for the existing SSD installation. This is a fi
 - Hyprland with the current monitor scale, gaps, rounded windows, touchpad settings and workspace/window controls. Sway and Foot are removed; SDDM starts the Hyprland session.
 - **Pi** (`pi-coding-agent`), **Herdr** and **jjui** (official aarch64 release binaries), with the shared Pi prompts, skills, keybindings and local extensions, plus the shared Herdr configuration and `herdr-tab-focus`, `herdr-workspace-pick` and `herdr-agent-pick` helpers. Pi's `settings.json` points `shellPath` at the Guix system Bash. These private packages build locally in seconds; everything else comes from substitutes. The npm-based Pi packages and Herdr plugins from NixOS are not preinstalled; install them on first use with `pi install …`.
 - The existing keyd Caps/Escape/Control, Shift/parenthesis and Command layers, managed by Shepherd with `uinput` loaded first. `sudo herd stop keyd` temporarily restores raw keyboard input if a mapping causes trouble.
-- Kitty with Fish, JetBrains Mono and Catppuccin Mocha colors; Noctalia 5.1.0 as the Hyprland shell/launcher (with Wofi retained as a launcher fallback); `nmtui` network controls.
+- Ghostty (the default terminal) and Kitty with Fish, JetBrains Mono and Catppuccin Mocha colors; Noctalia 5.1.0 as the Hyprland shell/launcher (with Wofi retained as a launcher fallback); `nmtui` network controls.
 - The shared Fish prompt, vi bindings, aliases and functions. A Guix-specific PATH file preserves inherited paths and adds Guix profiles and `/run/privileged/bin`. The Nix/UWSM login files and supervisor autostart are not copied.
 - Shared Git/JJ configuration, with Watchman disabled because it is unavailable in the evaluated Guix runtime. Jujutsu, jjui, the GitHub CLI (`github-cli`, `gh`), difftastic, tmux, fzf, zoxide, direnv, ripgrep, fd, jq, bat, btop, curl, Python, Node and basic build tools.
 - **Chromium via Flatpak**: the `flatpak` package (fully substitutable) behind the ported `chrome-unified` launcher with the shared Wayland flags. Guix's `ungoogled-chromium` has no aarch64 substitute and would need a multi-hour source build. Install the browser once after first boot (commands below). Old Reddit extension loading looks under `~/.config/chromium/extensions/`.
@@ -18,11 +18,11 @@ Opt-in native Guix configuration for the existing SSD installation. This is a fi
 
 The Asahi kernel is inherited with the uinput module enabled for keyd; initrd/UAS, filesystem UUIDs, bootloader definition, account declarations, channel pins and audio/D-Bus services remain preserved. Normal reconfiguration still updates the Guix generation and its boot menu/bootloader on the new ESP; it is not a home-only operation.
 
-Volume keys control the protected PipeWire default sink through `wpctl`; they do not bypass Asahi speaker safety. Internal speakers remain unverified, and Kitty's audio bell is disabled. Do not enable playback until the existing speaker-safety gate passes.
+Volume keys control the protected PipeWire default sink through `wpctl`; they do not bypass Asahi speaker safety. Internal speakers remain unverified, and Ghostty's audio bell is disabled. Do not enable playback until the existing speaker-safety gate passes.
 
 ## Deliberate gaps
 
-Kitty remains available as the working terminal while Ghostty packaging is being fixed. Ghostty configuration and its Catppuccin theme are staged from `desktop/shared/ghostty` for later activation; Wofi remains available as a launcher fallback.
+Ghostty is the default terminal and is also available from the custom launcher alongside Kitty. Its configuration and Catppuccin theme are staged from `desktop/shared/ghostty`; Wofi remains available as a launcher fallback.
 
 Neovim's Guix runtime plugin dependencies (LazyVim, Java tooling and unavailable language servers), Herdr's plugin set (annotate, tiny-fingers, sesh) and Tailscale are not ported yet. Babashka is included as `bb`, so `.bb` scripts can run directly; the NixOS-only `nixdiag` service script remains with NixOS because it depends on systemd/journald/NixOS paths. The copied Herdr tab helpers now call `herdr` directly; the keyd Command layer and Ghostty chord binds have Alt/Super equivalents in Hyprland.
 
@@ -39,7 +39,7 @@ Useful controls with keyd active:
 | Alt+1…0 / Alt+Shift+1…0 | Select / move window to workspace |
 | Alt+W / Alt+F | Close / fullscreen |
 | Ctrl+Alt+L | Lock |
-| Ctrl+Shift+T / Ctrl+Tab in Kitty | New / next Kitty tab |
+| Ctrl+Shift+T / Ctrl+Tab in Ghostty | New / next Ghostty tab |
 | Volume keys / mute | Protected PipeWire default sink |
 | Brightness keys | Brightness |
 | Ctrl+Shift+4 / Print | Region to clipboard / screenshot to Pictures |

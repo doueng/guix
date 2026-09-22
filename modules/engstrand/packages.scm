@@ -451,6 +451,7 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
   #~(modify-phases %standard-phases
       (delete 'configure)
       (delete 'check)
+      (delete 'install)
       (replace 'build
         (lambda* (#:key inputs #:allow-other-keys)
           (let* ((zcache (string-append (getcwd) "/.zig-cache-global"))
@@ -459,16 +460,20 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
                            (string-append (assoc-ref inputs in) "/lib")))
                  (pkgconfig '("gtk" "libadwaita" "libxkbcommon" "libpng" "zlib"
                               "bzip2" "expat" "fontconfig-minimal" "freetype" "harfbuzz"
-                              "pixman" "libxml2" "oniguruma" "glib" "glib-out")))
+                              "pixman" "libxml2" "oniguruma" "glib" "glib-out"
+                              "gtk4-layer-shell"))
+                 (inherited-pkgconfig (or (getenv "PKG_CONFIG_PATH") "")))
             (setenv "ZIG_GLOBAL_CACHE_DIR" zcache)
             (setenv "ZIG_LOCAL_CACHE_DIR"
                     (string-append (getcwd) "/.zig-cache-local"))
             (setenv "PKG_CONFIG_PATH"
-                    (string-join
-                     (map (lambda (in)
-                            (string-append (assoc-ref inputs in) "/lib/pkgconfig"))
-                          pkgconfig)
-                     ":"))
+                    (string-append
+                     (string-join
+                      (map (lambda (in)
+                             (string-append (assoc-ref inputs in) "/lib/pkgconfig"))
+                           pkgconfig)
+                      ":")
+                     ":" inherited-pkgconfig))
             (for-each
              (lambda (tarball)
                (invoke "zig" "fetch" "--global-cache-dir" zcache tarball))
@@ -505,12 +510,13 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
                     "--search-prefix" fixes
                     "--search-prefix" (search "gtk")
                     "--search-prefix" (search "libadwaita")
+                    "--search-prefix" (search "gtk4-layer-shell")
                     "--search-prefix" (search "libxkbcommon")
                     "--search-prefix" (search "glib")
                     "--search-prefix" (search "fontconfig-minimal")
                     "--search-prefix" (search "freetype")
                     "--search-prefix" (search "harfbuzz")))))
-      (add-after 'install 'wrap-binary
+      (add-after 'build 'wrap-binary
         (lambda* (#:key inputs #:allow-other-keys)
           (let* ((bin (string-append #$output "/bin"))
                  (real (string-append bin "/.ghostty-real"))
@@ -572,7 +578,7 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
     (inputs
      (list gtk libadwaita libxkbcommon libpng zlib bzip2 expat fontconfig
            freetype harfbuzz pixman libxml2 oniguruma glib pango graphene cairo
-           gsettings-desktop-schemas shared-mime-info adwaita-icon-theme
+           gtk4-layer-shell gsettings-desktop-schemas shared-mime-info adwaita-icon-theme
            gdk-pixbuf))
     (synopsis "Terminal emulator")
     (description "Ghostty terminal emulator from the ghostty-org/ghostty source at v1.3.1.")

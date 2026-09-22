@@ -1,5 +1,9 @@
 # Guix SSD installation checkpoint
 
+## Ghostty packaged and launcher-enabled — activation pending
+
+Added the native `ghostty` 1.3.1 package with its vendored Zig dependencies, GTK4 layer-shell input, runtime data wrapper and Guix build fixes. Added it to the familiar desktop Home profile and the custom launcher alongside Kitty. The pinned time-machine build succeeds on aarch64; the desktop service-graph evaluation and all 30 Python tests pass. Native desktop reconfigure remains pending.
+
 ## Desktop parity continuation — staged, not activated
 
 Migrated the remaining portable Pi resources from the NixOS setup into the
