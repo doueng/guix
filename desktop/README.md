@@ -14,7 +14,7 @@ Opt-in native Guix configuration for the existing SSD installation. This is a fi
 - All user-facing custom launchers and helpers are installed as editable Home links: the Noctalia/Wofi **custom launcher**, Chromium launcher, and every script under the shared Herdr `bin/` directory. Pi's complete `agent/` tree, including its shell hooks and scripts, is linked as well.
 - Neovim with the full mutable Fennel configuration, LazyVim/plugin declarations, Pi-org integration, Wayland clipboard and the existing options/keymaps. The config is linked from this checkout; install or update its runtime plugins separately when first launching it.
 - Terminal-only Doom Emacs using Guix's `emacs-no-x`, with the migrated Doom modules, keybindings, Clojure support and config linked from this checkout. The Doom framework itself is kept in `~/.config/emacs` and must be bootstrapped once with the commands below.
-- Hyprlock PAM integration (empty passwords rejected), a manual lock binding and a ten-minute idle lock. No automatic suspend is added. Test unlocking and lock-before-sleep on this machine before trusting it.
+- Hyprlock PAM integration (empty passwords rejected) and a manual lock binding. Automatic idle and suspend locking are disabled; use Ctrl+Alt+L when you want to lock.
 
 The Asahi kernel is inherited with the uinput module enabled for keyd; initrd/UAS, filesystem UUIDs, bootloader definition, account declarations, channel pins and audio/D-Bus services remain preserved. Normal reconfiguration still updates the Guix generation and its boot menu/bootloader on the new ESP; it is not a home-only operation.
 
@@ -24,7 +24,7 @@ Volume keys control the protected PipeWire default sink through `wpctl`; they do
 
 Ghostty is the default terminal and is also available from the custom launcher alongside Kitty. Its configuration and Catppuccin theme are staged from `desktop/shared/ghostty`; Wofi remains available as a launcher fallback.
 
-Neovim's Guix runtime plugin dependencies (LazyVim, Java tooling and unavailable language servers), Herdr's plugin set (annotate, tiny-fingers, sesh) and Tailscale are not ported yet. Babashka is included as `bb`, so `.bb` scripts can run directly; the NixOS-only `nixdiag` service script remains with NixOS because it depends on systemd/journald/NixOS paths. The copied Herdr tab helpers now call `herdr` directly; the keyd Command layer and Ghostty chord binds have Alt/Super equivalents in Hyprland.
+Neovim's Guix runtime plugin dependencies (LazyVim, Java tooling and unavailable language servers), Herdr's plugin set (annotate, tiny-fingers, sesh) and Tailscale are not ported yet. Babashka is included as `bb`, so `.bb` scripts can run directly; the NixOS-only `nixdiag` service script remains with NixOS because it depends on systemd/journald/NixOS paths. The copied Herdr tab helpers now call `herdr` directly; Hyprland's terminal bindings mirror NixOS by focusing the existing Ghostty window and selecting its Herdr tab when it is already focused.
 
 Useful controls with keyd active:
 
@@ -44,7 +44,7 @@ Useful controls with keyd active:
 | Brightness keys | Brightness |
 | Ctrl+Shift+4 / Print | Region to clipboard / screenshot to Pictures |
 
-The compositor handles both Super bindings and the Alt sequences emitted by the existing keyd Command layer. Clipboard bindings also handle keyd's Ctrl+Insert/Shift+Insert output. Herdr-specific tab focusing is not emulated; run `herdr` and use its own keys.
+The compositor handles both Super bindings and the Alt sequences emitted by the existing keyd Command layer. Clipboard bindings also handle keyd's Ctrl+Insert/Shift+Insert output. Terminal bindings focus the existing Ghostty window or select the requested Herdr tab instead of opening another terminal.
 
 Neovim: Space+ff selects files, Space+bb lists buffers, Space+e opens netrw, Space+/ starts an `rg` search, and Alt+comma/period selects buffers. These are simpler fallbacks, not the existing plugin pickers.
 
