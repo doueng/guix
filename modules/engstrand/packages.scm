@@ -544,6 +544,7 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
       (delete 'install)
       (replace 'build
         (lambda* (#:key inputs #:allow-other-keys)
+          (use-modules (guix build utils))
           (let* ((zcache (string-append (getcwd) "/.zig-cache-global"))
                  (fixes (string-append (getcwd) "/lib-fixes"))
                  (search (lambda (in)
@@ -596,6 +597,7 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
                ("cairo" "/../include/cairo/cairo.h" "cairo.h")
                ("cairo" "/../include/cairo/cairo-gobject.h" "cairo-gobject.h")))
             (invoke "zig" "build" "-Doptimize=ReleaseFast"
+                    (string-append "-j" (number->string (parallel-job-count)))
                     "--prefix" #$output
                     "--search-prefix" fixes
                     "--search-prefix" (search "gtk")
