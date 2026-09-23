@@ -30,8 +30,9 @@ lowering, including graft traversal. It reported 13.79 s in GC out of 22.34 s
 of profiler time; these instrumented numbers are not wall-time measurements.
 String package lookup/module discovery was only a few percent of samples.
 
-`make build` and `make apply` set `GC_FREE_SPACE_DIVISOR=1` for the pinned
-Guix/Guile process (apply passes it explicitly after sudo). This lets Guile's collector use more memory before collecting;
+`make build` and `make switch` set `GC_FREE_SPACE_DIVISOR=1` for the pinned
+Guix/Guile process (switch passes it explicitly after sudo). This lets Guile's
+collector use more memory before collecting;
 measurements found about a one-second warm-build saving with ~200 MiB more peak
 RSS. The setting is process-local and can be overridden for comparison, e.g.:
 
@@ -48,81 +49,37 @@ GC marker threads on this host.
 
 ## Reducing `make switch` time
 
-### What the current workflow repeats
+`make switch` now runs one pinned `guix system reconfigure`: Guix builds the
+system before activating it. The old build-then-apply workflow evaluated the
+system/Home twice even when all outputs were cached. Removing that preliminary
+build avoids a full extra client evaluation without a custom Guix driver.
 
-By default, `switch` runs `build` and then `apply`. The receipt in `local/` records a
-successful build and rejects changed sources, but `apply` still runs
-`guix system reconfigure` on the Scheme configuration, not the recorded store
-output. Consequently it repeats system/Home evaluation and derivation lowering;
-existing store outputs avoid recompilation, not that client-side work.
+There are no build receipts, source fingerprints, reuse flags or extra shell
+confirmation. Invoking `make switch` explicitly requests activation and ESP
+writes; sudo may still prompt for a password. `make apply` is an alias.
+`make build` remains an optional, non-activating preview, not a prerequisite.
+Old receipts under `local/` are ignored.
 
-This was checked against the installed pinned Guix source (`7e74121`):
-`guix/scripts/system.scm`, `perform-action`, lowers the system for both actions.
-Reconfigure additionally checks channel ancestry and storage/initrd safety,
-builds the boot configuration, activates the system, installs the bootloader,
-upgrades Shepherd services, and attempts kexec loading. The CLI has no option to
-reconfigure directly from a prebuilt system output while doing all those steps.
+Only the native Guix/root/ESP identity checks remain in the wrapper, to protect
+the independent NixOS boot environment. Guix's own channel authentication,
+downgrade checks, storage/initrd checks, generation management, bootloader
+installation and service upgrades remain unchanged. This ordering was checked
+against pinned Guix `7e74121`, `guix/scripts/system.scm`, `perform-action`.
 
-The checked-in `switch.log` is **not a successful switch timing**: it stops
-before sudo at a stray shell backslash. The current Makefile already contains
-the correction. The warm-build measurements above do not measure root's channel
-cache, activation, bootloader work, or the complete switch.
+The GC setting is passed explicitly after sudo and can be overridden with
+`GC_FREE_SPACE_DIVISOR=3 make switch`. Offline tests use fake Guix/sudo/hardware
+commands to verify a single reconfigure, environment forwarding, disk checks,
+and failure propagation without activating anything.
 
-### Options, in priority order
+End-to-end savings have not been measured: the timings above cover warm builds,
+not activation or bootloader work. On the next approved real switch, separate
+sudo waiting from execution and timestamp the reconfigure phases. Root's
+channel cache is separate from the user's; the warm user lookup measurement
+is not evidence of root's lookup cost. Do not disable authentication, grafts,
+safety checks or bootloader updates merely to improve timings.
 
-1. **Avoid system switching when it is unnecessary.** Existing live-linked
-   config contents need no Guix invocation. Use the guarded Home workflow for
-   Home-only package/service or link-list changes. This avoids system and ESP
-   work entirely; it is not appropriate for OS package/service changes.
-2. **Apply uses the same GC tuning as build.** Both default to
-   `GC_FREE_SPACE_DIVISOR=1`; apply passes the value *after* sudo so it is not
-   lost to environment filtering. Override it with, for example,
-   `GC_FREE_SPACE_DIVISOR=3 make switch`. This has the same memory tradeoff as
-   build. Its reconfigure speedup has not been measured. Offline recipe tests
-   verify the default and override survive a simulated sudo environment reset.
-3. **Reuse a reviewed build explicitly.** After `make build` succeeds and you
-   review it, use `make apply` or `make switch REUSE_BUILD=1`. Both run the same
-   guarded apply recipe, rejecting missing/stale receipts, mismatched configs
-   and missing outputs. Confirmation and disk checks remain mandatory. Reuse
-   fails closed rather than silently rebuilding an unreviewed replacement.
-   Plain `make switch` still builds first; values other than 0 or 1 are rejected.
-   This is explicit reuse, not automatic cache validation: the existing source
-   fingerprint does not cover arbitrary external `CONFIG` inputs or environment
-   dependencies. Rebuild and review when those change; do not enable reuse
-   globally.
-4. **For a larger redesign, evaluate only once.** A pinned Scheme driver could
-   build, pause for review, and then reconfigure using retained OS objects and
-   lowering caches. Potential savings are on the scale of one warm evaluation,
-   not a demonstrated end-to-end result. This crosses the unprivileged/root
-   boundary and relies on Guix internals; it must retain source/output identity,
-   channel downgrade checks, disk guards, confirmation, generation management,
-   bootloader installation and service upgrades. It is not a safe one-line
-   replacement for the existing workflow.
-
-Do not replace reconfigure with the output's activation script or
-`switch-generation`: neither is equivalent to a full new-system reconfigure.
-Do not disable grafts, authentication or safety checks to improve timings.
-`--no-bootloader` changes boot semantics and still lowers the boot configuration;
-it is not a transparent optimization. `--no-kexec` is a separate opt-in candidate
-only if fast kexec reboot is unwanted and timing shows meaningful overhead.
-
-### Measurement still needed
-
-On the next explicitly approved real switch, record separate build and apply
-elapsed times, separating human review/sudo waiting from execution. Timestamp
-reconfigure output to distinguish time before `activating system...`, activation,
-bootloader completion, service upgrades and kexec loading. Compare apply with
-GC divisor 1 versus its default on unchanged inputs; do not perform extra
-activations merely to benchmark.
-
-Root's time-machine cache is separate from the user's, so the 0.064 s lookup
-above does not establish root's lookup cost. If apply fetches/authenticates
-channels repeatedly, investigate that cache first. Resolving the authenticated
-pinned profile as the user and invoking its absolute store `bin/guix` via sudo
-could avoid a cold root time-machine lookup, but does not remove reconfigure's
-ancestry check or evaluation. Do not add a custom cache for an already warm
-lookup. No sudo command, activation or bootloader write was performed for this
-investigation.
+For existing live-linked config edits, no switch is needed. For Home-only
+package/service changes, use `make home-build` / `make home-apply`.
 
 ## Cold builds are different
 

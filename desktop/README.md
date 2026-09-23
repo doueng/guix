@@ -51,11 +51,15 @@ Neovim: Space+ff selects files, Space+bb lists buffers, Space+e opens netrw, Spa
 
 The repository is the live source of the desktop configuration. `desktop/system.scm` reads the reviewed disk identity from `GUIX_BASE` (default `/etc/guix-ssd`) and loads the pinned `channels.scm` from this checkout. It references Fish, Neovim, Doom, Pi and desktop assets directly; no snapshot or archive is created.
 
-From the repository root on the native Guix system, build and review the complete system configuration before a system reconfigure:
+From the repository root on the native Guix system, build and activate the configuration:
 
 ```sh
-make build
+make switch
 ```
+
+This explicitly requests system activation and Guix ESP updates, with no extra
+confirmation beyond sudo. Guix builds successfully before activating. For an
+optional non-activating preview, use `make build` or `make dry-run` first.
 
 For editor, shell, or Home package changes that do not alter system packages/services, build and interactively activate the standalone Home configuration instead:
 
@@ -66,20 +70,14 @@ make home-apply
 
 `desktop/home.scm` evaluates the same `%familiar-home` object embedded by the system config, so the Home package and service definitions stay in one place. Home activation is per-user and does not use `sudo`, reconfigure Guix System, or write the ESP. Changes to OS packages, kernel, services, bootloader or storage still require the reviewed system build/apply workflow.
 
-A successful `make build` records the built output and a fingerprint of the system sources under ignored `local/`. `make apply` refuses a missing or stale receipt, verifies the running root/ESP identities, and asks for explicit confirmation before `sudo guix system reconfigure`. Review the build output and current disk identity before confirming. Do not bypass the receipt/guards with a pasted reconfigure command.
-
-`make switch` builds and then runs guarded apply. If you already built and
-reviewed the configuration, use `make apply` or `make switch REUSE_BUILD=1` to
-avoid another build evaluation. Reuse still validates the receipt, asks for
-confirmation, and checks the disk identities; it fails rather than rebuilding
-if the receipt is invalid. Leave reuse opt-in, and rebuild if external inputs
-or environment-dependent configuration changed (these are not fully covered by
-the source fingerprint).
+`make switch` checks the native Guix system and root/ESP identities, then runs
+one pinned `guix system reconfigure`. There are no receipts, fingerprints or
+reuse options. `make apply` is a compatibility alias for the same operation.
 
 For measured build-speed options and the two known upstream/trust warnings,
 see [BUILDING.md](../BUILDING.md).
 
-`make build` performs the full pinned build and records a source-matched receipt. Stop on failure; source evaluation alone is insufficient. Keep the repository at `~/guix`, save your current `~/.config` privately, retain the working system generation, and review any Guix Home conflicts rather than forcing them away.
+`make build` performs the full pinned build without activation. Stop on failure; source evaluation alone is insufficient. Keep the repository at `~/guix`, save your current `~/.config` privately, retain the working system generation, and review any Guix Home conflicts rather than forcing them away.
 
 Bootstrap Doom Emacs once before first use, if `~/.config/emacs` does not exist. The Guix `emacs` command already selects this directory:
 
@@ -94,13 +92,10 @@ git clone --depth 1 https://github.com/doomemacs/doomemacs "$DOOM"
 
 The `~/.config/doom` directory is the live Guix checkout link. Doom's own framework remains in `~/.config/emacs` and downloaded packages in Doom's data directory; do not replace the checkout link with the framework directory.
 
-After the successful build and review, apply only from the native Guix session with:
-
-```sh
-make apply
-```
-
-The target rechecks the Guix root, ESP UUID and Asahi ESP PARTUUID against the retained installation values, then asks before reconfiguring. Do not run it from the NixOS installer or bypass it with a pasted `guix system reconfigure` command. Review the retained UUID/PARTUUID/disk record; never use `guix system init` to apply this layer. Existing passwords are not an onboarding step again; do not run `passwd` unless you intend to change them.
+Run `make switch` (or its `make apply` alias) only from the native Guix session.
+The target checks the Guix root, ESP UUID and Asahi ESP PARTUUID against the
+retained installation values before reconfiguring. Do not run it from the NixOS
+installer or bypass these checks with a pasted `guix system reconfigure` command. Review the retained UUID/PARTUUID/disk record; never use `guix system init` to apply this layer. Existing passwords are not an onboarding step again; do not run `passwd` unless you intend to change them.
 
 After the desktop configuration is applied, install Google Chrome once through Flatpak:
 

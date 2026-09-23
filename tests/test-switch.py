@@ -13,36 +13,27 @@ class SwitchTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        for directory in ("bin", "base", "modules", "desktop"):
-            (self.root / directory).mkdir()
-        # Redirect the device-tree read as well as stubbing the identity commands.
-        makefile = (REPO / "Makefile").read_text().replace(
+        (self.root / "bin").mkdir()
+        # Redirect the device-tree read; all privileged commands are stubbed.
+        (self.root / "Makefile").write_text((REPO / "Makefile").read_text().replace(
             "/proc/device-tree/chosen/asahi,efi-system-partition",
-            str(self.root / "efi-partuuid"),
-        )
-        (self.root / "Makefile").write_text(makefile)
+            str(self.root / "efi-partuuid")))
         (self.root / "efi-partuuid").write_text("test-partuuid")
-        (self.root / "base/devices.json").write_text("{}")
-        (self.root / "channels.scm").write_text("test channels")
-        (self.root / "desktop/system.scm").write_text("test system")
         self.log = self.root / "commands.log"
-        self.stub("guix", f'''printf '%s gc=%s\\n' "$*" "${{GC_FREE_SPACE_DIVISOR-unset}}" >> "{self.log}"
-# Existing path solely for the receipt's existence check; not a real system.
-printf '/gnu/store/\\n'
+        self.stub("guix", f'''printf '%s gc=%s base=%s\\n' "$*" "${{GC_FREE_SPACE_DIVISOR-unset}}" "${{GUIX_BASE-unset}}" >> "{self.log}"
 ''')
-        # Model sudo's environment filtering. Only assignments after sudo survive.
+        # Model sudo's environment filtering: only explicit assignments survive.
         self.stub("sudo", f'''echo sudo >> "{self.log}"
 exec env -i PATH="$PATH" "$@"
 ''')
         self.stub("readlink", "echo /gnu/store/fake-system\n")
         self.stub("findmnt", '''case "$*" in
   *'/boot/efi') echo test-esp ;;
-  *) echo "${TEST_ROOT_UUID:-test-root}" ;;
+  *) echo test-root ;;
 esac
 ''')
         self.env = dict(os.environ)
-        for key in ("GC_FREE_SPACE_DIVISOR", "MAKEFLAGS", "MFLAGS", "MAKELEVEL",
-                    "REUSE_BUILD", "TEST_ROOT_UUID"):
+        for key in ("GC_FREE_SPACE_DIVISOR", "MAKEFLAGS", "MFLAGS", "MAKELEVEL"):
             self.env.pop(key, None)
         self.env["PATH"] = str(self.root / "bin") + os.pathsep + os.environ["PATH"]
 
@@ -51,100 +42,58 @@ esac
         path.write_text("#!/bin/sh\nset -eu\n" + body)
         path.chmod(0o755)
 
-    def make(self, *args, answer="y\n", success=True):
+    def make(self, *args, success=True):
         result = subprocess.run(
             ["make", "--no-print-directory", "BASE=base", "ROOT_UUID=test-root",
              "ESP_UUID=test-esp", "ESP_PARTUUID=test-partuuid", *args],
-            cwd=self.root, env=self.env, input=answer, text=True,
+            cwd=self.root, env=self.env, input="", text=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         self.assertEqual(result.returncode == 0, success, result.stdout)
-        return result.stdout
-
-    def commands(self):
         return self.log.read_text() if self.log.exists() else ""
 
-    def test_apply_gc_default_survives_sudo(self):
-        self.make("build")
-        self.make("apply")
-        self.assertIn("sudo\n", self.commands())
-        self.assertIn("system reconfigure", self.commands())
-        self.assertTrue(self.commands().rstrip().endswith("gc=1"))
+    def test_switch_reconfigures_once_without_receipt_or_prompt(self):
+        commands = self.make("switch")
+        self.assertEqual(commands.count("sudo\n"), 1)
+        self.assertEqual(commands.count("system reconfigure"), 1)
+        self.assertNotIn("system build", commands)
+        self.assertIn(f"time-machine -C {self.root}/channels.scm --", commands)
+        self.assertIn(f"gc=1 base={self.root}/base", commands)
 
-    def test_apply_gc_override_survives_sudo(self):
+    def test_gc_override_survives_sudo(self):
         self.env["GC_FREE_SPACE_DIVISOR"] = "3"
-        self.make("build")
-        self.make("apply")
-        self.assertTrue(self.commands().rstrip().endswith("gc=3"))
+        self.assertIn("gc=3", self.make("switch"))
 
-    def test_switch_builds_then_applies_by_default(self):
-        self.make("switch")
-        commands = self.commands()
-        self.assertEqual(commands.count("system build"), 1)
-        self.assertLess(commands.index("system build"), commands.index("sudo"))
-        self.assertIn("system reconfigure", commands)
+    def test_apply_is_alias(self):
+        self.assertEqual(self.make("apply", "switch").count("system reconfigure"), 1)
 
-    def test_switch_reuses_reviewed_build(self):
-        self.make("build")
-        self.log.write_text("")
-        self.make("switch", "REUSE_BUILD=1")
-        self.assertNotIn("system build", self.commands())
-        self.assertIn("system reconfigure", self.commands())
+    def test_build_does_not_activate_or_write_receipt(self):
+        commands = self.make("build")
+        self.assertIn("system build", commands)
+        self.assertNotIn("sudo", commands)
+        self.assertFalse((self.root / "local").exists())
 
-    def test_reuse_rejects_missing_receipt(self):
-        self.make("switch", "REUSE_BUILD=1", success=False)
-        self.assertEqual(self.commands(), "")
+    def test_wrong_native_system_stops_before_sudo(self):
+        self.stub("readlink", "echo /nix/store/not-guix\n")
+        self.assertEqual(self.make("switch", success=False), "")
 
-    def test_reuse_rejects_stale_sources(self):
-        self.make("build")
-        self.log.write_text("")
-        (self.root / "desktop/system.scm").write_text("changed system")
-        self.make("switch", "REUSE_BUILD=1", success=False)
-        self.assertEqual(self.commands(), "")
+    def test_wrong_disks_stop_before_sudo(self):
+        for variable in ("ROOT_UUID", "ESP_UUID", "ESP_PARTUUID"):
+            with self.subTest(variable=variable):
+                self.assertEqual(self.make("switch", f"{variable}=wrong",
+                                           success=False), "")
 
-    def test_reuse_rejects_wrong_config(self):
-        self.make("build")
-        self.log.write_text("")
-        receipt = self.root / "local/system-build.receipt"
-        receipt.write_text(receipt.read_text().replace(
-            "config=desktop/system.scm", "config=other.scm"))
-        self.make("switch", "REUSE_BUILD=1", success=False)
-        self.assertEqual(self.commands(), "")
+    def test_missing_device_tree_stops_before_sudo(self):
+        (self.root / "efi-partuuid").unlink()
+        self.assertEqual(self.make("switch", success=False), "")
 
-    def test_reuse_rejects_missing_output(self):
-        self.make("build")
-        self.log.write_text("")
-        receipt = self.root / "local/system-build.receipt"
-        receipt.write_text(receipt.read_text().replace(
-            "output=/gnu/store/", "output=/gnu/store/nonexistent-switch-test-output"))
-        self.make("switch", "REUSE_BUILD=1", success=False)
-        self.assertEqual(self.commands(), "")
+    def test_absolute_config_path(self):
+        config = self.root / "external.scm"
+        self.assertIn(f' {config} gc=', self.make("switch", f"CONFIG={config}"))
 
-    def test_reuse_still_requires_confirmation(self):
-        self.make("build")
-        self.log.write_text("")
-        self.make("switch", "REUSE_BUILD=1", answer="n\n", success=False)
-        self.assertEqual(self.commands(), "")
-
-    def test_switch_rejects_invalid_reuse_option(self):
-        self.make("switch", "REUSE_BUILD=yes", success=False)
-        self.assertEqual(self.commands(), "")
-
-    def test_failed_build_does_not_apply(self):
+    def test_guix_failure_propagates(self):
         self.stub("guix", "exit 1\n")
         self.make("switch", success=False)
-        self.assertNotIn("sudo", self.commands())
-
-    def test_cancel_never_reaches_sudo(self):
-        self.make("build")
-        self.make("apply", answer="n\n", success=False)
-        self.assertNotIn("sudo", self.commands())
-
-    def test_wrong_root_never_reaches_sudo(self):
-        self.make("build")
-        self.env["TEST_ROOT_UUID"] = "wrong-root"
-        self.make("apply", success=False)
-        self.assertNotIn("sudo", self.commands())
 
 
 if __name__ == "__main__":
