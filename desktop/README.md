@@ -66,20 +66,12 @@ make home-apply
 
 `desktop/home.scm` evaluates the same `%familiar-home` object embedded by the system config, so the Home package and service definitions stay in one place. Home activation is per-user and does not use `sudo`, reconfigure Guix System, or write the ESP. Changes to OS packages, kernel, services, bootloader or storage still require the reviewed system build/apply workflow.
 
+A successful `make build` records the built output and a fingerprint of the system sources under ignored `local/`. `make apply` refuses a missing or stale receipt, verifies the running root/ESP identities, and asks for explicit confirmation before `sudo guix system reconfigure`. Review the build output and current disk identity before confirming. Do not bypass the receipt/guards with a pasted reconfigure command.
+
 For measured build-speed options and the two known upstream/trust warnings,
 see [BUILDING.md](../BUILDING.md).
 
-The equivalent explicit command is:
-
-```sh
-KIT="$HOME/guix"
-GUIX_BASE=/etc/guix-ssd guix time-machine -C "$KIT/channels.scm" -- \
-  system build -L "$KIT/modules" "$KIT/desktop/system.scm"
-```
-
-Stop on failure. This full pinned build must succeed before activation; source evaluation alone is insufficient. Keep the repository at `~/guix`, save your current `~/.config` privately, retain the working system generation, and review any Guix Home conflicts rather than forcing them away.
-
-After build success and approval to apply the desktop, verify this installation's native destinations immediately before reconfiguration:
+`make build` performs the full pinned build and records a source-matched receipt. Stop on failure; source evaluation alone is insufficient. Keep the repository at `~/guix`, save your current `~/.config` privately, retain the working system generation, and review any Guix Home conflicts rather than forcing them away.
 
 Bootstrap Doom Emacs once before first use, if `~/.config/emacs` does not exist. The Guix `emacs` command already selects this directory:
 
@@ -94,21 +86,15 @@ git clone --depth 1 https://github.com/doomemacs/doomemacs "$DOOM"
 
 The `~/.config/doom` directory is the live Guix checkout link. Doom's own framework remains in `~/.config/emacs` and downloaded packages in Doom's data directory; do not replace the checkout link with the framework directory.
 
-```sh
-set -euo pipefail
-case "$(readlink -f /run/current-system)" in /gnu/store/*) ;; *) exit 1 ;; esac
-test "$(findmnt -nro UUID /)" = c694c1fc-a241-459a-a60d-1c829f1b9c30
-test "$(findmnt -nro UUID /boot/efi)" = 77C4-10EC
-test "$(tr -d '\0' < /proc/device-tree/chosen/asahi,efi-system-partition)" = \
-  5408cbd2-dc6c-49c6-bee9-c51c5f3a29fc
+After the successful build and review, apply only from the native Guix session with:
 
-sudo env GUIX_BASE=/etc/guix-ssd guix time-machine -C "$HOME/guix/channels.scm" -- \
-  system reconfigure -L "$HOME/guix/modules" "$HOME/guix/desktop/system.scm"
+```sh
+make apply
 ```
 
-These checks are for the already-running native system, not the NixOS installer mount gate. Review the retained UUID/PARTUUID/disk record too. Never use `guix system init` to apply this layer. Existing passwords are not an onboarding step again; do not run `passwd` unless you intend to change them.
+The target rechecks the Guix root, ESP UUID and Asahi ESP PARTUUID against the retained installation values, then asks before reconfiguring. Do not run it from the NixOS installer or bypass it with a pasted `guix system reconfigure` command. Review the retained UUID/PARTUUID/disk record; never use `guix system init` to apply this layer. Existing passwords are not an onboarding step again; do not run `passwd` unless you intend to change them.
 
-After first boot into the new desktop, install the browser once:
+After the desktop configuration is applied, install Google Chrome once through Flatpak:
 
 ```sh
 flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
