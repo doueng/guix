@@ -45,7 +45,8 @@ build:
 	@set -eu; mkdir -p "$$(dirname "$(BUILD_RECEIPT)")"; \
 	  fingerprint=$(SOURCE_FINGERPRINT); \
 	  output_file=$$(mktemp); trap 'rm -f "$$output_file"' EXIT; \
-	  GUIX_BASE=$(BASE) guix time-machine -C channels.scm -- \
+	  GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} GUIX_BASE=$(BASE) \
+	    guix time-machine -C channels.scm -- \
 	    system build -L modules $(CONFIG) > "$$output_file"; \
 	  cat "$$output_file"; output=$$(tail -n 1 "$$output_file"); \
 	  case "$$output" in /gnu/store/*) ;; *) echo 'STOP: build returned no system output path'; exit 1;; esac; \
@@ -78,7 +79,7 @@ apply:
 	  output=$$(sed -n 's/^output=//p' "$(BUILD_RECEIPT)"); \
 	  case "$$output" in /gnu/store/*) ;; *) echo 'STOP: invalid output in build receipt'; exit 1;; esac; \
 	  test -e "$$output" || { echo 'STOP: built output was garbage-collected; rebuild'; exit 1; }; \
-	  echo "Reviewed system output: $$output"; \\
+	  echo "Reviewed system output: $$output"; \
 	  printf 'After reviewing the build and disk identities, reconfigure this Guix system/ESP? [y/N] '; \
 	  read answer; test "$$answer" = y -o "$$answer" = Y || { echo 'Cancelled'; exit 1; }; \
 	  case "$$(readlink -f /run/current-system)" in /gnu/store/*) ;; *) echo 'STOP: not the native Guix system'; exit 1;; esac; \
