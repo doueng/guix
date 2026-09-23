@@ -30,8 +30,8 @@ lowering, including graft traversal. It reported 13.79 s in GC out of 22.34 s
 of profiler time; these instrumented numbers are not wall-time measurements.
 String package lookup/module discovery was only a few percent of samples.
 
-`make build` now sets `GC_FREE_SPACE_DIVISOR=1` for the pinned Guix/Guile
-build process. This lets Guile's collector use more memory before collecting;
+`make build` and `make apply` set `GC_FREE_SPACE_DIVISOR=1` for the pinned
+Guix/Guile process (apply passes it explicitly after sudo). This lets Guile's collector use more memory before collecting;
 measurements found about a one-second warm-build saving with ~200 MiB more peak
 RSS. The setting is process-local and can be overridden for comparison, e.g.:
 
@@ -74,13 +74,12 @@ cache, activation, bootloader work, or the complete switch.
    config contents need no Guix invocation. Use the guarded Home workflow for
    Home-only package/service or link-list changes. This avoids system and ESP
    work entirely; it is not appropriate for OS package/service changes.
-2. **Extend the existing GC tuning to apply.** Currently only `build` sets
-   `GC_FREE_SPACE_DIVISOR`. The equivalent apply-side change would be
-   `sudo env GC_FREE_SPACE_DIVISOR="${GC_FREE_SPACE_DIVISOR:-1}" ...`, placing
-   it *after* sudo so it is not lost to environment filtering. This is the
-   smallest candidate optimization, with the same memory tradeoff as build.
-   Its reconfigure speedup has not been measured; the Makefile is unchanged by
-   this investigation.
+2. **Apply uses the same GC tuning as build.** Both default to
+   `GC_FREE_SPACE_DIVISOR=1`; apply passes the value *after* sudo so it is not
+   lost to environment filtering. Override it with, for example,
+   `GC_FREE_SPACE_DIVISOR=3 make switch`. This has the same memory tradeoff as
+   build. Its reconfigure speedup has not been measured. Offline recipe tests
+   verify the default and override survive a simulated sudo environment reset.
 3. **Reuse a reviewed build through `make apply`.** If `make build` already
    succeeded and was reviewed, use `make apply`, not `make switch`, which
    unconditionally builds again. All existing receipt and disk guards remain.

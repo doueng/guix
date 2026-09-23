@@ -26,6 +26,7 @@ help:
 test:
 	guile -L modules -s tests/test-desktop-direct.scm
 	@find desktop/shared/shell/fish -type f -name '*.fish' -exec fish --no-execute {} \;
+	python3 tests/test-switch.py
 
 eval:
 	@command -v guix >/dev/null || { echo 'guix not available; skipping Scheme checks'; exit 0; }
@@ -87,5 +88,5 @@ apply:
 	  test "$$(findmnt -nro UUID /boot/efi)" = $(ESP_UUID) || { echo 'STOP: unexpected ESP'; exit 1; }; \
 	  test "$$(tr -d '\0' < /proc/device-tree/chosen/asahi,efi-system-partition)" = $(ESP_PARTUUID) \
 	    || { echo 'STOP: booted through an unexpected ESP'; exit 1; }; \
-	  sudo env GUIX_BASE="$(BASE)" guix time-machine -C "$(CURDIR)/channels.scm" -- \
+	  sudo env GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} GUIX_BASE="$(BASE)" guix time-machine -C "$(CURDIR)/channels.scm" -- \
 	    system reconfigure -L "$(CURDIR)/modules" "$(CURDIR)/$(CONFIG)"
