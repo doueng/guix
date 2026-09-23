@@ -8,6 +8,8 @@ ROOT_UUID ?= c694c1fc-a241-459a-a60d-1c829f1b9c30
 ESP_UUID ?= 77C4-10EC
 ESP_PARTUUID ?= 5408cbd2-dc6c-49c6-bee9-c51c5f3a29fc
 BUILD_RECEIPT ?= local/system-build.receipt
+# Explicitly reuse a previously reviewed build; apply still validates its receipt.
+REUSE_BUILD ?= 0
 SOURCE_FINGERPRINT = $$( { sha256sum Makefile channels.scm "$(BASE)/devices.json"; find modules desktop -type f -print0 | sort -z | xargs -0 sha256sum; } | sha256sum | cut -d ' ' -f1)
 
 .PHONY: help test eval eval-desktop dry-run build apply switch home-build home-apply
@@ -16,7 +18,7 @@ help:
 	@echo 'build         pinned Guix build directly from $(CONFIG)'
 	@echo 'dry-run       show what build would fetch or build'
 	@echo 'apply         guarded native reconfigure (sudo; build and review first)'
-	@echo 'switch        build and apply sequentially (system and bootloader)'
+	@echo 'switch        build and apply (REUSE_BUILD=1: apply a reviewed build)'
 	@echo 'home-build    build desktop Home without changing system/bootloader'
 	@echo 'home-apply    interactively activate desktop Home (no sudo/ESP writes)'
 	@echo 'test          offline Scheme checks'
@@ -57,7 +59,11 @@ build:
 	  echo "Build receipt: $(BUILD_RECEIPT)"
 
 switch:
-	$(MAKE) build
+	@case "$(REUSE_BUILD)" in \
+	  0) $(MAKE) build ;; \
+	  1) echo 'Reusing reviewed build; apply will validate the receipt' ;; \
+	  *) echo 'STOP: REUSE_BUILD must be 0 or 1'; exit 1 ;; \
+	esac
 	$(MAKE) apply
 
 home-build:

@@ -50,7 +50,7 @@ GC marker threads on this host.
 
 ### What the current workflow repeats
 
-`switch` runs `build` and then `apply`. The receipt in `local/` records a
+By default, `switch` runs `build` and then `apply`. The receipt in `local/` records a
 successful build and rejects changed sources, but `apply` still runs
 `guix system reconfigure` on the Scheme configuration, not the recorded store
 output. Consequently it repeats system/Home evaluation and derivation lowering;
@@ -80,12 +80,16 @@ cache, activation, bootloader work, or the complete switch.
    `GC_FREE_SPACE_DIVISOR=3 make switch`. This has the same memory tradeoff as
    build. Its reconfigure speedup has not been measured. Offline recipe tests
    verify the default and override survive a simulated sudo environment reset.
-3. **Reuse a reviewed build through `make apply`.** If `make build` already
-   succeeded and was reviewed, use `make apply`, not `make switch`, which
-   unconditionally builds again. All existing receipt and disk guards remain.
-   A future opt-in receipt-aware switch could automate this, but must reject
-   stale/missing outputs and account for inputs outside the current fingerprint
-   (for example an external `CONFIG` or environment-dependent configuration).
+3. **Reuse a reviewed build explicitly.** After `make build` succeeds and you
+   review it, use `make apply` or `make switch REUSE_BUILD=1`. Both run the same
+   guarded apply recipe, rejecting missing/stale receipts, mismatched configs
+   and missing outputs. Confirmation and disk checks remain mandatory. Reuse
+   fails closed rather than silently rebuilding an unreviewed replacement.
+   Plain `make switch` still builds first; values other than 0 or 1 are rejected.
+   This is explicit reuse, not automatic cache validation: the existing source
+   fingerprint does not cover arbitrary external `CONFIG` inputs or environment
+   dependencies. Rebuild and review when those change; do not enable reuse
+   globally.
 4. **For a larger redesign, evaluate only once.** A pinned Scheme driver could
    build, pause for review, and then reconfigure using retained OS objects and
    lowering caches. Potential savings are on the scale of one warm evaluation,

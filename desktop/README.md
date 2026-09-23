@@ -68,6 +68,14 @@ make home-apply
 
 A successful `make build` records the built output and a fingerprint of the system sources under ignored `local/`. `make apply` refuses a missing or stale receipt, verifies the running root/ESP identities, and asks for explicit confirmation before `sudo guix system reconfigure`. Review the build output and current disk identity before confirming. Do not bypass the receipt/guards with a pasted reconfigure command.
 
+`make switch` builds and then runs guarded apply. If you already built and
+reviewed the configuration, use `make apply` or `make switch REUSE_BUILD=1` to
+avoid another build evaluation. Reuse still validates the receipt, asks for
+confirmation, and checks the disk identities; it fails rather than rebuilding
+if the receipt is invalid. Leave reuse opt-in, and rebuild if external inputs
+or environment-dependent configuration changed (these are not fully covered by
+the source fingerprint).
+
 For measured build-speed options and the two known upstream/trust warnings,
 see [BUILDING.md](../BUILDING.md).
 

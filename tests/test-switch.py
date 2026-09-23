@@ -77,6 +77,64 @@ esac
         self.make("apply")
         self.assertTrue(self.commands().rstrip().endswith("gc=3"))
 
+    def test_switch_builds_then_applies_by_default(self):
+        self.make("switch")
+        commands = self.commands()
+        self.assertEqual(commands.count("system build"), 1)
+        self.assertLess(commands.index("system build"), commands.index("sudo"))
+        self.assertIn("system reconfigure", commands)
+
+    def test_switch_reuses_reviewed_build(self):
+        self.make("build")
+        self.log.write_text("")
+        self.make("switch", "REUSE_BUILD=1")
+        self.assertNotIn("system build", self.commands())
+        self.assertIn("system reconfigure", self.commands())
+
+    def test_reuse_rejects_missing_receipt(self):
+        self.make("switch", "REUSE_BUILD=1", success=False)
+        self.assertEqual(self.commands(), "")
+
+    def test_reuse_rejects_stale_sources(self):
+        self.make("build")
+        self.log.write_text("")
+        (self.root / "desktop/system.scm").write_text("changed system")
+        self.make("switch", "REUSE_BUILD=1", success=False)
+        self.assertEqual(self.commands(), "")
+
+    def test_reuse_rejects_wrong_config(self):
+        self.make("build")
+        self.log.write_text("")
+        receipt = self.root / "local/system-build.receipt"
+        receipt.write_text(receipt.read_text().replace(
+            "config=desktop/system.scm", "config=other.scm"))
+        self.make("switch", "REUSE_BUILD=1", success=False)
+        self.assertEqual(self.commands(), "")
+
+    def test_reuse_rejects_missing_output(self):
+        self.make("build")
+        self.log.write_text("")
+        receipt = self.root / "local/system-build.receipt"
+        receipt.write_text(receipt.read_text().replace(
+            "output=/gnu/store/", "output=/gnu/store/nonexistent-switch-test-output"))
+        self.make("switch", "REUSE_BUILD=1", success=False)
+        self.assertEqual(self.commands(), "")
+
+    def test_reuse_still_requires_confirmation(self):
+        self.make("build")
+        self.log.write_text("")
+        self.make("switch", "REUSE_BUILD=1", answer="n\n", success=False)
+        self.assertEqual(self.commands(), "")
+
+    def test_switch_rejects_invalid_reuse_option(self):
+        self.make("switch", "REUSE_BUILD=yes", success=False)
+        self.assertEqual(self.commands(), "")
+
+    def test_failed_build_does_not_apply(self):
+        self.stub("guix", "exit 1\n")
+        self.make("switch", success=False)
+        self.assertNotIn("sudo", self.commands())
+
     def test_cancel_never_reaches_sudo(self):
         self.make("build")
         self.make("apply", answer="n\n", success=False)
