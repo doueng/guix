@@ -12,29 +12,21 @@ if status is-interactive
     stty -ixon 2>/dev/null
 end
 
-# Limit Rayon threads to avoid APFS kernel contention on Apple Silicon
-# See: https://github.com/jj-vcs/jj/issues/4508
-set -gx RAYON_NUM_THREADS 4
-
 # Shell settings
-set -U fish_greeting
-set -U fish_escape_delay_ms 10
+set -g fish_greeting
+set -g fish_escape_delay_ms 10
 set -g fish_key_bindings fish_vi_key_bindings
-set -Ux KEYTIMEOUT 1
+set -gx KEYTIMEOUT 1
 set -gx AIFX_ENABLE_PRIVATE_PREVIEW_FEATURES 1
-
-if test -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.fish
-    source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.fish
-end
 
 # Set up abbreviations
 abbr --add dotdot --regex '^\.\.+$' --function multicd
 
 # Prompt customization
-set -Ux my_emoji "🐟"
+set -g my_emoji "🐟"
 
 # FZF options
-set -Ux fzf_git_log_opts --no-mouse
+set -g fzf_git_log_opts --no-mouse
 # Completely override fish's cursor system for vi mode
 function fish_vi_cursor --description 'Custom vi cursor with hide support'
     # Override the built-in function completely
@@ -70,4 +62,6 @@ end
 # Initialize the custom cursor system
 fish_vi_cursor
 
-zoxide init fish | source
+if status is-interactive; and command -q zoxide
+    zoxide init fish | source
+end

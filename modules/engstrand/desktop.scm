@@ -207,11 +207,9 @@
           '(("EDITOR" . "nvim") ("VISUAL" . "nvim")
             ("DOOMDIR" . "/home/engstrand/.config/doom")
             ("COLORTERM" . "truecolor")
-            ("TERM_PROGRAM" . "ghostty")
             ("XCURSOR_THEME" . "Adwaita")
             ("XCURSOR_SIZE" . "20")
-            ("GTK_THEME" . "Adwaita:dark")
-            ("RAYON_NUM_THREADS" . "4")))
+            ("GTK_THEME" . "Adwaita:dark")))
         (simple-service 'familiar-files home-files-service-type
           %desktop-home-files)
         %asahi-desktop-home-services))))
