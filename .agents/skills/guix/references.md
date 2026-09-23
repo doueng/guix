@@ -11,8 +11,8 @@ The development manual can get ahead of this repository's pinned Guix/Asahi chan
 
 The converted Markdown copies are stored beside this file:
 
-- [`guix-manual.md`](guix-manual.md) — complete reference manual, development version.
-- [`guix-cookbook.md`](guix-cookbook.md) — complete cookbook.
+- [`guix-manual.md`](references/guix-manual.md) — complete reference manual, development version.
+- [`guix-cookbook.md`](references/guix-cookbook.md) — complete cookbook.
 
 These are generated snapshots, not hand-maintained extracts. The manual snapshot is several megabytes and may lag upstream; use its source URL above when the latest behavior matters. This repository pins its own Guix/Asahi channel, so always check the installed version and configuration context before relying on development-version documentation.
 

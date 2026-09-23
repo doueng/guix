@@ -5,8 +5,8 @@ Personal Guix System configuration for an M1 MacBook Air. The T7 hosts the Guix 
 ## Current state
 
 - Guix boots from the T7 after adding `uas` to the initrd. The user reports both account passwords are set.
-- The familiar desktop layer is built but **not activated**. An xHCI/U-Boot handoff fix is staged for further build and hardware validation.
-- Hardware acceptance is incomplete. Do not treat this checkout as a validated daily-driver system.
+- The familiar desktop layer and patched xHCI/U-Boot handoff have been built and activated. The user reports successful desktop and hardware acceptance; this checkout does not independently capture the hardware-test logs.
+- Preserve a known-good Guix generation and the independent NixOS/macOS recovery paths for future system changes.
 - The SSD and internal Guix boot environment are already initialized. **Never rerun formatting or `guix system init` as a resume step.**
 
 See [PROGRESS.md](PROGRESS.md) for the concise checkpoint, [INSTALLATION-PLAN.md](INSTALLATION-PLAN.md) for safety boundaries, [desktop/README.md](desktop/README.md) for desktop build/apply, and [BUILDING.md](BUILDING.md) for build notes. [REVIEW.md](REVIEW.md) records remaining review concerns.
@@ -19,7 +19,7 @@ make eval
 make eval-desktop
 ```
 
-The Scheme checks require Guix and the pinned Asahi channel. `make build` builds the selected system configuration; `make apply` performs a guarded native reconfigure and requires a successful reviewed build. See `make help`.
+The Scheme checks require Guix and the pinned Asahi channel. `make build` builds the selected system configuration; `make apply` performs a guarded native reconfigure and requires a successful reviewed build. Desktop/Home-only changes can use the independent `make home-build` and `make home-apply` workflow without reconfiguring the system or bootloader. See `make help`.
 
 Author Scheme in `modules/` and desktop assets in `desktop/`. `desktop/shared/` is independently maintained and does not sync from NixOS. Keep `local/` private and ignored; never commit firmware, credentials, password hashes or machine backups. Use jj.
 
