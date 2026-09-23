@@ -25,6 +25,7 @@ help:
 
 test:
 	guile -L modules -s tests/test-desktop-direct.scm
+	@find desktop/shared/shell/fish -type f -name '*.fish' -exec fish --no-execute {} \;
 
 eval:
 	@command -v guix >/dev/null || { echo 'guix not available; skipping Scheme checks'; exit 0; }
