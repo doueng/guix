@@ -45,9 +45,11 @@ normal workload. Do not reduce GC marker threads on this host.
 ## Cold builds are different
 
 The running daemon and `modules/engstrand/asahi.scm` use `--max-jobs=1 --cores=4`.
-These limit package builds, not the client's warm system evaluation.
-`make -j8 build` does not increase Guix build parallelism: the Make target
-contains one Guix command.
+These limit package builds, not the client's warm system evaluation. The custom
+Ghostty Zig build now reads Guix's `NIX_BUILD_CORES` through
+`parallel-job-count` and passes Zig's `-jN` option, so `--cores` also limits
+its internal build jobs. `make -j8 build` does not increase Guix build
+parallelism: the Make target contains one Guix command.
 
 When `make dry-run` shows actual source builds, consider a per-invocation
 parallelism override rather than changing the daemon. For example, from this
@@ -106,4 +108,6 @@ is adopted.
 - Raw timings, profiler output and logs: ignored `local/build-investigation/`.
 
 These results cover cached builds only, not first-build downloads, package
-compilation, reconfiguration, or hardware acceptance.
+compilation, reconfiguration, or hardware acceptance. The current Ghostty job
+limit change has been checked against Zig 0.15's build-runner option parser;
+it has not yet been measured in a full Ghostty compilation.
