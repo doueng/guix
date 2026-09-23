@@ -24,6 +24,13 @@
 (check (file-exists? (local-file-file %desktop-keyd-config))
        "Missing keyd configuration")
 
+(let* ((destinations
+        (append (map car %desktop-home-files)
+                (map car %desktop-direct-home-links)))
+       (unique (delete-duplicates destinations string=?)))
+  (check (= (length destinations) (length unique))
+         "Home destinations must be unique across managed and live links"))
+
 (for-each
  (lambda (entry)
    (check (not (or (string-suffix? ".pyc" (car entry))

@@ -34,68 +34,114 @@
             (stop #~(make-kill-destructor))))))
 
 ;; Live files are deliberately not home-files-service entries: that service
-;; always adds a store indirection.  Install direct links during activation.
-;; Also remove old store-backed tree links before creating child links; Guix's
-;; symlink manager otherwise follows such a parent into the checkout.
+;; always adds a store indirection. Install direct links during activation,
+;; and track ownership so stale links can be removed without touching files
+;; the user has replaced. Guix-managed links from older generations are
+;; migrated only when their known store naming pattern matches.
 (define %familiar-direct-home-links
   (simple-service 'familiar-direct-home-links home-activation-service-type
     #~(begin
-        (use-modules (guix build utils) (ice-9 ftw) (srfi srfi-13))
+        (use-modules (guix build utils) (ice-9 ftw) (ice-9 rdelim)
+                     (srfi srfi-1) (srfi srfi-13))
         (define roots
           '(".config/fish" ".config/nvim" ".config/doom"
             ".config/hypr" ".config/waybar" ".pi/agent"
             ".local/share/catppuccin-mocha/wallpapers"
             ".local/share/herdr/tiny-fingers"))
         (define links '#$%desktop-direct-home-links)
+        (define home (getenv "HOME"))
+        (define state (string-append home "/.local/state/guix-home"))
+        (define manifest (string-append state "/live-links"))
         (define (symlink-target path)
           (catch 'system-error
             (lambda ()
               (and (eq? 'symlink (stat:type (lstat path)))
                    (readlink path)))
             (lambda _ #f)))
-        (define (legacy-tree-link? path)
-          (let ((target (symlink-target path)))
-            (and target
-                 (string-prefix? "/gnu/store/" target)
-                 (string-suffix? "-familiar-live-file" target))))
         (define (path-exists? path)
           (catch 'system-error
             (lambda () (lstat path) #t)
             (lambda _ #f)))
-        ;; Hyprland prefers hyprland.lua when both files exist.  Remove only
-        ;; the old store-backed link that this configuration created; never
-        ;; delete an unmanaged regular file during Home activation.
-        (for-each
-         (lambda (relative)
-           (let ((path (string-append (getenv "HOME") "/" relative)))
-             (when (path-exists? path)
-               (unless (legacy-tree-link? path)
-                 (error "Refusing to remove unmanaged Home file" path))
-               (format #t "Removing stale Home config ~a~%" path)
-               (delete-file path))))
-         '(".config/hypr/hyprland.lua"))
-        (for-each
-         (lambda (root)
-           (let ((path (string-append (getenv "HOME") "/" root)))
-             (when (legacy-tree-link? path)
-               (format #t "Removing legacy Home tree link ~a~%" path)
-               (delete-file path))))
-         roots)
+        (define (legacy-link? target)
+          (and target
+               (string-prefix? "/gnu/store/" target)
+               (string-suffix? "-familiar-live-file" target)))
+        (define previous
+          (if (path-exists? manifest)
+              (call-with-input-file manifest
+                (lambda (port)
+                  (let loop ((line (read-line port)) (result '()))
+                    (if (eof-object? line)
+                        (reverse result)
+                        (let ((fields (string-split line #\tab)))
+                          (unless (= (length fields) 2)
+                            (error "Invalid live-link ownership record" manifest))
+                          (loop (read-line port) (cons fields result)))))))
+              '()))
+        (define current-paths (map car links))
+        ;; Preflight every existing target before making any changes. A file
+        ;; that replaced a managed symlink is user data, not ours to delete.
         (for-each
          (lambda (link)
            (let* ((relative (car link))
                   (source (cdr link))
-                  (target (string-append (getenv "HOME") "/" relative))
+                  (target (string-append home "/" relative))
+                  (old (symlink-target target))
+                  (owned (assoc relative previous)))
+             (when (and (path-exists? target)
+                        (not (or (equal? old source)
+                                 (legacy-link? old)
+                                 (and owned (equal? old (cadr owned))))))
+               (error "Refusing to replace unmanaged Home path" target))))
+         links)
+        (for-each
+         (lambda (owned)
+           (let* ((relative (car owned))
+                  (target (string-append home "/" relative))
+                  (old (symlink-target target)))
+             (when (and (not (member relative current-paths))
+                        (path-exists? target)
+                        (not (equal? old (cadr owned))))
+               (error "Refusing to remove changed or unmanaged Home path" target))))
+         previous)
+        ;; Remove only old store-backed tree roots made by the former Home
+        ;; linker. Do this after preflight so conflicts do not cause partial
+        ;; migration.
+        (for-each
+         (lambda (root)
+           (let* ((target (string-append home "/" root))
+                  (old (symlink-target target)))
+             (when (legacy-link? old) (delete-file target))))
+         roots)
+        (for-each
+         (lambda (owned)
+           (unless (member (car owned) current-paths)
+             (let* ((target (string-append home "/" (car owned)))
+                    (old (symlink-target target)))
+               (when old
+                 (format #t "Removing stale managed Home link ~a~%" target)
+                 (delete-file target)))))
+         previous)
+        (for-each
+         (lambda (link)
+           (let* ((relative (car link))
+                  (source (cdr link))
+                  (target (string-append home "/" relative))
                   (old (symlink-target target)))
              (mkdir-p (dirname target))
-             (when (and old
-                        (or (string=? old source)
-                            (and (string-prefix? "/gnu/store/" old)
-                                 (string-suffix? "-familiar-live-file" old))))
+             (when (and old (not (equal? old source)))
+               (format #t "Updating managed Home link ~a~%" target)
                (delete-file target))
-             (unless (path-exists? target)
-               (symlink source target))))
-         links))))
+             (unless (path-exists? target) (symlink source target))))
+         links)
+        (mkdir-p state)
+        (let ((temporary (string-append manifest ".new")))
+          (call-with-output-file temporary
+            (lambda (port)
+              (for-each (lambda (link)
+                          (format port "~a\t~a\n" (car link) (cdr link)))
+                        links)))
+          (rename-file temporary manifest)))))
 
 (define %familiar-herdr-plugins
   (simple-service 'familiar-herdr-plugins home-activation-service-type
