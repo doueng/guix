@@ -31,7 +31,8 @@
      (origin
        (inherit (package-source asahi-u-boot))
        (patches
-        (list (local-file "u-boot-xhci-dwc3-os-prepare.patch")))))))
+        (append (origin-patches (package-source asahi-u-boot))
+                (list (local-file "u-boot-xhci-dwc3-os-prepare.patch"))))))))
 
 ;; m1n1-u-boot-grub-installer is not exported by (gnu bootloader m1n1).
 (define m1n1-u-boot-grub-installer
