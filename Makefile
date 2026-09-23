@@ -8,7 +8,7 @@ ROOT_UUID ?= c694c1fc-a241-459a-a60d-1c829f1b9c30
 ESP_UUID ?= 77C4-10EC
 ESP_PARTUUID ?= 5408cbd2-dc6c-49c6-bee9-c51c5f3a29fc
 BUILD_RECEIPT ?= local/system-build.receipt
-SOURCE_FINGERPRINT = $$( { sha256sum Makefile channels.scm; find modules desktop -type f -print0 | sort -z | xargs -0 sha256sum; } | sha256sum | cut -d ' ' -f1)
+SOURCE_FINGERPRINT = $$( { sha256sum Makefile channels.scm "$(BASE)/devices.json"; find modules desktop -type f -print0 | sort -z | xargs -0 sha256sum; } | sha256sum | cut -d ' ' -f1)
 
 .PHONY: help test eval eval-desktop dry-run build apply switch home-build home-apply
 
@@ -76,7 +76,8 @@ apply:
 	    echo 'STOP: build receipt is for a different system configuration'; exit 1; }; \
 	  output=$$(sed -n 's/^output=//p' "$(BUILD_RECEIPT)"); \
 	  case "$$output" in /gnu/store/*) ;; *) echo 'STOP: invalid output in build receipt'; exit 1;; esac; \
-	  echo "Reviewed system output: $$output"; \
+	  test -e "$$output" || { echo 'STOP: built output was garbage-collected; rebuild'; exit 1; }; \
+	  echo "Reviewed system output: $$output"; \\
 	  printf 'After reviewing the build and disk identities, reconfigure this Guix system/ESP? [y/N] '; \
 	  read answer; test "$$answer" = y -o "$$answer" = Y || { echo 'Cancelled'; exit 1; }; \
 	  case "$$(readlink -f /run/current-system)" in /gnu/store/*) ;; *) echo 'STOP: not the native Guix system'; exit 1;; esac; \
