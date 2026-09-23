@@ -71,8 +71,13 @@ make home-apply
 `desktop/home.scm` evaluates the same `%familiar-home` object embedded by the system config, so the Home package and service definitions stay in one place. Home activation is per-user and does not use `sudo`, reconfigure Guix System, or write the ESP. Changes to OS packages, kernel, services, bootloader or storage still require the reviewed system build/apply workflow.
 
 `make switch` checks the native Guix system and root/ESP identities, then runs
-one pinned `guix system reconfigure`. There are no receipts, fingerprints or
-reuse options. `make apply` is a compatibility alias for the same operation.
+one pinned `guix system reconfigure`. The authenticated pinned Guix is resolved
+as your user before sudo, avoiding root's separate time-machine trust/cache.
+There are no receipts, fingerprints or reuse options. `make apply` is a
+compatibility alias for the same operation. Switch skips optional kexec loading
+by default; normal reboot and ESP updates are unchanged. Use
+`make switch RECONFIGURE_FLAGS=` only if you want Guix to prepare fast kexec
+reboot as well.
 
 For measured build-speed options and the two known upstream/trust warnings,
 see [BUILDING.md](../BUILDING.md).

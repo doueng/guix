@@ -1,6 +1,7 @@
 """Exercise Make recipes with fake Guix/sudo/hardware; never activate a system."""
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -20,25 +21,36 @@ class SwitchTests(unittest.TestCase):
             str(self.root / "efi-partuuid")))
         (self.root / "efi-partuuid").write_text("test-partuuid")
         self.log = self.root / "commands.log"
-        self.stub("guix", f'''printf '%s gc=%s base=%s\\n' "$*" "${{GC_FREE_SPACE_DIVISOR-unset}}" "${{GUIX_BASE-unset}}" >> "{self.log}"
-''')
+        self.profile = self.root / "bin/pinned"
+        self.profile_link = self.root / "profile-link"
+        self.profile_link.symlink_to(self.profile)
+        log_command = f'''printf '%s gc=%s base=%s\\n' "$*" "${{GC_FREE_SPACE_DIVISOR-unset}}" "${{GUIX_BASE-unset}}" >> "{self.log}"
+'''
+        self.stub("guix", log_command + f'echo "{self.profile_link}"\n')
+        self.stub("pinned/bin/guix", f'echo pinned >> "{self.log}"\n' + log_command)
         # Model sudo's environment filtering: only explicit assignments survive.
         self.stub("sudo", f'''echo sudo >> "{self.log}"
 exec env -i PATH="$PATH" "$@"
 ''')
-        self.stub("readlink", "echo /gnu/store/fake-system\n")
+        self.stub("readlink", f'''case "$*" in
+  *'/run/current-system') echo /gnu/store/fake-system ;;
+  *) exec "{shutil.which('readlink')}" "$@" ;;
+esac
+''')
         self.stub("findmnt", '''case "$*" in
   *'/boot/efi') echo test-esp ;;
   *) echo test-root ;;
 esac
 ''')
         self.env = dict(os.environ)
-        for key in ("GC_FREE_SPACE_DIVISOR", "MAKEFLAGS", "MFLAGS", "MAKELEVEL"):
+        for key in ("GC_FREE_SPACE_DIVISOR", "MAKEFLAGS", "MFLAGS", "MAKELEVEL",
+                    "RECONFIGURE_FLAGS", "SUBSTITUTE_URLS"):
             self.env.pop(key, None)
         self.env["PATH"] = str(self.root / "bin") + os.pathsep + os.environ["PATH"]
 
     def stub(self, name, body):
         path = self.root / "bin" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("#!/bin/sh\nset -eu\n" + body)
         path.chmod(0o755)
 
@@ -57,8 +69,13 @@ esac
         self.assertEqual(commands.count("sudo\n"), 1)
         self.assertEqual(commands.count("system reconfigure"), 1)
         self.assertNotIn("system build", commands)
-        self.assertIn(f"time-machine -C {self.root}/channels.scm --", commands)
+        self.assertIn(f"time-machine -C {self.root}/channels.scm gc=", commands)
+        self.assertLess(commands.index("time-machine"), commands.index("sudo"))
+        self.assertIn("sudo\npinned\nsystem reconfigure --no-kexec", commands)
         self.assertIn(f"gc=1 base={self.root}/base", commands)
+        self.assertIn("--substitute-urls=https://bordeaux.guix.gnu.org "
+                      "https://substitutes.asahi-guix.org https://ci.guix.gnu.org",
+                      commands)
 
     def test_gc_override_survives_sudo(self):
         self.env["GC_FREE_SPACE_DIVISOR"] = "3"
@@ -91,9 +108,21 @@ esac
         config = self.root / "external.scm"
         self.assertIn(f' {config} gc=', self.make("switch", f"CONFIG={config}"))
 
-    def test_guix_failure_propagates(self):
+    def test_time_machine_failure_stops_before_sudo(self):
         self.stub("guix", "exit 1\n")
+        self.assertEqual(self.make("switch", success=False), "")
+
+    def test_pinned_guix_failure_propagates(self):
+        self.stub("pinned/bin/guix", "exit 1\n")
         self.make("switch", success=False)
+
+    def test_kexec_can_be_enabled(self):
+        self.assertNotIn("--no-kexec", self.make("switch", "RECONFIGURE_FLAGS="))
+
+    def test_substitute_order_override(self):
+        commands = self.make("switch", "SUBSTITUTE_URLS=https://example.invalid")
+        self.assertIn("--substitute-urls=https://example.invalid", commands)
+        self.assertNotIn("https://bordeaux.guix.gnu.org", commands)
 
 
 if __name__ == "__main__":

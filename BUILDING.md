@@ -73,10 +73,11 @@ and failure propagation without activating anything.
 
 End-to-end savings have not been measured: the timings above cover warm builds,
 not activation or bootloader work. On the next approved real switch, separate
-sudo waiting from execution and timestamp the reconfigure phases. Root's
-channel cache is separate from the user's; the warm user lookup measurement
-is not evidence of root's lookup cost. Do not disable authentication, grafts,
-safety checks or bootloader updates merely to improve timings.
+sudo waiting from execution and timestamp the reconfigure phases. Switch now
+resolves the authenticated pinned profile as the invoking user, canonicalizes
+its store path, and runs that exact Guix through sudo, avoiding a separate root
+time-machine cache/trust lookup. Do not disable authentication, grafts, safety
+checks or bootloader updates merely to improve timings.
 
 For existing live-linked config edits, no switch is needed. For Home-only
 package/service changes, use `make home-build` / `make home-apply`.
@@ -108,6 +109,22 @@ Existing live-linked Fish, Neovim, Doom, Pi and desktop config contents do not
 need a system rebuild. Package/service changes and changes to the generated
 link list do. Avoiding an unnecessary build saves more than evaluator tuning.
 
+## Substitute order
+
+`make build`, `make dry-run` and `make switch` pass the cache order explicitly:
+Bordeaux, Asahi, then CI. This is a per-invocation override, not a daemon change;
+Home commands and other Guix invocations still use their existing defaults.
+All three caches remain available, and signing-key authorization is unchanged.
+Override the list with `SUBSTITUTE_URLS='URL1 URL2 ...'` if needed.
+
+Pinned Guix's `(guix substitutes)` `lookup-narinfos/diverse` queries caches in
+order, passing paths without an authorized hit to the next cache. Bordeaux
+first avoids asking Asahi about general packages that Bordeaux can supply.
+Asahi-only packages instead incur a Bordeaux miss first. Cached narinfo
+responses, server latency and download throughput affect the actual benefit;
+no speedup has been measured. A local system/boot-config derivation usually has
+no substitute anywhere, so reordering cannot eliminate those misses/builds.
+
 ## Warning sources and remedies
 
 ### `channel 'asahi' is not trusted`
@@ -122,8 +139,11 @@ current user's `${XDG_CONFIG_HOME:-$HOME/.config}/guix/trusted-channels.scm`.
 This trusts the channel signing identities, not just these particular commits;
 the build's `-C channels.scm` still supplies the pins. The current user's pinned
 `guix time-machine ... describe -f channels` was verified without the warning
-and without disabling authentication. A later sudo invocation may use a
-separate trust configuration and may need its own reviewed trust entry.
+and without disabling authentication. `make switch` now resolves this profile
+before sudo and invokes its canonical `bin/guix` directly, so root no longer
+repeats time-machine with a different trust configuration. Root's trust files
+are not modified. Users without the reviewed trust entry still get the warning;
+we do not suppress it or disable channel authentication.
 
 ### `libcamera-minimal imported from both … networking … photo`
 
@@ -138,6 +158,20 @@ reviewed Guix pin update or channel patch. Do not mutate `/gnu/store`, globally
 change Guile duplicate-binding handling, or filter stderr: those approaches
 hide unrelated diagnostics. The warning is retained until that upstream fix
 is adopted.
+
+### Kexec `delete` binding warning and `Device or resource busy`
+
+The reported final warnings occur during Guix's optional kexec preparation,
+after normal activation and bootloader installation have succeeded. Switch now
+passes `--no-kexec` by default, avoiding that generated program and its load
+attempt. This is a deliberate feature opt-out, not a kernel fix or global
+warning filter. Normal reboot still uses the updated ESP. Do not use
+`reboot --kexec` expecting the new system to have been loaded; this option does
+not unload an older kexec image either.
+
+To retain Guix's kexec preparation, run `make switch RECONFIGURE_FLAGS=`.
+The `delete` binding warning may still occur in other upstream generated
+programs; no global duplicate-binding policy was changed.
 
 ## Validation and local evidence
 

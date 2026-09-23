@@ -3,6 +3,10 @@
 
 BASE ?= /etc/guix-ssd
 CONFIG ?= desktop/system.scm
+# Prefer the general cache; keep Asahi and CI as signed-substitute fallbacks.
+SUBSTITUTE_URLS ?= https://bordeaux.guix.gnu.org https://substitutes.asahi-guix.org https://ci.guix.gnu.org
+# Normal boot still uses the updated ESP; fast kexec reboot is opt-in.
+RECONFIGURE_FLAGS ?= --no-kexec
 ROOT_UUID ?= c694c1fc-a241-459a-a60d-1c829f1b9c30
 ESP_UUID ?= 77C4-10EC
 ESP_PARTUUID ?= 5408cbd2-dc6c-49c6-bee9-c51c5f3a29fc
@@ -35,11 +39,12 @@ eval-desktop:
 
 dry-run:
 	GUIX_BASE="$(BASE)" guix time-machine -C channels.scm -- \
-	  system build --dry-run -L modules "$(CONFIG)"
+	  system build --dry-run --substitute-urls="$(SUBSTITUTE_URLS)" -L modules "$(CONFIG)"
 
 build:
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} GUIX_BASE="$(BASE)" \
-	  guix time-machine -C channels.scm -- system build -L modules "$(CONFIG)"
+	  guix time-machine -C channels.scm -- \
+	  system build --substitute-urls="$(SUBSTITUTE_URLS)" -L modules "$(CONFIG)"
 
 switch:
 	@set -eu; \
@@ -48,9 +53,11 @@ switch:
 	  test "$$(findmnt -nro UUID /boot/efi)" = "$(ESP_UUID)" || { echo 'STOP: unexpected ESP'; exit 1; }; \
 	  test "$$(tr -d '\0' < /proc/device-tree/chosen/asahi,efi-system-partition)" = "$(ESP_PARTUUID)" \
 	    || { echo 'STOP: booted through an unexpected ESP'; exit 1; }; \
+	  profile=$$(guix time-machine -C "$(CURDIR)/channels.scm"); \
+	  profile=$$(readlink -f "$$profile"); \
 	  sudo env GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} GUIX_BASE="$(abspath $(BASE))" \
-	    guix time-machine -C "$(CURDIR)/channels.scm" -- \
-	    system reconfigure -L "$(CURDIR)/modules" "$(abspath $(CONFIG))"
+	    "$$profile/bin/guix" system reconfigure $(RECONFIGURE_FLAGS) \
+	    --substitute-urls="$(SUBSTITUTE_URLS)" -L "$(CURDIR)/modules" "$(abspath $(CONFIG))"
 
 apply: switch
 
