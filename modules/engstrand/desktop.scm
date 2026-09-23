@@ -79,8 +79,23 @@
                           (loop (read-line port) (cons fields result)))))))
               '()))
         (define current-paths (map car links))
-        ;; Preflight every existing target before making any changes. A file
-        ;; that replaced a managed symlink is user data, not ours to delete.
+        ;; Retire only known links left by older Home generations before
+        ;; checking child paths; those children otherwise resolve through the
+        ;; old store-backed tree symlink during preflight.
+        (for-each
+         (lambda (relative)
+           (let* ((target (string-append home "/" relative))
+                  (old (symlink-target target)))
+             (when (legacy-link? old) (delete-file target))))
+         '(".config/hypr/hyprland.lua"))
+        (for-each
+         (lambda (root)
+           (let* ((target (string-append home "/" root))
+                  (old (symlink-target target)))
+             (when (legacy-link? old) (delete-file target))))
+         roots)
+        ;; Preflight every existing target before making any further changes.
+        ;; A file that replaced a managed symlink is user data, not ours to delete.
         (for-each
          (lambda (link)
            (let* ((relative (car link))
@@ -104,15 +119,6 @@
                         (not (equal? old (cadr owned))))
                (error "Refusing to remove changed or unmanaged Home path" target))))
          previous)
-        ;; Remove only old store-backed tree roots made by the former Home
-        ;; linker. Do this after preflight so conflicts do not cause partial
-        ;; migration.
-        (for-each
-         (lambda (root)
-           (let* ((target (string-append home "/" root))
-                  (old (symlink-target target)))
-             (when (legacy-link? old) (delete-file target))))
-         roots)
         (for-each
          (lambda (owned)
            (unless (member (car owned) current-paths)
