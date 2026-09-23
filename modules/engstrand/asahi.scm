@@ -38,14 +38,16 @@
             (comment "Engstrand")
             (group "users")
             (home-directory "/home/engstrand")
-            (password "*")
+            ;; #f preserves a passwd(1)-managed password across reconfigure.
+            ;; Set an initial password after a fresh installation.
+            (password #f)
             (supplementary-groups '("wheel" "netdev" "audio" "video")))
             (user-account
              (name "root")
              (group "root")
              (uid 0)
              (home-directory "/root")
-             (password ""))
+             (password #f))
             %base-user-accounts))
     (file-systems
      (cons* (file-system
