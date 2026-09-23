@@ -5,5 +5,8 @@ set -eu
 # Doom framework directory just as the NixOS package wrapper does.
 PATH="$HOME/.guix-home/profile/bin:$PATH"
 export PATH
+# Ignore inherited editor hints; GNU Emacs uses EMACS when resolving its
+# executable directory, and a generic `emacs` value can point at this wrapper.
+unset EMACS
 exec "$HOME/.guix-home/profile/bin/emacs" \
   --init-directory="$HOME/.config/emacs" "$@"

@@ -457,3 +457,14 @@ ultimately to plain `find-file' when the current directory is not a project."
 (let ((clojure-config (expand-file-name "clojure.el" eng/doom-config-dir)))
   (when (file-readable-p clojure-config)
     (load clojure-config t 'nomessage)))
+
+;; Guix ships the aarch64 native module as libparinfer_rust.so. Prefer that
+;; over parinfer-rust-mode's unsupported Linux/aarch64 auto-download.
+(let ((parinfer-rust-cli (executable-find "parinfer-rust")))
+  (when parinfer-rust-cli
+    (setq parinfer-rust-library
+          (expand-file-name "../lib/libparinfer_rust.so"
+                            (file-name-directory parinfer-rust-cli)))))
+
+(after! parinfer-rust-mode
+  (setq parinfer-rust-preferred-mode 'indent))

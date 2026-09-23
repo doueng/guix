@@ -145,7 +145,7 @@
                             "direnv" "ripgrep" "fd" "jq" "bat" "btop"
                             "python" "python-black" "python-boto3" "python-pyopenssl"
                             "python-pyyaml"
-                            "emacs-no-x" "emacs-fish-mode"
+                            "emacs-no-x" "emacs-fish-mode" "parinfer-rust-emacs"
                             "node" "make" "gcc-toolchain" "pkg-config"
                             "cmake" "dasel" "diff-so-fancy" "diffstat" "entr" "exercism"
                             "file" "fennel" "fnlfmt" "go" "gopls" "gore" "hyperfine"

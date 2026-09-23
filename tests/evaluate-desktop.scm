@@ -65,6 +65,10 @@
   (check (member "emacs-no-x" (map package-name (home-environment-packages
                                                    (cadar (service-value (find-service 'guix-home))))))
          "Terminal-only Emacs must be a Home package")
+  (check (member "parinfer-rust-emacs"
+                 (map package-name (home-environment-packages
+                                   (cadar (service-value (find-service 'guix-home))))))
+         "Parinfer's native library must be a Home package")
   (for-each (lambda (name) (check (not (member name names)) "Sway fallback must be dropped"))
             '("sway" "foot" "ungoogled-chromium")))
 (check (member "pi-coding-agent" (map package-name (home-environment-packages
