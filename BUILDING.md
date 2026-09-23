@@ -76,18 +76,13 @@ trusted channel introductions. This does **not** mean Git signature
 authentication was disabled or failed. `channels.scm` supplies authenticated
 introductions and exact commits for both channels.
 
-After reviewing those introductions, explicitly list the approved channels in
-`${XDG_CONFIG_HOME:-$HOME/.config}/guix/trusted-channels.scm`, using the same
-list format as this repository's `channels.scm`. If no trust file exists,
-copying the reviewed file there is sufficient. If one exists, merge the
-approved entries without dropping other trusted channels. This trusts the
-channel signing identities, not just these particular commits; the build's
-`-C channels.scm` still supplies the pins.
-
-Tested with a temporary `XDG_CONFIG_HOME` under ignored `local/`: the warning
-disappeared and pinned `describe` succeeded, without disabling authentication.
-The real user/root trust configurations were **not changed**. A later sudo
-invocation may need its own reviewed trust configuration.
+After reviewing those introductions, the approved channels are listed in the
+current user's `${XDG_CONFIG_HOME:-$HOME/.config}/guix/trusted-channels.scm`.
+This trusts the channel signing identities, not just these particular commits;
+the build's `-C channels.scm` still supplies the pins. The current user's pinned
+`guix time-machine ... describe -f channels` was verified without the warning
+and without disabling authentication. A later sudo invocation may use a
+separate trust configuration and may need its own reviewed trust entry.
 
 ### `libcamera-minimal imported from both … networking … photo`
 

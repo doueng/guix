@@ -18,11 +18,11 @@ Opt-in native Guix configuration for the existing SSD installation. This is a fi
 
 The Asahi kernel is inherited with the uinput module enabled for keyd; initrd/UAS, filesystem UUIDs, bootloader definition, account declarations, channel pins and audio/D-Bus services remain preserved. Normal reconfiguration still updates the Guix generation and its boot menu/bootloader on the new ESP; it is not a home-only operation.
 
-Volume keys control the protected PipeWire default sink through `wpctl`; they do not bypass Asahi speaker safety. Internal speakers remain unverified, and Ghostty's audio bell is disabled. Do not enable playback until the existing speaker-safety gate passes.
+Volume keys control the protected PipeWire default sink through `wpctl`; they do not bypass Asahi speaker safety. The user reports that speaker protection and routing have passed hardware verification. Ghostty's audio bell remains disabled.
 
 ## Deliberate gaps
 
-This is a first usability port, not full NixOS parity. Native activation and hardware acceptance are still pending; package availability/build success does not establish that the desktop works on this machine. Automatic idle/suspend locking is disabled. Neovim Java tooling, some language servers, Herdr's annotate plugin and Tailscale are not ported. LazyVim and its runtime plugins are fetched by lazy.nvim on first launch. Babashka is available as `bb`; the NixOS-only `nixdiag` script remains with NixOS because it depends on systemd/journald/NixOS paths. The Herdr tab helpers call `herdr` directly, and terminal bindings focus the existing Ghostty window/select its tab when appropriate.
+This is a first usability port, not full NixOS parity. The user reports that native activation and hardware acceptance passed; package availability/build success alone does not establish hardware behavior. Automatic idle/suspend locking is intentionally disabled. Neovim Java tooling, some language servers, Herdr's annotate plugin and Tailscale are not ported. LazyVim and its runtime plugins are fetched by lazy.nvim on first launch. Babashka is available as `bb`; the NixOS-only `nixdiag` script remains with NixOS because it depends on systemd/journald/NixOS paths. The Herdr tab helpers call `herdr` directly, and terminal bindings focus the existing Ghostty window/select its tab when appropriate.
 
 Useful controls with keyd active:
 

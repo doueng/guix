@@ -13,21 +13,19 @@ These identities document the installation, not authorization to mount, initiali
 
 ## Desktop and bootloader
 
-- The familiar desktop configuration is maintained in `desktop/` and builds from this checkout. Native desktop reconfigure/activation and desktop hardware testing remain pending.
-- A patched U-Boot/m1n1 bootloader is authored in `modules/engstrand/bootloader.scm`. A self-contained snapshot was staged for native validation; the U-Boot source build and attached-at-boot verification remain outstanding. Do not infer that earlier system builds include this patch.
-- Internal-speaker playback remains gated on verifying the machine-specific speaker protection and PipeWire/WirePlumber route. Suspend/resume on USB root, graphics/input and NixOS boot with the T7 disconnected also need acceptance.
+- The familiar desktop configuration is maintained in `desktop/` and has been natively activated. The user reports that desktop and hardware acceptance passed, including graphics/input/networking, lock/unlock, USB-root suspend/resume, protected audio routing/speaker safety, and NixOS boot with the T7 disconnected.
+- The patched U-Boot/m1n1 bootloader in `modules/engstrand/bootloader.scm` has been built, applied, and verified booting on hardware, per user report. The current `make switch` path builds `desktop/system.scm` and then runs guarded `guix system reconfigure`, which selects this bootloader via `make-ssd-os`.
+- Acceptance status is user-reported; this checkout does not independently capture hardware-test logs. Preserve the working generation and independent recovery path for future updates.
 
 ## Next work
 
-1. Resume only from the native Guix session with the T7 attached; verify live root/ESP identity and mounts before work. Do not reactivate the NixOS bootstrap merely to continue native acceptance.
-2. Build and inspect the staged patched bootloader configuration using the pinned, authenticated channels. Preserve a working generation and back up the Guix ESP before any reviewed reconfigure.
-3. If approved and the build succeeds, apply the desktop/bootloader changes through the guarded native workflow in [desktop/README.md](desktop/README.md). This is a system reconfigure and can update the Guix ESP; it is not a home-only operation.
-4. Complete hardware and recovery checks before moving sensitive data or changing the startup default.
+- Continue routine changes from the native Guix session. Before any future reconfigure, inspect the build and current disk identities; `make switch` changes the system generation and may update the Guix ESP.
+- Keep the known-good generation and independent NixOS recovery path available. Re-run relevant acceptance checks after changes to the bootloader, kernel, desktop, storage, or audio configuration.
 
 ## Validation known to pass
 
-- Python safety tests and the base/desktop Scheme evaluations passed during preparation.
+- Python safety tests and the base/desktop Scheme evaluations passed during preparation; current `make test`, `make eval`, and `make eval-desktop` also pass.
 - The UAS-corrected base system was built, initialized and booted.
-- Desktop system builds succeeded before the latest patched-U-Boot validation step.
+- The user reports that the current desktop and patched bootloader were built/applied and passed the hardware acceptance checks described above.
 
-These results are not substitutes for rebuilding the current checkout, applying it, or completing hardware acceptance. Ignored `local/` contains private snapshots and diagnostic artifacts; it is not portable source.
+Hardware acceptance is based on the user's report, not independently reproduced in this review. Rebuild and revalidate after relevant future changes. Ignored `local/` contains private snapshots and diagnostic artifacts; it is not portable source.
