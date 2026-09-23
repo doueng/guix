@@ -7,4 +7,5 @@ Personal Guix configuration for an M1 MacBook Air; the Guix system boots from an
 - Keep `local/` private and ignored. Do not commit firmware, credentials, password hashes or machine backups.
 - Author Scheme in `modules/` and desktop assets in `desktop/`. `desktop/shared/` is independently maintained; it does not sync from NixOS.
 - Use jj, not git. Run `make test`; Scheme evaluations require Guix and the pinned Asahi channel. See `README.md` and `desktop/README.md` for workflows.
+- Pi discovers the project Guix skill at `.agents/skills/guix/SKILL.md`; use it for Guix-specific tasks and its `references.md` for local/manual links.
 - NixOS bootstrap and AWS infrastructure belong to `~/nixos`, not this repository.
