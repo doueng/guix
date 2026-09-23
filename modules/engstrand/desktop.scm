@@ -20,7 +20,7 @@
   #:use-module (guix gexp)
   #:use-module (guix packages)
   #:use-module (srfi srfi-1)
-  #:export (make-familiar-os))
+  #:export (make-familiar-os %familiar-home))
 
 (define %keyd-service
   (simple-service 'familiar-keyd shepherd-root-service-type

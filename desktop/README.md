@@ -16,7 +16,7 @@ Native Guix configuration for the existing SSD installation. This is a first usa
 - Terminal-only Doom Emacs using the editable `emacs` launcher (which selects `~/.config/emacs`), with the migrated Doom modules, keybindings, Clojure support and config linked from this checkout. Parinfer's native Rust library is provided by Guix's aarch64-capable `parinfer-rust-emacs` package, and Doom is configured to use Indent Mode. The Doom framework itself is kept in `~/.config/emacs` and must be bootstrapped once with the commands below.
 - Hyprlock PAM integration (empty passwords rejected) and a manual lock binding. Automatic idle and suspend locking are disabled; use Ctrl+Alt+L when you want to lock.
 
-The Asahi kernel is inherited with the uinput module enabled for keyd; initrd/UAS, filesystem UUIDs, bootloader definition, account declarations, channel pins and audio/D-Bus services remain preserved. Normal reconfiguration still updates the Guix generation and its boot menu/bootloader on the new ESP; it is not a home-only operation.
+The Asahi kernel is inherited with the uinput module enabled for keyd; initrd/UAS, filesystem UUIDs, bootloader definition, account declarations, channel pins and audio/D-Bus services remain preserved. A system reconfigure updates the Guix generation and may update its boot menu/bootloader on the new ESP. For Home-only changes, use the standalone `desktop/home.scm` config and `make home-build` / `make home-apply`; this updates the user's Home generation without changing the system generation or ESP.
 
 Volume keys control the protected PipeWire default sink through `wpctl`; they do not bypass Asahi speaker safety. The user reports that speaker protection and routing have passed hardware verification. Ghostty's audio bell remains disabled.
 
@@ -51,11 +51,20 @@ Neovim: Space+ff selects files, Space+bb lists buffers, Space+e opens netrw, Spa
 
 The repository is the live source of the desktop configuration. `desktop/system.scm` reads the reviewed disk identity from `GUIX_BASE` (default `/etc/guix-ssd`) and loads the pinned `channels.scm` from this checkout. It references Fish, Neovim, Doom, Pi and desktop assets directly; no snapshot or archive is created.
 
-From the repository root on the native Guix system:
+From the repository root on the native Guix system, build and review the complete system configuration before a system reconfigure:
 
 ```sh
 make build
 ```
+
+For editor, shell, or Home package changes that do not alter system packages/services, build and interactively activate the standalone Home configuration instead:
+
+```sh
+make home-build
+make home-apply
+```
+
+`desktop/home.scm` evaluates the same `%familiar-home` object embedded by the system config, so the Home package and service definitions stay in one place. Home activation is per-user and does not use `sudo`, reconfigure Guix System, or write the ESP. Changes to OS packages, kernel, services, bootloader or storage still require the reviewed system build/apply workflow.
 
 For measured build-speed options and the two known upstream/trust warnings,
 see [BUILDING.md](../BUILDING.md).

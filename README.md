@@ -19,7 +19,7 @@ make eval
 make eval-desktop
 ```
 
-The Scheme checks require Guix and the pinned Asahi channel. `make build` builds the selected system configuration; `make apply` performs a guarded native reconfigure and requires a successful reviewed build. Desktop/Home-only changes can use the independent `make home-build` and `make home-apply` workflow without reconfiguring the system or bootloader. See `make help`.
+The Scheme checks require Guix and the pinned Asahi channel. `make build` builds the selected system configuration; `make apply` performs a guarded native reconfigure and requires a successful reviewed build. Desktop/Home-only changes can use `make home-build` and the interactive `make home-apply` workflow without reconfiguring the system or bootloader. See `make help`.
 
 Author Scheme in `modules/` and desktop assets in `desktop/`. `desktop/shared/` is independently maintained and does not sync from NixOS. Keep `local/` private and ignored; never commit firmware, credentials, password hashes or machine backups. Use jj.
 

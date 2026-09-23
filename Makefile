@@ -8,13 +8,15 @@ ROOT_UUID ?= c694c1fc-a241-459a-a60d-1c829f1b9c30
 ESP_UUID ?= 77C4-10EC
 ESP_PARTUUID ?= 5408cbd2-dc6c-49c6-bee9-c51c5f3a29fc
 
-.PHONY: help test eval eval-desktop dry-run build apply switch
+.PHONY: help test eval eval-desktop dry-run build apply switch home-build home-apply
 
 help:
 	@echo 'build         pinned Guix build directly from $(CONFIG)'
 	@echo 'dry-run       show what build would fetch or build'
 	@echo 'apply         guarded native reconfigure (sudo; build and review first)'
-	@echo 'switch        build and apply sequentially'
+	@echo 'switch        build and apply sequentially (system and bootloader)'
+	@echo 'home-build    build desktop Home without changing system/bootloader'
+	@echo 'home-apply    interactively activate desktop Home (no sudo/ESP writes)'
 	@echo 'test          offline Scheme checks'
 	@echo 'eval          base pinned Scheme checks'
 	@echo 'eval-desktop  desktop Scheme checks from this checkout'
@@ -43,6 +45,14 @@ build:
 switch:
 	$(MAKE) build
 	$(MAKE) apply
+
+home-build:
+	guix time-machine -C channels.scm -- home build -L modules desktop/home.scm
+
+home-apply:
+	@printf 'Activate Guix Home from desktop/home.scm for user %s? [y/N] ' "$$USER"; \
+	read answer; test "$$answer" = y -o "$$answer" = Y
+	guix time-machine -C channels.scm -- home reconfigure -L modules desktop/home.scm
 
 apply:
 	@test -f $(BASE)/devices.json || { echo "STOP: no devices.json under BASE=$(BASE)"; exit 1; }
