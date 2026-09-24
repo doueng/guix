@@ -5,7 +5,6 @@
   #:use-module (asahi guix systems sway)
   #:use-module (engstrand system bootloader)
   #:use-module (gnu)
-  #:use-module (gnu home)
   #:use-module (gnu packages ncurses)
   #:use-module (gnu packages package-management)
   #:use-module (gnu packages version-control)
@@ -33,15 +32,6 @@
     (initrd-modules (cons* "uas" asahi-initrd-modules))
     (users
      (cons* (user-account
-             (name "engstrand")
-             (comment "Engstrand")
-             (group "users")
-             (home-directory "/home/engstrand")
-            ;; #f preserves a passwd(1)-managed password across reconfigure.
-            ;; Set an initial password after a fresh installation.
-             (password #f)
-             (supplementary-groups '("wheel" "netdev" "audio" "video")))
-            (user-account
              (name "root")
              (group "root")
              (uid 0)
@@ -70,9 +60,8 @@
              ;; The Sway base provides slock and xlock; this system uses neither.
              (delete screen-locker-service-type)
              (delete openssh-service-type)
-             (guix-home-service-type
-              homes => `(("engstrand" ,(home-environment
-                                        (services %asahi-desktop-home-services)))))
+             ;; Guix Home is user configuration and is owned by the rde config.
+             (delete guix-home-service-type)
              (guix-service-type
               config => (guix-configuration
                           (inherit config)

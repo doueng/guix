@@ -1,7 +1,5 @@
-;; Keep substitute previews in sync with the packages declared in Home.
-;; Home services can add packages of their own; this covers explicit packages.
-(use-modules (engstrand desktop)
-             (gnu home)
+;; Keep substitute previews in sync with explicit packages declared in Home.
+(use-modules (engstrand config)
              (guix profiles))
 
-(packages->manifest (home-environment-packages %familiar-home))
+(packages->manifest %familiar-home-packages)

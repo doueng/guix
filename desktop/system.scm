@@ -1,13 +1,15 @@
-(use-modules (engstrand desktop)
-             (guix channels))
+(use-modules (engstrand config)
+             (guix channels)
+             (rde features))
 
 (define %root-uuid
   "c4f25409-b1a5-4ef0-8ac9-8e75f011668c")
 (define %esp-uuid
   "5CDF-1DF4")
 
-(make-familiar-os
- #:root-uuid %root-uuid
- #:esp-uuid %esp-uuid
- #:channels (primitive-load
-             (string-append (dirname (current-filename)) "/../channels.scm")))
+(rde-config-operating-system
+ (make-familiar-config
+  #:root-uuid %root-uuid
+  #:esp-uuid %esp-uuid
+  #:channels (primitive-load
+              (string-append (dirname (current-filename)) "/../channels.scm"))))
