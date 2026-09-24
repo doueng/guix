@@ -9,7 +9,7 @@ The development manual can get ahead of this repository's pinned Guix/Asahi chan
 
 ## Local/offline documentation
 
-The converted Markdown copies are stored beside this file:
+The converted Markdown copies are stored in the `references/` subdirectory:
 
 - [`guix-manual.md`](references/guix-manual.md) — complete reference manual, development version.
 - [`guix-cookbook.md`](references/guix-cookbook.md) — complete cookbook.
