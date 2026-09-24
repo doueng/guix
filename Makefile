@@ -7,7 +7,7 @@ SUBSTITUTE_URLS ?= https://bordeaux.guix.gnu.org https://substitutes.asahi-guix.
 # Normal boot still uses the updated ESP; fast kexec reboot is opt-in.
 RECONFIGURE_FLAGS ?= --no-kexec
 
-.PHONY: help test eval eval-desktop dry-run build apply switch home-build home-apply
+.PHONY: help test eval eval-desktop dry-run build apply switch home-build home-apply home-weather
 
 help:
 	@echo 'build         build $(CONFIG) without activating it'
@@ -15,6 +15,7 @@ help:
 	@echo 'switch        build and activate once via reconfigure (sudo; writes ESP)'
 	@echo 'apply         alias for switch'
 	@echo 'home-build    build desktop Home without changing system/bootloader'
+	@echo 'home-weather  check substitutes for explicit Home packages (network)'
 	@echo 'home-apply    interactively activate desktop Home (no sudo/ESP writes)'
 	@echo 'test          offline Scheme and workflow checks'
 	@echo 'eval          pinned installed-system and Home checks'
@@ -56,6 +57,10 @@ apply: switch
 
 home-build:
 	guix time-machine -C channels.scm -- home build -L modules desktop/home.scm
+
+home-weather:
+	guix time-machine -C channels.scm -- weather -L modules \
+	  --substitute-urls="$(SUBSTITUTE_URLS)" -m desktop/home-manifest.scm
 
 home-apply:
 	@printf 'Activate Guix Home from desktop/home.scm for user %s? [y/N] ' "$$USER"; \
