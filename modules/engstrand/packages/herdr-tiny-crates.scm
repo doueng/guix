@@ -1,4 +1,4 @@
-(define-module (engstrand herdr-tiny-crates)
+(define-module (engstrand packages herdr-tiny-crates)
   #:use-module (guix build-system cargo)
   #:export (herdr-tiny-fingers-crate-inputs))
 

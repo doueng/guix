@@ -1,4 +1,4 @@
-(define-module (engstrand packages)
+(define-module (engstrand packages definitions)
   #:use-module (gnu packages audio)
   #:use-module (gnu packages base)
   #:use-module (gnu packages calendar)
@@ -34,7 +34,7 @@
   #:use-module (guix build-system go)
   #:use-module (guix build-system meson)
   #:use-module (guix download)
-  #:use-module (engstrand herdr-tiny-crates)
+  #:use-module (engstrand packages herdr-tiny-crates)
   #:use-module (guix git-download)
   #:use-module (guix gexp)
   #:use-module (guix packages)
@@ -239,17 +239,17 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
     (description "Herdr terminal multiplexer from the herdrdev/herdr release binaries.")
     (home-page "https://github.com/herdrdev/herdr")
     (license license:asl2.0)))
-(define %herdr-module-dir
+(define %package-module-dir
   (dirname (canonicalize-path
-            (search-path %load-path "engstrand/packages.scm"))))
+            (search-path %load-path "engstrand/packages/definitions.scm"))))
 (define %repo-dir
-  (dirname (dirname %herdr-module-dir)))
+  (dirname (dirname (dirname %package-module-dir))))
 (define %herdr-sesh-vendor
-  (local-file (string-append %repo-dir "/desktop/shared/herdr/sesh/vendor.tar.gz")))
+  (local-file (string-append %repo-dir "/desktop/configs/herdr/sesh/vendor.tar.gz")))
 (define %herdr-sesh-manifest
-  (local-file (string-append %herdr-module-dir "/herdr-sesh-plugin.toml")))
+  (local-file (string-append %repo-dir "/desktop/configs/herdr/plugin-manifests/sesh.toml")))
 (define %herdr-tiny-fingers-manifest
-  (local-file (string-append %herdr-module-dir "/herdr-tiny-fingers-plugin.toml")))
+  (local-file (string-append %repo-dir "/desktop/configs/herdr/plugin-manifests/tiny-fingers.toml")))
 
 (define-public herdr-tiny-fingers
   (package
@@ -344,8 +344,6 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
     (home-page "https://github.com/idursun/jjui")
     (license license:expat)))
 
-;; The pinned Guix channel does not package Bluetui.  Use its static
-;; upstream aarch64 release rather than compiling a large Rust crate graph.
 (define-public bluetui
   (package
     (name "bluetui")

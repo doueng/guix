@@ -1,4 +1,4 @@
-(define-module (engstrand bootloader)
+(define-module (engstrand system bootloader)
   #:use-module (asahi guix build modules)
   #:use-module (asahi guix packages bootloader)
   #:use-module (asahi guix packages linux)
@@ -23,6 +23,10 @@
    #:configs '("CONFIG_INPUT_UINPUT=m")
    #:extra-version "keyd"))
 
+(define %bootloader-module-dir
+  (dirname (canonicalize-path
+            (search-path %load-path "engstrand/system/bootloader.scm"))))
+
 (define-public asahi-u-boot-os-prepare
   (package
     (inherit asahi-u-boot)
@@ -32,7 +36,8 @@
        (inherit (package-source asahi-u-boot))
        (patches
         (append (origin-patches (package-source asahi-u-boot))
-                (list (local-file "u-boot-xhci-dwc3-os-prepare.patch"))))))))
+                (list (local-file (string-append %bootloader-module-dir
+                                                 "/u-boot-xhci-dwc3-os-prepare.patch")))))))))
 
 ;; m1n1-u-boot-grub-installer is not exported by (gnu bootloader m1n1).
 (define m1n1-u-boot-grub-installer

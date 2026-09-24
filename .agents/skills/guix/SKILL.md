@@ -21,7 +21,7 @@ For offline work, consult the converted local copies in `references/guix-manual.
 - This is a personal M1 MacBook Air configuration booting from an initialized Samsung T7. Never rerun formatting or `guix system init` as a resume step.
 - Prefer offline, non-mutating checks. Do not mount, activate, reconfigure, write bootloader/ESP data, or perform destructive operations without explicit approval. Preserve the NixOS ESP and recovery environment; never disable channel authentication.
 - Keep `local/` private and ignored. Never commit firmware, credentials, password hashes, or machine backups. NixOS bootstrap and AWS infrastructure belong in `~/nixos`.
-- Author Scheme in `modules/`; desktop assets belong in `desktop/`. `desktop/shared/` is independently maintained.
+- Author Scheme in `modules/`; desktop assets belong in `desktop/`. Preserve the independently maintained configs in `desktop/configs/`; its Hypr settings are machine-specific.
 - Use jj, not git. Run `make test` for repository checks. Scheme evaluations require Guix and the pinned Asahi channel. Consult `BUILDING.md`, `INSTALLATION-PLAN.md`, and `desktop/README.md` when relevant.
 
 ## Practical workflow

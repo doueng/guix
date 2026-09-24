@@ -1,15 +1,15 @@
-(define-module (engstrand desktop-files)
+(define-module (engstrand home files)
   #:use-module (guix build utils)
   #:use-module (guix gexp)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-13)
-  #:export (desktop-file %desktop-home-files
-            %desktop-direct-home-links %desktop-keyd-config))
+  #:export (%desktop-home-files %desktop-direct-home-links
+            %desktop-keyd-config))
 
 (define %module-file
-  (canonicalize-path (search-path %load-path "engstrand/desktop-files.scm")))
+  (canonicalize-path (search-path %load-path "engstrand/home/files.scm")))
 (define %repo
-  (dirname (dirname (dirname %module-file))))
+  (dirname (dirname (dirname (dirname %module-file)))))
 
 (define (repo-file relative)
   (string-append %repo "/" relative))
@@ -26,7 +26,7 @@
   (let* ((root (repo-file relative))
          (prefix (if (string-suffix? "/" root) root (string-append root "/"))))
     ;; Wallpapers are optional and not present in every checkout.
-    (if (and (string=? relative "desktop/shared/theme/wallpapers")
+    (if (and (string=? relative "desktop/configs/theme/wallpapers")
              (not (file-exists? root)))
         '()
         (begin
@@ -51,45 +51,38 @@
 (define %desktop-direct-home-links
   (append
    (list
-    (file-entry ".config/git/config" "desktop/shared/git/config")
-    (file-entry ".config/jj/config.toml" "desktop/shared/jj/config.toml")
-    (file-entry ".config/jjui/config.toml" "desktop/shared/jjui/config.toml")
-    (file-entry ".config/herdr/config.toml" "desktop/shared/herdr/config.toml")
-    (file-entry ".config/herdr/sesh.toml" "desktop/shared/herdr/sesh.toml")
+    (file-entry ".config/git/config" "desktop/configs/git/config")
+    (file-entry ".config/jj/config.toml" "desktop/configs/jj/config.toml")
+    (file-entry ".config/jjui/config.toml" "desktop/configs/jjui/config.toml")
+    (file-entry ".config/herdr/config.toml" "desktop/configs/herdr/config.toml")
+    (file-entry ".config/herdr/sesh.toml" "desktop/configs/herdr/sesh.toml")
     (file-entry ".config/noctalia/config.toml"
-                 "desktop/shared/noctalia/config.toml")
+                 "desktop/configs/noctalia/config.toml")
     (file-entry ".local/share/icons/transparent.svg"
-                 "desktop/shared/noctalia/transparent.svg")
-    (file-entry ".config/ghostty/config" "desktop/shared/ghostty/config")
+                 "desktop/configs/noctalia/transparent.svg")
+    (file-entry ".config/ghostty/config" "desktop/configs/ghostty/config")
     (file-entry ".config/ghostty/config.asahi"
-                 "desktop/shared/ghostty/config.asahi")
+                 "desktop/configs/ghostty/config.asahi")
     (file-entry ".config/btop/themes/catppuccin-mocha.theme"
-                 "desktop/shared/theme/btop.theme")
-    (file-entry ".pi/README.md" "desktop/shared/pi/README.md"))
-   (tree-entries ".config/fish" "desktop/shared/shell/fish")
-   (tree-entries ".config/nvim" "desktop/shared/neovim")
-   (tree-entries ".config/doom" "desktop/shared/doom")
-   (tree-entries ".config/hypr" "desktop/home/.config/hypr")
-   (tree-entries ".config/waybar" "desktop/home/.config/waybar")
-   (tree-entries ".pi/agent" "desktop/shared/pi/assets/agent")
+                 "desktop/configs/theme/btop.theme")
+    (file-entry ".pi/README.md" "desktop/configs/pi/README.md"))
+   (tree-entries ".config/fish" "desktop/configs/shell/fish")
+   (tree-entries ".config/nvim" "desktop/configs/neovim")
+   (tree-entries ".config/doom" "desktop/configs/doom")
+   (tree-entries ".config/hypr" "desktop/configs/hypr")
+   (tree-entries ".pi/agent" "desktop/configs/pi/assets/agent")
    (tree-entries ".local/share/catppuccin-mocha/wallpapers"
-                  "desktop/shared/theme/wallpapers")
+                  "desktop/configs/theme/wallpapers")
    (tree-entries ".local/share/herdr/tiny-fingers"
-                  "desktop/shared/herdr/tiny-fingers")
+                  "desktop/configs/herdr/tiny-fingers")
    (tree-entries ".local/bin" "desktop/bin")
-   (tree-entries ".local/bin" "desktop/shared/herdr/bin")))
+   (tree-entries ".local/bin" "desktop/configs/herdr/bin")))
 
 (define %desktop-home-files
   (map (lambda (entry)
          (list (car entry) (local-file (cdr entry))))
-       (filter (lambda (entry)
-                 (not (assoc (car entry) %desktop-direct-home-links)))
-               (append (tree-entries "" "desktop/home")
-                       (tree-entries ".config/ghostty/themes"
-                                     "desktop/shared/ghostty/themes")))))
-
-(define (desktop-file path)
-  (local-file (repo-file path)))
+       (tree-entries ".config/ghostty/themes"
+                     "desktop/configs/ghostty/themes")))
 
 (define %desktop-keyd-config
   (local-file (repo-file "desktop/keyd.conf")))

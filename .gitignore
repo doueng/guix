@@ -3,4 +3,4 @@ local/
 __pycache__/
 
 # Large personal wallpaper assets remain outside the repository history.
-desktop/shared/theme/wallpapers/
+desktop/configs/theme/wallpapers/

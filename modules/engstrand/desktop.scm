@@ -1,7 +1,7 @@
 (define-module (engstrand desktop)
-  #:use-module (engstrand asahi)
-  #:use-module (engstrand desktop-files)
-  #:use-module (engstrand packages)
+  #:use-module (engstrand system asahi)
+  #:use-module (engstrand home files)
+  #:use-module (engstrand packages definitions)
   #:use-module (asahi guix systems desktop)
   #:use-module (gnu)
   #:use-module (gnu home)
@@ -45,6 +45,7 @@
     #~(begin
         (use-modules (guix build utils) (ice-9 ftw) (ice-9 rdelim)
                      (srfi srfi-1) (srfi srfi-13))
+        ;; Keep waybar here only to retire legacy store-backed tree links.
         (define roots
           '(".config/fish" ".config/nvim" ".config/doom"
             ".config/hypr" ".config/waybar" ".pi/agent"
