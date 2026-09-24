@@ -2,30 +2,19 @@
 
 ## Installed system
 
-- Native Guix boots from the Samsung T7 after adding `uas` to the initrd. The fix is present in the authored configuration and covered by `tests/evaluate.scm`.
-- The user reports setting both root and `engstrand` passwords. Do not rerun initialization to change or verify them.
-- Do not format the T7, rerun `guix system init`, or overwrite the protected NixOS ESP.
-- Existing root filesystem UUID: `c694c1fc-a241-459a-a60d-1c829f1b9c30`.
-- Guix ESP UUID/PARTUUID: `77C4-10EC` / `5408cbd2-dc6c-49c6-bee9-c51c5f3a29fc`.
-- Protected NixOS ESP UUID: `5CDF-1DF4`. Verify live device identities before any privileged operation; partition numbers can change.
+- The native Guix system now runs from the internal Btrfs root (`c4f25409-b1a5-4ef0-8ac9-8e75f011668c`) and uses the internal EFI system partition (`5CDF-1DF4`). The T7-to-internal migration is complete; migration preparation and deployment tooling has been retired.
+- The root and `engstrand` passwords are already set. Do not rerun initialization to change or verify them.
+- The user reports that the desktop and hardware acceptance passed, including graphics/input/networking, lock/unlock, suspend/resume and protected audio routing/speaker safety. Hardware acceptance is user-reported, not independently reproduced here.
+- The patched U-Boot/m1n1 bootloader and system configuration have been activated and verified booting, per user report. Keep a known-good system generation and independent recovery path available.
 
-These identities document the installation, not authorization to mount, initialize, activate or write to it.
+## Routine changes
 
-## Desktop and bootloader
+- Continue routine changes from the native Guix session. `make switch` checks the native system and internal root/EFI filesystem UUIDs before reconfiguring. System reconfigure may update the EFI partition.
+- Use `make home-build` / `make home-apply` for Home-only changes that do not affect system packages, services, kernel, bootloader or storage.
+- Keep `local/` private and ignored. It may contain machine-specific backups and diagnostics; do not commit it.
 
-- The familiar desktop configuration is maintained in `desktop/` and has been natively activated. The user reports that desktop and hardware acceptance passed, including graphics/input/networking, lock/unlock, USB-root suspend/resume, protected audio routing/speaker safety, and NixOS boot with the T7 disconnected.
-- The patched U-Boot/m1n1 bootloader in `modules/engstrand/bootloader.scm` has been built, applied, and verified booting on hardware, per user report. The current `make switch` path builds `desktop/system.scm` and then runs guarded `guix system reconfigure`, which selects this bootloader via `make-ssd-os`.
-- Acceptance status is user-reported; this checkout does not independently capture hardware-test logs. Preserve the working generation and independent recovery path for future updates.
+## Validation
 
-## Next work
-
-- Continue routine changes from the native Guix session. Before any future reconfigure, inspect the build and current disk identities; `make switch` changes the system generation and may update the Guix ESP.
-- Keep the known-good generation and independent NixOS recovery path available. Re-run relevant acceptance checks after changes to the bootloader, kernel, desktop, storage, or audio configuration.
-
-## Validation known to pass
-
-- Python safety tests and the base/desktop Scheme evaluations passed during preparation; current `make test`, `make eval`, and `make eval-desktop` also pass.
-- The UAS-corrected base system was built, initialized and booted.
-- The user reports that the current desktop and patched bootloader were built/applied and passed the hardware acceptance checks described above.
-
-Hardware acceptance is based on the user's report, not independently reproduced in this review. Rebuild and revalidate after relevant future changes. Ignored `local/` contains private snapshots and diagnostic artifacts; it is not portable source.
+- Run `make test` for offline checks.
+- `make eval` and `make eval-desktop` require Guix and the pinned Asahi channel.
+- Rebuild and repeat relevant hardware acceptance checks after changes to bootloader, kernel, desktop, storage or audio configuration.

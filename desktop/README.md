@@ -1,6 +1,6 @@
 # Familiar desktop layer
 
-Native Guix configuration for the existing SSD installation. This is a first usability port, not complete NixOS parity. The minimal Sway constructor remains available as the base configuration; retain the previous Sway generation as a recovery option. No Nix daemon, systemd/UWSM, partition changes or channel updates are introduced. The user reports that this desktop has been activated and hardware-accepted; see `PROGRESS.md` for scope and limitations.
+Native Guix configuration for the internal-drive installation. This is a first usability port, not complete NixOS parity. The minimal Sway constructor remains available as the base configuration; retain the previous Sway generation as a recovery option. No Nix daemon, systemd/UWSM, partition changes or channel updates are introduced. See `PROGRESS.md` for current status and limitations.
 
 ## Included
 
@@ -49,7 +49,7 @@ Neovim: Space+ff selects files, Space+bb lists buffers, Space+e opens netrw, Spa
 
 ## Build and apply directly from `~/guix`
 
-The repository is the live source of the desktop configuration. `desktop/system.scm` reads the reviewed disk identity from `GUIX_BASE` (default `/etc/guix-ssd`) and loads the pinned `channels.scm` from this checkout. It references Fish, Neovim, Doom, Pi and desktop assets directly; no snapshot or archive is created.
+The repository is the live source of the desktop configuration. `desktop/system.scm` declares the internal Btrfs root and EFI system partition UUIDs directly and loads the pinned `channels.scm` from this checkout. It references Fish, Neovim, Doom, Pi and desktop assets directly; no snapshot or archive is created.
 
 From the repository root on the native Guix system, build and activate the configuration:
 
@@ -70,8 +70,13 @@ make home-apply
 
 `desktop/home.scm` evaluates the same `%familiar-home` object embedded by the system config, so the Home package and service definitions stay in one place. Home activation is per-user and does not use `sudo`, reconfigure Guix System, or write the ESP. Changes to OS packages, kernel, services, bootloader or storage still require the reviewed system build/apply workflow.
 
-`make switch` checks the native Guix system and root/ESP identities, then runs
-one pinned `guix system reconfigure`. The authenticated pinned Guix is resolved
+`make switch` checks that it is running on Guix and that the mounted root and
+EFI partition match this installation before invoking the pinned
+`guix system reconfigure`. This changes the active system generation and may
+update the EFI system partition; inspect the build and retain a recovery
+system generation before applying.
+
+The authenticated pinned Guix is resolved
 as your user before sudo, avoiding root's separate time-machine trust/cache.
 There are no receipts, fingerprints or reuse options. `make apply` is a
 compatibility alias for the same operation. Switch skips optional kexec loading
@@ -97,10 +102,11 @@ git clone --depth 1 https://github.com/doomemacs/doomemacs "$DOOM"
 
 The `~/.config/doom` directory is the live Guix checkout link. Doom's own framework remains in `~/.config/emacs` and downloaded packages in Doom's data directory; do not replace the checkout link with the framework directory.
 
-Run `make switch` (or its `make apply` alias) only from the native Guix session.
-The target checks the Guix root, ESP UUID and Asahi ESP PARTUUID against the
-retained installation values before reconfiguring. Do not run it from the NixOS
-installer or bypass these checks with a pasted `guix system reconfigure` command. Review the retained UUID/PARTUUID/disk record; never use `guix system init` to apply this layer. Existing passwords are not an onboarding step again; do not run `passwd` unless you intend to change them.
+Run `make switch` (or its `make apply` alias) only from the internal Guix
+session. The target checks the root and ESP filesystem UUIDs before
+reconfiguring. Never use `guix system init` to apply this layer. Existing
+passwords are not an onboarding step again; do not run `passwd` unless you
+intend to change them.
 
 After the desktop configuration is applied, install Google Chrome once through Flatpak:
 
