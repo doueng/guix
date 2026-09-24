@@ -61,6 +61,11 @@ make switch
 This explicitly requests system activation and Guix ESP updates, with no extra
 confirmation beyond sudo. Guix builds successfully before activating. For an
 optional non-activating preview, use `make build` or `make dry-run` first.
+Before `make switch`, review `jj status` and the source diff, including
+`modules/` and `channels.scm`: the privileged reconfigure evaluates Scheme
+from this user-writable checkout. The root/ESP identity checks protect the
+target disk but do not authenticate local edits. Do not run a privileged
+reconfigure with unexplained changes or untrusted source.
 
 For editor, shell, or Home package changes that do not alter system packages/services, build and interactively activate the standalone Home configuration instead:
 

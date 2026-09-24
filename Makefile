@@ -42,6 +42,8 @@ build:
 	  guix time-machine -C channels.scm -- \
 	  system build --substitute-urls="$(SUBSTITUTE_URLS)" -L modules "$(CONFIG)"
 
+# Review jj status/diff first: sudo evaluates Scheme from this user-writable tree.
+# Root/ESP checks identify the machine; they do not validate local source.
 switch:
 	@set -eu; \
 	  case "$$(readlink -f /run/current-system)" in /gnu/store/*) ;; *) echo 'STOP: not the native Guix system'; exit 1;; esac; \
