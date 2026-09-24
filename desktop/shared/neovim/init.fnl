@@ -6,6 +6,12 @@
 
 (vim.loader.enable)
 
+;; LazyVim's Treesitter bootstrap checks CC rather than probing gcc. Guix
+;; provides gcc-toolchain's gcc executable but does not expose a cc alias.
+(when (or (not vim.env.CC) (= vim.env.CC ""))
+  (when (= (vim.fn.executable :gcc) 1)
+    (set vim.env.CC "gcc")))
+
 ;; Guix installs the Fennel Lua module beside its executable rather than in
 ;; Neovim's default Lua path.
 (local fennel-bin (vim.fn.exepath :fennel))
