@@ -127,4 +127,4 @@ guix time-machine -C "$KIT/channels.scm" -- repl \
 Hyprland --verify-config -c "$KIT/desktop/home/.config/hypr/hyprland.conf"
 ```
 
-The direct Scheme source check verifies that every Home source exists in the checkout. The pinned Scheme test checks both service graphs and preservation of the working system's storage/kernel/accounts/audio/pins. The full pinned system build remains the meaningful validation for Neovim and Doom package/runtime integration. A successful parser check does not establish graphics, keyd, locking or suspend behavior.
+The direct Scheme source check verifies managed Home sources in the checkout (wallpapers are optional). `make eval` runs the pinned Scheme test of the installed configuration, including the service/Home graphs and storage/kernel/accounts/audio/pins. The full pinned system build remains the meaningful validation for Neovim and Doom package/runtime integration. A successful parser check does not establish graphics, keyd, locking or suspend behavior.

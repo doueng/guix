@@ -16,5 +16,5 @@
 ## Validation
 
 - Run `make test` for offline checks.
-- `make eval` and `make eval-desktop` require Guix and the pinned Asahi channel.
+- `make eval` (also available as `make eval-desktop`) requires Guix and the pinned Asahi channel.
 - Rebuild and repeat relevant hardware acceptance checks after changes to bootloader, kernel, desktop, storage or audio configuration.

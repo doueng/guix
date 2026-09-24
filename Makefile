@@ -17,8 +17,8 @@ help:
 	@echo 'home-build    build desktop Home without changing system/bootloader'
 	@echo 'home-apply    interactively activate desktop Home (no sudo/ESP writes)'
 	@echo 'test          offline Scheme and workflow checks'
-	@echo 'eval          base pinned Scheme checks'
-	@echo 'eval-desktop  desktop Scheme checks from this checkout'
+	@echo 'eval          pinned installed-system and Home checks'
+	@echo 'eval-desktop  alias for eval'
 
 test:
 	guile -L modules -s tests/test-desktop-direct.scm
@@ -26,12 +26,11 @@ test:
 	python3 tests/test-switch.py
 
 eval:
-	@command -v guix >/dev/null || { echo 'guix not available; skipping Scheme checks'; exit 0; }
-	guix time-machine -C channels.scm -- repl -L modules tests/evaluate.scm channels.scm
-
-eval-desktop:
+	@command -v guix >/dev/null || { echo 'guix required for pinned Scheme checks'; exit 1; }
 	guix time-machine -C channels.scm -- repl \
 	  -L modules tests/evaluate-desktop.scm channels.scm
+
+eval-desktop: eval
 
 dry-run:
 	guix time-machine -C channels.scm -- \

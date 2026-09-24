@@ -179,7 +179,7 @@ programs; no global duplicate-binding policy was changed.
 
 - Ten full warm builds succeeded with identical output paths.
 - `guile -L modules -s tests/test-desktop-direct.scm`: passed.
-- `make eval-desktop`: passed the service/Home and preserved-system checks.
+- Pinned Scheme evaluation: passed the service/Home and preserved-system checks (now `make eval`).
 - Raw timings, profiler output and logs: ignored `local/build-investigation/`.
 
 These results cover cached builds only, not first-build downloads, package

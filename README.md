@@ -14,12 +14,11 @@ See [PROGRESS.md](PROGRESS.md) for the current machine checkpoint, [INSTALLATION
 ## Development
 
 ```sh
-make test
-make eval
-make eval-desktop
+make test          # offline source and workflow checks
+make eval          # installed system and Home, using pinned Guix/Asahi
 ```
 
-The Scheme checks require Guix and the pinned Asahi channel. `make build` builds without activating. `make switch` checks the native system/disk identities and runs one pinned reconfigure, which builds and activates without an extra confirmation prompt. `make apply` is an alias; no prior build or receipt is required. Desktop/Home-only changes can use `make home-build` and the interactive `make home-apply` workflow without reconfiguring the system or bootloader. Edits to already-linked files take effect immediately; new or removed files require a Home reconfigure to update links. See `make help`.
+`make eval-desktop` is an alias for `make eval`. Pinned Scheme checks require Guix and the pinned Asahi channel; they fail rather than silently skip when Guix is unavailable. `make build` builds without activating. `make switch` checks the native system/disk identities and runs one pinned reconfigure, which builds and activates without an extra confirmation prompt. `make apply` is an alias; no prior build or receipt is required. Desktop/Home-only changes can use `make home-build` and the interactive `make home-apply` workflow without reconfiguring the system or bootloader. Edits to already-linked files take effect immediately; new or removed files require a Home reconfigure to update links. See `make help`.
 
 Author Scheme in `modules/` and desktop assets in `desktop/`. `desktop/shared/` is independently maintained and does not sync from NixOS. Keep `local/` private and ignored; never commit firmware, credentials, password hashes or machine backups. Use jj.
 
