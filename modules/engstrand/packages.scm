@@ -41,7 +41,7 @@
   #:use-module (guix utils)
   #:use-module ((guix licenses) #:prefix license:)
   #:export (babashka noctalia github-cli pi-coding-agent herdr herdr-sesh
-            herdr-tiny-fingers jjui ghostty))
+            herdr-tiny-fingers jjui bluetui ghostty))
 
 (define babashka-version "1.13.223")
 (define noctalia-version "5.1.0")
@@ -49,6 +49,7 @@
 (define pi-version "0.87.1")
 (define herdr-version "0.9.0")
 (define jjui-version "0.10.10")
+(define bluetui-version "0.8.1")
 (define herdr-sesh-version "0.7.0")
 (define herdr-tiny-fingers-version "0.1.0")
 
@@ -342,6 +343,36 @@ notifications, a launcher, wallpaper management, lock screen and settings UI.")
     (description "A terminal user interface for the Jujutsu version control system.")
     (home-page "https://github.com/idursun/jjui")
     (license license:expat)))
+
+;; The pinned Guix channel does not package Bluetui.  Use its static
+;; upstream aarch64 release rather than compiling a large Rust crate graph.
+(define-public bluetui
+  (package
+    (name "bluetui")
+    (version bluetui-version)
+    (source
+     (origin
+       (method url-fetch)
+       (uri (string-append "https://github.com/pythops/bluetui/releases/download/v"
+                           version "/bluetui-aarch64-linux-musl"))
+       (file-name "bluetui")
+       (sha256
+        (base32 "0kr8y6hs09gn3p20cxm62lg609xxnhmwc9k9byh78lmbypdv39b6"))))
+    (build-system copy-build-system)
+    (supported-systems '("aarch64-linux"))
+    (arguments
+     (list
+      #:install-plan #~'(("bluetui" "bin/bluetui"))
+      #:phases
+      #~(modify-phases %standard-phases
+          (delete 'strip)
+          (add-after 'install 'make-executable
+            (lambda* (#:key outputs #:allow-other-keys)
+              (chmod (string-append (assoc-ref outputs "out") "/bin/bluetui") #o555))))))
+    (synopsis "Terminal user interface for managing Bluetooth devices")
+    (description "Bluetui manages BlueZ adapters and Bluetooth devices from a terminal.")
+    (home-page "https://github.com/pythops/bluetui")
+    (license license:gpl3)))
 
 (define breakpad-origin
   (origin

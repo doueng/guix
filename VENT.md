@@ -8,3 +8,6 @@ During the Guix setup review, .agents/skills/guix/references.md linked offline m
 ## 26-09-24 13:53 — tool_error
 
 Two jj history operations opened the configured interactive Neovim/builtin editor and stalled or timed out in the non-TTY shell: an initial split without -m and a squash with overlapping file edits. Workarounds were passing -m and keeping the overlapping test cleanup as a separate change. It would help if agent tooling documented/selected a noninteractive jj diff editor or warned clearly before commands needing a TTY.
+## 26-09-24 20:58 — tool_error
+
+Librarian-managed checkout guard rejected two read-only `git -C ... tag --sort=-version:refname` inspections (one in a compound ls/rg/git command), despite the skill permitting read-only inspection. I worked around it by reading the checkout's Readme.md, Cargo.toml and GitHub release metadata instead. Permit read-only git metadata queries in managed checkouts, or document their unsupported status, to avoid repeating this workaround.

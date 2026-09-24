@@ -87,12 +87,12 @@
        "Guest account leaked")
 (for-each (lambda (name) (check (find-service name) "Missing system service"))
           '(asahi-firmware asahi-substitutes speakersafetyd rtkit sddm
-            network-manager iwd guix-home backlight-udev-rules
+            network-manager iwd bluetooth guix-home backlight-udev-rules
             familiar-keyd familiar-keyd-config familiar-uinput screen-locker))
 (check (not (find-service 'openssh)) "SSH must remain disabled")
 (let ((packages (map package-name (operating-system-packages os))))
   (for-each (lambda (name) (check (member name packages) "Missing system package"))
-            '("hyprland" "flatpak" "keyd"))
+            '("hyprland" "flatpak" "keyd" "bluez"))
   (for-each (lambda (name) (check (not (member name packages)) "Obsolete desktop package"))
             '("sway" "foot")))
 (check (equal? '("engstrand") (map car (service-value (find-service 'guix-home))))
@@ -105,7 +105,7 @@
          "Standalone Home must share the system Home definition")
   (for-each (lambda (name) (check (member name home-packages) "Missing Home package"))
             '("pi-coding-agent" "herdr" "herdr-sesh" "herdr-tiny-fingers"
-              "jjui" "github-cli" "babashka" "noctalia" "ghostty"))
+              "jjui" "github-cli" "babashka" "noctalia" "ghostty" "bluetui"))
   (for-each (lambda (name) (check (memq name kinds) "Missing Home service"))
             '(familiar-direct-home-links familiar-herdr-plugins home-dbus pipewire
               home-xdg-mime-applications))

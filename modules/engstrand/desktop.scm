@@ -14,6 +14,7 @@
   #:use-module (gnu packages lua)
   #:use-module (gnu packages package-management)
   #:use-module (gnu packages xdisorg)
+  #:use-module (gnu services desktop)
   #:use-module (gnu services guix)
   #:use-module (gnu services linux)
   #:use-module (gnu services shepherd)
@@ -190,7 +191,7 @@
 
 (define %familiar-home
   (home-environment
-    (packages (cons* pi-coding-agent herdr herdr-sesh herdr-tiny-fingers jjui
+    (packages (cons* pi-coding-agent herdr herdr-sesh herdr-tiny-fingers jjui bluetui
                      github-cli babashka noctalia ghostty curl
                      (map specification->package
                           '("fish" "jujutsu" "clojure" "clojure-tools" "emacs-clojure-mode" "emacs-cider"
@@ -240,7 +241,7 @@
       (inherit base)
       (packages
         (append (map specification->package
-                            '("hyprland" "wofi" "hyprlock" "hypridle"
+                            '("bluez" "hyprland" "wofi" "hyprlock" "hypridle"
                               "polkit-gnome" "grim" "slurp" "keyd" "libnotify"
                               "font-jetbrains-mono" "font-google-noto-emoji" "adwaita-icon-theme"))
                 (remove (lambda (package)
@@ -248,6 +249,7 @@
                         (operating-system-packages base))))
       (services
         (cons*
+          (service bluetooth-service-type)
           %keyd-service
           (simple-service 'familiar-uinput kernel-module-loader-service-type '("uinput"))
           (simple-service 'familiar-keyd-config etc-service-type
