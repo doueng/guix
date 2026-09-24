@@ -42,9 +42,9 @@ build:
 	  guix time-machine -C channels.scm -- \
 	  system build --substitute-urls="$(SUBSTITUTE_URLS)" -L modules "$(CONFIG)"
 
-# Review jj status/diff first: sudo evaluates Scheme from this user-writable tree.
-# Root/ESP checks identify the machine; they do not validate local source.
 switch:
+	sudo rm /boot/efi/m1n1/boot.bin.old || true
+	sudo rm /boot/efi/m1n1/boot.bin.new || true
 	@set -eu; \
 	  case "$$(readlink -f /run/current-system)" in /gnu/store/*) ;; *) echo 'STOP: not the native Guix system'; exit 1;; esac; \
 	  test "$$(findmnt -nro UUID /)" = "c4f25409-b1a5-4ef0-8ac9-8e75f011668c" || { echo 'STOP: unexpected root filesystem'; exit 1; }; \
