@@ -7,6 +7,7 @@
   #:use-module (gnu home)
   #:use-module (gnu home services)
   #:use-module (gnu home services shells)
+  #:use-module (gnu home services xdg)
   #:use-module (gnu packages)
   #:use-module (gnu packages curl)
   #:use-module (gnu packages linux)
@@ -222,6 +223,12 @@
             ("GTK_THEME" . "Adwaita:dark")
             ;; Let launchers and xdg-open discover Flatpak's Chrome entry.
             ("XDG_DATA_DIRS" . "$XDG_DATA_DIRS:$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share")))
+        (service home-xdg-mime-applications-service-type
+          (home-xdg-mime-applications-configuration
+            (default '(("x-scheme-handler/http" . "com.google.Chrome.desktop")
+                       ("x-scheme-handler/https" . "com.google.Chrome.desktop")
+                       ("text/html" . "com.google.Chrome.desktop")
+                       ("inode/directory" . "thunar.desktop")))))
         (simple-service 'familiar-files home-files-service-type
           %desktop-home-files)
         %asahi-desktop-home-services))))

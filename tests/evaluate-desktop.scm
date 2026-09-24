@@ -107,7 +107,8 @@
             '("pi-coding-agent" "herdr" "herdr-sesh" "herdr-tiny-fingers"
               "jjui" "github-cli" "babashka" "noctalia" "ghostty"))
   (for-each (lambda (name) (check (memq name kinds) "Missing Home service"))
-            '(familiar-direct-home-links familiar-herdr-plugins home-dbus pipewire))
+            '(familiar-direct-home-links familiar-herdr-plugins home-dbus pipewire
+              home-xdg-mime-applications))
   (check (every (lambda (s) (memq s (home-environment-services home)))
                 %asahi-desktop-home-services)
          "Desktop changed protected Asahi audio/D-Bus services")
