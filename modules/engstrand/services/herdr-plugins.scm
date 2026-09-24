@@ -1,0 +1,44 @@
+(define-module (engstrand services herdr-plugins)
+  #:use-module (engstrand packages definitions)
+  #:use-module (gnu home services)
+  #:use-module (gnu services)
+  #:use-module (guix gexp)
+  #:export (%familiar-herdr-plugins))
+
+(define %familiar-herdr-plugins
+  (simple-service 'familiar-herdr-plugins home-activation-service-type
+    #~(begin
+        (use-modules (guix build utils) (ice-9 ftw) (ice-9 popen)
+                     (ice-9 rdelim) (srfi srfi-13))
+        (define (herdr-symlink-target path)
+          (catch 'system-error
+            (lambda ()
+              (and (eq? 'symlink (stat:type (lstat path)))
+                   (readlink path)))
+            (lambda _ #f)))
+        (define (herdr-path-exists? path)
+          (catch 'system-error
+            (lambda () (lstat path) #t)
+            (lambda _ #f)))
+        (let* ((herdr #$(file-append herdr "/bin/herdr"))
+               (sesh #$(file-append herdr-sesh ""))
+               (tiny #$(file-append herdr-tiny-fingers "")))
+          (invoke herdr "plugin" "link" sesh "--enabled")
+          (invoke herdr "plugin" "link" tiny "--enabled")
+          (let* ((pipe (open-input-pipe
+                        (string-append herdr " plugin config-dir fullerzz.sesh")))
+                 (config-dir (string-trim-both (read-line pipe)))
+                 (status (close-pipe pipe))
+                 (target (string-append config-dir "/sesh.toml"))
+                 (config (string-append (getenv "HOME") "/.config/herdr/sesh.toml")))
+            (unless (zero? status)
+              (error "Could not determine Herdr sesh plugin config directory"))
+            (mkdir-p config-dir)
+            (when (herdr-path-exists? target)
+              (let ((old (herdr-symlink-target target)))
+                (unless (and old
+                             (or (string=? old config)
+                                 (string-prefix? "/gnu/store/" old)))
+                  (error "Refusing to replace unmanaged Herdr config" target))
+                (delete-file target)))
+            (symlink config target))))))
