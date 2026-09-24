@@ -36,8 +36,8 @@
 ;; Live files are deliberately not home-files-service entries: that service
 ;; always adds a store indirection. Install direct links during activation,
 ;; and track ownership so stale links can be removed without touching files
-;; the user has replaced. Guix-managed links from older generations are
-;; migrated only when their known store naming pattern matches.
+;; the user has replaced. Conflicting live-link destinations are moved to a
+;; backup under ~/.local/state/guix-home before being replaced.
 (define %familiar-direct-home-links
   (simple-service 'familiar-direct-home-links home-activation-service-type
     #~(begin
@@ -52,6 +52,9 @@
         (define home (getenv "HOME"))
         (define state (string-append home "/.local/state/guix-home"))
         (define manifest (string-append state "/live-links"))
+        (define backup-directory
+          (string-append state "/backups/" (number->string (current-time))
+                         "-" (number->string (getpid))))
         (define (symlink-target path)
           (catch 'system-error
             (lambda ()
@@ -62,6 +65,28 @@
           (catch 'system-error
             (lambda () (lstat path) #t)
             (lambda _ #f)))
+        (define (backup-conflict relative)
+          (let* ((target (string-append home "/" relative))
+                 (backup (string-append backup-directory "/" relative)))
+            (when (path-exists? target)
+              (when (path-exists? backup)
+                (error "Home backup destination already exists" backup))
+              (mkdir-p (dirname backup))
+              (format #t "Backing up conflicting Home path ~a to ~a~%"
+                      target backup)
+              (rename-file target backup))))
+        (define (ensure-parent relative)
+          (let loop ((parts (drop-right (string-split relative #\/) 1))
+                     (prefix ""))
+            (unless (null? parts)
+              (let* ((next (if (string-null? prefix) (car parts)
+                               (string-append prefix "/" (car parts))))
+                     (target (string-append home "/" next)))
+                (when (and (path-exists? target)
+                           (not (eq? 'directory (stat:type (lstat target)))))
+                  (backup-conflict next))
+                (mkdir-p target)
+                (loop (cdr parts) next)))))
         (define (legacy-link? target)
           (and target
                (string-prefix? "/gnu/store/" target)
@@ -86,45 +111,20 @@
          (lambda (relative)
            (let* ((target (string-append home "/" relative))
                   (old (symlink-target target)))
-             (when (legacy-link? old) (delete-file target))))
+             (when (legacy-link? old) (backup-conflict relative))))
          '(".config/hypr/hyprland.lua"))
         (for-each
          (lambda (root)
            (let* ((target (string-append home "/" root))
                   (old (symlink-target target)))
-             (when (legacy-link? old) (delete-file target))))
+             (when (legacy-link? old) (backup-conflict root))))
          roots)
-        ;; Preflight every existing target before making any further changes.
-        ;; A file that replaced a managed symlink is user data, not ours to delete.
-        (for-each
-         (lambda (link)
-           (let* ((relative (car link))
-                  (source (cdr link))
-                  (target (string-append home "/" relative))
-                  (old (symlink-target target))
-                  (owned (assoc relative previous)))
-             (when (and (path-exists? target)
-                        (not (or (equal? old source)
-                                 (legacy-link? old)
-                                 (and owned (equal? old (cadr owned))))))
-               (error "Refusing to replace unmanaged Home path" target))))
-         links)
-        (for-each
-         (lambda (owned)
-           (let* ((relative (car owned))
-                  (target (string-append home "/" relative))
-                  (old (symlink-target target)))
-             (when (and (not (member relative current-paths))
-                        (path-exists? target)
-                        (not (equal? old (cadr owned))))
-               (error "Refusing to remove changed or unmanaged Home path" target))))
-         previous)
         (for-each
          (lambda (owned)
            (unless (member (car owned) current-paths)
              (let* ((target (string-append home "/" (car owned)))
                     (old (symlink-target target)))
-               (when old
+               (when (equal? old (cadr owned))
                  (format #t "Removing stale managed Home link ~a~%" target)
                  (delete-file target)))))
          previous)
@@ -134,10 +134,10 @@
                   (source (cdr link))
                   (target (string-append home "/" relative))
                   (old (symlink-target target)))
-             (mkdir-p (dirname target))
-             (when (and old (not (equal? old source)))
-               (format #t "Updating managed Home link ~a~%" target)
-               (delete-file target))
+             (ensure-parent relative)
+             (when (and (path-exists? target)
+                        (not (equal? old source)))
+               (backup-conflict relative))
              (unless (path-exists? target) (symlink source target))))
          links)
         (mkdir-p state)
@@ -154,13 +154,13 @@
     #~(begin
         (use-modules (guix build utils) (ice-9 ftw) (ice-9 popen)
                      (ice-9 rdelim) (srfi srfi-13))
-        (define (symlink-target path)
+        (define (herdr-symlink-target path)
           (catch 'system-error
             (lambda ()
               (and (eq? 'symlink (stat:type (lstat path)))
                    (readlink path)))
             (lambda _ #f)))
-        (define (path-exists? path)
+        (define (herdr-path-exists? path)
           (catch 'system-error
             (lambda () (lstat path) #t)
             (lambda _ #f)))
@@ -178,8 +178,8 @@
             (unless (zero? status)
               (error "Could not determine Herdr sesh plugin config directory"))
             (mkdir-p config-dir)
-            (when (path-exists? target)
-              (let ((old (symlink-target target)))
+            (when (herdr-path-exists? target)
+              (let ((old (herdr-symlink-target target)))
                 (unless (and old
                              (or (string=? old config)
                                  (string-prefix? "/gnu/store/" old)))
@@ -206,8 +206,10 @@
                             "unzip" "zip" "tree" "wl-clipboard"))))
     (services
       (cons*
-        %familiar-direct-home-links
+        ;; Activation gexps are folded in reverse service order. Install
+        ;; checkout links before Herdr tries to use its linked configuration.
         %familiar-herdr-plugins
+        %familiar-direct-home-links
         (service home-bash-service-type)
         (simple-service 'familiar-environment home-environment-variables-service-type
           '(("EDITOR" . "nvim") ("VISUAL" . "nvim")
@@ -220,9 +222,11 @@
           %desktop-home-files)
         %asahi-desktop-home-services))))
 
-(define* (make-familiar-os #:key root-uuid esp-uuid channels)
+(define* (make-familiar-os #:key root-uuid esp-uuid channels
+                           (root-filesystem-type "btrfs"))
   (let ((base (make-ssd-os #:root-uuid root-uuid #:esp-uuid esp-uuid
-                           #:channels channels)))
+                           #:channels channels
+                           #:root-filesystem-type root-filesystem-type)))
     (operating-system
       (inherit base)
       (packages
