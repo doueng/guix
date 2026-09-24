@@ -219,7 +219,9 @@
             ("COLORTERM" . "truecolor")
             ("XCURSOR_THEME" . "Adwaita")
             ("XCURSOR_SIZE" . "20")
-            ("GTK_THEME" . "Adwaita:dark")))
+            ("GTK_THEME" . "Adwaita:dark")
+            ;; Let launchers and xdg-open discover Flatpak's Chrome entry.
+            ("XDG_DATA_DIRS" . "$XDG_DATA_DIRS:$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share")))
         (simple-service 'familiar-files home-files-service-type
           %desktop-home-files)
         %asahi-desktop-home-services))))
