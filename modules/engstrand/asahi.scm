@@ -34,14 +34,14 @@
     (initrd-modules (cons* "uas" asahi-initrd-modules))
     (users
      (cons* (user-account
-            (name "engstrand")
-            (comment "Engstrand")
-            (group "users")
-            (home-directory "/home/engstrand")
+             (name "engstrand")
+             (comment "Engstrand")
+             (group "users")
+             (home-directory "/home/engstrand")
             ;; #f preserves a passwd(1)-managed password across reconfigure.
             ;; Set an initial password after a fresh installation.
-            (password #f)
-            (supplementary-groups '("wheel" "netdev" "audio" "video")))
+             (password #f)
+             (supplementary-groups '("wheel" "netdev" "audio" "video")))
             (user-account
              (name "root")
              (group "root")
@@ -68,12 +68,12 @@
     (services
      (cons* %udev-backlight-service
             (modify-services (operating-system-user-services asahi-sway-os)
-       (delete openssh-service-type)
-       (guix-home-service-type
-        homes => `(("engstrand" ,(home-environment
-                                  (services %asahi-desktop-home-services)))))
-       (guix-service-type
-        config => (guix-configuration
-                    (inherit config)
-                    (channels channels)
-                    (extra-options '("--max-jobs=1" "--cores=4")))))))))
+             (delete openssh-service-type)
+             (guix-home-service-type
+              homes => `(("engstrand" ,(home-environment
+                                        (services %asahi-desktop-home-services)))))
+             (guix-service-type
+              config => (guix-configuration
+                          (inherit config)
+                          (channels channels)
+                          (extra-options '("--max-jobs=1" "--cores=4")))))))))
