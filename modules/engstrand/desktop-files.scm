@@ -25,11 +25,17 @@
 (define (source-files relative)
   (let* ((root (repo-file relative))
          (prefix (if (string-suffix? "/" root) root (string-append root "/"))))
-    (map (lambda (path)
-           (cons (relative-to prefix path) path))
-         (sort (filter (lambda (path) (not (generated-source? path)))
-                       (find-files root #:directories? #f))
-               string<?))))
+    ;; Wallpapers are optional and not present in every checkout.
+    (if (and (string=? relative "desktop/shared/theme/wallpapers")
+             (not (file-exists? root)))
+        '()
+        (begin
+          (unless (file-exists? root) (error "Missing desktop source directory" root))
+          (map (lambda (path)
+                 (cons (relative-to prefix path) path))
+               (sort (filter (lambda (path) (not (generated-source? path)))
+                             (find-files root #:directories? #f))
+                     string<?))))))
 
 (define (tree-entries target-root source-root)
   (map (lambda (entry)
@@ -41,36 +47,6 @@
 
 (define (file-entry target source)
   (cons target (repo-file source)))
-
-(define %home-sources
-  (append
-   (tree-entries "" "desktop/home")
-   (tree-entries ".config/fish" "desktop/shared/shell/fish")
-   (tree-entries ".config/nvim" "desktop/shared/neovim")
-   (tree-entries ".config/doom" "desktop/shared/doom")
-   (list (file-entry ".config/git/config" "desktop/shared/git/config"))
-   (list (file-entry ".config/jj/config.toml" "desktop/shared/jj/config.toml"))
-   (list (file-entry ".config/herdr/config.toml" "desktop/shared/herdr/config.toml"))
-   (list (file-entry ".config/herdr/sesh.toml" "desktop/shared/herdr/sesh.toml"))
-   (tree-entries ".local/share/herdr/tiny-fingers"
-                  "desktop/shared/herdr/tiny-fingers")
-   (list (file-entry ".config/noctalia/config.toml"
-                      "desktop/shared/noctalia/config.toml"))
-   (list (file-entry ".local/share/icons/transparent.svg"
-                      "desktop/shared/noctalia/transparent.svg"))
-   (list (file-entry ".config/ghostty/config" "desktop/shared/ghostty/config"))
-   (list (file-entry ".config/ghostty/config.asahi"
-                      "desktop/shared/ghostty/config.asahi"))
-   (tree-entries ".config/ghostty/themes" "desktop/shared/ghostty/themes")
-   (list (file-entry ".config/btop/themes/catppuccin-mocha.theme"
-                      "desktop/shared/theme/btop.theme"))
-   (tree-entries ".local/share/catppuccin-mocha/wallpapers"
-                  "desktop/shared/theme/wallpapers")
-   (list (file-entry ".pi/README.md" "desktop/shared/pi/README.md"))
-   (tree-entries ".pi/agent" "desktop/shared/pi/assets/agent")
-   (list (file-entry ".config/jjui/config.toml" "desktop/shared/jjui/config.toml"))
-   (tree-entries ".local/bin" "desktop/bin")
-   (tree-entries ".local/bin" "desktop/shared/herdr/bin")))
 
 (define %desktop-direct-home-links
   (append
@@ -108,7 +84,9 @@
          (list (car entry) (local-file (cdr entry))))
        (filter (lambda (entry)
                  (not (assoc (car entry) %desktop-direct-home-links)))
-               %home-sources)))
+               (append (tree-entries "" "desktop/home")
+                       (tree-entries ".config/ghostty/themes"
+                                     "desktop/shared/ghostty/themes")))))
 
 (define (desktop-file path)
   (local-file (repo-file path)))
