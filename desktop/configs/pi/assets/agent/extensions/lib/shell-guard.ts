@@ -177,7 +177,14 @@ export function gitSubcommand(argv: string[]): string | null {
 
 export function isReadOnlyGitInvocation(invocation: ShellInvocation): boolean {
 	const subcommand = gitSubcommand(invocation.argv);
-	return subcommand !== null && READ_ONLY_GIT_SUBCOMMANDS.has(subcommand);
+	if (subcommand !== null && READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return true;
+	if (subcommand !== "tag") return false;
+
+	const tagIndex = invocation.argv.indexOf("tag");
+	const args = invocation.argv.slice(tagIndex + 1);
+	return args.every((arg) =>
+		arg === "-l" || arg === "--list" || arg.startsWith("--sort=") || arg.startsWith("--format=")
+	);
 }
 
 export function findJjRepoRoot(start: string): string | null {

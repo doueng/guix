@@ -23,6 +23,8 @@ try {
 	const checkout = join(librarianCheckoutRoot(), "github.com", "example", "repo");
 	assert.deepEqual(gitGuardDecision(`git -C ${checkout} status`, jjRoot), { block: false });
 	assert.deepEqual(gitGuardDecision(`cd ${checkout} && git show HEAD`, jjRoot), { block: false });
+	assert.deepEqual(gitGuardDecision(`git -C ${checkout} tag --sort=-version:refname`, jjRoot), { block: false });
+	assert.deepEqual(gitGuardDecision(`git -C ${checkout} tag v1.2.3`, jjRoot), { block: true, reason: "librarian-write" });
 	assert.deepEqual(gitGuardDecision(`git -C ${checkout} reset --hard`, jjRoot), { block: true, reason: "librarian-write" });
 } finally {
 	rmSync(root, { recursive: true, force: true });

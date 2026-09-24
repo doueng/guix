@@ -53,7 +53,7 @@ bash checkout.sh <repo> --force-update --path-only
 ## Recommended workflow
 
 1. Resolve repository path via `checkout.sh --path-only`.
-2. Use that path for searching, reading, and analysis.
+2. Use that path for searching, reading, and analysis. Read-only Git metadata queries (for example, `git -C <path> tag --sort=-version:refname`) are allowed; do not mutate the shared checkout.
 3. On later references to the same repo, call `checkout.sh` again; it will find and update the cached checkout.
 
 ## If edits are needed
