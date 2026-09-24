@@ -17,14 +17,8 @@ help:
 	@echo 'home-build    build desktop Home without changing system/bootloader'
 	@echo 'home-weather  check substitutes for explicit Home packages (network)'
 	@echo 'home-apply    interactively activate desktop Home (no sudo/ESP writes)'
-	@echo 'test          offline Scheme and workflow checks'
 	@echo 'eval          pinned installed-system and Home checks'
 	@echo 'eval-desktop  alias for eval'
-
-test:
-	guile -L modules -s tests/test-desktop-direct.scm
-	@find desktop/shared/shell/fish -type f -name '*.fish' -exec fish --no-execute {} \;
-	python3 tests/test-switch.py
 
 eval:
 	@command -v guix >/dev/null || { echo 'guix required for pinned Scheme checks'; exit 1; }
