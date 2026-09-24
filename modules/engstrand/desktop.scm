@@ -193,7 +193,7 @@
                      github-cli babashka noctalia ghostty curl
                      (map specification->package
                           '("fish" "jujutsu" "clojure" "clojure-tools" "emacs-clojure-mode" "emacs-cider"
- "difftastic" "tmux" "fzf" "zoxide"
+                            "difftastic" "tmux" "fzf" "zoxide"
                             "direnv" "ripgrep" "fd" "jq" "bat" "btop"
                             "python" "python-black" "python-boto3" "python-pyopenssl"
                             "python-pyyaml"
@@ -234,9 +234,9 @@
                             '("hyprland" "wofi" "hyprlock" "hypridle"
                               "polkit-gnome" "grim" "slurp" "keyd" "libnotify"
                               "font-jetbrains-mono" "font-google-noto-emoji" "adwaita-icon-theme"))
-                       (remove (lambda (package)
-                                 (member (package-name package) '("sway" "foot")))
-                               (operating-system-packages base))))
+                (remove (lambda (package)
+                          (member (package-name package) '("sway" "foot")))
+                        (operating-system-packages base))))
       (services
         (cons*
           %keyd-service
