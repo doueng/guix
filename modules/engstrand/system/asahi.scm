@@ -13,6 +13,7 @@
   #:use-module (gnu services base)
   #:use-module (gnu services guix)
   #:use-module (gnu services ssh)
+  #:use-module (gnu services xorg)
   #:export (make-base-os))
 
 (define* (make-base-os #:key root-uuid esp-uuid channels)
@@ -66,6 +67,8 @@
     (services
      (cons* %udev-backlight-service
             (modify-services (operating-system-user-services asahi-sway-os)
+             ;; The Sway base provides slock and xlock; this system uses neither.
+             (delete screen-locker-service-type)
              (delete openssh-service-type)
              (guix-home-service-type
               homes => `(("engstrand" ,(home-environment

@@ -243,7 +243,7 @@
       (inherit base)
       (packages
         (append (map specification->package
-                            '("bluez" "hyprland" "wofi" "hyprlock" "hypridle"
+                            '("bluez" "hyprland" "wofi"
                               "polkit-gnome" "grim" "slurp" "keyd" "libnotify"
                               "font-jetbrains-mono" "font-google-noto-emoji" "adwaita-icon-theme"))
                 (remove (lambda (package)
@@ -256,10 +256,6 @@
           (simple-service 'familiar-uinput kernel-module-loader-service-type '("uinput"))
           (simple-service 'familiar-keyd-config etc-service-type
             `(("keyd/default.conf" ,%desktop-keyd-config)))
-          (service screen-locker-service-type
-            (screen-locker-configuration
-              (name "hyprlock")
-              (program (file-append hyprlock "/bin/hyprlock"))))
           (modify-services (operating-system-user-services base)
             (guix-home-service-type
               homes => `(("engstrand" ,%familiar-home)))))))))
