@@ -14,3 +14,6 @@ Librarian-managed checkout guard rejected two read-only `git -C ... tag --sort=-
 ## 26-09-24 23:21 — inconsistent_cli_output
 
 Herdr plugin subcommands expose JSON inconsistently: `plugin list` defaults to human output and needs `--json`, while `plugin action list` defaults to JSON and rejects `--json`. I repeatedly retried list/parse commands after jq failures. Consistent JSON defaults or a shared `--json` flag across plugin subcommands would make scripted audits reliable.
+## 26-09-25 01:11 — misleading_test_target
+
+The Guix skill instructs running `make test`, but this repository's Makefile marks `test` phony without a recipe, so `make test` silently reports 'Nothing to be done'. I worked around this with a targeted `guix repl -L modules` input-equivalence check and an offline Guix build dry-run. Add a real test target or update the skill to specify a working check.
