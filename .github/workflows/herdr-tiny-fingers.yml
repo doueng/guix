@@ -1,0 +1,73 @@
+name: Build herdr-tiny-fingers
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/herdr-tiny-fingers.yml
+      - channels.scm
+      - modules/engstrand/packages/assets.scm
+      - modules/engstrand/packages/herdr-tiny-fingers.scm
+      - modules/engstrand/packages/rust-crates.scm
+      - desktop/configs/herdr/tiny-fingers/manifest.toml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # Bootstrap Guix on the ephemeral ARM64 runner.  The actual package
+      # evaluation below uses this repository's pinned channels.scm.
+      - name: Install Guix
+        shell: bash
+        run: |
+          set -euo pipefail
+          url=https://ftp.gnu.org/gnu/guix/guix-binary-1.5.0.aarch64-linux.tar.xz
+          curl --fail --location --retry 3 "$url" -o "$RUNNER_TEMP/guix.tar.xz"
+          echo 'a5d58b1d0294cad6adb1f2aff627d37feb5db763fdffbceb8551f2b12123cf39  '"$RUNNER_TEMP/guix.tar.xz" | sha256sum --check
+          sudo tar -xJf "$RUNNER_TEMP/guix.tar.xz" -C / --no-overwrite-dir
+          rm "$RUNNER_TEMP/guix.tar.xz"
+
+          sudo groupadd --system guixbuild
+          for i in $(seq 1 10); do
+            sudo useradd --system -g guixbuild -G guixbuild -d /var/empty -s /usr/sbin/nologin "guixbuilder$i"
+          done
+          guix_bin=/var/guix/profiles/per-user/root/current-guix/bin
+          for key in /var/guix/profiles/per-user/root/current-guix/share/guix/*.pub; do
+            # These bundled public keys are readable by the runner user.
+            # shellcheck disable=SC2024
+            sudo "$guix_bin/guix" archive --authorize < "$key"
+          done
+          sudo "$guix_bin/guix" archive --generate-key
+          sudo tee /etc/systemd/system/guix-daemon.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=Guix build daemon for CI
+          [Service]
+          ExecStart=/var/guix/profiles/per-user/root/current-guix/bin/guix-daemon --build-users-group=guixbuild --discover=no --substitute-urls="https://bordeaux.guix.gnu.org https://ci.guix.gnu.org"
+          Restart=on-failure
+          OOMPolicy=continue
+          TasksMax=8192
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now guix-daemon.service
+          echo "$guix_bin" >> "$GITHUB_PATH"
+
+      - name: Build pinned herdr-tiny-fingers
+        shell: bash
+        run: |
+          set -euo pipefail
+          guix time-machine -C channels.scm -- build \
+            --substitute-urls='https://bordeaux.guix.gnu.org https://ci.guix.gnu.org' \
+            -L modules herdr-tiny-fingers | tee "$RUNNER_TEMP/herdr-tiny-fingers-store-path"
+          store_path=$(tail -n 1 "$RUNNER_TEMP/herdr-tiny-fingers-store-path")
+          test -x "$store_path/bin/herdr-tiny-fingers"
+          test -f "$store_path/herdr-plugin.toml"
+          printf 'Built: %s\n' "$store_path" >> "$GITHUB_STEP_SUMMARY"
+          df -h /gnu/store
