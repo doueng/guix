@@ -26,10 +26,19 @@
                #:esp-uuid "1234-ABCD" #:channels channels))
 (define base (make make-ssd-os))
 (define os (make make-familiar-os))
+(define btrfs-desktop
+  (make-familiar-os #:root-uuid "11111111-2222-3333-4444-555555555555"
+                    #:esp-uuid "1234-ABCD" #:channels channels
+                    #:root-filesystem-type "btrfs"))
 (define services (operating-system-services os))
 (define (find-service name)
   (find (lambda (s) (eq? name (service-type-name (service-kind s)))) services))
 
+(check (equal? "btrfs"
+               (file-system-type
+                (find (lambda (fs) (string=? "/" (file-system-mount-point fs)))
+                      (operating-system-file-systems btrfs-desktop))))
+       "Desktop constructor must forward the Btrfs root type")
 (check (eq? (operating-system-kernel base) (operating-system-kernel os))
        "Desktop must not change the kernel")
 (check (equal? (operating-system-initrd-modules base) (operating-system-initrd-modules os))

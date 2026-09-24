@@ -15,11 +15,11 @@
   #:use-module (gnu services ssh)
   #:export (make-ssd-os))
 
-(define* (make-ssd-os #:key root-uuid esp-uuid channels)
-  (unless (and (string? root-uuid) (string? esp-uuid) (pair? channels))
-    (error "Supply root/ESP filesystem UUIDs and pinned channels"))
-  (when (string-ci=? esp-uuid "5CDF-1DF4")
-    (error "Refusing the existing NixOS ESP"))
+(define* (make-ssd-os #:key root-uuid esp-uuid channels
+                      (root-filesystem-type "ext4"))
+  (unless (and (string? root-uuid) (string? esp-uuid) (pair? channels)
+               (member root-filesystem-type '("ext4" "btrfs")))
+    (error "Supply root/ESP UUIDs, a supported root filesystem type, and pinned channels"))
   (operating-system
     (inherit asahi-sway-os)
     (kernel asahi-linux-keyd)
@@ -54,9 +54,9 @@
               (device (uuid root-uuid))
               (mount-point "/")
               (needed-for-boot? #t)
-              (type "ext4"))
+              (type root-filesystem-type))
             (file-system
-              (device (uuid esp-uuid 'fat32))
+              (device (uuid esp-uuid 'fat))
               (mount-point "/boot/efi")
               (needed-for-boot? #t)
               (type "vfat")

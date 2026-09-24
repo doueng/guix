@@ -21,12 +21,23 @@
   (make-ssd-os #:root-uuid "11111111-2222-3333-4444-555555555555"
                #:esp-uuid "1234-ABCD"
                #:channels channels))
+(define btrfs-os
+  (make-ssd-os #:root-uuid "11111111-2222-3333-4444-555555555555"
+               #:esp-uuid "1234-ABCD" #:channels channels
+               #:root-filesystem-type "btrfs"))
+(define (root-filesystem system)
+  (find (lambda (fs) (string=? "/" (file-system-mount-point fs)))
+        (operating-system-file-systems system)))
 
 (define users (operating-system-users os))
 (define services (operating-system-services os))
 (define (find-service name)
   (find (lambda (s) (eq? name (service-type-name (service-kind s)))) services))
 
+(check (equal? "ext4" (file-system-type (root-filesystem os)))
+       "Base constructor must keep its ext4 default")
+(check (equal? "btrfs" (file-system-type (root-filesystem btrfs-os)))
+       "Btrfs root selection must be supported")
 (check (equal? '("guix" "asahi")
                (map (compose symbol->string channel-name) channels))
        "Unexpected channels")
