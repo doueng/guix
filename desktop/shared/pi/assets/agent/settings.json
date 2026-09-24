@@ -4,6 +4,7 @@
   "enabledModels": [
     "gpt-6-luna",
     "gpt-6-astra",
+    "gpt-6-sol",
     "fireworks/accounts/fireworks/models/glm-5p3-flash",
     "fireworks/accounts/fireworks/models/deepseek-v4p1-flash"
   ],
