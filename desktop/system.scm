@@ -12,6 +12,5 @@
 (make-familiar-os
  #:root-uuid %root-uuid
  #:esp-uuid %esp-uuid
- #:root-filesystem-type "btrfs"
  #:channels (primitive-load
              (string-append (dirname (current-filename)) "/../channels.scm")))

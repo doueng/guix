@@ -13,13 +13,11 @@
   #:use-module (gnu services base)
   #:use-module (gnu services guix)
   #:use-module (gnu services ssh)
-  #:export (make-ssd-os))
+  #:export (make-base-os))
 
-(define* (make-ssd-os #:key root-uuid esp-uuid channels
-                      (root-filesystem-type "ext4"))
-  (unless (and (string? root-uuid) (string? esp-uuid) (pair? channels)
-               (member root-filesystem-type '("ext4" "btrfs")))
-    (error "Supply root/ESP UUIDs, a supported root filesystem type, and pinned channels"))
+(define* (make-base-os #:key root-uuid esp-uuid channels)
+  (unless (and (string? root-uuid) (string? esp-uuid) (pair? channels))
+    (error "Supply root/ESP UUIDs and pinned channels"))
   (operating-system
     (inherit asahi-sway-os)
     (kernel asahi-linux-keyd)
@@ -54,7 +52,7 @@
               (device (uuid root-uuid))
               (mount-point "/")
               (needed-for-boot? #t)
-              (type root-filesystem-type))
+              (type "btrfs"))
             (file-system
               (device (uuid esp-uuid 'fat))
               (mount-point "/boot/efi")

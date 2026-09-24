@@ -18,13 +18,9 @@
   (primitive-load (cadr (command-line))))
 
 (define os
-  (make-ssd-os #:root-uuid "11111111-2222-3333-4444-555555555555"
-               #:esp-uuid "1234-ABCD"
-               #:channels channels))
-(define btrfs-os
-  (make-ssd-os #:root-uuid "11111111-2222-3333-4444-555555555555"
-               #:esp-uuid "1234-ABCD" #:channels channels
-               #:root-filesystem-type "btrfs"))
+  (make-base-os #:root-uuid "11111111-2222-3333-4444-555555555555"
+                #:esp-uuid "1234-ABCD"
+                #:channels channels))
 (define (root-filesystem system)
   (find (lambda (fs) (string=? "/" (file-system-mount-point fs)))
         (operating-system-file-systems system)))
@@ -34,10 +30,8 @@
 (define (find-service name)
   (find (lambda (s) (eq? name (service-type-name (service-kind s)))) services))
 
-(check (equal? "ext4" (file-system-type (root-filesystem os)))
-       "Base constructor must keep its ext4 default")
-(check (equal? "btrfs" (file-system-type (root-filesystem btrfs-os)))
-       "Btrfs root selection must be supported")
+(check (equal? "btrfs" (file-system-type (root-filesystem os)))
+       "Internal root must be Btrfs")
 (check (equal? '("guix" "asahi")
                (map (compose symbol->string channel-name) channels))
        "Unexpected channels")
@@ -76,7 +70,7 @@
                "DM_FLAG_OS_PREPARE")))
        "Patched U-Boot must carry the OS_PREPARE patch")
 (check (member "uas" (operating-system-initrd-modules os))
-       "Initrd must include UAS for external USB storage")
+       "Initrd must preserve UAS support")
 (let ((packages (map package-name (operating-system-packages os))))
   (check (member "ncurses" packages)
          "System profile must include ncurses")

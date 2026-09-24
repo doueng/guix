@@ -224,11 +224,9 @@
           %desktop-home-files)
         %asahi-desktop-home-services))))
 
-(define* (make-familiar-os #:key root-uuid esp-uuid channels
-                           (root-filesystem-type "btrfs"))
-  (let ((base (make-ssd-os #:root-uuid root-uuid #:esp-uuid esp-uuid
-                           #:channels channels
-                           #:root-filesystem-type root-filesystem-type)))
+(define* (make-familiar-os #:key root-uuid esp-uuid channels)
+  (let ((base (make-base-os #:root-uuid root-uuid #:esp-uuid esp-uuid
+                            #:channels channels)))
     (operating-system
       (inherit base)
       (packages
