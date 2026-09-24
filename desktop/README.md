@@ -1,6 +1,6 @@
 # Familiar desktop layer
 
-Native Guix configuration for the internal-drive installation. This is a first usability port, not complete NixOS parity. The minimal Sway constructor remains available as the base configuration; retain the previous Sway generation as a recovery option. No Nix daemon, systemd/UWSM, partition changes or channel updates are introduced. See `PROGRESS.md` for current status and limitations.
+Native Guix desktop for the internal-drive installation. The familiar desktop is activated, though it does not aim for complete NixOS parity. The inherited Asahi Sway configuration remains the base for system services; retain a previous Sway generation or text console for recovery. No Nix daemon, systemd/UWSM, partition changes or channel updates are introduced. See [PROGRESS.md](../PROGRESS.md) for current status.
 
 ## Included
 
@@ -22,7 +22,7 @@ Volume keys control the protected PipeWire default sink through `wpctl`; they do
 
 ## Deliberate gaps
 
-This is a first usability port, not full NixOS parity. The user reports that native activation and hardware acceptance passed; package availability/build success alone does not establish hardware behavior. Automatic idle/suspend locking is intentionally disabled. Neovim Java tooling, some language servers, Herdr's annotate plugin and Tailscale are not ported. LazyVim and its runtime plugins are fetched by lazy.nvim on first launch. Babashka is available as `bb`; the NixOS-only `nixdiag` script remains with NixOS because it depends on systemd/journald/NixOS paths. The Herdr tab helpers call `herdr` directly, and terminal bindings focus the existing Ghostty window/select its tab when appropriate.
+This is not full NixOS parity. The user reports that native activation and hardware acceptance passed; package availability/build success alone does not establish hardware behavior. Automatic idle/suspend locking is intentionally disabled. Neovim Java tooling, some language servers, Herdr's annotate plugin and Tailscale are not ported. LazyVim and its runtime plugins are fetched by lazy.nvim on first launch. Babashka is available as `bb`; the NixOS-only `nixdiag` script remains with NixOS because it depends on systemd/journald/NixOS paths. The Herdr tab helpers call `herdr` directly, and terminal bindings focus the existing Ghostty window/select its tab when appropriate.
 
 Useful controls with keyd active:
 
@@ -68,7 +68,7 @@ make home-build
 make home-apply
 ```
 
-`desktop/home.scm` evaluates the same `%familiar-home` object embedded by the system config, so the Home package and service definitions stay in one place. Home activation is per-user and does not use `sudo`, reconfigure Guix System, or write the ESP. Changes to OS packages, kernel, services, bootloader or storage still require the reviewed system build/apply workflow.
+`desktop/home.scm` evaluates the same `%familiar-home` object embedded by the system config, so the Home package and service definitions stay in one place. Home activation is per-user and does not use `sudo`, reconfigure Guix System, or write the ESP. Edits to already-linked files are live; adding or removing a file requires Home reconfigure to refresh the links. Changes to OS packages, kernel, services, bootloader or storage still require the reviewed system build/apply workflow.
 
 `make switch` checks that it is running on Guix and that the mounted root and
 EFI partition match this installation before invoking the pinned

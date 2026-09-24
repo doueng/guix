@@ -1,6 +1,6 @@
 # Agent notes
 
-Personal Guix configuration for an M1 MacBook Air; the Guix system boots from an initialized Samsung T7.
+Personal Guix configuration for an M1 MacBook Air; the installed system boots from the internal Btrfs root and EFI system partition.
 
 - Read `PROGRESS.md` before installation or recovery work. Never rerun formatting or `guix system init` as a resume step.
 - Prefer offline checks. Mounting, activation, bootloader/ESP writes and destructive operations require explicit approval. Preserve the protected NixOS ESP and recovery environment; never disable channel authentication.

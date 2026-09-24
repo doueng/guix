@@ -9,7 +9,7 @@ Personal Guix System configuration for an M1 MacBook Air. Guix boots from the in
 - Preserve a known-good Guix generation and independent recovery path for future system changes.
 - The internal root and EFI system partition are initialized. **Never rerun formatting or `guix system init` as a resume step.**
 
-See [PROGRESS.md](PROGRESS.md) for the concise checkpoint, [INSTALLATION-PLAN.md](INSTALLATION-PLAN.md) for safety boundaries, [desktop/README.md](desktop/README.md) for desktop build/apply, and [BUILDING.md](BUILDING.md) for build notes. [REVIEW.md](REVIEW.md) records remaining review concerns.
+See [PROGRESS.md](PROGRESS.md) for the current machine checkpoint, [INSTALLATION-PLAN.md](INSTALLATION-PLAN.md) for safety boundaries, [desktop/README.md](desktop/README.md) for desktop/Home operations, and [BUILDING.md](BUILDING.md) for historical build measurements and warning notes.
 
 ## Development
 
@@ -19,10 +19,12 @@ make eval
 make eval-desktop
 ```
 
-The Scheme checks require Guix and the pinned Asahi channel. `make build` builds without activating. `make switch` checks the native system/disk identities and runs one pinned reconfigure, which builds and activates without an extra confirmation prompt. `make apply` is an alias; no prior build or receipt is required. Desktop/Home-only changes can use `make home-build` and the interactive `make home-apply` workflow without reconfiguring the system or bootloader. See `make help`.
+The Scheme checks require Guix and the pinned Asahi channel. `make build` builds without activating. `make switch` checks the native system/disk identities and runs one pinned reconfigure, which builds and activates without an extra confirmation prompt. `make apply` is an alias; no prior build or receipt is required. Desktop/Home-only changes can use `make home-build` and the interactive `make home-apply` workflow without reconfiguring the system or bootloader. Edits to already-linked files take effect immediately; new or removed files require a Home reconfigure to update links. See `make help`.
 
 Author Scheme in `modules/` and desktop assets in `desktop/`. `desktop/shared/` is independently maintained and does not sync from NixOS. Keep `local/` private and ignored; never commit firmware, credentials, password hashes or machine backups. Use jj.
 
 ## Safety
+
+Passwords remain managed outside the store with `passwd(1)`; reconfigure preserves them. The new desktop generation omits Sway/Foot; retain a previous Sway generation or a text console for recovery. Hardware behavior must be rechecked after relevant kernel, bootloader, desktop, storage or audio changes.
 
 Prefer offline checks. Mounting, activation, bootloader/EFI writes, formatting and other destructive operations require explicit approval. Preserve the independent recovery environment; never disable channel authentication. NixOS bootstrap changes belong in `~/nixos`, not here.

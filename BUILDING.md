@@ -1,4 +1,6 @@
-# Build speed and warnings
+# Build measurements and warning notes
+
+The timings below are historical measurements on the installed system, not a prerequisite for routine changes. For current workflows see [README.md](README.md) and [desktop/README.md](desktop/README.md).
 
 ## Measured warm builds
 
