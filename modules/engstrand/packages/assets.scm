@@ -7,5 +7,5 @@
 (define %repo-dir
   (dirname (dirname (dirname (dirname %module-file)))))
 
-(define (package-asset relative)
-  (local-file (string-append %repo-dir "/" relative)))
+(define* (package-asset relative #:optional (name (basename relative)))
+  (local-file (string-append %repo-dir "/" relative) name))

@@ -1169,7 +1169,8 @@
     rust-zmij-1.0.21))
 
 (define %herdr-tiny-fingers-manifest
-  (package-asset "desktop/configs/herdr/plugin-manifests/tiny-fingers.toml"))
+  (package-asset "desktop/configs/herdr/tiny-fingers/manifest.toml"
+                 "tiny-fingers.toml"))
 
 (define-public herdr-tiny-fingers
   (package

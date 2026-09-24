@@ -73,8 +73,6 @@
    (tree-entries ".pi/agent" "desktop/configs/pi/assets/agent")
    (tree-entries ".local/share/catppuccin-mocha/wallpapers"
                   "desktop/configs/theme/wallpapers")
-   (tree-entries ".local/share/herdr/tiny-fingers"
-                  "desktop/configs/herdr/tiny-fingers")
    (tree-entries ".local/bin" "desktop/bin")
    (tree-entries ".local/bin" "desktop/configs/herdr/bin")))
 

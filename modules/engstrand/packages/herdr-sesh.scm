@@ -11,7 +11,7 @@
 (define %herdr-sesh-vendor
   (package-asset "desktop/configs/herdr/sesh/vendor.tar.gz"))
 (define %herdr-sesh-manifest
-  (package-asset "desktop/configs/herdr/plugin-manifests/sesh.toml"))
+  (package-asset "desktop/configs/herdr/sesh/manifest.toml" "sesh.toml"))
 
 (define-public herdr-sesh
   (package

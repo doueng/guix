@@ -15,7 +15,7 @@
     #~(begin
         (use-modules (guix build utils) (ice-9 ftw) (ice-9 rdelim)
                      (srfi srfi-1) (srfi srfi-13))
-        ;; Keep waybar here only to retire legacy store-backed tree links.
+        ;; Keep obsolete roots here only to retire legacy store-backed tree links.
         (define roots
           '(".config/fish" ".config/nvim" ".config/doom"
             ".config/hypr" ".config/waybar" ".pi/agent"
