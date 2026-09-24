@@ -202,7 +202,9 @@
                             "cmake" "dasel" "diff-so-fancy" "diffstat" "entr" "exercism"
                             "file" "fennel" "fnlfmt" "go" "gopls" "gore" "hyperfine"
                             "jless" "libnotify" "lua" "nixfmt" "pandoc" "qpdf" "shellcheck"
-                            "shfmt" "sox" "typst" "uv" "xxd" "yq"
+                            "shfmt" "sox" "thunar" "typst" "uv" "xxd" "yq"
+                            "xdg-desktop-portal" "xdg-desktop-portal-gtk"
+                            "xdg-desktop-portal-hyprland"
                             "unzip" "zip" "tree" "wl-clipboard"))))
     (services
       (cons*

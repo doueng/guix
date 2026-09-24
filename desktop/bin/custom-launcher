@@ -25,7 +25,8 @@
     [["kitty" [(executable "kitty")]]
      ["ghostty" [(executable "ghostty")]]
      ["chrome-incognito" (conj chrome "--incognito")]
-     ["chrome" chrome]]))
+     ["chrome" chrome]
+     ["thunar" [(executable "thunar")]]]))
 
 (defn run [command options]
   @(p/process command options))
