@@ -1,5 +1,7 @@
 (define-module (engstrand services herdr-plugins)
-  #:use-module (engstrand packages definitions)
+  #:use-module (engstrand packages herdr)
+  #:use-module (engstrand packages herdr-sesh)
+  #:use-module (engstrand packages herdr-tiny-fingers)
   #:use-module (gnu home services)
   #:use-module (gnu services)
   #:use-module (guix gexp)
