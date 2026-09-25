@@ -2,5 +2,10 @@
 local/
 __pycache__/
 
+# OpenTofu provider downloads, local state, and account-specific inputs.
+infra/guix-cache/.terraform/
+infra/guix-cache/*.tfstate*
+infra/guix-cache/*.tfvars
+
 # Large personal wallpaper assets remain outside the repository history.
 desktop/configs/theme/wallpapers/
