@@ -32,6 +32,7 @@ export type RuleOutputMatch = {
 export type RuleMatch = {
   toolNames?: string[];
   argv0?: string[];
+  gitSubcommands?: string[];
   argvIncludes?: string[][];
   argvIncludesAny?: string[][];
   commandIncludes?: string[];
@@ -57,7 +58,6 @@ export type RuleSummarize = {
 
 export type RuleFailure = {
   preserveOnFailure?: boolean;
-  skipKeepPatterns?: boolean;
   head?: number;
   tail?: number;
 };
@@ -98,10 +98,14 @@ export type CompiledRule = {
   };
 };
 
+export type CommandMatchSource = "original" | "shell-body" | "effective";
+
 export type ClassificationResult = {
   family: string;
   confidence: number;
   matchedReducer?: string;
+  matchedVia?: CommandMatchSource;
+  matchedCommand?: string;
 };
 
 export type StoredArtifactRef = {
@@ -109,21 +113,21 @@ export type StoredArtifactRef = {
   storage: "file";
   path: string;
   metadataPath: string;
-  filteredTextPath?: string;
-  diffPath?: string;
 };
 
 export type StoredArtifactMetadata = {
   createdAt: string;
+  source?: string;
   toolName?: string;
   command?: string;
+  commandFamily?: string;
+  commandDigest?: string;
   exitCode?: number;
+  captureTruncated?: boolean;
   classification: ClassificationResult;
   rawChars: number;
   reducedChars?: number;
   ratio?: number;
-  filteredTextPath?: string;
-  diffPath?: string;
 };
 
 export type ArtifactMetadataRef = {
@@ -131,13 +135,34 @@ export type ArtifactMetadataRef = {
   storage: "file";
   path?: string;
   metadataPath: string;
+  metadataFormat?: "json" | "jsonl-segment";
+  metadataRecordId?: string;
   metadata: StoredArtifactMetadata;
+};
+
+export type ArtifactMetadataPage = {
+  entries: ArtifactMetadataRef[];
+  nextCursor?: string;
+  partial: boolean;
+  legacySidecarsIncluded: false;
+};
+
+export type ArtifactMetadataPageOptions = {
+  cursor?: string;
+  limit?: number;
 };
 
 export type CompactResult = {
   inlineText: string;
   previewText?: string;
   facts?: Record<string, number>;
+  compaction?: import("./core/compaction-metadata.js").CompactionMetadata;
+  trace?: {
+    normalizedCommand?: string;
+    normalizedArgv?: string[];
+    matchedReducer?: string;
+    family: string;
+  };
   rawRef?: StoredArtifactRef;
   stats: {
     rawChars: number;
@@ -150,8 +175,8 @@ export type CompactResult = {
 export type StoredArtifactInput = {
   input: ToolExecutionInput;
   rawText: string;
-  filteredText?: string;
   classification: ClassificationResult;
+  recordStats?: boolean;
   stats?: {
     rawChars?: number;
     reducedChars: number;
@@ -168,6 +193,8 @@ export type StoredArtifact = {
 export type ReduceOptions = {
   classifier?: string;
   maxInlineChars?: number;
+  noOmit?: boolean;
+  trace?: boolean;
   raw?: boolean;
   recordStats?: boolean;
   store?: boolean;
@@ -207,11 +234,14 @@ export type RuleFixture = {
 
 export type WrapOptions = {
   cwd?: string;
+  source?: string;
+  noOmit?: boolean;
   recordStats?: boolean;
   store?: boolean;
   storeDir?: string;
   tee?: boolean;
   raw?: boolean;
+  trace?: boolean;
   maxInlineChars?: number;
   maxCaptureBytes?: number;
 };

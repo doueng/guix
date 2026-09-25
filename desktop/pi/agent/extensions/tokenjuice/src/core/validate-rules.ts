@@ -52,6 +52,9 @@ function validateMatch(value: unknown, path: string): string[] {
   if ("argv0" in value && !isStringArray(value.argv0)) {
     errors.push(`${path}.argv0 must be an array of strings`);
   }
+  if ("gitSubcommands" in value && !isStringArray(value.gitSubcommands)) {
+    errors.push(`${path}.gitSubcommands must be an array of strings`);
+  }
   if ("commandIncludes" in value && !isStringArray(value.commandIncludes)) {
     errors.push(`${path}.commandIncludes must be an array of strings`);
   }
@@ -188,7 +191,7 @@ export function validateRule(raw: unknown): ValidationResult {
     errors.push(...validateOptionalNumberObject(raw.summarize, "summarize", ["head", "tail"]));
   }
   if ("failure" in raw) {
-    errors.push(...validateOptionalBooleanObject(raw.failure, "failure", ["preserveOnFailure", "skipKeepPatterns"]));
+    errors.push(...validateOptionalBooleanObject(raw.failure, "failure", ["preserveOnFailure"]));
     errors.push(...validateOptionalNumberObject(raw.failure, "failure", ["head", "tail"]));
   }
   if ("counters" in raw) {

@@ -147,7 +147,7 @@ async function loadRuleDescriptorsFromRoot(root: string, source: RuleOrigin): Pr
 }
 
 function loadBundledBuiltinRuleDescriptors(): RuleDescriptor[] {
-  return (BUNDLED_BUILTIN_RULES as unknown as JsonRule[]).map((rule) => {
+  return BUNDLED_BUILTIN_RULES.map((rule) => {
     assertValidRule(rule);
     return {
       source: "builtin" as const,

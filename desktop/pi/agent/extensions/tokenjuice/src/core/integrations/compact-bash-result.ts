@@ -1,25 +1,34 @@
-import { isRepositoryInspectionCommand } from "../command.js";
+import { getInspectionCommandSkipReason, getSafeRepositoryInventorySourceArgv } from "../inventory-safety.js";
+import { readNoOmissionFromEnv } from "../env.js";
+import { shouldRecordStats } from "../artifacts.js";
+import { buildInspectionSummary } from "../reduce-inspection-summary.js";
 import { reduceExecution } from "../reduce.js";
 import { getCompactionSkipReason, type RewritePolicyOptions } from "./rewrite-policy.js";
 
 import type { CompactResult, ReduceOptions, ToolExecutionInput } from "../../types.js";
+import type { InspectionCommandPolicy, InspectionCommandSkipReason } from "../inventory-safety.js";
 
 export type CompactBashResultInput = {
-  source: "claude-code" | "codex" | "pi";
+  source: "claude-code" | "cline" | "codex" | "command-code" | "copilot-agent" | "copilot-cli" | "droid" | "gemini-cli" | "grok-cli" | "kimi" | "mux" | "openclaw" | "openhands" | "opencode" | "pi" | "qwen-code";
   command: string;
   cwd?: string;
   visibleText: string;
   trustedFullText?: string;
   exitCode?: number;
   maxInlineChars?: number;
+  noOmit?: boolean;
+  allowOmit?: boolean;
   storeRaw?: boolean;
+  recordStats?: boolean;
   metadata?: Record<string, unknown>;
+  inspectionPolicy?: InspectionCommandPolicy;
+  /** @deprecated use inspectionPolicy instead. */
   skipInspectionCommands?: boolean;
 } & RewritePolicyOptions;
 
 export type CompactBashResultKeepReason =
   | "empty-output"
-  | "inspection-command"
+  | InspectionCommandSkipReason
   | "unsupported"
   | "no-compaction"
   | "low-savings-compaction"
@@ -40,6 +49,29 @@ export type CompactBashResultOutput =
       usedTrustedFullText: boolean;
       result: CompactResult;
     };
+
+function resolveInspectionPolicy(input: CompactBashResultInput): InspectionCommandPolicy {
+  if (input.inspectionPolicy) {
+    return input.inspectionPolicy;
+  }
+  return input.skipInspectionCommands ? "skip-all" : "compact-all";
+}
+
+export function getOutputAwareInspectionSkipReason(
+  policy: InspectionCommandPolicy,
+  executionInput: ToolExecutionInput,
+): InspectionCommandSkipReason | null {
+  const command = executionInput.command ?? "";
+  const rawText = executionInput.combinedText ?? "";
+  const inspectionSkipReason = getInspectionCommandSkipReason(command, policy);
+  if (
+    inspectionSkipReason === "file-content-inspection-command"
+    && buildInspectionSummary(executionInput, rawText)
+  ) {
+    return null;
+  }
+  return inspectionSkipReason;
+}
 
 export async function compactBashResult(input: CompactBashResultInput): Promise<CompactBashResultOutput> {
   const command = input.command.trim();
@@ -63,27 +95,32 @@ export async function compactBashResult(input: CompactBashResultInput): Promise<
     };
   }
 
-  if (input.skipInspectionCommands && isRepositoryInspectionCommand({ command })) {
+  const safeInventoryArgv = getSafeRepositoryInventorySourceArgv(command);
+  const executionInput: ToolExecutionInput = {
+    toolName: "exec",
+    command,
+    combinedText: rawText,
+    ...(safeInventoryArgv ? { argv: safeInventoryArgv } : {}),
+    ...(typeof input.cwd === "string" && input.cwd.trim() ? { cwd: input.cwd } : {}),
+    ...(typeof input.exitCode === "number" ? { exitCode: input.exitCode } : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+  };
+
+  const inspectionSkipReason = getOutputAwareInspectionSkipReason(resolveInspectionPolicy(input), executionInput);
+  if (inspectionSkipReason) {
     return {
       action: "keep",
-      reason: "inspection-command",
+      reason: inspectionSkipReason,
       rawText,
       usedTrustedFullText,
     };
   }
 
-  const executionInput: ToolExecutionInput = {
-    toolName: "exec",
-    command,
-    combinedText: rawText,
-    ...(typeof input.cwd === "string" && input.cwd.trim() ? { cwd: input.cwd } : {}),
-    ...(typeof input.exitCode === "number" ? { exitCode: input.exitCode } : {}),
-    ...(input.metadata ? { metadata: input.metadata } : {}),
-  };
   const options: ReduceOptions = {
     ...(typeof input.cwd === "string" && input.cwd.trim() ? { cwd: input.cwd } : {}),
     ...(typeof input.maxInlineChars === "number" ? { maxInlineChars: input.maxInlineChars } : {}),
-    recordStats: true,
+    ...(input.noOmit || (!input.allowOmit && readNoOmissionFromEnv()) ? { noOmit: true } : {}),
+    recordStats: input.recordStats ?? shouldRecordStats(),
     ...(input.storeRaw ? { store: true } : {}),
   };
 

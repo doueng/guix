@@ -1,240 +1,22 @@
 import { loadRules } from "./rules.js";
-import { classifyExecution, matchesRule } from "./classify.js";
-import { isFileContentInspectionCommand, normalizeExecutionInput } from "./command.js";
-import { clampText, clampTextMiddle, countTextChars, dedupeAdjacent, headTail, normalizeLines, pluralize, stripAnsi, trimEmptyEdges } from "./text.js";
-import { storeArtifact, storeArtifactMetadata } from "./artifacts.js";
+import { hasMultipleSubstantiveShellCommands } from "./command-match.js";
+import { classifyExecution, resolveRuleMatch } from "./classify.js";
+import { isFileContentInspectionCommand, isVerbatimConfigInspectionCommand } from "./command-identity.js";
+import { normalizeExecutionInput } from "./execution-input.js";
+import { clampTextMiddleWithMetadata, clampTextWithMetadata, collapseRepeatedEmojiBanner, countTextChars, dedupeAdjacent, headTail, normalizeLines, pluralize, stripAnsi, trimEmptyEdges } from "./text.js";
+import { storeArtifact, tryStoreArtifactMetadata } from "./artifacts.js";
+import { NO_COMPACTION_METADATA, mergeCompactionMetadata, type CompactionMetadata } from "./compaction-metadata.js";
+import { buildGithubActionsFailureSummary } from "./github-actions-summary.js";
+import { rewriteGhLines, rewriteGitDiffLines, rewriteGitStatusLines, rewriteSearchLines } from "./reduce-formatters.js";
+import { buildInspectionSummary } from "./reduce-inspection-summary.js";
+import { compactWholeJsonText } from "./reduce-utils.js";
 
 import type { CompactResult, CompiledRule, ReduceOptions, ToolExecutionInput } from "../types.js";
 
 const TINY_OUTPUT_MAX_CHARS = 240;
-function compactWhitespace(text: string): string {
-  return text.replace(/\s+/gu, " ").trim();
-}
-
-function rewriteGitStatusLine(line: string): string | null {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  if (trimmed.startsWith("On branch ")) {
-    return null;
-  }
-  if (/^and have \d+ and \d+ different commits each/u.test(trimmed)) {
-    return null;
-  }
-  if (/^(?:no changes added to commit|nothing added to commit but untracked files present)/u.test(trimmed)) {
-    return null;
-  }
-  if (/^\(use "git .+"\)$/u.test(trimmed) || /^use "git .+" to .+/u.test(trimmed)) {
-    return null;
-  }
-  if (trimmed === "Changes not staged for commit:") {
-    return "Changes not staged:";
-  }
-  if (trimmed === "Changes to be committed:") {
-    return "Staged changes:";
-  }
-  if (trimmed === "Untracked files:") {
-    return "Untracked files:";
-  }
-  if (/^\s*modified:\s+/u.test(line)) {
-    return `M: ${line.replace(/^\s*modified:\s+/u, "").trim()}`;
-  }
-  if (/^\s*new file:\s+/u.test(line)) {
-    return `A: ${line.replace(/^\s*new file:\s+/u, "").trim()}`;
-  }
-  if (/^\s*deleted:\s+/u.test(line)) {
-    return `D: ${line.replace(/^\s*deleted:\s+/u, "").trim()}`;
-  }
-  if (/^\s*renamed:\s+/u.test(line)) {
-    return `R: ${line.replace(/^\s*renamed:\s+/u, "").trim()}`;
-  }
-  if (/^\?\?\s+/u.test(trimmed)) {
-    return `?? ${trimmed.replace(/^\?\?\s+/u, "").trim()}`;
-  }
-
-  const porcelainMatch = line.match(/^([ MADRCU?!]{2})\s+(.+)$/u);
-  if (porcelainMatch) {
-    const status = porcelainMatch[1]!.trim().replace(/\?/gu, "??");
-    const path = porcelainMatch[2]!.trim();
-    const code = status === "" ? "M" : status[0] === "?" ? "??" : status[0]!;
-    return `${code}: ${path}`;
-  }
-
-  return trimmed;
-}
-
-function rewriteGitStatusLines(lines: string[]): string[] {
-  let section: "staged" | "unstaged" | "untracked" | null = null;
-  const rewritten = lines
-    .map((line) => {
-      const trimmed = line.trim();
-      if (trimmed === "Changes not staged for commit:") {
-        section = "unstaged";
-      } else if (trimmed === "Changes to be committed:") {
-        section = "staged";
-      } else if (trimmed === "Untracked files:") {
-        section = "untracked";
-      }
-
-      if (section === "untracked" && /^\s{2,}\S/u.test(line) && !/^\s*(?:modified:|new file:|deleted:|renamed:)/u.test(line)) {
-        return `?? ${trimmed}`;
-      }
-
-      return rewriteGitStatusLine(line);
-    })
-    .filter((line): line is string => line !== null);
-
-  const collapsed: string[] = [];
-  for (const line of rewritten) {
-    if (line === "" && collapsed[collapsed.length - 1] === "") {
-      continue;
-    }
-    collapsed.push(line);
-  }
-  return collapsed;
-}
-
-function extractGhLabelNames(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.flatMap((entry) => {
-    if (typeof entry === "string") {
-      return entry ? [entry] : [];
-    }
-    if (typeof entry === "object" && entry !== null && "name" in entry && typeof entry.name === "string") {
-      return entry.name ? [entry.name] : [];
-    }
-    return [];
-  });
-}
-
-function extractGhCommentCount(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.length;
-  }
-  if (typeof value === "object" && value !== null && "totalCount" in value && typeof value.totalCount === "number") {
-    return value.totalCount;
-  }
-  return null;
-}
-
-function parseJsonObjectLine(line: string): Record<string, unknown> | null {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function formatGhJsonRecord(record: Record<string, unknown>): string | null {
-  const numericId = typeof record.number === "number" ? record.number
-    : typeof record.databaseId === "number" ? record.databaseId
-      : null;
-  const title = typeof record.title === "string" ? record.title
-    : typeof record.displayTitle === "string" ? record.displayTitle
-      : typeof record.name === "string" ? record.name
-        : typeof record.workflowName === "string" ? record.workflowName
-          : null;
-  if (!title) {
-    return null;
-  }
-
-  const labels = extractGhLabelNames(record.labels).slice(0, 3);
-  const comments = extractGhCommentCount(record.comments);
-  const branch = typeof record.headBranch === "string" ? record.headBranch
-    : typeof record.headRefName === "string" ? record.headRefName
-      : null;
-  const status = typeof record.state === "string" ? record.state
-    : typeof record.status === "string" ? record.status
-      : typeof record.conclusion === "string" ? record.conclusion
-        : null;
-  const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt.slice(0, 10) : null;
-
-  const parts: string[] = [];
-  if (numericId !== null) {
-    parts.push(`#${numericId}`);
-  }
-  parts.push(compactWhitespace(title));
-  if (status) {
-    parts.push(`[${status}]`);
-  }
-  if (branch) {
-    parts.push(`(${compactWhitespace(branch)})`);
-  }
-  if (typeof comments === "number" && comments > 0) {
-    parts.push(`${comments}c`);
-  }
-  if (labels.length > 0) {
-    parts.push(`{${labels.join(", ")}}`);
-  }
-  if (updatedAt) {
-    parts.push(updatedAt);
-  }
-  return parts.join(" ");
-}
-
-function formatGhTableLine(line: string): string {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  const columns = trimmed.split(/\s{2,}|\t+/u).map((part) => compactWhitespace(part)).filter(Boolean);
-  if (columns.length >= 2 && /^\d+$/u.test(columns[0] ?? "")) {
-    const number = columns[0]!;
-    const title = columns[1]!;
-    const state = columns.length >= 4 ? columns.at(-1) : null;
-    const context = columns.length >= 3 ? columns.slice(2, state ? -1 : undefined).join(" ") : null;
-    const parts = [`#${number}`, title];
-    if (state) {
-      parts.push(`[${state}]`);
-    }
-    if (context) {
-      parts.push(`(${context})`);
-    }
-    return parts.join(" ");
-  }
-
-  return compactWhitespace(trimmed);
-}
-
-function rewriteGhLines(lines: string[], input: ToolExecutionInput): string[] {
-  const nonEmpty = lines.filter((line) => line.trim() !== "");
-  if (nonEmpty.length === 0) {
-    return [];
-  }
-
-  const parsedJsonLines = nonEmpty.map(parseJsonObjectLine);
-  if (parsedJsonLines.every((entry) => entry !== null)) {
-    const rewritten = parsedJsonLines
-      .map((entry) => formatGhJsonRecord(entry!))
-      .filter((line): line is string => typeof line === "string" && line.length > 0);
-    if (rewritten.length > 0) {
-      return rewritten;
-    }
-  }
-
-  if ((input.argv ?? [])[0] === "gh") {
-    return lines.map(formatGhTableLine);
-  }
-
-  return lines;
-}
+const SMALL_OUTPUT_PASSTHROUGH_MIN_SAVED_CHARS = 120;
+const SMALL_OUTPUT_PASSTHROUGH_MAX_RATIO = 0.75;
+const FAILURE_SEVERITY_FACTS = new Set(["error", "warning"]);
 
 function buildRawText(input: ToolExecutionInput): string {
   if (input.combinedText) {
@@ -270,7 +52,12 @@ function prettyPrintJsonIfPossible(text: string): string {
   return text;
 }
 
-function applyRule(compiledRule: CompiledRule, input: ToolExecutionInput, rawText: string): { summary: string; facts: Record<string, number> } {
+function applyRule(
+  compiledRule: CompiledRule,
+  input: ToolExecutionInput,
+  rawText: string,
+  noOmit = false,
+): { summary: string; facts: Record<string, number>; compaction: CompactionMetadata } {
   const rule = compiledRule.rule;
   if (rule.transforms?.prettyPrintJson) {
     rawText = prettyPrintJsonIfPossible(rawText);
@@ -282,25 +69,30 @@ function applyRule(compiledRule: CompiledRule, input: ToolExecutionInput, rawTex
     lines = normalizeLines(stripAnsi(lines.join("\n")));
   }
 
+  let rewriteCompaction: CompactionMetadata | undefined;
+  if (!noOmit && rule.id === "generic/fallback") {
+    const collapsed = collapseRepeatedEmojiBanner(lines);
+    lines = collapsed.lines;
+    rewriteCompaction = mergeCompactionMetadata(rewriteCompaction, collapsed.compaction);
+  }
+
   const outputMatchText = trimEmptyEdges(lines).join("\n");
   const matchedOutput = compiledRule.compiled.outputMatches.find((entry) => entry.pattern.test(outputMatchText));
-  if (matchedOutput) {
+  if (!noOmit && matchedOutput) {
     return {
       summary: matchedOutput.message,
       facts,
+      compaction: NO_COMPACTION_METADATA,
     };
   }
 
-  if (rule.filters?.skipPatterns?.length) {
+  if (!noOmit && rule.filters?.skipPatterns?.length) {
     lines = lines.filter((line) => !compiledRule.compiled.skipPatterns.some((pattern) => pattern.test(line)));
   }
 
   let counterLines = [...lines];
 
-  const isFailure = Boolean(input.exitCode && input.exitCode !== 0);
-  const skipKeepPatternsOnFailure = isFailure && Boolean(rule.failure?.skipKeepPatterns);
-
-  if (rule.filters?.keepPatterns?.length && !skipKeepPatternsOnFailure) {
+  if (!noOmit && rule.filters?.keepPatterns?.length) {
     const kept = lines.filter((line) => compiledRule.compiled.keepPatterns.some((pattern) => pattern.test(line)));
     if (kept.length > 0) {
       lines = kept;
@@ -312,7 +104,7 @@ function applyRule(compiledRule: CompiledRule, input: ToolExecutionInput, rawTex
     lines = trimEmptyEdges(lines);
   }
 
-  if (rule.transforms?.dedupeAdjacent) {
+  if (!noOmit && rule.transforms?.dedupeAdjacent) {
     counterLines = dedupeAdjacent(counterLines);
     lines = dedupeAdjacent(lines);
   }
@@ -321,24 +113,42 @@ function applyRule(compiledRule: CompiledRule, input: ToolExecutionInput, rawTex
     counterLines = rewriteGitStatusLines(counterLines);
     lines = rewriteGitStatusLines(lines);
   }
+  const preRewriteLines = [...lines];
   if (rule.id === "cloud/gh") {
-    counterLines = rewriteGhLines(counterLines, input);
-    lines = rewriteGhLines(lines, input);
+    counterLines = rewriteGhLines(counterLines, input, noOmit).lines;
+    const rewritten = rewriteGhLines(lines, input, noOmit);
+    lines = rewritten.lines;
+    rewriteCompaction = mergeCompactionMetadata(rewriteCompaction, rewritten.compaction);
+  }
+  if (rule.id === "search/rg") {
+    const rewritten = rewriteSearchLines(lines, noOmit);
+    lines = rewritten.lines;
+    rewriteCompaction = mergeCompactionMetadata(rewriteCompaction, rewritten.compaction);
+  }
+  if (rule.id === "git/diff") {
+    const rewritten = rewriteGitDiffLines(lines, noOmit);
+    lines = rewritten.lines;
+    rewriteCompaction = mergeCompactionMetadata(rewriteCompaction, rewritten.compaction);
   }
 
   for (const counter of compiledRule.compiled.counters) {
     const pattern = counter.pattern;
-    facts[counter.name] = (rule.counterSource === "preKeep" ? counterLines : lines).filter((line) => pattern.test(line)).length;
+    let factLines = rule.counterSource === "preKeep" ? counterLines : rule.id === "git/diff" ? preRewriteLines : lines;
+    if (rule.id === "git/diff" && (counter.name === "added line" || counter.name === "removed line")) {
+      factLines = factLines.filter((line) => !line.startsWith("+++") && !line.startsWith("---"));
+    }
+    facts[counter.name] = factLines.filter((line) => pattern.test(line)).length;
   }
 
   if (lines.length === 0 && rule.onEmpty) {
     return {
       summary: rule.onEmpty,
       facts,
+      compaction: rewriteCompaction ?? NO_COMPACTION_METADATA,
     };
   }
 
-  const summarize = isFailure && rule.failure?.preserveOnFailure
+  const summarize = input.exitCode && input.exitCode !== 0 && rule.failure?.preserveOnFailure
     ? {
         head: rule.failure.head ?? 6,
         tail: rule.failure.tail ?? 12,
@@ -348,10 +158,11 @@ function applyRule(compiledRule: CompiledRule, input: ToolExecutionInput, rawTex
         tail: rule.summarize?.tail ?? 6,
       };
 
-  const compacted = headTail(lines, summarize.head, summarize.tail);
+  const compacted = headTail(lines, summarize.head, summarize.tail, noOmit);
   return {
-    summary: compacted.join("\n").trim(),
+    summary: compacted.lines.join("\n").trim(),
     facts,
+    compaction: mergeCompactionMetadata(rewriteCompaction, compacted.compaction),
   };
 }
 
@@ -368,15 +179,68 @@ function buildPassthroughText(input: ToolExecutionInput, rawText: string): strin
   return normalized;
 }
 
-function formatInline(
+function buildLiteralPassthroughText(input: ToolExecutionInput, rawText: string): string {
+  const normalized = stripAnsi(rawText).trimEnd();
+  if (!normalized) {
+    return buildPassthroughText(input, rawText);
+  }
+
+  if (input.exitCode && input.exitCode !== 0) {
+    return `exit ${input.exitCode}\n${normalized}`;
+  }
+
+  return normalized;
+}
+
+function shouldKeepSmallOutput(
   classification: { family: string },
+  input: ToolExecutionInput,
+  rawChars: number,
+  compactChars: number,
+  maxInlineChars: number,
+): boolean {
+  if (rawChars === 0 || rawChars > maxInlineChars || (input.exitCode ?? 0) !== 0) {
+    return false;
+  }
+  if (!isTerseDiscoveryCommand(classification, input)) {
+    return false;
+  }
+
+  const savedChars = rawChars - compactChars;
+  const ratio = rawChars === 0 ? 1 : compactChars / rawChars;
+  return savedChars < SMALL_OUTPUT_PASSTHROUGH_MIN_SAVED_CHARS
+    || ratio > SMALL_OUTPUT_PASSTHROUGH_MAX_RATIO;
+}
+
+function isTerseDiscoveryCommand(classification: { family: string }, input: ToolExecutionInput): boolean {
+  const argv = input.argv ?? [];
+  if (classification.family === "git-status") {
+    return argv.some((arg) => arg === "--short" || arg === "-s" || arg.startsWith("--porcelain"));
+  }
+  if (classification.family === "git-remote") {
+    return argv.includes("-v") || argv.includes("--verbose");
+  }
+  if (classification.family === "git-worktree") {
+    return argv.includes("--porcelain");
+  }
+  return false;
+}
+
+function formatInline(
+  classification: { family: string; matchedReducer?: string },
   input: ToolExecutionInput,
   summary: string,
   facts: Record<string, number>,
+  noOmit = false,
 ): string {
+  const neutralizeSeverityFacts = classification.matchedReducer === "generic/fallback"
+    && input.exitCode === 0;
   const factParts = Object.entries(facts)
     .filter(([, count]) => count > 0)
-    .map(([name, count]) => pluralize(count, name));
+    .map(([name, count]) => pluralize(
+      count,
+      neutralizeSeverityFacts && FAILURE_SEVERITY_FACTS.has(name) ? `${name} mention` : name,
+    ));
 
   const lines: string[] = [];
   if (input.exitCode && input.exitCode !== 0) {
@@ -387,7 +251,7 @@ function formatInline(
     || (
       classification.family !== "git-status"
       && classification.family !== "help"
-      && summary.includes("omitted")
+      && (noOmit || summary.includes("omitted"))
     )
     || (classification.family === "test-results" && (input.exitCode ?? 0) !== 0);
 
@@ -404,32 +268,57 @@ function selectInlineText(
   rawText: string,
   compactText: string,
   maxInlineChars: number,
-): string {
-  if (classification.family === "git-status") {
-    return compactText;
-  }
-
+  compactCompaction: CompactionMetadata,
+  noOmit = false,
+): { text: string; compaction: CompactionMetadata } {
   const passthroughText = buildPassthroughText(input, rawText);
   const rawChars = countTextChars(stripAnsi(rawText));
   const compactChars = countTextChars(compactText);
-  const passthroughLimit = classification.family === "help" ? maxInlineChars : TINY_OUTPUT_MAX_CHARS;
-  if (countTextChars(passthroughText) > passthroughLimit) {
-    return compactText;
+  if (noOmit) {
+    return {
+      text: compactText,
+      compaction: compactCompaction,
+    };
+  }
+  if (shouldKeepSmallOutput(classification, input, rawChars, compactChars, maxInlineChars)) {
+    return {
+      text: buildLiteralPassthroughText(input, rawText),
+      compaction: NO_COMPACTION_METADATA,
+    };
+  }
+  if (classification.family === "git-status") {
+    return {
+      text: compactText,
+      compaction: compactCompaction,
+    };
   }
   if (rawChars <= maxInlineChars && compactChars >= rawChars) {
-    return passthroughText;
+    return {
+      text: passthroughText,
+      compaction: NO_COMPACTION_METADATA,
+    };
+  }
+  const passthroughLimit = classification.family === "help" ? maxInlineChars : TINY_OUTPUT_MAX_CHARS;
+  if (countTextChars(passthroughText) > passthroughLimit) {
+    return {
+      text: compactText,
+      compaction: compactCompaction,
+    };
   }
   if (countTextChars(passthroughText) <= countTextChars(compactText)) {
-    return passthroughText;
+    return {
+      text: passthroughText,
+      compaction: NO_COMPACTION_METADATA,
+    };
   }
-  return compactText;
+  return {
+    text: compactText,
+    compaction: compactCompaction,
+  };
 }
 
 export async function reduceExecution(input: ToolExecutionInput, opts: ReduceOptions = {}): Promise<CompactResult> {
-  const rules = await loadRules({
-    ...(opts.cwd ? { cwd: opts.cwd } : {}),
-    includeProject: true,
-  });
+  const rules = await loadRules(opts.cwd ? { cwd: opts.cwd } : undefined);
   return reduceExecutionWithRules(input, rules, opts);
 }
 
@@ -441,16 +330,52 @@ export async function reduceExecutionWithRules(
   const normalizedInput = normalizeExecutionInput(input);
   const rawText = buildRawText(normalizedInput);
   const measuredRawChars = countTextChars(stripAnsi(rawText));
-  const classification = classifyExecution(normalizedInput, rules, opts.classifier);
+  const maxInlineChars = opts.maxInlineChars ?? 1200;
+  const buildStats = (reducedChars: number): CompactResult["stats"] => ({
+    rawChars: measuredRawChars,
+    reducedChars,
+    ratio: measuredRawChars === 0 ? 1 : reducedChars / measuredRawChars,
+  });
+  const multipleSubstantiveCommands = !opts.classifier && hasMultipleSubstantiveShellCommands(input);
+  const resolvedMatch = opts.classifier || multipleSubstantiveCommands
+    ? undefined
+    : resolveRuleMatch(input, rules);
+  const classification = multipleSubstantiveCommands
+    ? {
+        family: "generic",
+        confidence: 0.2,
+        matchedReducer: "generic/fallback",
+      }
+    : resolvedMatch?.classification
+      ?? classifyExecution(input, rules, opts.classifier);
+  const reducerInput = multipleSubstantiveCommands
+    ? normalizedInput
+    : resolvedMatch?.candidateInput ?? normalizedInput;
+  const trace = opts.trace
+    ? {
+        ...(normalizedInput.command ? { normalizedCommand: normalizedInput.command } : {}),
+        ...(normalizedInput.argv?.length ? { normalizedArgv: normalizedInput.argv } : {}),
+        ...(reducerInput.command && reducerInput.command !== normalizedInput.command
+          ? { reducerCommand: reducerInput.command }
+          : {}),
+        ...(reducerInput.argv?.length && reducerInput.argv !== normalizedInput.argv
+          ? { reducerArgv: reducerInput.argv }
+          : {}),
+        ...(classification.matchedReducer ? { matchedReducer: classification.matchedReducer } : {}),
+        family: classification.family,
+      }
+    : undefined;
 
-  if (opts.raw) {
+  const requiresVerbatimOutput = !multipleSubstantiveCommands
+    && isVerbatimConfigInspectionCommand(input);
+  if (opts.raw || requiresVerbatimOutput) {
     const rawRef = opts.store
       ? await storeArtifact(
           {
             input: normalizedInput,
             rawText,
-            filteredText: rawText,
             classification,
+            ...(opts.recordStats !== undefined ? { recordStats: opts.recordStats } : {}),
             stats: {
               rawChars: measuredRawChars,
               reducedChars: measuredRawChars,
@@ -461,7 +386,7 @@ export async function reduceExecutionWithRules(
         )
       : undefined;
     if (!opts.store && opts.recordStats) {
-      await storeArtifactMetadata(
+      await tryStoreArtifactMetadata(
         {
           input: normalizedInput,
           rawText,
@@ -478,6 +403,8 @@ export async function reduceExecutionWithRules(
 
     return {
       inlineText: rawText,
+      compaction: NO_COMPACTION_METADATA,
+      ...(trace ? { trace } : {}),
       ...(rawRef ? { rawRef } : {}),
       stats: {
         rawChars: measuredRawChars,
@@ -488,9 +415,62 @@ export async function reduceExecutionWithRules(
     };
   }
 
+  const inspectionSummary = multipleSubstantiveCommands
+    ? null
+    : buildInspectionSummary(normalizedInput, rawText, opts.noOmit);
+  if (inspectionSummary) {
+    const summaryText = inspectionSummary.lines.join("\n").trim();
+    const selectedText = clampTextMiddleWithMetadata(summaryText, maxInlineChars, opts.noOmit);
+    const reducedChars = countTextChars(selectedText.text);
+    const summaryClassification = {
+      family: "structured-summary",
+      confidence: 0.9,
+      matchedReducer: inspectionSummary.matchedReducer,
+    };
+    const stats = {
+      rawChars: measuredRawChars,
+      reducedChars,
+      ratio: measuredRawChars === 0 ? 1 : reducedChars / measuredRawChars,
+    };
+    const rawRef = opts.store
+      ? await storeArtifact(
+          {
+            input: normalizedInput,
+            rawText,
+            classification: summaryClassification,
+            ...(opts.recordStats !== undefined ? { recordStats: opts.recordStats } : {}),
+            stats,
+          },
+          opts.storeDir,
+        )
+      : undefined;
+
+    if (!opts.store && opts.recordStats) {
+      await tryStoreArtifactMetadata(
+        {
+          input: normalizedInput,
+          rawText,
+          classification: summaryClassification,
+          stats,
+        },
+        opts.storeDir,
+      );
+    }
+
+    return {
+      inlineText: selectedText.text,
+      previewText: summaryText,
+      compaction: mergeCompactionMetadata(inspectionSummary.compaction, selectedText.compaction),
+      ...(trace ? { trace } : {}),
+      ...(rawRef ? { rawRef } : {}),
+      stats,
+      classification: summaryClassification,
+    };
+  }
+
   if (classification.matchedReducer === "generic/fallback" && isFileContentInspectionCommand(normalizedInput)) {
     if (!opts.store && opts.recordStats) {
-      await storeArtifactMetadata(
+      await tryStoreArtifactMetadata(
         {
           input: normalizedInput,
           rawText,
@@ -507,6 +487,8 @@ export async function reduceExecutionWithRules(
 
     return {
       inlineText: rawText,
+      compaction: NO_COMPACTION_METADATA,
+      ...(trace ? { trace } : {}),
       stats: {
         rawChars: measuredRawChars,
         reducedChars: measuredRawChars,
@@ -523,44 +505,136 @@ export async function reduceExecutionWithRules(
     throw new Error("missing generic fallback rule");
   }
 
-  const { summary, facts } = applyRule(matchedRule, normalizedInput, rawText);
-  const compactText = formatInline(classification, normalizedInput, summary || "(no output)", facts);
-  const maxInlineChars = opts.maxInlineChars ?? 1200;
-  const selectedText = selectInlineText(classification, normalizedInput, rawText, compactText, maxInlineChars);
-  const clamp = classification.family === "help" || selectedText.includes("\n") ? clampTextMiddle : clampText;
-  const provisionalInlineText = clamp(selectedText, maxInlineChars);
-  const provisionalReducedChars = countTextChars(provisionalInlineText);
-  const provisionalStats = {
+  const githubActionsFailureSummary = classification.matchedReducer === "generic/fallback"
+    ? buildGithubActionsFailureSummary(reducerInput, rawText, opts.noOmit)
+    : null;
+  if (githubActionsFailureSummary) {
+    const inlineText = clampTextMiddleWithMetadata(githubActionsFailureSummary.text, maxInlineChars, opts.noOmit);
+    const reducedChars = countTextChars(inlineText.text);
+    const stats = {
+      rawChars: measuredRawChars,
+      reducedChars,
+      ratio: measuredRawChars === 0 ? 1 : reducedChars / measuredRawChars,
+    };
+    const rawRef = opts.store
+      ? await storeArtifact(
+          {
+            input: normalizedInput,
+            rawText,
+            classification,
+            ...(opts.recordStats !== undefined ? { recordStats: opts.recordStats } : {}),
+            stats,
+          },
+          opts.storeDir,
+        )
+      : undefined;
+
+    if (!opts.store && opts.recordStats) {
+      await tryStoreArtifactMetadata(
+        {
+          input: normalizedInput,
+          rawText,
+          classification,
+          stats,
+        },
+        opts.storeDir,
+      );
+    }
+
+    return {
+      inlineText: inlineText.text,
+      previewText: githubActionsFailureSummary.text,
+      compaction: mergeCompactionMetadata(githubActionsFailureSummary.compaction, inlineText.compaction),
+      ...(trace ? { trace } : {}),
+      ...(rawRef ? { rawRef } : {}),
+      stats,
+      classification,
+    };
+  }
+
+  if (classification.matchedReducer === "generic/fallback") {
+    const exitPrefix = reducerInput.exitCode && reducerInput.exitCode !== 0 ? `exit ${reducerInput.exitCode}\n` : "";
+    const jsonBudget = Math.max(0, maxInlineChars - countTextChars(exitPrefix));
+    const jsonOutput = compactWholeJsonText(rawText, jsonBudget, opts.noOmit);
+    if (jsonOutput) {
+      const inlineText = `${exitPrefix}${jsonOutput.text}`;
+      const reducedChars = countTextChars(inlineText);
+      const jsonClassification = {
+        family: "structured-json",
+        confidence: 0.9,
+        matchedReducer: "generic/json",
+        ...(classification.matchedVia ? { matchedVia: classification.matchedVia } : {}),
+        ...(classification.matchedCommand ? { matchedCommand: classification.matchedCommand } : {}),
+      };
+      const stats = buildStats(reducedChars);
+      const rawRef = opts.store
+        ? await storeArtifact(
+            {
+              input: normalizedInput,
+              rawText,
+              classification: jsonClassification,
+              ...(opts.recordStats !== undefined ? { recordStats: opts.recordStats } : {}),
+              stats,
+            },
+            opts.storeDir,
+          )
+        : undefined;
+
+      if (!opts.store && opts.recordStats) {
+        await tryStoreArtifactMetadata(
+          {
+            input: normalizedInput,
+            rawText,
+            classification: jsonClassification,
+            stats,
+          },
+          opts.storeDir,
+        );
+      }
+
+      return {
+        inlineText,
+        ...(jsonOutput.compaction ? { compaction: jsonOutput.compaction } : {}),
+        ...(trace ? { trace: { ...trace, matchedReducer: jsonClassification.matchedReducer, family: jsonClassification.family } } : {}),
+        ...(rawRef ? { rawRef } : {}),
+        stats,
+        classification: jsonClassification,
+      };
+    }
+  }
+
+  const { summary, facts, compaction } = applyRule(matchedRule, reducerInput, rawText, opts.noOmit);
+  const compactText = formatInline(
+    classification,
+    reducerInput,
+    summary || "(no output)",
+    facts,
+    opts.noOmit,
+  );
+  const selectedText = selectInlineText(classification, reducerInput, rawText, compactText, maxInlineChars, compaction, opts.noOmit);
+  const clamp = classification.family === "help" || selectedText.text.includes("\n") ? clampTextMiddleWithMetadata : clampTextWithMetadata;
+  const inlineText = clamp(selectedText.text, maxInlineChars, opts.noOmit);
+  const reducedChars = countTextChars(inlineText.text);
+  const stats = {
     rawChars: measuredRawChars,
-    reducedChars: provisionalReducedChars,
-    ratio: measuredRawChars === 0 ? 1 : provisionalReducedChars / measuredRawChars,
+    reducedChars,
+    ratio: measuredRawChars === 0 ? 1 : reducedChars / measuredRawChars,
   };
   const rawRef = opts.store
     ? await storeArtifact(
         {
           input: normalizedInput,
           rawText,
-          filteredText: provisionalInlineText,
           classification,
-          stats: {
-            rawChars: provisionalStats.rawChars,
-            reducedChars: provisionalStats.reducedChars,
-            ratio: provisionalStats.ratio,
-          },
+          ...(opts.recordStats !== undefined ? { recordStats: opts.recordStats } : {}),
+          stats,
         },
         opts.storeDir,
       )
     : undefined;
-  const inlineText = clamp(selectedText, maxInlineChars);
-  const reducedChars = countTextChars(inlineText);
-  const stats = {
-    rawChars: measuredRawChars,
-    reducedChars,
-    ratio: measuredRawChars === 0 ? 1 : reducedChars / measuredRawChars,
-  };
 
   if (!opts.store && opts.recordStats) {
-    await storeArtifactMetadata(
+    await tryStoreArtifactMetadata(
       {
         input: normalizedInput,
         rawText,
@@ -572,9 +646,11 @@ export async function reduceExecutionWithRules(
   }
 
   return {
-    inlineText,
+    inlineText: inlineText.text,
     ...(summary ? { previewText: summary } : {}),
     ...(Object.keys(facts).length > 0 ? { facts } : {}),
+    compaction: mergeCompactionMetadata(selectedText.compaction, inlineText.compaction),
+    ...(trace ? { trace } : {}),
     ...(rawRef ? { rawRef } : {}),
     stats,
     classification,
@@ -582,12 +658,11 @@ export async function reduceExecutionWithRules(
 }
 
 export async function classifyOnly(input: ToolExecutionInput, forcedRuleId?: string) {
-  const rules = await loadRules({ includeProject: true });
-  return classifyExecution(normalizeExecutionInput(input), rules, forcedRuleId);
+  const rules = await loadRules();
+  return classifyExecution(input, rules, forcedRuleId);
 }
 
 export async function findMatchingRule(input: ToolExecutionInput): Promise<CompiledRule | undefined> {
-  const rules = await loadRules({ includeProject: true });
-  const normalizedInput = normalizeExecutionInput(input);
-  return rules.find((rule) => matchesRule(rule, normalizedInput));
+  const rules = await loadRules();
+  return resolveRuleMatch(input, rules)?.rule;
 }

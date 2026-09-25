@@ -1,3 +1,5 @@
+import { createCompactionMetadata, createPassthroughCompactionMetadata, type CompactionMetadata } from "./compaction-metadata.js";
+
 const ANSI_CSI_PATTERN = new RegExp(String.raw`\u001B\[[0-?]*[ -/]*[@-~]`, "g");
 const ANSI_OSC_PATTERN = new RegExp(String.raw`\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)`, "g");
 const ANSI_CSI_INCOMPLETE_PATTERN = new RegExp(String.raw`\u001B\[[0-?]*[ -/]*$`, "g");
@@ -7,6 +9,9 @@ const TRUNCATION_SUFFIX = "\n... truncated ...";
 const MIDDLE_TRUNCATION_MARKER = "\n... omitted ...\n";
 const COMBINING_MARK_PATTERN = /\p{Mark}/u;
 const EMOJI_PATTERN = /\p{Extended_Pictographic}/u;
+const FLAG_EMOJI_PATTERN = /^\p{Regional_Indicator}{2}$/u;
+const KEYCAP_EMOJI_PATTERN = /^[#*0-9]\uFE0F?\u20E3$/u;
+const REPEATED_EMOJI_BANNER_MIN_REPETITIONS = 24;
 const graphemeSegmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
   ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
   : null;
@@ -47,6 +52,10 @@ export function stripAnsi(text: string): string {
 
 export function countTextChars(text: string): number {
   return graphemes(text).length;
+}
+
+export function sliceTextChars(text: string, start: number, end?: number): string {
+  return graphemes(text).slice(start, end).join("");
 }
 
 function codePointWidth(codePoint: number): number {
@@ -133,16 +142,68 @@ export function dedupeAdjacent(lines: string[]): string[] {
   return next;
 }
 
-export function headTail(lines: string[], head: number, tail: number): string[] {
-  if (lines.length <= head + tail) {
-    return lines;
+function formatCodePoints(text: string): string {
+  return Array.from(text, (character) => `U+${character.codePointAt(0)?.toString(16).toUpperCase().padStart(4, "0")}`).join("+");
+}
+
+function isEmojiGrapheme(text: string): boolean {
+  return EMOJI_PATTERN.test(text)
+    || FLAG_EMOJI_PATTERN.test(text)
+    || KEYCAP_EMOJI_PATTERN.test(text);
+}
+
+export function collapseRepeatedEmojiBanner(lines: string[]): { lines: string[]; compaction?: CompactionMetadata } {
+  let collapsed = false;
+  const nextLines = lines.map((line) => {
+    const visibleSegments = graphemes(line).filter((segment) => !/^\s+$/u.test(segment));
+    const repeatedEmoji = visibleSegments[0];
+    if (
+      visibleSegments.length < REPEATED_EMOJI_BANNER_MIN_REPETITIONS
+      || !repeatedEmoji
+      || !isEmojiGrapheme(repeatedEmoji)
+      || visibleSegments.some((segment) => segment !== repeatedEmoji)
+    ) {
+      return line;
+    }
+
+    collapsed = true;
+    return `[repeated emoji banner omitted: ${formatCodePoints(repeatedEmoji)} x${visibleSegments.length}]`;
+  });
+
+  return collapsed
+    ? {
+        lines: nextLines,
+        compaction: createCompactionMetadata("repeated-emoji-banner-omission"),
+      }
+    : { lines: nextLines };
+}
+
+export function headTail(lines: string[], head: number, tail: number, noOmit = false): { lines: string[]; compaction?: CompactionMetadata } {
+  const safeHead = Math.max(0, head);
+  const safeTail = Math.max(0, tail);
+  if (safeHead === 0 && safeTail === 0) {
+    return { lines };
   }
 
-  return [
-    ...lines.slice(0, head),
-    `... ${lines.length - head - tail} lines omitted ...`,
-    ...lines.slice(-tail),
-  ];
+  if (lines.length <= safeHead + safeTail) {
+    return { lines };
+  }
+
+  if (noOmit) {
+    return {
+      lines,
+      compaction: createPassthroughCompactionMetadata("no-omit-head-tail-passthrough"),
+    };
+  }
+
+  return {
+    lines: [
+      ...lines.slice(0, safeHead),
+      `... ${lines.length - safeHead - safeTail} lines omitted ...`,
+      ...lines.slice(-safeTail),
+    ],
+    compaction: createCompactionMetadata("head-tail-omission"),
+  };
 }
 
 export function clampText(text: string, maxChars: number): string {
@@ -154,9 +215,38 @@ export function clampText(text: string, maxChars: number): string {
   return `${head}${TRUNCATION_SUFFIX}`;
 }
 
-export function clampTextMiddle(text: string, maxChars: number): string {
+export function clampTextWithMetadata(text: string, maxChars: number, noOmit = false): { text: string; compaction?: CompactionMetadata } {
   if (countTextChars(text) <= maxChars) {
-    return text;
+    return { text };
+  }
+
+  if (noOmit) {
+    return {
+      text,
+      compaction: createPassthroughCompactionMetadata("no-omit-char-clip-passthrough"),
+    };
+  }
+
+  return {
+    text: clampText(text, maxChars),
+    compaction: createCompactionMetadata("tail-truncation"),
+  };
+}
+
+export function clampTextMiddle(text: string, maxChars: number): string {
+  return clampTextMiddleWithMetadata(text, maxChars).text;
+}
+
+export function clampTextMiddleWithMetadata(text: string, maxChars: number, noOmit = false): { text: string; compaction?: CompactionMetadata } {
+  if (countTextChars(text) <= maxChars) {
+    return { text };
+  }
+
+  if (noOmit) {
+    return {
+      text,
+      compaction: createPassthroughCompactionMetadata("no-omit-char-clip-passthrough"),
+    };
   }
 
   const markerChars = countTextChars(MIDDLE_TRUNCATION_MARKER);
@@ -167,7 +257,10 @@ export function clampTextMiddle(text: string, maxChars: number): string {
   const head = trimHeadToLineBoundary(segments.slice(0, headChars).join(""));
   const tail = trimTailToLineBoundary(segments.slice(-tailChars).join(""));
 
-  return `${head}${MIDDLE_TRUNCATION_MARKER}${tail}`;
+  return {
+    text: `${head}${MIDDLE_TRUNCATION_MARKER}${tail}`,
+    compaction: createCompactionMetadata("middle-truncation"),
+  };
 }
 
 export function pluralize(count: number, noun: string): string {

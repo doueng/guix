@@ -1,25 +1,10 @@
 {
-  "name": "pi-tokenjuice-vendored",
-  "version": "0.4.0-vendored",
+  "name": "pi-tokenjuice-upstream",
+  "version": "0.8.5",
   "private": true,
   "type": "module",
   "license": "MIT",
   "pi": {
     "extensions": ["./src/extension.ts"]
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "files": ["src"],
-  "dependencies": {
-    "diff": "^7.0.0"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
-  },
-  "devDependencies": {
-    "@types/diff": "^7.0.1",
-    "@types/node": "^24.7.0",
-    "typescript": "^5.9.3"
   }
 }

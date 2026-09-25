@@ -1,13 +1,38 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 
+import { appendBoundedJsonl, readBoundedJsonlPage } from "./bounded-jsonl.js";
+import { getCommandName, getEffectiveCommandArgv } from "./command.js";
 import { countTextChars, stripAnsi } from "./text.js";
+import { resolveArtifactSource } from "./source.js";
 
-import type { ArtifactMetadataRef, StoredArtifact, StoredArtifactInput, StoredArtifactMetadata, StoredArtifactRef } from "../types.js";
+import type { ArtifactMetadataPage, ArtifactMetadataPageOptions, ArtifactMetadataRef, StoredArtifact, StoredArtifactInput, StoredArtifactMetadata, StoredArtifactRef, ToolExecutionInput } from "../types.js";
 
 const ARTIFACT_ID_PATTERN = /^tj_[0-9a-f-]{12}$/iu;
+export const ARTIFACT_DIR_ENV = "TOKENJUICE_ARTIFACT_DIR";
+export const STATS_ENABLED_ENV = "TOKENJUICE_STATS";
+const METADATA_SEGMENT_DIRECTORY = "metadata-v1";
+const METADATA_SEGMENT_PREFIX = "events";
+const DEFAULT_METADATA_LIST_LIMIT = 10_000;
+const OPTIONAL_METADATA_STORAGE_ERROR_CODES = new Set([
+  "EACCES",
+  "EDQUOT",
+  "EEXIST",
+  "EFBIG",
+  "EIO",
+  "EISDIR",
+  "ELOOP",
+  "EMFILE",
+  "ENAMETOOLONG",
+  "ENFILE",
+  "ENOENT",
+  "ENOSPC",
+  "ENOTDIR",
+  "EPERM",
+  "EROFS",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -29,10 +54,22 @@ function isStoredArtifactMetadata(value: unknown): value is StoredArtifactMetada
   if ("toolName" in value && value.toolName !== undefined && typeof value.toolName !== "string") {
     return false;
   }
+  if ("source" in value && value.source !== undefined && typeof value.source !== "string") {
+    return false;
+  }
   if ("command" in value && value.command !== undefined && typeof value.command !== "string") {
     return false;
   }
+  if ("commandFamily" in value && value.commandFamily !== undefined && typeof value.commandFamily !== "string") {
+    return false;
+  }
+  if ("commandDigest" in value && value.commandDigest !== undefined && typeof value.commandDigest !== "string") {
+    return false;
+  }
   if ("exitCode" in value && value.exitCode !== undefined && typeof value.exitCode !== "number") {
+    return false;
+  }
+  if ("captureTruncated" in value && value.captureTruncated !== undefined && typeof value.captureTruncated !== "boolean") {
     return false;
   }
   if ("reducedChars" in value && value.reducedChars !== undefined && typeof value.reducedChars !== "number") {
@@ -41,18 +78,26 @@ function isStoredArtifactMetadata(value: unknown): value is StoredArtifactMetada
   if ("ratio" in value && value.ratio !== undefined && typeof value.ratio !== "number") {
     return false;
   }
-  if ("filteredTextPath" in value && value.filteredTextPath !== undefined && typeof value.filteredTextPath !== "string") {
-    return false;
-  }
-  if ("diffPath" in value && value.diffPath !== undefined && typeof value.diffPath !== "string") {
-    return false;
-  }
 
   return true;
 }
 
-function artifactBaseDir(storeDir?: string): string {
-  return storeDir ?? join(homedir(), ".tokenjuice", "artifacts");
+function extractCaptureTruncatedFlag(input: ToolExecutionInput): boolean | undefined {
+  const value = input.metadata?.tokenjuiceCaptureTruncated;
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function getDefaultArtifactDir(): string {
+  const artifactDir = process.env[ARTIFACT_DIR_ENV];
+  if (typeof artifactDir === "string" && artifactDir.trim()) {
+    return artifactDir.trim();
+  }
+
+  return join(homedir(), ".tokenjuice", "artifacts");
+}
+
+export function resolveArtifactBaseDir(storeDir?: string): string {
+  return storeDir ?? getDefaultArtifactDir();
 }
 
 export function isValidArtifactId(id: string): boolean {
@@ -64,233 +109,158 @@ function buildArtifactPaths(id: string, storeDir?: string): StoredArtifactRef {
     throw new Error(`invalid artifact id: ${id}`);
   }
 
-  const base = artifactBaseDir(storeDir);
+  const base = resolveArtifactBaseDir(storeDir);
   return {
     id,
     storage: "file",
     path: join(base, `${id}.txt`),
     metadataPath: join(base, `${id}.json`),
-    filteredTextPath: join(base, `${id}.filtered.txt`),
-    diffPath: join(base, `${id}.diff.txt`),
   };
 }
 
-function buildMetadataOnlyPath(id: string, storeDir?: string): string {
-  if (!isValidArtifactId(id)) {
-    throw new Error(`invalid artifact id: ${id}`);
-  }
-  return join(artifactBaseDir(storeDir), `${id}.meta.json`);
-}
-
-function buildFilteredPath(id: string, storeDir?: string): string {
-  if (!isValidArtifactId(id)) {
-    throw new Error(`invalid artifact id: ${id}`);
-  }
-  return join(artifactBaseDir(storeDir), `${id}.filtered.txt`);
-}
-
-function buildDiffPath(id: string, storeDir?: string): string {
-  if (!isValidArtifactId(id)) {
-    throw new Error(`invalid artifact id: ${id}`);
-  }
-  return join(artifactBaseDir(storeDir), `${id}.diff.txt`);
-}
-
-type LineChange = {
-  value: string;
-  added?: boolean;
-  removed?: boolean;
+type StoredMetadataEvent = {
+  id: string;
+  hasRaw: boolean;
+  metadata: StoredArtifactMetadata;
 };
 
-const FINE_GRAINED_DIFF_MATRIX_LIMIT = 20_000;
-
-function splitLines(value: string): string[] {
-  const lines = value.split("\n");
-  if (lines[lines.length - 1] === "") {
-    lines.pop();
-  }
-  return lines;
+function isStoredMetadataEvent(value: unknown): value is StoredMetadataEvent {
+  return isRecord(value)
+    && typeof value.id === "string"
+    && isValidArtifactId(value.id)
+    && typeof value.hasRaw === "boolean"
+    && isStoredArtifactMetadata(value.metadata);
 }
 
-function pushLineChange(changes: LineChange[], next: LineChange): void {
-  if (!next.value) {
-    return;
-  }
-
-  const previous = changes[changes.length - 1];
-  if (previous && previous.added === next.added && previous.removed === next.removed) {
-    previous.value = `${previous.value}\n${next.value}`;
-    return;
-  }
-
-  changes.push(next);
+function metadataSegmentDir(storeDir?: string): string {
+  return join(resolveArtifactBaseDir(storeDir), METADATA_SEGMENT_DIRECTORY);
 }
 
-function diffLineSlices(before: string[], after: string[]): LineChange[] {
-  if (before.length === 0 && after.length === 0) {
-    return [];
-  }
-  if (before.length === 0) {
-    return [{ added: true, value: after.join("\n") }];
-  }
-  if (after.length === 0) {
-    return [{ removed: true, value: before.join("\n") }];
-  }
+const SAFE_COMMAND_FAMILY = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/u;
 
-  if (before.length * after.length > FINE_GRAINED_DIFF_MATRIX_LIMIT) {
-    return [
-      { removed: true, value: before.join("\n") },
-      { added: true, value: after.join("\n") },
-    ];
+export function getTelemetryCommandFamily(
+  input: Pick<ToolExecutionInput, "argv" | "command">,
+): string | undefined {
+  try {
+    const family = getCommandName(getEffectiveCommandArgv(input));
+    return family && SAFE_COMMAND_FAMILY.test(family) ? family : undefined;
+  } catch {
+    return undefined;
   }
-
-  const matrix = Array.from({ length: before.length + 1 }, () => Array<number>(after.length + 1).fill(0));
-  for (let leftIndex = before.length - 1; leftIndex >= 0; leftIndex -= 1) {
-    for (let rightIndex = after.length - 1; rightIndex >= 0; rightIndex -= 1) {
-      matrix[leftIndex][rightIndex] = before[leftIndex] === after[rightIndex]
-        ? matrix[leftIndex + 1][rightIndex + 1] + 1
-        : Math.max(matrix[leftIndex + 1][rightIndex], matrix[leftIndex][rightIndex + 1]);
-    }
-  }
-
-  const changes: LineChange[] = [];
-  let leftIndex = 0;
-  let rightIndex = 0;
-  while (leftIndex < before.length && rightIndex < after.length) {
-    if (before[leftIndex] === after[rightIndex]) {
-      pushLineChange(changes, { value: before[leftIndex] });
-      leftIndex += 1;
-      rightIndex += 1;
-      continue;
-    }
-
-    if (matrix[leftIndex + 1][rightIndex] >= matrix[leftIndex][rightIndex + 1]) {
-      pushLineChange(changes, { removed: true, value: before[leftIndex] });
-      leftIndex += 1;
-      continue;
-    }
-
-    pushLineChange(changes, { added: true, value: after[rightIndex] });
-    rightIndex += 1;
-  }
-
-  while (leftIndex < before.length) {
-    pushLineChange(changes, { removed: true, value: before[leftIndex] });
-    leftIndex += 1;
-  }
-  while (rightIndex < after.length) {
-    pushLineChange(changes, { added: true, value: after[rightIndex] });
-    rightIndex += 1;
-  }
-
-  return changes;
 }
 
-function buildSimpleDiff(rawText: string, filteredText: string): string {
-  const before = splitLines(rawText);
-  const after = splitLines(filteredText);
+function buildTelemetryMetadata(metadata: StoredArtifactMetadata, input: ToolExecutionInput): StoredArtifactMetadata {
+  const retainedMetadata = { ...metadata };
+  delete retainedMetadata.command;
+  const family = getTelemetryCommandFamily(input);
+  return {
+    ...retainedMetadata,
+    ...(family ? { commandFamily: family } : {}),
+  };
+}
 
-  let prefixLength = 0;
-  while (prefixLength < before.length && prefixLength < after.length && before[prefixLength] === after[prefixLength]) {
-    prefixLength += 1;
-  }
+async function appendMetadataEvent(
+  id: string,
+  metadata: StoredArtifactMetadata,
+  input: ToolExecutionInput,
+  hasRaw: boolean,
+  storeDir?: string,
+): Promise<string | undefined> {
+  return await appendBoundedJsonl(
+    metadataSegmentDir(storeDir),
+    METADATA_SEGMENT_PREFIX,
+    id,
+    {
+      id,
+      hasRaw,
+      metadata: buildTelemetryMetadata(metadata, input),
+    } satisfies StoredMetadataEvent,
+  );
+}
 
-  let beforeSuffixIndex = before.length - 1;
-  let afterSuffixIndex = after.length - 1;
-  while (beforeSuffixIndex >= prefixLength && afterSuffixIndex >= prefixLength && before[beforeSuffixIndex] === after[afterSuffixIndex]) {
-    beforeSuffixIndex -= 1;
-    afterSuffixIndex -= 1;
-  }
-
-  const changes: LineChange[] = [];
-  if (prefixLength > 0) {
-    changes.push({ value: before.slice(0, prefixLength).join("\n") });
-  }
-
-  changes.push(...diffLineSlices(
-    before.slice(prefixLength, beforeSuffixIndex + 1),
-    after.slice(prefixLength, afterSuffixIndex + 1),
-  ));
-
-  if (beforeSuffixIndex + 1 < before.length) {
-    changes.push({ value: before.slice(beforeSuffixIndex + 1).join("\n") });
-  }
-
-  return changes.map((part) => {
-    const prefix = part.added ? "+ " : part.removed ? "- " : "  ";
-    return part.value
-      .split("\n")
-      .map((line) => `${prefix}${line}`)
-      .join("\n");
-  }).filter(Boolean).join("\n");
+export function shouldRecordStats(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = env[STATS_ENABLED_ENV]?.trim().toLowerCase();
+  return value !== "0" && value !== "false" && value !== "no" && value !== "off";
 }
 
 export async function storeArtifact(input: StoredArtifactInput, storeDir?: string): Promise<StoredArtifactRef> {
   const id = `tj_${randomUUID().slice(0, 12)}`;
   const ref = buildArtifactPaths(id, storeDir);
-  await mkdir(artifactBaseDir(storeDir), { recursive: true, mode: 0o700 });
+  await mkdir(resolveArtifactBaseDir(storeDir), { recursive: true, mode: 0o700 });
+  const captureTruncated = extractCaptureTruncatedFlag(input.input);
 
-  const filteredTextPath = input.filteredText !== undefined ? buildFilteredPath(id, storeDir) : undefined;
-  const diffPath = input.filteredText !== undefined ? buildDiffPath(id, storeDir) : undefined;
-  const artifactRef: StoredArtifactRef = {
-    ...ref,
-    ...(filteredTextPath ? { filteredTextPath } : {}),
-    ...(diffPath ? { diffPath } : {}),
-  };
   const artifact: StoredArtifact = {
     id,
     rawText: input.rawText,
     metadata: {
       createdAt: new Date().toISOString(),
+      source: resolveArtifactSource(input.input),
       classification: input.classification,
       rawChars: input.stats?.rawChars ?? countTextChars(stripAnsi(input.rawText)),
       ...(input.input.toolName ? { toolName: input.input.toolName } : {}),
       ...(input.input.command ? { command: input.input.command } : {}),
       ...(typeof input.input.exitCode === "number" ? { exitCode: input.input.exitCode } : {}),
+      ...(captureTruncated !== undefined ? { captureTruncated } : {}),
       ...(input.stats ? { reducedChars: input.stats.reducedChars, ratio: input.stats.ratio } : {}),
-      ...(filteredTextPath ? { filteredTextPath } : {}),
-      ...(diffPath ? { diffPath } : {}),
     },
   };
 
-  const writes = [
+  await Promise.all([
     writeFile(ref.path, input.rawText, { encoding: "utf8", mode: 0o600 }),
     writeFile(ref.metadataPath, JSON.stringify(artifact.metadata, null, 2), { encoding: "utf8", mode: 0o600 }),
-  ];
-  if (filteredTextPath && input.filteredText !== undefined) {
-    writes.push(writeFile(filteredTextPath, input.filteredText, { encoding: "utf8", mode: 0o600 }));
-  }
-  if (diffPath && input.filteredText !== undefined) {
-    writes.push(writeFile(diffPath, buildSimpleDiff(input.rawText, input.filteredText), { encoding: "utf8", mode: 0o600 }));
+  ]);
+  if (input.recordStats ?? shouldRecordStats()) {
+    await appendMetadataEvent(id, artifact.metadata, input.input, true, storeDir).catch(() => undefined);
   }
 
-  await Promise.all(writes);
-
-  return artifactRef;
+  return ref;
 }
 
 export async function storeArtifactMetadata(input: StoredArtifactInput, storeDir?: string): Promise<ArtifactMetadataRef> {
   const id = `tj_${randomUUID().slice(0, 12)}`;
-  const metadataPath = buildMetadataOnlyPath(id, storeDir);
+  const captureTruncated = extractCaptureTruncatedFlag(input.input);
   const metadata: StoredArtifactMetadata = {
     createdAt: new Date().toISOString(),
+    source: resolveArtifactSource(input.input),
     classification: input.classification,
     rawChars: input.stats?.rawChars ?? countTextChars(stripAnsi(input.rawText)),
     ...(input.input.toolName ? { toolName: input.input.toolName } : {}),
     ...(input.input.command ? { command: input.input.command } : {}),
     ...(typeof input.input.exitCode === "number" ? { exitCode: input.input.exitCode } : {}),
+    ...(captureTruncated !== undefined ? { captureTruncated } : {}),
     ...(input.stats ? { reducedChars: input.stats.reducedChars, ratio: input.stats.ratio } : {}),
   };
 
-  await mkdir(artifactBaseDir(storeDir), { recursive: true, mode: 0o700 });
-  await writeFile(metadataPath, JSON.stringify(metadata, null, 2), { encoding: "utf8", mode: 0o600 });
+  const telemetryMetadata = buildTelemetryMetadata(metadata, input.input);
+  const metadataPath = await appendMetadataEvent(id, telemetryMetadata, input.input, false, storeDir);
+  if (!metadataPath) {
+    throw Object.assign(new Error("metadata segment is full or busy"), { code: "EFBIG" });
+  }
 
   return {
     id,
     storage: "file",
     metadataPath,
-    metadata,
+    metadataFormat: "jsonl-segment",
+    metadataRecordId: id,
+    metadata: telemetryMetadata,
   };
+}
+
+export async function tryStoreArtifactMetadata(
+  input: StoredArtifactInput,
+  storeDir?: string,
+): Promise<ArtifactMetadataRef | undefined> {
+  try {
+    return await storeArtifactMetadata(input, storeDir);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (typeof code !== "string" || !OPTIONAL_METADATA_STORAGE_ERROR_CODES.has(code)) {
+      throw error;
+    }
+
+    return undefined;
+  }
 }
 
 export async function getArtifact(id: string, storeDir?: string): Promise<StoredArtifact | null> {
@@ -321,7 +291,7 @@ export async function getArtifact(id: string, storeDir?: string): Promise<Stored
 }
 
 export async function listArtifacts(storeDir?: string): Promise<StoredArtifactRef[]> {
-  const base = artifactBaseDir(storeDir);
+  const base = resolveArtifactBaseDir(storeDir);
   try {
     const files = await readdir(base);
     return files
@@ -337,43 +307,45 @@ export async function listArtifacts(storeDir?: string): Promise<StoredArtifactRe
 }
 
 export async function listArtifactMetadata(storeDir?: string): Promise<ArtifactMetadataRef[]> {
-  const base = artifactBaseDir(storeDir);
-  try {
-    const files = await readdir(base);
-    const metadata = await Promise.all(
-      files
-        .filter((name) => name.endsWith(".json"))
-        .map(async (name) => {
-          const rawId = name.endsWith(".meta.json") ? name.replace(/\.meta\.json$/u, "") : name.replace(/\.json$/u, "");
-          if (!isValidArtifactId(rawId)) {
-            return null;
-          }
+  const entries: ArtifactMetadataRef[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await listArtifactMetadataPage(storeDir, {
+      limit: DEFAULT_METADATA_LIST_LIMIT,
+      ...(cursor ? { cursor } : {}),
+    });
+    entries.push(...page.entries);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return entries.sort((left, right) => right.metadata.createdAt.localeCompare(left.metadata.createdAt));
+}
 
-          const metadataPath = join(base, name);
-          try {
-            const raw = await readFile(metadataPath, "utf8");
-            const parsed = JSON.parse(raw) as unknown;
-            if (!isStoredArtifactMetadata(parsed)) {
-              return null;
-            }
-            const path = name.endsWith(".meta.json") ? undefined : join(base, `${rawId}.txt`);
-            return {
-              id: rawId,
-              storage: "file" as const,
-              ...(path ? { path } : {}),
-              metadataPath,
-              metadata: parsed,
-            };
-          } catch {
-            return null;
-          }
-        }),
-    );
-
-    return metadata
-      .filter((entry): entry is ArtifactMetadataRef => entry !== null)
-      .sort((left, right) => right.metadata.createdAt.localeCompare(left.metadata.createdAt));
-  } catch {
-    return [];
-  }
+export async function listArtifactMetadataPage(
+  storeDir?: string,
+  options: ArtifactMetadataPageOptions = {},
+): Promise<ArtifactMetadataPage> {
+  const page = await readBoundedJsonlPage(
+    metadataSegmentDir(storeDir),
+    METADATA_SEGMENT_PREFIX,
+    isStoredMetadataEvent,
+    options,
+  );
+  const base = resolveArtifactBaseDir(storeDir);
+  const entries = page.records
+    .map(({ path: metadataPath, value }) => ({
+      id: value.id,
+      storage: "file" as const,
+      ...(value.hasRaw ? { path: join(base, `${value.id}.txt`) } : {}),
+      metadataPath,
+      metadataFormat: "jsonl-segment" as const,
+      metadataRecordId: value.id,
+      metadata: value.metadata,
+    }))
+    .sort((left, right) => right.metadata.createdAt.localeCompare(left.metadata.createdAt));
+  return {
+    entries,
+    partial: page.partial,
+    legacySidecarsIncluded: false,
+    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+  };
 }

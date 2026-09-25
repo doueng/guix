@@ -1,7 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+// Pi entry point for upstream Tokenjuice v0.8.5.
+import { createTokenjuicePiExtension } from "./hosts/pi/extension/runtime.js";
 
-import { createTokenjuicePiExtension } from "./pi-extension/runtime.js";
-
-export default function tokenjuiceVendoredExtension(pi: ExtensionAPI) {
-  return createTokenjuicePiExtension({ extensionCommand: "tj" })(pi as any);
-}
+export default createTokenjuicePiExtension({ extensionCommand: "tj" });
