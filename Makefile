@@ -1,64 +1,81 @@
-# Native Guix workflow. Reconfigure builds before activation; no separate
-# build receipt is needed. Disk checks protect the internal installation.
+# Use the pulled Guix for daily operations; pull after changing channels.scm.
+# Reconfigure builds before activation; no separate build receipt is needed.
 
 CONFIG ?= desktop/system.scm
+HOME_CONFIG ?= desktop/home.scm
+HOME_MANIFEST ?= desktop/home-manifest.scm
+CHANNELS ?= channels.scm
+MODULES ?= modules
+
 # Prefer the general cache; keep Asahi and CI as signed-substitute fallbacks.
 SUBSTITUTE_URLS ?= https://bordeaux.guix.gnu.org https://substitutes.asahi-guix.org https://ci.guix.gnu.org
+
 # Normal boot still uses the updated ESP; fast kexec reboot is opt-in.
 RECONFIGURE_FLAGS ?= --no-kexec
 
-.PHONY: help eval eval-desktop dry-run build apply switch home-build home-apply home-weather stow
+GUIX := $(HOME)/.config/guix/current/bin/guix
+COMMON := --substitute-urls="$(SUBSTITUTE_URLS)" -L "$(MODULES)"
+
+.PHONY: help pull check eval eval-desktop dry-run build repro-build switch apply \
+        home-build home-weather home-apply stow
 
 help:
+	@echo 'pull          update the user Guix profile from $(CHANNELS)'
+	@echo 'check         dry-run system and build Home'
+	@echo 'dry-run       show what system build would fetch or build'
 	@echo 'build         build $(CONFIG) without activating it'
-	@echo 'dry-run       show what build would fetch or build'
-	@echo 'switch        build and activate once via reconfigure (sudo; writes ESP)'
+	@echo 'repro-build   build system using the pinned channels via time-machine'
+	@echo 'switch        build and activate system (sudo; writes ESP)'
 	@echo 'apply         alias for switch'
-	@echo 'home-build    build desktop Home without changing system/bootloader'
-	@echo 'home-weather  check substitutes for explicit Home packages (network)'
-	@echo 'home-apply    activate desktop Home, then stow live configs'
+	@echo 'home-build    build Home without activating it'
+	@echo 'home-weather  check substitutes for explicit Home packages'
+	@echo 'home-apply    activate Home, then stow live configs'
 	@echo 'stow          install live config links using GNU Stow'
-	@echo 'eval          pinned system dry-run and Home build'
-	@echo 'eval-desktop  alias for eval'
+	@echo 'eval          alias for check'
+	@echo 'eval-desktop  alias for check'
 
-eval: dry-run home-build
+pull:
+	"$(GUIX)" pull -C "$(CHANNELS)"
 
-eval-desktop: eval
+check: dry-run home-build
+
+eval: check
+
+eval-desktop: check
 
 dry-run:
-	guix time-machine -C channels.scm -- \
-	  system build --dry-run --substitute-urls="$(SUBSTITUTE_URLS)" -L modules "$(CONFIG)"
+	"$(GUIX)" system build --dry-run $(COMMON) "$(CONFIG)"
 
 build:
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
-	  guix time-machine -C channels.scm -- \
-	  system build --substitute-urls="$(SUBSTITUTE_URLS)" -L modules "$(CONFIG)"
+	  "$(GUIX)" system build $(COMMON) "$(CONFIG)"
+
+repro-build:
+	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
+	  "$(GUIX)" time-machine -C "$(CHANNELS)" -- \
+	  system build $(COMMON) "$(CONFIG)"
 
 switch:
-	sudo rm /boot/efi/m1n1/boot.bin.old || true
-	sudo rm /boot/efi/m1n1/boot.bin.new || true
-	@set -eu; \
-	  case "$$(readlink -f /run/current-system)" in /gnu/store/*) ;; *) echo 'STOP: not the native Guix system'; exit 1;; esac; \
-	  test "$$(findmnt -nro UUID /)" = "c4f25409-b1a5-4ef0-8ac9-8e75f011668c" || { echo 'STOP: unexpected root filesystem'; exit 1; }; \
-	  test "$$(findmnt -nro UUID /boot/efi)" = "5CDF-1DF4" || { echo 'STOP: unexpected ESP'; exit 1; }; \
-	  profile=$$(guix time-machine -C "$(CURDIR)/channels.scm"); \
-	  profile=$$(readlink -f "$$profile"); \
-	  sudo env GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
-	    "$$profile/bin/guix" system reconfigure $(RECONFIGURE_FLAGS) \
-	    --substitute-urls="$(SUBSTITUTE_URLS)" -L "$(CURDIR)/modules" "$(abspath $(CONFIG))"
+	sudo rm -f \
+	  /boot/efi/m1n1/boot.bin.old \
+	  /boot/efi/m1n1/boot.bin.new
+	sudo env GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
+	  "$(GUIX)" system reconfigure $(RECONFIGURE_FLAGS) \
+	    --substitute-urls="$(SUBSTITUTE_URLS)" \
+	    -L "$(abspath $(MODULES))" \
+	    "$(abspath $(CONFIG))"
 
 apply: switch
 
 home-build:
-	guix time-machine -C channels.scm -- home build -L modules desktop/home.scm
+	"$(GUIX)" home build $(COMMON) "$(HOME_CONFIG)"
 
 home-weather:
-	guix time-machine -C channels.scm -- weather -L modules \
-	  --substitute-urls="$(SUBSTITUTE_URLS)" -m desktop/home-manifest.scm
+	"$(GUIX)" weather $(COMMON) -m "$(HOME_MANIFEST)"
 
 stow:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/stow-home
 
 home-apply:
-	guix time-machine -C channels.scm -- home reconfigure -L modules desktop/home.scm
+	"$(GUIX)" home reconfigure $(COMMON) "$(HOME_CONFIG)"
 	$(MAKE) stow
