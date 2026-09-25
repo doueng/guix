@@ -18,12 +18,10 @@
   (or (find-executable name) name))
 
 (defn apps []
-  ;; Keep this list and its labels aligned with ~/nixos/scripts/custom-launcher.
   ;; Reuse the checked-in launcher so its Flatpak application ID and Wayland
   ;; flags stay consistent with the documented browser installation.
   (let [chrome [(executable "chrome-unified")]]
-    [["kitty" [(executable "kitty")]]
-     ["ghostty" [(executable "ghostty")]]
+    [["ghostty" [(executable "ghostty")]]
      ["chrome-incognito" (conj chrome "--incognito")]
      ["chrome" chrome]
      ["thunar" [(executable "thunar")]]]))
@@ -42,16 +40,12 @@
 
 (defn choose [noctalia]
   (let [entries (str (str/join "\n" (map first (apps))) "\n")
-        result (if noctalia
+        result (when noctalia
                  (run [noctalia "dmenu" "-p" ""]
-                      {:in entries :out :string :err :string})
-                 (if-let [wofi (find-executable "wofi")]
-                   (run [wofi "--dmenu" "-p" "launch"]
-                        {:in entries :out :string :err :string})
-                   (do
-                     (binding [*out* *err*]
-                       (println "No dmenu or wofi found"))
-                     nil)))]
+                      {:in entries :out :string :err :string}))]
+    (when-not noctalia
+      (binding [*out* *err*]
+        (println "Noctalia is unavailable; cannot open launcher")))
     (when result
       (if-not (zero? (:exit result))
         (System/exit (:exit result))

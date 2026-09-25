@@ -34,7 +34,9 @@
             (inherit base)
             (packages
              (remove (lambda (package)
-                       (member (package-name package) '("sway" "foot")))
+                       (member (package-name package)
+                               '("sway" "foot" "kitty" "wofi" "dmenu"
+                                 "librewolf" "emacs" "emacs-pgtk")))
                      (operating-system-packages base)))))
          (features
           (list

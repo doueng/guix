@@ -14,8 +14,7 @@
          "fd"
          "jq"
          "bat"
-         "btop"
-         "entr")))
+         "btop")))
 
 (define (feature-familiar-shell)
   (feature-package-set
