@@ -2,14 +2,6 @@ name: Build herdr-tiny-fingers
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/herdr-tiny-fingers.yml
-      - channels.scm
-      - modules/engstrand/packages/assets.scm
-      - modules/engstrand/packages/herdr-tiny-fingers.scm
-      - modules/engstrand/packages/rust-crates.scm
-      - desktop/configs/herdr/tiny-fingers/manifest.toml
 
 permissions:
   contents: read
