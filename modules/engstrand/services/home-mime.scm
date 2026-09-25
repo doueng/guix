@@ -9,4 +9,7 @@
       (default '(("x-scheme-handler/http" . "com.google.Chrome.desktop")
                  ("x-scheme-handler/https" . "com.google.Chrome.desktop")
                  ("text/html" . "com.google.Chrome.desktop")
-                 ("inode/directory" . "thunar.desktop"))))))
+                 ("inode/directory" . "thunar.desktop")
+                 ("image/jpeg" . "imv.desktop")
+                 ("image/png" . "imv.desktop")
+                 ("image/webp" . "imv.desktop"))))))

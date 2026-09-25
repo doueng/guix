@@ -13,6 +13,8 @@
   (append (list bluetui noctalia ghostty)
           (map specification->package
                '("thunar"
+                 "imv"
+                 "xdg-utils"
                  "xdg-desktop-portal"
                  "xdg-desktop-portal-gtk"
                  "xdg-desktop-portal-hyprland"

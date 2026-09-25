@@ -42,10 +42,10 @@ fill_mode = "crop"
 transition = ["fade", "wipe", "zoom"]
 transition_duration = 1500
 transition_on_startup = true
-directory = "~/.local/share/catppuccin-mocha/wallpapers"
+directory = "~/Desktop"
 
 [wallpaper.default]
-path = "~/.local/share/catppuccin-mocha/wallpapers/wallhaven-jeey2y.png"
+path = "~/Desktop/wallpaper.jpg"
 
 [theme]
 mode = "dark"
