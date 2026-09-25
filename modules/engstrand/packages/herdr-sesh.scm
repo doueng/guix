@@ -9,9 +9,9 @@
 (define herdr-sesh-version "0.7.0")
 
 (define %herdr-sesh-vendor
-  (package-asset "desktop/configs/herdr/sesh/vendor.tar.gz"))
+  (package-asset "desktop/build/herdr/sesh/vendor.tar.gz"))
 (define %herdr-sesh-manifest
-  (package-asset "desktop/configs/herdr/sesh/manifest.toml" "sesh.toml"))
+  (package-asset "desktop/build/herdr/sesh/manifest.toml" "sesh.toml"))
 
 (define-public herdr-sesh
   (package

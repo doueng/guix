@@ -1,0 +1,22 @@
+#!/usr/bin/env bb
+(ns stow-home
+  (:require [babashka.fs :as fs]
+            [babashka.process :as process]
+            [clojure.java.io :as io]))
+
+(def repo (-> *file* io/file .getCanonicalFile .getParentFile .getPath))
+(def home (or (System/getenv "HOME") (throw (ex-info "HOME is not set" {}))))
+(def stow (or (System/getenv "STOW") (str home "/.guix-home/profile/bin/stow")))
+
+(defn stow-package! [dir target package]
+  (fs/create-dirs target)
+  (process/shell {:inherit true} stow (str "--dir=" dir)
+                 (str "--target=" target) "--no-folding" "--restow" package))
+
+(doseq [app ["btop" "doom" "fish" "ghostty" "git" "herdr" "hypr"
+             "jj" "jjui" "noctalia" "nvim"]]
+  (stow-package! (str repo "/configs") (str home "/.config/" app) app))
+
+(stow-package! repo (str home "/.local/bin") "bin")
+(stow-package! repo (str home "/.local/share/icons") "icons")
+(stow-package! (str repo "/pi") (str home "/.pi/agent") "agent")

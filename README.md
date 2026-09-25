@@ -1,7 +1,9 @@
 # Guix on the internal drive
 
-Personal Guix System configuration for an M1 MacBook Air. Guix boots from the internal Btrfs root and EFI system partition. macOS remains an independent recovery environment. This repository owns the Guix configuration and `desktop/`; NixOS bootstrap/AWS work remains in `~/nixos`.
+Personal Guix System configuration for an M1 MacBook Air. Guix boots from the internal Btrfs root and EFI system partition. macOS remains an independent recovery environment.
 
-Layout: `desktop/system.scm` and `desktop/home.scm` are entry points; `modules/engstrand/config.scm` composes the reusable features in `modules/engstrand/features/` into both the operating system and Home, and the generated Home is integrated into the OS; `modules/engstrand/system/` and `home/` group support code; `packages/` has one file per package plus shared inputs, and `services/` has one local service per file; `desktop/configs/` holds application configs and Herdr plugin manifests used at package build time; `desktop/bin/` and `desktop/keyd.conf` hold machine-specific assets. Herdr plugin descriptors are package build inputs, not Home links.
+`desktop/system.scm` and `desktop/home.scm` are entry points; `modules/engstrand/config.scm` composes features in `modules/engstrand/features/`. Guix packages and services live under `modules/engstrand/`.
 
-Herdr plugins are built from pinned upstream sources in `modules/engstrand/packages/` and linked from the Guix Home profile. `desktop/configs/herdr/` holds live settings and plugin build inputs: `sesh/` has `manifest.toml` and the offline Go vendor archive, and `tiny-fingers/` has only `manifest.toml`, not a second Rust source tree. The packages install these descriptors as `herdr-plugin.toml`. `sesh.toml` is the live Sesh settings file.
+Mutable application configs live under `desktop/configs/<app>` and are linked directly into the corresponding `~/.config/<app>` directory using GNU Stow. `make home-apply` reconfigures Guix Home and refreshes these links; `make stow` refreshes only the mutable links. `make home-build` builds Home without activating it; `make switch` applies the Guix system.
+
+Guix Home manages packages, services, environment variables and store-backed files. Build-time package assets are kept separately from `desktop/configs/`. See `desktop/README.md` for Stow targets and testing.

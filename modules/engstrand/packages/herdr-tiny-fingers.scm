@@ -9,7 +9,7 @@
 (define herdr-tiny-fingers-version "0.1.0")
 
 (define %herdr-tiny-fingers-manifest
-  (package-asset "desktop/configs/herdr/tiny-fingers/manifest.toml"
+  (package-asset "desktop/build/herdr/tiny-fingers/manifest.toml"
                  "tiny-fingers.toml"))
 
 (define-public herdr-tiny-fingers

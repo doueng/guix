@@ -6,23 +6,15 @@ and [Fennel](https://fennel-lang.org) for spec files.
 
 ## Running
 
-```sh
-make test-nvim
-```
-
-This calls `scripts/test-nvim` (a [babashka](https://babashka.org) script)
-which:
-
-1. **Compile-checks** all `*_spec.fnl` files via `compile-check.lua`
-   (catches Fennel syntax errors before spawning test processes — a parse
-   error inside `plenary.busted.run` causes nvim to hang).
-2. **Runs** each spec file in its own headless nvim process via
-   `require('plenary.busted').run(file)`.
+There is currently no wired-up test runner in this repository. Run the
+compile-check and headless specs separately; `minimal-init.lua` documents the
+Neovim invocation. Compile-check the `*_spec.fnl` files before spawning test
+processes: a Fennel parse error inside `plenary.busted.run` can hang Neovim.
 
 ## Structure
 
 ```
-dendritic/features/neovim/assets/tests/pi-org/
+desktop/tests/nvim/pi-org/
 ├── minimal-init.lua        # Test bootstrap: Fennel loader, lazy.nvim, pi-org.setup
 ├── compile-check.lua       # Pre-compiles .fnl specs to catch syntax errors early
 ├── fixtures/

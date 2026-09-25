@@ -2,13 +2,12 @@
   #:use-module (engstrand features packages)
   #:use-module (engstrand services home-environment)
   #:use-module (engstrand services home-files)
-  #:use-module (engstrand services home-links)
+  #:use-module (gnu packages)
   #:export (feature-familiar-dotfiles))
 
 (define (feature-familiar-dotfiles)
   (feature-package-set
    'familiar-dotfiles
-   ;; This feature deliberately retains mutable links into the checkout.
-   #:home-services (list %familiar-direct-home-links
-                         %home-environment-service
+   #:home-packages (list (specification->package "stow"))
+   #:home-services (list %home-environment-service
                          %home-files-service)))

@@ -6,7 +6,7 @@
 -- calls pi-org.setup with the stub-pi command so session tests never spawn a
 -- real `pi`.
 --
--- Invoked headless by `make test-nvim` (scripts/test-nvim, babashka) via:
+-- Headless invocation (from the repository root):
 --   nvim --headless -u minimal-init.lua \
 --     -c "lua require('plenary.busted').run(vim.fn.argv(0))" spec/foo_spec.fnl
 --
@@ -54,12 +54,12 @@ if fennel_share then
 end
 
 local fennel = require("fennel")
--- Resolve the config dir from this file's path. arg[0] is nil under `-u`, so use
--- debug.getinfo to find the source file.
+-- Resolve the config and fixture trees from this file's path (arg[0] is nil under -u).
 local source = debug.getinfo(1, "S").source
 if source:sub(1, 1) == "@" then source = source:sub(2) end
-local config_dir = vim.fn.fnamemodify(vim.fn.resolve(source), ":p:h:h:h")
--- config_dir = dendritic/features/neovim/assets
+local test_dir = vim.fn.fnamemodify(vim.fn.resolve(source), ":p:h")
+local desktop_dir = vim.fn.fnamemodify(vim.fn.resolve(source), ":p:h:h:h:h")
+local config_dir = desktop_dir .. "/configs/nvim"
 
 -- NOTE: We do NOT prepend config_dir to the runtimepath. Doing so exposes
 -- fnl/config/*.fnl (e.g. config.fff) to lazy.nvim's rtp scan, which tries
@@ -90,12 +90,12 @@ end
 
 -- Put the spec directory on fennel.path so `require` can find helper modules
 -- written in Fennel (e.g. helpers.fnl → require :helpers).
-local spec_dir = config_dir .. "/tests/pi-org/spec"
+local spec_dir = test_dir .. "/spec"
 fennel.path = spec_dir .. "/?.fnl;" .. fennel.path
 
 -- Where the stub-pi fixture lives; individual specs override
 -- PI_ORG_STUB_FIXTURE to choose which event sequence to replay.
-local fixtures_dir = config_dir .. "/tests/pi-org/fixtures"
+local fixtures_dir = test_dir .. "/fixtures"
 vim.env.PI_ORG_STUB_FIXTURE = fixtures_dir .. "/turn-text-only.jsonl"
 
 -- Lazy-load plenary (test runner) + orgmode (org filetype for integration).
