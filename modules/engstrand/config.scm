@@ -9,10 +9,8 @@
   #:use-module (engstrand system asahi)
   #:use-module (gnu)
   #:use-module (gnu packages admin)
-  #:use-module (guix packages)
   #:use-module (rde features)
   #:use-module (rde features base)
-  #:use-module (srfi srfi-1)
   #:export (make-familiar-config %familiar-home-packages))
 
 ;; Keep the preview manifest in sync with the explicit package features.
@@ -29,15 +27,6 @@
                              #:channels channels))
          ;; User identity is contributed by feature-user-info, not this
          ;; machine-level operating-system.
-         (initial-os
-          (operating-system
-            (inherit base)
-            (packages
-             (remove (lambda (package)
-                       (member (package-name package)
-                               '("sway" "foot" "kitty" "wofi" "dmenu"
-                                 "librewolf" "emacs" "emacs-pgtk")))
-                     (operating-system-packages base)))))
          (features
           (list
            (feature-user-info
@@ -64,6 +53,6 @@
             #:feature-name-prefix 'asahi-machine
             #:system-services (operating-system-user-services base)))))
     (rde-config
-     (initial-os initial-os)
+     (initial-os base)
      (features features)
      (integrate-he-in-os? #t))))
