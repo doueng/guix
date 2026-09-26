@@ -10,9 +10,9 @@
                                 "[[window]]\nname = \"jjui\"\nstartup_script = \"jjui\"\n"
                                 "[[wildcard]]\npattern = \"/**\"\nwindows = [\"emacs\", \"pi\", \"jjui\"]\n"))]
     (is (= ["emacs" "pi" "jjui"] (mapv :name (sesh/startup-windows cfg "/tmp/project"))))
-  (let [manifest (slurp "manifest.toml")]
-    (is (.contains manifest "command = [\"./bin/herdr-sesh\", \"plugin\", \"open-picker\"]"))
-    (is (.contains manifest "command = [\"./bin/herdr-sesh\", \"picker\"]")))))
+   (let [manifest (slurp "manifest.toml")]
+     (is (.contains manifest "command = [\"./bin/herdr-sesh\", \"plugin\", \"open-picker\"]"))
+     (is (.contains manifest "command = [\"./bin/herdr-sesh\", \"picker\"]")))))
 
 (deftest sources
   (with-redefs [sesh/zoxide-paths (constantly ["/tmp/old" "/tmp/else"])

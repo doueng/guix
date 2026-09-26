@@ -33,9 +33,9 @@
   (or (env "HERDR_WORKSPACE_ID")
       (some #(when (:focused %) (:workspace_id %)) items)))
 (defn workspace-id [response] (or (get-in response [:workspace :workspace_id])
-                                   (get-in response [:workspace :id])))
+                                  (get-in response [:workspace :id])))
 (defn pane-id [response] (or (get-in response [:root_pane :pane_id])
-                              (get-in response [:root_pane :id])))
+                             (get-in response [:root_pane :id])))
 
 ;; Only the settings used by this local plugin are read from sesh.toml. Keep
 ;; config in Herdr's plugin directory so home activation can link it as before.
@@ -102,7 +102,7 @@
                                             (str i "\t" (escape-row (format "%-8s %-24s %s" (clojure.core/name source) name (or path ""))))) rows))
         result @(process/process ["fzf" "--border" "--layout" "reverse" "--no-multi"
                                   "--no-sort" "--delimiter" "\t" "--with-nth" "2"
-                                  "--prompt" "Sesh> " ]
+                                  "--prompt" "Sesh> "]
                                  {:in input :out :string :err :inherit})]
     (when (zero? (:exit result))
       (when-let [index (some-> (:out result) (str/split #"\t" 2) first parse-long)]
