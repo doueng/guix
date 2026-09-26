@@ -167,6 +167,7 @@ description = "review documents in this folder"
 [ui]
 # Sort the agent panel as an attention queue (blocked/done before idle agents).
 agent_panel_sort = "spaces"
+pane_borders = "off"
 show_agent_labels_on_pane_borders = false
 
 # Keep the Spaces sidebar focused on Herdr workspaces rather than Git branches
