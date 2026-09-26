@@ -3,4 +3,6 @@
   #:use-module (gnu services desktop)
   #:export (%bluetooth-service))
 
-(define %bluetooth-service (service bluetooth-service-type))
+(define %bluetooth-service
+  (service bluetooth-service-type
+           (bluetooth-configuration (auto-enable? #t))))

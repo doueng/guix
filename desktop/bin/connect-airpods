@@ -1,0 +1,32 @@
+#!/usr/bin/env bb
+
+(require '[babashka.process :as p]
+         '[clojure.string :as str])
+
+(def address "74:77:86:19:BA:5A")
+
+(defn bluetoothctl [& args]
+  @(p/process (into ["bluetoothctl"] args)
+              {:out :string :err :string}))
+
+(defn notify [title body]
+  @(p/process ["notify-send" title body]
+              {:out :string :err :string :continue true}))
+
+(defn error-message [result]
+  (str/trim (str (:out result) (:err result))))
+
+(defn main []
+  (let [power (bluetoothctl "power" "on")]
+    (if-not (zero? (:exit power))
+      (do
+        (notify "Bluetooth could not be enabled" (error-message power))
+        (System/exit 1))
+      (let [connection (bluetoothctl "connect" address)]
+        (if (zero? (:exit connection))
+          (notify "AirPods connected" "")
+          (do
+            (notify "AirPods connection failed" (error-message connection))
+            (System/exit 1)))))))
+
+(main)

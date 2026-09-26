@@ -54,7 +54,7 @@ alias gg='cd (git rev-parse --show-cdup)'
 
 alias tree='tree -I node_modules'
 
-alias bluetooth_airpods='bluetoothctl connect 74:77:86:19:BA:5A'
+alias bluetooth_airpods='~/.local/bin/connect-airpods'
 alias battery='cat /sys/class/power_supply/macsmc-battery/capacity'
 
 alias paste='fish_clipboard_paste'
