@@ -5,6 +5,8 @@
   #:use-module (engstrand features editor)
   #:use-module (engstrand features herdr)
   #:use-module (engstrand features keyd)
+  #:use-module (engstrand features moshi)
+  #:use-module (engstrand features remote-access)
   #:use-module (engstrand features shell)
   #:use-module (engstrand features tailscale)
   #:use-module (engstrand system asahi)
@@ -46,9 +48,11 @@
            (feature-familiar-development)
            ;; This precedes dotfiles because Herdr activation consumes its live config.
            (feature-familiar-herdr)
+           (feature-familiar-moshi)
            (feature-familiar-dotfiles)
            (feature-familiar-keyd)
            (feature-familiar-tailscale)
+           (feature-familiar-remote-access)
            ;; rde rebuilds the OS service list from feature services. Preserve
            ;; every user service supplied by the Asahi machine configuration.
            (feature-custom-services
