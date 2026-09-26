@@ -168,8 +168,4 @@
                                                                                               :persistence)]
                                                                   (when ok
                                                                     (persistence.load {:last true})))))
-                                                ;; Skip the auto-explorer when launching straight into
-                                                ;; pi-org (e.g. the `piorg` fish function sets this).
-                                                (if vim.g.pi_org_skip_explorer
-                                                    nil
-                                                    (open-explorer)))))})
+                                                (open-explorer))))})

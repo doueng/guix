@@ -39,9 +39,3 @@
 (require :config.lazy)
 (require :config.fff)
 
-;; Local modules that aren't lazy.nvim plugins: set them up directly.
-;; pi-org drives `pi --mode rpc` and renders in org-mode buffers; it depends
-;; on nvim-orgmode, which is declared in fnl/plugins/pi-org.fnl and lazy-loaded
-;; on :PiOrg / filetype=org.
-(let [pi-org (require :pi-org)]
-  (pi-org.setup {}))

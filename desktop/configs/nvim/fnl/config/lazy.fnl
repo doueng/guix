@@ -30,8 +30,7 @@
                        :plugins.lsp
                        :plugins.java
                        :plugins.noice
-                       :plugins.conform
-                       :plugins.pi-org])
+                       :plugins.conform])
 
 (local specs [])
 (each [_ module-name (ipairs plugin-modules)]
