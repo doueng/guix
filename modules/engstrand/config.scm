@@ -6,6 +6,7 @@
   #:use-module (engstrand features herdr)
   #:use-module (engstrand features keyd)
   #:use-module (engstrand features shell)
+  #:use-module (engstrand features tailscale)
   #:use-module (engstrand system asahi)
   #:use-module (gnu)
   #:use-module (gnu packages admin)
@@ -47,6 +48,7 @@
            (feature-familiar-herdr)
            (feature-familiar-dotfiles)
            (feature-familiar-keyd)
+           (feature-familiar-tailscale)
            ;; rde rebuilds the OS service list from feature services. Preserve
            ;; every user service supplied by the Asahi machine configuration.
            (feature-custom-services
