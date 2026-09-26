@@ -1,9 +1,9 @@
 id = "fullerzz.sesh"
 name = "Sesh for Herdr"
-version = "0.7.0"
+version = "0.8.0"
 min_herdr_version = "0.8.0"
-description = "Sesh-style smart workspace/session manager for Herdr"
-platforms = ["linux", "macos"]
+description = "Local Babashka workspace picker with zoxide and project tabs"
+platforms = ["linux"]
 
 [[actions]]
 id = "open-picker"
