@@ -3,7 +3,7 @@
   (name 'guix)
   (url "https://codeberg.org/guix/guix")
   (branch "master")
-  (commit "7e74121a40a8308166e328a23647cf6f3768e6c8")
+  (commit "6754acb1c65cd6f93c7444b1d4f96244e7bbf072")
   (introduction
    (make-channel-introduction
     "9edb3f66fd807b096b48283debdcddccfea34bad"
@@ -13,7 +13,7 @@
   (name 'asahi)
   (url "https://codeberg.org/asahi-guix/channel")
   (branch "main")
-  (commit "0a58b24a8448d75ec5570d28ebac2c88ebfbc540")
+  (commit "ee2e7465c0137224bcc0ad3b3d0d02109cb3a6c7")
   (introduction
    (make-channel-introduction
     "3eeb493b037bea44f225c4314c5556aa25aff36c"
@@ -23,7 +23,7 @@
   (name 'rde)
   (url "https://git.sr.ht/~abcdw/rde")
   (branch "master")
-  (commit "24955da51caf1aaad9a5f0e6c9c9845a504eff64")
+  (commit "022bd2a97e0eb3e31221c3eb0e6595cafb7894cb")
   (introduction
    (make-channel-introduction
     "257cebd587b66e4d865b3537a9a88cccd7107c95"

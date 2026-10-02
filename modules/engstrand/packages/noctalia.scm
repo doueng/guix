@@ -28,7 +28,7 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define noctalia-version "5.1.0")
+(define noctalia-version "5.2.1")
 
 (define-public noctalia
   (package
@@ -40,7 +40,7 @@
        (uri (string-append "https://github.com/noctalia-dev/noctalia/releases/download/v"
                            version "/noctalia-v" version ".tar.gz"))
        (sha256
-        (base32 "05h83s88i039jjh5fl86gkr685kjzf1m2y0abwnajar7xv99nnn8"))))
+        (base32 "1fsqdsk6mgpk6qfsifacs9wipkkgi43ygcn816bqif3phvbz5pzx"))))
     (build-system meson-build-system)
     (native-inputs (list pkg-config))
     (inputs

@@ -7,7 +7,7 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define babashka-version "1.13.223")
+(define babashka-version "1.13.225")
 
 ;; The collection package pulls a large Go dependency tree and currently
 ;; fails in goresctrl's aarch64 tests.  GitHub publishes the same CLI as a
@@ -25,7 +25,7 @@
        (uri (string-append "https://github.com/babashka/babashka/releases/download/v"
                            version "/babashka-" version "-linux-aarch64-static.tar.gz"))
        (sha256
-        (base32 "0qasmgb9zmvjz9ib5dxx62ak0hyxh8f0q2b548pk9w2vs18n0b05"))))
+        (base32 "1qhws5xcdby6dlrxki5jq255vyfnym4jm910dzymp5y9d8ncxm3z"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (arguments

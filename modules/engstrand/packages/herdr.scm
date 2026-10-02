@@ -5,7 +5,7 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define herdr-version "0.9.0")
+(define herdr-version "0.9.3")
 
 (define-public herdr
   (package
@@ -18,7 +18,7 @@
                            version "/herdr-linux-aarch64"))
        (file-name "herdr")
        (sha256
-        (base32 "1lph2n8h5515kq06ypgny8cx7zr12qzi2rskil9pnhp7nw7v53cw"))))
+        (base32 "1h7mw4qy4dwqamg3q2pqy2hvr8daqbvn9pk057li52374lzamrsd"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (arguments

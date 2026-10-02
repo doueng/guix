@@ -6,7 +6,7 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define jjui-version "0.10.10")
+(define jjui-version "0.10.11")
 
 (define-public jjui
   (package
@@ -18,13 +18,13 @@
        (uri (string-append "https://github.com/idursun/jjui/releases/download/v"
                            version "/jjui-" version "-linux-arm64.zip"))
        (sha256
-        (base32 "0p7g2b3sdi43r0k48a386v8qh66i48mkrrzais9d0bfkfc27fxqy"))))
+        (base32 "117myfq09baf0v4qqvk47n4zm24b0rr3slnm7i8ixhnxrhla0yfd"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (native-inputs (list unzip))
     (arguments
      (list #:install-plan
-           #~'(("jjui-0.10.10-linux-arm64" "bin/jjui"))))
+           #~'((#$(string-append "jjui-" version "-linux-arm64") "bin/jjui"))))
     (synopsis "Terminal user interface for Jujutsu")
     (description "A terminal user interface for the Jujutsu version control system.")
     (home-page "https://github.com/idursun/jjui")

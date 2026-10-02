@@ -5,7 +5,7 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define github-cli-version "2.83.2")
+(define github-cli-version "2.102.0")
 
 (define-public github-cli
   (package
@@ -17,7 +17,7 @@
        (uri (string-append "https://github.com/cli/cli/releases/download/v"
                            version "/gh_" version "_linux_arm64.tar.gz"))
        (sha256
-        (base32 "13m3fnx0zqiz40vcivsd07nma8q65b4xvjlnd7ij91gizjhc185i"))))
+        (base32 "1134xw9ya9v8hi4lhj8vyqm4wnr8fgsfdp9xv6ig6gglf9nchqkq"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (arguments
