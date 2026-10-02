@@ -1,10 +1,10 @@
 {
-  "defaultProvider": "fireworks",
-  "defaultModel": "accounts/fireworks/models/glm-5p3-flash",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-6.1-sol",
   "enabledModels": [
     "gpt-6-luna",
     "gpt-6-astra",
-    "gpt-6-sol",
+    "gpt-6.1-sol",
     "fireworks/accounts/fireworks/models/glm-5p3-flash",
     "fireworks/accounts/fireworks/models/deepseek-v4p1-flash"
   ],
@@ -15,6 +15,6 @@
   "theme": "dark",
   "defaultThinkingLevel": "high",
   "shellPath": "/run/current-system/profile/bin/bash",
-  "lastChangelogVersion": "0.87.1",
+  "lastChangelogVersion": "1.0.0",
   "hideThinkingBlock": true
 }
