@@ -1,23 +1,7 @@
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const TIMEOUT_MS = 15_000;
-
-async function getApiKey(): Promise<string> {
-  const fromEnvironment = process.env.TYPESAFE_API_KEY?.trim();
-  if (fromEnvironment) return fromEnvironment;
-  try {
-    const fromFile = (await readFile(join(homedir(), ".env/jev"), "utf8")).trim();
-    if (fromFile && !/[\r\n]/.test(fromFile)) return fromFile;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("Could not read ~/.env/jev");
-  }
-  throw new Error("TYPESAFE_API_KEY is unset and ~/.env/jev is missing or empty");
-}
 
 const ROUTES = {
   investigation: "Read-only understanding or explanation; no implementation is requested.",
@@ -30,42 +14,6 @@ const ROUTES = {
   large_project: "Cross-cutting or multi-stage work needs decomposition before execution.",
   other: "No category clearly fits, or the task is too ambiguous to classify.",
 } as const;
-
-type Route = keyof typeof ROUTES;
-
-type ChoiceAnswer = {
-  type?: unknown;
-  choice?: unknown;
-  probabilities?: unknown;
-  confidence?: unknown;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseChoice(payload: unknown): { route: Route; probabilities: Record<Route, number>; confidence: number } {
-  if (!isRecord(payload) || !isRecord(payload.answers)) throw new Error("TypeSafe returned an invalid response");
-  const answer = payload.answers.task as ChoiceAnswer | undefined;
-  if (!answer || answer.type !== "choice" || typeof answer.choice !== "string") {
-    throw new Error("TypeSafe returned no task classification");
-  }
-  if (!(answer.choice in ROUTES)) throw new Error("TypeSafe selected an unknown route");
-  if (!isRecord(answer.probabilities)) throw new Error("TypeSafe returned no probability distribution");
-
-  const probabilities = {} as Record<Route, number>;
-  for (const route of Object.keys(ROUTES) as Route[]) {
-    const probability = answer.probabilities[route];
-    if (typeof probability !== "number" || !Number.isFinite(probability)) {
-      throw new Error(`TypeSafe returned an invalid probability for ${route}`);
-    }
-    probabilities[route] = probability;
-  }
-  if (typeof answer.confidence !== "number" || !Number.isFinite(answer.confidence)) {
-    throw new Error("TypeSafe returned invalid confidence");
-  }
-  return { route: answer.choice as Route, probabilities, confidence: answer.confidence };
-}
 
 const schema = Type.Object(
   {
@@ -86,27 +34,33 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
       "If classification fails, report the failure and stop. Do not silently skip Jev or proceed with playbook routing."
     ],
     parameters: schema,
-    async execute(_toolCallId, params, signal) {
-      const apiKey = await getApiKey();
-      const response = await fetch(ENDPOINT, {
-          method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "jev-latest",
-          state: { task: params.task },
-          questions: {
-            task: {
-              type: "choice",
-              instructions: "Which engineering workflow best fits the user's current task? Classify the requested work, not incidental words. If the request is a continuation or does not clearly fit, choose other.",
-              criteria: ROUTES,
-            },
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const jev = ctx.modelRegistry.findOfType("classifier", "typesafe", "jev-latest");
+      if (!jev) throw new Error("Pi's TypeSafe Jev classifier is unavailable");
+      const classification = await ctx.modelRegistry.classify(jev, {
+        state: { task: params.task },
+        questions: {
+          task: {
+            type: "choice",
+            instructions: "Which engineering workflow best fits the user's current task? Classify the requested work, not incidental words. If the request is a continuation or does not clearly fit, choose other.",
+            criteria: ROUTES,
           },
-        }),
-        signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
-      });
-      if (!response.ok) throw new Error(`TypeSafe API returned HTTP ${response.status}`);
-      const result = parseChoice(await response.json());
-      const ranked = (Object.entries(result.probabilities) as [Route, number][])
+        },
+      }, { signal, timeoutMs: TIMEOUT_MS, maxRetries: 0 });
+      if (classification.stopReason !== "stop") {
+        throw new Error(classification.errorMessage ?? `Jev classification ${classification.stopReason}`);
+      }
+      const answer = classification.answers.task;
+      if (answer?.type !== "choice") throw new Error("TypeSafe returned no task classification");
+      if (!Object.hasOwn(ROUTES, answer.choice)) throw new Error("TypeSafe selected an unknown route");
+      // Pi validates the response shape and numbers; routing still requires every route's probability.
+      const probabilities = Object.fromEntries(Object.keys(ROUTES).map((route) => {
+        const probability = answer.probabilities[route];
+        if (probability === undefined) throw new Error(`TypeSafe returned no probability for ${route}`);
+        return [route, probability];
+      }));
+      const result = { route: answer.choice, probabilities, confidence: answer.confidence };
+      const ranked = Object.entries(result.probabilities)
         .sort((a, b) => b[1] - a[1])
         .map(([route, probability]) => `${route} ${probability.toFixed(2)}`)
         .join("\n");
@@ -121,7 +75,8 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
           type: "text",
           text: `Jev suggests ${result.route} (probability ${result.probabilities[result.route].toFixed(2)}; Choice confidence ${result.confidence.toFixed(2)}).\n${recommendation}\n\nDistribution:\n${ranked}`,
         }],
-        details: { route: result.route, probabilities: result.probabilities, confidence: result.confidence },
+        details: result,
+        usage: classification.usage,
       };
     },
   });
