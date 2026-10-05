@@ -1,6 +1,7 @@
 import {
 	findJjRepoRoot,
 	gitWorkingDirectory,
+	hasSafeShellOutputs,
 	isReadOnlyGitInvocation,
 	isWithin,
 	librarianCheckoutRoot,
@@ -13,7 +14,14 @@ export type GitGuardDecision = {
 };
 
 export function gitGuardDecision(command: string, cwd: string): GitGuardDecision {
-	for (const invocation of shellInvocations(command, cwd)) {
+	const invocations = shellInvocations(command, cwd);
+	// A pipeline consumer's redirection is still part of a cached Git export.
+	const readsCache = invocations.some((invocation) =>
+		invocation.command === "git" && isWithin(gitWorkingDirectory(invocation), librarianCheckoutRoot()));
+	if (readsCache && invocations.some((invocation) => !hasSafeShellOutputs(invocation))) {
+		return { block: true, reason: "librarian-write" };
+	}
+	for (const invocation of invocations) {
 		if (invocation.command !== "git") continue;
 		const gitCwd = gitWorkingDirectory(invocation);
 		if (isWithin(gitCwd, librarianCheckoutRoot())) {

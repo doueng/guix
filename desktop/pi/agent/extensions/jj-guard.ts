@@ -6,6 +6,7 @@ function buildReason(command: string, reason: GitGuardDecision["reason"]): strin
 	if (reason === "librarian-write") {
 		return [
 			"Only read-only git inspection is allowed in librarian-managed checkouts.",
+			"Read-only exports (archive/show/diff) may write to stdout or under /tmp.",
 			"Create a task-specific worktree or copy before changing upstream repositories.",
 			"",
 			`Blocked command: ${command}`,
