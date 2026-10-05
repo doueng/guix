@@ -2,10 +2,6 @@
 name: poteto-mode
 description: Rigorous engineering workflows with task-specific playbooks, deliberate delegation, concise communication, and verified work. Use for /poteto-mode or non-trivial engineering tasks.
 disable-model-invocation: true
-mode: true
-icon: crown
-color: yellow
-reminder: New task? Playbook match or rigor needed -> apply /poteto-mode. Casual turn or user opts out -> don't.
 ---
 
 # Poteto mode
@@ -14,12 +10,16 @@ reminder: New task? Playbook match or rigor needed -> apply /poteto-mode. Casual
 
 The Principles section below grounds every trigger. In your reply, name each principle that shaped a decision and the specific choice it changed. Cite only principles whose leaf SKILL.md you read this session.
 
-When entering poteto-mode for every new task, call `jev_classify_task` with the user's task before selecting a playbook. This is required, not optional. Do not classify short continuations such as "continue" or "run the tests". Treat Jev's route as advice, not authority. Use it when its probability is at least 0.75 and it matches the request. Between 0.50 and 0.75, make the final choice yourself. Below 0.50, classify the task yourself. If the Jev call fails, report the failure and stop before routing or acting. Do not silently fall back to manual classification.
+Every pstack skill named below lives next to this one. Resolve a skill named in bold, such as the **how** skill, as `../how/SKILL.md` relative to this skill's directory, and resolve `playbooks/`, `references/`, and `scripts/` paths relative to this directory. The pstack skills are hidden from automatic selection, so Pi does not list their paths elsewhere.
+
+For every new task, call `jev_classify_task` with the user's task before selecting a playbook. Do not classify short continuations such as "continue" or "run the tests". Jev's route is advice. Follow the recommendation line in the tool result, then map the route to a playbook with the **Route map** under Playbooks. If the call fails, say so in your reply, classify the task yourself with the Route map, and label the route as manual. Never present a manual route as Jev's.
+
+The `jev-pstack` extension keeps poteto-mode on for the session after `/skill:poteto-mode`. After a compaction, it tells you to re-read this file. `/poteto-mode-off` turns the mode off.
 
 Remaining triggers:
 
 - Nontrivial change, architecture decision, or "are we sure?" → the **how** skill.
-- About to `ask the user` on a "which approach", "how should I", or "what should this do" fork → classify it before you ask. If the answer is a fact you could observe by running something (behavior, timing, layout, output, perf, even whether an eval separates), it is not the human's to answer. Sketch it via the Prototype playbook (`playbooks/prototype.md`) and let the result decide. If the task is a read-only Investigation whose deliverable is a cited answer, stay in it and answer from the evidence rather than building a sketch. Reserve the question for a genuine product or preference call no experiment can settle. Under a full-autonomy grant, decide a call that the grant covers, act on it, and report it, with no reply word and no offer. Under the grant, apply a default for a call that only the operator can make. Report the default with a full explanation and the one word that reverses it. Gates that the operator named and the Always-pause list in Autonomy still need the operator.
+- About to `ask the user` on a "which approach", "how should I", or "what should this do" fork → classify it before you ask. If the answer is a fact you could observe by running something (behavior, timing, layout, output, perf, even whether an eval separates), it is not the human's to answer. Sketch it via the Prototype playbook (`playbooks/prototype.md`) and let the result decide. If the task is a read-only Investigation whose deliverable is a cited answer, stay in it and answer from the evidence rather than building a sketch. Reserve the question for a genuine product or preference call no experiment can settle. Under a full-autonomy grant, decide a call that the grant covers, act on it, and report it, with no reply word and no offer. Under the grant, apply a default for a call that only the operator can make. Report the default with a full explanation, and say in plain words what the operator could tell you to do instead. The operator answers in their own words. Never give a shorthand token to type back. Gates that the operator named and the Always-pause list in Autonomy still need the operator.
 - Any code → name the data shape first, and choose its organizing structure per **principle-model-the-domain**.
 - Code crossing a function boundary → the **architect** skill, parallel design exploration before implementing.
 - Parallel fan-out → the **swarm** skill for coverage matrices, races, gauntlets, and exploration partitions. Use **arena** for design or code bakeoffs with base selection and grafting.
@@ -30,6 +30,7 @@ Remaining triggers:
 - Before commit → run the available formatting, lint, and diff checks. Do not assume an uninstalled review plugin.
 - Before review → the **no-comments** skill (`/no-comments`).
 - Shipping UI / IDE / CLI → use an installed control skill if one exists. Otherwise reproduce and verify on the real surface with available project tooling. For bug fixes, reproduce first on the same surface yourself. Hand to the user only under the narrow Bug fix step 1 exception.
+- Running a benchmark, measuring perf yourself, or reporting a speedup or regression you measured → the **benchmark-checklist** skill before you report or act on the number.
 - Any PR-status request → the **Babysit** playbook (`playbooks/babysit.md`). That includes "babysit this", "get it green", "address the bugbot comments", and "check on PR X" / "anything outstanding on X". Never triggered by merely opening a PR. Declare its mode before polling. The playbook's step 1 owns the request-to-mode mapping.
 - Asked to land or ship a green stack → the **Shipping** playbook (`playbooks/shipping.md`). Green is not safe. Nothing gets armed before an independent per-PR verdict, and only the contiguous verified run from the root lands.
 - Bugbot or the agentic security review commented → skeptical posture. They catch real bugs and also file non-issues and nitpicks, so assess each on its merits and dismiss noise with a concrete reason instead of churning code. Triage fix / dismiss / ask per `references/bugbot-triage.md`.
@@ -68,6 +69,7 @@ Read the leaf skill in full for any principle you apply. Each entry names when i
 - **Fix Root Causes** (**principle-fix-root-causes**). Debugging. Trace each symptom to its root cause, reproduce first, ask why until you reach it.
 - **Sequence Work into Verifiable Units** (**principle-sequence-verifiable-units**). Multi-step work (sweeps, migrations, runs of similar edits) and how you stack commits and PRs. Break work into small units that each end in a check, verify each before the next, and order delivery so the sequence proves itself.
 - **Test Behavior, Not Implementation** (**principle-test-behavior-not-implementation**). Writing, changing, or keeping a test. Call the code the way its users do and assert the result against a literal expected value. If the test would still pass when every imported function returns `undefined`, rewrite the assertion or delete the test.
+- **Explain the Number** (**principle-explain-the-number**). Before you trust, report, or act on a number you measured (a speedup, a regression, a throughput, a latency, or an eval result). Find what limits it, and rule out that it measured something other than the work you think.
 
 **Delegation**
 
@@ -92,7 +94,9 @@ Read the leaf skill in full for any principle you apply. Each entry names when i
 
 Pi has no built-in subagent API. When an approved local delegation workflow is available and parallel work is useful, follow that workflow. Do not assume agents, model selection, or MCP tools are available. Otherwise work directly and state the constraint rather than pretending delegation happened.
 
-You own delegated work. Review the actual result and write your own summary. Give each agent a bounded, independent task and avoid concurrent edits to the same files. Use a fresh, complete prompt when resuming an agent if prior instructions may have been lost.
+You own delegated work. Review the actual result and write your own summary. Give each agent a bounded, independent task and avoid concurrent edits to the same files.
+
+**Fresh agents by default.** Give new work to a fresh agent with consolidated scope, meaning the original brief, every later directive, and the prior agent's report and branch. This holds for a fix round, a follow-up, a retry, and the next queue item. Resume an existing agent only when the new work strictly needs state that lives in that agent and is costly to move, such as its local checkout, its uncommitted changes, or a process it still runs. A stop or hold order to a running agent is not reuse. Resumed agents can silently lose directives, so prefer a fresh agent over trusting a "done" summary.
 
 ## Writing the reply
 
@@ -114,9 +118,26 @@ Comments follow the same rule as the reply. Write them clean as you go. Keep a c
 
 ## Playbooks
 
-Open a todolist whose first items are the matched playbook's steps, copied in verbatim, before any task-specific todos. A step you choose not to do stays in the list with a one-line `skip: <reason>`. Match the task to a playbook below, open its file, and copy its steps in verbatim.
+Use an available todo tool, or a short checklist in the conversation when none is installed. Its first items are the matched playbook's steps, copied in verbatim, before any task-specific items. A step you choose not to do stays in the list with a one-line `skip: <reason>`. Match the task to a playbook below, open its file, and copy its steps in verbatim.
 
 A large or cross-cutting effort (a migration across many call sites, an ambitious multi-part change), or work the user steps away from to trust later, routes to the **figure-it-out** skill even when a narrower playbook like Feature fits. Use **figure-it-out** whenever no bundled playbook fits. It designs a bespoke, rigorous playbook for the task. A standing project-scale program (multi-day, many stacked PRs, a fleet of subagents under one coordinator) routes to **Orchestrate** instead. figure-it-out designs one bespoke run, orchestrate runs the program.
+
+**Route map.** Each Jev route maps to the playbooks below. Pick among them with the playbook descriptions that follow the map. `scripts/check-pi-port.mjs` fails when these routes and the extension's routes differ.
+
+| Route | Playbooks |
+|---|---|
+| `investigation` | Investigation. Runtime forensics for a live symptom. Trace forensics for a captured profile. |
+| `bug_fix` | Bug fix. |
+| `feature` | Feature. Visual parity for pixel-exact UI equivalence. |
+| `refactor` | Refactoring. |
+| `performance` | Perf issue for a one-off fix. Hillclimb for sustained work on one metric. Runtime or Trace forensics when only a diagnosis is wanted. |
+| `prototype` | Prototype. |
+| `review` | The **interrogate** skill, read-only. Review the current setup when there is no diff. No PR or edits unless requested. |
+| `large_project` | figure-it-out. Orchestrate for a multi-day program. Multi-phase plan for a phased or stacked plan. Autonomous run for "run until done". Autopilot-full or Autopilot-stack for a queue of PRs. |
+| `pr_workflow` | Babysit. Shipping. Opening a PR. |
+| `session_handoff` | Session pickup. Pause safely. |
+| `skill_work` | Authoring or modifying a skill. Eval. |
+| `other` | Choose from the full list below. Worktree and simulator cleanup lives here. Use figure-it-out when nothing fits. |
 
 - **Investigation.** Read-only question: how does X work, why was Y built this way, are we sure about Z, should we do X or Y. `playbooks/investigation.md`.
 - **Bug fix.** A reported defect to reproduce, root-cause, and fix with runtime evidence. `playbooks/bug-fix.md`.

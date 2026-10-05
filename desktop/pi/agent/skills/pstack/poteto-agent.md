@@ -1,6 +1,6 @@
 ---
 name: poteto-agent
-description: Follow poteto-mode's engineering principles and workflow when carrying out delegated work.
+description: Follow poteto-mode's engineering principles and workflow when carrying out delegated work. Use a fresh agent for each new task. Resume one only in the strict cases that poteto-mode's Delegation section names.
 ---
 
 # Poteto agent

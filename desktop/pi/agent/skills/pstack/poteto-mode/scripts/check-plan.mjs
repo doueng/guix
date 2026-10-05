@@ -17,7 +17,7 @@ const SUB_BLOCKS = [
 	"Merge.",
 ];
 const PROGRAM_H3 = ["Arm the program", "Spawn owners", "PR mechanics", "Verdict and merge", "Boot recipe"];
-const PROGRAM_MARKERS = ["decision trail", "git show origin/main:", /30[- ]minute/, "status message"];
+const PROGRAM_MARKERS = ["decision trail", "Read the installed workflows", "hourly audit tick", "progress from side effects"];
 const HOW_TO_READ_MARKERS = [
 	"One box is one unit of work",
 	"names the evidence",
@@ -94,8 +94,7 @@ else {
 		else cursor = at + 1;
 	}
 	for (const marker of PROGRAM_MARKERS) {
-		const ok = marker instanceof RegExp ? marker.test(bodyText(program)) : bodyText(program).includes(marker);
-		if (!ok) fail(program.n, `Program checklist lacks "${marker}"`);
+		if (!bodyText(program).includes(marker)) fail(program.n, `Program checklist lacks "${marker}"`);
 	}
 }
 
@@ -136,7 +135,7 @@ for (const pr of prSections) {
 
 	const live = block("Verify, live.");
 	if (live) {
-		if (!LANES.test(live.rest)) fail(live.n, `${pr.title}: Verify, live lacks "Ten lanes on \`<swarm workers model>\` at the PR head" with the model filled in`);
+		if (!LANES.test(live.rest)) fail(live.n, `${pr.title}: Verify, live lacks the affected user-facing surface coverage rule`);
 		const lanes = boxes(live.lines).map((b) => ({ ...b, m: b.text.match(/^Lane (\d+)\. /) }));
 		const numbers = lanes.filter((b) => b.m).map((b) => Number(b.m[1])).sort((a, b) => a - b);
 		if (numbers.length === 0) fail(live.n, `${pr.title}: live verification has no numbered scenario`);

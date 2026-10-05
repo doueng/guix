@@ -11,7 +11,7 @@
 (defn stow-package! [dir target package]
   (fs/create-dirs target)
   (process/shell {:inherit true} stow (str "--dir=" dir)
-                 (str "--target=" target) "--no-folding" "--restow" package))
+                 (str "--target=" target) "--no-folding" "--ignore=node_modules" "--restow" package))
 
 (doseq [app ["btop" "doom" "fish" "ghostty" "git" "herdr" "hypr"
              "jj" "jjui" "noctalia" "nvim"]]

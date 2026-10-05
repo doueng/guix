@@ -54,7 +54,7 @@ Commit it only when the work is ambitious enough that a reviewer needs the trail
 
 ## Audit the log against the transcript
 
-At the end of the run, before handing back, check the log told the truth. Read this run's transcript from the active workspace's Pi session directory under `~/.pi/agent/sessions/` when available. Do not inspect another workspace's session directory. Walk this run's rows against what actually happened. Each stretch of them begins at one of this run's `start` rows, or at the first row if this run created the log, and ends at the next `start` row of another run:
+At the end of the run, before handing back, check the log told the truth. Prefer this run's transcript path from active Pi metadata. Otherwise run `node ../poteto-mode/scripts/session-dir.mjs <workspace>` relative to this skill directory, passing any explicit CLI session directory as the second argument. Confirm the workspace and conversation before reading messages. If the transcript is unavailable, record that audit gap. Do not inspect another workspace's session directory. Walk this run's rows against what actually happened. Each stretch of them begins at one of this run's `start` rows, or at the first row if this run created the log, and ends at the next `start` row of another run:
 
 - Check that every row maps to a real decision or action.
 - Check that each row's evidence resolves and shows what the row claims.

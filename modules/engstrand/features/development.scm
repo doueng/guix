@@ -1,6 +1,7 @@
 (define-module (engstrand features development)
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages babashka)
+  #:use-module (engstrand packages bun)
   #:use-module (engstrand packages github-cli)
   #:use-module (engstrand packages pi-coding-agent)
   #:use-module (gnu packages curl)
@@ -8,7 +9,7 @@
   #:export (feature-familiar-development %development-home-packages))
 
 (define %development-home-packages
-  (cons* babashka github-cli pi-coding-agent curl
+  (cons* babashka bun github-cli pi-coding-agent curl
          (map specification->package
               '("clojure-tools"
                 "emacs-clojure-mode"

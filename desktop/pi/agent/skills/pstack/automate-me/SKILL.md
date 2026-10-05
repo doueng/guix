@@ -12,7 +12,7 @@ Turn recurring working conventions into one concise skill. Ground preferences in
 
 ### 1. Find existing skills and evidence
 
-Look for matching skills under project and personal Pi skill directories, especially `desktop/pi/agent/skills/` and `~/.pi/agent/skills/`. Update a matching skill by default. Start fresh only when asked.
+Look for matching skills under project and personal Pi skill directories, especially `.pi/skills/`, `.agents/skills/`, and `~/.pi/agent/skills/`. Update a matching skill by default. Start fresh only when asked.
 
 Use only session transcripts that are available in the current environment and scoped to the active workspace. Do not search unrelated session stores. If no transcript access exists, say so and rely on the user's explicit statements.
 
@@ -24,7 +24,7 @@ Ask concise questions about preference gaps that the evidence cannot settle. Off
 
 ### 3. Draft
 
-Use the local `authoring-a-skill` playbook and the `unslop` skill. Preserve an existing skill's useful structure when updating it. Put project skills under the project's Pi skill directory and personal skills under `~/.pi/agent/skills/`.
+Use the local `authoring-a-skill` playbook and the `unslop` skill. Preserve an existing skill's useful structure when updating it. Put project skills under `.pi/skills/` or an existing `.agents/skills/` directory and personal skills under `~/.pi/agent/skills/`. When a discovered skill is a symlink, edit its repository source rather than replacing the link.
 
 Use frontmatter with a clear name and description. Keep the skill operational, concise, and scoped to recurring preferences. Reference related skills instead of duplicating their content.
 

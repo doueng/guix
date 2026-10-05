@@ -10,7 +10,7 @@ Rebuild the relevant working context and return a concise capsule of current sta
 
 ## Process
 
-1. If available, find the current workspace's Pi sessions under `~/.pi/agent/sessions/`. Confirm each transcript matches the target conversation before using it. If session files are unavailable, say so.
+1. Prefer session paths from active Pi metadata. Otherwise run `node ../poteto-mode/scripts/session-dir.mjs <workspace>` relative to this skill directory, passing any explicit CLI session directory as the second argument. Confirm each transcript's workspace and conversation before reading messages. If session files are unavailable, say so.
 2. Set the time window, topic, and workspace before searching. Default to the active workspace and recent history. Do not search another workspace without permission.
 3. Search relevant conversations for goals, decisions, open threads, corrections, and artifacts. For small searches, do this directly. If local delegation is available and the corpus is large, divide independent time slices and verify the reports against source transcripts. Otherwise search sequentially.
 4. For a named feature or bug, check available source history, issues, discussions, and incident records. Use only tools available in the current Pi session. Missing sources are explicit gaps.

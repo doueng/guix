@@ -1,6 +1,7 @@
 # Private installation records, diagnostics, and local test artifacts.
 local/
 __pycache__/
+desktop/pi/agent/skills/pstack/poteto-mode/scripts/node_modules/
 
 # OpenTofu provider downloads, local state, and account-specific inputs.
 infra/guix-cache/.terraform/

@@ -4,7 +4,7 @@
 
 1. Resolve the forge once. Prefer `gh`; use another installed forge CLI only when it can resolve this repository. Record the choice.
 2. State the PR order, verification requirements, merge owner, and stop conditions. Begin only on the operator's explicit go. Keep the plan and decisions in the decision trail.
-3. Use one isolated writer per PR only through an available local delegation workflow. Otherwise build sequentially. Owners work only in their assigned branches and report exact head SHAs.
+3. Use one isolated writer per PR only through an available local delegation workflow. Otherwise build sequentially. Owners work only in their assigned branches and report exact head SHAs. After the first push, each owner pushes its branch again after every verifiable unit, with hooks on. A WIP commit is fine.
 4. Verify each PR at its current head. Run required checks, exercise real behavior, and independently review when possible. Record self-review as such. Findings require a fix and fresh verification.
 5. Append only clean, verified changes to the linear stack. The coordinator alone changes branch topology. Rebase in order, verify changed heads, and preserve a clear dependency chain.
 6. Never merge or arm auto-merge. The operator reviews and lands the stack. A stop means no further writes.
