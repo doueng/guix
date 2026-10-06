@@ -149,7 +149,7 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
     return {
       message: {
         customType: "poteto-mode-reminder",
-        content: `poteto-mode is still active, but compaction removed its instructions. Read ${skillPath()} in full before you continue. A new task still starts with ${TOOL}.`,
+        content: `poteto-mode is still active, but compaction removed its instructions. Read ${skillPath()} in full before you continue. A new task still starts with codemode: text(await tools.${TOOL}({ task: "<user task>" })).`,
         display: false,
       },
     };

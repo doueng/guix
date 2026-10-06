@@ -19,3 +19,6 @@ Resolved: the guard now allows read-only archives, `ls-tree`, and `worktree list
 ## 26-10-06 15:20 — tool_error
 
 Reading a PNG screenshot (/tmp/osd-crop.png, 800x300, 31 KB, made with grim + imagemagick) with the read tool returned "No result provided" twice, and the pi process restarted at the same moment (new PID, start time 15:19:09). The user read this as the agent sending SIGTERM to pi. dmesg and the journal show no OOM kill and no signal. Workaround: stop using image reads for visual checks and use process and IPC introspection instead. Fix: make image attachment failures return an error instead of crashing or restarting the session, and record the restart cause in a pi log.
+## 26-10-07 00:08 — codemode_output
+
+Large batches of file reads and JSON-wrapped bash output repeatedly exceeded codemode's output budget, requiring narrower calls and repeated reads to inspect the omitted material. Print text results directly (for bash, text(result.output)), keep documentation batches within the output budget, and summarize/filter search results before emitting them. A codemode lint or output-size warning for large JSON-wrapped strings would prevent this avoidable backtracking.

@@ -22,7 +22,7 @@ Workflow:
 ## Stage 1: Finding
 Perform 10 independent review passes: 5 reviewer roles × 2 seeds.
 
-Use any available read-only helper/subagent tooling to parallelize when practical. If that is not available, do the passes yourself one by one without skipping any role or seed.
+Use `codemode` to batch independent file reads and available read-only helper calls with `Promise.allSettled()`, and print only evidence relevant to the review. Tool-call concurrency does not create independent reviewer agents. Use any available read-only helper/subagent tooling to parallelize when practical. If that is not available, do the passes yourself one by one without skipping any role or seed.
 
 Reviewer roles:
 - `reviewer-bug`: logic errors, boundary cases, null/undefined handling, races, missing error handling

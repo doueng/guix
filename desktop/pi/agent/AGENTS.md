@@ -1,0 +1,10 @@
+# Pi tool workflows
+
+- Use `codemode` for built-in, extension, and MCP tool calls. Settings enable it in `only` mode. Do not use direct MCP calls, `tool_search`, standalone MCP clients, or an MCP adapter to bypass it.
+- Discover unlisted tools inside scripts with `searchTools()`, then inspect `describeTool(name)` or `describeNamespace(name)` before calling them. Tool names replace non-identifier characters with `_`. Never guess tool names or arguments.
+- Keep MCP servers on the built-in integration with `exposure: "codemode"` (the default). Preserve deliberate `hidden` tools; avoid `direct` or `deferred` exposure overrides. Keep credentials and private server configuration out of repositories.
+- Batch independent reads, searches, and diagnostics with `Promise.allSettled()`. Print relevant evidence and individual failures rather than entire large results. Use `read` to examine files and `bash` for file discovery. Print text as text, not large JSON-wrapped strings.
+- Await every tool call. Keep dependent operations and shared-state mutations sequential. A failed script does not undo earlier calls. Codemode is orchestration, not a subagent or a security boundary; existing tool guards still apply.
+- Bash returns an object; inspect `exit_code`, `output`, `truncated`, and `full_output_path`. MCP returns a CallToolResult; check `isError` and use `structuredContent` or `content`. Other tools may return plain text unless their schema says otherwise. Forward image blocks with `image()`, never print base64.
+- Use `models.classify()` and `models.generateImages()` inside codemode for ad hoc classifier and image tasks. Discover available models first and check `stopReason` and `errorMessage`. Keep specialized extension wrappers when they provide validation, policy, or session state; call those wrappers through `tools`.
+- Shell scripts and autoresearch hooks run outside codemode and cannot access its globals. Keep their CLI implementations; fetch session MCP evidence through codemode before a run when needed.

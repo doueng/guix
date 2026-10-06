@@ -93,8 +93,8 @@ test("quoted shell operators and nested shell invocations", () => {
 	blocked(`bash -lc 'git -C ${cache} show HEAD' > README.md`, "librarian-write", cache);
 });
 
-test("extension hook allows exports and reports unsafe writes without a UI", async () => {
-	type Handler = (event: { toolName: string; input: { command: string } }, ctx: { cwd: string; hasUI: boolean }) => unknown;
+test("extension hook guards direct and codemode-nested bash calls without a UI", async () => {
+	type Handler = (event: { toolName: string; parentToolCallId?: string; input: { command: string } }, ctx: { cwd: string; hasUI: boolean }) => unknown;
 	let handler: Handler | undefined;
 	jjGuardExtension({ on: (name: string, callback: Handler) => {
 		assert.equal(name, "tool_call");
@@ -107,4 +107,8 @@ test("extension hook allows exports and reports unsafe writes without a UI", asy
 		{ cwd: cache, hasUI: false }) as { block: boolean; reason: string };
 	assert.equal(result.block, true);
 	assert.match(result.reason, /stdout or under \/tmp/u);
+	const nested = await handler({ toolName: "bash", parentToolCallId: "codemode-call", input: { command: "git status" } },
+		{ cwd: jj, hasUI: false }) as { block: boolean; reason: string };
+	assert.equal(nested.block, true);
+	assert.match(nested.reason, /Use jj instead/u);
 });

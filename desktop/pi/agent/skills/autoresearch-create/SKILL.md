@@ -13,6 +13,8 @@ Autonomous experiment loop: try ideas, keep what works, discard what doesn't, ne
 - **`run_experiment`** — runs command, times it, captures output.
 - **`log_experiment`** — records result. `keep` auto-commits. `discard`/`crash`/`checks_failed` auto-reverts code changes (autoresearch files preserved). Always include secondary `metrics` dict. Dashboard: ctrl+shift+t.
 
+Invoke these tools through `codemode` as `tools.init_experiment(...)`, `tools.run_experiment(...)`, and `tools.log_experiment(...)`, printing their results with `text()`. Keep init, run, and log sequential. Inspect each run before deciding how to log it; never batch iterations or edits with a run or rollback. Use codemode to batch independent source reads and reduce diagnostics, not to hide benchmark failures or metric lines.
+
 ## Setup
 
 1. Ask (or infer): **Goal**, **Command**, **Metric** (+ direction), **Files in scope**, **Constraints**.

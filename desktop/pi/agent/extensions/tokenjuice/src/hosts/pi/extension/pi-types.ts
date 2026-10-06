@@ -57,6 +57,7 @@ export type PiContext = {
 };
 
 export type PiToolResultEvent = {
+  parentToolCallId?: string;
   toolName?: string;
   input?: unknown;
   content?: unknown;

@@ -1,6 +1,7 @@
 (define-module (engstrand packages pi-coding-agent)
   #:use-module (gnu packages base)
   #:use-module (gnu packages elf)
+  #:use-module (gnu packages gcc)
   #:use-module (guix build-system copy)
   #:use-module (guix download)
   #:use-module (guix gexp)
@@ -32,7 +33,9 @@
             (lambda _
               (let* ((output #$output)
                      (loader #$(file-append glibc "/lib/ld-linux-aarch64.so.1"))
-                     (rpath #$(file-append glibc "/lib"))
+                     ;; QuickJS worker teardown needs libgcc_s for pthread_exit.
+                     (library-path (string-append #$(file-append glibc "/lib")
+                                                  ":" #$gcc:lib "/lib"))
                      (patchelf-bin #$(file-append patchelf "/bin/patchelf"))
                      (real (string-append output "/share/pi/pi"))
                      (bin-dir (string-append output "/bin"))
@@ -42,7 +45,7 @@
                    (when (and (elf-file? file)
                               (string-suffix? "/pi/pi" file))
                      ;; patchelf --set-rpath corrupts this large Bun binary.
-                     ;; Supply its glibc directory through the wrapper instead.
+                     ;; Supply its library directories through the wrapper instead.
                      (invoke patchelf-bin
                              "--set-interpreter" loader file)))
                  (find-files output))
@@ -51,7 +54,7 @@
                   (lambda (port)
                     (format port
                             "#!/bin/sh\nexport PI_SKIP_VERSION_CHECK=1\nexport LD_LIBRARY_PATH=~a${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\nexec ~a \"$@\"\n"
-                            rpath
+                            library-path
                             real)))
                 (chmod wrapper #o555)
                 (patch-shebang wrapper)))))))

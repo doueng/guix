@@ -138,7 +138,8 @@ export function createTokenjuicePiExtension(config: PiExtensionRuntimeConfig) {
 
     pi.on("tool_result", async (rawEvent, ctx) => {
       const event = rawEvent as PiToolResultEvent;
-      if (event.toolName !== "bash") {
+      // Nested consumers need the original output and structured bash result.
+      if (event.toolName !== "bash" || event.parentToolCallId !== undefined) {
         return undefined;
       }
 

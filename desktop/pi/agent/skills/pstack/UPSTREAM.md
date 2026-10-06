@@ -22,7 +22,7 @@ Omitted changes, with reasons.
 - `/goal` and `/loop 1h` arming in the autopilot and multi-phase playbooks. They are upstream host commands. The Pi playbooks keep their session-bound monitoring rule.
 - Host-specific PR tooling stays generic. `opening-a-pr.md` names a run's built-in PR tool only when one exists.
 
-Local changes include Pi entry commands, Jev routing with a manual fallback, the route map, mode persistence, conditional delegation, read-only self-review, session-directory resolution, GNU-system audit support, and port validation. Keep the MIT license with the bundle.
+Local changes include Pi entry commands, Jev routing with a manual fallback, the route map, mode persistence, conditional delegation, read-only self-review, session-directory resolution, GNU-system audit support, codemode-based MCP discovery and calls, batched read-only evidence gathering, and port validation. Keep the MIT license with the bundle.
 
 ## Runtime and paths
 

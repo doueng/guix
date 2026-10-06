@@ -8,6 +8,10 @@
     "openrouter/deepseek/deepseek-v4.1-flash",
     "openrouter/anthropic/claude-opus-5.5"
   ],
+  "defaultTools": ["+codemode"],
+  "codemode": {
+    "mode": "only"
+  },
   "editorPaddingX": 2,
   "treeFilterMode": "no-tools",
   "tuiMode": "fullscreen",
