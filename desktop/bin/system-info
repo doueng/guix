@@ -13,7 +13,7 @@
 (defn notification-id-file []
   (str (or (System/getenv "XDG_STATE_HOME")
            (str home "/.local/state"))
-       "/noctalia-notifications/system-info.id"))
+       "/notification-ids/system-info.id"))
 
 (defn close-system-info-later! []
   (let [id-file (notification-id-file)]

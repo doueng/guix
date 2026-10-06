@@ -10,3 +10,6 @@ infra/guix-cache/*.tfvars
 
 # Large personal wallpaper assets remain outside the repository history.
 desktop/configs/theme/wallpapers/
+
+desktop/build/dusk/target/
+desktop/build/dusk/.guix-profile*

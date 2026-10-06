@@ -2,7 +2,6 @@
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages bluetui)
   #:use-module (engstrand packages ghostty)
-  #:use-module (engstrand packages noctalia)
   #:use-module (engstrand services bluetooth)
   #:use-module (engstrand services home-mime)
   #:use-module (asahi guix systems desktop)
@@ -10,7 +9,7 @@
   #:export (feature-familiar-desktop %desktop-home-packages))
 
 (define %desktop-home-packages
-  (append (list bluetui noctalia ghostty)
+  (append (list bluetui ghostty)
           (map specification->package
                '("thunar"
                  "imv"

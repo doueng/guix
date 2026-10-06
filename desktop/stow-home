@@ -14,7 +14,7 @@
                  (str "--target=" target) "--no-folding" "--ignore=node_modules" "--restow" package))
 
 (doseq [app ["btop" "doom" "fish" "ghostty" "git" "herdr" "hypr"
-             "jj" "jjui" "noctalia" "nvim"]]
+             "jj" "jjui" "dusk" "nvim"]]
   (stow-package! (str repo "/configs") (str home "/.config/" app) app))
 
 (stow-package! repo (str home "/.local/bin") "bin")

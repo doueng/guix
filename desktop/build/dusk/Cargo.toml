@@ -1,0 +1,32 @@
+[package]
+name = "dusk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+publish = false
+description = "Programmable Wayland shell: GPUI surfaces described by a live Babashka runtime"
+
+# GPUI is pinned to the last Zed revision whose toolchain matches Guix's Rust
+# (1.93). Cargo.lock started from Zed's lockfile at that revision so every
+# transitive crate is a version Zed itself built with.
+[features]
+# Headless GPUI integration tests; not included in the daemon build.
+ui-tests = ["gpui/test-support"]
+
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "7f7520b98ed1a0ce03dab1d5ddcb87163f1bcdb8", default-features = false, features = ["font-kit", "wayland"] }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "7f7520b98ed1a0ce03dab1d5ddcb87163f1bcdb8", features = ["font-kit", "wayland"] }
+anyhow = "1"
+futures = "0.3"
+libc = "0.2"
+serde = "1"
+smol = "2"
+unicode-segmentation = "1"
+zbus = { version = "5", default-features = false, features = ["async-io"] }
+
+[patch.crates-io]
+async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }
+calloop = { git = "https://github.com/zed-industries/calloop" }
+
+[profile.release]
+debug = "line-tables-only"

@@ -29,23 +29,25 @@
 (defn run [command options]
   @(p/process command options))
 
-(defn ensure-noctalia []
-  (when-let [noctalia (find-executable "noctalia")]
-    (let [status (run [noctalia "msg" "status"]
-                      {:out :string :err :string})]
-      (when-not (zero? (:exit status))
-        (p/process [noctalia "--daemon"]
-                   {:out :string :err :string})))
-    noctalia))
+(defn ensure-dusk []
+  (when-let [dusk (find-executable "dusk")]
+    (when-not (zero? (:exit (run [dusk "msg" "status"] {:out :string :err :string})))
+      (p/process [dusk] {:out :string :err :string})
+      (loop [attempt 0]
+        (when (and (< attempt 50)
+                   (not (zero? (:exit (run [dusk "msg" "status"] {:out :string :err :string})))))
+          (Thread/sleep 100)
+          (recur (inc attempt)))))
+    dusk))
 
-(defn choose [noctalia]
+(defn choose [dusk]
   (let [entries (str (str/join "\n" (map first (apps))) "\n")
-        result (when noctalia
-                 (run [noctalia "dmenu" "-p" ""]
+        result (when dusk
+                 (run [dusk "dmenu" "-p" ""]
                       {:in entries :out :string :err :string}))]
-    (when-not noctalia
+    (when-not dusk
       (binding [*out* *err*]
-        (println "Noctalia is unavailable; cannot open launcher")))
+        (println "dusk is unavailable; cannot open launcher")))
     (when result
       (if-not (zero? (:exit result))
         (System/exit (:exit result))
@@ -54,7 +56,7 @@
               (apps))))))
 
 (defn main []
-  (when-let [command (choose (ensure-noctalia))]
+  (when-let [command (choose (ensure-dusk))]
     (try
       (p/process command)
       (catch Exception error
