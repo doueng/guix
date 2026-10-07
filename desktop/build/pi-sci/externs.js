@@ -1,0 +1,13 @@
+var piSciRun = function(source, api) {};
+var piSciApi = {};
+piSciApi.tools;
+piSciApi.catalog;
+piSciApi.models;
+piSciApi.text;
+piSciApi.image;
+piSciApi.exit;
+piSciApi.store;
+piSciApi.load;
+piSciApi.unstore;
+piSciApi.environment;
+piSciApi.commitEnvironment;

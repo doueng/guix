@@ -13,3 +13,6 @@ desktop/configs/theme/wallpapers/
 
 desktop/build/dusk/target/
 desktop/build/dusk/.guix-profile*
+desktop/build/pi-sci/dist/
+desktop/build/pi-sci/node_modules/
+desktop/build/pi-sci/.cpcache/

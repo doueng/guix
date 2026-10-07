@@ -1,0 +1,9 @@
+{:output-to "dist/sci.pending.js"
+ :output-dir "dist/cljs"
+ :optimizations :advanced
+ :target :none
+ :language-out :ecmascript-2020
+ :closure-defines {sci.core/disable-jit true}
+ :infer-externs true
+ :externs ["externs.js"]
+ :elide-asserts true}

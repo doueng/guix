@@ -17,7 +17,7 @@ GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := --substitute-urls="$(SUBSTITUTE_URLS)" -L "$(MODULES)"
 
 .PHONY: help pull check eval eval-desktop dry-run build repro-build switch apply \
-        home-build home-weather home-apply stow dusk dusk-test dusk-verify
+        home-build home-weather home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test
 
 help:
 	@echo 'pull          update the user Guix profile from $(CHANNELS)'
@@ -30,7 +30,9 @@ help:
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-weather  check substitutes for explicit Home packages'
 	@echo 'home-apply    activate Home, then stow live configs'
-	@echo 'stow          install live config links using GNU Stow'
+	@echo 'stow          build SCI and install live config links using GNU Stow'
+	@echo 'pi-sci        compile the pinned SCI codemode runtime'
+	@echo 'pi-sci-test   build and verify SCI codemode with the installed Pi'
 	@echo 'dusk          build the dusk shell (desktop/build/dusk)'
 	@echo 'dusk-test     run isolated runtime and headless GPUI tests'
 	@echo 'dusk-verify   run dusk end-to-end checks on the live session'
@@ -76,7 +78,13 @@ home-build:
 home-weather:
 	"$(GUIX)" weather $(COMMON) -m "$(HOME_MANIFEST)"
 
-stow:
+pi-sci:
+	desktop/build/pi-sci/build.sh
+
+pi-sci-test:
+	desktop/build/pi-sci/verify.sh
+
+stow: pi-sci
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/stow-home
 
 home-apply:

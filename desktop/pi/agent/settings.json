@@ -12,6 +12,7 @@
   "codemode": {
     "mode": "only"
   },
+  "extensions": ["-builtin:codemode"],
   "editorPaddingX": 2,
   "treeFilterMode": "no-tools",
   "tuiMode": "fullscreen",

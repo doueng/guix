@@ -20,7 +20,7 @@ Find the relevant paths, lines, symbols, and recent history. Use the repository'
 
 Search available sources that match the question, such as source history, issues, design documents, team discussion, observability, error tracking, and product data. Use only tools actually available in the current Pi session. A missing source is a gap, not a negative result. Skip a source only when it is unavailable or demonstrably irrelevant, and say which.
 
-If a local delegation workflow is available, assign independent evidence categories to separate read-only investigators. Otherwise use codemode to batch independent read-only searches with `Promise.allSettled()` and return relevant evidence with source identifiers. Keep dependent searches sequential. Do not claim a source or investigator was consulted without evidence.
+If a local delegation workflow is available, assign independent evidence categories to separate read-only investigators. Otherwise use codemode's settled parallel-call helper in its declared language to batch independent read-only searches and return relevant evidence with source identifiers. Keep dependent searches sequential. Do not claim a source or investigator was consulted without evidence.
 
 ## 4. Synthesize
 

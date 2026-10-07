@@ -146,10 +146,11 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
   pi.on("before_agent_start", async () => {
     if (!active || !rereadAfterCompaction) return;
     rereadAfterCompaction = false;
+    const example = `(text (await (tools/${TOOL} {:task "<user task>"})))`;
     return {
       message: {
         customType: "poteto-mode-reminder",
-        content: `poteto-mode is still active, but compaction removed its instructions. Read ${skillPath()} in full before you continue. A new task still starts with codemode: text(await tools.${TOOL}({ task: "<user task>" })).`,
+        content: `poteto-mode is still active, but compaction removed its instructions. Read ${skillPath()} in full before you continue. A new task still starts with codemode. Use ${example}.`,
         display: false,
       },
     };

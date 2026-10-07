@@ -6,7 +6,7 @@ The why skill spawns one investigator per available evidence category, each read
 |---|---|---|
 | Source control history | [`code-archaeology.md`](./sources/code-archaeology.md) | git, `gh` |
 
-For issue trackers, documents, team chat, observability, error tracking, and analytics, discover the current session's available tools inside `codemode` with `searchTools()` and `describeTool()`, then call them through `tools.<name>()`. Batch independent read-only searches with `Promise.allSettled()` and check each MCP result's `isError` before using its evidence. This Pi bundle does not include vendor-specific MCP playbooks. Record unavailable sources as evidence gaps.
+For issue trackers, documents, team chat, observability, error tracking, and analytics, discover, inspect, and invoke the current session's available tools inside `codemode` in its declared language. Batch independent read-only searches with that language's settled parallel-call helper and check each MCP result's `isError` before using its evidence. This Pi bundle does not include vendor-specific MCP playbooks. Record unavailable sources as evidence gaps.
 
 Cross-cutting:
 

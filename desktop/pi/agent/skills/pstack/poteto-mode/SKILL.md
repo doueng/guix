@@ -12,7 +12,7 @@ The Principles section below grounds every trigger. In your reply, name each pri
 
 Every pstack skill named below lives next to this one. Resolve a skill named in bold, such as the **how** skill, as `../how/SKILL.md` relative to this skill's directory, and resolve `playbooks/`, `references/`, and `scripts/` paths relative to this directory. The pstack skills are hidden from automatic selection, so Pi does not list their paths elsewhere.
 
-For every new task, call `jev_classify_task` through `codemode` with the user's task before selecting a playbook: `text(await tools.jev_classify_task({ task: "<user task>" }))`. Do not classify short continuations such as "continue" or "run the tests". Jev's route is advice. Follow the recommendation line in the tool result, then map the route to a playbook with the **Route map** under Playbooks. If the call fails, say so in your reply, classify the task yourself with the Route map, and label the route as manual. Never present a manual route as Jev's.
+For every new task, call `jev_classify_task` through `codemode` with the user's task before selecting a playbook. Codemode accepts Clojure through SCI. Use `(text (await (tools/jev_classify_task {:task "<user task>"})))`. Do not classify short continuations such as "continue" or "run the tests". Jev's route is advice. Follow the recommendation line in the tool result, then map the route to a playbook with the **Route map** under Playbooks. If the call fails, say so in your reply, classify the task yourself with the Route map, and label the route as manual. Never present a manual route as Jev's.
 
 The `jev-pstack` extension keeps poteto-mode on for the session after `/skill:poteto-mode`. After a compaction, it tells you to re-read this file. `/poteto-mode-off` turns the mode off.
 
@@ -82,7 +82,7 @@ Read the leaf skill in full for any principle you apply. Each entry names when i
 
 ## Autonomy
 
-**Just do it.** Discover available MCP tools with codemode's `searchTools()` and `describeTool()`, then call them through `tools.<name>()` inside codemode. Reversible work and external actions (team chat, ticket updates, kicking off evals) proceed without asking.
+**Just do it.** Discover and inspect available MCP tools with the helpers in codemode's declared language, then invoke their returned identifiers inside codemode. Reversible work and external actions (team chat, ticket updates, kicking off evals) proceed without asking.
 
 **Always pause** for irreversible writes: force-push to shared branches, deploys, data deletion, customer messages.
 

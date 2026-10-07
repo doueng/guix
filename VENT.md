@@ -22,3 +22,12 @@ Reading a PNG screenshot (/tmp/osd-crop.png, 800x300, 31 KB, made with grim + im
 ## 26-10-07 00:08 — codemode_output
 
 Large batches of file reads and JSON-wrapped bash output repeatedly exceeded codemode's output budget, requiring narrower calls and repeated reads to inspect the omitted material. Print text results directly (for bash, text(result.output)), keep documentation batches within the output budget, and summarize/filter search results before emitting them. A codemode lint or output-size warning for large JSON-wrapped strings would prevent this avoidable backtracking.
+## 26-10-07 11:41 — runtime_portability_and_testing
+
+Two recurring integration problems warranted structural fixes. The npm Biome binary repeatedly failed with ENOENT on Guix because its ELF loader path assumes an FHS system; I repeatedly used the Node ELF loader and mapped library directories, then made that workaround a portable launcher. Package tooling should detect non-FHS loaders automatically or provide a Guix-native binary. SCI's upstream async body transformation repeatedly allowed later expressions to run before earlier awaited tool calls completed, leading to surprising cancellation; I compared body forms and rebuilt several times before identifying the transformer. Checked build-time patches and real QuickJS sequencing/source-location regressions now guard it. An upstream SCI regression suite for sequential async bodies would prevent this re-discovery.
+## 26-10-07 12:07 — combined_output_truncation
+
+Bulk codemode reads have repeatedly exceeded the combined output limit even when each read is below its own limit. This task's initial batch joined full source files and several required skill references, truncating the middle and requiring narrower rereads. I reduced later batches to focused source regions and printed bash.output explicitly. A combined-output size warning or automatic per-file archived results would prevent rereads while preserving full required skill reads.
+## 26-10-07 14:04 — bulk_output_truncation
+
+Combined full skill/source reads exceeded the codemode output budget again and hid middle sections. Repeated workaround was to reread focused ranges and inspect captured logs by path. Add output-size budgeting or per-result truncation summaries to batch reads so the tool reports which sections are incomplete, and keep verification output in files with concise counts.
