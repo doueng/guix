@@ -10,4 +10,5 @@ piSciApi.store;
 piSciApi.load;
 piSciApi.unstore;
 piSciApi.environment;
+piSciApi.commands;
 piSciApi.commitEnvironment;

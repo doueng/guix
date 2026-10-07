@@ -4,7 +4,7 @@ This extension lets Pi run Clojure through SCI inside its existing QuickJS WebAs
 
 ## Build and verify
 
-The build needs Clojure CLI and its Java runtime. Verification also needs Node.js 22.19 or newer, npm, Bun, Python 3, and the installed `pi` command. On non-FHS Linux, the Biome launcher uses binutils' `readelf` to select the existing runtime loader. This Guix configuration already includes Clojure tools and Pi.
+The build needs Clojure CLI and its Java runtime. Verification also needs Node.js 22.19 or newer, npm, Bun, Python 3, Jujutsu, GNU Guix, GNU Make, and the installed `pi` command. On non-FHS Linux, the Biome launcher uses binutils' `readelf` to select the existing runtime loader. This Guix configuration already includes Clojure tools and Pi.
 
 Run these commands from the repository root:
 
@@ -14,11 +14,21 @@ make pi-sci-test
 make stow
 ```
 
-The first build fetches pinned Clojure dependencies. Verification installs locked development dependencies without lifecycle scripts. The runtime uses the installed Pi SDK, not those development dependencies.
+The first build fetches pinned Clojure dependencies and installs locked npm dependencies without lifecycle scripts when missing. The framework adapter integrates with the installed Pi. The structured file/search adapters use checked Pi SDK 1.0.4 implementations and their locked helper dependencies.
 
 `make stow` builds SCI before linking the extension. Restart Pi or use `/reload` after changes. Build artifacts stay in the ignored `dist/` directory. The compiler publishes the bundle with an atomic rename.
 
 The checked runtimes are the installed Pi 1.0.0 binary and Pi SDK 1.0.4. Tests exercise the actual CLI, terminal UI, and Stow-style symlinks. The SDK tests use deterministic local providers. They do not send prompts, files, or credentials to a service.
+
+### Run a focused SCI check
+
+From `desktop/build/pi-sci`, run:
+
+```sh
+node scripts/run-sci.mjs '(text (+ 20 22))'
+```
+
+The runner uses the locked Pi SDK and its real QuickJS worker with a deterministic local provider. It prints only the codemode result and exits nonzero when evaluation fails. The fixture provider makes no network requests. The runner permits only read-only `fs` tool operations. It does not load personal extensions or their policy hooks. Use the live Pi session for policy-sensitive work. Its working directory is a temporary test directory, so use absolute paths for existing files. This avoids the large event stream from CLI JSON mode. The verification suite separately tests the installed Pi CLI.
 
 ## SCI-only configuration
 
@@ -40,11 +50,13 @@ SCI compiles to JavaScript internally so it can run inside QuickJS. That impleme
 
 ## Clojure programs
 
+The installed Pi `docs/codemode.md` describes the disabled JavaScript evaluator. This README and its local links describe the active SCI extension.
+
 Code is raw Clojure source. The whole program is an async body. Pi's tools return promises, so `await` suspends evaluation until a result arrives. Pure Clojure computation remains synchronous. See [Async Clojure in Pi](async-clojure.md) for the reason and tradeoffs.
 
 ```clojure
-(let [source (await (tools/read {:path "package.json"}))]
-	(text (:name (json/parse source))))
+(let [result (await (fs/read-json "package.json"))]
+	(text (:name (:value result))))
 ```
 
 Use explicit await for every effect. Put require declarations before executable forms. Only provided namespaces can be required. Aliases `tools`, `catalog`, `models`, `json`, `str`, and `set` are already installed.
@@ -53,7 +65,7 @@ Helpers containing await need async metadata:
 
 ```clojure
 (defn ^:async read-package [path]
-	(json/parse (await (tools/read {:path path}))))
+	(:value (await (fs/read-json path))))
 
 (await (read-package "package.json"))
 ```
@@ -64,8 +76,8 @@ Independent calls can run concurrently:
 (let [results
       (await
        (all-settled
-        [(tools/read {:path "package.json"})
-         (tools/bash {:command "jj status"})]))]
+        [(fs/read "package.json")
+         (jj/status)]))]
 	(doseq [result results]
 		(text result)))
 ```
@@ -73,6 +85,14 @@ Independent calls can run concurrently:
 Successful entries have `:status :fulfilled` and `:value`. Failed entries have `:status :rejected` and `:error {:message ...}`. Use `all` when any failed call should reject the group.
 
 Strings print directly. Collections print as EDN. The final non-nil value also prints. `text`, `println`, `prn`, and `image` return nil. Use image for image blocks, not text.
+
+## Workstation capabilities
+
+Semantic `jj`, `guix`, `repo`, `make`, `fs`, and `search` namespaces use registered Pi tools with typed operation dispatch. JJ reads return records rather than formatted CLI output. Search and reads preserve bounded data from Pi's own implementations. Guix builds normalize store outputs; repo actions select verified Make targets. No git, rg, or generic process namespace is exposed. See [Workstation capabilities](domain-commands.md) for schemas, limits, cancellation, policy, and migration examples.
+
+Use `fs/read-json` for complete JSON documents. `tools/read` returns display-limited text, which can be truncated and cannot safely feed `json/parse`. Use `fs/read-jsonl` with field projections and its continuation cursor for session reviews. The [structured read reference](domain-commands.md#structured-json-and-jsonl) defines limits and clipping flags. The [design explanation](structured-reads-design.md) records the alternatives.
+
+Reduce tool results before printing. Discovery schemas, transcripts, and complete test logs do not belong in routine output. Store only cursors and compact summaries. A stored value is limited to 262144 JSON characters. The whole store is limited to 1048576.
 
 ## Branch-local library
 

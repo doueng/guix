@@ -8,6 +8,7 @@ import {
 import { Container, Text } from "@earendil-works/pi-tui";
 import type { TObject, TString } from "typebox";
 import { capabilities, SCI_INTRO, sciDescription } from "./catalog.ts";
+import { registerDomainCommands } from "./commands.ts";
 import {
 	assertEnvironmentLimits,
 	ENVIRONMENT_KEY,
@@ -19,6 +20,7 @@ import {
 import { compileSciSource, SCI_GRAMMAR } from "./source.ts";
 
 export default function sciCodemode(pi: ExtensionAPI) {
+	registerDomainCommands(pi);
 	const adapter: ExtensionAPI = {
 		...pi,
 		registerTool(registered) {
@@ -32,7 +34,8 @@ export default function sciCodemode(pi: ExtensionAPI) {
 				description: SCI_INTRO,
 				promptSnippet: "Run Clojure that calls other tools",
 				promptGuidelines: [
-					"Use SCI codemode to batch independent calls, compose results, and filter output. Await every tool and model call.",
+					"Run programs on the host; write programs in SCI. Keep parsing, filtering, grouping, sorting, aggregation, and orchestration in Clojure. Prefer semantic jj, guix, repo, make, fs, and search namespaces over bash. Search uses Pi's search implementation; do not expose or invoke rg as a process capability. Bash is an escape hatch for genuine shell semantics. Do not generate temporary interpreter programs for ordinary data analysis.",
+					"Collect independent effects first, await them together with all or all-settled, then reduce their results in SCI. Await every tool and model call.",
 					"Persist reusable helpers with top-level (defsession ^:async name [args] ...), or literal constants with (defsession name value). Use session/name on later calls. Ordinary def is temporary. Inspect with (session/definitions), (session/source 'name), and (session/forget 'name).",
 				],
 				constrainedSampling: { type: "grammar", variants: { openai_lark: SCI_GRAMMAR } },

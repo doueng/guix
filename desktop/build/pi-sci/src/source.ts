@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parseCodemodeSource } from "@earendil-works/pi-codemode/source";
+import { DOMAIN_COMMANDS } from "./commands.ts";
 import { ENVIRONMENT_KEY, ENVIRONMENT_RUNTIME, type Environment } from "./environment.ts";
 
 export const SCI_GRAMMAR = String.raw`
@@ -70,6 +71,7 @@ const publicKey = key => {
 	return key;
 };
 await piSciRun(${JSON.stringify(parsed.code)}, {
+	commands: ${JSON.stringify(DOMAIN_COMMANDS)},
 	environment: ${JSON.stringify(environment.operations)},
 	commitEnvironment: operations => store(${JSON.stringify(ENVIRONMENT_KEY)}, {
 		version: 1, runtime: ${JSON.stringify(ENVIRONMENT_RUNTIME)}, reset: false, operations,

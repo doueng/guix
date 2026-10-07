@@ -2,7 +2,8 @@
   (:require [sci.core :as sci]
             [clojure.string :as str]
             [clojure.set :as set]
-            [pi.library :as library]))
+            [pi.library :as library]
+            [pi.commands :as commands]))
 
 (defn wire-key [k]
   (cond
@@ -65,11 +66,14 @@
         live! (fn [] (when-not (= :live @phase)
                        (throw (ex-info "Effects are disabled during SCI declaration replay" {}))))
         effect (fn [f] (fn [& args] (live!) (apply f args)))
-        library (library/create-library context phase
-                   (fn [operations] ((.-commitEnvironment api) (to-wire operations))))
         tool-map (into {} (map (fn [id]
                                 [(symbol id) (effect (promised (aget (.-tools api) id)))])
                               (js/Object.keys (.-tools api))))
+        command-namespaces (commands/bindings (from-wire (.-commands api)) tool-map)
+        allowed-namespaces (into library/allowed-namespaces
+                                 (mapcat (fn [[ns info]] [(str ns) (str (:alias info))]) command-namespaces))
+        library (library/create-library context phase
+                   (fn [operations] ((.-commitEnvironment api) (to-wire operations))) allowed-namespaces)
         catalog-map (into {} (map (fn [id]
                                    [(symbol id) (effect (promised (aget (.-catalog api) id)))])
                                  (js/Object.keys (.-catalog api))))
@@ -91,7 +95,8 @@
                  'all-settled all-settled}
         runtime (into {} (map (fn [[n f]] [n (if (#{'all 'all-settled} n) f (effect f))]) runtime))
         ctx (sci/init {:deny forbidden
-                       :namespaces {'pi.tools tool-map
+                       :namespaces (merge {'pi.tools tool-map
+                                    'pi.result commands/result-bindings
                                     'pi.catalog catalog-map
                                     'pi.models model-map
                                     'pi.runtime runtime
@@ -102,12 +107,15 @@
                                     'clojure.core (select-keys runtime '[println prn])
                                     'user runtime
                                     'session (merge runtime (:bindings library))}
-                       :ns-aliases {'tools 'pi.tools
+                                          (into {} (map (fn [[ns info]] [ns (:bindings info)]) command-namespaces)))
+                       :ns-aliases (merge {'tools 'pi.tools
+                                    'result 'pi.result
                                     'catalog 'pi.catalog
                                     'models 'pi.models
                                     'json 'pi.json
                                     'str 'clojure.string
-                                    'set 'clojure.set}})]
+                                    'set 'clojure.set}
+                                          (into {} (map (fn [[ns info]] [(:alias info) ns]) command-namespaces)))})]
     (reset! context ctx)
     (try
       ((:replay! library) (from-wire (.-environment api)))
@@ -127,13 +135,13 @@
                                 (doseq [spec (rest form)]
                                   (let [spec (if (and (seq? spec) (= 'quote (first spec))) (second spec) spec)
                                         n (if (vector? spec) (first spec) spec)]
-                                    (when-not (contains? library/allowed-namespaces (str n))
+                                    (when-not (contains? allowed-namespaces (str n))
                                       (throw (ex-info "Only supplied namespaces may be required" {})))))
                                 (sci/binding [sci/ns (sci/find-ns ctx 'user)] (sci/eval-form ctx form))
                                 (recur forms))
                               (throw (ex-info "require must precede executable forms" {})))
                             (do
-                              (when (library/declaration? form) (library/descriptor form raw-source))
+                              (when (library/declaration? form) (library/descriptor form raw-source allowed-namespaces))
                               (recur (conj forms [form raw-source]))))))))
             boxed-result (reduce
                     (fn [promise [form raw-source]]

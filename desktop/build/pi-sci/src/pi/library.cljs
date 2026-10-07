@@ -9,7 +9,7 @@
 (def allowed-namespaces
   #{"session" "tools" "catalog" "models" "json" "str" "set" "clojure.core"
     "cljs.core" "clojure.string" "clojure.set" "pi.tools" "pi.catalog"
-    "pi.models" "pi.json" "pi.runtime"})
+    "pi.models" "pi.json" "pi.runtime" "pi.result" "result"})
 
 (def mutations
   #{"def" "defn" "defmacro" "defsession" "declare" "ns" "in-ns"
@@ -39,17 +39,17 @@
                (= (count x) (count (distinct (map #(if (keyword? %) (subs (str %) 1) %) (keys x))))))
     :else false))
 
-(defn validate-function [form]
+(defn validate-function [form allowed-ns]
   (doseq [node (tree-seq coll? seq form)]
     (when (and (symbol? node) (namespace node)
-               (not (contains? allowed-namespaces (namespace node))))
+               (not (contains? allowed-ns (namespace node))))
       (throw (ex-info "Persistent functions cannot reference invocation-local or private namespaces" {})))
     (when (and (seq? node) (symbol? (first node)) (contains? mutations (name (first node))))
       (throw (ex-info "Persistent functions cannot define vars, macros, or mutate namespaces" {})))
     (when (or (:macro (meta node)) (:sci/macro (meta node)) (:dynamic (meta node)))
       (throw (ex-info "Persistent macros and dynamic vars are unsupported" {})))))
 
-(defn descriptor [form source]
+(defn descriptor [form source allowed-ns]
   (when-not (and (declaration? form) (<= 3 (count form)))
     (throw (ex-info "Expected a top-level defsession declaration" {})))
   (when (> (count source) 16384)
@@ -67,7 +67,7 @@
       (throw (ex-info "Persistent macros and dynamic vars are unsupported" {})))
     (cond
       function?
-      (do (validate-function forms)
+      (do (validate-function forms allowed-ns)
           {:operation {:op :define :name n :source source :kind :function
                        :parameters (pr-str (first forms)) :async async?}
            :form (with-meta (list* 'clojure.core/defn sym forms) (meta form))})
@@ -76,7 +76,7 @@
             parameters (if (symbol? (second value)) (nth value 2) (second value))]
         (when-not (vector? parameters)
           (throw (ex-info "Persistent functions require one explicit parameter vector" {})))
-        (validate-function function)
+        (validate-function function allowed-ns)
         {:operation {:op :define :name n :source source :kind :function
                      :parameters (pr-str parameters) :async (true? (:async (meta function)))}
          :form (with-meta (list 'clojure.core/def sym function) (meta form))})
@@ -85,18 +85,18 @@
        :form (with-meta (list 'clojure.core/def sym value) (meta form))}
       :else (throw (ex-info "defsession accepts a literal value or a function, not a computed initializer" {})))))
 
-(defn parse-declaration [ctx operation]
+(defn parse-declaration [ctx operation allowed-ns]
   (let [reader (sci/source-reader (:source operation))
         [form source] (sci/parse-next+string ctx reader)
         eof (sci/parse-next ctx reader)
-        parsed (descriptor form source)]
+        parsed (descriptor form source allowed-ns)]
     (when-not (= :sci.core/eof eof)
       (throw (ex-info "A session definition must contain exactly one declaration" {})))
     (when-not (= (dissoc (:operation parsed) :source) (dissoc operation :source))
       (throw (ex-info "Session declaration metadata does not match its source" {})))
     parsed))
 
-(defn create-library [context phase emit]
+(defn create-library [context phase emit allowed-ns]
   (let [definitions (atom {})
         delta (atom [])
         history-count (atom 0)
@@ -129,14 +129,14 @@
                   (emit @delta))]
     {:declare! (fn [form source]
                  (live!)
-                 (let [parsed (descriptor form source)]
+                 (let [parsed (descriptor form source allowed-ns)]
                    (apply-definition! parsed)
                    (commit! (:operation parsed)))
                  nil)
      :replay! (fn [operations]
                 (doseq [operation operations]
                   (case (:op operation)
-                    "define" (apply-definition! (parse-declaration @context (-> operation (update :op keyword) (update :kind keyword))))
+                    "define" (apply-definition! (parse-declaration @context (-> operation (update :op keyword) (update :kind keyword)) allowed-ns))
                     "forget" (do (check! operation) (forget! (declaration-name (:name operation))))
                     (throw (ex-info "Unknown SCI library operation" {})))))
      :bindings {'definitions (fn []
