@@ -1,18 +1,23 @@
 {
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6.1-sol",
+  "defaultProvider": "claude-bridge",
+  "defaultModel": "claude-opus-5-5",
   "enabledModels": [
     "gpt-6-luna",
     "gpt-6-astra",
     "gpt-6.1-sol",
     "openrouter/deepseek/deepseek-v4.1-flash",
-    "openrouter/anthropic/claude-opus-5.5"
+    "openrouter/anthropic/claude-opus-5.5",
+    "claude-bridge/claude-opus-5-5"
   ],
-  "defaultTools": ["+codemode"],
+  "defaultTools": [
+    "+codemode"
+  ],
   "codemode": {
     "mode": "only"
   },
-  "extensions": ["-builtin:codemode"],
+  "extensions": [
+    "-builtin:codemode"
+  ],
   "editorPaddingX": 2,
   "treeFilterMode": "no-tools",
   "tuiMode": "fullscreen",
@@ -21,5 +26,8 @@
   "defaultThinkingLevel": "high",
   "shellPath": "/run/current-system/profile/bin/bash",
   "lastChangelogVersion": "1.0.0",
-  "hideThinkingBlock": true
+  "hideThinkingBlock": true,
+  "packages": [
+    "npm:pi-claude-bridge@0.9.2"
+  ]
 }

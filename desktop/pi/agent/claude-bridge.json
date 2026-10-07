@@ -1,0 +1,11 @@
+{
+  "askClaude": {
+    "enabled": false
+  },
+  "provider": {
+    "longContextExtraUsage": false,
+    "strictMcpConfig": true,
+    "pathToClaudeCodeExecutable": "/home/engstrand/.local/bin/claude-bridge-cli"
+  },
+  "startupNoticeShown": "2026-10-08"
+}

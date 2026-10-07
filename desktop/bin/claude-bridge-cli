@@ -1,0 +1,11 @@
+#!/bin/sh
+# Run pi-claude-bridge's bundled Claude Code on Guix (no /lib ELF loader).
+set -eu
+agent_dir=${PI_CODING_AGENT_DIR:-"$HOME/.pi/agent"}
+claude="$agent_dir/npm/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/claude"
+loader="$HOME/.guix-home/profile/lib/ld-linux-aarch64.so.1"
+if [ ! -x "$claude" ] || [ ! -x "$loader" ]; then
+    printf '%s\n' 'claude-bridge-cli: install pi-claude-bridge and ensure the Guix Home glibc loader is available.' >&2
+    exit 1
+fi
+exec "$loader" --argv0 "$claude" "$claude" "$@"
