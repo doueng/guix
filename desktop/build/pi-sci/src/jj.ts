@@ -79,6 +79,21 @@ async function commits(
 	});
 	return { ...result, ...collection(items, count), stdout: undefined };
 }
+function diffFlags(
+	args: { revisions?: string; from?: string; to?: string; paths?: string[] },
+	format: string[],
+) {
+	if (args.revisions && (args.from || args.to))
+		throw new Error("Use revisions OR from/to, not both");
+	return [
+		...(args.revisions
+			? ["-r", args.revisions]
+			: [...(args.from ? ["--from", args.from] : []), ...(args.to ? ["--to", args.to] : [])]),
+		...format,
+		"--",
+		...(args.paths ?? []).map((p) => `cwd:${JSON.stringify(p)}`),
+	];
+}
 async function changes(
 	args: Options & {
 		revisions?: string;
@@ -89,23 +104,7 @@ async function changes(
 	},
 	execution: Execution,
 ) {
-	if (args.revisions && (args.from || args.to))
-		throw new Error("Use revisions OR from/to, not both");
-	const flags = args.revisions
-		? ["-r", args.revisions]
-		: [...(args.from ? ["--from", args.from] : []), ...(args.to ? ["--to", args.to] : [])];
-	const result = await jj(
-		[
-			"diff",
-			...flags,
-			"-T",
-			diffTemplate,
-			"--",
-			...(args.paths ?? []).map((p) => `cwd:${JSON.stringify(p)}`),
-		],
-		args,
-		execution,
-	);
+	const result = await jj(["diff", ...diffFlags(args, ["-T", diffTemplate])], args, execution);
 	const items = records(complete(result));
 	for (const item of items)
 		if (typeof item.path !== "string" || typeof item.status !== "string")
@@ -136,6 +135,16 @@ export const jjDomain: Domain = {
 			"revision",
 		),
 		diff: operation(Type.Object(diffInput), changes),
+		patch: operation(
+			Type.Object({
+				revisions: optional(string),
+				from: optional(string),
+				to: optional(string),
+				paths: optional(strings),
+				stat: optional(Type.Boolean()),
+			}),
+			async (a, e) => jj(["diff", ...diffFlags(a, [a.stat ? "--stat" : "--git"])], a, e),
+		),
 		"files-changed": operation(Type.Object(diffInput), async (a, e) => {
 			const r = await changes(a, e);
 			return { ...r, items: r.items.map((row) => (row as Record<string, unknown>).path) };

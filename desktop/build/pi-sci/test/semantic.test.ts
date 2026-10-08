@@ -133,7 +133,7 @@ test("Pi search returns records without parsing display text and preserves limit
 		assert.equal((await runtime.call("(await (git/status))")).isError, true);
 		assert.deepEqual(
 			DOMAINS.map((d) => d.id),
-			["jj", "guix", "make", "search", "fs", "repo"],
+			["jj", "guix", "make", "search", "fs", "sys", "repo"],
 		);
 	} finally {
 		runtime.close();

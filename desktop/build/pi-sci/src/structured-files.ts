@@ -138,18 +138,18 @@ export async function readJsonl(
 		const cursor = { offset: record.offset, line: record.line };
 		if (items.length >= (options.limit ?? 100))
 			return { path, items, next_cursor: cursor, truncated: true };
-		const item = {
-			line: record.line,
-			...project(
-				parse(record.bytes, path, record.line),
-				options.fields,
-				options.max_string_chars ?? 2000,
-			),
-		};
-		const size = Buffer.byteLength(JSON.stringify(item));
+		const value = parse(record.bytes, path, record.line);
+		let maxChars = options.max_string_chars ?? 2000;
+		let item = { line: record.line, ...project(value, options.fields, maxChars) };
+		let size = Buffer.byteLength(JSON.stringify(item));
+		while (size > PAGE_BYTES && maxChars > 0) {
+			maxChars = Math.floor(maxChars / 2);
+			item = { line: record.line, ...project(value, options.fields, maxChars) };
+			size = Buffer.byteLength(JSON.stringify(item));
+		}
 		if (size > PAGE_BYTES)
 			throw new Error(
-				`JSONL projection at line ${record.line} exceeds 48 KiB; select fewer fields or reduce max_string_chars`,
+				`JSONL projection at line ${record.line} exceeds 48 KiB even with empty strings; select fewer fields`,
 			);
 		if (bytes + size > PAGE_BYTES) return { path, items, next_cursor: cursor, truncated: true };
 		items.push(item);

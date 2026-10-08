@@ -1,6 +1,28 @@
 import { fileURLToPath } from "node:url";
 import { toCodemodeIdentifier } from "@earendil-works/pi-codemode";
 import type { ToolLoadout, ToolNamespace } from "@earendil-works/pi-coding-agent";
+import { DOMAINS } from "./commands.ts";
+import { signatures } from "./operations.ts";
+
+const STEERING: Record<string, string> = {
+	bash: "Shell escape hatch. Prefer semantic jj, guix, repo, make, fs, sys, and search SCI functions. Use Pi-backed search rather than an rg process. Keep ordinary data analysis in SCI; do not generate temporary interpreter programs.",
+	read: "Display-limited text for humans. Prefer fs/read, which returns :text, line metadata, :next_line, and image blocks.",
+};
+
+export const PROMPT_REWRITES: [string, string][] = [
+	[
+		"- Use bash for file operations like ls, rg, find",
+		"- Use SCI fs and search functions for file operations (fs/read, fs/list, fs/glob, search/files, search/text); bash is an escape hatch",
+	],
+	[
+		"- Use read to examine files instead of cat or sed.",
+		"- Use fs/read to examine files instead of cat or sed.",
+	],
+];
+
+export function rewritePrompt(prompt: string) {
+	return PROMPT_REWRITES.reduce((text, [from, to]) => text.split(from).join(to), prompt);
+}
 
 export interface Capability {
 	id: string;
@@ -32,13 +54,7 @@ export function capabilities(
 				id: tool.name,
 				name,
 				symbol: `tools/${name}`,
-				description: [
-					tool.name === "bash"
-						? "Shell escape hatch. Prefer semantic jj, guix, repo, make, fs, and search SCI functions. Use Pi-backed search rather than an rg process. Keep ordinary data analysis in SCI; do not generate temporary interpreter programs."
-						: "",
-					tool.description,
-					...bullets,
-				]
+				description: [STEERING[tool.name] ?? "", tool.description, ...bullets]
 					.filter(Boolean)
 					.join("\n"),
 				inputSchema: tool.parameters,
@@ -65,13 +81,13 @@ For JSON files, use (await (fs/read-json "package.json")) and inspect :value. Do
 Reduce results before printing. Print schemas only when needed, not whole discovery results or transcripts. Store only small summaries or cursors, never raw transcripts. One stored value is limited to 262144 JSON characters; the whole store to 1048576.
 Optional first line: ;; @options: {"max_output_tokens": 10000, "timeout_ms": 60000}
 No JavaScript interop, arbitrary require, eval, filesystem, process, network, or timers. Effects go through Pi's injected capabilities. require forms must precede executable forms and can only select provided namespaces.
-Strings print directly. Collections print as EDN. The final non-nil value is printed. text and image return nil.
+Strings print directly. Command and bash results print as an [exit ...] status line followed by raw output. Other collections print as EDN; use pr-str to see a command result as data. Each text block keeps a fair share of the output budget, and clipped blocks name the spill file and line range. The final non-nil value is printed. text and image return nil.
 JSON objects become keyword-keyed maps; arrays become vectors. Keys retain their exact spelling, including underscores and camelCase. Keyword arguments become JSON strings. Duplicate encoded keys and non-JSON values fail.
 (text value), (image block), (exit), (store "key" value), (load "key" default), and (unstore "key") are available. Store changes persist only on success and follow the session branch. Tool effects are not rolled back.
 (await (all [...])), (await (all-settled [...])) compose eager calls. all-settled yields {:status :fulfilled :value ...} or {:status :rejected :error {:message ...}}. Calls still running at script completion are cancelled.
 (catalog/search query {:limit 8 :namespace "..."}), (catalog/describe id), (catalog/namespace name), and (catalog/invoke id args) return promises. Search and describe return canonical :id, :name, :symbol, description, and schemas. Discover and describe before invoking an unlisted tool.
 Aliases tools, catalog, models, json, str, and set are prebound. json/parse and json/generate convert JSON. clojure.string and clojure.set are available. Ordinary def and defn are temporary. Explicit top-level (defsession name value) and (defsession ^:async name [args] ...) persist in the session namespace on success. Values must be literal JSON-compatible data; functions cannot capture invocation-local names. Persistent macros and computed initializers are unsupported. Use session/name, (session/definitions), (session/source 'name), and (session/forget 'name). Code and store changes commit together on the active branch. Conflicts do not retry external effects.
-Run programs on the host; write programs in SCI. Semantic namespaces jj, guix, make, repo, fs, and search exist only when their registered tools are callable. Use (await (jj/log {:revisions "@" :limit 10})), (await (jj/files-changed)), (await (guix/build {:file "package.scm"})), (await (make/run "target")), (await (repo/pi-sci-test)), (await (search/text "pattern" {:paths ["src"]})), (await (search/files {:glob "*.clj"})), or (await (fs/read "file" {:start_line 20 :end_line 50})). Collection results have :items and :truncated. JJ commit records use :change-id, :commit-id, :description, :author, :parents, and :empty?. Text file reads have :text, :start_line, :end_line, :total_lines, :next_line, and :truncated. fs/exists? returns a boolean. Successful image reads have :kind "image" and an :image value to forward with image; omitted images have :kind "image-omitted" and :note. Command actions have :ok, :exit_code, :stderr, :timed_out, :truncated, and :duration_ms; Guix builds add :outputs and :outputs_complete. (result/check r) checks command actions; use structured fields for read operations, not stdout!. Use :cwd and :timeout_ms when needed; command actions also accept :env. There is no git or rg namespace, generic process/run, or shell/run. Search uses Pi's search implementation. Raw jj/run and guix/run are lower-level fixed-program fallbacks. Bash is an escape hatch. Keep parsing, filtering, grouping, sorting, aggregation, joins, and command selection in SCI. Do not generate temporary interpreter programs for ordinary analysis. Collect independent effects first, await them together, then reduce in SCI. Consider defsession after repeating a nontrivial pattern; do not persist one-off transforms.
+Run programs on the host; write programs in SCI. Semantic namespaces jj, guix, make, repo, fs, sys, and search exist only when their registered tools are callable; their signatures are listed below. Use (await (jj/log {:revisions "@" :limit 10})), (await (jj/files-changed)), (await (guix/build {:file "package.scm"})), (await (make/run "target")), (await (repo/pi-sci-test)), (await (search/text "pattern" {:paths ["src"]})), (await (search/files {:glob "*.clj"})), or (await (fs/read "file" {:start_line 20 :end_line 50})). Collection results have :items and :truncated. JJ commit records use :change-id, :commit-id, :description, :author, :parents, and :empty?. Text file reads have :text, :start_line, :end_line, :total_lines, :next_line, and :truncated. fs/exists? returns a boolean. Successful image reads have :kind "image" and an :image value to forward with image; omitted images have :kind "image-omitted" and :note. Command actions have :ok, :exit_code, :stderr, :timed_out, :truncated, and :duration_ms; Guix builds add :outputs and :outputs_complete. (result/check r) checks command actions; use structured fields for read operations, not stdout!. Use :cwd and :timeout_ms when needed; command actions also accept :env. There is no git or rg namespace, generic process/run, or shell/run. Search uses Pi's search implementation. Raw jj/run and guix/run are lower-level fixed-program fallbacks. Bash is an escape hatch. Keep parsing, filtering, grouping, sorting, aggregation, joins, and command selection in SCI. Do not generate temporary interpreter programs for ordinary analysis. Collect independent effects first, await them together, then reduce in SCI. Consider defsession after repeating a nontrivial pattern; do not persist one-off transforms.
 models/get-models-of-type, models/get-available-of-type, models/get-model-of-type, models/classify, and models/generate-images preserve Pi's model API arguments. Check :stopReason and :errorMessage. Forward image blocks with image, never text.
 `;
 
@@ -81,7 +97,15 @@ export function sciDescription(
 	budget: number,
 	models: boolean,
 ) {
-	const visible = entries.filter((entry) => loadout.getExposure(entry.id) !== "deferred");
+	const domains = DOMAINS.filter((domain) => entries.some((entry) => entry.id === domain.id));
+	const semantic = domains.length
+		? `Semantic functions. The positional argument comes first, then an options map; ! marks a required key. Every call also accepts :cwd and :timeout_ms, and command domains accept :env. Await each call.\n${domains.flatMap(signatures).join("\n")}`
+		: "";
+	const visible = entries.filter(
+		(entry) =>
+			loadout.getExposure(entry.id) !== "deferred" &&
+			!domains.some((domain) => domain.id === entry.id),
+	);
 	let remaining = budget;
 	const sections: string[] = [];
 	const groups = new Map<string, Capability[]>();
@@ -114,7 +138,13 @@ export function sciDescription(
 			([name, entries]) =>
 				`Namespace ${name}. Discover its tools with catalog/search.\n${entries[0]?.namespace?.description ?? ""}`,
 		);
-	return [SCI_INTRO, !models ? "Model capabilities are disabled." : "", ...namespaces, ...sections]
+	return [
+		SCI_INTRO,
+		!models ? "Model capabilities are disabled." : "",
+		semantic,
+		...namespaces,
+		...sections,
+	]
 		.filter(Boolean)
 		.join("\n\n");
 }

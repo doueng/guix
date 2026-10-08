@@ -1,5 +1,7 @@
 # SCI codemode for Pi
 
+[manual.html](manual.html) is the full technical manual: a tutorial, how-to guides, reference, and design explanation.
+
 This extension lets Pi run Clojure through SCI inside its existing QuickJS WebAssembly sandbox. Pi still executes tools, applies guards, accounts for model usage, saves images, and persists branch-local storage.
 
 ## Build and verify
@@ -84,15 +86,21 @@ Independent calls can run concurrently:
 
 Successful entries have `:status :fulfilled` and `:value`. Failed entries have `:status :rejected` and `:error {:message ...}`. Use `all` when any failed call should reject the group.
 
-Strings print directly. Collections print as EDN. The final non-nil value also prints. `text`, `println`, `prn`, and `image` return nil. Use image for image blocks, not text.
+Strings print directly. Command and bash results print as a status line followed by raw output. Other collections print as EDN. The final non-nil value also prints.
+
+Each `text` block gets a fair share of the output budget. Small blocks stay whole. A large block keeps its head and tail plus a marker with the exact `fs/read` call for its full text in the spill file, so one oversized block cannot hide the blocks around it. Error, image, and transaction notices are never clipped. Failure reports group repeated tool calls and omit interpreter stack frames. Reader errors show the source line where the unclosed form opens and where reading stopped. Unresolved or dotted symbols such as `tools.edit` and `git/status` get a hint. `text`, `println`, `prn`, and `image` return nil. Use image for image blocks, not text.
 
 ## Workstation capabilities
 
-Semantic `jj`, `guix`, `repo`, `make`, `fs`, and `search` namespaces use registered Pi tools with typed operation dispatch. JJ reads return records rather than formatted CLI output. Search and reads preserve bounded data from Pi's own implementations. Guix builds normalize store outputs; repo actions select verified Make targets. No git, rg, or generic process namespace is exposed. See [Workstation capabilities](domain-commands.md) for schemas, limits, cancellation, policy, and migration examples.
+Semantic `jj`, `guix`, `repo`, `make`, `fs`, `sys`, and `search` namespaces use registered Pi tools with typed operation dispatch. JJ reads return records rather than formatted CLI output. Search and reads preserve bounded data from Pi's own implementations. Guix builds normalize store outputs; repo actions select verified Make targets. No git, rg, or generic process namespace is exposed. See [Workstation capabilities](domain-commands.md) for schemas, limits, cancellation, policy, and migration examples.
 
 Use `fs/read-json` for complete JSON documents. `tools/read` returns display-limited text, which can be truncated and cannot safely feed `json/parse`. Use `fs/read-jsonl` with field projections and its continuation cursor for session reviews. The [structured read reference](domain-commands.md#structured-json-and-jsonl) defines limits and clipping flags. The [design explanation](structured-reads-design.md) records the alternatives.
 
 Reduce tool results before printing. Discovery schemas, transcripts, and complete test logs do not belong in routine output. Store only cursors and compact summaries. A stored value is limited to 262144 JSON characters. The whole store is limited to 1048576.
+
+## Measure agent friction
+
+`node scripts/session-metrics.mjs [count | session.jsonl ...]` counts, per Pi session, codemode calls that use bash or `tools/read`, escaped bash maps, budget truncations, clipped blocks, parse and validation errors, and hints. It defaults to the seven most recent sessions. Run it before and after a guidance or capability change.
 
 ## Branch-local library
 

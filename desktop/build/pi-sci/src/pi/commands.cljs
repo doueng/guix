@@ -1,4 +1,5 @@
-(ns pi.commands)
+(ns pi.commands
+  (:require [clojure.string :as str]))
 
 (defn ok? [result]
   (and (map? result) (not (false? (:ok result))) (= 0 (:exit_code result))
@@ -21,14 +22,25 @@
                 (throw (ex-info "Command result has no stdout string; use its structured fields" result)))
               (:stdout result))})
 
-(defn options [value positional]
+(defn options [value positional array?]
   (cond
     (nil? value) {}
     (map? value) value
-    (and positional (= positional :targets) (string? value)) {:targets [value]}
-    (and positional (= positional :targets) (vector? value)) {:targets value}
-    (and positional (string? value)) {positional value}
+    (and positional array? (string? value)) {positional [value]}
+    (and positional (or (string? value) (vector? value))) {positional value}
     :else (throw (ex-info "Expected an options map or the operation's positional argument" {}))))
+
+(defn check-keys [fname accepted required opts]
+  (let [accepted (set (map keyword accepted))
+        given (set (map keyword (keys opts)))
+        unknown (remove accepted given)
+        missing (remove given (map keyword required))]
+    (when (or (seq unknown) (seq missing))
+      (throw (ex-info (str fname " "
+                           (str/join " and " (remove nil? [(when (seq unknown) (str "does not accept " (str/join ", " unknown)))
+                                                            (when (seq missing) (str "requires " (str/join ", " missing)))]))
+                           ". Accepted keys: " (str/join ", " (sort (map str accepted))) ".")
+                      {})))))
 
 (defn bindings [specs tools]
   (into {}
@@ -37,20 +49,22 @@
                   [(symbol namespace)
                    {:alias (symbol alias)
                     :bindings (into {}
-                               (map (fn [[name {:keys [operation positional select]}]]
+                               (map (fn [[name {:keys [operation positional positional_array select keys required]}]]
                                       (let [positional (when positional (keyword positional))
                                             dispatch (fn [opts]
                                                        (when-not (string? operation)
                                                          (throw (ex-info "SCI capability bindings are incompatible; run make pi-sci and /reload" {})))
+                                                       (when keys
+                                                         (check-keys (str alias "/" (clojure.core/name name)) keys required opts))
                                                        (let [result (invoke (assoc opts :operation operation))]
                                                          (if select (.then result #(get % (keyword select))) result)))
-                                            call (fn [value] (dispatch (options value positional)))]
+                                            call (fn [value] (dispatch (options value positional positional_array)))]
                                         [(symbol (clojure.core/name name))
                                          (fn
                                            ([] (call nil))
                                            ([value] (call value))
                                            ([value opts]
                                             (when-not (map? opts) (throw (ex-info "Expected an options map" {})))
-                                            (dispatch (merge opts (options value positional)))))]))
+                                            (dispatch (merge opts (options value positional positional_array)))))]))
                                     functions))}]))
               specs)))

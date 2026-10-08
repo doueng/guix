@@ -141,6 +141,68 @@ export const guixDomain: Domain = {
 			"package",
 		),
 		version: operation(Type.Object({}), async (a, e) => guix(["--version"], a, e)),
+		download: operation(
+			Type.Object({ url: string }),
+			async (a, e) => {
+				const r = await guix(["download", "--", a.url], a, e);
+				const lines = r.ok && !r.truncated ? r.stdout.split("\n").filter(Boolean) : [];
+				return {
+					...r,
+					store_path: lines.find((line) => line.startsWith("/gnu/store/")) ?? null,
+					hash: lines.findLast((line) => !line.startsWith("/")) ?? null,
+				};
+			},
+			"url",
+			true,
+		),
+		lint: operation(
+			Type.Object({
+				packages: strings,
+				load_paths: optional(strings),
+				checkers: optional(strings),
+			}),
+			async (a, e) =>
+				guix(
+					[
+						"lint",
+						...(a.load_paths ?? []).flatMap((p) => ["-L", p]),
+						...(a.checkers?.length ? [`--checkers=${a.checkers.join(",")}`] : []),
+						"--",
+						...a.packages,
+					],
+					a,
+					e,
+				),
+			"packages",
+		),
+		style: operation(
+			Type.Object({
+				packages: optional(strings),
+				files: optional(strings),
+				load_paths: optional(strings),
+				styling: optional(string),
+				dry_run: optional(Type.Boolean()),
+			}),
+			async (a, e) => {
+				if (Boolean(a.packages?.length) === Boolean(a.files?.length))
+					throw new Error("Give packages OR files");
+				return guix(
+					[
+						"style",
+						...(a.load_paths ?? []).flatMap((p) => ["-L", p]),
+						...(a.styling ? [`--styling=${a.styling}`] : []),
+						...(a.dry_run ? ["--dry-run"] : []),
+						...(a.files?.length ? ["--whole-file"] : []),
+						"--",
+						...(a.files ?? a.packages ?? []),
+					],
+					a,
+					e,
+				);
+			},
+			undefined,
+			true,
+		),
 		run: operation(
 			Type.Object({ args: optional(strings) }),
 			async (a, e) => guix(a.args ?? [], a, e),

@@ -7,7 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import type { TObject, TString } from "typebox";
-import { capabilities, SCI_INTRO, sciDescription } from "./catalog.ts";
+import { capabilities, rewritePrompt, SCI_INTRO, sciDescription } from "./catalog.ts";
 import { registerDomainCommands } from "./commands.ts";
 import {
 	assertEnvironmentLimits,
@@ -17,7 +17,8 @@ import {
 	parseEnvironmentDelta,
 	readEnvironment,
 } from "./environment.ts";
-import { compileSciSource, SCI_GRAMMAR } from "./source.ts";
+import { budgetOutput } from "./output.ts";
+import { compileSciSource, outputBudget, SCI_GRAMMAR } from "./source.ts";
 
 export default function sciCodemode(pi: ExtensionAPI) {
 	registerDomainCommands(pi);
@@ -34,7 +35,7 @@ export default function sciCodemode(pi: ExtensionAPI) {
 				description: SCI_INTRO,
 				promptSnippet: "Run Clojure that calls other tools",
 				promptGuidelines: [
-					"Run programs on the host; write programs in SCI. Keep parsing, filtering, grouping, sorting, aggregation, and orchestration in Clojure. Prefer semantic jj, guix, repo, make, fs, and search namespaces over bash. Search uses Pi's search implementation; do not expose or invoke rg as a process capability. Bash is an escape hatch for genuine shell semantics. Do not generate temporary interpreter programs for ordinary data analysis.",
+					"Run programs on the host; write programs in SCI. Keep parsing, filtering, grouping, sorting, aggregation, and orchestration in Clojure. Prefer semantic jj, guix, repo, make, fs, sys, and search namespaces over bash. Search uses Pi's search implementation; do not expose or invoke rg as a process capability. Bash is an escape hatch for genuine shell semantics. Do not generate temporary interpreter programs for ordinary data analysis.",
 					"Collect independent effects first, await them together with all or all-settled, then reduce their results in SCI. Await every tool and model call.",
 					"Persist reusable helpers with top-level (defsession ^:async name [args] ...), or literal constants with (defsession name value). Use session/name on later calls. Ordinary def is temporary. Inspect with (session/definitions), (session/source 'name), and (session/forget 'name).",
 				],
@@ -91,7 +92,10 @@ export default function sciCodemode(pi: ExtensionAPI) {
 						(name) => metadata.get(name)?.promptGuidelines ?? [],
 					);
 					const code = compileSciSource(params.code, entries, environment);
-					const result = await executor.execute(id, { ...params, code }, signal, update, ctx);
+					const result = await budgetOutput(
+						await executor.execute(id, { ...params, code }, signal, update, ctx),
+						outputBudget(params.code),
+					);
 					if (result.isError) return result;
 					try {
 						if (signal?.aborted) throw new Error("SCI invocation was aborted before commit.");
@@ -168,7 +172,7 @@ export default function sciCodemode(pi: ExtensionAPI) {
 		} catch (error) {
 			summary = `SCI library unavailable: ${error instanceof Error ? error.message : String(error)}`;
 		}
-		return { systemPrompt: `${event.systemPrompt}\n\n${summary}` };
+		return { systemPrompt: `${rewritePrompt(event.systemPrompt)}\n\n${summary}` };
 	});
 	pi.registerCommand("sci-library", {
 		description:

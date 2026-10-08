@@ -11,21 +11,65 @@
     (keyword? k) (subs (str k) 1)
     :else (throw (ex-info "JSON map keys must be strings or keywords" {}))))
 
-(defn to-wire [x]
+(defn value-kind [x]
   (cond
-    (or (nil? x) (string? x) (boolean? x)) x
-    (number? x) (if (js/Number.isFinite x) x
-                 (throw (ex-info "JSON numbers must be finite" {})))
-    (keyword? x) (subs (str x) 1)
-    (map? x) (let [obj (js/Object.create nil)]
-               (doseq [[k v] x]
-                 (let [key (wire-key k)]
-                   (when (js/Object.prototype.hasOwnProperty.call obj key)
-                     (throw (ex-info (str "Duplicate JSON key " key) {})))
-                   (aset obj key (to-wire v))))
-               obj)
-    (sequential? x) (into-array (map to-wire x))
-    :else (throw (ex-info "Value is not JSON-compatible" {}))))
+    (set? x) "a set"
+    (symbol? x) "a symbol"
+    (fn? x) "a function"
+    (regexp? x) "a regex"
+    (instance? js/Promise x) "a promise (missing await?)"
+    :else "an unsupported value"))
+
+(defn to-wire
+  ([x] (to-wire x []))
+  ([x path]
+   (cond
+     (or (nil? x) (string? x) (boolean? x)) x
+     (number? x) (if (js/Number.isFinite x) x
+                  (throw (ex-info "JSON numbers must be finite" {})))
+     (keyword? x) (subs (str x) 1)
+     (map? x) (let [obj (js/Object.create nil)]
+                (doseq [[k v] x]
+                  (let [key (wire-key k)]
+                    (when (js/Object.prototype.hasOwnProperty.call obj key)
+                      (throw (ex-info (str "Duplicate JSON key " key) {})))
+                    (aset obj key (to-wire v (conj path k)))))
+                obj)
+     (sequential? x) (into-array (map-indexed (fn [i v] (to-wire v (conj path i))) x))
+     :else (throw (ex-info (str "Value " (when (seq path) (str "at " (pr-str path) " "))
+                                "is " (value-kind x) ", which is not JSON-compatible") {})))))
+
+(def command-keys [:ok :exit_code :signal :stderr :stdout :timed_out :truncated :full_output_path :duration_ms])
+
+(defn status-line [{:keys [exit_code signal timed_out truncated full_output_path] :as r} elapsed]
+  (str "[exit " (if (nil? exit_code) "none" exit_code)
+       (when signal (str ", signal " signal))
+       (when timed_out ", timed out")
+       (when elapsed (str ", " elapsed))
+       (when truncated (str ", truncated" (when full_output_path (str "; full output " full_output_path))))
+       "]"))
+
+(def renderers
+  [{:shape #(and (map? %) (string? (:output %)) (contains? % :exit_code))
+    :render (fn [r]
+              (str (status-line r (some-> (:wall_time_seconds r) (str " s")))
+                   "\n" (str/trimr (:output r))))}
+   {:shape #(and (map? %) (contains? % :exit_code) (contains? % :duration_ms))
+    :render (fn [r]
+              (let [extra (apply dissoc r command-keys)]
+                (str/join "\n"
+                          (remove str/blank?
+                                  [(status-line r (str (:duration_ms r) " ms"))
+                                   (when (seq extra) (pr-str extra))
+                                   (some-> (:stdout r) str/trimr)
+                                   (when-not (str/blank? (:stderr r)) (str "stderr:\n" (str/trimr (:stderr r))))]))))}])
+
+(defn display [x]
+  (if (string? x)
+    x
+    (if-let [render (some (fn [{:keys [shape render]}] (when (shape x) render)) renderers)]
+      (render x)
+      (pr-str x))))
 
 (defn from-wire [x]
   (js->clj x :keywordize-keys true))
@@ -54,11 +98,47 @@
     import add-class! add-js-lib! enable-unrestricted-access!
     slurp spit future future-call pmap agent send send-off shutdown-agents])
 
-(defn script-error [error]
-  (let [{:keys [line column file]} (ex-data error)
-        message (or (ex-message error) (.-message error) (str error))]
-    (js/Error. (str message
-                    (when line (str " at " (or file "codemode.clj") ":" line ":" (or column 1)))))))
+(defn excerpt [source line column label]
+  (when-let [text (and source line (get (str/split-lines source) (dec line)))]
+    (let [column (max 1 (or column 1))
+          start (max 0 (- column 80))
+          gutter (str "  " line " | ")]
+      (str "\n" gutter (subs text start (min (count text) (+ start 160)))
+           "\n" (apply str (repeat (+ (count gutter) (- column 1 start)) " ")) "^ " label))))
+
+(def dotted-alias #"(?:^|[\s(\[{'@])(tools|catalog|models|json|str|set|fs|search|jj|guix|make|repo|sys|result|session)\.([A-Za-z][\w?!*-]*)")
+
+(defn dotted-hint [[_ alias n]]
+  (str "Use " alias "/" n "; Clojure namespaces use a slash, not a dot."))
+
+(def symbol-hints
+  [[(re-pattern (str "^" (.-source dotted-alias) "$")) dotted-hint]
+   [#"^tools/(grep|rg)$" (constantly "Use search/text.")]
+   [#"^tools/(find|ls)$" (constantly "Use search/files, fs/list, or fs/glob.")]
+   [#"^git/" (constantly "There is no git namespace. Use jj/ functions in this repository.")]
+   [#"^rg/" (constantly "Use search/text.")]
+   [#"^(process|shell|sh)/" (constantly "There is no generic process runner. Use a semantic namespace, or tools/bash as the escape hatch.")]])
+
+(defn hint [message source]
+  (if-let [[_ sym] (re-find #"(?:Unable to resolve symbol|Could not resolve symbol): *(\S+)" message)]
+    (some (fn [[pattern advice]] (some-> (re-find pattern sym) advice)) symbol-hints)
+    (when (re-find #"not a function" message)
+      (some-> (re-find dotted-alias (or source "")) dotted-hint))))
+
+(defn script-error
+  ([error] (script-error error nil))
+  ([error source]
+   (let [{:keys [line column file]} (ex-data error)
+         message (or (ex-message error) (.-message error) (str error))
+         [_ open-line open-column] (re-find #"to match \S+ at \[(\d+)[, ]+(\d+)\]" message)
+         advice (hint message source)]
+     (js/Error. (str message
+                     (when line (str " at " (or file "codemode.clj") ":" line ":" (or column 1)))
+                     (when advice (str "\nHint: " advice))
+                     (when (re-find #"Unmatched delimiter|EOF while reading|Unexpected EOF" message)
+                       (str (when open-line
+                              (excerpt source (js/parseInt open-line) (js/parseInt open-column) "unclosed form opens here"))
+                            (excerpt source line column "reader stopped here"))))))))
 
 (defn run [source api]
   (let [phase (atom :replay)
@@ -80,7 +160,7 @@
         model-map (into {} (map (fn [id]
                                  [(symbol id) (effect (promised (aget (.-models api) id)))])
                                (js/Object.keys (.-models api))))
-        runtime {'text (fn [x] ((.-text api) (if (string? x) x (pr-str x))) nil)
+        runtime {'text (fn [x] ((.-text api) (display x)) nil)
                  'println (fn [& xs] ((.-text api) (str/join " " (map str xs))) nil)
                  'prn (fn [& xs] ((.-text api) (str/join " " (map pr-str xs))) nil)
                  'image (fn [x] ((.-image api) (to-wire x)) nil)
@@ -157,10 +237,10 @@
         (.then result
              (fn [value]
                (when-not (nil? value)
-                 ((.-text api) (if (string? value) value (pr-str value))))
+                 ((.-text api) (display value)))
                js/undefined)
-             (fn [error] (js/Promise.reject (script-error error)))))
+             (fn [error] (js/Promise.reject (script-error error source)))))
       (catch :default e
-        (js/Promise.reject (script-error e))))))
+        (js/Promise.reject (script-error e source))))))
 
 (set! js/piSciRun run)

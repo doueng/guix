@@ -142,9 +142,20 @@ test("JSONL byte budgets resume at the deferred record and never silently drop a
 			join(runtime.cwd, "projection.jsonl"),
 			JSON.stringify({ id: 7, texts: Array(30).fill("x".repeat(2000)) }),
 		);
+		const reclipped = (await readJsonl(join(runtime.cwd, "projection.jsonl"), {})).items[0];
+		assert.equal(reclipped.value_truncated, true);
+		assert.equal((reclipped.value as { id: number }).id, 7);
+		assert.equal((reclipped.value as { texts: string[] }).texts.length, 30);
+		assert.ok(Buffer.byteLength(JSON.stringify(reclipped)) <= 48 * 1024);
+		writeFileSync(
+			join(runtime.cwd, "wide.jsonl"),
+			JSON.stringify({
+				keys: Object.fromEntries(Array.from({ length: 9000 }, (_, i) => [`k${i}`, i])),
+			}),
+		);
 		await assert.rejects(
-			readJsonl(join(runtime.cwd, "projection.jsonl"), {}),
-			/projection at line 1 exceeds 48 KiB/,
+			readJsonl(join(runtime.cwd, "wide.jsonl"), {}),
+			/projection at line 1 exceeds 48 KiB even with empty strings/,
 		);
 		assert.deepEqual(
 			(await readJsonl(join(runtime.cwd, "projection.jsonl"), { fields: { id: ["id"] } })).items,

@@ -66,6 +66,15 @@ export function description(domain: Domain) {
 			"; ",
 		)}. Await calls. Named operations return structured data with explicit truncation. Run programs on the host; write programs in SCI. Prefer semantic operations over raw arguments. Irreversible operations require permission.`;
 }
+export function signatures(domain: Domain) {
+	return Object.entries(domain.operations).map(([name, op]) => {
+		const required = new Set(op.input.required ?? []);
+		const keys = Object.keys(op.input.properties)
+			.filter((key) => key !== op.positional)
+			.map((key) => `:${key}${required.has(key) ? "!" : ""}`);
+		return `(${domain.alias}/${name}${op.positional ? ` ${op.positional}` : ""}${keys.length ? ` {${keys.join(" ")}}` : ""})${op.mutation ? " mutation" : ""}`;
+	});
+}
 export function registerDomain(pi: ExtensionAPI, domain: Domain) {
 	pi.registerTool({
 		name: domain.id,
@@ -117,7 +126,19 @@ export function bindings(domain: Domain) {
 		functions: Object.fromEntries(
 			Object.entries(domain.operations).map(([name, op]) => [
 				name,
-				{ operation: name, positional: op.positional ?? null, select: op.select ?? null },
+				{
+					operation: name,
+					positional: op.positional ?? null,
+					positional_array:
+						op.positional !== undefined &&
+						(op.input.properties[op.positional] as { type?: string } | undefined)?.type === "array",
+					select: op.select ?? null,
+					keys: [
+						...Object.keys(op.input.properties),
+						...Object.keys(domain.local ? { cwd: 0, timeout_ms: 0 } : common),
+					],
+					required: op.input.required ?? [],
+				},
 			]),
 		),
 	};

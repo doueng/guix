@@ -1,4 +1,4 @@
-import { lstat, opendir } from "node:fs/promises";
+import { lstat, opendir, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Type } from "typebox";
 import {
@@ -14,6 +14,118 @@ import {
 import { readJson, readJsonl } from "./structured-files.ts";
 
 const optional = Type.Optional;
+const GLOB_DIRECTORIES = 10_000;
+const GLOB_MATCHES = 100_000;
+const USAGE_ENTRIES = 200_000;
+const SORT_SCAN = 10_000;
+
+function kind(entry: { isSymbolicLink(): boolean; isDirectory(): boolean; isFile(): boolean }) {
+	return entry.isSymbolicLink()
+		? "symlink"
+		: entry.isDirectory()
+			? "directory"
+			: entry.isFile()
+				? "file"
+				: "other";
+}
+function segmentPattern(segment: string) {
+	let source = "";
+	for (let i = 0; i < segment.length; i++) {
+		const c = segment[i];
+		const close = c === "[" ? segment.indexOf("]", i + 2) : -1;
+		if (c === "*") source += "[^/]*";
+		else if (c === "?") source += "[^/]";
+		else if (close !== -1) {
+			const body = segment.slice(i + 1, close).replace(/\\/g, "\\\\");
+			source += `[${body.startsWith("!") ? `^${body.slice(1)}` : body}]`;
+			i = close;
+		} else source += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+	}
+	return new RegExp(`^${source}$`);
+}
+async function children(directory: string) {
+	try {
+		return await readdir(directory, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+}
+async function expandGlob(pattern: string, signal?: AbortSignal) {
+	let paths = ["/"],
+		visited = 0,
+		truncated = false;
+	const visit = () => {
+		signal?.throwIfAborted();
+		if (++visited > GLOB_DIRECTORIES) truncated = true;
+		return !truncated;
+	};
+	for (const segment of pattern.split("/").filter(Boolean)) {
+		const next: string[] = [];
+		if (segment === "**") {
+			const queue = [...paths];
+			while (queue.length && visit()) {
+				const directory = queue.shift() as string;
+				next.push(directory);
+				for (const entry of await children(directory))
+					if (entry.isDirectory() && !entry.name.startsWith("."))
+						queue.push(join(directory, entry.name));
+			}
+			truncated ||= queue.length > 0;
+		} else if (!/[*?[]/.test(segment)) {
+			for (const directory of paths) next.push(join(directory, segment));
+		} else {
+			const matcher = segmentPattern(segment);
+			for (const directory of paths) {
+				if (!visit()) break;
+				for (const entry of await children(directory))
+					if (matcher.test(entry.name) && (segment.startsWith(".") || !entry.name.startsWith(".")))
+						next.push(join(directory, entry.name));
+				if (next.length > GLOB_MATCHES) {
+					truncated = true;
+					break;
+				}
+			}
+		}
+		paths = [...new Set(next)];
+	}
+	const existing = [];
+	for (const candidate of paths) {
+		signal?.throwIfAborted();
+		try {
+			await lstat(candidate);
+			existing.push(candidate);
+		} catch {}
+	}
+	return { paths: existing.sort(), truncated };
+}
+async function diskUsage(root: string, signal?: AbortSignal) {
+	const queue = [root];
+	let bytes = 0,
+		disk = 0,
+		files = 0,
+		directories = 0,
+		entries = 0;
+	while (queue.length) {
+		signal?.throwIfAborted();
+		const current = queue.shift() as string;
+		const s = await lstat(current);
+		bytes += s.size;
+		disk += s.blocks * 512;
+		if (++entries > USAGE_ENTRIES) break;
+		if (s.isDirectory()) {
+			directories++;
+			for (const entry of await children(current)) queue.push(join(current, entry.name));
+		} else files++;
+	}
+	return {
+		path: root,
+		bytes,
+		disk_bytes: disk,
+		files,
+		directories,
+		truncated: queue.length > 0,
+	};
+}
 function path(a: Options & { path?: string }, e: Execution) {
 	return resolve(e.ctx.cwd, a.cwd ?? ".", a.path ?? ".");
 }
@@ -29,7 +141,15 @@ async function piSearch(
 ) {
 	const create = await factory(name);
 	const tool = create(cwd);
-	const result = await tool.execute("sci-search", input, e.signal, undefined, { ...e.ctx, cwd });
+	const result = await tool
+		.execute("sci-search", input, e.signal, undefined, { ...e.ctx, cwd })
+		.catch((error: unknown) => {
+			if (error instanceof Error && /regex parse error/.test(error.message))
+				throw new Error(
+					`${error.message}\nHint: pass :literal true to search for the exact string.`,
+				);
+			throw error;
+		});
 	if (result.isError) throw new Error("Pi search failed");
 	if (!result.structuredContent)
 		throw new Error("Pi search adapter did not return structured records");
@@ -190,13 +310,7 @@ export const fsDomain: Domain = {
 				e.signal?.throwIfAborted();
 				return {
 					path: p,
-					kind: s.isSymbolicLink()
-						? "symlink"
-						: s.isDirectory()
-							? "directory"
-							: s.isFile()
-								? "file"
-								: "other",
+					kind: kind(s),
 					size: s.size,
 					mode: s.mode,
 					modified_ms: s.mtimeMs,
@@ -222,21 +336,40 @@ export const fsDomain: Domain = {
 			false,
 			"exists",
 		),
+		glob: operation(
+			Type.Object({ pattern: string, limit }),
+			async (a, e) => {
+				const pattern = resolve(e.ctx.cwd, a.cwd ?? ".", a.pattern);
+				const { paths, truncated } = await expandGlob(pattern, e.signal);
+				const bounded = collection(paths, a.limit ?? 100);
+				return { ...bounded, pattern, truncated: bounded.truncated || truncated };
+			},
+			"pattern",
+		),
+		"disk-usage": operation(
+			Type.Object({ path: optional(string) }),
+			async (a, e) => diskUsage(path(a, e), e.signal),
+			"path",
+		),
 		list: operation(
 			Type.Object({
 				path: optional(string),
 				depth: optional(Type.Integer({ minimum: 1, maximum: 16 })),
 				limit,
+				stat: optional(Type.Boolean()),
+				sort: optional(
+					Type.Union([Type.Literal("name"), Type.Literal("modified"), Type.Literal("size")]),
+				),
 			}),
 			async (a, e) => {
 				const root = path(a, e),
-					count = a.limit ?? 100,
+					count = a.sort ? SORT_SCAN : (a.limit ?? 100),
 					queue = [{ path: root, depth: 1 }];
 				const items: Record<string, unknown>[] = [];
 				let visited = 0;
 				while (queue.length && items.length <= count) {
 					e.signal?.throwIfAborted();
-					if (++visited > 1000) return { ...collection(items, count), root, truncated: true };
+					if (++visited > 1000) break;
 					const directory = queue.shift();
 					if (!directory) break;
 					const dir = await opendir(directory.path);
@@ -246,13 +379,7 @@ export const fsDomain: Domain = {
 						items.push({
 							path: p,
 							name: entry.name,
-							kind: entry.isSymbolicLink()
-								? "symlink"
-								: entry.isDirectory()
-									? "directory"
-									: entry.isFile()
-										? "file"
-										: "other",
+							kind: kind(entry),
 							depth: directory.depth,
 						});
 						if (entry.isDirectory() && directory.depth < (a.depth ?? 1))
@@ -260,11 +387,24 @@ export const fsDomain: Domain = {
 						if (items.length > count) break;
 					}
 				}
-				return {
-					...collection(items, count),
-					root,
-					truncated: collection(items, count).truncated || queue.length > 0,
+				const scanned = items.length > count || queue.length > 0;
+				if (a.stat || a.sort)
+					for (const item of items) {
+						e.signal?.throwIfAborted();
+						const s = await lstat(item.path as string);
+						Object.assign(item, { size: s.size, modified_ms: s.mtimeMs });
+					}
+				const order = {
+					name: (x: Record<string, unknown>, y: Record<string, unknown>) =>
+						String(x.path).localeCompare(String(y.path)),
+					modified: (x: Record<string, unknown>, y: Record<string, unknown>) =>
+						Number(y.modified_ms) - Number(x.modified_ms),
+					size: (x: Record<string, unknown>, y: Record<string, unknown>) =>
+						Number(y.size) - Number(x.size),
 				};
+				if (a.sort) items.sort(order[a.sort]);
+				const bounded = collection(items, a.limit ?? 100);
+				return { ...bounded, root, truncated: bounded.truncated || scanned };
 			},
 		),
 	},

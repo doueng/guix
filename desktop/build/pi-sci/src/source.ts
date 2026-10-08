@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { parseCodemodeSource } from "@earendil-works/pi-codemode/source";
 import { DOMAIN_COMMANDS } from "./commands.ts";
 import { ENVIRONMENT_KEY, ENVIRONMENT_RUNTIME, type Environment } from "./environment.ts";
+import { DEFAULT_OUTPUT_TOKENS, EXECUTOR_OUTPUT_TOKENS } from "./output.ts";
 
 export const SCI_GRAMMAR = String.raw`
 start: options_source | plain_source
@@ -16,6 +17,10 @@ export function parseSciSource(source: string) {
 	if (!source.trim()) throw new Error("Expected non-empty Clojure source.");
 	const normalized = source.replace(/^([ \t]*);; @options:/, "$1// @options:");
 	return parseCodemodeSource(normalized);
+}
+
+export function outputBudget(source: string) {
+	return parseSciSource(source).options.maxOutputTokens ?? DEFAULT_OUTPUT_TOKENS;
 }
 
 export function compileSciSource(
@@ -34,16 +39,12 @@ export function compileSciSource(
 	}
 	const options = parsed.options;
 	const directive =
-		options.maxOutputTokens !== undefined || options.timeoutMs !== undefined
-			? "// @options: " +
-				JSON.stringify({
-					...(options.maxOutputTokens !== undefined
-						? { max_output_tokens: options.maxOutputTokens }
-						: {}),
-					...(options.timeoutMs !== undefined ? { timeout_ms: options.timeoutMs } : {}),
-				}) +
-				"\n"
-			: "";
+		"// @options: " +
+		JSON.stringify({
+			max_output_tokens: Math.max(EXECUTOR_OUTPUT_TOKENS, options.maxOutputTokens ?? 0),
+			...(options.timeoutMs !== undefined ? { timeout_ms: options.timeoutMs } : {}),
+		}) +
+		"\n";
 	return (
 		directive +
 		"let piSciRun;\n" +
