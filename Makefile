@@ -1,4 +1,4 @@
-# Use the pulled Guix for daily operations; pull after changing channels.scm.
+# Daily targets use the pulled Guix and refuse to run until it matches channels.scm.
 # Reconfigure builds before activation; no separate build receipt is needed.
 
 CONFIG ?= desktop/system.scm
@@ -15,7 +15,7 @@ GC_AGE ?= 2w
 GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := -L "$(MODULES)"
 
-.PHONY: help pull check dry-run build repro-build switch gc \
+.PHONY: help pull channels-current check dry-run build repro-build switch gc \
         home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test
 
 help:
@@ -38,12 +38,17 @@ help:
 pull:
 	"$(GUIX)" pull -C "$(CHANNELS)"
 
+channels-current:
+	@pinned=$$(grep -o '(commit "[0-9a-f]*")' "$(CHANNELS)" | sort); \
+	pulled=$$("$(GUIX)" describe -f channels | grep -o '(commit "[0-9a-f]*")' | sort); \
+	test "$$pinned" = "$$pulled" || { echo '$(CHANNELS) differs from the pulled Guix; run make pull' >&2; exit 1; }
+
 check: dry-run home-build
 
-dry-run:
+dry-run: channels-current
 	"$(GUIX)" system build --dry-run $(COMMON) "$(CONFIG)"
 
-build:
+build: channels-current
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
 	  "$(GUIX)" system build $(COMMON) "$(CONFIG)"
 
@@ -52,7 +57,7 @@ repro-build:
 	  "$(GUIX)" time-machine -C "$(CHANNELS)" -- \
 	  system build $(COMMON) "$(CONFIG)"
 
-switch:
+switch: channels-current
 	sudo rm -f \
 	  /boot/efi/m1n1/boot.bin.old \
 	  /boot/efi/m1n1/boot.bin.new
@@ -67,7 +72,7 @@ gc:
 	"$(GUIX)" pull --delete-generations=$(GC_AGE)
 	"$(GUIX)" gc
 
-home-build:
+home-build: channels-current
 	"$(GUIX)" home build $(COMMON) "$(HOME_CONFIG)"
 
 PI_SCI := desktop/build/pi-sci
@@ -87,7 +92,7 @@ pi-sci-test:
 stow: pi-sci
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/stow-home
 
-home-apply:
+home-apply: channels-current
 	"$(GUIX)" home reconfigure $(COMMON) "$(HOME_CONFIG)"
 	$(MAKE) stow
 
