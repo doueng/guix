@@ -39,7 +39,7 @@ Read-only operation markers describe intent, not a sandbox. JJ reads can snapsho
 
 `jj/bookmark-list` and `jj/op-log` return bounded JSON records from JJ's serializer. `jj/version` returns textual command output. `jj/run` is a lower-level fixed-program fallback taking `:args`.
 
-Mutations are `jj/new`, `jj/describe`, `jj/squash`, and `jj/rebase`. Describe takes `:message` and optional `:revision`, or a message string. New takes optional `:revisions` and `:message`. Squash requires a message and accepts `:from`/`:into`. Rebase requires `:source` and `:destination`. Explicit messages avoid interactive editors. Test mutations run only in temporary repositories.
+Mutations are `jj/new`, `jj/describe`, `jj/squash`, and `jj/rebase`. Describe takes `:message` and optional `:revision`, or a message string. New takes optional `:revisions` and `:message`. Squash takes `:message` or `:use_destination_message true`, and accepts `:from`/`:into`. Rebase requires `:source` and `:destination`. Explicit messages avoid interactive editors. Test mutations run only in temporary repositories.
 
 Machine-readable reads validate JJ JSON before normalization. JJ's JSON format is version-sensitive; unsupported formats fail rather than falling back to display-text parsing. If transport truncation prevents complete JSON decoding, the call fails with the retained log path. Refine the query or reduce its limit. No partial JSON is presented as a complete result.
 

@@ -61,6 +61,22 @@ test("Jujutsu reads return typed JSON and mutations expose their operation to ho
 		const status = await data(runtime, "(await (jj/status))");
 		assert.equal(status.working_copy["commit-id"], log.items[0]["commit-id"]);
 		assert.equal((await runtime.call('(await (jj/new {:message "next"}))')).isError, false);
+		writeFileSync(join(runtime.cwd, "moved.txt"), "moved\n");
+		assert.match(
+			output(await runtime.call('(await (jj/squash {:into "@-"}))')),
+			/Pass :message or :use_destination_message true/,
+		);
+		const squashed = await data(
+			runtime,
+			'(await (jj/squash {:into "@-" :use_destination_message true}))',
+		);
+		assert.equal(squashed.ok, true);
+		const parent = await data(runtime, '(await (jj/log {:revisions "@-"}))');
+		assert.equal(parent.items[0].description, 'line one\nquoted "line"\n');
+		assert.deepEqual(
+			(await data(runtime, '(await (jj/files-changed {:revisions "@-"}))')).items.sort(),
+			[filename, "moved.txt"].sort(),
+		);
 		const bounded = await data(runtime, '(await (jj/log {:revisions "all()" :limit 1}))');
 		assert.equal(bounded.items.length, 1);
 		assert.equal(bounded.truncated, true);

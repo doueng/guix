@@ -187,19 +187,26 @@ export const jjDomain: Domain = {
 			true,
 		),
 		squash: operation(
-			Type.Object({ from: optional(string), into: optional(string), message: string }),
-			async (a, e) =>
-				jj(
+			Type.Object({
+				from: optional(string),
+				into: optional(string),
+				message: optional(string),
+				use_destination_message: optional(Type.Boolean()),
+			}),
+			async (a, e) => {
+				if ((a.message === undefined) === !a.use_destination_message)
+					throw new Error("Pass :message or :use_destination_message true, not both");
+				return jj(
 					[
 						"squash",
 						...(a.from ? ["--from", a.from] : []),
 						...(a.into ? ["--into", a.into] : []),
-						"-m",
-						a.message,
+						...(a.message === undefined ? ["--use-destination-message"] : ["-m", a.message]),
 					],
 					a,
 					e,
-				),
+				);
+			},
 			undefined,
 			true,
 		),
