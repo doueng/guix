@@ -18,6 +18,7 @@
   #:use-module (gnu services desktop)
   #:use-module (gnu services guix)
   #:use-module (gnu services linux)
+  #:use-module (gnu services networking)
   #:use-module (gnu services sound)
   #:use-module (gnu services ssh)
   #:use-module (gnu services sysctl)
@@ -98,6 +99,7 @@
             polkit-wheel-service
             (service udisks-service-type)
             (service upower-service-type)
+            (service ntp-service-type)
             (service x11-socket-directory-service-type))
       (modify-services (operating-system-user-services asahi-base-os)
         (delete openssh-service-type)
