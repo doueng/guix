@@ -126,6 +126,10 @@ test("errors explain how to fix the program", async () => {
 				/search\/files does not accept :pattern and requires :glob\. Accepted keys: .*:glob/,
 			],
 			['(await (search/text "(unclosed"))', /Hint: pass :literal true/],
+			[
+				'(await (fs/read-jsonl "x.jsonl" {:fields ["type"]}))',
+				/Hint: fs\/read-jsonl takes :path string, :cursor \{:offset integer :line integer\}, :fields \{string \[string\]\}, :limit integer/,
+			],
 		];
 		for (const [source, expected] of cases) {
 			const result = await runtime.call(source);

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type Static, type TObject, Type } from "typebox";
+import { type Static, type TObject, type TSchema, Type } from "typebox";
 import { type CommandResult, runCommand } from "./command-process.ts";
 
 export const string = Type.String({ maxLength: 65536, pattern: "^[^\\u0000]*$" });
@@ -118,6 +118,25 @@ export function registerDomain(pi: ExtensionAPI, domain: Domain) {
 		},
 	});
 }
+type SchemaShape = {
+	type?: string;
+	items?: TSchema;
+	properties?: Record<string, TSchema>;
+	patternProperties?: Record<string, TSchema>;
+	anyOf?: TSchema[];
+};
+export function shape(schema: TSchema): string {
+	const s = schema as SchemaShape;
+	if (s.anyOf) return s.anyOf.map(shape).join(" or ");
+	if (s.type === "array" && s.items) return `[${shape(s.items)}]`;
+	if (s.properties)
+		return `{${Object.entries(s.properties)
+			.map(([key, value]) => `:${key} ${shape(value)}`)
+			.join(" ")}}`;
+	const [values] = Object.values(s.patternProperties ?? {});
+	if (values) return `{string ${shape(values)}}`;
+	return s.type ?? "any";
+}
 export function bindings(domain: Domain) {
 	return {
 		id: domain.id,
@@ -138,6 +157,12 @@ export function bindings(domain: Domain) {
 						...Object.keys(domain.local ? { cwd: 0, timeout_ms: 0 } : common),
 					],
 					required: op.input.required ?? [],
+					shapes: Object.fromEntries(
+						Object.entries({
+							...op.input.properties,
+							...(domain.local ? { cwd: common.cwd, timeout_ms: common.timeout_ms } : common),
+						}).map(([key, value]) => [key, shape(value)]),
+					),
 				},
 			]),
 		),

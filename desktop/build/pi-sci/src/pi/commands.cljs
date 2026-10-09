@@ -42,6 +42,13 @@
                            ". Accepted keys: " (str/join ", " (sort (map str accepted))) ".")
                       {})))))
 
+(defn shape-hint [fname shapes error]
+  (let [message (or (.-message error) (str error))]
+    (if (re-find #"Validation failed for tool" message)
+      (js/Error. (str message "\nHint: " fname " takes "
+                      (str/join ", " (map (fn [[k v]] (str ":" (name k) " " v)) shapes)) "."))
+      error)))
+
 (defn bindings [specs tools]
   (into {}
         (keep (fn [{:keys [id namespace alias functions]}]
@@ -49,14 +56,16 @@
                   [(symbol namespace)
                    {:alias (symbol alias)
                     :bindings (into {}
-                               (map (fn [[name {:keys [operation positional positional_array select keys required]}]]
+                               (map (fn [[name {:keys [operation positional positional_array select keys required shapes]}]]
                                       (let [positional (when positional (keyword positional))
                                             dispatch (fn [opts]
                                                        (when-not (string? operation)
                                                          (throw (ex-info "SCI capability bindings are incompatible; run make pi-sci and /reload" {})))
                                                        (when keys
                                                          (check-keys (str alias "/" (clojure.core/name name)) keys required opts))
-                                                       (let [result (invoke (assoc opts :operation operation))]
+                                                       (let [fname (str alias "/" (clojure.core/name name))
+                                                             result (.catch (invoke (assoc opts :operation operation))
+                                                                            #(throw (shape-hint fname shapes %)))]
                                                          (if select (.then result #(get % (keyword select))) result)))
                                             call (fn [value] (dispatch (options value positional positional_array)))]
                                         [(symbol (clojure.core/name name))
