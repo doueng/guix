@@ -173,6 +173,8 @@ test("fs glob, disk usage, and sorted listings replace ls, find, and du", async 
 	try {
 		const cwd = runtime.cwd;
 		mkdirSync(join(cwd, "sub", "deep"), { recursive: true });
+		mkdirSync(join(cwd, ".cache"));
+		writeFileSync(join(cwd, ".cache", "c.txt"), "5");
 		writeFileSync(join(cwd, "a1.txt"), "1");
 		writeFileSync(join(cwd, "a2.txt"), "22");
 		writeFileSync(join(cwd, ".a3.txt"), "333");
@@ -181,9 +183,13 @@ test("fs glob, disk usage, and sorted listings replace ls, find, and du", async 
 		assert.deepEqual(glob.items, [join(cwd, "a1.txt"), join(cwd, "a2.txt")]);
 		assert.equal(glob.truncated, false);
 		assert.deepEqual((await data(runtime, '(await (fs/glob {:glob "a?.txt"}))')).items, glob.items);
-		assert.deepEqual((await data(runtime, '(await (fs/glob "**/c.txt"))')).items, [
-			join(cwd, "sub", "deep", "c.txt"),
-		]);
+		const visible = await data(runtime, '(await (fs/glob "**/c.txt"))');
+		assert.deepEqual(visible.items, [join(cwd, "sub", "deep", "c.txt")]);
+		assert.ok(visible.skipped_hidden >= 1);
+		const all = await data(runtime, '(await (fs/glob "**/c.txt" {:hidden true}))');
+		assert.deepEqual(all.items, [join(cwd, ".cache", "c.txt"), join(cwd, "sub", "deep", "c.txt")]);
+		assert.equal(all.skipped_hidden, 0);
+		assert.ok((await data(runtime, '(await (fs/glob "*.txt"))')).skipped_hidden >= 1);
 		assert.deepEqual((await data(runtime, '(await (fs/glob ".a*"))')).items, [
 			join(cwd, ".a3.txt"),
 		]);

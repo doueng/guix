@@ -50,9 +50,10 @@ async function children(directory: string) {
 		return [];
 	}
 }
-async function expandGlob(pattern: string, signal?: AbortSignal) {
+async function expandGlob(pattern: string, signal?: AbortSignal, hidden = false) {
 	let paths = ["/"],
 		visited = 0,
+		skippedHidden = 0,
 		truncated = false;
 	const visit = () => {
 		signal?.throwIfAborted();
@@ -66,9 +67,11 @@ async function expandGlob(pattern: string, signal?: AbortSignal) {
 			while (queue.length && visit()) {
 				const directory = queue.shift() as string;
 				next.push(directory);
-				for (const entry of await children(directory))
-					if (entry.isDirectory() && !entry.name.startsWith("."))
-						queue.push(join(directory, entry.name));
+				for (const entry of await children(directory)) {
+					if (!entry.isDirectory()) continue;
+					if (hidden || !entry.name.startsWith(".")) queue.push(join(directory, entry.name));
+					else skippedHidden++;
+				}
 			}
 			truncated ||= queue.length > 0;
 		} else if (!/[*?[]/.test(segment)) {
@@ -77,9 +80,12 @@ async function expandGlob(pattern: string, signal?: AbortSignal) {
 			const matcher = segmentPattern(segment);
 			for (const directory of paths) {
 				if (!visit()) break;
-				for (const entry of await children(directory))
-					if (matcher.test(entry.name) && (segment.startsWith(".") || !entry.name.startsWith(".")))
+				for (const entry of await children(directory)) {
+					if (!matcher.test(entry.name)) continue;
+					if (hidden || segment.startsWith(".") || !entry.name.startsWith("."))
 						next.push(join(directory, entry.name));
+					else skippedHidden++;
+				}
 				if (next.length > GLOB_MATCHES) {
 					truncated = true;
 					break;
@@ -96,7 +102,7 @@ async function expandGlob(pattern: string, signal?: AbortSignal) {
 			existing.push(candidate);
 		} catch {}
 	}
-	return { paths: existing.sort(), truncated };
+	return { paths: existing.sort(), truncated, skippedHidden };
 }
 async function diskUsage(root: string, signal?: AbortSignal) {
 	const queue = [root];
@@ -346,12 +352,17 @@ export const fsDomain: Domain = {
 			"exists",
 		),
 		glob: operation(
-			Type.Object({ pattern: string, limit }),
+			Type.Object({ pattern: string, hidden: optional(Type.Boolean()), limit }),
 			async (a, e) => {
 				const pattern = resolve(e.ctx.cwd, a.cwd ?? ".", a.pattern);
-				const { paths, truncated } = await expandGlob(pattern, e.signal);
+				const { paths, truncated, skippedHidden } = await expandGlob(pattern, e.signal, a.hidden);
 				const bounded = collection(paths, a.limit ?? 100);
-				return { ...bounded, pattern, truncated: bounded.truncated || truncated };
+				return {
+					...bounded,
+					pattern,
+					truncated: bounded.truncated || truncated,
+					skipped_hidden: skippedHidden,
+				};
 			},
 			"pattern",
 			false,
