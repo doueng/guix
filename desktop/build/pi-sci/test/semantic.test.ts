@@ -129,6 +129,15 @@ test("Pi search returns records without parsing display text and preserves limit
 		);
 		const files = await data(runtime, '(await (search/files {:glob "*.clj"}))');
 		assert.ok(files.items.includes('odd:23: "file.clj'));
+		const everything = await data(runtime, '(await (search/files {:glob "**/*" :limit 1000}))');
+		assert.deepEqual(
+			everything.items.filter((item: string) => /^\.(git|jj)\//.test(item)),
+			[],
+		);
+		assert.deepEqual(
+			(await data(runtime, '(await (search/text "repositoryformatversion"))')).items,
+			[],
+		);
 		assert.equal((await runtime.call('(await (rg/search "needle"))')).isError, true);
 		assert.equal((await runtime.call("(await (git/status))")).isError, true);
 		assert.deepEqual(

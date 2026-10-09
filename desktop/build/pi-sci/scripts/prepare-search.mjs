@@ -26,7 +26,7 @@ for (const [name, hash] of Object.entries(hashes)) {
 		source = replace(
 			source,
 			'const args = ["--json", "--line-number", "--color=never", "--hidden"];',
-			'const args = ["--json", "--line-number", "--color=never", "--hidden", "--no-require-git"];',
+			'const args = ["--json", "--line-number", "--color=never", "--hidden", "--no-require-git", "--glob", "!.git", "--glob", "!.jj"];',
 		);
 		source = replace(
 			source,
@@ -57,6 +57,11 @@ for (const [name, hash] of Object.entries(hashes)) {
 		);
 	}
 	if (name === "find") {
+		source = replace(
+			source,
+			'const args = ["--glob", "--color=never", "--hidden"];',
+			'const args = ["--glob", "--color=never", "--hidden", "--exclude", ".git", "--exclude", ".jj"];',
+		);
 		source = replace(
 			source,
 			'content: [{ type: "text", text: "No files found matching pattern" }],\n                                    details: undefined',
