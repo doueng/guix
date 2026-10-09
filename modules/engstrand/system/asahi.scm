@@ -21,6 +21,7 @@
   #:use-module (gnu services networking)
   #:use-module (gnu services sound)
   #:use-module (gnu services ssh)
+  #:use-module (rde system services admin)
   #:use-module (gnu services sysctl)
   #:export (make-base-os))
 
@@ -100,6 +101,9 @@
             (service udisks-service-type)
             (service upower-service-type)
             (service ntp-service-type)
+            ;; Let agents read system service state without a password.
+            (simple-service 'familiar-herd-status sudoers-service-type
+                            (list "engstrand ALL=(root) NOPASSWD: /run/current-system/profile/bin/herd status, /run/current-system/profile/bin/herd status *"))
             (service x11-socket-directory-service-type))
       (modify-services (operating-system-user-services asahi-base-os)
         (delete openssh-service-type)
