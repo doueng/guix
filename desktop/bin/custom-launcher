@@ -29,17 +29,6 @@
 (defn run [command options]
   @(p/process command options))
 
-(defn ensure-dusk []
-  (when-let [dusk (find-executable "dusk")]
-    (when-not (zero? (:exit (run [dusk "msg" "status"] {:out :string :err :string})))
-      (p/process [dusk] {:out :string :err :string})
-      (loop [attempt 0]
-        (when (and (< attempt 50)
-                   (not (zero? (:exit (run [dusk "msg" "status"] {:out :string :err :string})))))
-          (Thread/sleep 100)
-          (recur (inc attempt)))))
-    dusk))
-
 (defn choose [dusk]
   (let [entries (str (str/join "\n" (map first (apps))) "\n")
         result (when dusk
@@ -56,7 +45,7 @@
               (apps))))))
 
 (defn main []
-  (when-let [command (choose (ensure-dusk))]
+  (when-let [command (choose (find-executable "dusk"))]
     (try
       (p/process command)
       (catch Exception error

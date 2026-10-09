@@ -16,27 +16,11 @@
              (str "/run/current-system/profile/bin/" name)])
       (throw (ex-info (str "Executable not found: " name) {:name name}))))
 
-(defn dusk-status []
-  @(p/process [(executable "dusk") "msg" "status"]
-              {:out :string :err :string :continue true}))
-
-(defn ensure-dusk-running []
-  (when-not (zero? (:exit (dusk-status)))
-    (p/process [(executable "dusk")] {:out :string :err :string})
-    (loop [attempt 0]
-      (let [status (dusk-status)]
-        (cond
-          (zero? (:exit status)) nil
-          (< attempt 50) (do (Thread/sleep 100) (recur (inc attempt)))
-          :else (throw (ex-info "dusk did not become ready" {})))))))
-
 (defn -main [& args]
   (when (< (count args) 2)
     (binding [*out* *err*]
       (println "usage: notify-replace <key> <notify-send args...>"))
     (System/exit 2))
-
-  (ensure-dusk-running)
 
   (let [[key & notify-args] args
         state-dir (str (or (System/getenv "XDG_STATE_HOME")
