@@ -14,7 +14,7 @@ Every pstack skill named below lives next to this one. Resolve a skill named in 
 
 For every new task, call `jev_classify_task` through `codemode` with the user's task before selecting a playbook. Codemode accepts Clojure through SCI. Use `(text (await (tools/jev_classify_task {:task "<user task>"})))`. Do not classify short continuations such as "continue" or "run the tests". Jev's route is advice. Follow the recommendation line in the tool result, then map the route to a playbook with the **Route map** under Playbooks. If the call fails, say so in your reply, classify the task yourself with the Route map, and label the route as manual. Never present a manual route as Jev's.
 
-The `jev-pstack` extension keeps poteto-mode on for the session after `/skill:poteto-mode`. After a compaction, it tells you to re-read this file. `/poteto-mode-off` turns the mode off.
+The `jev-pstack` extension starts poteto-mode with the first prompt of a new session and keeps it on for the session after `/skill:poteto-mode`. After a compaction, it tells you to re-read this file. `/poteto-mode-off` turns the mode off.
 
 Remaining triggers:
 

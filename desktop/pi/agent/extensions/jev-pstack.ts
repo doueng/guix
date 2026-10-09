@@ -49,6 +49,7 @@ function recommendation(route: Route, probability: number) {
 
 export default function jevPstackExtension(pi: ExtensionAPI) {
   let active = false;
+  let autoStart = false;
   let rereadAfterCompaction = false;
 
   function sync(ctx: ExtensionContext) {
@@ -62,6 +63,7 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
       active = next;
       pi.appendEntry(MODE_ENTRY, { active });
     }
+    autoStart = false;
     rereadAfterCompaction = false;
     sync(ctx);
   }
@@ -125,17 +127,30 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     active = false;
+    let recorded = false;
+    let started = false;
     for (const entry of ctx.sessionManager.getBranch()) {
+      if (entry.type === "message") started = true;
       if (entry.type === "custom" && entry.customType === MODE_ENTRY) {
+        recorded = true;
         active = (entry.data as { active?: unknown } | undefined)?.active === true;
       }
     }
+    // New conversations start in poteto-mode. A recorded choice, including /poteto-mode-off, wins.
+    autoStart = !recorded && !started;
     rereadAfterCompaction = false;
     sync(ctx);
   });
 
   pi.on("input", async (event, ctx) => {
-    if (event.source !== "extension" && /^\/skill:poteto-mode(?:\s|$)/.test(event.text)) setActive(true, ctx);
+    if (event.source === "extension") return { action: "continue" };
+    if (/^\/skill:poteto-mode(?:\s|$)/.test(event.text)) {
+      setActive(true, ctx);
+    } else if (autoStart && !event.text.startsWith("/")) {
+      // Pi expands /skill: after input handlers, so this loads the skill exactly as typing it would.
+      setActive(true, ctx);
+      return { action: "transform", text: `/skill:poteto-mode ${event.text}` };
+    }
     return { action: "continue" };
   });
 

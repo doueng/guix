@@ -2,7 +2,7 @@
 
 This bundle adapts the MIT-licensed pstack engineering workflows for Pi. Skill files and supporting references stay together so Pi can discover nested `SKILL.md` files and resolve relative references.
 
-Use `/skill:poteto-mode` as the explicit entry point. The bundle's skills disable automatic model invocation, so poteto-mode resolves sibling skills as `../<name>/SKILL.md`. The `jev-pstack.ts` extension stands in for the upstream persistent mode. It records the mode in the session, activates `jev_classify_task` only while the mode is on, and asks the model to re-read poteto-mode after compaction. Pi has no built-in subagent API. Use delegation only through an explicitly requested and available local workflow; otherwise work directly and state that parallel review was unavailable. Use Pi's active session and configuration paths rather than assuming another agent host's layout.
+New sessions start in poteto-mode: the `jev-pstack.ts` extension rewrites the first plain prompt as `/skill:poteto-mode <prompt>`. Use `/skill:poteto-mode` as the explicit entry point elsewhere, and `/poteto-mode-off` to opt out. The bundle's skills disable automatic model invocation, so poteto-mode resolves sibling skills as `../<name>/SKILL.md`. The `jev-pstack.ts` extension stands in for the upstream persistent mode. It records the mode in the session, activates `jev_classify_task` only while the mode is on, and asks the model to re-read poteto-mode after compaction. Pi has no built-in subagent API. Use delegation only through an explicitly requested and available local workflow; otherwise work directly and state that parallel review was unavailable. Use Pi's active session and configuration paths rather than assuming another agent host's layout.
 
 ## Provenance
 
