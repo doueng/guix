@@ -429,6 +429,7 @@ export const fsDomain: Domain = {
 				const bounded = collection(items, a.limit ?? 100);
 				return { ...bounded, root, truncated: bounded.truncated || scanned };
 			},
+			"path",
 		),
 	},
 };

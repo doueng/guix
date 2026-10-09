@@ -22,13 +22,18 @@
                 (throw (ex-info "Command result has no stdout string; use its structured fields" result)))
               (:stdout result))})
 
-(defn options [value positional array?]
+(defn usage [fname keys positional]
+  (str fname " takes "
+       (if positional (str "a " (name positional) " or an options map") "an options map")
+       ". Accepted keys: " (str/join ", " (sort (map #(str (keyword %)) keys))) "."))
+
+(defn options [fname keys value positional array?]
   (cond
     (nil? value) {}
     (map? value) value
     (and positional array? (string? value)) {positional [value]}
     (and positional (or (string? value) (vector? value))) {positional value}
-    :else (throw (ex-info "Expected an options map or the operation's positional argument" {}))))
+    :else (throw (ex-info (usage fname keys positional) {}))))
 
 (defn check-keys [fname accepted required opts]
   (let [accepted (set (map keyword accepted))
@@ -79,13 +84,13 @@
                                                              result (.catch (invoke (assoc opts :operation operation))
                                                                             #(throw (shape-hint fname shapes %)))]
                                                          (if select (.then result #(get % (keyword select))) result)))
-                                            call (fn [value] (dispatch (options value positional positional_array)))]
+                                            call (fn [value] (dispatch (options fname keys value positional positional_array)))]
                                         [(symbol (clojure.core/name name))
                                          (fn
                                            ([] (call nil))
                                            ([value] (call value))
                                            ([value opts]
-                                            (when-not (map? opts) (throw (ex-info "Expected an options map" {})))
-                                            (dispatch (merge opts (options value positional positional_array)))))]))
+                                            (when-not (map? opts) (throw (ex-info (usage fname keys positional) {})))
+                                            (dispatch (merge opts (options fname keys value positional positional_array)))))]))
                                     functions))}]))
               specs)))

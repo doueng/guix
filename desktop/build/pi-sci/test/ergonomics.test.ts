@@ -145,6 +145,11 @@ test("errors explain how to fix the program", async () => {
 				/search\/files takes :glob; :pattern is an alias for it\. Pass only one\./,
 			],
 			['(await (search/text "(unclosed"))', /Hint: pass :literal true/],
+			["(await (fs/list 42))", /fs\/list takes a path or an options map\. Accepted keys: .*:depth/],
+			[
+				'(await (fs/read "x" 2))',
+				/fs\/read takes a path or an options map\. Accepted keys: .*:start_line/,
+			],
 			[
 				'(await (fs/read-jsonl "x.jsonl" {:fields ["type"]}))',
 				/Hint: fs\/read-jsonl takes :path string, :cursor \{:offset integer :line integer\}, :fields \{string \[string\]\}, :limit integer/,
@@ -201,6 +206,12 @@ test("fs glob, disk usage, and sorted listings replace ls, find, and du", async 
 		assert.deepEqual(
 			[usage.bytes >= 4, usage.files, usage.directories, usage.truncated],
 			[true, 1, 2, false],
+		);
+		assert.deepEqual(
+			(await data(runtime, '(await (fs/list "sub"))')).items.map(
+				(item: { name: string }) => item.name,
+			),
+			["deep"],
 		);
 		const sorted = await data(runtime, '(await (fs/list {:sort "size" :limit 2}))');
 		assert.equal(sorted.items.length, 2);
