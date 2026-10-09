@@ -70,8 +70,16 @@ gc:
 home-build:
 	"$(GUIX)" home build $(COMMON) "$(HOME_CONFIG)"
 
-pi-sci:
-	desktop/build/pi-sci/build.sh
+PI_SCI := desktop/build/pi-sci
+PI_SCI_OUTPUTS := $(PI_SCI)/dist/sci.js $(addprefix $(PI_SCI)/dist/pi-,grep.mjs find.mjs read.mjs)
+PI_SCI_SOURCES := $(addprefix $(PI_SCI)/,build.sh compiler.edn deps.edn externs.js \
+                    package-lock.json scripts/prepare-search.mjs) \
+                  $(wildcard $(PI_SCI)/src/pi/*)
+
+$(PI_SCI_OUTPUTS) &: $(PI_SCI_SOURCES)
+	$(PI_SCI)/build.sh
+
+pi-sci: $(PI_SCI_OUTPUTS)
 
 pi-sci-test:
 	desktop/build/pi-sci/verify.sh
