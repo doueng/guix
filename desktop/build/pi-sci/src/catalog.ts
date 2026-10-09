@@ -98,10 +98,13 @@ const README = fileURLToPath(new URL("../README.md", import.meta.url));
 // Claude Code cuts MCP tool descriptions at 2048 characters. What a model needs
 // to call functions without guessing keys must fit before that point.
 export const DESCRIPTION_HEAD = 2048;
-// Domains whose signatures come before the plain tools'. The rest follow in
-// DOMAIN_ORDER while they fit.
+// Signature priority: the main domains, the core plain tools, the remaining
+// domains in DOMAIN_ORDER, the other tools, and finally version and describe
+// functions, which take no options and are rarely called.
 const HEAD_DOMAINS = ["fs", "search", "sys", "jj"];
+const CORE_TOOLS = ["edit", "write", "bash", "read", "vent"];
 const DOMAIN_ORDER = [...HEAD_DOMAINS, "make", "repo", "guix"];
+const RARE = /^\([a-z-]+\/(version|describe)\)/;
 
 export const SCI_BASICS = `Run restricted Clojure with SCI inside Pi's QuickJS sandbox.
 The input is raw Clojure source, not JSON or a code fence. The body is async; use (await ...) for tool, discovery, and model calls. Helper functions containing await need ^:async metadata.
@@ -145,14 +148,20 @@ export function sciDescription(
 	);
 	const plain = visible.filter((entry) => !entry.namespace?.name);
 	const namespaced = visible.filter((entry) => !plain.includes(entry));
-	const lines = [
+	const core = CORE_TOOLS.flatMap((id) => plain.filter((entry) => entry.id === id));
+	const ranked = [
 		...first.flatMap(signatures),
-		...plain.map(toolSignature),
+		...core.map(toolSignature),
 		...domains
 			.filter((domain) => !first.includes(domain))
 			.sort((a, b) => order(a.id) - order(b.id))
 			.flatMap(signatures),
+		...plain.filter((entry) => !core.includes(entry)).map(toolSignature),
 		...namespaced.map(toolSignature),
+	];
+	const lines = [
+		...ranked.filter((line) => !RARE.test(line)),
+		...ranked.filter((line) => RARE.test(line)),
 	];
 	// Fill the part that survives truncation in priority order, then move the
 	// remainder after it.
