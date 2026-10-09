@@ -12,7 +12,7 @@ import {
 	strings,
 } from "./operations.ts";
 
-const commitTemplate = `'{' ++ '"commit":' ++ json(self) ++ ',"empty":' ++ json(empty) ++ "}\\n"`;
+const commitTemplate = `'{' ++ '"commit":' ++ json(self) ++ ',"empty":' ++ json(empty) ++ ',"conflict":' ++ json(conflict) ++ "}\\n"`;
 const diffTemplate = `'{' ++ '"path":' ++ json(path) ++ ',"status":' ++ json(status) ++ ',"source":' ++ json(source.path()) ++ ',"before":' ++ json(source.file_type()) ++ ',"after":' ++ json(target.file_type()) ++ "}\\n"`;
 const optional = Type.Optional;
 const revision = { revision: optional(string) };
@@ -64,7 +64,8 @@ async function commits(
 			typeof c?.commit_id !== "string" ||
 			typeof c.change_id !== "string" ||
 			typeof c.description !== "string" ||
-			typeof row.empty !== "boolean"
+			typeof row.empty !== "boolean" ||
+			typeof row.conflict !== "boolean"
 		)
 			throw new Error("Unsupported JJ commit JSON format");
 		return {
@@ -75,6 +76,7 @@ async function commits(
 			committer: c.committer,
 			parents: c.parents,
 			"empty?": row.empty,
+			"conflict?": row.conflict,
 		};
 	});
 	return { ...result, ...collection(items, count), stdout: undefined };

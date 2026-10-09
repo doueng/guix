@@ -31,7 +31,7 @@ Read-only operation markers describe intent, not a sandbox. JJ reads can snapsho
 
 ## Jujutsu
 
-`jj/log` accepts `:revisions`, `:paths`, and `:limit`. Its default revisions are `@`. `jj/show` accepts a revision string or `{:revision "@"}`. Both return `:items` containing `:change-id`, `:commit-id`, `:description`, `:author`, `:committer`, `:parents`, and `:empty?`.
+`jj/log` accepts `:revisions`, `:paths`, and `:limit`. Its default revisions are `@`. `jj/show` accepts a revision string or `{:revision "@"}`. Both return `:items` containing `:change-id`, `:commit-id`, `:description`, `:author`, `:committer`, `:parents`, `:empty?`, and `:conflict?`.
 
 `jj/diff` returns file records with `:path`, `:status`, `:source`, `:before`, and `:after`. `jj/files-changed` returns path strings in `:items`. Both accept `:revisions` or `:from`/`:to`, plus `:paths` and `:limit`. Paths are quoted literal path prefixes, not fileset expressions. `jj/status` resolves the working-copy commit first, then reads its diff by commit ID. It adds `:working_copy` to the collection. `jj/file-show` accepts `:path` and optional `:revision`, and returns `:text` with command/truncation metadata.
 

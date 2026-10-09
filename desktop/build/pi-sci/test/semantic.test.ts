@@ -43,6 +43,7 @@ test("Jujutsu reads return typed JSON and mutations expose their operation to ho
 		assert.equal(log.items[0].description, 'line one\nquoted "line"\n');
 		assert.match(log.items[0]["commit-id"], /^[a-f0-9]+$/);
 		assert.equal(log.items[0]["empty?"], false);
+		assert.equal(log.items[0]["conflict?"], false);
 		assert.equal(log.truncated, false);
 		assert.deepEqual((await data(runtime, "(await (jj/bookmark-list))")).items, []);
 		const ops = await data(runtime, "(await (jj/op-log {:limit 1}))");
@@ -70,6 +71,15 @@ test("Jujutsu reads return typed JSON and mutations expose their operation to ho
 		const before = calls.length;
 		assert.equal((await runtime.call('(await (jj/log {:args ["status"]}))')).isError, true);
 		assert.equal(calls.length, before);
+		const side = async (text: string) => {
+			writeFileSync(join(runtime.cwd, "side.txt"), text);
+			return (await data(runtime, "(await (jj/log))")).items[0]["change-id"];
+		};
+		const one = await side("one\n");
+		assert.equal((await runCommand("jj", ["new", "@-"], { cwd: runtime.cwd })).exit_code, 0);
+		const two = await side("two\n");
+		assert.equal((await runCommand("jj", ["new", one, two], { cwd: runtime.cwd })).exit_code, 0);
+		assert.equal((await data(runtime, "(await (jj/log))")).items[0]["conflict?"], true);
 	} finally {
 		runtime.close();
 	}
