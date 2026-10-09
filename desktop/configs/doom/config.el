@@ -468,3 +468,25 @@ ultimately to plain `find-file' when the current directory is not a project."
 
 (after! parinfer-rust-mode
   (setq parinfer-rust-preferred-mode 'indent))
+
+(after! envrc
+  ;; Emacs 31's global mode sweep can visit stderr buffers direnv has deleted.
+  (when (= emacs-major-version 31)
+    (define-minor-mode envrc-global-mode
+      "Toggle envrc in live buffers, including during direnv completion."
+      :global t
+      :group 'envrc
+      (if envrc-global-mode
+          (add-hook 'after-change-major-mode-hook
+                    #'envrc-global-mode-enable-in-buffer)
+        (remove-hook 'after-change-major-mode-hook
+                     #'envrc-global-mode-enable-in-buffer))
+      (dolist (buffer (buffer-list))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (if envrc-global-mode
+                ;; Global toggles revisit buffers even after a local disable.
+                (let ((envrc-mode--set-explicitly nil))
+                  (envrc-global-mode-enable-in-buffer))
+              (when envrc-mode
+                (envrc-mode -1)))))))))
