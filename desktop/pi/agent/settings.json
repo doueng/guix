@@ -23,7 +23,7 @@
   "tuiMode": "fullscreen",
   "quietStartup": true,
   "theme": "dark",
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "medium",
   "shellPath": "/run/current-system/profile/bin/bash",
   "lastChangelogVersion": "1.0.0",
   "hideThinkingBlock": true,
