@@ -113,7 +113,7 @@ See [Persistent Clojure helpers](session-library.md) for syntax, inspection, for
 Generated tool functions retain Pi's identifier spelling. Canonical tool IDs remain available through the catalog:
 
 ```clojure
-(let [hit (first (await (catalog/search "lookup" {:limit 5})))
+(let [hit (first (:items (await (catalog/search "lookup" {:limit 5}))))
       detail (await (catalog/describe (:id hit)))]
 	(text detail))
 ```

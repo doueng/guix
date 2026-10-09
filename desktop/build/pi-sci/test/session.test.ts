@@ -108,15 +108,17 @@ test("catalog uses only callable tools and resolves canonical IDs", async () => 
 	try {
 		const result = await runtime.call(`
 			(let [hits (await (catalog/search "demo lookup" {:namespace "demo"}))
-			      hit (first hits)
+			      hit (first (:items hits))
 			      detail (await (catalog/describe (:id hit)))]
 				(text [(:id detail) (:symbol detail)])
+				(text [:truncated (:truncated hits)])
 				(text (:description detail))
 				(text (await (catalog/invoke (:id detail) {:key "x"}))))
 			(text (:instructions (await (catalog/namespace "demo"))))
 		`);
 		assert.equal(result.isError, false, output(result));
 		assert.match(output(result), /\["mcp__demo__lookup" "tools\/mcp__demo__lookup"\]/);
+		assert.match(output(result), /\[:truncated false\]/);
 		assert.match(output(result), /record x/);
 		assert.match(output(result), /A fixture lookup must use its declared key/);
 		assert.match(output(result), /Inspect the schema first/);

@@ -60,8 +60,13 @@ const invoke = (id, args) => {
 };
 const catalog = {
 	search: async (query, options) => {
-		const matches = await searchTools(query, options);
-		return matches.map(match => byName.get(match.name)).filter(Boolean);
+		// Ask for one extra match so truncation is exact. Pi's default limit is 8.
+		const limit = options?.limit ?? 8;
+		const matches = await searchTools(query, { ...options, limit: limit + 1 });
+		return {
+			items: matches.slice(0, limit).map(match => byName.get(match.name)).filter(Boolean),
+			truncated: matches.length > limit,
+		};
 	},
 	describe: id => byId.get(id) || byName.get(id),
 	namespace: (...args) => describeNamespace(...args),
