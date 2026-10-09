@@ -139,6 +139,7 @@
                     "define" (apply-definition! (parse-declaration @context (-> operation (update :op keyword) (update :kind keyword)) allowed-ns))
                     "forget" (do (check! operation) (forget! (declaration-name (:name operation))))
                     (throw (ex-info "Unknown SCI library operation" {})))))
+     :names (fn [] (set (keys @definitions)))
      :bindings {'definitions (fn []
                                (mapv #(-> % (dissoc :op :source) (update :name (fn [n] (str "session/" n))))
                                      (sort-by :name (vals @definitions))))

@@ -88,7 +88,7 @@ Successful entries have `:status :fulfilled` and `:value`. Failed entries have `
 
 Strings print directly. Command and bash results print as a status line followed by raw output. Other collections print as EDN. The final non-nil value also prints.
 
-Each `text` block gets a fair share of the output budget. Small blocks stay whole. A large block keeps its head and tail plus a marker with the exact `fs/read` call for its full text in the spill file, so one oversized block cannot hide the blocks around it. Error, image, and transaction notices are never clipped. Failure reports group repeated tool calls and omit interpreter stack frames. Reader errors show the source line where the unclosed form opens and where reading stopped. Unresolved or dotted symbols such as `tools.edit` and `git/status` get a hint. `text`, `println`, `prn`, and `image` return nil. Use image for image blocks, not text.
+Each `text` block gets a fair share of the output budget. Small blocks stay whole. A large block keeps its head and tail plus a marker with the exact `fs/read` call for its full text in the spill file, so one oversized block cannot hide the blocks around it. Error, image, and transaction notices are never clipped. Failure reports group repeated tool calls and omit interpreter stack frames. Reader errors show the source line where the unclosed form opens and where reading stopped. Unresolved or dotted symbols such as `tools.edit` and `git/status` get a hint. An unqualified call to a `defsession` definition gets a `session/` hint. `text`, `println`, `prn`, and `image` return nil. Use image for image blocks, not text.
 
 ## Workstation capabilities
 

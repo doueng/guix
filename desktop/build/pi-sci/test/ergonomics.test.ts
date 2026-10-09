@@ -132,6 +132,14 @@ test("errors explain how to fix the program", async () => {
 			assert.equal(result.isError, true, source);
 			assert.match(output(result), expected);
 		}
+		assert.equal((await runtime.call("(defsession helper [] 1)")).isError, false);
+		const unqualified = await runtime.call("(text (helper))");
+		assert.equal(unqualified.isError, true);
+		assert.match(
+			output(unqualified),
+			/Hint: Use session\/helper; defsession definitions live in the session namespace/,
+		);
+		assert.doesNotMatch(output(await runtime.call("(text (missing))")), /Hint: Use session/);
 	} finally {
 		runtime.close();
 	}

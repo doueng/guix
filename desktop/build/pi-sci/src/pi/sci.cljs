@@ -119,19 +119,21 @@
    [#"^rg/" (constantly "Use search/text.")]
    [#"^(process|shell|sh)/" (constantly "There is no generic process runner. Use a semantic namespace, or tools/bash as the escape hatch.")]])
 
-(defn hint [message source]
+(defn hint [message source session-names]
   (if-let [[_ sym] (re-find #"(?:Unable to resolve symbol|Could not resolve symbol): *(\S+)" message)]
-    (some (fn [[pattern advice]] (some-> (re-find pattern sym) advice)) symbol-hints)
+    (if (contains? session-names sym)
+      (str "Use session/" sym "; defsession definitions live in the session namespace.")
+      (some (fn [[pattern advice]] (some-> (re-find pattern sym) advice)) symbol-hints))
     (when (re-find #"not a function" message)
       (some-> (re-find dotted-alias (or source "")) dotted-hint))))
 
 (defn script-error
-  ([error] (script-error error nil))
-  ([error source]
+  ([error] (script-error error nil #{}))
+  ([error source session-names]
    (let [{:keys [line column file]} (ex-data error)
          message (or (ex-message error) (.-message error) (str error))
          [_ open-line open-column] (re-find #"to match \S+ at \[(\d+)[, ]+(\d+)\]" message)
-         advice (hint message source)]
+         advice (hint message source session-names)]
      (js/Error. (str message
                      (when line (str " at " (or file "codemode.clj") ":" line ":" (or column 1)))
                      (when advice (str "\nHint: " advice))
@@ -239,8 +241,8 @@
                (when-not (nil? value)
                  ((.-text api) (display value)))
                js/undefined)
-             (fn [error] (js/Promise.reject (script-error error source)))))
+             (fn [error] (js/Promise.reject (script-error error source ((:names library)))))))
       (catch :default e
-        (js/Promise.reject (script-error e source))))))
+        (js/Promise.reject (script-error e source ((:names library))))))))
 
 (set! js/piSciRun run)
