@@ -1,0 +1,12 @@
+:lang clojure: Couldn't find cljfmt. Formatting will be disabled.
+:lang go: Couldn't find gomodifytags. Manipulating struct tags will not work
+:lang go: Couldn't find gore. REPL will not work
+:lang go: Couldn't find gotests. Generating tests will not work
+:lang nix: Couldn't find the nix package manager. nix-mode won't work.
+:lang python: Couldn't find black. Code formatting will not work.
+:lang python: Couldn't find nosetests. Running tests through nose will not work.
+:lang python: Couldn't find pipenv. pipenv support will not work.
+:lang python: Couldn't find pytest. Running tests through pytest will not work.
+:term ghostel: Couldn't find zig. Pre-built binaries cover most platforms; only needed if you want to compile the ghostel module from source via M-x ghostel-module-compile
+Failed to locate 'Symbols Nerd Font Mono' font on your system
+Failed to locate the 'Symbola' font on your system

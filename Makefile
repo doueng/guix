@@ -16,7 +16,8 @@ GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := -L "$(MODULES)"
 
 .PHONY: help pull channels-current check system-facts dry-run build repro-build switch gc \
-        home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test
+        home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test \
+        doom-check doom-baseline
 
 help:
 	@echo 'pull          update the user Guix profile from $(CHANNELS)'
@@ -35,6 +36,8 @@ help:
 	@echo 'dusk          build the dusk shell (desktop/build/dusk)'
 	@echo 'dusk-test     run isolated runtime and headless GPUI tests'
 	@echo 'dusk-verify   run dusk end-to-end checks on the live session'
+	@echo 'doom-check    fail on doom doctor warnings missing from the baseline'
+	@echo 'doom-baseline accept the current doom doctor warnings'
 
 pull:
 	"$(GUIX)" pull -C "$(CHANNELS)"
@@ -109,3 +112,19 @@ dusk-test:
 
 dusk-verify:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/dusk/verify.bb
+
+# doom doctor exits 0 even when an enabled module lacks its tools, so compare its
+# warnings, prefixed with their module, against an accepted baseline.
+DOOM ?= $(HOME)/.config/emacs/bin/doom
+DOOM_BASELINE := desktop/build/doom/doctor-baseline.txt
+DOOM_WARNINGS = out=$$(cd "$(HOME)" && "$(DOOM)" doctor 2>&1) || { printf '%s\n' "$$out" >&2; exit 1; }; \
+	printf '%s\n' "$$out" | awk '/^ *> :/ { m = $$2 " " $$3 ": " } /^ *! / { sub(/^ *! /, ""); print m $$0 }' | LC_ALL=C sort
+
+doom-check:
+	@warnings=$$($(DOOM_WARNINGS)) || exit 1; \
+	new=$$(printf '%s\n' "$$warnings" | LC_ALL=C comm -23 - "$(DOOM_BASELINE)"); \
+	test -z "$$new" || { printf 'New doom doctor warnings (accept with make doom-baseline):\n%s\n' "$$new" >&2; exit 1; }; \
+	echo 'doom doctor: no new warnings'
+
+doom-baseline:
+	@$(DOOM_WARNINGS) > "$(DOOM_BASELINE)"
