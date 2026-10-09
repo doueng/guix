@@ -7,7 +7,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import type { TObject, TString } from "typebox";
-import { capabilities, rewritePrompt, SCI_BASICS, SCI_INTRO, sciDescription } from "./catalog.ts";
+import {
+	capabilities,
+	rewritePrompt,
+	SCI_BASICS,
+	SCI_INTRO,
+	sciDescription,
+	skillIndex,
+} from "./catalog.ts";
 import { registerDomainCommands } from "./commands.ts";
 import {
 	assertEnvironmentLimits,
@@ -171,6 +178,17 @@ export default function sciCodemode(pi: ExtensionAPI) {
 			summary = environmentSummary(readEnvironment(ctx.sessionManager.getBranch()));
 		} catch (error) {
 			summary = `SCI library unavailable: ${error instanceof Error ? error.message : String(error)}`;
+		}
+		if (ctx.model?.provider === "claude-bridge") {
+			// The bridge rebuilds Claude's prompt from these structured options, so the
+			// replacement prompt below never reaches Claude. It also drops Pi's skill
+			// list unless an MCP tool named read exists, which codemode-only sessions lack.
+			const sections = event.systemPromptOptions.sections;
+			sections.sci_library = summary;
+			const skills = skillIndex(event.systemPromptOptions.skills);
+			if (skills) sections.skill_index = skills;
+			sections.shell =
+				"tools/bash runs bash, whatever interactive shell the environment notes report.";
 		}
 		return { systemPrompt: `${rewritePrompt(event.systemPrompt)}\n\n${summary}` };
 	});

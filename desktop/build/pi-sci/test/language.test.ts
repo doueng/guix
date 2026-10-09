@@ -48,3 +48,40 @@ test("an unavailable SCI bundle errors instead of executing the input as JavaScr
 		syncBuiltinESMExports();
 	}
 });
+
+test("the Claude bridge receives the skill list, library note, and shell as prompt sections", async () => {
+	let handler: ((event: unknown, ctx: unknown) => unknown) | undefined;
+	sciCodemode({
+		registerTool() {},
+		on(name: string, fn: (event: unknown, ctx: unknown) => unknown) {
+			if (name === "before_agent_start") handler = fn;
+			return () => {};
+		},
+		registerCommand() {},
+	} as unknown as ExtensionAPI);
+	assert.ok(handler);
+	const skill = (name: string, hidden: boolean) => ({
+		name,
+		description: `${name} work.`,
+		filePath: `/skills/${name}/SKILL.md`,
+		disableModelInvocation: hidden,
+	});
+	const run = async (provider: string) => {
+		const event = {
+			systemPrompt: "prompt",
+			systemPromptOptions: { sections: {}, skills: [skill("guix", false), skill("poteto", true)] },
+		};
+		const ctx = { model: { provider }, sessionManager: { getBranch: () => [] } };
+		await handler?.(event, ctx);
+		return event.systemPromptOptions.sections as Record<string, string>;
+	};
+	const bridge = await run("claude-bridge");
+	assert.deepEqual(Object.keys(bridge).sort(), ["sci_library", "shell", "skill_index"]);
+	assert.match(
+		bridge.skill_index,
+		/^When a task matches.*\n- guix: guix work\. \/skills\/guix\/SKILL\.md$/,
+	);
+	assert.doesNotMatch(bridge.skill_index, /poteto/);
+	assert.match(bridge.sci_library, /^Branch SCI library revision/);
+	assert.deepEqual(await run("openai"), {});
+});

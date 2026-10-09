@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { toCodemodeIdentifier } from "@earendil-works/pi-codemode";
-import type { ToolLoadout, ToolNamespace } from "@earendil-works/pi-coding-agent";
+import type { Skill, ToolLoadout, ToolNamespace } from "@earendil-works/pi-coding-agent";
 import { DOMAINS } from "./commands.ts";
 import { signatures } from "./operations.ts";
 
@@ -19,6 +19,15 @@ export const PROMPT_REWRITES: [string, string][] = [
 		"- Use fs/read to examine files instead of cat or sed.",
 	],
 ];
+
+export function skillIndex(skills: readonly Skill[]) {
+	const visible = skills.filter((skill) => !skill.disableModelInvocation);
+	if (!visible.length) return undefined;
+	return [
+		"When a task matches a skill's description, read its file with (await (fs/read path)) before you start.",
+		...visible.map((skill) => `- ${skill.name}: ${skill.description} ${skill.filePath}`),
+	].join("\n");
+}
 
 export function rewritePrompt(prompt: string) {
 	return PROMPT_REWRITES.reduce((text, [from, to]) => text.split(from).join(to), prompt);
