@@ -20,6 +20,7 @@
   #:use-module (gnu services linux)
   #:use-module (gnu services sound)
   #:use-module (gnu services ssh)
+  #:use-module (gnu services sysctl)
   #:export (make-base-os))
 
 (define* (make-base-os #:key root-uuid esp-uuid channels)
@@ -68,6 +69,17 @@
             ;; Sway example packages, guest Home, or generic %desktop-services.
             %asahi-sddm-service
             (service kernel-module-loader-service-type '("asahi" "appledrm"))
+            ;; Compressed swap in RAM; without swap, memory pressure ends in OOM kills.
+            (service zram-device-service-type
+                     (zram-device-configuration
+                      (size "8G")
+                      ;; The Asahi kernel builds only the LZO zram backend.
+                      (compression-algorithm 'lzo-rle)
+                      (priority 100)))
+            ;; zram swap has no seek cost, so swap earlier and read single pages.
+            (simple-service 'familiar-zram-sysctl sysctl-service-type
+                            '(("vm.swappiness" . "100")
+                              ("vm.page-cluster" . "0")))
             ;; On this hardware, the ALSA UCM and speaker protection are not
             ;; optional.  PipeWire and D-Bus for the user are in Guix Home.
             (service asahi:alsa-service-type)
