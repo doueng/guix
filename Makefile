@@ -15,12 +15,13 @@ GC_AGE ?= 2w
 GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := -L "$(MODULES)"
 
-.PHONY: help pull channels-current check dry-run build repro-build switch gc \
+.PHONY: help pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test
 
 help:
 	@echo 'pull          update the user Guix profile from $(CHANNELS)'
-	@echo 'check         dry-run system and build Home'
+	@echo 'check         check system facts, dry-run system and build Home'
+	@echo 'system-facts  print folded daemon, sysctl, Shepherd and mount config; lint mounts'
 	@echo 'dry-run       show what system build would fetch or build'
 	@echo 'build         build $(CONFIG) without activating it'
 	@echo 'repro-build   build system using the pinned channels via time-machine'
@@ -43,7 +44,10 @@ channels-current:
 	pulled=$$("$(GUIX)" describe -f channels | grep -o '(commit "[0-9a-f]*")' | sort); \
 	test "$$pinned" = "$$pulled" || { echo '$(CHANNELS) differs from the pulled Guix; run make pull' >&2; exit 1; }
 
-check: dry-run home-build
+check: system-facts dry-run home-build
+
+system-facts: channels-current
+	"$(GUIX)" repl -L "$(MODULES)" -- tests/system-facts.scm
 
 dry-run: channels-current
 	"$(GUIX)" system build --dry-run $(COMMON) "$(CONFIG)"
