@@ -51,7 +51,11 @@
               (device (uuid root-uuid))
               (mount-point "/")
               (needed-for-boot? #t)
-              (type "btrfs"))
+              (type "btrfs")
+              ;; Early boot passes options verbatim to mount(2), so atime
+              ;; must be a flag; btrfs rejects "noatime" as EINVAL.
+              (flags '(no-atime))
+              (options "compress=zstd:1"))
             (file-system
               (device (uuid esp-uuid 'fat))
               (mount-point "/boot/efi")
