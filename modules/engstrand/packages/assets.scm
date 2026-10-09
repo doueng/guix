@@ -1,6 +1,6 @@
 (define-module (engstrand packages assets)
   #:use-module (guix gexp)
-  #:export (package-asset))
+  #:export (package-asset %repo-dir))
 
 (define %module-file
   (canonicalize-path (search-path %load-path "engstrand/packages/assets.scm")))
