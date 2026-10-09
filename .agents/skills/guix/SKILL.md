@@ -11,7 +11,7 @@ Use the [GNU Guix System manual](https://guix.gnu.org/manual/devel/en/guix.html)
 
 - Check `guix --version` and the configured channels before relying on version-sensitive commands, APIs, or documentation. The development manual may differ from the Guix and Asahi channel versions used here.
 - Read Guix and channel sources for the pulled commit under `~/.config/guix/current/share/guile/site/3.0/` (for example `gnu/services/linux.scm` or `asahi/guix/services/substitutes.scm`). The hashed directories in `~/.cache/guix/checkouts/` may hold other commits.
-- Verify system configuration with `make system-facts`, which prints folded service values. Values read from `operating-system-services` before folding miss extensions from other services.
+- Verify system configuration with `make system-facts` (under a second), which prints folded service values. Run `make check` only when you need built outputs. Values read from `operating-system-services` before folding miss extensions from other services.
 - This repository's Guix Scheme modules are in `modules/`. Evaluate them with Guix and the pinned Asahi channel available; do not assume a generic Guix environment has the required packages or channel definitions.
 - Prefer read-only or dry-run commands when inspecting configurations. Do not run system-changing commands such as `guix system reconfigure` or `guix system init` unless explicitly requested.
 - When troubleshooting, inspect the relevant configuration and command output, then consult the matching manual or cookbook section before proposing changes.

@@ -20,12 +20,12 @@ COMMON := -L "$(MODULES)"
 
 help:
 	@echo 'pull          update the user Guix profile from $(CHANNELS)'
-	@echo 'check         check system facts, dry-run system and build Home'
+	@echo 'check         check system facts, then build system and Home without activating'
 	@echo 'system-facts  print folded daemon, sysctl, Shepherd and mount config; lint mounts'
 	@echo 'dry-run       show what system build would fetch or build'
 	@echo 'build         build $(CONFIG) without activating it'
 	@echo 'repro-build   build system using the pinned channels via time-machine'
-	@echo 'switch        build and activate system (sudo; writes ESP)'
+	@echo 'switch        check system facts, build and activate system (sudo; writes ESP)'
 	@echo 'gc            delete generations older than $(GC_AGE), then collect garbage'
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-apply    activate Home, then stow live configs'
@@ -44,7 +44,8 @@ channels-current:
 	pulled=$$("$(GUIX)" describe -f channels | grep -o '(commit "[0-9a-f]*")' | sort); \
 	test "$$pinned" = "$$pulled" || { echo '$(CHANNELS) differs from the pulled Guix; run make pull' >&2; exit 1; }
 
-check: system-facts dry-run home-build
+# The system build includes Home, so check needs no separate Home build.
+check: system-facts build
 
 system-facts: channels-current
 	"$(GUIX)" repl -L "$(MODULES)" -- tests/system-facts.scm
@@ -61,7 +62,7 @@ repro-build:
 	  "$(GUIX)" time-machine -C "$(CHANNELS)" -- \
 	  system build $(COMMON) "$(CONFIG)"
 
-switch: channels-current
+switch: channels-current system-facts
 	sudo rm -f \
 	  /boot/efi/m1n1/boot.bin.old \
 	  /boot/efi/m1n1/boot.bin.new
