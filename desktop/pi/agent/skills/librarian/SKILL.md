@@ -56,19 +56,6 @@ bash checkout.sh <repo> --force-update --path-only
 2. Use that path for searching, reading, and analysis. Read-only Git metadata queries (for example, `git -C <path> tag --sort=-version:refname`) are allowed; do not mutate the shared checkout.
 3. On later references to the same repo, call `checkout.sh` again; it will find and update the cached checkout.
 
-The Pi Git guard uses the target of `git -C`, not the shell's initial directory. Literal paths and simple literal assignments such as `C=~/.cache/checkouts/github.com/owner/repo; git -C "$C" log` are supported. For computed paths, resolve the path first and pass it explicitly.
-
-Read-only exports are allowed to stdout or files under `/tmp`:
-
-```bash
-git -C ~/.cache/checkouts/github.com/owner/repo archive HEAD path | tar -x -C /tmp/task-copy
-git -C ~/.cache/checkouts/github.com/owner/repo archive HEAD path > /tmp/source.tar
-git -C ~/.cache/checkouts/github.com/owner/repo diff OLD NEW -- path > /tmp/delta.patch
-git -C ~/.cache/checkouts/github.com/owner/repo show HEAD:path | diff - /tmp/local-copy
-```
-
-Create the extraction directory first. `ls-tree`, `tag` listing and `worktree list` are also allowed; commands that create tags or modify worktrees remain blocked. Redirections and export output options must not write into the shared cache. The guard is a best-effort shell policy, not a sandbox.
-
 ## If edits are needed
 
 Prefer not to edit directly in the shared cache. Create a separate worktree or copy from the cached checkout for task-specific modifications.
