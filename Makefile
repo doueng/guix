@@ -51,7 +51,7 @@ channels-current:
 check: system-facts build
 
 system-facts: channels-current
-	"$(GUIX)" repl -L "$(MODULES)" -- tests/system-facts.scm
+	"$(GUIX)" repl -L "$(MODULES)" -- desktop/system-facts.scm
 
 dry-run: channels-current
 	"$(GUIX)" system build --dry-run $(COMMON) "$(CONFIG)"
