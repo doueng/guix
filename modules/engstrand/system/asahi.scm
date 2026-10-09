@@ -86,6 +86,12 @@
             (simple-service 'familiar-zram-sysctl sysctl-service-type
                             '(("vm.swappiness" . "100")
                               ("vm.page-cluster" . "0")))
+            ;; Data is single-copy, so scrub only detects data corruption; DUP
+            ;; metadata is repaired.  Shepherd drops timer events missed while
+            ;; asleep, so the default first-Sunday midnight would rarely run.
+            (service btrfs-scrub-service-type
+                     (btrfs-scrub-configuration
+                      (schedule "0 12 * * *")))
             ;; On this hardware, the ALSA UCM and speaker protection are not
             ;; optional.  PipeWire and D-Bus for the user are in Guix Home.
             (service asahi:alsa-service-type)
