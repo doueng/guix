@@ -12,7 +12,7 @@ Find what made the session slow or wrong, and propose the environment change tha
 
 Default to the current session. Work from primary sources, not memory of the conversation.
 
-1. **Transcript.** The session file is the newest `.jsonl` in `~/.pi/agent/sessions/<cwd with each / replaced by ->/`. Read it with `fs/read-jsonl`, project `type`, `message.role`, `message.content`, `message.isError` and `message.toolName`, and follow `:next_cursor` to the end. The projection shape is in the structured JSON section of `~/guix/desktop/build/pi-sci/domain-commands.md`. In SCI, extract each codemode `:code`, every error result, and every user correction.
+1. **Transcript.** The session file is the newest `.jsonl` in `~/.pi/agent/sessions/--<cwd>--/`, where `<cwd>` drops its leading `/` and replaces each remaining `/` with `-`. For `~/guix` that is `--home-engstrand-guix--`. `(await (fs/list {:path dir :sort "modified" :limit 1}))` returns it. Read it with `fs/read-jsonl`, project `type`, `message.role`, `message.content`, `message.isError` and `message.toolName`, and follow `:next_cursor` to the end. The projection shape is in the structured JSON section of `~/guix/desktop/build/pi-sci/domain-commands.md`. In SCI, extract each codemode `:code`, every error result, and every user correction.
 2. **Metrics.** Run `node ~/guix/desktop/build/pi-sci/scripts/session-metrics.mjs <session.jsonl>`. It counts bash escapes, validation errors, parse errors and truncation.
 3. **Vent log.** Read `VENT.md` in the workspace. A candidate that repeats an entry ranks higher. A recurrence of an entry marked resolved is a regression.
 
