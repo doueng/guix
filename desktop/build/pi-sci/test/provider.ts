@@ -82,6 +82,9 @@ export function fixtureProvider(nextSource: () => string | undefined): Extension
 				) {
 					throw new Error("Codemode must advertise only Clojure and the SCI grammar.");
 				}
+				const signature = declared.description.indexOf("(fs/read path ");
+				if (signature + "(fs/read path ".length > 2048)
+					throw new Error("Codemode signatures must fit in the first 2048 description characters.");
 				if (pi.getAllTools().find((tool) => tool.name === "codemode")?.parameters !== schema) {
 					throw new Error("The replacement must preserve Pi's codemode schema identity.");
 				}

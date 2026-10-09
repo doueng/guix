@@ -7,7 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import type { TObject, TString } from "typebox";
-import { capabilities, rewritePrompt, SCI_INTRO, sciDescription } from "./catalog.ts";
+import { capabilities, rewritePrompt, SCI_BASICS, SCI_INTRO, sciDescription } from "./catalog.ts";
 import { registerDomainCommands } from "./commands.ts";
 import {
 	assertEnvironmentLimits,
@@ -32,7 +32,7 @@ export default function sciCodemode(pi: ExtensionAPI) {
 			});
 			pi.registerTool({
 				...original,
-				description: SCI_INTRO,
+				description: `${SCI_BASICS}\n${SCI_INTRO}`,
 				promptSnippet: "Run Clojure that calls other tools",
 				promptGuidelines: [
 					"Run programs on the host; write programs in SCI. Keep parsing, filtering, grouping, sorting, aggregation, and orchestration in Clojure. Prefer semantic jj, guix, repo, make, fs, sys, and search namespaces over bash. Search uses Pi's search implementation; do not expose or invoke rg as a process capability. Bash is an escape hatch for genuine shell semantics. Do not generate temporary interpreter programs for ordinary data analysis.",

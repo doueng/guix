@@ -64,22 +64,63 @@ export function capabilities(
 		});
 }
 
-export function declaration(entry: Capability) {
-	return (
-		`### ${entry.symbol}\n${entry.description}\nCall (await (${entry.symbol} {...})).\nInput JSON Schema: ${JSON.stringify(entry.inputSchema)}\n` +
-		(entry.outputSchema
-			? `Result JSON Schema: ${JSON.stringify(entry.outputSchema)}`
-			: "Result is a string.")
-	);
+type Schema = {
+	type?: string;
+	items?: Schema;
+	properties?: Record<string, Schema>;
+	required?: string[];
+};
+
+function keys(schema: Schema): string {
+	const required = new Set(schema.required ?? []);
+	return Object.entries(schema.properties ?? {})
+		.map(([key, value]) => {
+			const nested =
+				value.type === "array" && value.items?.properties ? ` [{${keys(value.items)}}]` : "";
+			return `:${key}${required.has(key) ? "!" : ""}${nested}`;
+		})
+		.join(" ");
 }
 
-export const SCI_INTRO = `Run restricted Clojure with SCI inside Pi's QuickJS sandbox.
+export function toolSignature(entry: Capability) {
+	const options = keys(entry.inputSchema as Schema);
+	return `(${entry.symbol}${options ? ` {${options}}` : ""})`;
+}
+
+function summary(entry: Capability) {
+	const line = entry.description.split("\n")[0] ?? "";
+	const sentence = line.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? line;
+	return `${entry.symbol}: ${sentence}`;
+}
+
+const README = fileURLToPath(new URL("../README.md", import.meta.url));
+
+// Claude Code cuts MCP tool descriptions at 2048 characters. What a model needs
+// to call functions without guessing keys must fit before that point.
+export const DESCRIPTION_HEAD = 2048;
+// Domains whose signatures come before the plain tools'. The rest follow in
+// DOMAIN_ORDER while they fit.
+const HEAD_DOMAINS = ["fs", "search", "sys", "jj"];
+const DOMAIN_ORDER = [...HEAD_DOMAINS, "make", "repo", "guix"];
+
+export const SCI_BASICS = `Run restricted Clojure with SCI inside Pi's QuickJS sandbox.
 The input is raw Clojure source, not JSON or a code fence. The body is async; use (await ...) for tool, discovery, and model calls. Helper functions containing await need ^:async metadata.
-Example: (text (mapv #(* % 2) [1 2 3]))
-Read ${fileURLToPath(new URL("../README.md", import.meta.url))} for the active SCI codemode documentation. Installed Pi docs/codemode.md describes the disabled JavaScript evaluator.
-For JSON files, use (await (fs/read-json "package.json")) and inspect :value. Do not parse display-limited tools/read output. For session JSONL, use fs/read-jsonl with :fields projections and :next_cursor. Follow all pages before claiming complete coverage. :value_truncated marks clipped strings.
-Reduce results before printing. Print schemas only when needed, not whole discovery results or transcripts. Store only small summaries or cursors, never raw transcripts. One stored value is limited to 262144 JSON characters; the whole store to 1048576.
 Optional first line: ;; @options: {"max_output_tokens": 10000, "timeout_ms": 60000}
+Read ${README} for the active SCI documentation.`;
+
+function order(id: string) {
+	const index = DOMAIN_ORDER.indexOf(id);
+	return index < 0 ? DOMAIN_ORDER.length : index;
+}
+
+const SIGNATURE_HEADER =
+	"Signatures. The positional argument comes first, then an options map; ! marks a required key. Every call also accepts :cwd and :timeout_ms; command domains accept :env.";
+
+const MORE_SIGNATURES =
+	'Signatures not listed here follow later. (catalog/describe "id") returns any tool\'s full schema.';
+
+export const SCI_INTRO = `For JSON files, use (await (fs/read-json "package.json")) and inspect :value. Do not parse display-limited tools/read output. For session JSONL, use fs/read-jsonl with :fields projections and :next_cursor. Follow all pages before claiming complete coverage. :value_truncated marks clipped strings.
+Reduce results before printing. Print schemas only when needed, not whole discovery results or transcripts. Store only small summaries or cursors, never raw transcripts. One stored value is limited to 262144 JSON characters; the whole store to 1048576.
 No JavaScript interop, arbitrary require, eval, filesystem, process, network, or timers. Effects go through Pi's injected capabilities. require forms must precede executable forms and can only select provided namespaces.
 Strings print directly. Command and bash results print as an [exit ...] status line followed by raw output. Other collections print as EDN; use pr-str to see a command result as data. Each text block keeps a fair share of the output budget, and clipped blocks name the spill file and line range. The final non-nil value is printed. text and image return nil.
 JSON objects become keyword-keyed maps; arrays become vectors. Keys retain their exact spelling, including underscores and camelCase. Keyword arguments become JSON strings. Duplicate encoded keys and non-JSON values fail.
@@ -87,7 +128,7 @@ JSON objects become keyword-keyed maps; arrays become vectors. Keys retain their
 (await (all [...])), (await (all-settled [...])) compose eager calls. all-settled yields {:status :fulfilled :value ...} or {:status :rejected :error {:message ...}}. Calls still running at script completion are cancelled.
 (catalog/search query {:limit 8 :namespace "..."}), (catalog/describe id), (catalog/namespace name), and (catalog/invoke id args) return promises. Search returns {:items [...] :truncated bool}; its items and describe return canonical :id, :name, :symbol, description, and schemas. Discover and describe before invoking an unlisted tool.
 Aliases tools, catalog, models, json, str, and set are prebound. json/parse and json/generate convert JSON. clojure.string and clojure.set are available. Ordinary def and defn are temporary. Explicit top-level (defsession name value) and (defsession ^:async name [args] ...) persist in the session namespace on success. Values must be literal JSON-compatible data; functions cannot capture invocation-local names. Persistent macros and computed initializers are unsupported. Use session/name, (session/definitions), (session/source 'name), and (session/forget 'name). Code and store changes commit together on the active branch. Conflicts do not retry external effects.
-Run programs on the host; write programs in SCI. Semantic namespaces jj, guix, make, repo, fs, sys, and search exist only when their registered tools are callable; their signatures are listed below. Use (await (jj/log {:revisions "@" :limit 10})), (await (jj/files-changed)), (await (guix/build {:file "package.scm"})), (await (make/run "target")), (await (repo/pi-sci-test)), (await (search/text "pattern" {:paths ["src"]})), (await (search/files {:glob "*.clj"})), or (await (fs/read "file" {:start_line 20 :end_line 50})). Collection results have :items and :truncated. JJ commit records use :change-id, :commit-id, :description, :author, :parents, and :empty?. Text file reads have :text, :start_line, :end_line, :total_lines, :next_line, and :truncated. fs/exists? returns a boolean. Successful image reads have :kind "image" and an :image value to forward with image; omitted images have :kind "image-omitted" and :note. Command actions have :ok, :exit_code, :stderr, :timed_out, :truncated, and :duration_ms; Guix builds add :outputs and :outputs_complete. (result/check r) checks command actions; use structured fields for read operations, not stdout!. Use :cwd and :timeout_ms when needed; command actions also accept :env. There is no git or rg namespace, generic process/run, or shell/run. Search uses Pi's search implementation. Raw jj/run and guix/run are lower-level fixed-program fallbacks. Bash is an escape hatch. Keep parsing, filtering, grouping, sorting, aggregation, joins, and command selection in SCI. Do not generate temporary interpreter programs for ordinary analysis. Collect independent effects first, await them together, then reduce in SCI. Consider defsession after repeating a nontrivial pattern; do not persist one-off transforms.
+Run programs on the host; write programs in SCI. Semantic namespaces jj, guix, make, repo, fs, sys, and search exist only when their registered tools are callable; their signatures are listed above. Use (await (jj/log {:revisions "@" :limit 10})), (await (jj/files-changed)), (await (guix/build {:file "package.scm"})), (await (make/run "target")), (await (repo/pi-sci-test)), (await (search/text "pattern" {:paths ["src"]})), (await (search/files {:glob "*.clj"})), or (await (fs/read "file" {:start_line 20 :end_line 50})). Collection results have :items and :truncated. JJ commit records use :change-id, :commit-id, :description, :author, :parents, and :empty?. Text file reads have :text, :start_line, :end_line, :total_lines, :next_line, and :truncated. fs/exists? returns a boolean. Successful image reads have :kind "image" and an :image value to forward with image; omitted images have :kind "image-omitted" and :note. Command actions have :ok, :exit_code, :stderr, :timed_out, :truncated, and :duration_ms; Guix builds add :outputs and :outputs_complete. (result/check r) checks command actions; use structured fields for read operations, not stdout!. Use :cwd and :timeout_ms when needed; command actions also accept :env. There is no git or rg namespace, generic process/run, or shell/run. Search uses Pi's search implementation. Raw jj/run and guix/run are lower-level fixed-program fallbacks. Bash is an escape hatch. Keep parsing, filtering, grouping, sorting, aggregation, joins, and command selection in SCI. Do not generate temporary interpreter programs for ordinary analysis. Collect independent effects first, await them together, then reduce in SCI. Consider defsession after repeating a nontrivial pattern; do not persist one-off transforms.
 models/get-models-of-type, models/get-available-of-type, models/get-model-of-type, models/classify, and models/generate-images preserve Pi's model API arguments. Check :stopReason and :errorMessage. Forward image blocks with image, never text.
 `;
 
@@ -98,52 +139,58 @@ export function sciDescription(
 	models: boolean,
 ) {
 	const domains = DOMAINS.filter((domain) => entries.some((entry) => entry.id === domain.id));
-	const semantic = domains.length
-		? `Semantic functions. The positional argument comes first, then an options map; ! marks a required key. Every call also accepts :cwd and :timeout_ms, and command domains accept :env. Await each call.\n${domains.flatMap(signatures).join("\n")}`
-		: "";
+	const first = HEAD_DOMAINS.flatMap((id) => domains.filter((domain) => domain.id === id));
 	const visible = entries.filter(
 		(entry) =>
 			loadout.getExposure(entry.id) !== "deferred" &&
 			!domains.some((domain) => domain.id === entry.id),
 	);
+	const plain = visible.filter((entry) => !entry.namespace?.name);
+	const namespaced = visible.filter((entry) => !plain.includes(entry));
+	const lines = [
+		...first.flatMap(signatures),
+		...plain.map(toolSignature),
+		...domains
+			.filter((domain) => !first.includes(domain))
+			.sort((a, b) => order(a.id) - order(b.id))
+			.flatMap(signatures),
+		...namespaced.map(toolSignature),
+	];
+	// Fill the part that survives truncation in priority order, then move the
+	// remainder after it.
+	const header = lines.length ? `${SCI_BASICS}\n${SIGNATURE_HEADER}` : SCI_BASICS;
+	let room = DESCRIPTION_HEAD - header.length - MORE_SIGNATURES.length - 2;
+	const head: string[] = [];
+	const later: string[] = [];
+	for (const line of lines) {
+		if (line.length + 1 <= room) {
+			head.push(line);
+			room -= line.length + 1;
+		} else later.push(line);
+	}
 	let remaining = budget;
-	const sections: string[] = [];
-	const groups = new Map<string, Capability[]>();
-	for (const entry of visible) {
-		const name = entry.namespace?.name ?? "";
-		const group = groups.get(name) ?? [];
-		group.push(entry);
-		groups.set(name, group);
+	const summaries: string[] = [];
+	for (const entry of [...plain, ...namespaced]) {
+		const text = summary(entry);
+		const cost = Math.ceil(text.length / 4);
+		if (cost > remaining) continue;
+		remaining -= cost;
+		summaries.push(text);
 	}
-	const queues = [...groups].map(([namespace, tools]) => ({
-		namespace,
-		tools: tools
-			.map((entry) => ({ entry, text: declaration(entry) }))
-			.sort((a, b) => a.text.length - b.text.length),
-	}));
-	for (let active = queues; active.length > 0; ) {
-		active = active.filter((group) => {
-			const next = group.tools[0];
-			const cost = Math.ceil(next.text.length / 4);
-			if (cost > remaining) return false;
-			remaining -= cost;
-			sections.push(next.text);
-			group.tools.shift();
-			return group.tools.length > 0;
-		});
-	}
-	const namespaces = [...groups.entries()]
-		.filter(([name]) => Boolean(name))
-		.map(
-			([name, entries]) =>
-				`Namespace ${name}. Discover its tools with catalog/search.\n${entries[0]?.namespace?.description ?? ""}`,
-		);
+	const namespaces = new Map<string, string>();
+	for (const entry of namespaced)
+		if (entry.namespace && !namespaces.has(entry.namespace.name))
+			namespaces.set(
+				entry.namespace.name,
+				`Namespace ${entry.namespace.name}. Discover its tools with catalog/search.\n${entry.namespace.description ?? ""}`,
+			);
 	return [
+		[header, ...head, lines.length ? MORE_SIGNATURES : ""].filter(Boolean).join("\n"),
+		later.join("\n"),
 		SCI_INTRO,
 		!models ? "Model capabilities are disabled." : "",
-		semantic,
-		...namespaces,
-		...sections,
+		...namespaces.values(),
+		summaries.length ? `Tool summaries:\n${summaries.join("\n")}` : "",
 	]
 		.filter(Boolean)
 		.join("\n\n");
