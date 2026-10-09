@@ -6,14 +6,11 @@ HOME_CONFIG ?= desktop/home.scm
 CHANNELS ?= channels.scm
 MODULES ?= modules
 
-# Prefer the general cache; keep Asahi and CI as signed-substitute fallbacks.
-SUBSTITUTE_URLS ?= https://bordeaux.guix.gnu.org https://substitutes.asahi-guix.org https://ci.guix.gnu.org
-
 # Normal boot still uses the updated ESP; fast kexec reboot is opt-in.
 RECONFIGURE_FLAGS ?= --no-kexec
 
 GUIX := $(HOME)/.config/guix/current/bin/guix
-COMMON := --substitute-urls="$(SUBSTITUTE_URLS)" -L "$(MODULES)"
+COMMON := -L "$(MODULES)"
 
 .PHONY: help pull check dry-run build repro-build switch \
         home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test
@@ -57,7 +54,6 @@ switch:
 	  /boot/efi/m1n1/boot.bin.new
 	sudo env GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
 	  "$(GUIX)" system reconfigure $(RECONFIGURE_FLAGS) \
-	    --substitute-urls="$(SUBSTITUTE_URLS)" \
 	    -L "$(abspath $(MODULES))" \
 	    "$(abspath $(CONFIG))"
 

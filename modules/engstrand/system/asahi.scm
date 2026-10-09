@@ -1,6 +1,8 @@
 (define-module (engstrand system asahi)
+  #:use-module (asahi guix config)
   #:use-module (asahi guix initrd)
   #:use-module ((asahi guix services sound) #:prefix asahi:)
+  #:use-module (asahi guix services substitutes)
   #:use-module (asahi guix services udev)
   #:use-module (asahi guix systems base)
   #:use-module (asahi guix systems desktop)
@@ -83,8 +85,16 @@
             (service x11-socket-directory-service-type))
       (modify-services (operating-system-user-services asahi-base-os)
         (delete openssh-service-type)
+        ;; It prepends its URL to the daemon's list; the list below owns the order.
+        (delete asahi-substitutes-service-type)
         (guix-service-type
          config => (guix-configuration
                      (inherit config)
                      (channels channels)
+                     (authorized-keys (append %asahi-substitute-keys
+                                              (guix-configuration-authorized-keys config)))
+                     ;; Prefer the general cache; Asahi and CI are signed fallbacks.
+                     (substitute-urls (append '("https://bordeaux.guix.gnu.org")
+                                              %asahi-substitute-urls
+                                              '("https://ci.guix.gnu.org")))
                      (extra-options '("--max-jobs=1" "--cores=4")))))))))
