@@ -27,7 +27,7 @@
     (inherit asahi-base-os)
     (kernel asahi-linux-keyd)
     (host-name "asahi-guix")
-    (timezone "Europe/Amsterdam")
+    (timezone "Europe/London")
     (locale "en_US.utf8")
     (keyboard-layout (keyboard-layout "us"))
     (bootloader
