@@ -49,6 +49,21 @@ test("command and bash results print a status line and raw output", async () => 
 			await runtime.call("(text (await (tools/bash {:command \"printf 'a\\nb'\"})))"),
 		);
 		assert.match(bash, /\[exit 0(, [\d.]+ s)?\]\na\nb/);
+		assert.doesNotMatch(bash, /Hint/);
+		const piped = output(
+			await runtime.call('(text (await (tools/bash {:command "printf a | grep a"})))'),
+		);
+		assert.doesNotMatch(piped, /Hint/);
+		const listing = output(
+			await runtime.call(
+				'(await (tools/bash {:command "cd . && ls"})) (await (tools/bash {:command "grep -r x .; true"}))',
+			),
+		);
+		assert.match(
+			listing,
+			/Hint: tools\/bash ran ls; search\/text, search\/files, fs\/list, and fs\/read/,
+		);
+		assert.equal(listing.match(/Hint:/g)?.length, 1);
 		writeFileSync(join(runtime.cwd, "Makefile"), "hello:\n\t@printf 'make-domain'\n");
 		const make = output(await runtime.call('(text (await (make/run "hello")))'));
 		assert.match(make, /\[exit 0, \d+ ms\]\nmake-domain/);

@@ -119,6 +119,22 @@
    [#"^rg/" (constantly "Use search/text.")]
    [#"^(process|shell|sh)/" (constantly "There is no generic process runner. Use a semantic namespace, or tools/bash as the escape hatch.")]])
 
+(def file-command #"(?:^|;|&&|\|\||\n|\$\()\s*(?:sudo\s+)?(grep|rg|find|cat|ls)(?=\s|$)")
+
+(defn bash-hint [command]
+  (when-let [[_ program] (re-find file-command (str command))]
+    (str "Hint: tools/bash ran " program "; search/text, search/files, fs/list, and fs/read return structured data without a shell.")))
+
+(defn hint-bash [bash print!]
+  (let [shown (atom false)]
+    (fn [& args]
+      (let [result (apply bash args)]
+        (when-not @shown
+          (when-let [advice (bash-hint (:command (first args)))]
+            (reset! shown true)
+            (print! advice)))
+        result))))
+
 (defn hint [message source session-names]
   (if-let [[_ sym] (re-find #"(?:Unable to resolve symbol|Could not resolve symbol): *(\S+)" message)]
     (if (contains? session-names sym)
@@ -151,6 +167,8 @@
         tool-map (into {} (map (fn [id]
                                 [(symbol id) (effect (promised (aget (.-tools api) id)))])
                               (js/Object.keys (.-tools api))))
+        tool-map (cond-> tool-map
+                   (contains? tool-map 'bash) (update 'bash hint-bash (.-text api)))
         command-namespaces (commands/bindings (from-wire (.-commands api)) tool-map)
         allowed-namespaces (into library/allowed-namespaces
                                  (mapcat (fn [[ns info]] [(str ns) (str (:alias info))]) command-namespaces))
