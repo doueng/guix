@@ -9,10 +9,13 @@ MODULES ?= modules
 # Normal boot still uses the updated ESP; fast kexec reboot is opt-in.
 RECONFIGURE_FLAGS ?= --no-kexec
 
+# make gc keeps generations newer than GC_AGE; the current one always stays.
+GC_AGE ?= 2w
+
 GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := -L "$(MODULES)"
 
-.PHONY: help pull check dry-run build repro-build switch \
+.PHONY: help pull check dry-run build repro-build switch gc \
         home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test
 
 help:
@@ -22,6 +25,7 @@ help:
 	@echo 'build         build $(CONFIG) without activating it'
 	@echo 'repro-build   build system using the pinned channels via time-machine'
 	@echo 'switch        build and activate system (sudo; writes ESP)'
+	@echo 'gc            delete generations older than $(GC_AGE), then collect garbage'
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-apply    activate Home, then stow live configs'
 	@echo 'stow          build SCI and install live config links using GNU Stow'
@@ -56,6 +60,12 @@ switch:
 	  "$(GUIX)" system reconfigure $(RECONFIGURE_FLAGS) \
 	    -L "$(abspath $(MODULES))" \
 	    "$(abspath $(CONFIG))"
+
+gc:
+	sudo "$(GUIX)" system delete-generations $(GC_AGE)
+	"$(GUIX)" home delete-generations $(GC_AGE)
+	"$(GUIX)" pull --delete-generations=$(GC_AGE)
+	"$(GUIX)" gc
 
 home-build:
 	"$(GUIX)" home build $(COMMON) "$(HOME_CONFIG)"
