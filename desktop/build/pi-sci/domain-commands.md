@@ -19,7 +19,7 @@ SCI constructs arguments, transforms data, and controls execution. Registered Pi
 (await (sys/which ["ruff" "clang-format"]))
 ```
 
-The codemode description lists one generated signature per callable function, such as `(search/files glob {:path :paths :limit})`. A key after `!` is required. SCI checks option keys before the call, so `(search/files {:pattern "*.clj"})` fails with the accepted keys instead of a schema union dump. A positional argument whose schema is an array also accepts one string, so `(sys/which "ruff")` and `(guix/lint "hello")` work.
+The codemode description lists one generated signature per callable function, such as `(search/files glob {:path :paths :limit})`. A key after `!` is required. SCI checks option keys before the call, so `(search/files {:depth 2})` fails with the accepted keys instead of a schema union dump. Keys spelled as in Pi's own grep, find and read tools are aliases: `:pattern` for `search/text` `:query` and `search/files` `:glob`, `:offset` for `fs/read` `:start_line`, and `:glob` for `fs/glob` `:pattern`. Passing both spellings fails. A positional argument whose schema is an array also accepts one string, so `(sys/which "ruff")` and `(guix/lint "hello")` work.
 
 ## Registry and permissions
 

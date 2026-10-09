@@ -42,6 +42,18 @@
                            ". Accepted keys: " (str/join ", " (sort (map str accepted))) ".")
                       {})))))
 
+(defn rename-aliases [fname aliases opts]
+  (reduce (fn [opts [alias canonical]]
+            (let [alias (keyword alias)
+                  canonical (keyword canonical)]
+              (cond
+                (not (contains? opts alias)) opts
+                (contains? opts canonical)
+                (throw (ex-info (str fname " takes " canonical "; " alias " is an alias for it. Pass only one.") {}))
+                :else (-> opts (dissoc alias) (assoc canonical (get opts alias))))))
+          opts
+          aliases))
+
 (defn shape-hint [fname shapes error]
   (let [message (or (.-message error) (str error))]
     (if (re-find #"Validation failed for tool" message)
@@ -56,14 +68,14 @@
                   [(symbol namespace)
                    {:alias (symbol alias)
                     :bindings (into {}
-                               (map (fn [[name {:keys [operation positional positional_array select keys required shapes]}]]
+                               (map (fn [[name {:keys [operation positional positional_array select keys required shapes aliases]}]]
                                       (let [positional (when positional (keyword positional))
+                                            fname (str alias "/" (clojure.core/name name))
                                             dispatch (fn [opts]
                                                        (when-not (string? operation)
                                                          (throw (ex-info "SCI capability bindings are incompatible; run make pi-sci and /reload" {})))
-                                                       (when keys
-                                                         (check-keys (str alias "/" (clojure.core/name name)) keys required opts))
-                                                       (let [fname (str alias "/" (clojure.core/name name))
+                                                       (let [opts (rename-aliases fname aliases opts)
+                                                             _ (when keys (check-keys fname keys required opts))
                                                              result (.catch (invoke (assoc opts :operation operation))
                                                                             #(throw (shape-hint fname shapes %)))]
                                                          (if select (.then result #(get % (keyword select))) result)))

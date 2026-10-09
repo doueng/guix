@@ -21,6 +21,8 @@ export function operation<T extends TObject>(
 	positional?: string,
 	mutation = false,
 	select?: string,
+	// Alternative key spellings, renamed to the canonical key before checking.
+	aliases: Record<string, string> = {},
 ) {
 	return {
 		input,
@@ -29,6 +31,7 @@ export function operation<T extends TObject>(
 		positional,
 		mutation,
 		select,
+		aliases,
 	};
 }
 export type Operation = ReturnType<typeof operation>;
@@ -152,6 +155,7 @@ export function bindings(domain: Domain) {
 						op.positional !== undefined &&
 						(op.input.properties[op.positional] as { type?: string } | undefined)?.type === "array",
 					select: op.select ?? null,
+					aliases: op.aliases,
 					keys: [
 						...Object.keys(op.input.properties),
 						...Object.keys(domain.local ? { cwd: 0, timeout_ms: 0 } : common),

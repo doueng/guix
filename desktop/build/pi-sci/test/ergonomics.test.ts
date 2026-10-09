@@ -137,8 +137,12 @@ test("errors explain how to fix the program", async () => {
 			['(store "k" {:tags #{:a}})', /Value at \[:tags\] is a set, which is not JSON-compatible/],
 			['(store "k" [(fs/exists? "x")])', /Value at \[0\] is a promise \(missing await\?\)/],
 			[
-				'(await (search/files {:pattern "*.clj"}))',
-				/search\/files does not accept :pattern and requires :glob\. Accepted keys: .*:glob/,
+				'(await (search/files {:pattern "*.clj" :depth 2}))',
+				/search\/files does not accept :depth\. Accepted keys: .*:glob/,
+			],
+			[
+				'(await (search/files {:pattern "*.clj" :glob "*.clj"}))',
+				/search\/files takes :glob; :pattern is an alias for it\. Pass only one\./,
 			],
 			['(await (search/text "(unclosed"))', /Hint: pass :literal true/],
 			[
@@ -176,6 +180,7 @@ test("fs glob, disk usage, and sorted listings replace ls, find, and du", async 
 		const glob = await data(runtime, '(await (fs/glob "a?.txt"))');
 		assert.deepEqual(glob.items, [join(cwd, "a1.txt"), join(cwd, "a2.txt")]);
 		assert.equal(glob.truncated, false);
+		assert.deepEqual((await data(runtime, '(await (fs/glob {:glob "a?.txt"}))')).items, glob.items);
 		assert.deepEqual((await data(runtime, '(await (fs/glob "**/c.txt"))')).items, [
 			join(cwd, "sub", "deep", "c.txt"),
 		]);

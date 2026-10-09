@@ -135,6 +135,11 @@ test("Pi search returns records without parsing display text and preserves limit
 			'(await (search/text {:query "shared" :paths ["one" "two"]}))',
 		);
 		assert.equal(multi.items.length, 2);
+		assert.equal(
+			(await data(runtime, '(await (search/text {:pattern "shared" :paths ["one" "two"]}))')).items
+				.length,
+			2,
+		);
 		assert.equal(multi.truncated, false);
 		assert.equal(
 			(await data(runtime, '(await (search/text {:query "shared" :paths ["one" "two"] :limit 1}))'))
@@ -155,6 +160,10 @@ test("Pi search returns records without parsing display text and preserves limit
 		);
 		const files = await data(runtime, '(await (search/files {:glob "*.clj"}))');
 		assert.ok(files.items.includes('odd:23: "file.clj'));
+		assert.deepEqual(
+			(await data(runtime, '(await (search/files {:pattern "*.clj"}))')).items,
+			files.items,
+		);
 		const everything = await data(runtime, '(await (search/files {:glob "**/*" :limit 1000}))');
 		assert.deepEqual(
 			everything.items.filter((item: string) => /^\.(git|jj)\//.test(item)),
@@ -196,6 +205,10 @@ test("Pi-backed file reads have clean data and continuation and filesystem listi
 				/image-omitted\n.*Read image file/s.test(output(image)),
 		);
 		const tail = await data(runtime, '(await (fs/read {:path "file.txt" :start_line 3}))');
+		assert.equal(
+			(await data(runtime, '(await (fs/read {:path "file.txt" :offset 3}))')).text,
+			tail.text,
+		);
 		assert.equal(tail.text, "c\n");
 		assert.equal(tail.next_line, null);
 		assert.equal(tail.truncated, false);

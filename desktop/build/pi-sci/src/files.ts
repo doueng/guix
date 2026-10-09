@@ -224,11 +224,17 @@ export const searchDomain: Domain = {
 					e,
 				),
 			"query",
+			false,
+			undefined,
+			{ pattern: "query" },
 		),
 		files: operation(
 			Type.Object({ glob: string, path: optional(string), paths: optional(strings), limit }),
 			async (a, e) => search("find", { pattern: a.glob, path: a.path, limit: a.limit }, a, e),
 			"glob",
+			false,
+			undefined,
+			{ pattern: "glob" },
 		),
 	},
 };
@@ -270,6 +276,9 @@ export const fsDomain: Domain = {
 				return r.structuredContent as Record<string, unknown>;
 			},
 			"path",
+			false,
+			undefined,
+			{ offset: "start_line" },
 		),
 		"read-json": operation(
 			Type.Object({ path: string }),
@@ -345,6 +354,9 @@ export const fsDomain: Domain = {
 				return { ...bounded, pattern, truncated: bounded.truncated || truncated };
 			},
 			"pattern",
+			false,
+			undefined,
+			{ glob: "pattern" },
 		),
 		"disk-usage": operation(
 			Type.Object({ path: optional(string) }),
