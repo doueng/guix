@@ -6,7 +6,7 @@
   #:use-module (engstrand packages jjui)
   #:use-module (engstrand services herdr-plugins)
   #:use-module (gnu packages)
-  #:export (feature-familiar-herdr %herdr-home-packages))
+  #:export (feature-familiar-herdr))
 
 (define %herdr-home-packages
   (cons* herdr herdr-sesh herdr-tiny-fingers jjui

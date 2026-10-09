@@ -14,15 +14,7 @@
   #:use-module (gnu packages admin)
   #:use-module (rde features)
   #:use-module (rde features base)
-  #:export (make-familiar-config %familiar-home-packages))
-
-;; Keep the preview manifest in sync with the explicit package features.
-(define %familiar-home-packages
-  (append %desktop-home-packages
-          %shell-home-packages
-          %editor-home-packages
-          %development-home-packages
-          %herdr-home-packages))
+  #:export (make-familiar-config))
 
 (define* (make-familiar-config #:key root-uuid esp-uuid channels)
   (let* ((base (make-base-os #:root-uuid root-uuid

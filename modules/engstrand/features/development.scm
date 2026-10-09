@@ -7,7 +7,7 @@
   #:use-module (engstrand packages pi-coding-agent)
   #:use-module (gnu packages curl)
   #:use-module (gnu packages)
-  #:export (feature-familiar-development %development-home-packages))
+  #:export (feature-familiar-development))
 
 (define %development-home-packages
   (cons* babashka bun github-cli jiti pi-coding-agent curl

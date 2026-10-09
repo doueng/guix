@@ -1,7 +1,7 @@
 (define-module (engstrand features editor)
   #:use-module (engstrand features packages)
   #:use-module (gnu packages)
-  #:export (feature-familiar-editor %editor-home-packages))
+  #:export (feature-familiar-editor))
 
 (define %editor-home-packages
   (map specification->package

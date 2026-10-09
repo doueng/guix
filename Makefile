@@ -3,7 +3,6 @@
 
 CONFIG ?= desktop/system.scm
 HOME_CONFIG ?= desktop/home.scm
-HOME_MANIFEST ?= desktop/home-manifest.scm
 CHANNELS ?= channels.scm
 MODULES ?= modules
 
@@ -17,7 +16,7 @@ GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := --substitute-urls="$(SUBSTITUTE_URLS)" -L "$(MODULES)"
 
 .PHONY: help pull check dry-run build repro-build switch \
-        home-build home-weather home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test
+        home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test
 
 help:
 	@echo 'pull          update the user Guix profile from $(CHANNELS)'
@@ -27,7 +26,6 @@ help:
 	@echo 'repro-build   build system using the pinned channels via time-machine'
 	@echo 'switch        build and activate system (sudo; writes ESP)'
 	@echo 'home-build    build Home without activating it'
-	@echo 'home-weather  check substitutes for explicit Home packages'
 	@echo 'home-apply    activate Home, then stow live configs'
 	@echo 'stow          build SCI and install live config links using GNU Stow'
 	@echo 'pi-sci        compile the pinned SCI codemode runtime'
@@ -65,9 +63,6 @@ switch:
 
 home-build:
 	"$(GUIX)" home build $(COMMON) "$(HOME_CONFIG)"
-
-home-weather:
-	"$(GUIX)" weather $(COMMON) -m "$(HOME_MANIFEST)"
 
 pi-sci:
 	desktop/build/pi-sci/build.sh

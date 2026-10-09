@@ -2,7 +2,7 @@
   #:use-module (engstrand features packages)
   #:use-module (engstrand services home-shell)
   #:use-module (gnu packages)
-  #:export (feature-familiar-shell %shell-home-packages))
+  #:export (feature-familiar-shell))
 
 (define %shell-home-packages
   (map specification->package

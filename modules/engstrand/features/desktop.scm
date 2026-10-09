@@ -6,7 +6,7 @@
   #:use-module (engstrand services home-mime)
   #:use-module (asahi guix systems desktop)
   #:use-module (gnu packages)
-  #:export (feature-familiar-desktop %desktop-home-packages))
+  #:export (feature-familiar-desktop))
 
 (define %desktop-home-packages
   (append (list bluetui ghostty)
