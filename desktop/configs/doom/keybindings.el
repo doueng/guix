@@ -2,7 +2,7 @@
 
 ;; Global leader bindings
 (map! :leader
-      :desc "Toggle Treemacs" "e" #'treemacs)
+      :desc "Toggle Treemacs" "e" #'+treemacs/toggle)
 
 (defun eng/lsp-rename ()
   (interactive)
@@ -159,7 +159,7 @@
 
 ;; Toggle operations
 (map! :leader
-      :desc "Toggle treemacs"       "e" #'treemacs
+      :desc "Toggle treemacs"       "e" #'+treemacs/toggle
       :desc "Toggle line numbers"   "t l" #'doom/toggle-line-numbers
       :desc "Toggle word wrap"      "t w" #'visual-line-mode
       :desc "Toggle terminal"       "t T" #'+vterm/toggle)

@@ -413,6 +413,12 @@ This is a lightweight way to apply config changes without restarting Emacs."
                  ".")
            " "))))
 
+(after! treemacs
+  ;; Doom disables follow mode. Reveal the current file in the tree, and keep
+  ;; the workspace reduced to the current buffer's project.
+  (treemacs-follow-mode 1)
+  (treemacs-project-follow-mode 1))
+
 (defun eng/open-project-startup-layout (&optional file)
   "Open FILE and show the project tree.
 This is intended for project-specific launcher commands, not as a global
@@ -427,7 +433,7 @@ was already started with a file argument."
   (when (require 'treemacs nil t)
     (let ((file-window (selected-window)))
       (ignore-errors
-        (treemacs))
+        (treemacs-add-and-display-current-project-exclusively))
       (when (window-live-p file-window)
         (select-window file-window)))))
 
