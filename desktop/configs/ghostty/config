@@ -29,11 +29,6 @@ resize-overlay = never
 app-notifications = no-clipboard-copy
 link-url = false
 
-macos-non-native-fullscreen = true
-macos-titlebar-style = tabs
-macos-titlebar-proxy-icon = hidden
-macos-option-as-alt = true
-auto-update = off
 quit-after-last-window-closed = false
 
 gtk-titlebar = false
