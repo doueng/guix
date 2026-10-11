@@ -146,6 +146,31 @@
   (when (and (symbol? node) (re-find dotted-symbol (str node)))
     (throw (ex-info (str "Unable to resolve symbol: " node) (select-keys (meta node) [:line :column])))))
 
+;; A page cut short by a byte budget looks complete unless the script checks
+;; :truncated. A read that returned everything it asked for is not partial.
+(defn partial-read [args result]
+  (when (and (map? args) (map? result) (:truncated result))
+    (case (:operation args)
+      "read-jsonl"
+      (let [wanted (or (:limit args) 100)
+            got (count (:items result))]
+        (when (and (:next_cursor result) (< got wanted))
+          {:fname "fs/read-jsonl" :detail (str got " of " wanted " requested records")
+           :resume [:cursor (:next_cursor result)]}))
+      "read"
+      (let [wanted (or (:limit args)
+                       (some-> (:end_line args) (- (or (:start_line args) 1)) inc))
+            got (some-> (:end_line result) (- (or (:start_line result) 1)) inc)]
+        (when (and (:next_line result) (or (nil? wanted) (and got (< got wanted))))
+          {:fname "fs/read" :detail (str "lines " (:start_line result) "-" (:end_line result)
+                                           " of " (:total_lines result))
+           :resume [:start_line (:next_line result)]}))
+      nil)))
+
+(defn partial-hint [{:keys [fname path detail resume]}]
+  (str "Hint: " fname " returned part of " path " (" detail "). Pass "
+       (pr-str (first resume)) " " (pr-str (second resume)) " to read the rest."))
+
 (defn hint [message source session-names]
   (if-let [[_ sym] (re-find #"(?:Unable to resolve symbol|Could not resolve symbol): *(\S+)" message)]
     (if (contains? session-names sym)
@@ -176,9 +201,21 @@
                        (throw (ex-info "Effects are disabled during SCI declaration replay" {}))))
         effect (fn [f] (fn [& args] (live!) (apply f args)))
         pending (atom 0)
+        partials (atom {})
+        followed? (fn [opts {:keys [path resume]}]
+                    (and (= path (:path opts)) (= (second resume) (get opts (first resume)))))
         tracked (fn [f] (fn [& args]
-                          (swap! pending inc)
-                          (.finally (apply f args) #(swap! pending dec))))
+                          (let [opts (first args)]
+                            (when (map? opts)
+                              (swap! partials #(into {} (remove (fn [[_ entry]] (followed? opts entry))) %)))
+                            (swap! pending inc)
+                            (-> (apply f args)
+                                (.then (fn [result]
+                                         (when-let [entry (partial-read opts result)]
+                                           (swap! partials assoc [(:operation opts) (:path opts)]
+                                                  (assoc entry :path (:path opts))))
+                                         result))
+                                (.finally #(swap! pending dec))))))
         tool-map (into {} (map (fn [id]
                                 [(symbol id) (effect (tracked (promised (aget (.-tools api) id))))])
                               (js/Object.keys (.-tools api))))
@@ -274,6 +311,8 @@
              (fn [value]
                (when-not (nil? value)
                  ((.-text api) (display value)))
+               (doseq [entry (vals @partials)]
+                 ((.-text api) (partial-hint entry)))
                (let [n @pending]
                  (when (pos? n)
                    ((.-text api) (str "Hint: " n (if (= 1 n) " call was" " calls were")

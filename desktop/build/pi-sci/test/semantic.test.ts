@@ -111,7 +111,7 @@ test("Pi search returns records without parsing display text and preserves limit
 		const found = await data(runtime, '(await (search/text "needle"))');
 		assert.equal(found.items.length, 2, JSON.stringify(found));
 		assert.equal(found.truncated, false);
-		assert.equal(found.items[0].path, join(runtime.cwd, 'odd:23: "file.clj'));
+		assert.equal(found.items[0].path, 'odd:23: "file.clj');
 		assert.equal(found.items[0].line, 1);
 		assert.equal(found.items[0].column, 1);
 		assert.deepEqual(found.items[0].columns, [1, 8]);
@@ -150,10 +150,7 @@ test("Pi search returns records without parsing display text and preserves limit
 			runtime,
 			'(await (search/files {:glob "*.clj" :paths ["one" "two"]}))',
 		);
-		assert.deepEqual(
-			new Set(multiFiles.items),
-			new Set([join(runtime.cwd, "one", "a.clj"), join(runtime.cwd, "two", "b.clj")]),
-		);
+		assert.deepEqual(new Set(multiFiles.items), new Set(["one/a.clj", "two/b.clj"]));
 		assert.equal(
 			(await runtime.call('(await (search/text "needle" {:path "." :paths ["one"]}))')).isError,
 			true,

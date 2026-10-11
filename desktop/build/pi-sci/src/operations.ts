@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type Static, type TObject, type TSchema, Type } from "typebox";
 import { type CommandResult, runCommand } from "./command-process.ts";
@@ -78,6 +78,30 @@ export function signatures(domain: Domain) {
 		return `(${domain.alias}/${name}${op.positional ? ` ${op.positional}` : ""}${keys.length ? ` {${keys.join(" ")}}` : ""})${op.mutation ? " mutation" : ""}`;
 	});
 }
+function relativePath(value: Json, base: string): Json {
+	if (typeof value !== "string" || !isAbsolute(value)) return value;
+	const path = relative(base, value);
+	if (path === "") return ".";
+	return path.startsWith("..") || isAbsolute(path) ? value : path;
+}
+
+// Paths under the call's directory print relative to it, which keeps results
+// short. Passing one back with the same :cwd names the same file. Only path
+// fields change, never file contents in :value or :text.
+export function relativePaths(data: { [key: string]: Json }, base: string) {
+	const out = { ...data };
+	for (const key of ["path", "root", "pattern"])
+		if (key in out) out[key] = relativePath(out[key], base);
+	if (Array.isArray(out.paths)) out.paths = out.paths.map((item) => relativePath(item, base));
+	if (Array.isArray(out.items))
+		out.items = out.items.map((item) =>
+			item && typeof item === "object" && !Array.isArray(item) && "path" in item
+				? { ...item, path: relativePath(item.path, base) }
+				: relativePath(item, base),
+		);
+	return out;
+}
+
 export function registerDomain(pi: ExtensionAPI, domain: Domain) {
 	pi.registerTool({
 		name: domain.id,
@@ -105,6 +129,8 @@ export function registerDomain(pi: ExtensionAPI, domain: Domain) {
 			try {
 				controller.signal.throwIfAborted();
 				data = JSON.parse(JSON.stringify(await op.run(args, { ctx, signal: controller.signal })));
+				if (domain.local)
+					data = relativePaths(data, resolve(ctx.cwd, (args.cwd as string | undefined) ?? "."));
 				controller.signal.throwIfAborted();
 			} catch (error) {
 				if (controller.signal.aborted) throw controller.signal.reason;

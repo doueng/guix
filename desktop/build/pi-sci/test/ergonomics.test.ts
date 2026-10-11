@@ -186,6 +186,67 @@ test("errors explain how to fix the program", async () => {
 	}
 });
 
+test("results name paths relative to the call directory and flag partial reads", async () => {
+	const runtime = await harness();
+	try {
+		const cwd = runtime.cwd;
+		mkdirSync(join(cwd, "sub"));
+		writeFileSync(join(cwd, "sub", "a.txt"), "x\n");
+		writeFileSync(join(cwd, "paths.json"), JSON.stringify({ path: join(cwd, "sub", "a.txt") }));
+		const listing = await data(runtime, '(await (fs/list "sub"))');
+		assert.equal(listing.root, "sub");
+		assert.deepEqual(
+			listing.items.map((item: { path: string }) => item.path),
+			["sub/a.txt"],
+		);
+		const scoped = await data(runtime, '(await (fs/list "." {:cwd "sub"}))');
+		assert.equal(scoped.root, ".");
+		assert.deepEqual(
+			scoped.items.map((item: { path: string }) => item.path),
+			["a.txt"],
+		);
+		assert.equal((await data(runtime, '(await (fs/stat "/"))')).path, "/");
+		const json = await data(runtime, '(await (fs/read-json "paths.json"))');
+		assert.equal(json.path, "paths.json");
+		assert.equal(json.value.path, join(cwd, "sub", "a.txt"));
+
+		writeFileSync(
+			join(cwd, "big.jsonl"),
+			Array.from({ length: 2000 }, (_, i) => JSON.stringify({ i, pad: "x".repeat(100) })).join(
+				"\n",
+			),
+		);
+		const cut = output(
+			await runtime.call('(count (:items (await (fs/read-jsonl "big.jsonl" {:limit 1000}))))'),
+		);
+		assert.match(
+			cut,
+			/Hint: fs\/read-jsonl returned part of big\.jsonl \(\d+ of 1000 requested records\)\. Pass :cursor \{:offset \d+, :line \d+\} to read the rest\./,
+		);
+		const paged = output(
+			await runtime.call(
+				'(loop [c nil n 0] (let [r (await (fs/read-jsonl "big.jsonl" (cond-> {:limit 1000} c (assoc :cursor c)))) n (+ n (count (:items r)))] (if (:next_cursor r) (recur (:next_cursor r) n) n)))',
+			),
+		);
+		assert.match(paged, /2000/);
+		assert.doesNotMatch(paged, /Hint/);
+		writeFileSync(
+			join(cwd, "long.txt"),
+			Array.from({ length: 3000 }, (_, i) => `line ${i}`).join("\n"),
+		);
+		assert.match(
+			output(await runtime.call('(count (:text (await (fs/read "long.txt"))))')),
+			/Hint: fs\/read returned part of long\.txt \(lines 1-2000 of 3000\)\. Pass :start_line 2001 to read the rest\./,
+		);
+		assert.doesNotMatch(
+			output(await runtime.call('(count (:text (await (fs/read "long.txt" {:limit 5}))))')),
+			/Hint/,
+		);
+	} finally {
+		runtime.close();
+	}
+});
+
 test("fs glob, disk usage, and sorted listings replace ls, find, and du", async () => {
 	const runtime = await harness();
 	try {
@@ -198,22 +259,20 @@ test("fs glob, disk usage, and sorted listings replace ls, find, and du", async 
 		writeFileSync(join(cwd, ".a3.txt"), "333");
 		writeFileSync(join(cwd, "sub", "deep", "c.txt"), "4444");
 		const glob = await data(runtime, '(await (fs/glob "a?.txt"))');
-		assert.deepEqual(glob.items, [join(cwd, "a1.txt"), join(cwd, "a2.txt")]);
+		assert.deepEqual(glob.items, ["a1.txt", "a2.txt"]);
 		assert.equal(glob.truncated, false);
 		assert.deepEqual((await data(runtime, '(await (fs/glob {:glob "a?.txt"}))')).items, glob.items);
 		const visible = await data(runtime, '(await (fs/glob "**/c.txt"))');
-		assert.deepEqual(visible.items, [join(cwd, "sub", "deep", "c.txt")]);
+		assert.deepEqual(visible.items, ["sub/deep/c.txt"]);
 		assert.ok(visible.skipped_hidden >= 1);
 		const all = await data(runtime, '(await (fs/glob "**/c.txt" {:hidden true}))');
-		assert.deepEqual(all.items, [join(cwd, ".cache", "c.txt"), join(cwd, "sub", "deep", "c.txt")]);
+		assert.deepEqual(all.items, [".cache/c.txt", "sub/deep/c.txt"]);
 		assert.equal(all.skipped_hidden, 0);
 		assert.ok((await data(runtime, '(await (fs/glob "*.txt"))')).skipped_hidden >= 1);
-		assert.deepEqual((await data(runtime, '(await (fs/glob ".a*"))')).items, [
-			join(cwd, ".a3.txt"),
-		]);
+		assert.deepEqual((await data(runtime, '(await (fs/glob ".a*"))')).items, [".a3.txt"]);
 		assert.deepEqual(
 			(await data(runtime, `(await (fs/glob ${JSON.stringify(join(cwd, "[ab]1.*"))}))`)).items,
-			[join(cwd, "a1.txt")],
+			["a1.txt"],
 		);
 		const usage = await data(runtime, '(await (fs/disk-usage "sub"))');
 		assert.deepEqual(
