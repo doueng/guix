@@ -9,8 +9,6 @@
                          "/config/chromium/extensions/old-reddit-redirect"))
 (def chrome-flags
   ["--ozone-platform=wayland"
-   "--high-dpi-support=1"
-   "--force-device-scale-factor=1.6"
    "--enable-font-antialiasing"
    "--enable-lcd-text"])
 

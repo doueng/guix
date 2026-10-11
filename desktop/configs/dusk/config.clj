@@ -17,7 +17,7 @@
 (def radius (* 9 corner-radius-scale))
 (def popup-opacity 0.6)
 
-(ui/defaults! {:scale 1.8 :font-family "sans-serif" :color (:on-surface theme)})
+(ui/defaults! {:scale 1.125 :font-family "sans-serif" :color (:on-surface theme)})
 
 (defn card-style [opacity]
   {:bg (ui/alpha (:surface theme) opacity)
