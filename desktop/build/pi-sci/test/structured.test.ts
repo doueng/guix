@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readJson, readJsonl } from "../src/structured-files.ts";
@@ -52,6 +53,34 @@ test("complete JSON reads parse beyond the display limit without losing values",
 		}
 	} finally {
 		runtime.close();
+	}
+});
+
+// Codemode cancels calls still pending when a script ends. A signal that
+// aborts while the file opens must reject the read, not leave the stream to
+// emit an unhandled error that kills Pi.
+test("a structured read cancelled while its file opens rejects without an uncaught error", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-sci-abort-"));
+	const path = join(dir, "data.jsonl");
+	writeFileSync(path, '{"a":1}\n');
+	const uncaught: unknown[] = [];
+	const record = (error: unknown) => uncaught.push(error);
+	process.on("uncaughtException", record);
+	try {
+		for (const read of [
+			(signal: AbortSignal) => readJson(path, signal),
+			(signal: AbortSignal) => readJsonl(path, {}, signal),
+		]) {
+			const controller = new AbortController();
+			const pending = read(controller.signal);
+			controller.abort();
+			await assert.rejects(pending, { name: "AbortError" });
+		}
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		assert.deepEqual(uncaught, []);
+	} finally {
+		process.off("uncaughtException", record);
+		rmSync(dir, { recursive: true, force: true });
 	}
 });
 

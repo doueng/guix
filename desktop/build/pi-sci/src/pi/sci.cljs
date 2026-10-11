@@ -135,6 +135,17 @@
             (print! advice)))
         result))))
 
+(def dotted-symbol (re-pattern (str "^" (.-source dotted-alias) "$")))
+
+;; Both forms evaluate without error in SCI, so a script that uses them reports
+;; success while its call never runs.
+(defn check-form [node]
+  (when (and (seq? node) (= 'await (first node)) (not= 2 (count node)))
+    (throw (ex-info "await takes one expression; write (await (f args)), not (await f args)"
+                    (select-keys (meta node) [:line :column]))))
+  (when (and (symbol? node) (re-find dotted-symbol (str node)))
+    (throw (ex-info (str "Unable to resolve symbol: " node) (select-keys (meta node) [:line :column])))))
+
 (defn hint [message source session-names]
   (if-let [[_ sym] (re-find #"(?:Unable to resolve symbol|Could not resolve symbol): *(\S+)" message)]
     (if (contains? session-names sym)
@@ -164,8 +175,12 @@
         live! (fn [] (when-not (= :live @phase)
                        (throw (ex-info "Effects are disabled during SCI declaration replay" {}))))
         effect (fn [f] (fn [& args] (live!) (apply f args)))
+        pending (atom 0)
+        tracked (fn [f] (fn [& args]
+                          (swap! pending inc)
+                          (.finally (apply f args) #(swap! pending dec))))
         tool-map (into {} (map (fn [id]
-                                [(symbol id) (effect (promised (aget (.-tools api) id)))])
+                                [(symbol id) (effect (tracked (promised (aget (.-tools api) id))))])
                               (js/Object.keys (.-tools api))))
         tool-map (cond-> tool-map
                    (contains? tool-map 'bash) (update 'bash hint-bash (.-text api)))
@@ -175,10 +190,10 @@
         library (library/create-library context phase
                    (fn [operations] ((.-commitEnvironment api) (to-wire operations))) allowed-namespaces)
         catalog-map (into {} (map (fn [id]
-                                   [(symbol id) (effect (promised (aget (.-catalog api) id)))])
+                                   [(symbol id) (effect (tracked (promised (aget (.-catalog api) id))))])
                                  (js/Object.keys (.-catalog api))))
         model-map (into {} (map (fn [id]
-                                 [(symbol id) (effect (promised (aget (.-models api) id)))])
+                                 [(symbol id) (effect (tracked (promised (aget (.-models api) id))))])
                                (js/Object.keys (.-models api))))
         runtime {'text (fn [x] ((.-text api) (display x)) nil)
                  'println (fn [& xs] ((.-text api) (str/join " " (map str xs))) nil)
@@ -227,6 +242,7 @@
                         forms
                         (do
                           (doseq [node (tree-seq coll? seq form)]
+                            (check-form node)
                             (when (and (number? node) (not (js/Number.isFinite node)))
                               (throw (ex-info "JSON numbers must be finite" {}))))
                           (if (and (seq? form) (= 'require (first form)))
@@ -258,6 +274,11 @@
              (fn [value]
                (when-not (nil? value)
                  ((.-text api) (display value)))
+               (let [n @pending]
+                 (when (pos? n)
+                   ((.-text api) (str "Hint: " n (if (= 1 n) " call was" " calls were")
+                                      " still running when the script ended and " (if (= 1 n) "was" "were")
+                                      " cancelled. Await each call, as in (await (fs/read path))."))))
                js/undefined)
              (fn [error] (js/Promise.reject (script-error error source ((:names library)))))))
       (catch :default e

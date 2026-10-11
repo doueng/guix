@@ -274,7 +274,13 @@ test("pending calls are cancelled when the body ends", async () => {
 		result.calls.map((call) => [call.name, call.status]),
 		[["slow", "cancelled"]],
 	);
-	assert.deepEqual(result.output, [{ type: "text", text: "finished" }]);
+	assert.deepEqual(result.output, [
+		{ type: "text", text: "finished" },
+		{
+			type: "text",
+			text: "Hint: 1 call was still running when the script ended and was cancelled. Await each call, as in (await (fs/read path)).",
+		},
+	]);
 });
 
 test("async helpers sequence their own body expressions", async () => {

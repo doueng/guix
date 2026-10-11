@@ -133,6 +133,12 @@ test("errors explain how to fix the program", async () => {
 				/1 \| \(let \[b \(inc 1\)\n\s+\^ unclosed form opens here[\s\S]*2 \| {3}\(\* b 2\)\)\)\n\s+\^ reader stopped here/,
 			],
 			['(await (tools.edit {:path "x"}))', /Hint: Use tools\/edit; Clojure namespaces use a slash/],
+			[
+				'(text "a") (await tools.edit {:path "x"})',
+				/await takes one expression[\s\S]*codemode\.clj:1:12/,
+			],
+			['(await fs/read "x")', /await takes one expression; write \(await \(f args\)\)/],
+			["(text tools.edit)", /Hint: Use tools\/edit; Clojure namespaces use a slash/],
 			["(await (git/status))", /Hint: There is no git namespace/],
 			['(store "k" {:tags #{:a}})', /Value at \[:tags\] is a set, which is not JSON-compatible/],
 			['(store "k" [(fs/exists? "x")])', /Value at \[0\] is a promise \(missing await\?\)/],
@@ -168,6 +174,13 @@ test("errors explain how to fix the program", async () => {
 			/Hint: Use session\/helper; defsession definitions live in the session namespace/,
 		);
 		assert.doesNotMatch(output(await runtime.call("(text (missing))")), /Hint: Use session/);
+		const unawaited = await runtime.call('(let [r (fs/exists? "x")] (pr-str r))');
+		assert.equal(unawaited.isError, false);
+		assert.match(output(unawaited), /Hint: 1 call was still running when the script ended/);
+		assert.doesNotMatch(
+			output(await runtime.call('(pr-str (await (fs/exists? "x")))')),
+			/still running/,
+		);
 	} finally {
 		runtime.close();
 	}

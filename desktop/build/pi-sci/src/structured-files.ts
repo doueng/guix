@@ -32,6 +32,8 @@ export async function readJson(path: string, signal?: AbortSignal) {
 		if (!(await file.stat()).isFile()) throw new Error("Structured reads require a regular file");
 		const chunks: Buffer[] = [];
 		let bytes = 0;
+		// A stream built on an already aborted signal also emits an unhandled error.
+		signal?.throwIfAborted();
 		const stream = file.createReadStream({ autoClose: false, signal });
 		try {
 			for await (const chunk of stream) {
@@ -63,6 +65,7 @@ async function* records(path: string, cursor: Cursor, signal?: AbortSignal) {
 			await file.read(byte, 0, 1, cursor.offset - 1);
 			if (byte[0] !== 10) throw new Error("JSONL cursor must point to a record boundary");
 		}
+		signal?.throwIfAborted();
 		const stream = file.createReadStream({ start: cursor.offset, autoClose: false, signal });
 		let pending: Buffer = Buffer.alloc(0),
 			offset = cursor.offset,
