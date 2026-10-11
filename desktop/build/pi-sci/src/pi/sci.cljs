@@ -1,5 +1,7 @@
 (ns pi.sci
   (:require [sci.core :as sci]
+            [goog.string :as gstring]
+            [goog.string.format]
             [clojure.string :as str]
             [clojure.set :as set]
             [pi.library :as library]
@@ -117,7 +119,31 @@
    [#"^tools/(find|ls)$" (constantly "Use search/files, fs/list, or fs/glob.")]
    [#"^git/" (constantly "There is no git namespace. Use jj/ functions in this repository.")]
    [#"^rg/" (constantly "Use search/text.")]
-   [#"^(process|shell|sh)/" (constantly "There is no generic process runner. Use a semantic namespace, or tools/bash as the escape hatch.")]])
+   [#"^(process|shell|sh)/" (constantly "There is no generic process runner. Use a semantic namespace, or tools/bash as the escape hatch.")]
+   [#"^await$" (constantly "await works in the script body and in functions marked ^:async, such as (defn ^:async f [x] ...). To await many calls, await them together: (await (all (mapv #(fs/read %) paths))).")]
+   [#"^(Long/parseLong|Integer/parseInt|js/parseInt|bigint)$" (constantly "Use parse-long.")]
+   [#"^(Double/parseDouble|js/parseFloat|bigdec)$" (constantly "Use parse-double.")]
+   [#"^spit$" (constantly "Use (await (tools/write {:path p :content s})).")]
+   [#"^slurp$" (constantly "Use (:text (await (fs/read p))), or fs/read-json for JSON.")]
+   [#"^StringBuilder$" (constantly "Use str or clojure.string/join.")]
+   [#"^(Exception|Throwable|RuntimeException)$" (constantly "Use (catch :default e ...); there are no Java classes.")]
+   [#"^js/JSON" (constantly "Use json/parse and json/generate.")]
+   [#"^js/" (constantly "There is no JavaScript interop. clojure.core, clojure.string, clojure.set, Math, and the Pi namespaces are available.")]])
+
+;; Clojure functions models reach for that SCI's ClojureScript core lacks or
+;; that have no interop route here. Math mirrors the static methods of
+;; java.lang.Math that scripts use.
+(def numbers
+  {'parse-long parse-long
+   'parse-double parse-double
+   'parse-boolean parse-boolean
+   'abs abs
+   'format gstring/format})
+
+(def math
+  {'abs abs 'ceil #(js/Math.ceil %) 'floor #(js/Math.floor %) 'round #(js/Math.round %)
+   'sqrt #(js/Math.sqrt %) 'pow #(js/Math.pow %1 %2) 'log #(js/Math.log %) 'exp #(js/Math.exp %)
+   'max max 'min min 'PI js/Math.PI})
 
 (def file-command #"(?:^|;|&&|\|\||\n|\$\()\s*(?:sudo\s+)?(grep|rg|find|cat|ls)(?=\s|$)")
 
@@ -256,7 +282,8 @@
                                               'generate #(js/JSON.stringify (to-wire %))}
                                     'clojure.string (sci/copy-ns clojure.string (sci/create-ns 'clojure.string))
                                     'clojure.set (sci/copy-ns clojure.set (sci/create-ns 'clojure.set))
-                                    'clojure.core (select-keys runtime '[println prn])
+                                    'clojure.core (merge numbers (select-keys runtime '[println prn]))
+                                    'Math math
                                     'user runtime
                                     'session (merge runtime (:bindings library))}
                                           (into {} (map (fn [[ns info]] [ns (:bindings info)]) command-namespaces)))

@@ -139,6 +139,16 @@ test("errors explain how to fix the program", async () => {
 			],
 			['(await fs/read "x")', /await takes one expression; write \(await \(f args\)\)/],
 			["(text tools.edit)", /Hint: Use tools\/edit; Clojure namespaces use a slash/],
+			['(Long/parseLong "1")', /Hint: Use parse-long\./],
+			['(Double/parseDouble "1")', /Hint: Use parse-double\./],
+			['(spit "x" "y")', /Hint: Use \(await \(tools\/write/],
+			["(StringBuilder.)", /Hint: Use str or clojure\.string\/join\./],
+			["(try 1 (catch Exception e 2))", /Hint: Use \(catch :default e \.\.\.\)/],
+			['(js/JSON.parse "1")', /Hint: Use json\/parse/],
+			[
+				'(mapv (fn [p] (await (fs/read p))) ["a"])',
+				/Hint: await works in the script body and in functions marked \^:async/,
+			],
 			["(await (git/status))", /Hint: There is no git namespace/],
 			['(store "k" {:tags #{:a}})', /Value at \[:tags\] is a set, which is not JSON-compatible/],
 			['(store "k" [(fs/exists? "x")])', /Value at \[0\] is a promise \(missing await\?\)/],
@@ -180,6 +190,21 @@ test("errors explain how to fix the program", async () => {
 		assert.doesNotMatch(
 			output(await runtime.call('(pr-str (await (fs/exists? "x")))')),
 			/still running/,
+		);
+	} finally {
+		runtime.close();
+	}
+});
+
+test("number parsing, formatting, and Math functions are available", async () => {
+	const runtime = await harness();
+	try {
+		assert.deepEqual(
+			await data(
+				runtime,
+				'{:long (parse-long "-12") :double (parse-double "1.5") :bad (parse-long "x") :abs (abs -3) :format (format "%.2f|%s|%03d" 2.5 "a" 7) :ceil (Math/ceil 1.2) :pow (Math/pow 2 10)}',
+			),
+			{ long: -12, double: 1.5, bad: null, abs: 3, format: "2.50|a|007", ceil: 2, pow: 1024 },
 		);
 	} finally {
 		runtime.close();
