@@ -16,7 +16,6 @@
 
 (def herdr-bin (or (System/getenv "HERDR_BIN_PATH")
                    (bin-path "herdr")))
-(def allowed-labels #{"shell" "emacs" "pi" "jjui"})
 
 (defn tab-number [target]
   (try
@@ -60,43 +59,35 @@
         (fail! (str "invalid JSON from " (str/join " " argv) ": " (.getMessage error)))))))
 
 (defn usage []
-  (eprintln "Usage: herdr-tab-focus <shell|emacs|pi|jjui|1..9>")
+  (eprintln "Usage: herdr-tab-focus <1..9>")
   (System/exit 2))
 
-(defn tab-id-for-target [tabs target]
-  (if (contains? allowed-labels target)
-    (some (fn [{tab-id :tab_id tab-label :label}]
-            (when (= target tab-label) tab-id))
-          tabs)
-    (when-let [number (tab-number target)]
-      ;; Herdr's public tab numbers remain stable after tabs are closed or
-      ;; moved, so use the ordered tab list here rather than TabInfo.number.
-      (nth (map :tab_id tabs) (dec number) nil))))
+(defn tab-id-for-number [tabs number]
+  ;; Herdr's public tab numbers remain stable after tabs are closed or
+  ;; moved, so use the ordered tab list here rather than TabInfo.number.
+  (nth (map :tab_id tabs) (dec number) nil))
 
 (defn -main [& args]
   (when (some #{"-h" "--help"} args)
-    (eprintln "Usage: herdr-tab-focus <shell|emacs|pi|jjui|1..9>")
+    (eprintln "Usage: herdr-tab-focus <1..9>")
     (System/exit 0))
   (if (not= 1 (count args))
     (usage)
-    (let [target (first args)]
-      (when-not (or (contains? allowed-labels target)
-                    (tab-number target))
-        (usage))
-      (let [workspace-id (or (System/getenv "HERDR_ACTIVE_WORKSPACE_ID")
-                             (some (fn [{:keys [focused workspace_id]}]
-                                     (when focused workspace_id))
-                                   (get-in (json! [herdr-bin "workspace" "list"])
-                                           [:result :workspaces])))]
-        (when-not workspace-id
-          (fail! "no focused Herdr workspace"))
-        (let [tabs (get-in (json! [herdr-bin "tab" "list"
-                                     "--workspace" workspace-id])
-                            [:result :tabs])
-              tab-id (tab-id-for-target tabs target)]
-          (when-not tab-id
-            (fail! (str "no Herdr tab named or numbered " target
-                        " in workspace " workspace-id)))
-          (run! [herdr-bin "tab" "focus" tab-id]))))))
+    (let [number (or (tab-number (first args)) (usage))
+          workspace-id (or (System/getenv "HERDR_ACTIVE_WORKSPACE_ID")
+                           (some (fn [{:keys [focused workspace_id]}]
+                                   (when focused workspace_id))
+                                 (get-in (json! [herdr-bin "workspace" "list"])
+                                         [:result :workspaces])))]
+      (when-not workspace-id
+        (fail! "no focused Herdr workspace"))
+      (let [tabs (get-in (json! [herdr-bin "tab" "list"
+                                   "--workspace" workspace-id])
+                          [:result :tabs])
+            tab-id (tab-id-for-number tabs number)]
+        (when-not tab-id
+          (fail! (str "no Herdr tab numbered " number
+                      " in workspace " workspace-id)))
+        (run! [herdr-bin "tab" "focus" tab-id])))))
 
 (apply -main *command-line-args*)
