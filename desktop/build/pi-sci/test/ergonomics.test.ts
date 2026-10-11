@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { runCommand } from "../src/command-process.ts";
 import { searchDomain } from "../src/files.ts";
 import { signatures } from "../src/operations.ts";
-import { condenseFailure } from "../src/output.ts";
+import { condenseFailure, throttleUpdates } from "../src/output.ts";
 import { harness, output } from "./harness.ts";
 
 async function data(runtime: Awaited<ReturnType<typeof harness>>, source: string) {
@@ -184,6 +184,21 @@ test("errors explain how to fix the program", async () => {
 	} finally {
 		runtime.close();
 	}
+});
+
+test("progress updates are throttled to the latest value and dropped after stop", async () => {
+	const seen: number[] = [];
+	const progress = throttleUpdates((value: number) => seen.push(value), 40);
+	for (let i = 1; i <= 1000; i++) progress.update?.(i);
+	assert.deepEqual(seen, [1]);
+	await new Promise((resolve) => setTimeout(resolve, 60));
+	assert.deepEqual(seen, [1, 1000]);
+	progress.update?.(1001);
+	progress.update?.(1002);
+	progress.stop();
+	await new Promise((resolve) => setTimeout(resolve, 60));
+	assert.deepEqual(seen, [1, 1000]);
+	assert.equal(throttleUpdates(undefined).update, undefined);
 });
 
 test("results name paths relative to the call directory and flag partial reads", async () => {

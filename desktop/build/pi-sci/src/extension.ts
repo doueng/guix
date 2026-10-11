@@ -24,7 +24,7 @@ import {
 	parseEnvironmentDelta,
 	readEnvironment,
 } from "./environment.ts";
-import { budgetOutput } from "./output.ts";
+import { budgetOutput, throttleUpdates } from "./output.ts";
 import { compileSciSource, outputBudget, SCI_GRAMMAR } from "./source.ts";
 
 export default function sciCodemode(pi: ExtensionAPI) {
@@ -99,10 +99,20 @@ export default function sciCodemode(pi: ExtensionAPI) {
 						(name) => metadata.get(name)?.promptGuidelines ?? [],
 					);
 					const code = compileSciSource(params.code, entries, environment);
-					const result = await budgetOutput(
-						await executor.execute(id, { ...params, code }, signal, update, ctx),
-						outputBudget(params.code),
-					);
+					const progress = throttleUpdates(update);
+					let executed: Awaited<ReturnType<typeof executor.execute>>;
+					try {
+						executed = await executor.execute(
+							id,
+							{ ...params, code },
+							signal,
+							progress.update,
+							ctx,
+						);
+					} finally {
+						progress.stop();
+					}
+					const result = await budgetOutput(executed, outputBudget(params.code));
 					if (result.isError) return result;
 					try {
 						if (signal?.aborted) throw new Error("SCI invocation was aborted before commit.");

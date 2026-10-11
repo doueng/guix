@@ -112,3 +112,35 @@ export async function budgetOutput<T extends AgentToolResult<unknown>>(
 		details: { ...(result.details as object), ...(path ? { fullOutputPath: path } : {}) },
 	};
 }
+
+// Pi's codemode executor reports progress after every nested call, and each
+// report carries the whole call list, so a script with n calls sends O(n²)
+// bytes to the UI. Deliver the first report, then at most one per interval,
+// always the latest. stop() drops a pending report once the call returns.
+export function throttleUpdates<T>(update: ((value: T) => void) | undefined, intervalMs = 250) {
+	if (!update) return { update, stop() {} };
+	let last = 0;
+	let pending: { value: T } | undefined;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const flush = () => {
+		timer = undefined;
+		if (!pending) return;
+		last = Date.now();
+		const { value } = pending;
+		pending = undefined;
+		update(value);
+	};
+	return {
+		update(value: T) {
+			pending = { value };
+			const wait = last + intervalMs - Date.now();
+			if (wait <= 0 && !timer) flush();
+			else timer ??= setTimeout(flush, Math.max(0, wait));
+		},
+		stop() {
+			if (timer) clearTimeout(timer);
+			timer = undefined;
+			pending = undefined;
+		},
+	};
+}
