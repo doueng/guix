@@ -47,7 +47,8 @@
 (defn main []
   (when-let [command (choose (find-executable "dusk"))]
     (try
-      (p/process command)
+      ;; Pipes would close when bb exits, killing apps that write to stdout.
+      (p/process command {:inherit true})
       (catch Exception error
         (binding [*out* *err*]
           (println "Unable to launch" (first command) ":" (.getMessage error)))
