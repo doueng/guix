@@ -2,17 +2,44 @@
 // Run the same goal-only tasks against several Pi harness profiles with one
 // model and write one record per trial. See eval/README.md.
 import { spawn } from "node:child_process";
-import { createWriteStream, existsSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { appendFile, chmod, mkdir, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { finished } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { readEvents, summarize } from "./metrics.mjs";
-import { TASKS } from "./tasks.mjs";
+import { TASKS } from "./registry.mjs";
 
 const desktop = fileURLToPath(new URL("../../../", import.meta.url));
 const SCI = join(desktop, "pi/agent/extensions/sci-codemode/index.ts");
 const GUIDANCE = join(desktop, "pi/agent/AGENTS.md");
+const packages = join(homedir(), ".pi/agent/npm/node_modules");
+
+// A provider that Pi loads from a package needs its extension and config file,
+// which --no-extensions and the fresh agent directory would otherwise drop.
+const PROVIDERS = {
+	"claude-bridge": {
+		extensions: [join(packages, "pi-claude-bridge/src/index.ts")],
+		files: ["claude-bridge.json", "npm"],
+	},
+};
+const PARSE_RULE =
+	" Keep parsing, filtering, grouping, sorting, joins, and aggregation in SCI; do not generate temporary Python, JavaScript, shell, or Babashka programs for them.";
+
+function withoutParseRule() {
+	const text = readFileSync(GUIDANCE, "utf8");
+	if (!text.includes(PARSE_RULE))
+		throw new Error(
+			"AGENTS.md no longer contains the parse rule; update PARSE_RULE in eval/run.mjs",
+		);
+	const path = join(homedir(), ".cache/pi-sci-eval/AGENTS-without-parse-rule.md");
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, text.replace(PARSE_RULE, ""));
+	return path;
+}
+
 const sciSettings = (mode) => ({
 	defaultTools: ["+codemode"],
 	extensions: ["-builtin:codemode"],
@@ -21,11 +48,13 @@ const sciSettings = (mode) => ({
 
 // One variable per neighbouring profile: vanilla → sci-bare adds SCI-only
 // codemode, sci-bare → sci adds the production AGENTS.md guidance, and
-// sci-bare → hybrid also declares the plain tools.
+// sci-bare → hybrid also declares the plain tools. sci → sci-nopy drops the
+// rule that forbids generating Python or shell programs for data work.
 export const PROFILES = {
 	vanilla: { args: ["--tools", "read,bash,edit,write"] },
 	"sci-bare": { extensions: [SCI], settings: sciSettings("only") },
 	sci: { extensions: [SCI], settings: sciSettings("only"), append: [GUIDANCE] },
+	"sci-nopy": { extensions: [SCI], settings: sciSettings("only"), append: [withoutParseRule()] },
 	hybrid: { extensions: [SCI], settings: sciSettings("on") },
 };
 
@@ -39,11 +68,18 @@ const opts = flags(process.argv.slice(2));
 if (!opts.model) throw new Error("--model is required");
 const profiles = (opts.profiles ?? "vanilla,sci,hybrid").split(",");
 for (const id of profiles) if (!PROFILES[id]) throw new Error(`unknown profile ${id}`);
-const tasks = opts.tasks ? TASKS.filter((task) => opts.tasks.split(",").includes(task.id)) : TASKS;
+const provider = PROVIDERS[opts.model.split("/")[0]] ?? {};
+const tasks = TASKS.filter(
+	(task) =>
+		(!opts.tasks || opts.tasks.split(",").includes(task.id)) &&
+		(!opts.suite || opts.suite.split(",").includes(task.suite)),
+);
+if (!tasks.length) throw new Error("no tasks match --tasks and --suite");
 const attempts = Number(opts.attempts ?? 1);
 const jobs = Number(opts.jobs ?? 3);
 const timeoutMs = 1000 * Number(opts.timeout ?? 300);
 const thinking = opts.thinking ?? "medium";
+const retries = Number(opts.retries ?? 3);
 const runId = opts.run ?? new Date().toISOString().replace(/[:.]/g, "-");
 const out = resolve(opts.out ?? join(homedir(), ".cache/pi-sci-eval/runs"), runId);
 
@@ -68,8 +104,9 @@ async function prepare(trial, dir) {
 	}
 	await mkdir(ws, { recursive: true });
 	for (const path of trial.task.executable ?? []) await chmod(join(ws, path), 0o755);
+	await trial.task.setup?.(ws);
 	const source = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi/agent");
-	for (const name of ["auth.json", "models.json", "models-store.json"])
+	for (const name of ["auth.json", "models.json", "models-store.json", ...(provider.files ?? [])])
 		if (existsSync(join(source, name))) await symlink(join(source, name), join(agent, name));
 	const profile = PROFILES[trial.profile];
 	await writeFile(
@@ -79,17 +116,22 @@ async function prepare(trial, dir) {
 	return { ws, agent };
 }
 
-function piArgs(trial) {
+function piArgs(trial, dir, prompt, turn) {
 	const profile = PROFILES[trial.profile];
 	return [
 		"--no-extensions",
-		...(profile.extensions ?? []).flatMap((path) => ["--extension", path]),
+		...[...(provider.extensions ?? []), ...(profile.extensions ?? [])].flatMap((path) => [
+			"--extension",
+			path,
+		]),
 		"--no-context-files",
 		"--no-skills",
 		"--no-prompt-templates",
 		"--no-themes",
 		"--no-approve",
-		"--no-session",
+		"--session-dir",
+		join(dir, "session"),
+		...(turn > 0 ? ["--continue"] : []),
 		"--model",
 		opts.model,
 		"--thinking",
@@ -99,20 +141,32 @@ function piArgs(trial) {
 		"--mode",
 		"json",
 		"-p",
-		trial.task.prompt,
+		prompt,
 	];
 }
 
-function runPi(trial, dir, ws, agent) {
+function runTurn(trial, dir, ws, agent, prompt, turn) {
 	return new Promise((done) => {
-		const started = Date.now();
-		const child = spawn("pi", piArgs(trial), {
+		const child = spawn("pi", piArgs(trial, dir, prompt, turn), {
 			cwd: ws,
 			env: { ...process.env, PI_CODING_AGENT_DIR: agent },
 			stdio: ["ignore", "pipe", "pipe"],
 		});
-		child.stdout.pipe(createWriteStream(join(dir, "events.jsonl")));
-		child.stderr.pipe(createWriteStream(join(dir, "stderr.txt")));
+		const events = createWriteStream(join(dir, "events.jsonl"), { flags: "a" });
+		child.stdout.pipe(events);
+		child.stderr.pipe(createWriteStream(join(dir, "stderr.txt"), { flags: "a" }));
+		let last = { stopReason: null, errorMessage: null };
+		createInterface({ input: child.stdout }).on("line", (line) => {
+			if (!line.startsWith('{"type":"message_end"')) return;
+			try {
+				const { message } = JSON.parse(line);
+				if (message?.role === "assistant")
+					last = {
+						stopReason: message.stopReason ?? null,
+						errorMessage: message.errorMessage ?? null,
+					};
+			} catch {}
+		});
 		let timedOut = false;
 		const timer = setTimeout(() => {
 			timedOut = true;
@@ -120,9 +174,41 @@ function runPi(trial, dir, ws, agent) {
 		}, timeoutMs);
 		child.on("close", (exit) => {
 			clearTimeout(timer);
-			done({ exit, timedOut, wallSeconds: (Date.now() - started) / 1000 });
+			finished(events).then(() => done({ exit, timedOut, ...last }));
 		});
 	});
+}
+
+const RATE_LIMITED = /rate.?limit|\b429\b|overloaded|\b529\b/i;
+
+// A task with several prompts continues one session, so a later prompt can
+// reuse whatever the agent built in an earlier one. A prompt that ends on a
+// rate limit after Pi's own retries is sent again into the same session after
+// a pause; invocations records how many times each prompt ran.
+async function runPi(trial, dir, ws, agent) {
+	const started = Date.now();
+	const prompts = trial.task.prompts ?? [trial.task.prompt];
+	const invocations = [];
+	let last = { exit: 0, timedOut: false };
+	for (const [turn, prompt] of prompts.entries()) {
+		for (let attempt = 0; ; attempt++) {
+			last = await runTurn(trial, dir, ws, agent, prompt, turn + attempt);
+			const limited = last.stopReason === "error" && RATE_LIMITED.test(last.errorMessage ?? "");
+			if (!limited || attempt >= retries) {
+				invocations.push(attempt + 1);
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 30_000 * 2 ** attempt));
+		}
+		if (last.exit !== 0 || last.timedOut) break;
+	}
+	return {
+		exit: last.exit,
+		timedOut: last.timedOut,
+		invocations,
+		providerError: last.stopReason === "error" ? last.errorMessage : null,
+		wallSeconds: (Date.now() - started) / 1000,
+	};
 }
 
 async function runTrial(trial) {

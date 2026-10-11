@@ -5,7 +5,7 @@ import { join } from "node:path";
 // Each task owns its fixture and an executable grader. Prompts state the goal
 // only, never which tool to use.
 
-async function answer(ws) {
+export async function answer(ws) {
 	try {
 		return (await readFile(join(ws, "answer.txt"), "utf8")).trim();
 	} catch {
@@ -13,14 +13,14 @@ async function answer(ws) {
 	}
 }
 
-function lines(text) {
+export function lines(text) {
 	return (text ?? "")
 		.split("\n")
 		.map((line) => line.trim())
 		.filter(Boolean);
 }
 
-function nodeTests(ws) {
+export function nodeTests(ws) {
 	try {
 		execFileSync("node", ["--test"], { cwd: ws, stdio: "pipe", timeout: 60_000 });
 		return true;
@@ -82,7 +82,108 @@ function buildLog() {
 
 const LOG = buildLog();
 
-export const TASKS = [
+export function random(seed) {
+	let state = seed;
+	return () => {
+		state = (state * 1103515245 + 12345) % 2147483648;
+		return state / 2147483648;
+	};
+}
+
+const REGIONS = ["north", "south", "east", "west"];
+
+export function orders(seed) {
+	const next = random(seed);
+	const rows = ["id,customer,region,amount,status"];
+	const totals = Object.fromEntries(REGIONS.map((region) => [region, 0]));
+	for (let id = 1; id <= 300; id++) {
+		const region = REGIONS[Math.floor(next() * 4)];
+		const cents = Math.floor(next() * 250000) + 100;
+		const refund = next() < 0.15;
+		totals[region] += refund ? -cents : cents;
+		const spelled = [
+			region,
+			region.toUpperCase(),
+			` ${region[0].toUpperCase()}${region.slice(1)} `,
+		][id % 3];
+		const amount = `${refund ? "-" : ""}$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+		rows.push(`${id},"Customer ${id}, Ltd",${spelled},"${amount}",${refund ? "refunded" : "paid"}`);
+	}
+	const expected = REGIONS.toSorted().map(
+		(region) => `${region} ${(totals[region] / 100).toFixed(2)}`,
+	);
+	return { text: `${rows.join("\n")}\n`, expected };
+}
+
+const SEPTEMBER = orders(9);
+const OCTOBER = orders(10);
+
+const CHECKS = Array.from({ length: 12 }, (_, i) => `check-${String(i + 1).padStart(2, "0")}.sh`);
+const FAILING = ["check-03.sh", "check-08.sh", "check-11.sh"];
+
+export function services(count = 60, seed = 42) {
+	const next = random(seed);
+	const names = Array.from({ length: count }, (_, i) => `svc-${String(i + 1).padStart(2, "0")}`);
+	const files = {};
+	const ports = {};
+	const missing = [];
+	for (const [i, name] of names.entries()) {
+		const port = i % 17 === 5 ? 8080 : 9000 + i;
+		const depends = [names[Math.floor(next() * count)], names[Math.floor(next() * count)]].filter(
+			(dep) => dep !== name,
+		);
+		if (i % 13 === 4) depends.push(`svc-legacy-${i}`);
+		for (const dep of new Set(depends))
+			if (!names.includes(dep)) missing.push(`missing ${name} ${dep}`);
+		ports[port] = [...(ports[port] ?? []), name];
+		files[`services/${name}.json`] =
+			`${JSON.stringify({ name, port, depends_on: [...new Set(depends)] }, null, 2)}\n`;
+	}
+	const clashes = Object.entries(ports)
+		.filter(([, users]) => users.length > 1)
+		.map(([port, users]) => `port ${port} ${users.toSorted().join(",")}`);
+	return { files, expected: [...missing.toSorted(), ...clashes.toSorted()] };
+}
+
+const SERVICES = services();
+
+const BROKEN_PACKAGE = `(use-modules (guix packages) (guix gexp) (guix build-system trivial)
+             ((guix licenses) #:prefix license:))
+
+(package
+  (name "greeting")
+  (version "1.0")
+  (source (local-file "greeting.txt"))
+  (build-system trivial-build-system)
+  (arguments
+   (list
+    #:builder
+    (with-imported-modules '((guix build utils))
+      #~(begin
+          (use-modules (guix build utils))
+          (let ((share (string-append #$output "/share/greeting")))
+            (mkdir share)
+            (copy-file #$source (string-append share "/greeting.txt")))))))
+  (home-page "https://example.org/greeting")
+  (synopsis "Install a greeting")
+  (description "This package installs a greeting file.")
+  (license license:expat))
+`;
+
+function guixBuild(ws) {
+	try {
+		const out = execFileSync("guix", ["build", "-f", "package.scm"], {
+			cwd: ws,
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: 300_000,
+		});
+		return out.toString().trim().split("\n").at(-1);
+	} catch {
+		return null;
+	}
+}
+
+export const BASE_TASKS = [
 	{
 		id: "discover-executable",
 		category: "tool-discovery",
@@ -263,6 +364,65 @@ export const TASKS = [
 				passed: JSON.stringify(got) === JSON.stringify(expected),
 				detail: { got, expected },
 			};
+		},
+	},
+	{
+		id: "session-reuse",
+		category: "session-state",
+		prompts: [
+			"data/2026-09.csv is an order export. Compute the net revenue per region. Region names are case-insensitive and may have stray spaces, and refunds have negative amounts. Write `<region in lowercase> <total with two decimals>` lines, sorted by region, to sept.txt.",
+			"Now do the same for data/2026-10.csv and write the result to oct.txt.",
+		],
+		files: { "data/2026-09.csv": SEPTEMBER.text, "data/2026-10.csv": OCTOBER.text },
+		async validate(ws) {
+			const sept = lines(await readFile(join(ws, "sept.txt"), "utf8").catch(() => ""));
+			const oct = lines(await readFile(join(ws, "oct.txt"), "utf8").catch(() => ""));
+			const passed =
+				JSON.stringify(sept) === JSON.stringify(SEPTEMBER.expected) &&
+				JSON.stringify(oct) === JSON.stringify(OCTOBER.expected);
+			return { passed, detail: { sept, oct, expected: [SEPTEMBER.expected, OCTOBER.expected] } };
+		},
+	},
+	{
+		id: "fanout-checks",
+		category: "fan-out",
+		prompt:
+			"Run every script in checks/. Each takes a few seconds. Write the file names of the scripts that fail to answer.txt, one per line, sorted.",
+		files: Object.fromEntries(
+			CHECKS.map((name) => [
+				`checks/${name}`,
+				`#!/bin/sh\nsleep 3\n${FAILING.includes(name) ? `echo '${name}: failed' >&2\nexit 1` : "echo ok"}\n`,
+			]),
+		),
+		executable: CHECKS.map((name) => `checks/${name}`),
+		async validate(ws) {
+			const got = lines(await answer(ws)).map((line) => line.split("/").at(-1));
+			return { passed: JSON.stringify(got) === JSON.stringify(FAILING), detail: { got } };
+		},
+	},
+	{
+		id: "fanout-services",
+		category: "fan-out",
+		prompt:
+			"services/ holds one JSON file per service with `name`, `port`, and `depends_on`. Write to answer.txt one `missing <service> <dependency>` line for every dependency that names no existing service, then one `port <port> <services>` line for every port used by more than one service, with the services sorted and comma-separated. Sort the missing lines, then the port lines.",
+		files: SERVICES.files,
+		async validate(ws) {
+			const got = lines(await answer(ws));
+			return { passed: JSON.stringify(got) === JSON.stringify(SERVICES.expected), detail: { got } };
+		},
+	},
+	{
+		id: "guix-build",
+		category: "real-world",
+		prompt:
+			"`guix build -f package.scm` fails. Fix package.scm so the build succeeds and the package installs files/greeting.txt as share/greeting/greeting.txt. Keep the package name and version.",
+		files: { "package.scm": BROKEN_PACKAGE, "files/greeting.txt": "hello from the eval\n" },
+		async validate(ws) {
+			const out = guixBuild(ws);
+			const installed = out
+				? await readFile(join(out, "share/greeting/greeting.txt"), "utf8").catch(() => null)
+				: null;
+			return { passed: installed === "hello from the eval\n", detail: { out, installed } };
 		},
 	},
 ];

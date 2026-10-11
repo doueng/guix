@@ -2,14 +2,33 @@
 // Prove each grader rejects the untouched fixture and accepts a reference
 // solution, so a pass in a live run means the task was done.
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { TASKS } from "./tasks.mjs";
+import { TASKS } from "./registry.mjs";
 
 const put = (ws, text) => writeFile(join(ws, "answer.txt"), `${text}\n`);
 const edit = async (ws, path, from, to) =>
 	writeFile(join(ws, path), (await readFile(join(ws, path), "utf8")).replaceAll(from, to));
+
+function csvRow(line) {
+	return [...line.matchAll(/("([^"]*)"|[^,]*)(,|$)/g)].slice(0, -1).map((m) => m[2] ?? m[1]);
+}
+
+async function revenue(ws, input, output) {
+	const totals = {};
+	const [, ...rows] = (await readFile(join(ws, input), "utf8")).trim().split("\n");
+	for (const row of rows) {
+		const [, , region, amount] = csvRow(row);
+		const key = region.trim().toLowerCase();
+		totals[key] = (totals[key] ?? 0) + Math.round(Number(amount.replace(/[$,]/g, "")) * 100);
+	}
+	const text = Object.keys(totals)
+		.sort()
+		.map((key) => `${key} ${(totals[key] / 100).toFixed(2)}`)
+		.join("\n");
+	await writeFile(join(ws, output), `${text}\n`);
+}
 
 const SOLUTIONS = {
 	"discover-executable": (ws) =>
@@ -43,6 +62,44 @@ const SOLUTIONS = {
 		),
 	"failure-recovery": (ws) => put(ws, "37"),
 	"parallel-checks": (ws) => put(ws, "types.sh"),
+	"session-reuse": async (ws) => {
+		await revenue(ws, "data/2026-09.csv", "sept.txt");
+		await revenue(ws, "data/2026-10.csv", "oct.txt");
+	},
+	"fanout-checks": async (ws) => {
+		const failed = [];
+		for (const name of (await readdir(join(ws, "checks"))).sort())
+			try {
+				execFileSync(join(ws, "checks", name), { stdio: "ignore" });
+			} catch {
+				failed.push(name);
+			}
+		await put(ws, failed.join("\n"));
+	},
+	"fanout-services": async (ws) => {
+		const services = [];
+		for (const name of await readdir(join(ws, "services")))
+			services.push(JSON.parse(await readFile(join(ws, "services", name), "utf8")));
+		const names = new Set(services.map((s) => s.name));
+		const missing = services.flatMap((s) =>
+			s.depends_on.filter((dep) => !names.has(dep)).map((dep) => `missing ${s.name} ${dep}`),
+		);
+		const ports = {};
+		for (const s of services) ports[s.port] = [...(ports[s.port] ?? []), s.name];
+		const clashes = Object.entries(ports)
+			.filter(([, users]) => users.length > 1)
+			.map(([port, users]) => `port ${port} ${users.sort().join(",")}`);
+		await put(ws, [...missing.sort(), ...clashes.sort()].join("\n"));
+	},
+	"guix-build": async (ws) => {
+		await edit(
+			ws,
+			"package.scm",
+			'(local-file "greeting.txt")',
+			'(local-file "files/greeting.txt")',
+		);
+		await edit(ws, "package.scm", "(mkdir share)", "(mkdir-p share)");
+	},
 	"jsonl-aggregate": async (ws) => {
 		const counts = {};
 		for (const line of (await readFile(join(ws, "events.jsonl"), "utf8")).split("\n")) {
@@ -55,15 +112,17 @@ const SOLUTIONS = {
 };
 
 let failures = 0;
-for (const task of TASKS) {
+const only = process.argv[2]?.split(",");
+for (const task of TASKS.filter((t) => !only || only.includes(t.suite) || only.includes(t.id))) {
 	const ws = await mkdtemp(join(tmpdir(), `pi-sci-eval-${task.id}-`));
 	for (const [path, content] of Object.entries(task.files)) {
 		await mkdir(dirname(join(ws, path)), { recursive: true });
 		await writeFile(join(ws, path), content);
 	}
 	for (const path of task.executable ?? []) await chmod(join(ws, path), 0o755);
+	await task.setup?.(ws);
 	const before = await task.validate(ws);
-	await SOLUTIONS[task.id](ws);
+	await (task.solve ?? SOLUTIONS[task.id])(ws);
 	const after = await task.validate(ws);
 	const ok = !before.passed && after.passed;
 	if (!ok) failures++;

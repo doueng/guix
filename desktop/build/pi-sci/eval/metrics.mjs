@@ -1,16 +1,93 @@
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
+const UPDATE_PREFIX = Buffer.from('{"type":"tool_execution_update"');
+
+// Streams the file, because progress updates can make it larger than a Node
+// string. Updates are skipped: no metric uses them, and they hold most bytes.
 export function readEvents(path) {
-	return readFileSync(path, "utf8")
-		.split("\n")
-		.filter(Boolean)
-		.flatMap((line) => {
-			try {
-				return [JSON.parse(line)];
-			} catch {
-				return [];
+	const events = [];
+	const fd = openSync(path, "r");
+	const chunk = Buffer.alloc(1 << 20);
+	let pending = [];
+	let skipping = false;
+	const finish = (parts) => {
+		const line = Buffer.concat(parts);
+		if (line.length === 0 || line.subarray(0, UPDATE_PREFIX.length).equals(UPDATE_PREFIX)) return;
+		try {
+			events.push(JSON.parse(line.toString("utf8")));
+		} catch {}
+	};
+	try {
+		for (;;) {
+			const n = readSync(fd, chunk, 0, chunk.length, null);
+			if (n <= 0) break;
+			let start = 0;
+			for (
+				let end = chunk.indexOf(10, start);
+				end !== -1 && end < n;
+				end = chunk.indexOf(10, start)
+			) {
+				if (!skipping) finish([...pending, chunk.subarray(start, end)]);
+				pending = [];
+				skipping = false;
+				start = end + 1;
 			}
-		});
+			if (start < n && !skipping) {
+				pending.push(Buffer.from(chunk.subarray(start, n)));
+				const head = Buffer.concat(pending.slice(0, 1)).subarray(0, UPDATE_PREFIX.length);
+				if (head.length === UPDATE_PREFIX.length && head.equals(UPDATE_PREFIX)) {
+					skipping = true;
+					pending = [];
+				}
+			}
+		}
+		if (!skipping && pending.length) finish(pending);
+	} finally {
+		closeSync(fd);
+	}
+	return events;
+}
+
+// Each pi invocation writes one session header, so a session with several
+// prompts splits there into one segment per prompt. agent_start would also
+// split at Pi's automatic retries.
+export function promptSegments(events) {
+	const segments = [];
+	let current = [];
+	for (const event of events) {
+		if (event.type === "session" && current.some((e) => e.type === "session")) {
+			segments.push(current);
+			current = [];
+		}
+		current.push(event);
+	}
+	if (current.length) segments.push(current);
+	return segments;
+}
+
+const PROVIDER_PRICES = { "claude-bridge": "anthropic" };
+
+// List price in dollars, from Pi's model store. Subscription providers report
+// $0, so this is the comparable cost across runs.
+export function priceFor(model) {
+	const [provider, ...rest] = model.split("/");
+	const id = rest.join("/");
+	const store = JSON.parse(readFileSync(join(homedir(), ".pi/agent/models-store.json"), "utf8"));
+	const models = store[PROVIDER_PRICES[provider] ?? provider]?.models ?? [];
+	return models.find((entry) => entry.id === id)?.cost ?? null;
+}
+
+export function listCost(usage, price) {
+	if (!price) return NaN;
+	return (
+		(usage.input * price.input +
+			usage.output * price.output +
+			usage.cacheRead * price.cacheRead +
+			usage.cacheWrite * price.cacheWrite) /
+		1e6
+	);
 }
 
 const text = (result) =>
