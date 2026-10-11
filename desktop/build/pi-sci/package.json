@@ -6,8 +6,8 @@
     "build": "./build.sh",
     "test": "node --test test/*.test.ts",
     "check": "tsc --noEmit",
-    "lint": "node scripts/biome.mjs check src/*.ts test/*.ts scripts/*.mjs",
-    "format": "node scripts/biome.mjs format --write src/*.ts test/*.ts scripts/*.mjs"
+    "lint": "node scripts/biome.mjs check src/*.ts test/*.ts scripts/*.mjs eval/*.mjs",
+    "format": "node scripts/biome.mjs format --write src/*.ts test/*.ts scripts/*.mjs eval/*.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.5",
