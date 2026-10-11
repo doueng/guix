@@ -24,7 +24,8 @@
     [["ghostty" [(executable "ghostty")]]
      ["chrome-incognito" (conj chrome "--incognito")]
      ["chrome" chrome]
-     ["thunar" [(executable "thunar")]]]))
+     ["thunar" [(executable "thunar")]]
+     ["intellij" [(executable "flatpak") "run" "com.jetbrains.IntelliJ-IDEA-Community"]]]))
 
 (defn run [command options]
   @(p/process command options))
