@@ -31,62 +31,6 @@ workspace_picker = ["prefix+w", "prefix+e"]
 navigate_workspace_up = "w"
 navigate_workspace_down = "e"
 
-# These are the Alt+Ctrl chords emitted by Ghostty. Tab order is shell,
-# Emacs, pi, jjui.
-[[keys.command]]
-key = "ctrl+alt+q"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus shell"
-description = "focus shell tab"
-
-[[keys.command]]
-key = "ctrl+alt+w"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus emacs"
-description = "focus Emacs tab"
-
-[[keys.command]]
-key = "ctrl+alt+e"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus pi"
-description = "focus pi tab"
-
-[[keys.command]]
-key = "ctrl+alt+r"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus jjui"
-description = "focus jjui tab"
-
-[[keys.command]]
-key = "ctrl+alt+t"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus 5"
-description = "focus tab 5"
-
-[[keys.command]]
-key = "ctrl+alt+y"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus 6"
-description = "focus tab 6"
-
-[[keys.command]]
-key = "ctrl+alt+u"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus 7"
-description = "focus tab 7"
-
-[[keys.command]]
-key = "ctrl+alt+p"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus 8"
-description = "focus tab 8"
-
-[[keys.command]]
-key = "ctrl+alt+o"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus 9"
-description = "focus tab 9"
-
 # Pick an agent in the focused workspace with an fzf selector.
 [[keys.command]]
 key = "prefix+a"
@@ -118,13 +62,6 @@ key = "prefix+shift+b"
 type = "plugin_action"
 command = "fullerzz.sesh.last"
 description = "switch to the previous workspace"
-
-# Cmd+g is an existing jjui alias in Ghostty/Hyprland.
-[[keys.command]]
-key = "ctrl+alt+g"
-type = "shell"
-command = "$HOME/.local/bin/herdr-tab-focus jjui"
-description = "focus jjui tab (Cmd+g alias)"
 
 # Show letter hints for URLs, paths, SHAs, and other visible text, then copy
 # the selected match to the clipboard.

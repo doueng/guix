@@ -50,8 +50,6 @@ keybind = super+a=select_all
 # keybind = super+minus=decrease_font_size:1
 # keybind = super+zero=reset_font_size
 # keybind = super+n=new_window
-keybind = super+t=text:\x1b\x0e
-keybind = super+w=text:\x1b\x18
 # keybind = super+shift+w=close_window
 # keybind = super+shift+left_bracket=previous_tab
 # keybind = super+shift+right_bracket=next_tab
@@ -60,9 +58,7 @@ keybind = shift+ctrl+alt+r=reload_config
 # prefix bytes is more reliable than trying to represent Ctrl+Alt+<letter>
 # through a terminal protocol.
 keybind = super+physical:one=text:\x02\x31
-keybind = super+enter=text:\x1b\x11
 keybind = super+physical:two=text:\x02\x32
-keybind = super+e=text:\x1b\x17
 keybind = super+physical:three=text:\x02\x33
 keybind = super+physical:four=text:\x02\x34
 keybind = super+physical:five=text:\x02\x35
@@ -70,8 +66,6 @@ keybind = super+physical:six=text:\x02\x36
 keybind = super+physical:seven=text:\x02\x37
 keybind = super+physical:eight=text:\x02\x38
 keybind = super+physical:nine=text:\x02\x39
-# Cmd+g -> Alt+Ctrl+g (for the Herdr jjui tab)
-keybind = super+g=text:\x1b\x07
 keybind = super+left=text:\x01
 keybind = super+right=text:\x05
 keybind = alt+left=esc:b
