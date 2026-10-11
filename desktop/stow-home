@@ -17,6 +17,9 @@
              "jj" "jjui" "dusk" "nvim"]]
   (stow-package! (str repo "/configs") (str home "/.config/" app) app))
 
+;; The IntelliJ Flatpak points XDG_CONFIG_HOME into its sandbox, so IdeaVim
+;; only reads ~/.ideavimrc.
+(stow-package! (str repo "/configs") home "ideavim")
 (stow-package! repo (str home "/.local/bin") "bin")
 (stow-package! repo (str home "/.local/share/icons") "icons")
 (stow-package! (str repo "/pi") (str home "/.pi/agent") "agent")

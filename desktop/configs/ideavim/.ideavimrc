@@ -1,0 +1,57 @@
+" Selected IntelliSpace modules
+
+Plug 'justinmk/vim-sneak'
+
+"" idea-doom-emacs
+source ~/.config/ideavim/idea-doom-emacs/init.vim
+source ~/.config/ideavim/idea-doom-emacs/subword-mode.vim
+set norelativenumber
+
+" Map file tree navigation
+map <leader>e :action SelectInProjectView<CR>
+nmap <C-h> :action SelectInProjectView<CR>
+let g:NERDTreeMapActivateNode = 'l'
+
+" Execute an action. Like <M-x>
+let g:WhichKeyDesc_Leader_Space = "<leader><Space> M-x"
+nnoremap <leader><Space>    :action GotoAction<CR>
+vnoremap <leader><Space>    :action GotoAction<CR>
+
+" Find file
+map <Leader>ff :action GotoFile<CR>
+let g:WhichKeyDesc_find_file2 = '<leader>ff Find file'
+
+
+"" Intellimacs
+" source ~/.intellimacs/spacemacs.vim
+"
+" " (Optional) Enable other Intellimacs modules
+" source ~/.intellimacs/extra.vim
+" source ~/.intellimacs/major.vim
+" source ~/.intellimacs/hybrid.vim
+"
+" " (Optional) Enable which-key plugin
+" source ~/.intellimacs/which-key.vim
+"
+
+nmap <C-o> <Action>(Back)
+nmap <C-i> <Action>(Forward)
+nmap <M-r> <Action>(Run)
+nmap <M-1> <Action>(GoToTab1)
+nmap <M-2> <Action>(GoToTab2)
+nmap <M-3> <Action>(GoToTab3)
+nmap <M-4> <Action>(GoToTab4)
+nmap <M-5> <Action>(GoToTab5)
+nmap <M-6> <Action>(GoToTab6)
+nmap <M-7> <Action>(GoToTab7)
+nmap <M-8> <Action>(GoToTab8)
+nmap <M-9> <Action>(GoToLastTab)
+sethandler <M-p> a:vim
+nmap <M-p> <Action>(ActivateProjectToolWindow)
+nmap <A-.> <Action>(NextTab)
+nmap <A-,> <Action>(PreviousTab)
+
+nmap gi :action GotoImplementation<CR>
+nmap gI :action GotoSuperMethod<CR>
+
+set nofoldenable
