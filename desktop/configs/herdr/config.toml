@@ -23,7 +23,8 @@ delivery = "system"
 prefix = "ctrl+b"
 new_tab = "prefix+c"
 next_tab = "prefix+n"
-switch_tab = "prefix+1..9"
+# keyd turns Cmd+digits into Ctrl+digits.
+switch_tab = ["prefix+1..9", "ctrl+1..9"]
 
 # Open Spaces navigation with prefix+w or prefix+e, then move the selection
 # with w (up) and e (down); enter focuses the workspace, esc leaves.

@@ -1,11 +1,9 @@
 # Ghostty Configuration
 
-config-file = ?config.asahi
-
 font-family = JetBrainsMono Nerd Font
 # Keep programming operators literal in terminal applications such as Neovim.
 font-feature = -calt, -liga, -dlig
-font-size = 13
+font-size = 9.375
 font-thicken = true
 
 theme = catppuccin-mocha
@@ -26,6 +24,7 @@ copy-on-select = false
 clipboard-trim-trailing-spaces = true
 
 window-decoration = none
+quick-terminal-autohide = true
 resize-overlay = never
 app-notifications = no-clipboard-copy
 link-url = false
