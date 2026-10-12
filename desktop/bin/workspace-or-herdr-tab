@@ -1,11 +1,16 @@
 #!/usr/bin/env bb
 
+(require '[babashka.classpath :as classpath]
+         '[babashka.fs :as fs])
+;; Scripts are stowed as symlinks; load the client from the repository.
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+
 (require '[babashka.process :as p]
          '[cheshire.core :as json]
-         '[clojure.string :as str])
+         '[clojure.string :as str]
+         '[herdr.client :as herdr])
 
 (def workspace 1)
-(def home (System/getProperty "user.home"))
 
 (defn hyprctl [& args]
   (let [result @(p/process (into ["hyprctl"] args)
@@ -19,13 +24,9 @@
         [:class :initialClass :title]))
 
 (defn main [& args]
-  (if (not= 1 (count args))
-    (do
-      (binding [*out* *err*]
-        (println "Usage: workspace-or-herdr-tab <herdr-tab>"))
-      2)
-    (let [tab (first args)
-          target (some (fn [window]
+  (if-let [tab (and (= 1 (count args))
+                    (some-> (parse-long (first args)) #{1 2 3 4 5 6 7 8 9}))]
+    (let [target (some (fn [window]
                          (let [window-workspace (:workspace window)]
                            (when (and (= workspace (:id window-workspace))
                                       (ghostty? window))
@@ -37,10 +38,13 @@
         (p/shell "hyprctl" "dispatch" "workspace" (str workspace))
 
         (= active target)
-        (p/shell (str home "/.local/bin/herdr-tab-focus") tab)
+        (herdr/focus-tab! tab)
 
         :else
         (p/shell "hyprctl" "dispatch" "focuswindow" (str "address:" target)))
-      0)))
+      0)
+    (do
+      (herdr/eprintln "Usage: workspace-or-herdr-tab <1..9>")
+      2)))
 
 (System/exit (apply main *command-line-args*))

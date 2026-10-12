@@ -1,46 +1,16 @@
 #!/usr/bin/env bb
 
+(require '[babashka.classpath :as classpath]
+         '[babashka.fs :as fs])
+;; Scripts are stowed as symlinks; load the client from the repository.
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+
 (ns herdr-agent-pick
-  (:require [babashka.fs :as fs]
-            [babashka.process :as process]
-            [cheshire.core :as json]
-            [clojure.string :as str]))
-
-(defn bin-path [name]
-  (let [home (System/getProperty "user.home")
-        candidates [(str "/run/current-system/sw/bin/" name)
-                    (str home "/.nix-profile/bin/" name)
-                    (str home "/.local/bin/" name)]]
-    (or (some #(when (fs/executable? %) %) candidates)
-        name)))
-
-(def herdr-bin (or (System/getenv "HERDR_BIN_PATH")
-                   (bin-path "herdr")))
-
-(defn eprintln [& values]
-  (binding [*out* *err*]
-    (apply println values)))
-
-(defn run! [argv options]
-  (let [result (try
-                 @(process/process argv options)
-                 (catch Exception error
-                   {:exit 127
-                    :out ""
-                    :err (.getMessage error)}))]
-    (if (zero? (:exit result))
-      result
-      (do
-        (when (seq (:err result))
-          (eprintln (:err result)))
-        (System/exit (:exit result))))))
+  (:require [clojure.string :as str]
+            [herdr.client :as herdr]))
 
 (defn agents []
-  (let [output (:out (run! [herdr-bin "agent" "list"]
-                          {:out :string :err :string}))]
-    (get-in (json/parse-string output true)
-            [:result :agents]
-            [])))
+  (or (:agents (herdr/call! "agent" "list")) []))
 
 (defn current-workspace-id [items]
   (or (System/getenv "HERDR_WORKSPACE_ID")
@@ -79,7 +49,7 @@
 
 (defn pick [rows]
   (let [input (str/join "\n" (map #(str (:id %) "\t" (:display %)) rows))
-        result (run! ["fzf"
+        result (herdr/run! ["fzf"
                       "--border"
                       "--delimiter" "\t"
                       "--header" "Agent                 Status    Working directory"
@@ -88,7 +58,7 @@
                       "--no-sort"
                       "--prompt" "Agent> "
                       "--with-nth" "2"]
-                     {:in input :out :string :err :string})]
+                     {:in input})]
     (some-> (:out result)
             str/trim
             (str/split #"\t" 2)
@@ -104,5 +74,4 @@
                 vec)]
   (when (seq rows)
     (when-let [selected-id (pick rows)]
-      (run! [herdr-bin "agent" "focus" selected-id]
-            {:out :string :err :string}))))
+      (herdr/run! [herdr/bin "agent" "focus" selected-id]))))
