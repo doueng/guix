@@ -1,7 +1,8 @@
 (define-module (engstrand features shell)
   #:use-module (engstrand features packages)
-  #:use-module (engstrand services home-shell)
+  #:use-module (gnu home services shells)
   #:use-module (gnu packages)
+  #:use-module (gnu services)
   #:export (feature-familiar-shell))
 
 (define %shell-home-packages
@@ -20,4 +21,4 @@
   (feature-package-set
    'familiar-shell
    #:home-packages %shell-home-packages
-   #:home-services (list %home-shell-service)))
+   #:home-services (list (service home-bash-service-type))))
