@@ -1,8 +1,6 @@
 (define-module (engstrand features herdr)
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages herdr)
-  #:use-module (engstrand packages herdr-sesh)
-  #:use-module (engstrand packages herdr-tiny-fingers)
   #:use-module (engstrand packages jjui)
   #:use-module (gnu home services)
   #:use-module (gnu packages)
@@ -10,10 +8,13 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-herdr))
 
+;; Activation links and enables each plugin in this list.
+(define %herdr-plugins (list herdr-sesh herdr-tiny-fingers))
+
 (define %herdr-home-packages
-  (cons* herdr herdr-sesh herdr-tiny-fingers jjui
-         (list
-          (specification->package "jujutsu"))))
+  (append (list herdr)
+          %herdr-plugins
+          (list jjui (specification->package "jujutsu"))))
 
 (define %familiar-herdr-plugins
   (simple-service 'familiar-herdr-plugins home-activation-service-type
@@ -30,11 +31,10 @@
           (catch 'system-error
             (lambda () (lstat path) #t)
             (lambda _ #f)))
-        (let* ((herdr #$(file-append herdr "/bin/herdr"))
-               (sesh #$(file-append herdr-sesh ""))
-               (tiny #$(file-append herdr-tiny-fingers "")))
-          (invoke herdr "plugin" "link" sesh "--enabled")
-          (invoke herdr "plugin" "link" tiny "--enabled")
+        (let ((herdr #$(file-append herdr "/bin/herdr")))
+          (for-each (lambda (plugin)
+                      (invoke herdr "plugin" "link" plugin "--enabled"))
+                    (list #$@%herdr-plugins))
           (let* ((pipe (open-input-pipe
                         (string-append herdr " plugin config-dir fullerzz.sesh")))
                  (config-dir (string-trim-both (read-line pipe)))
