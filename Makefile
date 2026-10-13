@@ -16,7 +16,7 @@ GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := -L "$(MODULES)"
 
 .PHONY: help pull channels-current check system-facts dry-run build repro-build switch gc \
-        home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test \
+        nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test \
         doom-check doom-baseline
 
 help:
@@ -28,6 +28,11 @@ help:
 	@echo 'repro-build   build system using the pinned channels via time-machine'
 	@echo 'switch        check system facts, build and activate system (sudo; writes ESP)'
 	@echo 'gc            delete generations older than $(GC_AGE), then collect garbage'
+	@echo 'nixpkgs-lock  resolve $(NIXPKGS)/packages.sexp against cache.nixos.org (NIXPKGS_REV=...)'
+	@echo 'nixpkgs-key   generate the key that signs nixpkgs imports'
+	@echo 'nixpkgs-authorize let the running daemon trust that key before the first switch (sudo)'
+	@echo 'nixpkgs-import copy the locked nixpkgs closures into /gnu/store'
+	@echo 'nixpkgs-verify check imported items against cache.nixos.org hashes'
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-apply    activate Home, then stow live configs'
 	@echo 'stow          build SCI and install live config links using GNU Stow'
@@ -56,16 +61,16 @@ system-facts: channels-current
 dry-run: channels-current
 	"$(GUIX)" system build --dry-run $(COMMON) "$(CONFIG)"
 
-build: channels-current
+build: channels-current nixpkgs-import
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
 	  "$(GUIX)" system build $(COMMON) "$(CONFIG)"
 
-repro-build:
+repro-build: nixpkgs-import
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
 	  "$(GUIX)" time-machine -C "$(CHANNELS)" -- \
 	  system build $(COMMON) "$(CONFIG)"
 
-switch: channels-current system-facts
+switch: channels-current system-facts nixpkgs-import
 	sudo rm -f \
 	  /boot/efi/m1n1/boot.bin.old \
 	  /boot/efi/m1n1/boot.bin.new
@@ -80,8 +85,33 @@ gc:
 	"$(GUIX)" pull --delete-generations=$(GC_AGE)
 	"$(GUIX)" gc
 
-home-build: channels-current
+home-build: channels-current nixpkgs-import
 	"$(GUIX)" home build $(COMMON) "$(HOME_CONFIG)"
+
+# nixpkgs binaries enter /gnu/store signed by NIXPKGS_KEY; the daemon trusts
+# its public half, $(NIXPKGS)/signing-key.pub, through asahi.scm.
+NIXPKGS := modules/engstrand/nixpkgs
+NIXPKGS_KEY ?= $(HOME)/.config/guix/nixpkgs-bridge/signing-key.sec
+NIXPKGS_BRIDGE := "$(GUIX)" repl $(COMMON) -- desktop/build/nixpkgs/bridge.scm
+
+nixpkgs-lock:
+	$(NIXPKGS_BRIDGE) lock $(NIXPKGS)/packages.sexp $(NIXPKGS)/lock.sexp $(NIXPKGS_REV)
+
+nixpkgs-key:
+	test ! -e "$(NIXPKGS_KEY)" || { echo '$(NIXPKGS_KEY) exists' >&2; exit 1; }
+	$(NIXPKGS_BRIDGE) key "$(NIXPKGS_KEY)"
+	cp "$(basename $(NIXPKGS_KEY)).pub" $(NIXPKGS)/signing-key.pub
+
+# The first switch imports before it installs the key from asahi.scm, so a new
+# key must be trusted by the running daemon once; the switch then keeps it.
+nixpkgs-authorize:
+	sudo "$(GUIX)" archive --authorize < $(NIXPKGS)/signing-key.pub
+
+nixpkgs-import:
+	$(NIXPKGS_BRIDGE) import $(NIXPKGS)/lock.sexp "$(NIXPKGS_KEY)"
+
+nixpkgs-verify:
+	$(NIXPKGS_BRIDGE) verify $(NIXPKGS)/lock.sexp
 
 PI_SCI := desktop/build/pi-sci
 PI_SCI_OUTPUTS := $(PI_SCI)/dist/sci.js $(addprefix $(PI_SCI)/dist/pi-,grep.mjs find.mjs read.mjs)
@@ -100,7 +130,7 @@ pi-sci-test:
 stow: pi-sci
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/stow-home
 
-home-apply: channels-current
+home-apply: channels-current nixpkgs-import
 	"$(GUIX)" home reconfigure $(COMMON) "$(HOME_CONFIG)"
 	$(MAKE) stow
 

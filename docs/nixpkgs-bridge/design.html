@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nixpkgs-bridge: cached nixpkgs binaries in the Guix store</title>
+<style>
+  body { font: 16px/1.55 system-ui, sans-serif; max-width: 62rem; margin: 2rem auto; padding: 0 1.25rem; color: #1d1f21; }
+  h1 { font-size: 1.9rem; margin-bottom: .2rem; }
+  h2 { margin-top: 2.6rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+  h3 { margin-top: 1.8rem; }
+  code, pre { font: 13.5px/1.45 ui-monospace, monospace; }
+  pre { background: #f6f8fa; border: 1px solid #e4e7eb; padding: .8rem 1rem; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 14.5px; }
+  th, td { border: 1px solid #dde1e5; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+  th { background: #f2f4f7; }
+  .meta { color: #666; }
+  .tag { font-size: 12px; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+  .measured { background: #dcf5e3; color: #0d5a26; }
+  .source { background: #e3ecfb; color: #183f86; }
+  .background { background: #f1f1f1; color: #444; }
+  .guess { background: #fff1d6; color: #7a4b00; }
+  .box { border-left: 4px solid #3a6ff7; background: #f4f7ff; padding: .7rem 1rem; margin: 1rem 0; }
+  .warn { border-left-color: #d98a00; background: #fff8ea; }
+  .chosen { background: #f1fbf3; }
+</style>
+</head>
+<body>
+
+<h1>nixpkgs-bridge</h1>
+<p class="meta">Design for using cache.nixos.org binaries on this Guix System laptop (M1 MacBook Air, aarch64-linux, Asahi kernel with 16 KiB pages). Written 2026-10-13 against Guix 6754acb and nixpkgs 8edc0c72.</p>
+
+<p>Each claim carries an evidence tag.
+<span class="tag measured">measured</span> means I ran it on this laptop.
+<span class="tag source">source</span> means I read it in Guix, guix-transfer, or cache.nixos.org output.
+<span class="tag background">background</span> means general knowledge of the two projects that I did not check here.
+<span class="tag guess">guess</span> means an untested prediction.</p>
+
+<div class="box">
+<p><strong>Recommendation.</strong> Do not translate nixpkgs derivations. Copy built nixpkgs outputs into <code>/gnu/store</code> instead. Rewrite the 10-byte prefix <code>/nix/store</code> to <code>/gnu/store</code>, which is also 10 bytes, and keep the 32-character hash. The rewritten bytes have the same layout, so ELF interpreters, RPATHs, shebangs and symlinks keep working. Rewrite every occurrence of the prefix, not only the hash parts.</p>
+<p>As built, <code>make nixpkgs-import</code> does the rewriting and signs the result with a local key that the daemon trusts, then pipes it to <code>guix archive --import</code>. A Guix package wrapper makes the items installable from <code>home.scm</code>. Section 11 describes the built system. Sections 4 to 9 are the original proposal, which used a substitute server instead.</p>
+<p>A spike on this laptop rewrote the closures of hello, python3, git, fd, ripgrep and jq (93 store items, 454 MiB on disk) from cache.nixos.org. All six ran from <code>/gnu/store</code> <span class="tag measured">measured</span>.</p>
+</div>
+
+<h2>1. Goal and constraints</h2>
+<ul>
+  <li>Install nixpkgs packages on this machine without building them, using the binaries Hydra already built for <code>aarch64-linux</code>.</li>
+  <li>Keep one store, one daemon and one garbage collector. Packages from nixpkgs should sit in the same Guix Home profile as Guix packages.</li>
+  <li>The machine runs a 16 KiB page kernel (<code>getconf PAGESIZE</code> prints 16384) <span class="tag measured">measured</span>. nixpkgs aarch64 binaries assume nothing about page size in general. jemalloc builds that hard-code 4 KiB pages are the usual failure. <code>fd</code>, which nixpkgs links against jemalloc, ran fine <span class="tag measured">measured</span>.</li>
+  <li>No secrets, firmware or machine backups go in the repository (from <code>AGENTS.md</code>). A public signing key may go in. The secret key stays on the machine.</li>
+</ul>
+
+<h2>2. What guix-transfer does, and why its mirror image misses the goal</h2>
+<p><a href="https://github.com/fzakaria/guix-transfer">guix-transfer</a> walks a Guix <code>.drv</code> graph bottom-up. It rewrites every <code>/gnu/store</code> reference to the already translated <code>/nix/store</code> path and registers each derivation with <code>nix derivation add</code>, which recomputes the output paths <span class="tag source">source</span>. It must recompute paths because the store directory is an input to the output path hash, in both systems (guix-transfer <code>DESIGN.md</code> section 6) <span class="tag source">source</span>.</p>
+<p>That is the reason a mirror image cannot use the nixpkgs cache. A translated nixpkgs derivation gets a new <code>/gnu/store</code> output path that no cache has ever built, so the Guix daemon must build it. guix-transfer says so itself. Realising <code>hello</code> recompiles Guix's whole source bootstrap and takes hours <span class="tag source">source</span>. The reverse would rebuild nixpkgs from its bootstrap tools in the same way. Only fixed-output sources would come from a cache.</p>
+<p>So the unit that crosses over must be the built output (a NAR), not the derivation. The question becomes how to make a binary built for <code>/nix/store</code> run from <code>/gnu/store</code>.</p>
+
+<h3>The trick that makes it cheap</h3>
+<p><code>/nix/store</code> and <code>/gnu/store</code> are both 10 bytes. Replacing one with the other in place keeps every string length, ELF offset and NAR length field intact. If the bridge also keeps the 32-character hash part, the whole mapping from nixpkgs paths to Guix paths is one pure function:</p>
+<pre>/nix/store/0xy6jlccm8kfpwmhkxabz3638lchyi74-hello-2.12.3
+/gnu/store/0xy6jlccm8kfpwmhkxabz3638lchyi74-hello-2.12.3</pre>
+<p>guix-transfer needs a growing map from Guix paths to Nix paths and must process the graph in order. Here there is no map and no ordering, because a reference's new name never depends on its content. Self-references, such as glibc pointing into its own <code>lib/</code>, are no special case. Guix's grafting does a similar same-length rewrite of store references, which shows that such rewrites hold up in practice <span class="tag background">background</span>.</p>
+
+<h2>3. How nixpkgs and Guix packages differ</h2>
+<table>
+<tr><th>Aspect</th><th>nixpkgs</th><th>Guix</th><th>Consequence for the bridge</th></tr>
+<tr><td>Store directory</td><td><code>/nix/store</code></td><td><code>/gnu/store</code></td><td>Same length, so a byte-level swap is safe <span class="tag measured">measured</span>.</td></tr>
+<tr><td>Path hashing</td><td colspan="2">Same algorithm. The store directory goes into the hash, so the same derivation gets different paths in the two systems (guix-transfer <code>DESIGN.md</code> section 6) <span class="tag source">source</span>.</td><td>The bridge keeps the nixpkgs hash instead of recomputing one. The Guix path is not derivable from any Guix derivation, so the item must arrive signed.</td></tr>
+<tr><td>Derivation file</td><td colspan="2">Same ATerm <code>Derive(...)</code> record and the same NAR format <span class="tag source">source</span>.</td><td>The bridge never reads derivations. It works on NARs only.</td></tr>
+<tr><td>Package language</td><td>Nix expressions, <code>callPackage</code>, <code>stdenv</code> phases, overlays</td><td>Guile records, build systems, G-expressions</td><td>The bridge never evaluates nixpkgs while building. Evaluation happens once, when the lock file is written (section 5.1).</td></tr>
+<tr><td>Bootstrap</td><td>Prebuilt bootstrap-tools tarball <span class="tag background">background</span></td><td>Full-source bootstrap from small seeds (stage0, mes, tcc) <span class="tag source">source</span></td><td>No shared base. Each nixpkgs closure brings its own glibc and libgcc.</td></tr>
+<tr><td>glibc</td><td>2.44 in nixpkgs 8edc0c72 <span class="tag measured">measured</span></td><td>2.41 in Guix 6754acb <span class="tag measured">measured</span></td><td>Two C libraries side by side. Each binary loads its own through its interpreter and RPATH, so they do not clash. The nixpkgs glibc NAR alone is 46.9 MB <span class="tag measured">measured</span>.</td></tr>
+<tr><td>Outputs</td><td>Fine splits such as <code>out</code>, <code>bin</code>, <code>dev</code>, <code>man</code>, <code>doc</code>, chosen by <code>meta.outputsToInstall</code>. jq's <code>out</code> holds only the library. The binary is in <code>bin</code> <span class="tag measured">measured</span>.</td><td>Mostly a single <code>out</code>, with <code>lib</code>, <code>doc</code> and <code>debug</code> where useful</td><td>The lock must record <code>outputsToInstall</code>. Taking Hydra's <code>out</code> path gave a jq without a binary <span class="tag measured">measured</span>.</td></tr>
+<tr><td>Substitute signatures</td><td><code>Sig: cache.nixos.org-1:&lt;base64 ed25519&gt;</code> over a fingerprint of path, NAR hash, size and references <span class="tag source">source</span></td><td><code>Signature: 1;&lt;host&gt;;&lt;base64 canonical s-expression&gt;</code>, checked against <code>/etc/guix/acl</code> <span class="tag source">source</span></td><td>Nix signatures do not carry over. The rewritten NAR has a new hash anyway. The bridge checks the Nix signature and then signs with its own Guix key.</td></tr>
+<tr><td>Unsigned import</td><td>n/a</td><td>Allowed only for content-addressed items with no deriver (<code>nix/libstore/local-store.cc:1379</code>) <span class="tag source">source</span></td><td>Most nixpkgs outputs reference themselves, so they cannot be content-addressed. A signing key is required.</td></tr>
+<tr><td>NAR compression</td><td>zstd for all 93 items fetched <span class="tag measured">measured</span></td><td>lzip, zstd or gzip. bordeaux served hello as lzip <span class="tag measured">measured</span>.</td><td>The bridge serves zstd, which Guix accepts <span class="tag background">background</span>.</td></tr>
+<tr><td>Runtime lookup</td><td>Wrapper scripts, <code>LOCALE_ARCHIVE</code>, <code>NIX_SSL_CERT_FILE</code>, <code>/run/opengl-driver</code> on NixOS <span class="tag background">background</span></td><td><code>GUIX_LOCPATH</code>, <code>GUIX_PYTHONPATH</code>, <code>SSL_CERT_FILE</code>, profile search paths</td><td>CLI tools work as-is. A git clone over HTTPS worked <span class="tag measured">measured</span>. GUI apps that use OpenGL need a driver path (section 7).</td></tr>
+<tr><td>Security updates</td><td>Rebuild and new paths</td><td>Grafts rewrite references in place</td><td>Bridged items are never grafted. Updating means a new lock revision.</td></tr>
+<tr><td>Build sandbox</td><td>Provides <code>/bin/sh</code></td><td>No <code>/bin</code> at all (guix-transfer README) <span class="tag source">source</span></td><td>Does not matter here, since nothing is built.</td></tr>
+</table>
+
+<h2>4. Options considered</h2>
+<table>
+<tr><th>Option</th><th>How</th><th>Uses the nixpkgs cache</th><th>One store and GC</th><th>Cost</th></tr>
+<tr><td>A. Nix next to Guix</td><td><code>nix-service-type</code> from <code>(gnu services nix)</code> runs nix-daemon with a real <code>/nix/store</code> <span class="tag source">source</span>.</td><td>Yes</td><td>No. Two stores, two daemons, two GC roots. nixpkgs packages cannot appear in <code>home.scm</code>.</td><td>Close to zero code</td></tr>
+<tr><td>B. Reverse guix-transfer</td><td>Translate nixpkgs <code>.drv</code> files to Guix and let guix-daemon build them.</td><td>No, only for sources</td><td>Yes</td><td>Hours of building per closure. Also needs a nixpkgs bootstrap port.</td></tr>
+<tr><td>C1. Transplant, direct import</td><td>A client script rewrites NARs and pipes a signed export to <code>guix archive --import</code>.</td><td>Yes</td><td>Yes</td><td>Small. But the user process needs the signing key, and that key can put any content into the store.</td></tr>
+<tr class="chosen"><td><strong>C2. Transplant, bridge substitute server (chosen)</strong></td><td>A local service answers narinfo and NAR requests for an allowlist of hashes, rewrites, and signs.</td><td>Yes</td><td>Yes</td><td>One service and one module. The key stays with a service account, and the daemon's normal checks still run.</td></tr>
+</table>
+<p>C2 beats C1 because the user never holds a key that can inject arbitrary store items. Lowering a package only asks the daemon to <code>ensure-path</code>. The daemon then uses the same signed substitute path as for bordeaux. Option A stays the fallback if the bridge ever stops paying for itself. It is the right choice if you want nixpkgs tools such as <code>nix shell</code>, flakes or home-manager rather than nixpkgs binaries.</p>
+
+<h2>5. Design</h2>
+<pre>
+ desktop/nixpkgs.scm           make nixpkgs-lock               desktop/nixpkgs.lock
+ (attr names wanted)  ───────▶ guix shell nix -- nix eval ───▶ revision, system, packages,
+                               + narinfo walk on cache.nixos     full closure (allowlist)
+                                                                        │
+                                       ┌────────────────────────────────┤ read at eval time
+                                       ▼                                ▼
+ home.scm: (nixpkgs-package "jq") ─▶ gexp compiler ─▶ ensure-path /gnu/store/&lt;h&gt;-jq-1.8.2-bin
+                                                                        │ daemon substitutes
+                                                                        ▼
+                     guix-daemon ──GET /&lt;h&gt;.narinfo──▶ nixpkgs-bridge (shepherd, 127.0.0.1)
+                                  ◀─signed narinfo───   1. h in allowlist?   else 404
+                                  ──GET nar──────────▶  2. fetch cache.nixos.org narinfo, check Sig
+                                  ◀─rewritten NAR────   3. fetch NAR, check NarHash
+                                                        4. /nix/store/ ─▶ /gnu/store/ in the byte stream
+                                                        5. new NarHash, swapped References, sign
+</pre>
+
+<h3>5.1 Data shapes</h3>
+<p><strong>Path mapping.</strong> A function, not a table. <code>(nix-&gt;gnu "/nix/store/X") = "/gnu/store/X"</code>. Because of this, the bridge, the lock and the Guix module never have to agree on a translation table.</p>
+<p><strong>Lock file</strong> (<code>desktop/nixpkgs.lock</code>, an s-expression so Guile reads it without a JSON dependency). It is the single source of truth. The lock writer produces it and nothing else edits it.</p>
+<pre>(nixpkgs-lock
+ (revision "8edc0c72e3a38faf5434e40d1f19431125fe4b30")
+ (system "aarch64-linux")
+ (packages
+  ("jq" (version "1.8.2")
+        (install "bin" "man")
+        (outputs ("bin" "/nix/store/kr5py0dcqc9f3l9148qd1axh0z77lld3-jq-1.8.2-bin")
+                 ("man" "/nix/store/3dk5p8ydxv92px9q2y5vgq3gzl26vdxy-jq-1.8.2-man"))))
+ (closure "/nix/store/hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25" ...))</pre>
+<p><code>closure</code> is the union of the runtime closures of every installed output, from narinfo <code>References</code>. The bridge uses it as its allowlist. The lock writer refuses to write the lock if any closure member lacks a narinfo on cache.nixos.org. A missing narinfo means Hydra did not build it for aarch64, and the bridge must never fall back to building.</p>
+<p><strong>Rewritten narinfo</strong>, the bridge's answer. Example for hello:</p>
+<pre>StorePath: /gnu/store/0xy6jlccm8kfpwmhkxabz3638lchyi74-hello-2.12.3
+URL: nar/zstd/0xy6jlccm8kfpwmhkxabz3638lchyi74-hello-2.12.3
+Compression: zstd
+NarHash: sha256:&lt;hash of the rewritten NAR&gt;
+NarSize: 294360
+References: 0xy6jlccm8kfpwmhkxabz3638lchyi74-hello-2.12.3 hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25
+System: aarch64-linux
+Signature: 1;localhost;&lt;canonical sexp signed by the bridge key&gt;</pre>
+<p><code>NarSize</code> and <code>References</code> carry over unchanged in length and hash parts. The nixpkgs <code>Deriver</code> is dropped because no such <code>.drv</code> exists in <code>/gnu/store</code>.</p>
+
+<h3>5.2 Components</h3>
+<table>
+<tr><th>Piece</th><th>Location</th><th>Role</th></tr>
+<tr><td>Wanted list</td><td><code>desktop/nixpkgs.scm</code></td><td>A list of attribute names, such as <code>("jq" "ripgrep")</code>.</td></tr>
+<tr><td>Lock writer</td><td><code>make nixpkgs-lock</code></td><td>Runs <code>guix shell nix -- nix eval</code> with a store under <code>~/.cache</code>. That needs no root and no nix-daemon, and took 18 s for three attributes <span class="tag measured">measured</span>. It reads <code>outPath</code> and <code>meta.outputsToInstall</code> for <code>legacyPackages.aarch64-linux</code> at the channel revision, then walks narinfos to fill <code>closure</code>.</td></tr>
+<tr><td>Bridge server</td><td><code>modules/engstrand/nixpkgs/bridge.scm</code></td><td>Guile HTTP server on <code>127.0.0.1</code>. It reuses <code>(guix narinfo)</code>, <code>(guix pki)</code> and <code>(guix pk-crypto)</code> to sign, the same way <code>guix/scripts/authenticate.scm</code> does with <code>bytevector-&gt;hash-data</code> and <code>signature-sexp</code> <span class="tag source">source</span>. It keeps rewritten NARs in <code>/var/cache/nixpkgs-bridge</code> with a size cap.</td></tr>
+<tr><td>Bridge service</td><td><code>modules/engstrand/system/asahi.scm</code></td><td>A Shepherd service that runs as user <code>nixpkgs-bridge</code>, which owns <code>/etc/nixpkgs-bridge/signing-key.sec</code>. The <code>guix-configuration</code> block at <code>asahi.scm:118</code> gains the public key in <code>authorized-keys</code> and <code>http://127.0.0.1:8181</code> at the end of <code>substitute-urls</code>.</td></tr>
+<tr><td>Guix module</td><td><code>modules/engstrand/nixpkgs.scm</code></td><td>Exports <code>nixpkgs-package</code>. See below.</td></tr>
+<tr><td>Check</td><td><code>make nixpkgs-check</code></td><td>For each locked package, run one binary from the real Home profile and grep the closure for leftover <code>/nix/store/</code> strings.</td></tr>
+</table>
+
+<h3>5.3 The Guix side</h3>
+<p>A G-expression compiler turns a locked nixpkgs path into a source input. <code>lower-inputs</code> in <code>guix/gexp.scm:952</code> treats any lowered value that is a store path string as a source <span class="tag source">source</span>. The daemon registers sources as references of the derivation, and through it of the profile. That puts bridged items under normal Guix garbage collection.</p>
+<pre>(define-record-type &lt;nixpkgs-item&gt;
+  (nixpkgs-item path)
+  nixpkgs-item?
+  (path nixpkgs-item-path))
+
+(define-gexp-compiler (nixpkgs-item-compiler (item &lt;nixpkgs-item&gt;) system target)
+  (let ((path (nix-&gt;gnu (nixpkgs-item-path item))))
+    (mbegin %store-monad
+      ((store-lift ensure-path) path)   ; the daemon substitutes it from the bridge
+      (return path))))
+
+(define (nixpkgs-package attr)
+  (match (lock-package attr)
+    (($ &lt;locked-package&gt; attr version install-paths)
+     (package
+       (name (string-append "nixpkgs-" attr))
+       (version version)
+       (source #f)
+       (build-system trivial-build-system)
+       (arguments
+        (list #:modules '((guix build union))
+              #:builder
+              #~(begin
+                  (use-modules (guix build union))
+                  (union-build #$output
+                               (list #$@(map nixpkgs-item install-paths))))))
+       (synopsis (string-append "nixpkgs " attr " from cache.nixos.org"))
+       (description "Binary output of nixpkgs, rewritten into /gnu/store.")
+       (home-page "https://search.nixos.org")
+       (license #f)))))</pre>
+<p>In <code>home.scm</code>, <code>(map nixpkgs-package '("jq" "ripgrep"))</code> joins the package list. The <code>nixpkgs-</code> prefix keeps names apart from Guix packages in <code>guix package -I</code> and in profile conflict messages.</p>
+
+<h2>6. Trust</h2>
+<ul>
+  <li>The bridge key can sign anything, so it is as powerful as the bordeaux key in <code>/etc/guix/acl</code>. It lives only with the <code>nixpkgs-bridge</code> service account. Revoking it means removing one entry from <code>authorized-keys</code>.</li>
+  <li>The bridge signs only after it has checked the cache.nixos.org signature and the original <code>NarHash</code>. So the chain of trust is cache.nixos.org, then a fixed byte rewrite anyone can repeat, then the local key. The spike already checks <code>NarHash</code> and fails on a mismatch <span class="tag measured">measured</span>. Checking <code>Sig</code> is still to do.</li>
+  <li>The allowlist keeps the bridge silent for every other hash. Otherwise each Guix substitute lookup would leak a <code>/gnu/store</code> hash to cache.nixos.org and add a round trip.</li>
+  <li>A collision between a bridged path and a future Guix output path would need two different 160-bit truncated SHA-256 values to match. I treat it as impossible.</li>
+</ul>
+
+<h2>7. Known divergences and risks</h2>
+<table>
+<tr><th>Risk</th><th>Status</th><th>Handling</th></tr>
+<tr><td>Store paths inside compressed data, such as gzip man pages, jars or wheels, are not rewritten.</td><td>At least 10 of git's man pages hold <code>/nix/store</code> links to <code>git-doc</code>. Of 460 compressed files, none was needed at run time in the spike <span class="tag measured">measured</span>.</td><td>The check scans compressed files and reports hits. A follow-up could decompress, rewrite and recompress known formats, accepting a new file hash.</td></tr>
+<tr><td>Prose mentions of the bare prefix (<code>`/nix/store`</code> without a trailing slash).</td><td>One file, Python's <code>EXTERNALLY-MANAGED</code> <span class="tag measured">measured</span>.</td><td>Harmless. Rewriting only <code>/nix/store/</code> with the slash avoids touching unrelated text.</td></tr>
+<tr><td>Files that hash their own contents, such as Python <code>RECORD</code> files.</td><td>Hashes go stale after the rewrite <span class="tag guess">guess</span>.</td><td>Only pip uninstall reads them, and bridged items are read-only.</td></tr>
+<tr><td>OpenGL and Vulkan apps look for drivers in <code>/run/opengl-driver</code>.</td><td>Not tested <span class="tag guess">guess</span>.</td><td>A system service could link <code>/run/opengl-driver</code> to a bridged nixpkgs <code>mesa</code>, which includes the Asahi driver upstream. Test this before promising GUI apps.</td></tr>
+<tr><td>Locales.</td><td>Not tested <span class="tag guess">guess</span>.</td><td>Point <code>LOCALE_ARCHIVE</code> at a bridged <code>glibcLocales</code> in Home. Without it, nixpkgs glibc falls back to built-in <code>C.UTF-8</code>.</td></tr>
+<tr><td>Disk use.</td><td>The six-package spike closure is 454 MiB, of which git's Perl dependencies are a large share <span class="tag measured">measured</span>.</td><td>Pin one nixpkgs revision for all packages, so they share one glibc and one OpenSSL. Mixing Hydra builds from different evaluations duplicates the base.</td></tr>
+<tr><td>Reproducing Home on a machine without the bridge.</td><td>The build fails at <code>ensure-path</code> <span class="tag guess">guess</span>.</td><td>Acceptable for a personal laptop. <code>make repro-build</code> should skip nixpkgs packages or fail with a clear message.</td></tr>
+<tr><td>aarch64 build gaps on Hydra.</td><td>Not every package is built for aarch64 <span class="tag background">background</span>.</td><td>The lock writer refuses such packages.</td></tr>
+</table>
+
+<h2>8. Spike evidence</h2>
+<p>The spike store paths come from Hydra's latest finished <code>nixpkgs/unstable</code> aarch64 builds. hello, jq and ripgrep match revision 8edc0c72 exactly <span class="tag measured">measured</span>. The spike fetched narinfos and NARs from cache.nixos.org, checked <code>NarHash</code>, swapped the prefix and unpacked the result into a directory. I used <code>unshare -rm</code> to mount an overlay of that directory on top of <code>/gnu/store</code>, which needs no root and changes nothing on the system, and ran each binary.</p>
+<table>
+<tr><th>Package</th><th>Command run from <code>/gnu/store</code></th><th>Result</th></tr>
+<tr><td>hello 2.12.3</td><td><code>hello --version</code>, <code>--greeting</code></td><td>Ran. The ELF interpreter is <code>/gnu/store/hx9w…-glibc-2.44-25/lib/ld-linux-aarch64.so.1</code>.</td></tr>
+<tr><td>python3 3.14.7</td><td>import ssl, sqlite3, ctypes, zlib, lzma</td><td>Ran. <code>sys.prefix</code> reports the <code>/gnu/store</code> path. OpenSSL 3.5.8, SQLite 3.53.3.</td></tr>
+<tr><td>git 2.55.0</td><td><code>git clone --depth 1 https://github.com/fzakaria/guix-transfer</code></td><td>Cloned over HTTPS, with Perl, curl and krb5 in the closure.</td></tr>
+<tr><td>fd 10.5.0</td><td><code>fd -e rs</code></td><td>Ran on 16 KiB pages with jemalloc.</td></tr>
+<tr><td>ripgrep 15.2.0</td><td><code>rg -c</code></td><td>Ran.</td></tr>
+<tr><td>jq 1.8.2 (<code>bin</code>)</td><td><code>jq -c .a</code></td><td>Printed <code>[1,2]</code>.</td></tr>
+</table>
+<p>The full check took 55 s on a fresh directory, mostly downloading. The first spike runs took 3.3 s for hello and 39 s for the other five <span class="tag measured">measured</span>.</p>
+<p>Not yet verified: that guix-daemon accepts a bridge-signed substitute for a path that no Guix derivation produces. Reading <code>importPath</code> (<code>local-store.cc:1326</code>), the daemon checks syntax, the signature and the NAR hash, not where the path came from <span class="tag source">source</span>. Testing it needs a new key in <code>/etc/guix/acl</code>, which is a system change. That makes it phase 1 below.</p>
+
+<h2>9. Implementation plan</h2>
+<p>The riskiest unknown comes first. Each phase ends in a check run on the real system.</p>
+<ol>
+  <li><strong>Daemon acceptance.</strong> Generate the bridge key and authorize it with a reconfigure. Serve the hello narinfo and NAR from a throwaway server, then run <code>guix build /gnu/store/0xy6…-hello-2.12.3</code>. Done means the item is valid, <code>guix gc --verify=contents</code> passes, and <code>guix gc -R</code> lists glibc.</li>
+  <li><strong>Lock writer.</strong> <code>make nixpkgs-lock</code> writes <code>desktop/nixpkgs.lock</code> for the wanted list. Done means the lock for hello, jq and ripgrep matches the paths in section 8, and an attribute missing on aarch64 makes the writer fail.</li>
+  <li><strong>Bridge service.</strong> Add the allowlist, the <code>Sig</code> check, rewrite, signing and the cache. Done means phase 1 passes against the service, and a hash outside the allowlist gets 404 with no outbound request.</li>
+  <li><strong>Guix module.</strong> Add <code>nixpkgs-package</code> and the G-expression compiler. Done means <code>make home-build</code> builds a Home containing <code>nixpkgs-jq</code>.</li>
+  <li><strong>Home integration and checks.</strong> Add <code>make nixpkgs-check</code>. Done means every locked package runs from <code>~/.guix-home/profile/bin</code> after <code>make home-apply</code>, and <code>guix gc</code> keeps bridged items while the profile references them.</li>
+  <li><strong>Optional.</strong> Add an OpenGL driver link and a locale archive, if you want GUI apps.</li>
+</ol>
+
+<h2>10. Open decisions</h2>
+<ul>
+  <li>Channel: <code>nixpkgs-unstable</code> (used here, revision 8edc0c72) or a stable <code>nixos-YY.MM</code> branch, which gets fewer updates but holds versions still for six months.</li>
+  <li>Scope: CLI tools only, or GUI apps too, which adds the OpenGL work in phase 6.</li>
+  <li>If you would rather run nixpkgs tooling itself (flakes, <code>nix shell</code>, home-manager), choose option A instead. It costs a second store but no code.</li>
+</ul>
+
+<h2>11. As built</h2>
+<p>The first implementation differs from section 5 in four ways.</p>
+<ul>
+  <li><strong>No substitute server.</strong> <code>make nixpkgs-import</code> signs an export stream with a key in <code>~/.config/guix/nixpkgs-bridge/</code> and pipes it to <code>guix archive --import</code>. The daemon trusts the key through <code>authorized-keys</code> in <code>modules/engstrand/system/asahi.scm</code>. The key is held by the user account rather than a service account. On this single-user laptop that account already has sudo, so the gain from a separate service did not pay for an HTTP server and a Shepherd service.</li>
+  <li><strong>The lock holds every narinfo.</strong> <code>modules/engstrand/nixpkgs/lock.sexp</code> records URL, compression, NAR hash, size and references for each closure item. The lock writer checks each cache.nixos.org signature. The importer then needs only the lock, and refuses any NAR whose hash or size differs.</li>
+  <li><strong>Graphics.</strong> The nixpkgs ghostty, run from the rewritten store, loaded OpenGL 4.6 through nixpkgs Mesa 26.2.4 <span class="tag measured">measured</span>. <code>nixpkgs-system-services</code> links <code>/run/opengl-driver</code> to that Mesa and installs <code>/etc/fonts/fonts.conf</code>. Those are the default paths nixpkgs libglvnd and fontconfig search, and Guix programs read neither <span class="tag measured">measured</span>. A first version set the Mesa variables in a ghostty wrapper instead, and every shell ghostty started inherited them, along with any Guix GUI program run from that shell.</li>
+  <li><strong>Locales.</strong> Home sets <code>LOCALE_ARCHIVE</code> to nixpkgs <code>glibcLocalesUtf8</code>. Guix's glibc 2.41 has no reference to that variable <span class="tag measured">measured</span>, so only nixpkgs programs read it.</li>
+</ul>
+<p>Before the key was trusted, a throwaway script checked the archive writer without root. It imported a content-addressed test item through the real daemon and verified the signature with <code>guix authenticate</code> against a temporary ACL. Now the real import and <code>make nixpkgs-verify</code> cover the same ground. Verify reads each item back from <code>/gnu/store</code>, maps <code>/gnu/store/</code> back to <code>/nix/store/</code>, and compares the NAR hash with the one cache.nixos.org signed.</p>
+</body>
+</html>

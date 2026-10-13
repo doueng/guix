@@ -23,6 +23,7 @@
   #:use-module (gnu services ssh)
   #:use-module (rde system services admin)
   #:use-module (gnu services sysctl)
+  #:use-module (guix gexp)
   #:export (make-base-os))
 
 (define* (make-base-os #:key root-uuid esp-uuid channels)
@@ -120,6 +121,8 @@
                      (inherit config)
                      (channels channels)
                      (authorized-keys (append %asahi-substitute-keys
+                                              ;; Signs nixpkgs imports; see make nixpkgs-import.
+                                              (list (local-file "../nixpkgs/signing-key.pub" "nixpkgs-signing-key.pub"))
                                               (guix-configuration-authorized-keys config)))
                      ;; Prefer the general cache; Asahi and CI are signed fallbacks.
                      (substitute-urls (append '("https://bordeaux.guix.gnu.org")
