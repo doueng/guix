@@ -142,13 +142,22 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
     sync(ctx);
   });
 
+  // The selector falls back to the first user message, which is the expanded skill block.
+  function nameSession(task: string) {
+    const name = task.replace(/\s+/g, " ").trim().slice(0, 80);
+    if (name && !pi.getSessionName()) pi.setSessionName(name);
+  }
+
   pi.on("input", async (event, ctx) => {
     if (event.source === "extension") return { action: "continue" };
+    const firstPrompt = autoStart;
     if (/^\/skill:poteto-mode(?:\s|$)/.test(event.text)) {
       setActive(true, ctx);
+      if (firstPrompt) nameSession(event.text.replace(/^\/skill:poteto-mode/, ""));
     } else if (autoStart && !event.text.startsWith("/")) {
       // Pi expands /skill: after input handlers, so this loads the skill exactly as typing it would.
       setActive(true, ctx);
+      nameSession(event.text);
       return { action: "transform", text: `/skill:poteto-mode ${event.text}` };
     }
     return { action: "continue" };
