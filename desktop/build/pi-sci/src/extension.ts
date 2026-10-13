@@ -3,6 +3,7 @@ import {
 	createCodemodeExtension,
 	type ExtensionAPI,
 	highlightCode,
+	isToolCallEventType,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
@@ -16,6 +17,7 @@ import {
 	skillIndex,
 } from "./catalog.ts";
 import { registerDomainCommands } from "./commands.ts";
+import { CODEMODE_RULES, repairDelimiters, rulesForPath } from "./delimiters.ts";
 import {
 	assertEnvironmentLimits,
 	ENVIRONMENT_KEY,
@@ -27,8 +29,33 @@ import {
 import { budgetOutput, throttleUpdates } from "./output.ts";
 import { compileSciSource, outputBudget, SCI_GRAMMAR } from "./source.ts";
 
+function registerWriteRepair(pi: ExtensionAPI) {
+	const notes = new Map<string, string>();
+	pi.on("tool_call", (event) => {
+		if (!isToolCallEventType("write", event)) return;
+		const rules = rulesForPath(event.input.path);
+		if (!rules) return;
+		const outcome = repairDelimiters(event.input.content, rules);
+		if (outcome.kind === "repaired") {
+			event.input.content = outcome.content;
+			notes.set(event.toolCallId, outcome.note);
+		} else if (outcome.kind === "unbalanced")
+			notes.set(
+				event.toolCallId,
+				`[delimiter warning] ${outcome.summary} The file was written as sent.`,
+			);
+	});
+	pi.on("tool_result", (event) => {
+		const note = notes.get(event.toolCallId);
+		notes.delete(event.toolCallId);
+		if (note && !event.isError)
+			return { content: [...event.content, { type: "text", text: note }] };
+	});
+}
+
 export default function sciCodemode(pi: ExtensionAPI) {
 	registerDomainCommands(pi);
+	registerWriteRepair(pi);
 	const adapter: ExtensionAPI = {
 		...pi,
 		registerTool(registered) {
@@ -98,7 +125,9 @@ export default function sciCodemode(pi: ExtensionAPI) {
 						(name) => metadata.get(name)?.namespace,
 						(name) => metadata.get(name)?.promptGuidelines ?? [],
 					);
-					const code = compileSciSource(params.code, entries, environment);
+					const repair = repairDelimiters(params.code, CODEMODE_RULES);
+					const source = repair.kind === "repaired" ? repair.content : params.code;
+					const code = compileSciSource(source, entries, environment);
 					const progress = throttleUpdates(update);
 					let executed: Awaited<ReturnType<typeof executor.execute>>;
 					try {
@@ -112,7 +141,15 @@ export default function sciCodemode(pi: ExtensionAPI) {
 					} finally {
 						progress.stop();
 					}
-					const result = await budgetOutput(executed, outputBudget(params.code));
+					const budgeted = await budgetOutput(executed, outputBudget(source));
+					const [header, ...rest] = budgeted.content;
+					const result =
+						repair.kind === "repaired" && header
+							? {
+									...budgeted,
+									content: [header, { type: "text" as const, text: repair.note }, ...rest],
+								}
+							: budgeted;
 					if (result.isError) return result;
 					try {
 						if (signal?.aborted) throw new Error("SCI invocation was aborted before commit.");
