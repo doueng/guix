@@ -6,17 +6,11 @@
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
 
 (ns herdr-agent-pick
-  (:require [clojure.string :as str]
+  (:require [babashka.fs :as fs]
+            [cheshire.core :as json]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
             [herdr.client :as herdr]))
-
-(defn agents []
-  (or (:agents (herdr/call! "agent" "list")) []))
-
-(defn current-workspace-id [items]
-  (or (System/getenv "HERDR_WORKSPACE_ID")
-      (some (fn [{:keys [focused workspace_id]}]
-              (when focused workspace_id))
-            items)))
 
 (def agent-state-order
   ;; Keep attention-worthy agents at the top, matching Herdr's priority view.
@@ -26,52 +20,140 @@
    "idle" 3
    "unknown" 4})
 
+(def state-icon
+  {"blocked" "!"
+   "done" "✓"
+   "working" "●"
+   "idle" "○"})
+
 (defn state-key [value]
   (str/lower-case (str (or value "unknown"))))
 
-(defn agent-sort-key [{:keys [agent agent_status pane_id]}]
-  [(get agent-state-order (state-key agent_status) 99)
-   (state-key agent)
-   (str pane_id)])
-
 (defn clean-text [value]
   (-> (str value)
-      (str/replace #"[\t\r\n]+" " ")))
+      (str/replace #"\s+" " ")
+      str/trim))
 
-(defn row-data [{:keys [agent agent_status focused cwd pane_id tab_id]}]
-  {:id pane_id
-   :display (format "%s %-8s %-24s %s%s"
-                    (if focused "*" " ")
-                    (clean-text (or agent_status "unknown"))
-                    (clean-text (or agent "unnamed"))
-                    (clean-text (or cwd ""))
-                    (if tab_id (str "  [" tab_id "]") ""))})
+(defn truncate [text width]
+  (if (> (count text) width)
+    (str (subs text 0 (dec width)) "…")
+    text))
 
-(defn pick [rows]
+(defn message-text
+  "The words the user typed, without the skill bodies pi expands into prompts."
+  [{:keys [content]}]
+  (some-> (if (string? content)
+            content
+            (some #(when (= "text" (:type %)) (:text %)) content))
+          (str/replace #"(?s)<skill\b.*?</skill>" "")
+          clean-text
+          not-empty))
+
+(defn session-title
+  "The last name set with pi's /name, or else the session's first prompt."
+  [path]
+  (when (and path (fs/exists? path))
+    (with-open [reader (io/reader path)]
+      (loop [[line & lines] (line-seq reader)
+             name nil
+             prompt nil]
+        (if-not line
+          (or name prompt)
+          ;; Session files grow large; only parse the lines that can matter.
+          (cond
+            (str/includes? line "\"session_info\"")
+            (recur lines (or (:name (json/parse-string line true)) name) prompt)
+
+            (and (nil? prompt) (str/includes? line "\"role\":\"user\""))
+            (recur lines name (some-> (json/parse-string line true) :message message-text))
+
+            :else (recur lines name prompt)))))))
+
+(defn age [path]
+  (when (and path (fs/exists? path))
+    (let [seconds (quot (- (System/currentTimeMillis)
+                           (.toMillis (fs/last-modified-time path)))
+                        1000)]
+      (cond
+        (< seconds 60) "now"
+        (< seconds 3600) (str (quot seconds 60) "m")
+        (< seconds 86400) (str (quot seconds 3600) "h")
+        :else (str (quot seconds 86400) "d")))))
+
+(defn locations
+  "Map workspace and tab ids to their numbers and labels."
+  []
+  (let [workspaces (:workspaces (herdr/call! "workspace" "list"))
+        tabs (mapcat #(:tabs (herdr/call! "tab" "list" "--workspace" (:workspace_id %)))
+                     workspaces)]
+    {:workspaces (into {} (map (juxt :workspace_id identity)) workspaces)
+     :tabs (into {} (map (juxt :tab_id identity)) tabs)}))
+
+(defn row [{:keys [workspaces tabs]} current-workspace-id
+           {:keys [agent agent_session agent_status cwd focused name pane_id tab_id workspace_id]}]
+  (let [workspace (get workspaces workspace_id)
+        tab (get tabs tab_id)
+        session-path (when (= "path" (:kind agent_session)) (:value agent_session))
+        status (state-key agent_status)]
+    {:id pane_id
+     :sort-key [(get agent-state-order status 99)
+                (if (= workspace_id current-workspace-id) 0 1)
+                (or (:number workspace) 99)
+                (or (:number tab) 99)]
+     :marker (if focused "*" " ")
+     :status (str (get state-icon status "?") " " status)
+     :place (str (or (:label workspace) workspace_id) "/" (or (:label tab) tab_id))
+     :agent (or name agent "agent")
+     :age (or (age session-path) "")
+     :title (truncate (clean-text (or (session-title session-path)
+                                      (some-> cwd fs/file-name)
+                                      ""))
+                      100)}))
+
+(defn column-width [rows key]
+  (reduce max 0 (map #(count (key %)) rows)))
+
+(defn layout [rows]
+  (let [format-string (str "%s %-" (column-width rows :status) "s  "
+                           "%-" (column-width rows :place) "s  "
+                           "%-" (column-width rows :agent) "s  "
+                           "%4s  %s")]
+    {:header (format format-string " " "Status" "Where" "Agent" "Age" "Task")
+     :rows (map #(assoc % :display (format format-string (:marker %) (:status %) (:place %)
+                                           (:agent %) (:age %) (:title %)))
+                rows)}))
+
+(defn pick [rows header]
   (let [input (str/join "\n" (map #(str (:id %) "\t" (:display %)) rows))
         result (herdr/run! ["fzf"
-                      "--border"
-                      "--delimiter" "\t"
-                      "--header" "Agent                 Status    Working directory"
-                      "--layout" "reverse"
-                      "--no-multi"
-                      "--no-sort"
-                      "--prompt" "Agent> "
-                      "--with-nth" "2"]
-                     {:in input})]
+                            "--border"
+                            "--delimiter" "\t"
+                            "--header" header
+                            "--layout" "reverse"
+                            "--no-multi"
+                            "--no-sort"
+                            "--prompt" "Agent> "
+                            "--with-nth" "2"
+                            ;; Pi draws on the alternate screen, so scrollback reads scroll an idle
+                            ;; pane (about a second) and fail on a working one.
+                            "--preview" (str herdr/bin " agent read {1} --source visible")
+                            "--preview-window" "down,60%,follow,border-top"]
+                           {:in input})]
     (some-> (:out result)
             str/trim
+            not-empty
             (str/split #"\t" 2)
             first)))
 
-(let [items (vec (agents))
-      workspace-id (current-workspace-id items)
-      rows (->> items
-                (filter #(or (nil? workspace-id)
-                             (= workspace-id (:workspace_id %))))
-                (sort-by agent-sort-key)
-                (map row-data)
+(let [agents (or (:agents (herdr/call! "agent" "list")) [])
+      where (locations)
+      current-workspace-id (or (System/getenv "HERDR_ACTIVE_WORKSPACE_ID")
+                               (System/getenv "HERDR_WORKSPACE_ID"))
+      rows (->> agents
+                (map #(row where current-workspace-id %))
+                (sort-by :sort-key)
                 vec)]
   (when (seq rows)
-    (when-let [selected-id (pick rows)]
-      (herdr/run! [herdr/bin "agent" "focus" selected-id]))))
+    (let [{:keys [header rows]} (layout rows)]
+      (when-let [selected-id (pick rows header)]
+        (herdr/run! [herdr/bin "agent" "focus" selected-id])))))

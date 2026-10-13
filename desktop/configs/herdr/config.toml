@@ -32,14 +32,14 @@ workspace_picker = ["prefix+w", "prefix+e"]
 navigate_workspace_up = "w"
 navigate_workspace_down = "e"
 
-# Pick an agent in the focused workspace with an fzf selector.
+# Pick an agent from any workspace with an fzf selector that previews its pane.
 [[keys.command]]
 key = "prefix+a"
 type = "popup"
 command = "$HOME/.local/bin/herdr-agent-pick"
 description = "focus an agent"
-width = "70%"
-height = "50%"
+width = "85%"
+height = "80%"
 
 # Pick an open Herdr workspace with a workspace-only fzf selector.
 [[keys.command]]
