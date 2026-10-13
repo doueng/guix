@@ -1,7 +1,7 @@
 (define-module (engstrand features desktop)
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages bluetui)
-  #:use-module (engstrand packages ghostty)
+  #:use-module (engstrand nixpkgs)
   #:use-module (asahi guix systems desktop)
   #:use-module (gnu home services xdg)
   #:use-module (gnu packages)
@@ -10,7 +10,11 @@
   #:export (feature-familiar-desktop))
 
 (define %desktop-home-packages
-  (append (list bluetui ghostty)
+  (append (list bluetui
+                ;; Launchers may not inherit Home's LOCALE_ARCHIVE.
+                (nixpkgs-package "ghostty"
+                                 #:environment
+                                 `(("LOCALE_ARCHIVE" ,(nixpkgs-locale-archive)))))
           (map specification->package
                '("thunar"
                  "imv"
@@ -49,7 +53,8 @@
    'familiar-desktop
    #:home-packages %desktop-home-packages
    #:system-packages %desktop-system-packages
-   #:system-services (list (service bluetooth-service-type
-                                    (bluetooth-configuration (auto-enable? #t))))
+   #:system-services (cons (service bluetooth-service-type
+                                    (bluetooth-configuration (auto-enable? #t)))
+                           (nixpkgs-system-services))
    #:home-services (append %asahi-desktop-home-services
                            (list %home-mime-service))))

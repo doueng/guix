@@ -1,21 +1,21 @@
 (define-module (engstrand features shell)
   #:use-module (engstrand features packages)
+  #:use-module (engstrand nixpkgs)
   #:use-module (gnu home services shells)
   #:use-module (gnu packages)
   #:use-module (gnu services)
   #:export (feature-familiar-shell))
 
 (define %shell-home-packages
-  (map specification->package
-       '("fish"
-         "fzf"
-         "zoxide"
-         "direnv"
-         "ripgrep"
-         "fd"
-         "jq"
-         "bat"
-         "btop")))
+  (append
+   ;; git and neovim also stay in the system profile for root.
+   (map nixpkgs-package
+        '("fish" "fzf" "zoxide" "ripgrep" "fd" "git" "neovim"))
+   (map specification->package
+        '("direnv"
+          "jq"
+          "bat"
+          "btop"))))
 
 (define (feature-familiar-shell)
   (feature-package-set
