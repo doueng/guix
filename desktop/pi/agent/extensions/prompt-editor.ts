@@ -281,26 +281,36 @@ function ensureDefaultModeEntries(file: ModesFile, ctx: ExtensionContext, pi: Ex
 	}
 }
 
+// Only a missing file means "use defaults". Read and parse errors propagate so that a
+// malformed modes.json is reported and never overwritten with defaults.
 async function loadModesFile(filePath: string, ctx: ExtensionContext, pi: ExtensionAPI): Promise<ModesFile> {
+	let raw: string;
 	try {
-		const raw = await fs.readFile(filePath, "utf8");
-		const parsed = JSON.parse(raw) as Record<string, unknown>;
-		const currentMode = typeof parsed.currentMode === "string" ? parsed.currentMode : "default";
-		const modesRaw = parsed.modes && typeof parsed.modes === "object" ? (parsed.modes as Record<string, unknown>) : {};
-		const modes: Record<string, ModeSpec> = {};
-		for (const [k, v] of Object.entries(modesRaw)) {
-			modes[k] = sanitizeModeSpec(v);
-		}
-		const file: ModesFile = {
-			version: 1,
-			currentMode,
-			modes,
-		};
-		ensureDefaultModeEntries(file, ctx, pi);
-		return file;
-	} catch {
-		return createDefaultModes(ctx, pi);
+		raw = await fs.readFile(filePath, "utf8");
+	} catch (err: any) {
+		if (err?.code === "ENOENT") return createDefaultModes(ctx, pi);
+		throw err;
 	}
+	const parsed = JSON.parse(raw) as Record<string, unknown>;
+	const currentMode = typeof parsed.currentMode === "string" ? parsed.currentMode : "default";
+	const modesRaw = parsed.modes && typeof parsed.modes === "object" ? (parsed.modes as Record<string, unknown>) : {};
+	const modes: Record<string, ModeSpec> = {};
+	for (const [k, v] of Object.entries(modesRaw)) {
+		modes[k] = sanitizeModeSpec(v);
+	}
+	const file: ModesFile = {
+		version: 1,
+		currentMode,
+		modes,
+	};
+	ensureDefaultModeEntries(file, ctx, pi);
+	return file;
+}
+
+function notifyUnreadableModes(ctx: ExtensionContext, filePath: string, err: unknown, consequence: string): void {
+	if (!ctx.hasUI) return;
+	const reason = err instanceof Error ? err.message : String(err);
+	ctx.ui.notify(`Cannot read ${filePath}: ${reason}. ${consequence}`, "error");
 }
 
 async function saveModesFile(filePath: string, data: ModesFile): Promise<void> {
@@ -436,7 +446,13 @@ async function ensureRuntime(pi: ExtensionAPI, ctx: ExtensionContext): Promise<v
 		runtime.filePath = filePath;
 		runtime.fileMtimeMs = mtimeMs;
 
-		const loaded = await loadModesFile(filePath, ctx, pi);
+		let loaded: ModesFile;
+		try {
+			loaded = await loadModesFile(filePath, ctx, pi);
+		} catch (err) {
+			notifyUnreadableModes(ctx, filePath, err, "Using default modes until the file is fixed.");
+			loaded = createDefaultModes(ctx, pi);
+		}
 		// Normalize/ensure defaults *before* we snapshot baseline so later persistence
 		// only reflects explicit user actions ("store").
 		ensureDefaultModeEntries(loaded, ctx, pi);
@@ -472,7 +488,13 @@ async function persistRuntime(pi: ExtensionAPI, ctx: ExtensionContext): Promise<
 
 	await withFileLock(runtime.filePath, async () => {
 		// Merge our local patch into the latest on disk to avoid clobbering other agents.
-		const latest = await loadModesFile(runtime.filePath, ctx, pi);
+		let latest: ModesFile;
+		try {
+			latest = await loadModesFile(runtime.filePath, ctx, pi);
+		} catch (err) {
+			notifyUnreadableModes(ctx, runtime.filePath, err, "Mode changes were not saved.");
+			return;
+		}
 		applyModesPatch(latest, patch);
 		ensureDefaultModeEntries(latest, ctx, pi);
 		await saveModesFile(runtime.filePath, latest);
