@@ -256,9 +256,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (add-hook hook #'eng/disable-hl-line 100))
 (eng/disable-hl-line)
 
-(use-package! fish-mode
-  :mode ("\\.fish\\'" . fish-mode))
-
 (with-eval-after-load 'evil
   (define-key evil-normal-state-map (kbd "C-o") #'evil-jump-backward)
   (define-key evil-normal-state-map (kbd "C-i") #'evil-jump-forward))

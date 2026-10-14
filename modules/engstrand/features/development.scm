@@ -16,9 +16,7 @@
                '("clojure" "curl" "file" "fnlfmt" "gopls" "hyperfine" "nixfmt"
                  "shellcheck" "shfmt" "tree-sitter" "typst" "uv"))
           (map specification->package
-              '("emacs-clojure-mode"
-                "emacs-cider"
-                "python"
+              '("python"
                 "node"
                 "make"
                 "gcc-toolchain"

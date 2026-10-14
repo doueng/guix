@@ -6,7 +6,6 @@
 (define %editor-home-packages
   (map specification->package
        '("emacs-no-x"
-         "emacs-fish-mode"
          "parinfer-rust-emacs")))
 
 (define (feature-familiar-editor)
