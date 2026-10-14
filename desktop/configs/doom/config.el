@@ -1,6 +1,5 @@
 ;;; config.el --- Doom Emacs configuration -*- lexical-binding: t; -*-
 
-;; Personal Information
 (setq user-full-name "Douglas Engstrand"
       user-mail-address "doueng09@gmail.com"
       ;; Emacs subprocess helpers require a POSIX shell even though the
@@ -41,7 +40,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
       ;; command. Keep the stable title above without paying that hot-path cost.
       xterm-set-window-title nil)
 
-;; Keep Emacs frames free of menu, tool, and scroll bars.
 (dolist (mode '(menu-bar-mode tool-bar-mode scroll-bar-mode))
   (when (fboundp mode)
     (funcall mode -1)))
@@ -50,7 +48,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
     (set alist (cons parameter
                      (assq-delete-all (car parameter) (symbol-value alist))))))
 
-;; Ensure terminal mouse support remains enabled.
 (defun eng/enable-tty-mouse ()
   (unless (display-graphic-p)
     (xterm-mouse-mode 1)))
@@ -82,10 +79,8 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (advice-add #'etcc--set-cursor :around #'eng/etcc--set-cursor-when-changed)
   (etcc--set-cursor))
 
-;; Theme (matching Neovim doom-one theme)
 (setq doom-theme 'doom-one)
 
-;; Line numbers (disabled like in Neovim config)
 (setq display-line-numbers-type nil)
 
 (after! doom-modeline
@@ -96,18 +91,14 @@ This is a lightweight way to apply config changes without restarting Emacs."
     (set-face-attribute 'doom-modeline-buffer-modified nil :inherit 'doom-modeline-buffer-file))
   (force-mode-line-update t))
 
-;; Autosave configuration - save actual files to disk
-(setq auto-save-default nil ; Disable default autosave to #file#
-      make-backup-files nil ; Disable backup files
+(setq auto-save-default nil
+      make-backup-files nil
       file-precious-flag t) ; Avoid in-place truncation (safer for concurrent readers)
 
-;; Auto-save the *real* file on idle using Emacs' built-in timer.
 (auto-save-visited-mode 1)
 
-;; Auto-revert buffers when files change on disk
 (global-auto-revert-mode 1)
 
-;; Disable pairing/matching helpers globally.
 (electric-pair-mode -1)
 (show-paren-mode -1)
 (setq blink-matching-paren nil)
@@ -135,7 +126,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (with-current-buffer buf
     (eng/disable-delimiter-helpers)))
 
-;; Save place in files (remember cursor position)
 (save-place-mode 1)
 (add-hook 'save-place-after-find-file-hook
           (lambda ()
@@ -153,24 +143,23 @@ This is a lightweight way to apply config changes without restarting Emacs."
     (kill-new buffer-file-name)
     (message "Copied: %s" buffer-file-name)))
 
-;; Editor behavior (similar to options.lua)
 (setq-default
  bidi-display-reordering 'left-to-right           ; Faster redisplay when not editing RTL text
  bidi-paragraph-direction 'left-to-right
  cursor-in-non-selected-windows nil
- delete-by-moving-to-trash t                      ; Delete files to trash
- window-combination-resize t                      ; take new window space from all other windows (not just current)
- x-stretch-cursor t)                              ; Stretch cursor to the glyph width
+ delete-by-moving-to-trash t
+ window-combination-resize t
+ x-stretch-cursor t)
 
 (setq bidi-inhibit-bpa t
       highlight-nonselected-windows nil
-      undo-limit 80000000                         ; Raise undo-limit to 80Mb
-      evil-want-fine-undo t                       ; By default while in insert all changes are one big blob. Be more granular
-      truncate-string-ellipsis "…"                ; Unicode ellispis are nicer than "...", and also save /precious/ space
-      password-cache-expiry nil                   ; I can trust my computers ... can't I?
-      scroll-preserve-screen-position 'always     ; Don't have `point' jump around
-      scroll-margin 2                             ; It's nice to maintain a little margin
-      display-time-default-load-average nil       ; I don't think I've ever found this useful
+      undo-limit 80000000
+      evil-want-fine-undo t
+      truncate-string-ellipsis "…"
+      password-cache-expiry nil
+      scroll-preserve-screen-position 'always
+      scroll-margin 2
+      display-time-default-load-average nil
       ;; Keep newly displayed text fully fontified while scrolling. This trades
       ;; some peak scroll throughput for immediate, stable syntax colors.
       redisplay-skip-fontification-on-input nil
@@ -185,7 +174,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
 ;; jumping instead, so disable evil-snipe auto-enablement (per Doom docs).
 (remove-hook 'doom-first-input-hook #'evil-snipe-mode)
 
-;; Clipboard integration (like Neovim unnamedplus)
 (setq select-enable-clipboard t
       select-enable-primary t
       save-interprogram-paste-before-kill t
@@ -200,7 +188,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
                   (mapcar #'substring-no-properties
                           (cl-remove-if-not #'stringp kill-ring)))))
 
-;; Shared clipboard integration with Neovim.
 (defun eng/system-clipboard-copy (text &optional _push)
   "Copy TEXT to the Wayland clipboard."
   (when (and (stringp text) (not (string-empty-p text)))
@@ -218,22 +205,18 @@ This is a lightweight way to apply config changes without restarting Emacs."
 (setq interprogram-cut-function #'eng/system-clipboard-copy
       interprogram-paste-function #'eng/system-clipboard-paste)
 
-;; Search behavior (case insensitive like Neovim)
-(setq-default search-upper-case t)  ; If there's upper case, be case sensitive
+(setq-default search-upper-case t)
 
-;; Indentation (matching Neovim config: 2 spaces, expandtab)
 (setq-default
  tab-width 2
- indent-tabs-mode nil)  ; Use spaces instead of tabs
+ indent-tabs-mode nil)
 
-;; Enable evil mode globally (Vim keybindings)
 (setq evil-want-C-u-scroll t
       evil-want-C-d-scroll t
       evil-respect-visual-line-mode t
       evil-undo-system 'undo-redo)
 
-;; Performance optimizations
-(setq read-process-output-max (* 4 1024 1024) ; 4 MiB for language servers
+(setq read-process-output-max (* 4 1024 1024)
       ;; The local Ghostty PTY reports 9600 baud, which makes Emacs favor
       ;; insert/delete-line terminal operations. Those expose Ghostty's darker
       ;; default background during rapid scrolling. A realistic local-terminal
@@ -276,7 +259,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
 (use-package! fish-mode
   :mode ("\\.fish\\'" . fish-mode))
 
-;; Evil jumplist navigation (normal state).
 (with-eval-after-load 'evil
   (define-key evil-normal-state-map (kbd "C-o") #'evil-jump-backward)
   (define-key evil-normal-state-map (kbd "C-i") #'evil-jump-forward))
@@ -289,7 +271,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
                        (string-prefix-p (concat name "=") entry))
                      process-environment))))
 
-;; Doom LSP using lsp-mode with nixd, fish-lsp, gopls.
 ;; Doom's Scheme module adds a Nix-only Guix path. In the Guix profile, use
 ;; the active Guile module paths so Geiser can resolve Guix sources.
 (after! geiser-guile
@@ -390,13 +371,11 @@ This is a lightweight way to apply config changes without restarting Emacs."
 
   (add-to-list 'projectile-project-root-files-bottom-up ".ijwb/.bazelproject")
 
-  ;; Avoid traversing huge generated trees.
   (dolist (dir '(".git" ".direnv" ".cache" ".ccls-cache" ".venv"
                  "bazel-bin" "bazel-out" "bazel-testlogs"
                  ".scip" "node_modules" "vendor"))
     (add-to-list 'projectile-globally-ignored-directories dir))
 
-  ;; Use fd if available (much faster than find).
   (when-let ((fd (executable-find "fd")))
     (setq projectile-generic-command
           (string-join
@@ -451,9 +430,6 @@ ultimately to plain `find-file' when the current directory is not a project."
    (t
     (call-interactively #'find-file))))
 
-;; No automatic Go formatting on save. Use the explicit format bindings instead.
-
-;; Load our custom keybindings
 (load (expand-file-name "keybindings.el" eng/doom-config-dir) t 'nomessage)
 
 ;; Load feature-specific Emacs config supplied by enabled Home Manager modules.

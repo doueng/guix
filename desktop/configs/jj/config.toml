@@ -41,7 +41,6 @@ username = "engstrand"
 [aliases]
 # Makes jj jj log work
 jj = []
-# "New Trunk"
 nt = ["new", "trunk()"]
 publish-master = ["util", "exec", "--", "bash", "-c", """
 set -euo pipefail
@@ -50,23 +49,17 @@ jj bookmark set master -r @-
 jj git push --remote origin --bookmark master
 """, ""]
 track-status = ["file", "track", "all()"]
-# lg -- just a nice short non-overwhelming log command
 lg = ["log", "-n", "10", "--config", "revsets.log=rlog"]
-# lgf/showf -- faster read-only variants for large repos
 lgf = ["--ignore-working-copy", "log", "-n", "10", "--config", "revsets.log=rlog"]
 showf = ["--ignore-working-copy", "show"]
-# id -- show the change-id of a revision
 id = ["util", "exec", "--", "bash", "-euo", "pipefail", "-c", '''
   jj --ignore-working-copy log -n 1 -GT 'self.change_id()' -r "${1:-@}"
 ''', ""]
-# sha -- show the commit-id of a revision
 sha = ["util", "exec", "--", "bash", "-euo", "pipefail", "-c", '''
   jj --ignore-working-copy log -n 1 -GT 'self.commit_id()' -r "${1:-@}"
 ''', ""]
 f = ["file"]
-# tug -- pull up the most recent bookmark using jj's builtin advance command
 tug = ["bookmark", "advance"]
-# -- diff-formatter options --
 diff-git = ["diff", "--config", "ui.diff-formatter=:git"]
 diff-jj = ["diff", "--config", "ui.diff-formatter=:color-words"]
 diff-difft = ["diff", "--tool", "difft"]
@@ -265,25 +258,17 @@ backend = "none"
 watchman.register-snapshot-trigger = false
 
 [snapshot]
-# auto-track allows specifying which changes to track automatically
-auto-track = "all()" # or "none()"
+auto-track = "all()"
 auto-update-stale = true
 
 [revset-aliases]
-# Helper: Closest bookmark to the commit
-# https://github.com/jj-vcs/jj/discussions/5568
 'closest_bookmark(to)' = 'heads(::to & bookmarks())'
 'closest_pushable(to)' = 'heads(::to & ~description(exact:"") & (~empty() | merges()))'
 
-# -- log revsets --
-
-# log -- show the log of the current revision (default log expression)
 # connected() includes revisions between selected endpoints so jj/jjui do not show
 # "(elided revisions)" for the current stack.
 'log' = 'connected(present(@) | ancestors(immutable_heads().., 2) | present(trunk()))'
 
-# rlog -- show the ancestors and descendants of the current revision (up to 3 in each direction)
 'rlog' = 'connected(ancestors(trunk()..@, 2) | descendants(@, 3) | @)'
 
-# hlog -- show just the ancestors of the current revision (same as git log --oneline HEAD)
 'hlog' = '::@'

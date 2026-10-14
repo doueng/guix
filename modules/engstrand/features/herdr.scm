@@ -9,7 +9,6 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-herdr))
 
-;; Activation links and enables each plugin in this list.
 (define %herdr-plugins (list herdr-sesh herdr-tiny-fingers))
 
 (define %herdr-home-packages

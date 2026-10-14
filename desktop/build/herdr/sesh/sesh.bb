@@ -37,8 +37,7 @@
 (defn pane-id [response] (or (get-in response [:root_pane :pane_id])
                              (get-in response [:root_pane :id])))
 
-;; Only the settings used by this local plugin are read from sesh.toml. Keep
-;; config in Herdr's plugin directory so home activation can link it as before.
+;; Only the settings used by this local plugin are read from sesh.toml.
 (defn toml-string [line key]
   (when-let [[_ value] (re-matches (re-pattern (str "\\s*" key "\\s*=\\s*\"(.*)\"\\s*")) line)]
     (-> value (str/replace "\\\"" "\"") (str/replace "\\\\" "\\"))))

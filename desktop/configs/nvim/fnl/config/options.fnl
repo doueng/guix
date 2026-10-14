@@ -1,4 +1,3 @@
-;; Basic editor options
 (vim.filetype.add {:extension {:bb :clojure} :filename {:bb.edn :clojure}})
 
 (set vim.opt.number false)
@@ -57,7 +56,6 @@
 
 (set vim.opt.conceallevel 0)
 
-;; Visual
 (set vim.opt.list false)
 (set vim.opt.termguicolors true)
 (fn apply-hidden-cursor-highlight []
@@ -76,7 +74,6 @@
 (set vim.opt.updatetime 250)
 (set vim.opt.timeoutlen 300)
 
-;; Splits
 (set vim.opt.splitright true)
 (set vim.opt.splitbelow true)
 

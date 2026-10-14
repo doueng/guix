@@ -1,5 +1,4 @@
 # Daily targets use the pulled Guix and refuse to run until it matches channels.scm.
-# Reconfigure builds before activation; no separate build receipt is needed.
 
 CONFIG ?= desktop/system.scm
 HOME_CONFIG ?= desktop/home.scm
@@ -52,7 +51,6 @@ channels-current:
 	pulled=$$("$(GUIX)" describe -f channels | grep -o '(commit "[0-9a-f]*")' | sort); \
 	test "$$pinned" = "$$pulled" || { echo '$(CHANNELS) differs from the pulled Guix; run make pull' >&2; exit 1; }
 
-# The system build includes Home, so check needs no separate Home build.
 check: system-facts build
 
 system-facts: channels-current

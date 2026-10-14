@@ -48,11 +48,6 @@
       (error "command failed" (cons program args)))
     text))
 
-
-;;;
-;;; Narinfos.
-;;;
-
 (define (narinfo-fields text)
   (filter-map (lambda (line)
                 (let ((i (string-index line #\:)))
@@ -122,11 +117,6 @@
                  (remove (cut assoc <> seen) refs))
                 seen)))))
 
-
-;;;
-;;; Locking.
-;;;
-
 (define (evaluate attrs revision system)
   "Evaluate ATTRS in nixpkgs REVISION; return (ATTR VERSION ((OUTPUT PATH) ...))."
   (define expr
@@ -171,11 +161,6 @@
            (items ,@items))
          port)))
     (format #t "locked ~a packages, ~a store items~%" (length packages) (length items))))
-
-
-;;;
-;;; Fetching and rewriting.
-;;;
 
 (define* (rewrite-port in out #:key (from "/nix/store/") (to "gnu"))
   "Copy IN to OUT, replacing the 3 letters after the slash in every FROM with
@@ -244,11 +229,6 @@ rewritten NAR to DIRECTORY, unless an earlier run already did."
                       (lock-list (assoc-ref by-name name) 'references)))))
     (map (cut assoc-ref by-name <>)
          (reverse (fold visit '() (map car by-name))))))
-
-
-;;;
-;;; Importing.
-;;;
 
 (define %export-magic #x4558494e)
 

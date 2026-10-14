@@ -8,8 +8,6 @@
                   ;; compares against Git HEAD/the tracked bookmark instead of the
                   ;; current jj working-copy commit. Force jj mode for accurate signs.
                   (set vim.g.signify_skip {:vcs {:allow [:jj]}})
-                  ;; Be explicit so jj mode stays stable even if the plugin default
-                  ;; changes across updates.
                   (set vim.g.signify_vcs_cmds
                        {:jj "jj diff --ignore-working-copy --color=never --git --context=0 -r @ -- %f"})
                   (set vim.g.signify_vcs_cmds_diffmode

@@ -110,8 +110,6 @@
               :auto_install false}
       :lombok {:path vim.env.NVIM_JAVA_LOMBOK_JAR
                :auto_install false}
-      ;; Nixpkgs provides these two VS Code extensions. Spring Boot Tools
-      ;; remains nvim-java-managed because its extension is not in Nixpkgs.
       :java_test {:path vim.env.NVIM_JAVA_TEST_HOME
                   :auto_install false}
       :java_debug_adapter {:path vim.env.NVIM_JAVA_DEBUG_HOME

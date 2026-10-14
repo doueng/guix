@@ -1,8 +1,6 @@
 #!/bin/sh
 set -eu
 
-# Guix's Emacs package is intentionally terminal-only.  Select the mutable
-# Doom framework directory just as the NixOS package wrapper does.
 PATH="$HOME/.guix-home/profile/bin:$PATH"
 export PATH
 # Ignore inherited editor hints; GNU Emacs uses EMACS when resolving its

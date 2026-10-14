@@ -1,5 +1,3 @@
-;; flash.nvim - jump/search motion replacement for leap.nvim
-;; https://github.com/folke/flash.nvim
 (local lazy-spec (require :lib.lazy))
 (local plugin lazy-spec.plugin)
 (local key lazy-spec.key)

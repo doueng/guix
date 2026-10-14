@@ -1,5 +1,3 @@
-;; Entrypoint for Neovim configuration.
-;; Mirrors the files Home Manager previously embedded so edits apply instantly.
 ;; Leader keys must be set before plugins load.
 (set vim.g.mapleader " ")
 (set vim.g.maplocalleader "\\")
@@ -24,8 +22,6 @@
        (vim.fn.fnamemodify (vim.fn.resolve (.. (vim.fn.stdpath :config) "/init.fnl"))
                            ":p:h"))
 
-;; Put the real config checkout on runtimepath so LazyVim/lazy.nvim can discover
-;; lua/config/*.lua shims even before Home Manager has linked ~/.config/nvim/lua.
 (vim.opt.rtp:prepend config-dir)
 
 (set fennel.path (.. config-dir "/fnl/?.fnl;" config-dir "/fnl/?/init.fnl;"
@@ -33,7 +29,6 @@
 
 (local searchers (or package.searchers package.loaders))
 (when searchers
-  ;; Prefer Fennel modules when a migrated file shadows an old Lua path.
   (table.insert searchers 2 fennel.searcher))
 
 (require :config.lazy)

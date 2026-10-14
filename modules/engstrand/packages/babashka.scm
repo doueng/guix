@@ -9,12 +9,7 @@
 
 (define babashka-version "1.13.225")
 
-;; The collection package pulls a large Go dependency tree and currently
-;; fails in goresctrl's aarch64 tests.  GitHub publishes the same CLI as a
-;; signed release binary, which is the appropriate small native package here.
-;; Guix's pinned channel does not provide Babashka yet.  Use the upstream
-;; native aarch64 release so the .bb scripts and #!/usr/bin/env bb helpers
-;; work without a Clojure/JVM dependency tree.
+;; Guix's pinned channel has no Babashka, so package the upstream aarch64 release.
 (define-public babashka
   (package
     (name "babashka")

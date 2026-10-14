@@ -1,6 +1,3 @@
-# Alias definitions migrated from Home Manager.
-# Keep commands simple; Fish expands these functions on demand.
-
 alias '...'='../..'
 alias dc='cd'
 alias cdd='cd $HOME/Downloads'

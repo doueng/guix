@@ -1,7 +1,4 @@
-# Function for printing a column (splits input on whitespace)
-# ex: echo 1 2 3 | coln 3
-# output: 3
-function coln
+function coln --description 'Print the Nth whitespace-separated column of each line'
     while read -l input
         echo $input | awk '{print $'$argv[1]'}'
     end

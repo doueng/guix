@@ -1,5 +1,3 @@
-;; lazy.nvim itself is provided by Home Manager via pkgs.vimPlugins.lazy-nvim.
-;; The plugins below, including LazyVim, are still managed by lazy.nvim.
 (local lazy (require :lazy))
 (local config-dir (vim.fn.fnamemodify (vim.fn.resolve (.. (vim.fn.stdpath :config)
                                                           :/init.fnl))

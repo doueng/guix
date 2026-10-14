@@ -1,6 +1,3 @@
--- Guix does not provide Home Manager's generated Fennel bootstrap.  Keep the
--- bootstrap portable: the Fennel executable supplied by Guix tells us where
--- its Lua module lives, and lazy.nvim remains mutable under XDG data.
 -- Guix patches Neovim's parser lookup to use TREE_SITTER_GRAMMAR_PATH
 -- instead of runtimepath. Prefer Guix parsers, then fall back to parsers
 -- installed by nvim-treesitter in runtimepath, loading only on demand.
