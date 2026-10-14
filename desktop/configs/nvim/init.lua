@@ -25,6 +25,8 @@ do
   end
 end
 
+-- Guix installs the Fennel Lua module beside its executable rather than in
+-- Neovim's default Lua path.
 local fennel_bin = vim.fn.exepath("fennel")
 if fennel_bin ~= "" then
   local fennel_path = vim.fn.fnamemodify(fennel_bin, ":p:h:h")

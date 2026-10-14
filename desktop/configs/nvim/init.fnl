@@ -10,13 +10,6 @@
   (when (= (vim.fn.executable :gcc) 1)
     (set vim.env.CC "gcc")))
 
-;; Guix installs the Fennel Lua module beside its executable rather than in
-;; Neovim's default Lua path.
-(local fennel-bin (vim.fn.exepath :fennel))
-(when (not= fennel-bin "")
-  (local fennel-path (.. (vim.fn.fnamemodify fennel-bin :p:h:h)
-                         "/share/lua/5.3/?.lua"))
-  (set package.path (.. fennel-path ";" package.path)))
 (local fennel (require :fennel))
 (local config-dir
        (vim.fn.fnamemodify (vim.fn.resolve (.. (vim.fn.stdpath :config) "/init.fnl"))
