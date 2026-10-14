@@ -230,8 +230,9 @@ Signature: 1;localhost;&lt;canonical sexp signed by the bridge key&gt;</pre>
 </ul>
 
 <h2>11. As built</h2>
-<p>The first implementation differs from section 5 in four ways.</p>
+<p>The first implementation differs from section 5 in five ways.</p>
 <ul>
+  <li><strong>File locations.</strong> The wanted list is <code>modules/engstrand/nixpkgs/packages.sexp</code> and the lock is <code>modules/engstrand/nixpkgs/lock.sexp</code>, beside the module that reads them, rather than <code>desktop/nixpkgs.scm</code> and <code>desktop/nixpkgs.lock</code>. The make targets run the command-line entry point <code>desktop/build/nixpkgs/bridge.scm</code>.</li>
   <li><strong>No substitute server.</strong> <code>make nixpkgs-import</code> signs an export stream with a key in <code>~/.config/guix/nixpkgs-bridge/</code> and pipes it to <code>guix archive --import</code>. The daemon trusts the key through <code>authorized-keys</code> in <code>modules/engstrand/system/asahi.scm</code>. The key is held by the user account rather than a service account. On this single-user laptop that account already has sudo, so the gain from a separate service did not pay for an HTTP server and a Shepherd service.</li>
   <li><strong>The lock holds every narinfo.</strong> <code>modules/engstrand/nixpkgs/lock.sexp</code> records URL, compression, NAR hash, size and references for each closure item. The lock writer checks each cache.nixos.org signature. The importer then needs only the lock, and refuses any NAR whose hash or size differs.</li>
   <li><strong>Graphics.</strong> The nixpkgs ghostty, run from the rewritten store, loaded OpenGL 4.6 through nixpkgs Mesa 26.2.4 <span class="tag measured">measured</span>. <code>nixpkgs-system-services</code> links <code>/run/opengl-driver</code> to that Mesa and installs <code>/etc/fonts/fonts.conf</code>. Those are the default paths nixpkgs libglvnd and fontconfig search, and Guix programs read neither <span class="tag measured">measured</span>. A first version set the Mesa variables in a ghostty wrapper instead, and every shell ghostty started inherited them, along with any Guix GUI program run from that shell.</li>
