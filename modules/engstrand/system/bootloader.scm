@@ -12,9 +12,7 @@
   #:use-module (gnu packages linux)
   #:use-module (guix gexp)
   #:use-module (guix modules)
-  #:use-module (guix packages)
-  #:export (asahi-u-boot-os-prepare
-            m1n1-u-boot-grub-bootloader-os-prepare))
+  #:use-module (guix packages))
 
 (define-public asahi-linux-keyd
   (customize-linux
