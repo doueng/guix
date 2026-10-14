@@ -12,14 +12,12 @@ end
 set -g fish_greeting
 set -g fish_escape_delay_ms 10
 set -g fish_key_bindings fish_vi_key_bindings
-set -gx KEYTIMEOUT 1
 set -gx AIFX_ENABLE_PRIVATE_PREVIEW_FEATURES 1
 
 abbr --add dotdot --regex '^\.\.+$' --function multicd
 
 set -g my_emoji "🐟"
 
-set -g fzf_git_log_opts --no-mouse
 function fish_vi_cursor --description 'Custom vi cursor with hide support'
     function __fish_vi_cursor_set --argument mode
         if not status is-interactive; and not status is-interactive-read
