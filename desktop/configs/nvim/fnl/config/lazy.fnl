@@ -24,7 +24,6 @@
                        :plugins.telescope
                        :plugins.lualine
                        :plugins.bufferline
-                       :plugins.nvim-cmp
                        :plugins.lsp
                        :plugins.java
                        :plugins.noice
