@@ -50,7 +50,6 @@
        emacs-lisp
        (go +lsp)
        json
-       (java +lsp +tree-sitter)
        (javascript +lsp +tree-sitter)
        (lua +fennel)
        markdown
