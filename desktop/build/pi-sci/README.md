@@ -102,6 +102,8 @@ Reduce tool results before printing. Discovery schemas, transcripts, and complet
 
 `node scripts/session-metrics.mjs [count | session.jsonl ...]` counts, per Pi session, codemode calls that use bash or `tools/read`, escaped bash maps, budget truncations, clipped blocks, parse and validation errors, and hints. It defaults to the seven most recent sessions. Run it before and after a guidance or capability change.
 
+`node scripts/delimiter-replay.mjs [count]` replays the delimiter repair over Clojure codemode programs from the most recent Pi sessions (default 1000). It tallies scanner false positives on programs that succeeded, and repairs that match the model's own retry after a reader error. `node scripts/delimiter-replay.mjs files PATH ...` checks Lisp files instead. Run it before changing `src/delimiters.ts`.
+
 ## Branch-local library
 
 Explicit top-level `defsession` declarations persist functions and literal constants in `session`. Ordinary definitions remain temporary. Each invocation reconstructs the library in a fresh sandbox. Code and stored task data commit in one branch entry.
