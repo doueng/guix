@@ -6,10 +6,6 @@ import os from "node:os";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
 
-// =============================================================================
-// Modes
-// =============================================================================
-
 type ModeName = string;
 
 type ModeSpec = {
@@ -29,7 +25,6 @@ type ModesFile = {
 	modes: Record<ModeName, ModeSpec>;
 };
 
-// Only "default" is a forced/built-in mode. Others are just initial suggestions and can be renamed/deleted.
 const DEFAULT_MODE_ORDER = ["default"] as const;
 const CUSTOM_MODE_NAME = "custom" as const;
 
@@ -81,8 +76,10 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const STALE_LOCK_MS = 30_000;
+const LOCK_WAIT_MS = 5_000;
+
 function getLockPathForFile(filePath: string): string {
-	// Lock file next to the json so it works across processes.
 	return `${filePath}.lock`;
 }
 
@@ -95,14 +92,11 @@ async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<
 		try {
 			const handle = await fs.open(lockPath, "wx");
 			try {
-				// Best-effort metadata for debugging stale locks.
 				await handle.writeFile(
 					JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }) + "\n",
 					"utf8"
 				);
-			} catch {
-				// ignore
-			}
+			} catch {}
 
 			try {
 				return await fn();
@@ -113,19 +107,15 @@ async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<
 		} catch (err: any) {
 			if (err?.code !== "EEXIST") throw err;
 
-			// If the lock looks stale (crash), break it.
 			try {
 				const st = await fs.stat(lockPath);
-				if (Date.now() - st.mtimeMs > 30_000) {
+				if (Date.now() - st.mtimeMs > STALE_LOCK_MS) {
 					await fs.unlink(lockPath);
 					continue;
 				}
-			} catch {
-				// ignore
-			}
+			} catch {}
 
-			if (Date.now() - start > 5_000) {
-				// Don't hang the UI forever.
+			if (Date.now() - start > LOCK_WAIT_MS) {
 				throw new Error(`Timed out waiting for lock: ${lockPath}`);
 			}
 			await sleep(40 + Math.random() * 80);
@@ -143,23 +133,14 @@ async function atomicWriteUtf8(filePath: string, content: string): Promise<void>
 	await fs.writeFile(tmpPath, content, "utf8");
 
 	try {
-		// POSIX: atomic replace.
 		await fs.rename(tmpPath, filePath);
-	} catch (err: any) {
-		// Windows: rename can't overwrite.
-		if (err?.code === "EEXIST" || err?.code === "EPERM") {
-			await fs.unlink(filePath).catch(() => {});
-			await fs.rename(tmpPath, filePath);
-		} else {
-			// best-effort cleanup
-			await fs.unlink(tmpPath).catch(() => {});
-			throw err;
-		}
+	} catch (err) {
+		await fs.unlink(tmpPath).catch(() => {});
+		throw err;
 	}
 }
 
 function cloneModesFile(file: ModesFile): ModesFile {
-	// JSON-based clone is fine here (small, plain data structure).
 	return JSON.parse(JSON.stringify(file)) as ModesFile;
 }
 
@@ -275,9 +256,7 @@ function createDefaultModes(ctx: ExtensionContext, pi: ExtensionAPI): ModesFile 
 		version: 1,
 		currentMode: "default",
 		modes: {
-			// Forced default mode
 			default: { ...base },
-			// Convenience mode (user can delete/rename)
 			fast: { ...base, thinkingLevel: "off" },
 		},
 	};
@@ -329,8 +308,6 @@ async function saveModesFile(filePath: string, data: ModesFile): Promise<void> {
 }
 
 function orderedModeNames(modes: Record<string, ModeSpec>): string[] {
-	// Preserve insertion order from the JSON file.
-	// Object key iteration order is stable in modern JS runtimes.
 	// NOTE: "custom" is an overlay mode and must not be selectable/persisted.
 	return Object.keys(modes).filter((name) => name !== CUSTOM_MODE_NAME);
 }
@@ -339,18 +316,14 @@ function getModeBorderColor(ctx: ExtensionContext, pi: ExtensionAPI, mode: strin
 	const theme = ctx.ui.theme;
 	const spec = runtime.data.modes[mode];
 
-	// Explicit color override in JSON.
 	if (spec?.color) {
 		try {
 			// Validate early so we don't crash during render.
 			theme.getFgAnsi(spec.color as any);
 			return (text: string) => theme.fg(spec.color as any, text);
-		} catch {
-			// fall through to thinking-based colors
-		}
+		} catch {}
 	}
 
-	// Default: derive from the current thinking level.
 	return theme.getThinkingBorderColor(pi.getThinkingLevel());
 }
 
@@ -915,10 +888,6 @@ async function cycleMode(pi: ExtensionAPI, ctx: ExtensionContext, direction: 1 |
 	await applyMode(pi, ctx, next);
 }
 
-// =============================================================================
-// Prompt history
-// =============================================================================
-
 const MAX_HISTORY_ENTRIES = 100;
 const MAX_RECENT_PROMPTS = 30;
 
@@ -1449,10 +1418,9 @@ class PromptEditor extends CustomEditor {
 			label += ` · ${this.count}_`;
 		}
 
-		// Compute how much room we have for the label core (without truncating the prefix).
 		const labelLeftSpace = prefix.endsWith(" ") ? "" : " ";
 		const labelRightSpace = " ";
-		const minRightBorder = 1; // keep at least one border cell on the right
+		const minRightBorder = 1;
 		const maxLabelLen = Math.max(0, width - prefix.length - labelLeftSpace.length - labelRightSpace.length - minRightBorder);
 		if (maxLabelLen <= 0) return lines;
 		if (label.length > maxLabelLen) label = label.slice(0, maxLabelLen);
