@@ -5,7 +5,7 @@ description: Help with GNU Guix package management, channels, system configurati
 
 # GNU Guix
 
-Use the [GNU Guix System manual](https://guix.gnu.org/manual/devel/en/guix.html) and [cookbook](https://guix.gnu.org/cookbook/en/guix-cookbook.html) as primary references. For offline documentation, see [`references.md`](references.md) and the local manual and cookbook snapshots in `references/`.
+Use the [GNU Guix System manual](https://guix.gnu.org/manual/devel/en/guix.html) and [cookbook](https://guix.gnu.org/cookbook/en/guix-cookbook.html) as primary references. For offline documentation that matches the pulled Guix, see [`references.md`](references.md), which shows how to search and read the installed Info manuals.
 
 ## Guidance
 
