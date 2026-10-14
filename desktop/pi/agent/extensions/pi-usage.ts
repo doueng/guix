@@ -1,7 +1,12 @@
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const FIREWORKS_ORIGIN = "https://api.fireworks.ai";
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+const ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
 const FIREWORKS_WINDOW_DAYS = 30;
 const TTL_MS = 5 * 60 * 1000;
 const STATUS_ID = "usage";
@@ -26,20 +31,26 @@ type FireworksSpend = {
 
 type RateWindow = { used_percent?: number; limit_window_seconds?: number; reset_at?: number };
 
-type CodexUsage = {
+type RateLimits = {
 	windows: Array<{ label: string; used: number; resetsAt?: number }>;
 	plan?: string;
 };
 
 type Entry<T> = {
-	query: (ctx: UsageCtx) => Promise<T>;
+	title: string;
+	providers: string[];
+	authorize: (ctx: UsageCtx) => Promise<string | undefined>;
+	query: (authorization: string | undefined) => Promise<T>;
 	render: (data: T) => string;
 	describe: (data: T) => string[];
 };
 
 type AnyEntry = {
 	id: string;
-	query: (ctx: UsageCtx) => Promise<unknown>;
+	title: string;
+	providers: string[];
+	authorize: (ctx: UsageCtx) => Promise<string | undefined>;
+	query: (authorization: string | undefined) => Promise<unknown>;
 	render: (data: unknown) => string;
 	describe: (data: unknown) => string[];
 };
@@ -78,10 +89,11 @@ async function fetchJson(
 	url: string,
 	authorization: string | undefined,
 	description: string,
+	headers: Record<string, string> = {},
 ): Promise<Record<string, unknown>> {
 	if (!authorization) throw new Error("no credentials");
 	const response = await fetch(url, {
-		headers: { Authorization: authorization },
+		headers: { ...headers, Authorization: authorization },
 		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 	});
 	if (!response.ok) throw new Error(`${description} ${response.status}`);
@@ -106,9 +118,9 @@ function resetLabel(resetsAt: number | undefined): string {
 
 const PROVIDER_FIREWORKS = "fireworks";
 const PROVIDER_CODEX = "openai-codex";
+const PROVIDER_ANTHROPIC = "anthropic";
 
-async function queryFireworks(ctx: UsageCtx): Promise<FireworksSpend> {
-	const authorization = await bearerFromAuth(ctx, PROVIDER_FIREWORKS);
+async function queryFireworks(authorization: string | undefined): Promise<FireworksSpend> {
 	const accountsPayload = await fetchJson(
 		`${FIREWORKS_ORIGIN}/v1/accounts?pageSize=200`,
 		authorization,
@@ -149,6 +161,9 @@ async function queryFireworks(ctx: UsageCtx): Promise<FireworksSpend> {
 }
 
 const fireworksEntry: Entry<FireworksSpend> = {
+	title: `Fireworks, last ${FIREWORKS_WINDOW_DAYS} days`,
+	providers: [PROVIDER_FIREWORKS],
+	authorize: (ctx) => bearerFromAuth(ctx, PROVIDER_FIREWORKS),
 	query: queryFireworks,
 	render: (spend) => `fw ${formatUsd(spend.total)}`,
 	describe: (spend) => [
@@ -158,11 +173,10 @@ const fireworksEntry: Entry<FireworksSpend> = {
 	],
 };
 
-async function queryCodex(ctx: UsageCtx): Promise<CodexUsage> {
-	const authorization = await bearerFromAuth(ctx, PROVIDER_CODEX);
+async function queryCodex(authorization: string | undefined): Promise<RateLimits> {
 	const payload = await fetchJson(CODEX_USAGE_URL, authorization, "Codex usage");
 	const rateLimit = (payload.rate_limit ?? {}) as Record<string, RateWindow | null>;
-	const windows: CodexUsage["windows"] = [];
+	const windows: RateLimits["windows"] = [];
 	for (const raw of Object.values(rateLimit)) {
 		if (!raw || typeof raw.used_percent !== "number") continue;
 		windows.push({
@@ -177,19 +191,82 @@ async function queryCodex(ctx: UsageCtx): Promise<CodexUsage> {
 	};
 }
 
-const codexEntry: Entry<CodexUsage> = {
-	query: queryCodex,
-	render: (usage) => `codex ${usage.windows.map((w) => `${w.label} ${Math.round(w.used)}%`).join(" · ")}`,
-	describe: (usage) => [
+function renderLimits(name: string, usage: RateLimits): string {
+	return `${name} ${usage.windows.map((w) => `${w.label} ${Math.round(w.used)}%`).join(" · ")}`;
+}
+
+function describeLimits(usage: RateLimits): string[] {
+	return [
 		`  Plan: ${usage.plan ?? "unknown"}`,
 		...usage.windows.map((w) => `  ${w.label} window: ${Math.round(w.used)}% used${resetLabel(w.resetsAt)}`),
-	],
+	];
+}
+
+const codexEntry: Entry<RateLimits> = {
+	title: "OpenAI Codex",
+	providers: [PROVIDER_CODEX],
+	authorize: (ctx) => bearerFromAuth(ctx, PROVIDER_CODEX),
+	query: queryCodex,
+	render: (usage) => renderLimits("codex", usage),
+	describe: describeLimits,
+};
+
+const ANTHROPIC_WINDOWS: Record<string, string> = {
+	five_hour: "5h",
+	seven_day: "7d",
+	seven_day_opus: "7d opus",
+	seven_day_sonnet: "7d sonnet",
+};
+
+type ClaudeCredentials = {
+	claudeAiOauth?: { accessToken?: string; expiresAt?: number; subscriptionType?: string };
+};
+
+async function readClaudeCredentials(): Promise<ClaudeCredentials["claudeAiOauth"]> {
+	try {
+		return (JSON.parse(await readFile(CLAUDE_CREDENTIALS_PATH, "utf8")) as ClaudeCredentials).claudeAiOauth;
+	} catch {
+		return undefined;
+	}
+}
+
+// claude-bridge runs Claude Code, which keeps its own subscription token fresh; pi's anthropic login is the fallback.
+async function authorizeAnthropic(ctx: UsageCtx): Promise<string | undefined> {
+	const oauth = await readClaudeCredentials();
+	if (oauth?.accessToken && (oauth.expiresAt ?? 0) > Date.now()) return `Bearer ${oauth.accessToken}`;
+	return bearerFromAuth(ctx, PROVIDER_ANTHROPIC);
+}
+
+async function queryAnthropic(authorization: string | undefined): Promise<RateLimits> {
+	const payload = await fetchJson(ANTHROPIC_USAGE_URL, authorization, "Anthropic usage", {
+		"anthropic-beta": "oauth-2025-04-20",
+	});
+	const windows: RateLimits["windows"] = [];
+	for (const [key, label] of Object.entries(ANTHROPIC_WINDOWS)) {
+		const raw = payload[key] as { utilization?: number; resets_at?: string } | null | undefined;
+		if (!raw || typeof raw.utilization !== "number") continue;
+		const resetsAt = raw.resets_at ? Date.parse(raw.resets_at) / 1000 : Number.NaN;
+		windows.push({ label, used: raw.utilization, resetsAt: Number.isFinite(resetsAt) ? resetsAt : undefined });
+	}
+	return { windows, plan: (await readClaudeCredentials())?.subscriptionType };
+}
+
+const anthropicEntry: Entry<RateLimits> = {
+	title: "Anthropic",
+	providers: [PROVIDER_ANTHROPIC, "claude-bridge"],
+	authorize: authorizeAnthropic,
+	query: queryAnthropic,
+	render: (usage) => renderLimits("claude", usage),
+	describe: describeLimits,
 };
 
 function asEntry<T>(id: string, entry: Entry<T>): AnyEntry {
 	return {
 		id,
-		query: (ctx) => entry.query(ctx),
+		title: entry.title,
+		providers: entry.providers,
+		authorize: entry.authorize,
+		query: (authorization) => entry.query(authorization),
 		render: (data) => entry.render(data as T),
 		describe: (data) => entry.describe(data as T),
 	};
@@ -199,12 +276,13 @@ export default function piUsageExtension(pi: ExtensionAPI) {
 	const entries: AnyEntry[] = [
 		asEntry(PROVIDER_FIREWORKS, fireworksEntry),
 		asEntry(PROVIDER_CODEX, codexEntry),
+		asEntry(PROVIDER_ANTHROPIC, anthropicEntry),
 	];
 	const cache = new Map<string, CacheSlot>();
 	const inFlight = new Map<string, Promise<unknown>>();
 
 	const publishStatus = (ctx: UsageCtx) => {
-		const current = entries.find(({ id }) => id === ctx.model?.provider);
+		const current = entries.find(({ providers }) => providers.includes(ctx.model?.provider ?? ""));
 		const visible = current ? [current] : entries;
 		const parts: string[] = [];
 		for (const { id, render } of visible) {
@@ -215,11 +293,15 @@ export default function piUsageExtension(pi: ExtensionAPI) {
 		ctx.ui?.setStatus(STATUS_ID, parts.length > 0 ? parts.join(" · ") : undefined);
 	};
 
-	const refreshOne = async (ctx: UsageCtx, { id, query }: AnyEntry, force: boolean): Promise<void> => {
+	const refreshOne = async (
+		{ id, query }: AnyEntry,
+		authorization: string,
+		force: boolean,
+	): Promise<void> => {
 		const slot = cache.get(id);
 		if (!force && slot && Date.now() - slot.at < TTL_MS) return;
 		if (inFlight.has(id)) return inFlight.get(id)?.then(() => undefined);
-		const load = query(ctx)
+		const load = query(authorization)
 			.then((data) => {
 				cache.set(id, { data, at: Date.now() });
 			})
@@ -234,11 +316,12 @@ export default function piUsageExtension(pi: ExtensionAPI) {
 	};
 
 	const refreshAll = async (ctx: UsageCtx, force: boolean): Promise<void> => {
-		const active: AnyEntry[] = [];
+		const active: Array<[AnyEntry, string]> = [];
 		for (const entry of entries) {
-			if ((await bearerFromAuth(ctx, entry.id)) !== undefined) active.push(entry);
+			const authorization = await entry.authorize(ctx);
+			if (authorization !== undefined) active.push([entry, authorization]);
 		}
-		await Promise.all(active.map((entry) => refreshOne(ctx, entry, force)));
+		await Promise.all(active.map(([entry, authorization]) => refreshOne(entry, authorization, force)));
 		publishStatus(ctx);
 	};
 
@@ -256,24 +339,21 @@ export default function piUsageExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("usage", {
-		description: "Show provider usage (Fireworks spend, Codex limits)",
+		description: "Show provider usage (Fireworks spend, Codex and Anthropic limits)",
 		handler: async (_args, ctx) => {
 			ctx.ui.setStatus(STATUS_ID, "usage checking…");
 			await refreshAll(ctx, true);
 			const sections: string[] = [];
-			for (const { id, describe } of entries) {
+			for (const { id, title, describe } of entries) {
 				const slot = cache.get(id);
 				if (slot?.data !== undefined) {
-					sections.push(
-						`${id === PROVIDER_FIREWORKS ? `Fireworks, last ${FIREWORKS_WINDOW_DAYS} days` : "OpenAI Codex"}:`,
-						...describe(slot.data),
-					);
+					sections.push(`${title}:`, ...describe(slot.data));
 				} else if (slot?.error) {
 					sections.push(`${id}: ${slot.error}`);
 				}
 			}
 			if (sections.length === 0) {
-				sections.push("No usage providers configured (needs Fireworks or Codex credentials).");
+				sections.push("No usage providers configured (needs Fireworks, Codex, or Anthropic credentials).");
 			} else if (cache.get(PROVIDER_FIREWORKS)?.data !== undefined) {
 				sections.push("", "Fireworks line items may differ from the final invoice once credits or adjustments apply.");
 			}
