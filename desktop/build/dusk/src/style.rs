@@ -71,8 +71,7 @@ pub fn pixels(v: &Value, scale: f32) -> Option<f32> {
 }
 
 /// CSS-like edge shorthand: n | [v h] | [t r b l].
-pub fn edges(v: &Value, scale: f32) -> Option<[Value; 4]> {
-    let _ = scale;
+pub fn edges(v: &Value) -> Option<[Value; 4]> {
     match v {
         Value::Int(_) | Value::Float(_) | Value::Keyword(_) | Value::Str(_) => {
             Some([v.clone(), v.clone(), v.clone(), v.clone()])
@@ -188,7 +187,7 @@ pub fn apply<T: Styled>(mut el: T, props: &Value, scale: f32) -> T {
                 Some(l) => el.max_h(l),
                 None => el,
             },
-            "padding" => match edges(v, scale) {
+            "padding" => match edges(v) {
                 Some([t, r, b, l]) => {
                     let s = el.style();
                     s.padding.top = definite(&t, scale);
@@ -199,7 +198,7 @@ pub fn apply<T: Styled>(mut el: T, props: &Value, scale: f32) -> T {
                 }
                 None => el,
             },
-            "margin" => match edges(v, scale) {
+            "margin" => match edges(v) {
                 Some([t, r, b, l]) => {
                     let s = el.style();
                     s.margin.top = length(&t, scale);
@@ -268,7 +267,7 @@ pub fn apply<T: Styled>(mut el: T, props: &Value, scale: f32) -> T {
                     None => el,
                 },
             },
-            "border" => match edges(v, scale) {
+            "border" => match edges(v) {
                 Some([t, r, b, l]) => {
                     let w = |e: &Value| pixels(e, scale).map(|p| AbsoluteLength::Pixels(px(p)));
                     let s = el.style();

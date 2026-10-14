@@ -61,7 +61,7 @@ impl SurfaceSpec {
             };
         }
         let mut margin = [0; 4];
-        if let Some([t, r, b, l]) = props.get("margin").and_then(|m| style::edges(m, scale)) {
+        if let Some([t, r, b, l]) = props.get("margin").and_then(style::edges) {
             for (slot, v) in margin.iter_mut().zip([t, r, b, l]) {
                 *slot = style::pixels(&v, scale).unwrap_or(0.).round() as i32;
             }
@@ -507,7 +507,7 @@ impl Render for SurfaceView {
         }
         if (auto_w || auto_h) && !self.closing {
             let viewport = window.viewport_size();
-            let padding = p.get("padding").and_then(|v| style::edges(v, scale));
+            let padding = p.get("padding").and_then(style::edges);
             let pad = |i: usize| {
                 padding
                     .as_ref()
