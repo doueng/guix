@@ -361,8 +361,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (setq projectile-indexing-method 'alien
         projectile-enable-caching t
         projectile-sort-order 'recentf
-        projectile-project-search-path '(("~/Uber/" . 1)
-                                         ("~/src/" . 2)
+        projectile-project-search-path '(("~/src/" . 2)
                                          ("~/code/" . 2)
                                          ("~/exercism/" . 2)))
 

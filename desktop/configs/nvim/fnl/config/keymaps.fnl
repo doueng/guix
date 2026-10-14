@@ -54,14 +54,3 @@
 
 (vim.keymap.set [:n :v] :<C-c> "\"+y" {:desc "Copy to clipboard"})
 (vim.keymap.set [:n :v] :<C-x> "\"+d" {:desc "Cut to clipboard"})
-
-(vim.api.nvim_create_user_command :Sourcegraph
-                                  (fn []
-                                    (let [file-path (vim.fn.expand "%:p")
-                                          line-number (vim.fn.line ".")]
-                                      (vim.fn.system [:sourcegraph.py
-                                                      file-path
-                                                      (tostring line-number)])))
-                                  {:nargs 0})
-
-(vim.keymap.set [:n :v] :<leader>gr ":Sourcegraph<CR>" {:silent false})

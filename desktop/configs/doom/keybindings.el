@@ -114,10 +114,6 @@
       :desc "LSP diagnostics"       "c x" #'eng/lsp-diagnostics
       :desc "Comment line"          "c /" #'comment-line)
 
-(map! :leader
-      :prefix ("c u" . "uLSP")
-      :desc "Show query scope"      "q" #'eng/go-code-show-query-scope)
-
 (after! go-mode
   (map! :map go-mode-map
         :localleader
