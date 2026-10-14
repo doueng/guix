@@ -21,5 +21,4 @@
 ;; only reads ~/.ideavimrc.
 (stow-package! (str repo "/configs") home "ideavim")
 (stow-package! repo (str home "/.local/bin") "bin")
-(stow-package! repo (str home "/.local/share/icons") "icons")
 (stow-package! (str repo "/pi") (str home "/.pi/agent") "agent")
