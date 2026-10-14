@@ -36,14 +36,6 @@ gtk-single-instance = desktop
 
 # Key Bindings (custom)
 keybind = shift+insert=paste_from_clipboard
-# keybind = super+equal=increase_font_size:1
-# keybind = super+plus=increase_font_size:1
-# keybind = super+minus=decrease_font_size:1
-# keybind = super+zero=reset_font_size
-# keybind = super+n=new_window
-# keybind = super+shift+w=close_window
-# keybind = super+shift+left_bracket=previous_tab
-# keybind = super+shift+right_bracket=next_tab
 keybind = shift+ctrl+alt+r=reload_config
 keybind = super+left=text:\x01
 keybind = super+right=text:\x05
@@ -53,20 +45,6 @@ keybind = super+up=jump_to_prompt:-1
 keybind = super+down=jump_to_prompt:1
 keybind = super+shift+up=jump_to_prompt:-1
 keybind = super+shift+down=jump_to_prompt:1
-# keybind = super+page_up=scroll_page_up
-# keybind = super+page_down=scroll_page_down
-# keybind = super+home=scroll_to_top
-# keybind = super+end=scroll_to_bottom
-# keybind = shift+up=adjust_selection:up
-# keybind = shift+down=adjust_selection:down
-# keybind = shift+left=adjust_selection:left
-# keybind = shift+right=adjust_selection:right
-# keybind = shift+page_up=adjust_selection:page_up
-# keybind = shift+page_down=adjust_selection:page_down
-# keybind = shift+home=adjust_selection:home
-# keybind = shift+end=adjust_selection:end
-# keybind = super+alt+shift+w=close_all_windows
-# keybind = super+alt+i=inspector:toggle
 keybind = super+p=toggle_quick_terminal
 keybind = super+shift+j=write_scrollback_file:paste
 keybind = super+alt+shift+j=write_scrollback_file:open
