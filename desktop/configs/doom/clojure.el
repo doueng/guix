@@ -1,4 +1,4 @@
-;;; emacs.el --- Clojure feature config -*- lexical-binding: t; -*-
+;;; clojure.el --- Clojure feature config -*- lexical-binding: t; -*-
 
 ;; Register Babashka files before clojure-mode loads. Keeping this inside
 ;; `after!' creates a cycle: opening a .bb file cannot load clojure-mode until

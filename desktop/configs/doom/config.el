@@ -431,14 +431,7 @@ ultimately to plain `find-file' when the current directory is not a project."
     (call-interactively #'find-file))))
 
 (load (expand-file-name "keybindings.el" eng/doom-config-dir) t 'nomessage)
-
-;; Load feature-specific Emacs config supplied by enabled Home Manager modules.
-(dolist (file (and (boundp 'eng/emacs-extra-config-files) eng/emacs-extra-config-files))
-  (load file t 'nomessage))
-
-(let ((clojure-config (expand-file-name "clojure.el" eng/doom-config-dir)))
-  (when (file-readable-p clojure-config)
-    (load clojure-config t 'nomessage)))
+(load (expand-file-name "clojure.el" eng/doom-config-dir) t 'nomessage)
 
 ;; Guix ships the aarch64 native module as libparinfer_rust.so. Prefer that
 ;; over parinfer-rust-mode's unsupported Linux/aarch64 auto-download.
