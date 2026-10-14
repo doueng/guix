@@ -97,5 +97,6 @@
 application through chat or manual Lisp forms.  It provides a terminal interface,
 managed previews, revision history, recovery and live repair of paused calls.")
       (home-page "https://github.com/ghuntley/jiti")
-      ;; Upstream does not currently declare a license.
+      ;; Upstream added an MIT license in 70146a2 (2026-10-07), after this
+      ;; commit; update the commit and use license:expat.
       (license #f))))
