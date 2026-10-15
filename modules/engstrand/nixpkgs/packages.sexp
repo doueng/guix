@@ -20,6 +20,7 @@
  "shellcheck"
  "shfmt"
  "tree-sitter"
+ "ty"
  "typst"
  "uv"
  "zoxide")

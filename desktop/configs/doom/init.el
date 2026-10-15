@@ -55,7 +55,7 @@
        markdown
        (nix +lsp)
        org
-       python
+       (python +lsp +tree-sitter)
        (scheme +guile)
        (sh +fish +lsp)
        yaml

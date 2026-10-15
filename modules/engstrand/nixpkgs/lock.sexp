@@ -101,6 +101,10 @@
    (outputs
     ("out" "/nix/store/qyfx6d3my5wql10xhar9b7lz038n9dwl-tree-sitter-0.26.11")))
   (package
+   (attr "ty")
+   (version "0.0.84")
+   (outputs ("out" "/nix/store/9ridhri2y7c0qhzw9w6smg0446ba8rx3-ty-0.0.84")))
+  (package
    (attr "typst")
    (version "0.15.1")
    (outputs ("out" "/nix/store/ld3fp7ak7cyri9qmkzdxnyxcxrx0fdv9-typst-0.15.1")))
@@ -1623,6 +1627,17 @@
                "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25"
                "na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib"
                "rapkjqa9n550h6hixy9sfrlmappxm83d-fzf-0.74.4"))
+        (item (path "/nix/store/9ridhri2y7c0qhzw9w6smg0446ba8rx3-ty-0.0.84")
+              (url "nar/1ryz05xdwqwh79rndyv2m2x7qkqxba6nynnp16r5nlpc1hq8k6ic.nar.zst")
+              (compression "zstd")
+              (nar-hash
+               "sha256:1ryz05xdwqwh79rndyv2m2x7qkqxba6nynnp16r5nlpc1hq8k6ic")
+              (nar-size 36467896)
+              (references
+               "6jwqk0vli4zpdpxa2nqgm3p4yfb76g8s-jemalloc-5.3.1"
+               "9ridhri2y7c0qhzw9w6smg0446ba8rx3-ty-0.0.84"
+               "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25"
+               "na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib"))
         (item (path "/nix/store/9wd1p2hwnww5bhb70gqqgg8y4x51da35-aalib-1.4rc5")
               (url "nar/1d5hx7lqimpiv75lxx6q3wgsnrzag8k4a65r12h46yw394783fiw.nar.zst")
               (compression "zstd")
