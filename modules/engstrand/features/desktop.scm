@@ -33,6 +33,7 @@
           "grim"
           "slurp"
           "libnotify"
+          "font-dejavu"
           "font-jetbrains-mono"
           "font-google-noto-emoji"
           "adwaita-icon-theme"))))
