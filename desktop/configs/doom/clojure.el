@@ -23,8 +23,7 @@
    '((:command . "clojure")
      (:exec . ("%c %s"))
      (:description . "Run Clojure with the clojure CLI"))
-   :mode '(clojure-mode clojure-ts-mode)
-   :override t))
+   :mode '(clojure-mode clojure-ts-mode)))
 
 (defun eng/clojure-project-root ()
   "Return the current Clojure project root or `default-directory`."
