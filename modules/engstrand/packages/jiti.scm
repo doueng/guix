@@ -7,10 +7,11 @@
   #:use-module (guix build-system asdf)
   #:use-module (guix download)
   #:use-module (guix gexp)
-  #:use-module (guix packages))
+  #:use-module (guix packages)
+  #:use-module ((guix licenses) #:prefix license:))
 
 (define-public jiti
-  (let ((commit "a9f46a604c07d8d1e1687a2797cb6e8edfecf818"))
+  (let ((commit "70146a2236dcd34696807102028af943cf0be370"))
     (package
       (name "jiti")
       (version (string-append "0.1.0-0." (substring commit 0 7)))
@@ -21,7 +22,7 @@
                              commit))
          (file-name (string-append "jiti-" commit ".tar.gz"))
          (sha256
-          (base32 "0ngnd1cwg6h7jwq6z8iryynkc658ddlwb9amz7iqjd1fdgd40rri"))))
+          (base32 "00shm7fqck3y532163v0sgh5sx99yvdhl7q6cv40bvzrxilzbnja"))))
       (build-system asdf-build-system/sbcl)
       (inputs
        (list sbcl-dexador sbcl-yason sbcl-babel
@@ -97,6 +98,4 @@
 application through chat or manual Lisp forms.  It provides a terminal interface,
 managed previews, revision history, recovery and live repair of paused calls.")
       (home-page "https://github.com/ghuntley/jiti")
-      ;; Upstream added an MIT license in 70146a2 (2026-10-07), after this
-      ;; commit; update the commit and use license:expat.
-      (license #f))))
+      (license license:expat))))
