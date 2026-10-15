@@ -114,6 +114,16 @@
       :desc "LSP diagnostics"       "c x" #'eng/lsp-diagnostics
       :desc "Comment line"          "c /" #'comment-line)
 
+;; Match idea-doom-emacs where Doom's defaults differ. Git hunks stay on
+;; SPC g [ and SPC g ] in these buffers.
+(map! :after lsp-mode
+      :map lsp-mode-map
+      :n "gi"    #'lsp-find-implementation
+      :n "[d"    #'flycheck-previous-error
+      :n "]d"    #'flycheck-next-error
+      :n "C-w d" #'flycheck-display-error-at-point
+      :n "C-w C-d" #'flycheck-display-error-at-point)
+
 (after! go-mode
   (map! :map go-mode-map
         :localleader
