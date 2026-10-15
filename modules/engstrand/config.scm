@@ -1,4 +1,5 @@
 (define-module (engstrand config)
+  #:use-module (engstrand features agent-control)
   #:use-module (engstrand features desktop)
   #:use-module (engstrand features development)
   #:use-module (engstrand features dotfiles)
@@ -49,6 +50,7 @@
            (feature-familiar-moshi)
            (feature-familiar-dotfiles)
            (feature-familiar-keyd)
+           (feature-familiar-agent-control)
            (feature-familiar-tailscale)
            (feature-familiar-remote-access)
            ;; rde rebuilds the OS service list from feature services. Preserve
