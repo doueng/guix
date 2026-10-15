@@ -1,6 +1,7 @@
 (define-module (engstrand features tailscale)
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages tailscale)
+  #:use-module (gnu packages dns)
   #:use-module (gnu packages linux)
   #:use-module (gnu services)
   #:use-module (gnu services shepherd)
@@ -21,9 +22,13 @@
                              "--state=/var/lib/tailscale.state")
                        ;; The Asahi kernel has nf_tables without its inet
                        ;; families, so use legacy iptables for the firewall.
+                       ;; Without resolvconf on PATH, tailscaled overwrites
+                       ;; /etc/resolv.conf directly; openresolv then refuses
+                       ;; NetworkManager's DNS for every new network.
                        #:environment-variables
                        (cons* "TS_DEBUG_FIREWALL_MODE=iptables"
                               (string-append "PATH=" #$(file-append iptables "/sbin")
+                                             ":" #$(file-append openresolv "/sbin")
                                              ":" (or (getenv "PATH") ""))
                               (filter (lambda (variable)
                                         (not (string-prefix? "PATH=" variable)))
