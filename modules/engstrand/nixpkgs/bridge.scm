@@ -29,6 +29,7 @@
   #:use-module (srfi srfi-26)
   #:use-module (srfi srfi-71)
   #:export (write-lock
+            package-versions
             import-items
             verify-items
             generate-signing-key))
@@ -117,28 +118,46 @@
                  (remove (cut assoc <> seen) refs))
                 seen)))))
 
+(define (map-attrs body attrs revision system)
+  "Evaluate the Nix expression BODY, in which d is the derivation of attribute
+n, for each of ATTRS in nixpkgs REVISION; return the parsed JSON objects."
+  (setenv "NIX_CONFIG" "experimental-features = nix-command flakes")
+  (vector->list
+   (json-string->scm
+    (command-output "guix" "shell" "nix" "--" "nix" "eval"
+                    "--store" (string-append (getenv "HOME") "/.cache/nixpkgs-bridge/nix-store")
+                    "--json"
+                    (string-append "github:NixOS/nixpkgs/" revision
+                                   "#legacyPackages." system)
+                    "--apply"
+                    (string-append
+                     "p: map (n: let d = p.${n}; in " body ") "
+                     "(builtins.fromJSON ''" (scm->json-string (list->vector attrs)) "'')")))))
+
 (define (evaluate attrs revision system)
   "Evaluate ATTRS in nixpkgs REVISION; return (ATTR VERSION ((OUTPUT PATH) ...))."
-  (define expr
-    (string-append
-     "p: map (n: let d = p.${n}; in { attr = n; version = d.version or \"0\"; "
-     "outputs = map (o: { name = o; path = d.${o}.outPath; }) "
-     "(d.meta.outputsToInstall or [ \"out\" ]); }) "
-     "(builtins.fromJSON ''" (scm->json-string (list->vector attrs)) "'')"))
-  (setenv "NIX_CONFIG" "experimental-features = nix-command flakes")
   (map (lambda (entry)
          (list (assoc-ref entry "attr")
                (assoc-ref entry "version")
                (map (lambda (o) (list (assoc-ref o "name") (assoc-ref o "path")))
                     (vector->list (assoc-ref entry "outputs")))))
-       (vector->list
-        (json-string->scm
-         (command-output "guix" "shell" "nix" "--" "nix" "eval"
-                         "--store" (string-append (getenv "HOME") "/.cache/nixpkgs-bridge/nix-store")
-                         "--json"
-                         (string-append "github:NixOS/nixpkgs/" revision
-                                        "#legacyPackages." system)
-                         "--apply" expr)))))
+       (map-attrs (string-append
+                   "{ attr = n; version = d.version or \"0\"; "
+                   "outputs = map (o: { name = o; path = d.${o}.outPath; }) "
+                   "(d.meta.outputsToInstall or [ \"out\" ]); }")
+                  attrs revision system)))
+
+(define (package-versions attrs revision system)
+  "Return (ATTR VERSION CHANGELOG) for ATTRS in nixpkgs REVISION.  CHANGELOG
+falls back to the homepage and may be empty."
+  (map (lambda (entry)
+         (list (assoc-ref entry "attr")
+               (assoc-ref entry "version")
+               (assoc-ref entry "changelog")))
+       (map-attrs (string-append
+                   "{ attr = n; version = d.version or \"0\"; "
+                   "changelog = toString (d.meta.changelog or d.meta.homepage or \"\"); }")
+                  attrs revision system)))
 
 (define (write-lock file attrs revision system)
   (let* ((packages (evaluate attrs revision system))

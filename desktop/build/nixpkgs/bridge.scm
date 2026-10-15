@@ -2,6 +2,9 @@
 ;;   lock PACKAGES LOCK [REVISION]  evaluate PACKAGES (a list of attribute names)
 ;;                                  and write LOCK; REVISION defaults to the
 ;;                                  locked one, then to nixpkgs-unstable
+;;   versions PACKAGES [REVISION]   print REVISION, which defaults to the latest
+;;                                  nixpkgs-unstable, then ATTR VERSION CHANGELOG
+;;                                  lines separated by tabs
 ;;   import LOCK SECRET-KEY         import the locked closures into the store
 ;;   verify LOCK                    check imported items against the signed
 ;;                                  cache.nixos.org NAR hashes
@@ -35,6 +38,14 @@
                       (lock-ref (read-nixpkgs-lock lock) 'revision)
                       (latest-revision))))
                "aarch64-linux"))
+  ((_ "versions" packages . revision)
+   (let ((revision (match revision ((revision) revision) (() (latest-revision)))))
+     (format #t "~a~%" revision)
+     (for-each (match-lambda
+                 ((attr version changelog)
+                  (format #t "~a\t~a\t~a~%" attr version changelog)))
+               (package-versions (call-with-input-file packages read)
+                                 revision "aarch64-linux"))))
   ((_ "import" lock secret-key)
    (import-items (lock-items (read-nixpkgs-lock lock)) secret-key (cache-directory)))
   ((_ "verify" lock)
@@ -46,5 +57,5 @@
   ((_ "key" secret-key)
    (format #t "wrote ~a~%" (generate-signing-key secret-key)))
   (_
-   (format (current-error-port) "usage: bridge.scm lock|import|verify|key ...~%")
+   (format (current-error-port) "usage: bridge.scm lock|versions|import|verify|key ...~%")
    (exit 1)))
