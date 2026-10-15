@@ -1,9 +1,10 @@
 //! Font and icon discovery.
 //!
 //! GPUI's Linux text system (cosmic-text/fontdb) reads `/etc/fonts/fonts.conf`
-//! directly, which does not exist on Guix. Before GPUI starts we ask the real
-//! fontconfig (`fc-list`) where fonts live and hand fontdb a small generated
-//! config listing those directories. Generic families such as `sans-serif`
+//! directly, but Guix's fontconfig reads its own store config, so the two can
+//! disagree (the nixpkgs bridge installs an `/etc/fonts` without DejaVu). Before
+//! GPUI starts we ask the real fontconfig (`fc-list`) where fonts live and hand
+//! fontdb a small generated config listing those directories. Generic families such as `sans-serif`
 //! are resolved with `fc-match` because GPUI matches family names literally.
 
 use std::collections::{BTreeSet, HashMap};
@@ -47,8 +48,7 @@ fn runtime_dir() -> PathBuf {
 pub fn configure_fontconfig() {
     // Resolve the initial fallback before GPUI starts (not during rendering).
     load_family("sans-serif");
-    if std::env::var_os("FONTCONFIG_FILE").is_some() || Path::new("/etc/fonts/fonts.conf").exists()
-    {
+    if std::env::var_os("FONTCONFIG_FILE").is_some() {
         return;
     }
     let mut dirs = BTreeSet::new();
