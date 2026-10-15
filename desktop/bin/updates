@@ -1,0 +1,502 @@
+#!/usr/bin/env bb
+;; Usage: updates [status|list|refresh|apply] [SOURCE[/NAME] ...]
+;;
+;; Every source reads installed versions from the files or profiles that hold
+;; them, so this keeps no inventory of its own; refresh only caches latest versions.
+(ns updates
+  (:require [babashka.fs :as fs]
+            [babashka.http-client :as http]
+            [babashka.process :as p]
+            [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.string :as str]))
+
+(def repo (-> *file* fs/real-path fs/parent fs/parent fs/parent str))
+(def home (System/getProperty "user.home"))
+(def guix (str home "/.config/guix/current/bin/guix"))
+(def cache-file (str (or (System/getenv "XDG_CACHE_HOME") (str home "/.cache"))
+                     "/updates/latest.edn"))
+(defn in-repo [path] (str repo "/" path))
+
+(defn sh [& args]
+  (let [[opts args] (if (map? (first args)) [(first args) (rest args)] [{} args])]
+    (str/trim (:out (apply p/shell (assoc opts :out :string) args)))))
+(defn run! [& args] (apply p/shell {:dir repo} args))
+(defn http-json [url] (json/parse-string (:body (http/get url)) true))
+(defn github [path] (json/parse-string (sh "gh" "api" path) true))
+(defn head-commit [url ref] (first (str/split (sh "git" "ls-remote" url ref) #"\s")))
+(defn compare-url [url from to]
+  (let [base (str/replace url #"\.git$" "")]
+    (if (str/includes? base "git.sr.ht")
+      (str base "/log/" to)
+      (str base "/compare/" from "..." to))))
+
+;; Guix channels pin commits in channels.scm; their packages follow the pin.
+(def channels-file (in-repo "channels.scm"))
+
+(defn channel-items []
+  (for [[_ name url branch commit]
+        (re-seq #"\(name '(\S+)\)\s*\(url \"([^\"]+)\"\)\s*\(branch \"([^\"]+)\"\)\s*\(commit \"([0-9a-f]+)\"\)"
+                (slurp channels-file))]
+    {:name name :url url :branch branch :current commit}))
+
+(defn channel-refresh [items]
+  (for [{:keys [url branch current] :as item} items
+        :let [latest (head-commit url (str "refs/heads/" branch))]]
+    (assoc item :latest latest :changelog (compare-url url current latest))))
+
+(defn bumped-channels [items]
+  (reduce (fn [text {:keys [current latest]}] (str/replace text current latest))
+          (slurp channels-file) items))
+
+(defn channel-apply! [items]
+  (spit channels-file (bumped-channels items)))
+
+;; Packages installed from the channels, at the versions a channel bump brings.
+;; Comparing the newest version per name before and after the bump hides older
+;; variants that stay installed.
+(def guix-versions-script
+  "(use-modules (gnu packages) (guix packages) (ice-9 match) (ice-9 rdelim))
+(call-with-input-file (cadr (command-line))
+  (lambda (port)
+    (let loop ()
+      (match (read-line port)
+        ((? eof-object?) #t)
+        (name
+         (match (find-packages-by-name name)
+           ((package . _)
+            (format #t \"~a\\t~a\\t~a~%\" name (package-version package)
+                    (or (package-home-page package) \"\")))
+           (() #t))
+         (loop))))))")
+
+(def custom-package-names
+  (delay (set (for [file (fs/glob (in-repo "modules") "**.scm")
+                    [_ name] (re-seq #"(?:\(name|#:name) \"([^\"]+)\"" (slurp (str file)))]
+                name))))
+
+(defn guix-items []
+  (->> [(str home "/.guix-home/profile") "/run/current-system/profile"]
+       (mapcat #(str/split-lines (sh guix "package" "-p" % "-I")))
+       (map #(let [[name version] (map str/trim (str/split % #"\t"))] {:name name :current version}))
+       (remove #(or (str/starts-with? (:name %) "nixpkgs-") (@custom-package-names (:name %))))
+       (group-by :name) vals (map first) (sort-by :name)))
+
+(defn guix-refresh [items]
+  (let [channels (channel-refresh (channel-items))
+        dir (fs/create-temp-dir)
+        [script names bumped] (map #(str (fs/path dir %)) ["versions.scm" "names" "channels.scm"])
+        versions (fn [& command]
+                   (into {} (for [line (str/split-lines (apply sh {:err :string} command))
+                                  :let [[name version home-page] (str/split line #"\t")]]
+                              [name {:version version :home-page home-page}])))]
+    (spit script guix-versions-script)
+    (spit names (str/join "\n" (map :name items)))
+    (spit bumped (bumped-channels channels))
+    (binding [*out* *err*]
+      (println "guix: evaluating the bumped channels; the first run per bump takes minutes"))
+    (try
+      (let [now (versions guix "repl" "--" script names)
+            later (versions guix "time-machine" "-C" bumped "--" "repl" "--" script names)]
+        (for [{:keys [name current] :as item} items
+              :let [before (now name) after (later name)]]
+          (assoc item
+                 :latest (cond (and before (not after)) "removed"
+                               (not= (:version before) (:version after)) (:version after)
+                               :else current)
+                 :changelog (:home-page after))))
+      (finally (fs/delete-tree dir)))))
+
+(declare read-cache with-latest outdated?)
+
+(defn guix-apply! [_]
+  (channel-apply! (filter outdated? (with-latest (read-cache) (map #(assoc % :source "channel")
+                                                                      (channel-items))))))
+
+;; nixpkgs packages share one locked revision; applying any of them relocks all.
+(def nixpkgs-dir "modules/engstrand/nixpkgs")
+
+(defn nixpkgs-items []
+  (let [[_ & fields] (edn/read-string (slurp (in-repo (str nixpkgs-dir "/lock.sexp"))))
+        field (fn [k] (rest (some #(when (= k (first %)) %) fields)))]
+    (cons {:name "nixpkgs" :current (first (field 'revision))}
+          (for [[_ [_ attr] [_ version]] (field 'packages)]
+            {:name attr :current version}))))
+
+(defn nixpkgs-refresh [items]
+  (let [[revision & rows] (str/split-lines
+                           (sh {:dir repo :err :string} guix "repl" "-L" "modules" "--"
+                               "desktop/build/nixpkgs/bridge.scm" "versions"
+                               (str nixpkgs-dir "/packages.sexp")))
+        latest (into {} (for [row rows :let [[attr version changelog] (str/split row #"\t")]]
+                          [attr {:latest version :changelog (first (str/split (str changelog) #" "))}]))]
+    (for [{:keys [name current] :as item} items]
+      (merge item
+             (if (= name "nixpkgs")
+               {:latest revision
+                :changelog (compare-url "https://github.com/NixOS/nixpkgs" current revision)}
+               (latest name))))))
+
+(defn nixpkgs-apply! [items]
+  (run! "make" "nixpkgs-lock" (str "NIXPKGS_REV=" (:latest (first items)))))
+
+;; Packages built from upstream GitHub releases or commits, one per file.
+;; Tailscale publishes its binaries elsewhere but tags the same versions here.
+(def github-repos {"tailscale" {:repo "tailscale/tailscale" :prefix "v"}})
+
+(defn github-item [file]
+  (let [text (slurp file)
+        name (fs/strip-ext (fs/file-name file))
+        [_ repo prefix] (re-find #"github\.com/([^/]+/[^/]+)/releases/download/([^\"]*)\"" text)
+        [_ codeload] (re-find #"codeload\.github\.com/([^/]+/[^/]+)/" text)
+        [commit-form commit] (re-find #"\(commit \"([0-9a-f]{40})\"\)" text)
+        [version-form version] (or (re-find #"\(define \S+-version \"([^\"]+)\"\)" text)
+                                   (re-find #"\(version \"([^\"]+)\"\)" text))
+        base {:name name :file (str file)
+              :package (second (re-find #"\(define-public (\S+)" text))
+              :hash (second (re-find #"\(base32 \"([0-9a-z]+)\"\)" text))}]
+    (cond
+      codeload (assoc base :repo codeload :current commit :form commit-form)
+      repo (assoc base :repo repo :prefix prefix :current version :form version-form)
+      (github-repos name) (merge base (github-repos name) {:current version :form version-form}))))
+
+(defn github-items []
+  (keep (comp github-item str) (sort (fs/glob (in-repo "modules/engstrand/packages") "*.scm"))))
+
+(defn github-refresh [items]
+  (pmap (fn [{:keys [repo prefix current] :as item}]
+          (if prefix
+            (let [{:keys [tag_name html_url]} (github (str "repos/" repo "/releases/latest"))]
+              (assoc item :latest (str/replace-first tag_name prefix "") :changelog html_url))
+            (let [latest (:sha (github (str "repos/" repo "/commits/HEAD")))]
+              (assoc item :latest latest
+                     :changelog (compare-url (str "https://github.com/" repo) current latest)))))
+        items))
+
+(defn source-uri [{:keys [name package]}]
+  (let [script (str (fs/create-temp-file {:suffix ".scm"}))]
+    (spit script (str "(use-modules (guix packages) (engstrand packages " name "))\n"
+                      "(let ((uri (origin-uri (package-source " package "))))"
+                      " (display (if (string? uri) uri (car uri))))"))
+    (try (sh {:dir repo} guix "repl" "-L" "modules" "--" script)
+         (finally (fs/delete script)))))
+
+(defn github-apply! [items]
+  (doseq [{:keys [file form current latest hash] :as item} items
+          :let [text (slurp file)]]
+    (spit file (str/replace text form (str/replace form current latest)))
+    (try
+      (let [new-hash (last (str/split-lines (sh guix "download" (source-uri item))))]
+        (spit file (str/replace (slurp file) hash new-hash)))
+      (catch Exception e
+        (spit file text)
+        (throw e)))))
+
+;; Upstream code vendored under desktop/, recorded in desktop/upstream.edn.
+(def upstream-file (in-repo "desktop/upstream.edn"))
+
+(defn checkout [repo]
+  (let [dir (str home "/.cache/checkouts/github.com/" repo)]
+    (if (fs/exists? dir)
+      (sh "git" "-C" dir "fetch" "-q" "origin")
+      (sh "git" "clone" "-q" "--filter=blob:none" (str "https://github.com/" repo) dir))
+    dir))
+
+(defn upstream-items []
+  (for [[dir {:keys [commit] :as entry}] (sort-by key (edn/read-string (slurp upstream-file)))]
+    (merge {:name (fs/file-name dir)} entry {:dir dir :current commit})))
+
+(defn upstream-refresh [items]
+  (pmap (fn [{:keys [repo path current] :as item}]
+          (let [git-dir (checkout repo)
+                tree #(sh "git" "-C" git-dir "rev-parse" (str % ":" path))
+                newest (sh "git" "-C" git-dir "log" "-1" "--format=%H" "origin/HEAD" "--" (or path "."))
+                latest (if (= (tree current) (tree newest)) current newest)]
+            (assoc item :latest latest
+                   :changelog (if path
+                                (str "https://github.com/" repo "/commits/" latest "/" path)
+                                (compare-url (str "https://github.com/" repo) current latest)))))
+        items))
+
+(defn merge-upstream!
+  "Three-way merge the upstream changes from :current to :latest into the local
+copy; return the files left with conflict markers."
+  [{:keys [repo path dir current latest]}]
+  (let [git-dir (checkout repo)
+        local (in-repo (str "desktop/" dir))
+        prefix (if path (str path "/") "")
+        files (fn [commit]
+                (set (for [file (str/split-lines (sh "git" "-C" git-dir "ls-tree" "-r" "--name-only"
+                                                     commit "--" (or path ".")))
+                           :when (seq file)]
+                       (subs file (count prefix)))))
+        tmp (fs/create-temp-dir)
+        show (fn [commit file]
+               (let [out (str (fs/path tmp (str (subs commit 0 12) "-" (str/replace file "/" "_"))))]
+                 (p/shell {:out (fs/file out)} "git" "-C" git-dir "show" (str commit ":" prefix file))
+                 out))
+        base (files current)
+        theirs (files latest)]
+    (try
+      (doall
+       (for [file (sort (into base theirs))
+             :let [mine (str (fs/path local file))
+                   mine? (fs/exists? mine)]
+             :when (cond
+                     (not (theirs file))
+                     (do (when (and mine? (= (slurp mine) (slurp (show current file))))
+                           (fs/delete mine))
+                         false)
+                     (not mine?)
+                     (do (when-not (base file)
+                           (fs/create-dirs (fs/parent mine))
+                           (fs/copy (show latest file) mine))
+                         false)
+                     :else
+                     (let [ancestor (if (base file) (show current file) (str (fs/create-temp-file {:dir tmp})))]
+                       (pos? (:exit (p/shell {:continue true} "git" "merge-file"
+                                             "-L" "local" "-L" "base" "-L" "upstream"
+                                             mine ancestor (show latest file))))))]
+         (str "desktop/" dir "/" file)))
+      (finally (fs/delete-tree tmp)))))
+
+(defn upstream-apply! [items]
+  (doseq [{:keys [name dir manual current latest changelog] :as item} items]
+    (if manual
+      (println (str "  " name " is updated by hand: review " changelog
+                    ", then set its :commit in desktop/upstream.edn to " latest))
+      (let [conflicts (merge-upstream! item)]
+        (spit upstream-file
+              (str/replace (slurp upstream-file)
+                           (re-pattern (str "(\"" dir "\"\\s*\\{[^}]*:commit \")" current))
+                           (str "$1" latest)))
+        (doseq [file conflicts] (println (str "  conflict: " file)))))))
+
+;; Skills installed by the skills CLI, which pins each folder's content hash.
+(def skills-lock (in-repo "skills-lock.json"))
+
+(defn folder-hash
+  "Hash DIR the way the skills CLI's computeSkillFolderHash does."
+  [dir]
+  (let [files (->> (file-seq (fs/file dir))
+                   (filter #(.isFile %))
+                   (map #(str (fs/relativize dir %)))
+                   (remove #(re-find #"(^|/)(\.git|node_modules)/" %))
+                   (sort-by (juxt str/lower-case identity)))
+        digest (java.security.MessageDigest/getInstance "SHA-256")]
+    (doseq [file files]
+      (.update digest (.getBytes file "UTF-8"))
+      (.update digest (fs/read-all-bytes (fs/path dir file))))
+    (apply str (map #(format "%02x" %) (.digest digest)))))
+
+(defn skills-items []
+  (for [[skill {:keys [source sourceType skillPath computedHash]}]
+        (sort-by key (:skills (json/parse-string (slurp skills-lock) true)))
+        :when (= sourceType "github")]
+    {:name (name skill) :repo source :path (str (fs/parent skillPath)) :current computedHash}))
+
+(defn skills-refresh [items]
+  (pmap (fn [{:keys [repo path] :as item}]
+          (let [git-dir (checkout repo)
+                tmp (fs/create-temp-dir)]
+            (try
+              (p/shell {:dir (str tmp)} "sh" "-c" "git -C \"$1\" archive origin/HEAD \"$2\" | tar x"
+                       "sh" git-dir path)
+              (assoc item :latest (folder-hash (str (fs/path tmp path)))
+                     :changelog (str "https://github.com/" repo "/commits/HEAD/" path))
+              (finally (fs/delete-tree tmp)))))
+        items))
+
+(defn skills-apply! [items]
+  (apply run! "bun" "x" "skills" "update" "-p" "-y" (map :name items)))
+
+;; Flatpak apps come from Flathub; the system remote is unreadable without root.
+(defn flatpak-items []
+  (for [line (str/split-lines (sh "flatpak" "list" "--app" "--columns=application,version"))
+        :let [[id version] (str/split line #"\t")]]
+    {:name id :current version}))
+
+(defn flatpak-refresh [items]
+  (pmap (fn [{:keys [name] :as item}]
+          (let [release (first (:releases (http-json (str "https://flathub.org/api/v2/appstream/" name))))]
+            (assoc item :latest (:version release)
+                   :changelog (or (:url release) (str "https://flathub.org/apps/" name)))))
+        items))
+
+(defn flatpak-apply! [items]
+  (apply run! "flatpak" "update" "-y" (map :name items)))
+
+;; Doom Emacs is a git checkout; doom upgrade also updates its pinned packages.
+(def doom-dir (str home "/.config/emacs"))
+
+(defn doom-items []
+  [{:name "doomemacs" :current (sh "git" "-C" doom-dir "rev-parse" "HEAD")}])
+
+(defn doom-refresh [items]
+  (for [{:keys [current] :as item} items
+        :let [latest (head-commit (sh "git" "-C" doom-dir "remote" "get-url" "origin") "HEAD")]]
+    (assoc item :latest latest
+           :changelog (compare-url "https://github.com/doomemacs/doomemacs" current latest))))
+
+(defn doom-apply! [_]
+  (run! (str doom-dir "/bin/doom") "upgrade"))
+
+;; lazy.nvim pins plugins in the stowed lazy-lock.json and rewrites it on update.
+(def lazy-lock (in-repo "desktop/configs/nvim/lazy-lock.json"))
+(def lazy-dir (str home "/.local/share/nvim/lazy"))
+
+(defn lazy-items []
+  (for [[plugin {:keys [branch commit]}] (sort-by key (json/parse-string (slurp lazy-lock) true))
+        :let [name (name plugin) dir (str lazy-dir "/" name)]
+        :when (fs/exists? dir)]
+    {:name name :branch branch :current commit
+     :url (sh "git" "-C" dir "remote" "get-url" "origin")}))
+
+(defn lazy-refresh [items]
+  (let [out (str (fs/create-temp-file))
+        ;; lazy.nvim's own check honours pinned commits, tags and versions.
+        check (str "lua require('lazy').check({ wait = true, show = false }) "
+                   "local lines = {} "
+                   "for _, p in pairs(require('lazy.core.config').plugins) do "
+                   "if p._.updates then table.insert(lines, p.name .. '\\t' .. p._.updates.to.commit) end "
+                   "end vim.fn.writefile(lines, '" out "')")
+        _ (p/shell {:out :string :err :string} "nvim" "--headless" (str "+" check) "+qa")
+        updates (into {} (map #(str/split % #"\t") (str/split-lines (slurp out))))]
+    (fs/delete out)
+    (for [{:keys [name url current] :as item} items
+          :let [latest (get updates name current)]]
+      (assoc item :latest latest :changelog (compare-url url current latest)))))
+
+(defn lazy-apply! [items]
+  (run! "nvim" "--headless" (str "+Lazy! update " (str/join " " (map :name items))) "+qa"))
+
+;; Pi installs npm packages pinned in the stowed settings.json.
+(def pi-settings (in-repo "desktop/pi/agent/settings.json"))
+
+(defn pi-items []
+  (for [source (:packages (json/parse-string (slurp pi-settings) true))
+        :let [[_ name version] (re-find #"^npm:(.+)@([^@]+)$" source)]
+        :when name]
+    {:name name :current version}))
+
+(defn pi-refresh [items]
+  (pmap (fn [{:keys [name] :as item}]
+          (let [{:keys [version repository]} (http-json (str "https://registry.npmjs.org/" name "/latest"))
+                repo (some->> (:url repository) (re-find #"github\.com[/:]([^/]+/[^/.]+)") second)]
+            (assoc item :latest version
+                   :changelog (if repo
+                                (str "https://github.com/" repo "/releases")
+                                (str "https://www.npmjs.com/package/" name)))))
+        items))
+
+(defn pi-apply! [items]
+  (doseq [{:keys [name latest]} items]
+    (run! "pi" "install" (str "npm:" name "@" latest))))
+
+;; Rebuild steps run in this order after declarative sources change.
+(def rebuild-steps ["make pull" "make home-apply" "make switch" "make doom-check"])
+
+(def sources
+  {"channel" {:items channel-items :refresh channel-refresh :apply! channel-apply!
+              :then #{"make pull" "make home-apply" "make switch"}}
+   "guix" {:items guix-items :refresh guix-refresh :apply! guix-apply!
+           :then #{"make pull" "make home-apply" "make switch"}}
+   "nixpkgs" {:items nixpkgs-items :refresh nixpkgs-refresh :apply! nixpkgs-apply!
+              :then #{"make home-apply" "make switch"}}
+   "github" {:items github-items :refresh github-refresh :apply! github-apply!
+             :then #{"make home-apply" "make switch"}}
+   "upstream" {:items upstream-items :refresh upstream-refresh :apply! upstream-apply!
+               :then #{"make home-apply"}}
+   "skills" {:items skills-items :refresh skills-refresh :apply! skills-apply!}
+   "flatpak" {:items flatpak-items :refresh flatpak-refresh :apply! flatpak-apply!}
+   "doom" {:items doom-items :refresh doom-refresh :apply! doom-apply! :then #{"make doom-check"}}
+   "lazy" {:items lazy-items :refresh lazy-refresh :apply! lazy-apply!}
+   "pi" {:items pi-items :refresh pi-refresh :apply! pi-apply!}})
+
+(def source-order ["channel" "guix" "nixpkgs" "github" "upstream" "skills"
+                   "flatpak" "doom" "lazy" "pi"])
+
+(defn selected? [selectors {:keys [source name]}]
+  (or (empty? selectors)
+      (some #{source (str source "/" name)} selectors)))
+
+(defn inventory [selectors]
+  (let [wanted? (fn [source]
+                  (or (empty? selectors)
+                      (some #(or (= source %) (str/starts-with? % (str source "/"))) selectors)))]
+    (->> (filter wanted? source-order)
+         (pmap (fn [source]
+                 (try (map #(assoc % :source source) ((get-in sources [source :items])))
+                      (catch Exception e [{:source source :name "?" :error (ex-message e)}]))))
+         (apply concat)
+         (filter #(selected? selectors %)))))
+
+(defn read-cache []
+  (if (fs/exists? cache-file) (edn/read-string (slurp cache-file)) {:latest {}}))
+
+(defn with-latest [cache items]
+  (for [{:keys [source name] :as item} items]
+    (merge item (get-in cache [:latest [source name]]))))
+
+(defn refresh! [selectors]
+  (let [items (inventory selectors)
+        fresh (apply concat
+                     (pmap (fn [[source group]]
+                             (try ((get-in sources [source :refresh]) group)
+                                  (catch Exception e (map #(assoc % :error (ex-message e)) group))))
+                           (group-by :source items)))
+        cache (read-cache)]
+    (fs/create-dirs (fs/parent cache-file))
+    (spit cache-file
+          (pr-str (-> cache
+                      (assoc :refreshed-at (str (java.time.Instant/now)))
+                      (update :latest into
+                              (for [{:keys [source name latest changelog error]} fresh]
+                                [[source name] {:latest latest :changelog changelog :error error}])))))
+    (with-latest (read-cache) items)))
+
+(defn outdated? [{:keys [current latest]}] (and latest (not= current latest)))
+
+(defn short [v] (if (and v (re-matches #"[0-9a-f]{40,64}" v)) (subs v 0 12) (or v "")))
+
+(defn print-table [items]
+  (let [rows (for [{:keys [source name current latest changelog error] :as item} items]
+               [source name (short current)
+                (cond error "error" (nil? latest) "?" (outdated? item) (short latest) :else "=")
+                (or error (when (outdated? item) changelog) "")])
+        widths (apply map (fn [& cells] (apply max (map count cells)))
+                      ["SOURCE" "NAME" "CURRENT" "LATEST" ""] rows)]
+    (doseq [row (cons ["SOURCE" "NAME" "CURRENT" "LATEST" "CHANGELOG"] rows)]
+      (println (str/trimr (str/join "  " (map #(format (str "%-" (max 1 %1) "s") %2) widths row)))))))
+
+(defn print-status [items]
+  (let [{:keys [refreshed-at]} (read-cache)
+        shown (filter #(or (outdated? %) (:error %)) items)]
+    (println (if refreshed-at (str "Latest versions from " refreshed-at) "Never refreshed; run: updates refresh"))
+    (when (seq shown) (print-table shown))
+    (println (str (count (filter outdated? items)) " of " (count items) " have updates; "
+                  (count (remove :latest items)) " unknown."))))
+
+(defn apply! [selectors]
+  (let [items (filter outdated? (with-latest (read-cache) (inventory selectors)))
+        groups (group-by :source items)]
+    (if (empty? items)
+      (println "Nothing to update; run updates refresh first if the cache is old.")
+      (do
+        (doseq [source source-order :let [group (groups source)] :when group]
+          (println (str "Updating " source ": " (str/join ", " (map :name group))))
+          ((get-in sources [source :apply!]) group))
+        (let [steps (set (mapcat #(get-in sources [% :then]) (keys groups)))]
+          (when (seq steps)
+            (println "Review the repository diff with jj diff, then run:")
+            (doseq [step rebuild-steps :when (steps step)] (println (str "  " step)))))))))
+
+(let [[command & selectors] *command-line-args*]
+  (case (or command "status")
+    "status" (print-status (with-latest (read-cache) (inventory selectors)))
+    "list" (print-table (with-latest (read-cache) (inventory selectors)))
+    "refresh" (print-status (refresh! selectors))
+    "apply" (apply! selectors)
+    (do (println "usage: updates [status|list|refresh|apply] [SOURCE[/NAME] ...]")
+        (println (str "sources: " (str/join " " source-order)))
+        (System/exit 1))))

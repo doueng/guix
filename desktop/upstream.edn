@@ -1,0 +1,31 @@
+;; Upstream code vendored under desktop/, keyed by its local directory: the
+;; GitHub repository, the copied subdirectory, and the upstream commit the copy
+;; is synced to.  updates apply three-way merges newer upstream changes into
+;; local edits.  :manual entries are ports or reshaped copies that are updated
+;; by hand; the UPSTREAM.md or README beside each copy describes its deviations.
+{"build/herdr/sesh"
+ {:repo "fullerzz/herdr-plugin-sesh" :commit "9c963cdeb176c648043711551a779a03985279b1" :manual true}
+ "build/herdr/tiny-fingers"
+ {:repo "hotchpotch/herdr-tiny-fingers" :commit "2927dcf2bc95fe53a7143c040bbdcbcf804d65ed" :manual true}
+ "configs/ideavim/.config/ideavim/idea-doom-emacs"
+ {:repo "sei40kr/idea-doom-emacs" :commit "48e780b9d17c57e9686d4b73f477df69e907f094"}
+ "pi/agent/extensions/pi-autoresearch"
+ {:repo "davebcn87/pi-autoresearch" :path "extensions/pi-autoresearch" :commit "84232861a09e753f63bceda46852f0ddbb4c9afd"}
+ "pi/agent/extensions/pi-vent"
+ {:repo "IgorWarzocha/pi-vent" :path "extensions" :commit "8d211c039a03e930ec7b0e5deb8b317f7b1b30a8" :manual true}
+ "pi/agent/extensions/tokenjuice/src"
+ {:name "tokenjuice" :repo "vincentkoc/tokenjuice" :path "src" :commit "001d5975184ea33f49441ed8724714472e4fca26"}
+ "pi/agent/skills/autoresearch-create"
+ {:repo "davebcn87/pi-autoresearch" :path "skills/autoresearch-create" :commit "84232861a09e753f63bceda46852f0ddbb4c9afd"}
+ "pi/agent/skills/autoresearch-finalize"
+ {:repo "davebcn87/pi-autoresearch" :path "skills/autoresearch-finalize" :commit "84232861a09e753f63bceda46852f0ddbb4c9afd"}
+ "pi/agent/skills/autoresearch-hooks"
+ {:repo "davebcn87/pi-autoresearch" :path "skills/autoresearch-hooks" :commit "84232861a09e753f63bceda46852f0ddbb4c9afd"}
+ "pi/agent/skills/herdr"
+ {:repo "herdrdev/herdr" :path "skills/herdr" :commit "9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c"}
+ "pi/agent/skills/librarian"
+ {:repo "mitsuhiko/agent-stuff" :path "skills/librarian" :commit "0ad04e3302f30198bf31d4c8b4ba7b5d1d5f6714"}
+ "pi/agent/skills/pstack"
+ {:repo "cursor/plugins" :path "pstack" :commit "2cbf58508f40de470d7490b55c51d71241928fa2" :manual true}
+ "pi/agent/skills/retro"
+ {:repo "mattpocock/skills" :path "skills/engineering/retro" :commit "a7d038f6bf7f01b516408e95e2fb56e0b338fa6f"}}
