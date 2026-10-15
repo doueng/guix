@@ -354,6 +354,13 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (setq lsp-ui-doc-enable nil
         lsp-ui-sideline-enable nil))
 
+;; Projectile declares these safe, but Doom loads it after the first file's
+;; dir-locals are read, so Emacs would ask before applying them.
+(dolist (var '(projectile-project-compilation-cmd
+               projectile-project-test-cmd
+               projectile-project-run-cmd))
+  (put var 'safe-local-variable #'stringp))
+
 (after! projectile
   (setq projectile-indexing-method 'alien
         projectile-enable-caching t
