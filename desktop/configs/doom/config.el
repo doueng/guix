@@ -354,6 +354,37 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (setq lsp-ui-doc-enable nil
         lsp-ui-sideline-enable nil))
 
+;; A Guix profile is a symlink tree into per-package store directories. Doom
+;; visits symlink targets, which moves a library file such as anthropic's
+;; messages.py out of the profile's site-packages. ty then cannot place it in a
+;; package, so go to definition dead-ends at its relative imports. Keep the path
+;; the language server returned for store files.
+(defun eng/keep-guix-store-symlink-path (fn filename &rest args)
+  (let ((find-file-visit-truename
+         (and find-file-visit-truename
+              (not (string-prefix-p "/gnu/store/" (expand-file-name filename))))))
+    (apply fn filename args)))
+(advice-remove #'find-file-noselect #'eng/keep-guix-store-symlink-path)
+(advice-add #'find-file-noselect :around #'eng/keep-guix-store-symlink-path)
+
+;; lsp-mode's ty client has no library folders, so a jump into an installed
+;; package or ty's typeshed stubs started a new ty rooted inside that package,
+;; which cannot resolve the package's relative imports. Declared library
+;; folders join the project's ty instead. Each such jump also saved its root as
+;; a project, and a saved project skips the library check, so drop those.
+(defun eng/lsp-library-path-p (path)
+  (or (string-prefix-p "/gnu/store/" path)
+      (string-prefix-p (expand-file-name "~/.cache/ty/") path)))
+
+(after! lsp-python-ty
+  ;; Quoted so the struct accessor expands after lsp-mode defines it, not while
+  ;; config.el is read.
+  (eval '(setf (lsp--client-library-folders-fn (gethash 'ty-ls lsp-clients))
+               (lambda (_workspace) (list "/gnu/store/" (expand-file-name "~/.cache/ty/"))))
+        t)
+  (dolist (folder (seq-filter #'eng/lsp-library-path-p (lsp-session-folders (lsp-session))))
+    (lsp-workspace-folders-remove folder)))
+
 ;; Projectile declares these safe, but Doom loads it after the first file's
 ;; dir-locals are read, so Emacs would ask before applying them.
 (dolist (var '(projectile-project-compilation-cmd
