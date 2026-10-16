@@ -13,7 +13,7 @@
   (cons* babashka bun github-cli jiti pi-coding-agent
          (append
           (map nixpkgs-package
-               '("clojure" "curl" "file" "fnlfmt" "gopls" "hyperfine" "nixfmt"
+               '("clojure" "curl" "dasel" "file" "fnlfmt" "gopls" "hyperfine" "nixfmt"
                  "shellcheck" "shfmt" "tree-sitter" "typst" "uv"))
           (map specification->package
               '("python"

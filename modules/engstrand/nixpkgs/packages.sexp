@@ -5,6 +5,7 @@
  "glibcLocalesUtf8"
  "clojure"
  "curl"
+ "dasel"
  "fd"
  "file"
  "fish"

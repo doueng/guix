@@ -29,6 +29,10 @@
     ("bin" "/nix/store/8kdawibp3831l16sx890nmxjyxii2a8i-curl-8.22.0-bin")
     ("man" "/nix/store/pkx6g62xshir1v7hqzns0x2ygzx1w60n-curl-8.22.0-man")))
   (package
+   (attr "dasel")
+   (version "3.11.2")
+   (outputs ("out" "/nix/store/a5s5ydryd4clvhv10h7vjjc2s5q1ywj5-dasel-3.11.2")))
+  (package
    (attr "fd")
    (version "10.5.0")
    (outputs ("out" "/nix/store/09w3qz2zfj2libm9x42w65wpa6syzdgn-fd-10.5.0")))
@@ -1679,6 +1683,15 @@
               (references
                "a5h1239glgbiq7fx59nzr2s078n47zyd-perl5.42.3-CGI-4.59"
                "njbhsqlzr9p7m2hb3i8zbic2q88qdaaw-perl5.42.3-HTML-Parser-3.85"))
+        (item (path "/nix/store/a5s5ydryd4clvhv10h7vjjc2s5q1ywj5-dasel-3.11.2")
+              (url "nar/04hqj932235p4zs5yahr1p7g6r6gzx81ymff1idn1syicpq9acib.nar.zst")
+              (compression "zstd")
+              (nar-hash
+               "sha256:04hqj932235p4zs5yahr1p7g6r6gzx81ymff1idn1syicpq9acib")
+              (nar-size 9711592)
+              (references
+               "5g0149dc72bz1rdxjc10qnr4vdh9yp1x-tzdata-2026d"
+               "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25"))
         (item (path "/nix/store/a6naychnaf31hvgsnbj9i9xc0hg5x6c2-libogg-1.3.6")
               (url "nar/101yxj6dippk5vckd79063qd6lfi0z5dx100l5dgday365wfhz44.nar.zst")
               (compression "zstd")
