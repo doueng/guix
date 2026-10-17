@@ -1624,13 +1624,7 @@ class HardwareCursorPromptEditor extends PromptEditor implements Focusable {
 		this.syncCursorShape(true);
 	}
 
-	override handleInput(data: string): void {
-		this.syncCursorShape(true);
-		super.handleInput(data);
-	}
-
 	override render(width: number): string[] {
-		this.syncCursorShape(true);
 		const lines = super.render(width).map((line) =>
 			line.replace(SOFTWARE_CURSOR_RE, (_match, marker = "", text = "") =>
 				this.vimMode === "insert" ? text : marker + text
