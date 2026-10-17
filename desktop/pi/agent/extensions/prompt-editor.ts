@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, ModelSelectEvent, ThinkingLevel } from "@earendil-works/pi-coding-agent";
 import { CustomEditor, ModelSelectorComponent, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { CURSOR_MARKER, matchesKey, visibleWidth, type Focusable, type Keybindings, type Theme, type TUI } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, matchesKey, renderFakeCursor, visibleWidth, type Focusable, type Keybindings, type Theme, type TUI } from "@earendil-works/pi-tui";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
@@ -918,7 +918,9 @@ interface PromptEntry {
 	timestamp: number;
 }
 
-const SOFTWARE_CURSOR_RE = /(\x1b_pi:c\x07)?\x1b\[7m([^\x1b]*)\x1b\[0m/;
+const regexLiteral = (text: string) => text.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+const [FAKE_CURSOR_START, FAKE_CURSOR_END] = renderFakeCursor("\0").split("\0").map(regexLiteral);
+const SOFTWARE_CURSOR_RE = new RegExp(`(${regexLiteral(CURSOR_MARKER)})?${FAKE_CURSOR_START}(.*?)${FAKE_CURSOR_END}`, "s");
 const CURSOR_INSERT = "\u001b[?25l";
 const CURSOR_NORMAL = "\u001b[?25h\u001b[4 q";
 const CURSOR_RESTORE = "\u001b[?25h\u001b[2 q";
