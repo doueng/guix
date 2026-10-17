@@ -1,0 +1,50 @@
+{:paths ["src" "test" "eval"]
+ :tasks {eval:compare {:doc "Live Pi, Pi/SCI and bbh comparison. Spends OpenRouter credits. Args: OUTPUT-DIR REPETITIONS."
+                       :requires ([bbh.compare])
+                       :task (apply bbh.compare/-main *command-line-args*)}
+         eval:contracts {:doc "Offline paired protocol checks. Args: OUTPUT-DIR REPETITIONS."
+                         :requires ([bbh.contracts])
+                         :task (apply bbh.contracts/-main *command-line-args*)}
+         eval:graders {:doc "Reject untouched fixtures and accept reference solutions."
+                       :requires ([bbh.tasks])
+                       :task (bbh.tasks/verify-graders!)}
+         test {:doc "Run the bbh tests."
+               :requires ([clojure.test :as t] [bbh.llm-test] [bbh.session-test] [bbh.acp-test] [bbh.claude-test] [bbh.env-test] [bbh.eval-test])
+               :task (let [{:keys [fail error]} (t/run-tests 'bbh.llm-test 'bbh.session-test 'bbh.acp-test 'bbh.claude-test 'bbh.env-test 'bbh.eval-test)]
+                       (System/exit (if (zero? (+ fail error)) 0 1)))}
+         try {:doc "bb try MODEL PROMPT...: run real prompts through agent-shell headlessly."
+              :task (let [[model & prompts] *command-line-args*
+                          home (System/getProperty "user.home")]
+                      (shell {:extra-env {"BBH_MODEL" model
+                                          "BBH_TRY_PROMPTS" (clojure.string/join "\n---\n" prompts)
+                                          "BBH_ELISP_BUILD" (or (System/getenv "BBH_ELISP_BUILD")
+                                                                (str home "/.config/emacs/.local/straight/build-31.1"))
+                                          "BBH_DOOM_AGENT_SHELL" (str (babashka.fs/absolutize "../../configs/doom/agent-shell.el"))}}
+                             "emacs" "-Q" "--batch" "-l" "test/try.el"))}
+         test:doom {:doc "Start real Doom in a PTY and test the installed bbh configuration."
+                    :task (let [dir (babashka.fs/create-temp-dir {:prefix "bbh-doom-test"})
+                                report (str (babashka.fs/path dir "report.txt"))
+                                log (str (babashka.fs/path dir "terminal.log"))
+                                launcher? (= "launcher" (first *command-line-args*))]
+                            (try
+                              (shell {:out :string :err :string
+                                      :extra-env {"TERM" "xterm-256color"
+                                                  "XDG_DATA_HOME" (str dir)
+                                                  "BBH_MODEL" (str "script/" (babashka.fs/absolutize "test/script.edn"))
+                                                  "BBH_STARTUP_REPORT" report
+                                                  "BBH_STARTUP_LAUNCHED" (if launcher? "1" "0")}}
+                                     "timeout" "60" "script" "-q" "-e" "-c"
+                                     (str (System/getProperty "user.home")
+                                          (if launcher? "/.local/bin/emacs-bbh" "/.local/bin/emacs") " -nw -l "
+                                          (babashka.fs/absolutize "test/doom-startup-test.el")) log)
+                              (finally
+                                (println (str "Doom startup artifacts: " dir))
+                                (when (babashka.fs/exists? report) (println (slurp report))))))}
+         test:emacs {:doc "Drive bbh acp from Doom's agent-shell config in emacs --batch."
+                     :task (let [home (System/getProperty "user.home")]
+                             (shell {:extra-env {"BBH_MODEL" (str "script/" (babashka.fs/absolutize "test/script.edn"))
+                                                 "XDG_DATA_HOME" (str (babashka.fs/create-temp-dir {:prefix "bbh-emacs-test"}))
+                                                 "BBH_ELISP_BUILD" (or (System/getenv "BBH_ELISP_BUILD")
+                                                                       (str home "/.config/emacs/.local/straight/build-31.1"))
+                                                 "BBH_DOOM_AGENT_SHELL" (str (babashka.fs/absolutize "../../configs/doom/agent-shell.el"))}}
+                                    "emacs" "-Q" "--batch" "-l" "test/agent-shell-test.el" "-f" "ert-run-tests-batch-and-exit"))}}}

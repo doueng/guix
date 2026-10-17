@@ -466,6 +466,7 @@ ultimately to plain `find-file' when the current directory is not a project."
 
 (load (expand-file-name "keybindings.el" eng/doom-config-dir) t 'nomessage)
 (load (expand-file-name "clojure.el" eng/doom-config-dir) t 'nomessage)
+(load (expand-file-name "agent-shell.el" eng/doom-config-dir) nil 'nomessage)
 
 ;; Guix ships the aarch64 native module as libparinfer_rust.so. Prefer that
 ;; over parinfer-rust-mode's unsupported Linux/aarch64 auto-download.

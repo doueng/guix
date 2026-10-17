@@ -1,0 +1,4 @@
+#!/bin/sh
+# bb agent harness; its source lives in desktop/build/bbh.
+here=$(dirname "$(readlink -f "$0")")
+exec bb --config "$here/../build/bbh/bb.edn" -m bbh.main "$@"
