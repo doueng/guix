@@ -3,6 +3,7 @@
 
   Events are maps with a :type of :text, :tool-call, :tool-result or :usage."
   (:require [babashka.fs :as fs]
+            [bbh.context :as context]
             [bbh.repl :as repl]
             [bbh.transcript :as transcript]
             [bbh.usage :as usage]
@@ -11,14 +12,8 @@
 
 (def ^:private max-rounds 100)
 
-(defn- cap [s n]
-  (if (<= (count s) n)
-    s
-    (let [half (quot n 2)]
-      (str (subs s 0 half) "\n[... " (- (count s) n) " chars elided ...]\n" (subs s (- (count s) half))))))
-
 (defn render [{:keys [out err value]} max-chars]
-  (cap (->> [(when (seq out) (str "out:\n" (str/trimr out)))
+  (context/cap (->> [(when (seq out) (str "out:\n" (str/trimr out)))
              (when (seq err) (str "err:\n" (str/trimr err)))
              (when value (str "=> " value))]
             (remove nil?)
@@ -34,6 +29,7 @@
          :model model :make-engine make-engine :engine (make-engine model)
          :emit (or emit (fn [_])) :notes (vec notes)
          :messages (transcript/load-messages dir)
+         :compaction (transcript/load-compaction dir)
          :interrupted false :evaluating false :cancel nil
          :manifest repl/defaults :repl nil :spent 0.0 :limits nil
          :code-lock (Object.)}))
@@ -137,30 +133,77 @@
           (not (string? code)) "Arguments must be JSON of the form {\"code\": \"...\"}."
           :else (run-code! s id code))))
 
+(defn context
+  "The messages the model sees after the latest compaction."
+  [s]
+  (let [{:keys [messages compaction manifest]} @s]
+    (context/view messages compaction manifest)))
+
+(defn compact!
+  "Fold the transcript before its recent messages into a summary, which can
+  FOCUS on what the user names. Returns a description for the user."
+  [s focus]
+  (system-prompt! s)
+  (let [{:keys [dir messages compaction manifest engine]} @s
+        from (or (:first-kept compaction) 0)
+        cut (context/cut-point messages from (:keep-recent-tokens manifest))]
+    (cond (not (:sample engine)) "Claude Code compacts its own context, so compaction only applies to OpenRouter models."
+          (nil? cut) "Nothing to compact yet."
+          :else
+          (let [{:keys [message usage]}
+                (try ((:sample engine)
+                      {:messages (context/summary-request (:summary compaction) (subvec messages from cut) focus)}
+                      {:on-text (fn [_]) :on-open #(swap! s assoc :cancel %)})
+                     (finally (swap! s assoc :cancel nil)))
+                summary (str/trim (str (:content message)))]
+            (swap! s update :spent + (or (:cost usage) 0))
+            (cond (:interrupted @s) "Compaction was interrupted."
+                  (str/blank? summary) "Compaction failed because the model returned an empty summary."
+                  :else (let [c (transcript/append-compaction! dir {:first-kept cut :summary summary})]
+                          (swap! s assoc :compaction c)
+                          (str "Compacted " (- cut from) " messages into a summary of about "
+                               (context/tokens summary) " tokens.")))))))
+
+(defn- note! [s text]
+  (emit! s {:type :text :text (str "[bbh] " text "\n\n")}))
+
+(defn- sample! [s system]
+  (let [{:keys [engine manifest]} @s]
+    (try
+      ((:sample engine)
+       {:messages (into [{:role "system" :content system}] (context s))
+        :tools [{:type "function"
+                 :function {:name "clojure" :description (:tool-description manifest)
+                            :parameters tool-input-schema}}]}
+       {:on-text #(when (seq %) (emit! s {:type :text :text %}))
+        :on-open #(swap! s assoc :cancel %)
+        :on-retry #(note! s %)})
+      (finally (swap! s assoc :cancel nil)))))
+
 (defmethod turn! :loop [s]
-  (loop [round 1]
+  (loop [round 1 overflowed false]
     (let [system (system-prompt! s)
-          {:keys [engine manifest messages]} @s
-          {:keys [message usage]}
-          ((:sample engine)
-           {:messages (into [{:role "system" :content system}] messages)
-            :tools [{:type "function"
-                     :function {:name "clojure" :description (:tool-description manifest)
-                                :parameters tool-input-schema}}]}
-           {:on-text #(when (seq %) (emit! s {:type :text :text %}))
-            :on-open #(swap! s assoc :cancel %)})
-          _ (swap! s assoc :cancel nil)
-          message (cond-> message (:interrupted @s) (dissoc :tool_calls))]
-      (when (or (seq (:content message)) (seq (:tool_calls message)))
-        (record! s message))
-      (when usage
-        (add-usage! s {:used (:prompt_tokens usage) :cost (:cost usage)}))
-      (when (seq (:tool_calls message))
-        (doseq [call (:tool_calls message)]
-          (record! s {:role "tool" :tool_call_id (:id call) :content (call-tool! s call)}))
-        (cond (:interrupted @s) nil
-              (< round max-rounds) (recur (inc round))
-              :else (swap! s update :notes conj (str "The previous turn stopped after " max-rounds " tool rounds.")))))))
+          _ (when (> (context/tokens (context s)) (:compact-at-tokens (:manifest @s)))
+              (note! s (compact! s nil)))
+          result (when-not (:interrupted @s)
+                   (try (sample! s system)
+                        (catch clojure.lang.ExceptionInfo e
+                          (if (and (:overflow (ex-data e)) (not overflowed)) ::overflow (throw e)))))]
+      (if (= ::overflow result)
+        (do (note! s (str "The request exceeded the model's context. " (compact! s nil)))
+            (when-not (:interrupted @s) (recur round true)))
+        (let [{:keys [message usage]} result
+              message (cond-> message (:interrupted @s) (dissoc :tool_calls))]
+          (when (or (seq (:content message)) (seq (:tool_calls message)))
+            (record! s message))
+          (when usage
+            (add-usage! s {:used (:prompt_tokens usage) :cost (:cost usage)}))
+          (when (seq (:tool_calls message))
+            (doseq [call (:tool_calls message)]
+              (record! s {:role "tool" :tool_call_id (:id call) :content (call-tool! s call)}))
+            (cond (:interrupted @s) nil
+                  (< round max-rounds) (recur (inc round) false)
+                  :else (swap! s update :notes conj (str "The previous turn stopped after " max-rounds " tool rounds.")))))))))
 
 (defn set-model! [s model]
   (let [engine ((:make-engine @s) model)]
@@ -183,6 +226,8 @@
                    (if (str/blank? args)
                      (str "Model: " (:model @s))
                      (str "Model: " (set-model! s (str/trim args)))))}
+   "compact" {:doc "Summarize older messages now. /compact TEXT says what the summary should keep."
+              :run (fn [s args] (compact! s args))}
    "usage" {:doc "Show subscription limits and spend."
             :run (fn [s _] (usage/report {:limits (:limits @s) :spent (:spent @s)}))}})
 

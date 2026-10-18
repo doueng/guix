@@ -24,8 +24,8 @@
                        :requires ([bbh.tasks])
                        :task (bbh.tasks/verify-graders!)}
          test {:doc "Run the bbh tests."
-               :requires ([clojure.test :as t] [bbh.llm-test] [bbh.session-test] [bbh.acp-test] [bbh.claude-test] [bbh.env-test] [bbh.eval-test])
-               :task (let [{:keys [fail error]} (t/run-tests 'bbh.llm-test 'bbh.session-test 'bbh.acp-test 'bbh.claude-test 'bbh.env-test 'bbh.eval-test)]
+               :requires ([clojure.test :as t] [bbh.llm-test] [bbh.context-test] [bbh.session-test] [bbh.acp-test] [bbh.claude-test] [bbh.env-test] [bbh.eval-test])
+               :task (let [{:keys [fail error]} (t/run-tests 'bbh.llm-test 'bbh.context-test 'bbh.session-test 'bbh.acp-test 'bbh.claude-test 'bbh.env-test 'bbh.eval-test)]
                        (System/exit (if (zero? (+ fail error)) 0 1)))}
          try {:doc "bb try MODEL PROMPT...: run real prompts through agent-shell headlessly."
               :task (let [[model & prompts] *command-line-args*

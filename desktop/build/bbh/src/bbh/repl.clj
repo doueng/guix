@@ -101,13 +101,19 @@
   {:system "You work inside a persistent babashka REPL through the clojure tool. Definitions persist until the REPL process restarts."
    :tool-description "Evaluate Clojure in the persistent babashka REPL. Returns printed output and the last value."
    :deadline-ms 120000
-   :max-output-chars 30000})
+   :max-output-chars 30000
+   :compact-at-tokens 200000
+   :keep-recent-tokens 20000
+   :trim-tool-chars 4000})
 
 (def ^:private checks
   {:system [string? "a string"]
    :tool-description [string? "a string"]
    :deadline-ms [pos-int? "a positive integer"]
-   :max-output-chars [pos-int? "a positive integer"]})
+   :max-output-chars [pos-int? "a positive integer"]
+   :compact-at-tokens [pos-int? "a positive integer"]
+   :keep-recent-tokens [pos-int? "a positive integer"]
+   :trim-tool-chars [pos-int? "a positive integer"]})
 
 (defn- validate [m]
   (if-not (map? m)

@@ -40,32 +40,67 @@
        (take-while #(not= % "[DONE]"))
        (map #(json/parse-string % true))))
 
+(def retry-delays-ms
+  "Waits before each retry of a rate limit, server error or failed connection."
+  [1000 2000 4000 8000 16000])
+
+(defn- retry-wait-ms [resp delay]
+  (or (some-> (get-in resp [:headers "retry-after"]) parse-long (* 1000) (min 60000)) delay))
+
+(defn- overflow? [status text]
+  (and (= 400 status)
+       (boolean (re-find #"(?i)context length|context window|maximum context|too many tokens|prompt is too long" text))))
+
+(defn- post!
+  "POST BODY, retrying while CANCELLED is false. Returns a 200 response or throws,
+  with :overflow in the ex-data when the request exceeded the model's context."
+  [body cancelled on-retry]
+  (loop [delays retry-delays-ms]
+    (let [resp (try (http/post "https://openrouter.ai/api/v1/chat/completions"
+                               {:headers {"Authorization" (str "Bearer " (openrouter-key))
+                                          "Content-Type" "application/json"}
+                                :body body :as :stream :throw false})
+                    (catch java.io.IOException e {:exception e}))
+          status (:status resp)]
+      (cond
+        (= 200 status) resp
+        (and (seq delays) (or (:exception resp) (= 429 status) (<= 500 status 599)))
+        (let [wait (retry-wait-ms resp (first delays))
+              end (+ (System/currentTimeMillis) wait)]
+          (some-> ^java.io.InputStream (:body resp) .close)
+          (on-retry (str "OpenRouter " (or status (ex-message (:exception resp)))
+                         ", retrying in " (quot (+ wait 999) 1000) " s."))
+          (while (and (not @cancelled) (< (System/currentTimeMillis) end)) (Thread/sleep 50))
+          (when-not @cancelled (recur (rest delays))))
+        (:exception resp) (throw (:exception resp))
+        :else (let [text (with-open [b ^java.io.InputStream (:body resp)] (slurp b))]
+                (throw (ex-info (str "OpenRouter " status ": " text)
+                                {:status status :overflow (overflow? status text)})))))))
+
 (defn openrouter
   "A sample function for MODEL on OpenRouter. Calls ON-OPEN with a function
-  that aborts the stream."
+  that aborts the request, and ON-RETRY with a note before each retry."
   [model]
-  (fn [{:keys [messages tools]} {:keys [on-text on-open]}]
-    (let [resp (http/post "https://openrouter.ai/api/v1/chat/completions"
-                          {:headers {"Authorization" (str "Bearer " (openrouter-key))
-                                     "Content-Type" "application/json"}
-                           :body (json/generate-string {:model model :messages messages :tools tools
-                                                        :stream true :usage {:include true}})
-                           :as :stream
-                           :throw false})
-          cancelled (atom false)
+  (fn [{:keys [messages tools]} {:keys [on-text on-open on-retry]}]
+    (let [cancelled (atom false)
+          _ (on-open #(reset! cancelled true))
+          resp (post! (json/generate-string (cond-> {:model model :messages messages
+                                                     :stream true :usage {:include true}}
+                                              (seq tools) (assoc :tools tools)))
+                      cancelled (or on-retry (fn [_])))
           acc (volatile! {:content ""})]
-      (with-open [body (:body resp)]
-        (when (not= 200 (:status resp))
-          (throw (ex-info (str "OpenRouter " (:status resp) ": " (slurp body)) {})))
-        (on-open #(do (reset! cancelled true) (.close ^java.io.InputStream body)))
-        (try
-          (doseq [c (chunks body)]
-            (when-let [e (:error c)]
-              (throw (ex-info (str "OpenRouter: " (:message e)) c)))
-            (some-> (get-in c [:choices 0 :delta :content]) on-text)
-            (vswap! acc step c))
-          (finish @acc)
-          (catch java.io.IOException e
-            (if @cancelled
-              (-> (finish @acc) (update :message dissoc :tool_calls) (assoc :interrupted true))
-              (throw e))))))))
+      (if-not resp
+        {:message {:role "assistant" :content ""} :usage nil :interrupted true}
+        (with-open [body (:body resp)]
+          (on-open #(do (reset! cancelled true) (.close ^java.io.InputStream body)))
+          (try
+            (doseq [c (chunks body)]
+              (when-let [e (:error c)]
+                (throw (ex-info (str "OpenRouter: " (:message e)) c)))
+              (some-> (get-in c [:choices 0 :delta :content]) on-text)
+              (vswap! acc step c))
+            (finish @acc)
+            (catch java.io.IOException e
+              (if @cancelled
+                (-> (finish @acc) (update :message dissoc :tool_calls) (assoc :interrupted true))
+                (throw e)))))))))

@@ -29,14 +29,14 @@ bbh --resume last                     # continue the newest transcript in a fres
 bbh --model openrouter/deepseek/deepseek-v4.1-flash
 ```
 
-Both front ends share the commands `/help`, `/model`, `/port`, `/restart` and `/usage`. Ctrl-C, or agent-shell's interrupt, aborts the model's turn and kills the REPL when an evaluation is running.
+Both front ends share the commands `/compact`, `/help`, `/model`, `/port`, `/restart` and `/usage`. Ctrl-C, or agent-shell's interrupt, aborts the model's turn and kills the REPL when an evaluation is running.
 
 ## Models
 
 Model ids are `PROVIDER/MODEL`, and `BBH_MODEL` overrides the default, `claude/haiku`.
 
 - `claude/...` runs Claude Code on the Claude subscription. Claude Code owns the agent loop and calls the `clojure` tool through `bbh.mcp`, an MCP server that forwards each call to the session over a loopback socket. Its rate-limit events feed `/usage`.
-- `openrouter/...` runs bbh's own loop against OpenRouter, with the key from `OPENROUTER_API_KEY` or Pi's `auth.json`.
+- `openrouter/...` runs bbh's own loop against OpenRouter, with the key from `OPENROUTER_API_KEY` or Pi's `auth.json`. Rate limits, server errors and failed connections are retried five times with backoff, honoring `Retry-After`.
 - `script/PATH` replays an EDN file of replies, for tests.
 
 Switching models mid-conversation keeps the transcript. A Claude Code session that starts late receives the earlier transcript with the next prompt.
@@ -60,11 +60,11 @@ Skills come from Pi's directories, so the pstack pack and project skills load as
 - `src/bbh/repl.clj` starts the REPL process and evaluates over nREPL. `src/bbh/llm.clj` streams OpenRouter.
 - `src/bbh/usage.clj` reports Claude, Codex and OpenRouter limits, after Pi's `pi-usage` extension.
 
-Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.jsonl`, `repl.log`, `repl.port` and, for Claude, `claude-session` and `claude.log`.
+Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.jsonl`, `compactions.jsonl`, `repl.log`, `repl.port` and, for Claude, `claude-session` and `claude.log`.
 
 ## Lifetimes
 
-The transcript is durable and only grows. The REPL's live state lasts until the process restarts, which happens on a deadline, on an interrupted evaluation, on `/restart` and on resume. There is no rollback and no branching. bb cannot interrupt a busy thread, so bbh kills the REPL process tree instead.
+The transcript is durable and only grows. The model sees a context derived from it in `src/bbh/context.clj`. Tool output from earlier user turns is cut to `:trim-tool-chars`. When the context passes `:compact-at-tokens`, or the provider reports an overflow, the OpenRouter loop asks the model to summarize everything except the last `:keep-recent-tokens` and appends the summary to `compactions.jsonl`. `/compact TEXT` does the same on demand and tells the summary what to keep. All three limits are manifest keys. Claude Code compacts its own context, but a Claude Code session that joins late receives the compacted history. The REPL's live state lasts until the process restarts, which happens on a deadline, on an interrupted evaluation, on `/restart` and on resume. There is no rollback and no branching. bb cannot interrupt a busy thread, so bbh kills the REPL process tree instead.
 
 ## Checks
 

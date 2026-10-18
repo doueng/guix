@@ -112,7 +112,8 @@
         {:keys [in queue fresh]} (:claude @s)
         text (:content (peek (:messages @s)))
         text (if (and fresh (some #(= "assistant" (:role %)) prior))
-               (str "[bbh] Earlier in this conversation, before you joined it:\n\n" (history prior) "\n\n" text)
+               (str "[bbh] Earlier in this conversation, before you joined it:\n\n"
+                    (history (pop (session/context s))) "\n\n" text)
                text)]
     (swap! s assoc-in [:claude :fresh] false)
     (swap! s assoc :cancel #(send-line! in {:type "control_request" :request_id (str (random-uuid))

@@ -23,13 +23,15 @@
                           (swap! requests conj req)
                           (let [s (first @script)]
                             (swap! script rest)
+                            (when (= :overflow s)
+                              (throw (ex-info "OpenRouter 400: maximum context length" {:overflow true})))
                             (when (string? s) (on-text s))
                             {:message (reply s)}))}
         s (session/new-session {:dir dir :init init :model "faux" :make-engine (constantly engine)
                                 :emit #(swap! events conj %)})]
     (spit init init-src)
     (session/start-repl! s)
-    {:s s :requests requests :events events}))
+    {:s s :requests requests :events events :dir dir}))
 
 (defn- tool-results [{:keys [s]}]
   (->> (:messages @s) (filter #(= "tool" (:role %))) (mapv :content)))
@@ -112,6 +114,45 @@
     (stop! h)
     (is (= (str "nREPL 127.0.0.1:" (:port (:repl @(:s h)))) (:text (first @(:events h)))))
     (is (= 0 (count @(:requests h))))))
+
+(defn- texts [{:keys [events]}]
+  (->> @events (filter #(= :text (:type %))) (mapv :text)))
+
+(def ^:private long-answer (apply str (repeat 400 "x")))
+
+(deftest a-large-context-is-compacted-before-the-next-request
+  (let [h (harness "(ns bbh.env) (def manifest {:compact-at-tokens 50 :keep-recent-tokens 10})"
+                   [long-answer "SUMMARY" "second"])
+        _ (session/prompt! (:s h) "hello")
+        _ (session/prompt! (:s h) "next")
+        resumed (session/new-session {:dir (:dir h) :model "faux" :make-engine (constantly {:kind :loop})})]
+    (stop! h)
+    (is (nil? (:tools (get @(:requests h) 1))))
+    (is (= [{:role "system" :content (system-prompt h 2)}
+            {:role "user" :content "[bbh] Earlier messages in this conversation were compacted into this summary:\n\nSUMMARY"}
+            {:role "user" :content "next"}]
+           (:messages (get @(:requests h) 2))))
+    (is (= ["hello" long-answer "next" "second"] (mapv :content (:messages @(:s h)))))
+    (is (= "[bbh] Compacted 2 messages into a summary of about 2 tokens.\n\n" (get (texts h) 1)))
+    (is (= {:first-kept 2 :summary "SUMMARY"} (:compaction @resumed)))))
+
+(deftest an-overflowing-request-compacts-and-retries-once
+  (let [h (harness "" [long-answer :overflow "SUMMARY" "after"])]
+    (session/prompt! (:s h) "hello")
+    (is (= :end-turn (session/prompt! (:s h) "next")))
+    (stop! h)
+    (is (= "after" (:content (peek (:messages @(:s h))))))
+    (is (= "[bbh] The request exceeded the model's context. Compacted 1 messages into a summary of about 2 tokens.\n\n"
+           (get (texts h) 1)))))
+
+(deftest compact-command-passes-the-users-focus
+  (let [h (harness "" ["answer" "SUMMARY"])]
+    (session/prompt! (:s h) "hello")
+    (session/prompt! (:s h) "/compact keep the numbers")
+    (stop! h)
+    (is (str/ends-with? (get-in @(:requests h) [1 :messages 1 :content])
+                        "The user asks the summary to focus on: keep the numbers"))
+    (is (= "Compacted 1 messages into a summary of about 2 tokens." (peek (texts h))))))
 
 (deftest render-elides-the-middle-of-long-output
   (is (= "out\n[... 9 chars elided ...]\nhij" (session/render {:out "abcdefghij"} 6))))
