@@ -129,7 +129,11 @@ Only the final expression's value is returned. Print intermediate results with p
 
 (defn expand-prompt [{:keys [text first?]}]
   (let [[_ skill args] (re-matches #"(?s)/skill:(\S+)\s*(.*)" text)]
-    (cond (= text "/poteto-mode-off")
+    (cond (= text "/new")
+          (do (reset! poteto? true)
+              {:reply "Fresh start: poteto-mode is re-armed for new conversations. Begin a new conversation in your client to clear this transcript."})
+
+          (= text "/poteto-mode-off")
           (do (reset! poteto? false) {:reply "poteto-mode is off. Start it again with /skill:poteto-mode."})
           skill
           (if-let [s (first (filter #(= skill (:name %)) (skills)))]
@@ -154,7 +158,8 @@ Only the final expression's value is returned. Print intermediate results with p
 (defn commands
   "Slash commands expand-prompt handles, for agent-shell's completion."
   []
-  (into [{:name "poteto-mode-off" :description "Turn off poteto-mode for this conversation."}]
+  (into [{:name "new" :description "Start fresh: re-arm poteto-mode for a new conversation."}
+         {:name "poteto-mode-off" :description "Turn off poteto-mode for this conversation."}]
         (for [{:keys [name description]} (skills)]
           {:name (str "skill:" name) :description description})))
 
