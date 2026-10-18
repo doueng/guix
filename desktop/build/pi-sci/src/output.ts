@@ -53,62 +53,79 @@ async function spill(text: string) {
 	return path;
 }
 
+// Pi's executor joins adjacent text items, marks each text() block with
+// `==> text k/N <==`, and appends console output and the failure to the same
+// item. Splitting at those boundaries recovers the blocks; joining the parts
+// with a newline restores the item exactly.
+const BOUNDARY =
+	/\n(?===> text \d+\/\d+ <==\n|<console_output>\n|Script error:\n|Note: models\.generateImages)/;
+const MARKER = /^==> text \d+\/\d+ <==\n/;
+
 export async function budgetOutput<T extends AgentToolResult<unknown>>(
 	result: T,
 	maxTokens: number,
 ): Promise<T> {
 	if (!result.content.length) return result;
-	const [header, ...items] = result.content.map((item) =>
-		item.type === "text" && item.text.startsWith("Script error:\n")
-			? { ...item, text: condenseFailure(item.text) }
-			: item,
+	const [header, ...items] = result.content;
+	const split = items.map((item) =>
+		item.type === "text"
+			? item.text.split(BOUNDARY).map((part) => {
+					const marker = MARKER.exec(part)?.[0] ?? "";
+					const body = part.slice(marker.length);
+					return {
+						marker,
+						body: body.startsWith("Script error:\n") ? condenseFailure(body) : body,
+					};
+				})
+			: undefined,
 	);
-	const texts = items.flatMap((item, index) =>
-		item.type === "text" ? [{ index, text: item.text }] : [],
-	);
-	const fixed = texts.filter(({ text }) => isProtected(text));
-	const flexible = texts.filter(({ text }) => !isProtected(text));
+	const parts = split.flatMap((item) => item ?? []);
+	const fixed = parts.filter(({ body }) => isProtected(body));
+	const flexible = parts.filter(({ body }) => !isProtected(body));
 	const budget = Math.max(
 		0,
-		maxTokens * CHARS_PER_TOKEN - fixed.reduce((sum, { text }) => sum + text.length, 0),
+		maxTokens * CHARS_PER_TOKEN - fixed.reduce((sum, { body }) => sum + body.length, 0),
 	);
 	const cap = fairCap(
-		flexible.map(({ text }) => text.length),
+		flexible.map(({ body }) => body.length),
 		budget,
 	);
-	if (!Number.isFinite(cap)) return { ...result, content: [header, ...items] };
-	const combined = texts.map(({ text }) => text).join("\n");
 	let path: string | undefined;
 	let failure: string | undefined;
-	try {
-		path = await spill(combined);
-	} catch (error) {
-		failure = error instanceof Error ? error.message : String(error);
+	const lines = new Map<(typeof parts)[number], [number, number]>();
+	if (Number.isFinite(cap)) {
+		try {
+			path = await spill(parts.map(({ marker, body }) => marker + body).join("\n"));
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
+		}
+		let line = 1;
+		for (const part of parts) {
+			const first = line + (part.marker ? 1 : 0);
+			const last = first + part.body.split("\n").length - 1;
+			lines.set(part, [first, last]);
+			line = last + 1;
+		}
 	}
-	let line = 1;
-	const lines = new Map<number, [number, number]>();
-	for (const { index, text } of texts) {
-		const count = text.split("\n").length;
-		lines.set(index, [line, line + count - 1]);
-		line += count;
-	}
-	const clipped = items.map((item, index) => {
-		const entry = flexible.find((candidate) => candidate.index === index);
-		if (!entry || entry.text.length <= cap || item.type !== "text") return item;
+	const clip = (part: (typeof parts)[number]) => {
+		if (!flexible.includes(part) || part.body.length <= cap) return part.body;
 		const head = Math.ceil(cap * 0.6);
 		const tail = cap - head;
-		const [first, last] = lines.get(index) ?? [0, 0];
+		const [first, last] = lines.get(part) ?? [0, 0];
 		const where = path
 			? `full text: (fs/read ${JSON.stringify(path)} {:start_line ${first} :end_line ${last}})`
 			: `full text could not be saved: ${failure}`;
-		return {
-			...item,
-			text: `${entry.text.slice(0, head)}\n...[clipped ${entry.text.length - cap} of ${entry.text.length} chars; ${where}]...\n${tail > 0 ? entry.text.slice(-tail) : ""}`,
-		};
+		return `${part.body.slice(0, head)}\n...[clipped ${part.body.length - cap} of ${part.body.length} chars; ${where}]...\n${tail > 0 ? part.body.slice(-tail) : ""}`;
+	};
+	const content = items.map((item, index) => {
+		const itemParts = split[index];
+		return itemParts && item.type === "text"
+			? { ...item, text: itemParts.map((part) => part.marker + clip(part)).join("\n") }
+			: item;
 	});
 	return {
 		...result,
-		content: [header, ...clipped],
+		content: [header, ...content],
 		details: { ...(result.details as object), ...(path ? { fullOutputPath: path } : {}) },
 	};
 }

@@ -114,7 +114,7 @@ test("failures list repeated calls once and omit interpreter stack frames", asyn
 	const runtime = await harness();
 	try {
 		const result = await runtime.call(
-			'(doseq [_ (range 3)] (await (fs/exists? "x"))) (throw (ex-info "boom" {}))',
+			'(text "before") (doseq [_ (range 3)] (await (fs/exists? "x"))) (throw (ex-info "boom" {}))',
 		);
 		assert.equal(result.isError, true);
 		assert.match(output(result), /fs \(ok\) x3/);

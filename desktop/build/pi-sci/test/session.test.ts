@@ -95,7 +95,11 @@ test("catalog uses only callable tools and resolves canonical IDs", async () => 
 					label: name,
 					description: "Find a demo record.",
 					promptGuidelines: ["A fixture lookup must use its declared key."],
-					namespace: { name: "mcp__demo", instructions: "Inspect the schema first." },
+					namespace: {
+						name: "mcp__demo",
+						aliases: ["demo"],
+						instructions: "Inspect the schema first.",
+					},
 					parameters: Type.Object({ key: Type.String() }),
 					execute: async (_id, args) => ({
 						content: [{ type: "text", text: `record ${args.key}` }],
