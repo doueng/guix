@@ -68,7 +68,7 @@ The transcript is durable and only grows. The REPL's live state lasts until the 
 
 ## Checks
 
-[The paired Pi evaluation](eval/README.md) compares live task completion and scripted protocol behavior. [Its baseline report](eval/RESULTS.md) includes the observed UI tradeoffs.
+[The evaluation guide](eval/README.md) covers two kinds of checks. The trace tools assert, render, and label every conversation, and score an LLM judge against your labels. The paired Pi evaluation compares live task completion and scripted protocol behavior. [Its baseline report](eval/RESULTS.md) includes the observed UI tradeoffs.
 
 ```sh
 bb test                  # sessions, streaming, ACP process, Claude adapter and MCP
@@ -76,4 +76,6 @@ bb test:emacs            # composer, history, cancellation and nREPL endpoint
 bb test:doom             # installed Doom startup and Ctrl-N, in a separate terminal
 bb test:doom launcher    # installed emacs-bbh launcher, including automatic session startup
 bb try MODEL PROMPT...   # real prompts through agent-shell, printing the buffer
+bb eval:lint             # assertion hits per cohort over real and eval conversations
+bb eval:review           # label conversations good or bad with a critique
 ```

@@ -1,4 +1,44 @@
-# Compare Pi and bbh
+# Evaluate bbh
+
+bbh has two kinds of evaluation. The trace tools read every bbh conversation, check it against cheap assertions, and collect good or bad labels from you and from an LLM judge. The comparison below runs fixed tasks through Pi, Pi/SCI, and bbh and grades the results. The design follows Hamel Husain's [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/).
+
+## Read, assert, and label traces
+
+A trace is one conversation directory with a `messages.jsonl`. Real conversations live in `~/.local/share/bbh/conversations`. Comparison runs write theirs under each trial's `data/bbh/conversations`, and the trace tools join them with the trial's `result.json` and the run's `manifest.json`. With no arguments, the tools read the real conversations and `~/.cache/bbh-eval`. Pass directories to read others, such as a run in `/tmp`.
+
+```sh
+bb eval:lint [ROOT...]        # assertion hits and graded passes per cohort
+bb eval:show DIR              # one trace as Markdown
+bb eval:review [ROOT...]      # label unlabeled traces, newest first
+bb eval:judge [ROOT...]       # LLM judge; with no roots, every trace you labeled
+bb eval:agreement             # judge precision and recall against your labels
+```
+
+`eval:lint` groups traces into cohorts. A cohort is one comparison run and profile, or one day of real conversations. Each cell counts the traces in a cohort with at least one hit, so two cohorts show whether a change made a failure rarer. The report lists example traces for each assertion. A failure does not stop the command. The pass rate you accept is your decision.
+
+`eval/bbh/traces.clj` owns the assertions. Each one was seen in real traces or is a known trap in babashka.
+
+| Assertion | Hit when |
+| --- | --- |
+| `guessed-arity` | A step raised `ArityException`, usually a guessed helper signature. |
+| `unresolved-symbol` | A step named a function or namespace the REPL does not have. |
+| `pi-idiom` | The code used Pi codemode conventions such as `await`, `tools/...`, `fs/read`, or `fs/list`. |
+| `root-blind-glob` | The code used a `**/` glob, which skips root-level files. |
+| `repl-restart` | An evaluation timed out or died, and the REPL lost its definitions. |
+| `error-streak` | Three or more failed evaluations ran in a row. |
+| `no-final-answer` | A turn ended without assistant text after its last tool call. |
+
+To add an assertion, add an entry to `assertions` after you see the failure in a trace. Add a test in `test/bbh/eval_test.clj` that builds a conversation with the failure.
+
+`eval:show` and `eval:review` render the trace in the same way. Skill blocks shrink to one line. Each step shows its code, its result, the exception class when it failed, and the assertions it broke. Comparison trials also show their task and grader verdict.
+
+Labels are binary, and each one carries a critique. They are appended to `~/.local/share/bbh/eval/labels.jsonl`, and the newest label per trace and labeler wins. Set `BBH_EVAL_DATA` to keep labels somewhere else, for example while you test the tools.
+
+The judge runs Claude Code without tools on your subscription. It uses `opus` unless `BBH_JUDGE_MODEL` names another model. It gets `eval/judge.md` as its system prompt and the rendered trace without the grader verdict. Its labeler name includes a hash of `judge.md`, so an edited prompt starts a new labeler and keeps old verdicts comparable.
+
+`eval:agreement` treats bad as the positive class. Precision is the share of the judge's bad verdicts that you also marked bad. Recall is the share of your bad labels that the judge caught. The true negative rate is the share of your good labels the judge kept good. Raw agreement misleads when most traces are good, so the command does not report it. The command prints every disagreement with both critiques. Use those critiques to edit `judge.md`, then rerun `eval:judge` and `eval:agreement`. Trust the judge on unlabeled traces only after its precision and recall hold on 25 to 50 of your labels, and keep labeling a sample after that.
+
+## Compare Pi and bbh
 
 This evaluator compares three configurations on the same generated projects and model.
 
@@ -10,7 +50,7 @@ For a prompt treatment, the optional third argument selects profiles. `BBH_EVAL_
 
 All profiles exclude personal extensions and project instructions. Pi uses an isolated agent directory with links to the existing credentials and model configuration. bbh gets a private copy of its init file. These processes are not security sandboxes. They retain the user's operating-system permissions.
 
-## Run the checks
+### Run the checks
 
 Run these commands from `desktop/build/bbh`.
 
@@ -24,7 +64,7 @@ The contract checks use a local scripted provider. They do not make model API ca
 
 Use a new output directory for each run. The runners refuse to overwrite completed results.
 
-## Live tasks
+### Live tasks
 
 The four tasks are adapted from `desktop/build/pi-sci/eval/tasks.mjs`.
 
@@ -37,7 +77,7 @@ The four tasks are adapted from `desktop/build/pi-sci/eval/tasks.mjs`.
 
 `eval/bbh/tasks.clj` owns fixtures and graders. The grader check proves that untouched fixtures fail and reference solutions pass. The rename grader permits only the requested rename in the test file. It does not accept deletion of assertions.
 
-## Contract checks
+### Contract checks
 
 The local Pi provider in `fixture-provider.ts` emits scripted messages through the installed CLI. bbh uses its existing script engine. Pi receives streamed deltas; bbh receives a complete scripted string. The text check therefore tests end-to-end preservation, not equal stream chunking.
 
@@ -45,7 +85,7 @@ The checks cover whitespace and Unicode, visible tool failure followed by recove
 
 These checks use Pi RPC and bbh ACP. They do not test UI focus or keystrokes. Queueing is outside this contract comparison because Pi owns queues in its runtime while bbh's interactive queue is in agent-shell.
 
-## Artifacts
+### Artifacts
 
 Each live trial records its workspace, raw JSONL events, stderr, a grade, and telemetry. `summary.json` aggregates the trial records. `manifest.json` records the profiles and model. New runs also capture source fingerprints and check them again after the run. The first baseline predates that fingerprint check.
 

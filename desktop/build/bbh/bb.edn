@@ -5,6 +5,21 @@
          eval:contracts {:doc "Offline paired protocol checks. Args: OUTPUT-DIR REPETITIONS."
                          :requires ([bbh.contracts])
                          :task (apply bbh.contracts/-main *command-line-args*)}
+         eval:lint {:doc "Level 1 assertion hits and graded passes per cohort. Args: ROOT... (default: conversations and ~/.cache/bbh-eval)."
+                    :requires ([bbh.traces])
+                    :task (apply bbh.traces/lint! *command-line-args*)}
+         eval:show {:doc "Render one conversation directory as Markdown with assertion hits."
+                    :requires ([bbh.traces])
+                    :task (bbh.traces/show! (first *command-line-args*))}
+         eval:review {:doc "Label unlabeled traces good or bad with a critique. Args: ROOT..."
+                      :requires ([bbh.labels])
+                      :task (apply bbh.labels/review! *command-line-args*)}
+         eval:judge {:doc "LLM-judge traces under ROOT..., or every human-labeled trace. Spends Claude quota; BBH_JUDGE_MODEL defaults to opus."
+                     :requires ([bbh.labels])
+                     :task (apply bbh.labels/judge! *command-line-args*)}
+         eval:agreement {:doc "Judge precision and recall against human labels, with disagreements."
+                         :requires ([bbh.labels])
+                         :task (bbh.labels/agreement!)}
          eval:graders {:doc "Reject untouched fixtures and accept reference solutions."
                        :requires ([bbh.tasks])
                        :task (bbh.tasks/verify-graders!)}
