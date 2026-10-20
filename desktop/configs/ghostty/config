@@ -30,6 +30,7 @@ app-notifications = no-clipboard-copy
 link-url = false
 
 quit-after-last-window-closed = false
+confirm-close-surface = false
 
 gtk-titlebar = false
 gtk-single-instance = desktop

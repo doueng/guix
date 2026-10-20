@@ -19,10 +19,8 @@
       (keyleader/desktop-palette! leader-grammar))
     @ran))
 
-(deftest palette-asks-before-closing-a-window
-  (let [close "q  Close window   [CTRL+ALT+W]"]
-    (is (= [] (palette-run [close "No"])) "Declining must run nothing")
-    (is (= [["window.close"]] (palette-run [close "Yes"])))))
+(deftest palette-closes-a-window-without-asking
+  (is (= [["window.close"]] (palette-run ["q  Close window   [CTRL+ALT+W]"]))))
 
 (deftest hyprland-drift-reports-missing-and-unexpected-binds
   (let [expected (keyleader/expected-binds leader-grammar)

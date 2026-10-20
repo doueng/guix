@@ -207,8 +207,7 @@
             b (in-context grammar context)]
       (emit! (str "leader " (name context))
              (str "SPC " (str/join " " (:keys b)))
-             (str "after " entry ": " (leader-action context b)
-                  (when (:confirm b) " (asks first outside editors)") "; applied by " owner)
+             (str "after " entry ": " (leader-action context b) "; applied by " owner)
              "keybindings/leader.edn"
              (line-of b)))))
 

@@ -164,6 +164,8 @@ command = "annotate.open"
 description = "review documents in this folder"
 
 [ui]
+# Close workspaces and their last tab without asking.
+confirm_close = false
 # Sort the agent panel as an attention queue (blocked/done before idle agents).
 agent_panel_sort = "spaces"
 pane_borders = "off"

@@ -6,7 +6,6 @@
 ;; :desktop (a Hyprland dispatcher such as ["focus" {:workspace 2}], see
 ;; desktop/lib/hypr/dispatch.clj, or an action keyword), :desktop-command
 ;; (argv), :herdr (CLI vector or action keyword).
-;; :confirm asks before the desktop or Herdr action; editor actions never ask.
 ;; :terminal :passthrough names the programs that receive bare Ctrl+h/j/k/l
 ;; inside Herdr instead of Herdr moving focus. It matches the lower-cased
 ;; foreground process name, which Linux truncates to 15 characters (Guix's
@@ -28,7 +27,7 @@
   {:keys ["w" "v"] :label "Split right" :idea "<C-w>v" :nvim "<cmd>vsplit<cr>" :doom "split-window-right"
    :herdr ["pane" "split" "--direction" "right" "--focus"]}
   {:keys ["w" "d"] :label "Close window or pane" :idea "<C-w>c" :nvim "<cmd>close<cr>" :doom "delete-window"
-   :desktop ["window.close"] :herdr :close-pane :confirm true}
+   :desktop ["window.close"] :herdr :close-pane}
   {:keys ["w" "m"] :label "Maximize or zoom" :idea "<Action>(HideAllWindows)" :nvim "<cmd>lua Snacks.zoom()<cr>"
    :doom "doom/window-maximize-buffer" :desktop ["window.fullscreen" {:mode "maximized"}]
    :herdr ["pane" "zoom" "--toggle"]}
@@ -41,7 +40,7 @@
   {:keys ["b" "p"] :label "Previous buffer, tab or window" :idea "<Action>(PreviousTab)" :nvim "<cmd>bprevious<cr>"
    :doom "previous-buffer" :desktop ["window.cycle_next" {:next false}] :herdr :previous-tab}
   {:keys ["b" "d"] :label "Close buffer or tab" :idea "<Action>(CloseContent)" :nvim "<cmd>lua Snacks.bufdelete()<cr>"
-   :doom "kill-current-buffer" :herdr :close-tab :confirm true}
+   :doom "kill-current-buffer" :herdr :close-tab}
   {:keys ["f" "s"] :label "Save file" :idea "<Action>(SaveAll)" :nvim "<cmd>write<cr>" :doom "save-buffer"}
   {:keys ["f" "r"] :label "Recent files" :idea "<Action>(RecentFiles)" :nvim "<cmd>Telescope oldfiles<cr>" :doom "recentf-open-files"}
   {:keys ["s" "b"] :label "Search buffer" :idea "<Action>(Find)" :nvim "<cmd>Telescope current_buffer_fuzzy_find<cr>"

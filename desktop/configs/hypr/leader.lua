@@ -18,7 +18,7 @@ hl.define_submap("leader-w", function()
     hl.bind(mods .. "J", keys.leave(hl.dsp.focus({ direction = "down" }), "Alt+Space w j", "Focus down"))
     hl.bind(mods .. "K", keys.leave(hl.dsp.focus({ direction = "up" }), "Alt+Space w k", "Focus up"))
     hl.bind(mods .. "L", keys.leave(hl.dsp.focus({ direction = "right" }), "Alt+Space w l", "Focus right"))
-    hl.bind(mods .. "D", keys.leave(hl.dsp.exec_cmd("~/.local/bin/keyleader run w d")))
+    hl.bind(mods .. "D", keys.leave(hl.dsp.window.close(), "Alt+Space w d", "Close window or pane"))
     hl.bind(mods .. "M", keys.leave(hl.dsp.window.fullscreen({ mode = "maximized" }), "Alt+Space w m", "Maximize or zoom"))
   end
   hl.bind("escape", hl.dsp.submap("reset"))

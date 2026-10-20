@@ -26,7 +26,7 @@
 (def directions #{"left" "down" "up" "right"})
 (def action-keywords {:desktop #{:choose-window}
                       :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane}})
-(def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :herdr :confirm})
+(def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :herdr})
 
 (defn- text? [v] (and (string? v) (not (str/blank? v))))
 (defn- argv? [v] (and (vector? v) (seq v) (every? string? v)))
@@ -48,8 +48,7 @@
       (and (has? :desktop-command) (not (argv? (:desktop-command b)))) "desktop-command must be an argv vector"
       (and (has? :herdr) (not (or ((action-keywords :herdr) (:herdr b))
                                   (and (argv? (:herdr b)) (= "pane" (first (:herdr b)))))))
-      (str "herdr must be one of " (sort (action-keywords :herdr)) " or a herdr pane command vector")
-      (and (has? :confirm) (not (boolean? (:confirm b)))) "confirm must be true or false")))
+      (str "herdr must be one of " (sort (action-keywords :herdr)) " or a herdr pane command vector"))))
 
 (defn validate! [{:keys [groups bindings terminal] :as grammar}]
   (let [group-keys (set (map first groups))]
@@ -223,9 +222,6 @@
       (and (= 1 exit) (str/blank? err)) nil
       :else (throw (ex-info "Dusk menu failed" {:exit exit :error err})))))
 
-(defn confirm-desktop? [label]
-  (= "Yes" (dmenu (str label "?") ["No" "Yes"])))
-
 (defn choose-window! []
   (let [clients (json/parse-string (run! ["hyprctl" "-j" "clients"]) true)
         lines (mapv #(format "%s  %s  [%s]" (:class %) (:title %) (:address %)) clients)]
@@ -250,33 +246,31 @@
       (str/starts-with? choice "SPC ")
       (run-desktop! grammar (str/split (second (re-find #"^SPC (.+?)  " choice)) #" "))
       :else (when-let [entry (some #(when (= choice (keyguide/line %)) %) guide-entries)]
-              (when (keyguide/run-entry! entry confirm-desktop?)
-                (log! "Hyprland" (str desktop-leader " Space") (:label entry)))))))
+              (keyguide/run-entry! entry)
+              (log! "Hyprland" (str desktop-leader " Space") (:label entry))))))
 
 (defn run-desktop! [grammar keys]
   (if (= keys ["SPC"])
     (desktop-palette! grammar)
     (let [b (some #(when (= keys (:keys %)) %) (in-context grammar :desktop))
           pressed (str desktop-leader " " (str/join " " keys))]
-      (when (or (not (:confirm b)) (confirm-desktop? (:label b)))
-        (if (:nav b)
-          (move-desktop-focus! (:nav b) pressed)
-          (do (cond
-                (:desktop-command b) (spawn! (:desktop-command b))
-                (= :choose-window (:desktop b)) (choose-window!)
-                (vector? (:desktop b)) (hypr/dispatch! (:desktop b)))
-              (log! "Hyprland" pressed (:label b))))))))
+      (if (:nav b)
+        (move-desktop-focus! (:nav b) pressed)
+        (do (cond
+              (:desktop-command b) (spawn! (:desktop-command b))
+              (= :choose-window (:desktop b)) (choose-window!)
+              (vector? (:desktop b)) (hypr/dispatch! (:desktop b)))
+            (log! "Hyprland" pressed (:label b)))))))
 
 (defn hypr-key [k]
   (get {"=" "equal" "SPC" "SPACE" "/" "slash"} k (str/upper-case k)))
 
 (defn desktop-dispatcher
   "The dispatcher that a desktop binding runs inside Hyprland, or nil when it
-  needs keyleader (confirmation, menus, commands)."
+  needs keyleader (menus, commands)."
   [b]
-  (when-not (:confirm b)
-    (cond (:nav b) ["focus" {:direction (:nav b)}]
-          (vector? (:desktop b)) (:desktop b))))
+  (cond (:nav b) ["focus" {:direction (:nav b)}]
+        (vector? (:desktop b)) (:desktop b)))
 
 (defn hypr-config
   "leader.lua: the desktop leader submaps, generated from the grammar. Each key
@@ -347,10 +341,6 @@
       (nil? i) (throw (ex-info "Herdr reported no focused tab" {:tabs (mapv :tab_id ts)}))
       :else (run! ["herdr" "tab" "focus" (:tab_id (nth ts (mod (+ i delta) (count ts))))]))))
 
-(defn confirm-herdr? [label]
-  (show! (str label "?") [["y" "Yes"] ["n" "No"]])
-  (= "y" (read-key)))
-
 (declare herdr-palette!)
 
 (defn run-herdr! [grammar keys]
@@ -360,19 +350,18 @@
           pane (herdr-pane)
           action (:herdr b)
           pressed (str "Ctrl+b Space " (str/join " " keys))]
-      (when (or (not (:confirm b)) (confirm-herdr? (:label b)))
-        (when-not (:nav b) (log! "Herdr" pressed (:label b)))
-        (cond
-          (:nav b) (nav! (:nav b) pressed)
-          (vector? action) (run! (concat ["herdr"] (take 2 action) ["--pane" pane] (drop 2 action)))
-          (= :close-pane action) (run! ["herdr" "pane" "close" pane])
-          (= :close-tab action) (run! ["herdr" "tab" "close" (System/getenv "HERDR_ACTIVE_TAB_ID")])
-          (= :next-tab action) (step-tab! 1)
-          (= :previous-tab action) (step-tab! -1)
-          (= :choose-tab action)
-          (let [ts (tabs)]
-            (when-let [line (fzf "Tab" (map #(str (:tab_id %) "  " (:label %)) ts))]
-              (run! ["herdr" "tab" "focus" (first (str/split line #"  "))]))))))))
+      (when-not (:nav b) (log! "Herdr" pressed (:label b)))
+      (cond
+        (:nav b) (nav! (:nav b) pressed)
+        (vector? action) (run! (concat ["herdr"] (take 2 action) ["--pane" pane] (drop 2 action)))
+        (= :close-pane action) (run! ["herdr" "pane" "close" pane])
+        (= :close-tab action) (run! ["herdr" "tab" "close" (System/getenv "HERDR_ACTIVE_TAB_ID")])
+        (= :next-tab action) (step-tab! 1)
+        (= :previous-tab action) (step-tab! -1)
+        (= :choose-tab action)
+        (let [ts (tabs)]
+          (when-let [line (fzf "Tab" (map #(str (:tab_id %) "  " (:label %)) ts))]
+            (run! ["herdr" "tab" "focus" (first (str/split line #"  "))])))))))
 
 (defn herdr-palette! [grammar]
   (when-let [line (fzf "Command" (palette-lines grammar :herdr))]

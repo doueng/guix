@@ -6,6 +6,12 @@
       ;; interactive terminal shell remains Fish.
       shell-file-name (or (executable-find "bash") "/bin/sh"))
 
+;; Quit Emacs, delete frames and kill process buffers without asking. Saving
+;; unsaved files still asks.
+(setq confirm-kill-emacs nil
+      confirm-kill-processes nil)
+(global-set-key [remap delete-frame] nil)
+
 (let ((interactive-shell (or (executable-find "fish") shell-file-name)))
   (setq-default explicit-shell-file-name interactive-shell
                 vterm-shell interactive-shell))

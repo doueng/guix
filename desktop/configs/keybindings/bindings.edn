@@ -10,7 +10,7 @@
              {:id "L" :label "Move right" :hypr ["CTRL ALT SHIFT" "L" ["window.move" {:direction "right"}]]}
              {:id "f" :label "Fullscreen" :hypr ["CTRL ALT" "F" ["window.fullscreen"]]}
              {:id "v" :label "Toggle floating" :hypr ["CTRL ALT" "V" ["window.float" {:action "toggle"}]]}
-             {:id "q" :label "Close window" :hypr ["CTRL ALT" "W" ["window.close"]] :confirm true}]}
+             {:id "q" :label "Close window" :hypr ["CTRL ALT" "W" ["window.close"]]}]}
   {:id "s" :label "Workspaces" :workspace-digits true}
   {:id "a" :label "Applications"
    :entries [{:id "t" :label "Terminal" :chord "Cmd+Return" :command ["~/.local/bin/workspace-or-herdr-tab" "1"]}

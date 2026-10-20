@@ -42,12 +42,12 @@ You can keep Alt held after Alt+Space. Each key also works with Alt.
 | --- | --- | --- |
 | w h, w j, w k, w l | Focus left, down, up, or right | All |
 | w s, w v | Split below, split right | Editors, Herdr |
-| w d | Close the window or pane. Herdr and the desktop ask first | All |
+| w d | Close the window or pane | All |
 | w m | Maximize or zoom | All |
 | w = | Balance windows | Neovim, Doom |
 | b b | Choose a buffer, Herdr tab, or desktop window | All |
 | b n, b p | Next or previous buffer, Herdr tab, or window in the workspace | All |
-| b d | Close the buffer or Herdr tab. Herdr asks first | Editors, Herdr |
+| b d | Close the buffer or Herdr tab | Editors, Herdr |
 | f s, f r | Save, recent files | Editors |
 | s b | Search the buffer | Editors |
 | c d, c R, c r, c a, c x | Definition, references, rename, code action, diagnostics | Editors |
@@ -73,7 +73,8 @@ Cmd+/ opens a grouped, searchable Dusk menu in every application.
 Type a group name and press Enter. Select an action with Enter.
 Escape closes without running an action. `.. Back` returns to the groups.
 Entries marked `guide` display advice rather than inject keys into the focused application.
-Window and workspace entries execute their displayed action. The close-window menu action asks for confirmation.
+Window and workspace entries execute their displayed action.
+Closing never asks. Hyprland, Herdr, Ghostty and Emacs close windows, panes, tabs and frames straight away. Neovim and Emacs still ask to save unsaved files.
 This is an on-demand menu, not an automatic popup after arbitrary application prefixes.
 
 Doom and Neovim show which-key after a 350 ms pause on a prefix.

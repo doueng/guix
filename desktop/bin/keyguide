@@ -90,14 +90,11 @@
       (throw (ex-info (str "Action failed: " (str/join " " argv)) {:exit (:exit result)})))))
 
 (defn run-entry!
-  "Run ENTRY after CONFIRM? accepts its label, when the entry asks for confirmation.
-  Every menu that runs guide entries goes through here."
-  [entry confirm?]
-  (when (or (not (:confirm entry)) (confirm? (:label entry)))
-    (if-let [d (dispatcher entry)]
-      (hypr/dispatch! d)
-      (execute! (argv entry)))
-    true))
+  "Run ENTRY. Every menu that runs guide entries goes through here."
+  [entry]
+  (if-let [d (dispatcher entry)]
+    (hypr/dispatch! d)
+    (execute! (argv entry))))
 
 (defn choose [prompt items]
   (let [{:keys [exit out err]}
@@ -109,9 +106,6 @@
       (and (= 1 exit) (str/blank? err)) nil
       :else (throw (ex-info "Dusk menu failed" {:exit exit :error err})))))
 
-(defn- confirm-in-menu? [label]
-  (= "yes" (:id (choose (str label "?") [{:id "no" :label "Cancel"} {:id "yes" :label label}]))))
-
 (defn browse! [gs start]
   (loop [group (some #(when (= start (:id %)) %) gs)]
     (if group
@@ -119,8 +113,8 @@
                                (cons {:id ".." :label "Back"} (:entries group)))]
         (if (= ".." (:id entry))
           (recur nil)
-          (when (run-entry! entry confirm-in-menu?)
-            (execute! ["sh" "-c" (str/replace (log-command "Cmd+/" (:label entry)) "~/" (str (fs/home) "/"))]))))
+          (do (run-entry! entry)
+              (execute! ["sh" "-c" (str/replace (log-command "Cmd+/" (:label entry)) "~/" (str (fs/home) "/"))]))))
       (when-let [selected (choose "Keyguide | type a group, Enter | Esc closes" gs)]
         (recur selected)))))
 

@@ -42,8 +42,10 @@
   (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
     (is (lines "hl.bind(\"ALT + SPACE\", hl.dsp.submap(\"leader\"))"))
     (is (lines "hl.bind(mods .. \"H\", keys.leave(hl.dsp.focus({ direction = \"left\" }), \"Alt+Space w h\", \"Focus left\"))"))
-    (is (lines "hl.bind(mods .. \"D\", keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/keyleader run w d\")))")
-        "Confirmed actions go through the script")
+    (is (lines "hl.bind(mods .. \"D\", keys.leave(hl.dsp.window.close(), \"Alt+Space w d\", \"Close window or pane\"))")
+        "Closing runs in Hyprland without asking")
+    (is (lines "hl.bind(mods .. \"B\", keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/keyleader run b b\")))")
+        "Menus go through the script")
     (is (lines "hl.bind(\"catchall\", keys.cancel(\"leader-w\"))"))))
 
 (deftest grammar-rejects-ambiguity
