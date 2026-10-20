@@ -41,6 +41,9 @@ keybind = super+left=text:\x01
 keybind = super+right=text:\x05
 keybind = alt+left=esc:b
 keybind = alt+right=esc:f
+# keyd emits Ctrl+arrows for physical Alt+arrows.
+keybind = ctrl+left=esc:b
+keybind = ctrl+right=esc:f
 keybind = super+up=jump_to_prompt:-1
 keybind = super+down=jump_to_prompt:1
 keybind = super+shift+up=jump_to_prompt:-1
