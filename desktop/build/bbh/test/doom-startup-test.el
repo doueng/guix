@@ -41,15 +41,15 @@
                     (with-current-buffer transcript
                       (unless (derived-mode-p 'org-mode)
                         (error "The transcript is not an org buffer"))
-                      (unless (string-match-p "^\\* add forty and two\n\n#\\+begin_tool done" (buffer-string))
+                      (unless (string-match-p "^\\* add forty and two\n\n#\\+begin_src clojure\n(\\+ 40 2)\n#\\+end_src\n#\\+begin_result done" (buffer-string))
                         (error "The transcript lacks the prompt heading and tool block")))
                     (call-interactively (key-binding (kbd "C-c C-t")))
                     (with-current-buffer transcript
                       (goto-char (point-min))
-                      (re-search-forward "^#\\+begin_tool")
+                      (re-search-forward "^#\\+begin_result")
                       (forward-line 1)
                       (when (invisible-p (point))
-                        (error "C-c C-t did not expand the tool call")))
+                        (error "C-c C-t did not expand the tool result")))
                     (unless (eq (window-buffer (selected-window)) composer)
                       (error "C-c C-t moved focus out of the composer"))
                     (unless (< (nth 1 (window-edges (get-buffer-window transcript)))

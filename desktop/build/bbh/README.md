@@ -8,14 +8,14 @@ From a project directory, `emacs-bbh` opens your normal Doom Emacs with a bbh se
 
 In Emacs, `M-x eng/bbh` starts a session in [agent-shell](https://github.com/xenodium/agent-shell), which runs `bbh acp` and speaks the Agent Client Protocol over stdio. `M-x eng/bbh-cider-connect` attaches CIDER to that session's REPL. The Doom side lives in `desktop/configs/doom/agent-shell.el`.
 
-The Emacs layout has a transcript above a persistent composer. The composer keeps your draft during replies and cancellation. The transcript is a read-only org buffer. Each prompt is a heading, replies are converted from Markdown to org, and each tool call is a `#+begin_tool` block that starts folded. `TAB` on a block toggles it, and the usual org commands navigate and fold the rest. agent-shell's own shell buffer still drives the session but stays out of the layout.
+The Emacs layout has a transcript above a persistent composer. The composer keeps your draft during replies and cancellation. The transcript is a read-only org buffer. Each prompt is a heading, replies are converted from Markdown to org, and each tool call shows its full code followed by a `#+begin_result` block that starts folded. `TAB` on a result toggles it, and the usual org commands navigate and fold the rest. agent-shell's own shell buffer still drives the session but stays out of the layout.
 
 | Key | Action |
 | --- | --- |
 | `C-n` | Send, or queue while the model is working. |
 | `RET` | Insert a newline. |
 | `C-c C-k` | Interrupt the current turn after confirmation. |
-| `C-c C-t` | Expand every tool call, or fold them all. Works in the composer and the transcript. |
+| `C-c C-t` | Expand every tool result, or fold them all. Works in the composer and the transcript. |
 | `M-v`, `C-v` | Page the transcript without leaving the composer. |
 | `M-p`, `M-n` | Browse prompt history. |
 | `C-c C-p` | Peek at the last response. |

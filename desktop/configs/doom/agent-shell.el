@@ -63,7 +63,7 @@
   "Tool call ids to markers at the start of their blocks.")
 
 (defvar-local eng/bbh-transcript-tools-shown nil
-  "Whether tool calls are expanded.  New tool calls follow this state.")
+  "Whether tool results are expanded.  New results follow this state.")
 
 (defun eng/bbh--md-emphasis (text)
   (replace-regexp-in-string
@@ -107,13 +107,19 @@
     (string-join (nreverse lines) "\n")))
 
 (defun eng/bbh--tool-block (tool)
-  "An org block for TOOL, agent-shell's record of one tool call."
-  (format "#+begin_tool %s %s\n%s\n#+end_tool\n"
-          (pcase (map-elt tool :status) ("completed" "done") ("failed" "failed") (_ "running"))
-          (or (map-elt tool :title) "")
-          (eng/bbh--md->org
-           (string-trim (mapconcat (lambda (item) (or (map-nested-elt item '(content text)) ""))
-                                   (map-elt tool :content) "\n\n")))))
+  "Org blocks for TOOL, agent-shell's record of one tool call: its code,
+then a result block.  bbh's adapter sends the content as the code's fence
+followed by the result's fence."
+  (let* ((code (or (map-nested-elt tool '(:raw-input code)) ""))
+         (text (string-trim (mapconcat (lambda (item) (or (map-nested-elt item '(content text)) ""))
+                                       (map-elt tool :content) "\n\n")))
+         (result (string-trim (string-remove-prefix (concat "```clojure\n" code "\n```") text)))
+         (result (string-remove-suffix "\n```" (string-remove-prefix "```\n" result))))
+    (format "#+begin_src clojure\n%s\n#+end_src\n#+begin_result %s %d\n%s#+end_result\n"
+            (org-escape-code-in-string code)
+            (pcase (map-elt tool :status) ("completed" "done") ("failed" "failed") (_ "running"))
+            (if (string-empty-p result) 0 (length (split-string result "\n")))
+            (if (string-empty-p result) "" (concat (org-escape-code-in-string result) "\n")))))
 
 (defun eng/bbh-transcript--edit (change)
   "Call CHANGE at the end of the transcript, keeping followers at the end."
@@ -130,10 +136,24 @@
 (defun eng/bbh-transcript--separator ()
   (if (bobp) "" "\n"))
 
-(defun eng/bbh-transcript--fold-tool (marker fold)
+(defun eng/bbh-transcript--result-start (marker)
   (save-excursion
     (goto-char marker)
+    (re-search-forward "^#\\+begin_result ")
+    (line-beginning-position)))
+
+(defun eng/bbh-transcript--fold-tool (marker fold)
+  "Fold or show the result of the tool call that starts at MARKER."
+  (save-excursion
+    (goto-char (eng/bbh-transcript--result-start marker))
     (org-fold-hide-block-toggle (if fold t 'off) t)))
+
+(defun eng/bbh-transcript--tool-folded-p (marker)
+  "Whether the result at MARKER is folded, or nil when it is still empty."
+  (save-excursion
+    (goto-char (eng/bbh-transcript--result-start marker))
+    (forward-line 1)
+    (and (not (looking-at-p "#\\+end_result")) (invisible-p (point)))))
 
 (defun eng/bbh-transcript--prompt (prompt)
   (setq eng/bbh-transcript--reply nil)
@@ -160,9 +180,10 @@
   (eng/bbh-transcript--edit
    (lambda ()
      (if-let* ((start (gethash id eng/bbh-transcript--tools)))
-         (let ((folded (invisible-p (save-excursion (goto-char start) (forward-line 1) (point)))))
+         (let ((folded (or (eng/bbh-transcript--tool-folded-p start)
+                           (not eng/bbh-transcript-tools-shown))))
            (goto-char start)
-           (delete-region start (if (re-search-forward "^#\\+end_tool\n" nil t) (point) (point-max)))
+           (delete-region start (if (re-search-forward "^#\\+end_result\n" nil t) (point) (point-max)))
            (insert (eng/bbh--tool-block tool))
            (eng/bbh-transcript--fold-tool start folded))
        (insert (eng/bbh-transcript--separator))
@@ -182,18 +203,23 @@
                                                        (map-elt data :tool-call)))
           ((or 'turn-complete 'error) (setq eng/bbh-transcript--reply nil)))))))
 
-(defun eng/bbh--tool-label (status title)
+(defun eng/bbh--result-label (status lines)
   (concat (propertize (pcase status ("done" "✓") ("failed" "✗") (_ "…"))
                       'face (pcase status ("done" 'success) ("failed" 'error) (_ 'warning)))
-          " " (propertize title 'face 'font-lock-function-name-face)))
+          " "
+          (propertize (pcase lines
+                        ("0" (if (equal status "running") "running" "no output"))
+                        ("1" "output (1 line)")
+                        (_ (format "output (%s lines)" lines)))
+                      'face 'shadow)))
 
 (defun eng/bbh--fontify-nested-blocks (limit)
   "Fontify src and example blocks up to LIMIT as code.
-Org fontifies a tool block as one special block and skips the blocks inside it."
-  (while (re-search-forward "^#\\+begin_\\(src\\|example\\)\\(?: +\\(\\S-+\\)\\)?.*\n" limit t)
+Org leaves result blocks, a special block, without the code background."
+  (while (re-search-forward "^#\\+begin_\\(src\\|example\\|result\\)\\(?: +\\(\\S-+\\)\\)?.*\n" limit t)
     (let ((beg (match-end 0))
           (type (match-string 1))
-          (lang (match-string 2)))
+          (lang (and (equal (match-string 1) "src") (match-string 2))))
       (when (re-search-forward (format "^#\\+end_%s$" type) nil t)
         (let ((end (match-beginning 0)))
           (when (and lang (< beg end))
@@ -203,11 +229,11 @@ Org fontifies a tool block as one special block and skips the blocks inside it."
 
 (defconst eng/bbh-transcript--markup
   '((eng/bbh--fontify-nested-blocks)
-    ("^#\\+begin_\\(?:src\\|example\\|quote\\).*\n\\|\n#\\+end_\\(?:src\\|example\\|quote\\|tool\\)$"
+    ("^#\\+begin_\\(?:src\\|example\\|quote\\).*\n\\|\n#\\+end_\\(?:src\\|example\\|quote\\|result\\)$"
      (0 (progn (put-text-property (match-beginning 0) (match-end 0) 'display "") nil)))
-    ("^#\\+begin_tool \\([a-z]+\\) \\(.*\\)$"
+    ("^#\\+begin_result \\([a-z]+\\) \\([0-9]+\\)$"
      (0 (progn (put-text-property (match-beginning 0) (match-end 0) 'display
-                                  (eng/bbh--tool-label (match-string 1) (match-string 2)))
+                                  (eng/bbh--result-label (match-string 1) (match-string 2)))
                nil))))
   "Format nested blocks as code and hide the org markup lines around blocks.")
 
@@ -236,13 +262,13 @@ Org fontifies a tool block as one special block and skips the blocks inside it."
         (with-current-buffer shell (setq eng/bbh-transcript transcript))))))
 
 (defun eng/bbh-toggle-tools ()
-  "Expand every tool call in the transcript, or fold them all."
+  "Expand every tool result in the transcript, or fold them all."
   (interactive)
   (with-current-buffer (eng/bbh--transcript (or (eng/bbh--shell) (user-error "No bbh session in this buffer")))
     (setq eng/bbh-transcript-tools-shown (not eng/bbh-transcript-tools-shown))
     (maphash (lambda (_ start) (eng/bbh-transcript--fold-tool start (not eng/bbh-transcript-tools-shown)))
              eng/bbh-transcript--tools)
-    (message (if eng/bbh-transcript-tools-shown "Tool calls expanded" "Tool calls folded"))))
+    (message (if eng/bbh-transcript-tools-shown "Tool results expanded" "Tool results folded"))))
 
 (define-key eng/bbh-transcript-mode-map (kbd "C-c C-t") #'eng/bbh-toggle-tools)
 

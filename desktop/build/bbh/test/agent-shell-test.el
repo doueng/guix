@@ -66,7 +66,7 @@
   (with-current-buffer transcript
     (save-excursion
       (goto-char (point-min))
-      (re-search-forward "^#\\+begin_tool ")
+      (re-search-forward "^#\\+begin_result ")
       (forward-line 1)
       (invisible-p (point)))))
 
@@ -86,7 +86,7 @@
       (insert "draft while output arrives")
       (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 60))
       (should (equal (bbh-test--text transcript)
-                     "* add forty\n#+begin_quote\nadd forty\nand two\n#+end_quote\n\n#+begin_tool done (+ 40 2)\n#+begin_src clojure\n(+ 40 2)\n#+end_src\n\n#+begin_example\n=> 42\n#+end_example\n#+end_tool\n\nThe answer is 42.\n"))
+                     "* add forty\n#+begin_quote\nadd forty\nand two\n#+end_quote\n\n#+begin_src clojure\n(+ 40 2)\n#+end_src\n#+begin_result done 1\n=> 42\n#+end_result\n\nThe answer is 42.\n"))
       (with-current-buffer transcript
         (should (derived-mode-p 'org-mode))
         (should buffer-read-only)
@@ -96,18 +96,18 @@
           (search-forward text)
           (should (memq 'org-block (ensure-list (get-text-property (match-beginning 0) 'face))))))
       (should (equal (bbh-test--screen transcript)
-                     "* add forty\nadd forty\nand two\n\n✓ (+ 40 2)\n\nThe answer is 42.\n"))
+                     "* add forty\nadd forty\nand two\n\n(+ 40 2)\n✓ output (1 line)\n\nThe answer is 42.\n"))
       (should (bbh-test--tool-folded-p transcript))
       (call-interactively (key-binding (kbd "C-c C-t")))
       (should-not (bbh-test--tool-folded-p transcript))
       (should (equal (bbh-test--screen transcript)
-                     "* add forty\nadd forty\nand two\n\n✓ (+ 40 2)\n(+ 40 2)\n\n=> 42\n\nThe answer is 42.\n"))
+                     "* add forty\nadd forty\nand two\n\n(+ 40 2)\n✓ output (1 line)\n=> 42\n\nThe answer is 42.\n"))
       (with-current-buffer transcript
         (call-interactively (key-binding (kbd "C-c C-t"))))
       (should (bbh-test--tool-folded-p transcript))
       (with-current-buffer transcript
         (goto-char (point-min))
-        (re-search-forward "^#\\+begin_tool")
+        (re-search-forward "^#\\+begin_result")
         (org-cycle)
         (should-not (bbh-test--tool-folded-p transcript))
         (org-cycle)
@@ -175,7 +175,7 @@
         (insert "add forty again")
         (eng/bbh-send)
         (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 60))
-        (should (string-prefix-p "* add forty again\n\n#+begin_tool done (+ 40 2)" (bbh-test--text transcript)))
+        (should (string-prefix-p "* add forty again\n\n#+begin_src clojure\n(+ 40 2)\n#+end_src\n#+begin_result done 1" (bbh-test--text transcript)))
         (should-not (string-match-p "^\\* add forty$" (bbh-test--text transcript)))))))
 
 (ert-deftest bbh-cider-connect-works-from-the-composer ()
