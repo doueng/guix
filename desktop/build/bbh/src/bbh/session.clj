@@ -24,9 +24,10 @@
 (defn new-session
   "DIR holds the transcript and logs, INIT is loaded into every new REPL, CWD is
   where the REPL runs, MODEL names the engine MAKE-ENGINE builds, and EMIT
-  receives every event."
+  receives every event. The REPL keeps its port file in DIR even after /resume
+  moves the transcript, so a front end finds it under the id it started with."
   [{:keys [dir init cwd model make-engine emit notes]}]
-  (atom {:dir dir :init init :cwd (or cwd (str (fs/cwd)))
+  (atom {:dir dir :repl-dir dir :init init :cwd (or cwd (str (fs/cwd)))
          :model model :make-engine make-engine :engine (make-engine model)
          :emit (or emit (fn [_])) :notes (vec notes)
          :messages (transcript/load-messages dir)
@@ -45,8 +46,8 @@
 (defn start-repl!
   "Start the REPL and load init. Returns a problem description or nil."
   [s]
-  (let [{:keys [dir init cwd]} @s
-        conn (repl/start! {:dir dir :cwd cwd})
+  (let [{:keys [repl-dir init cwd]} @s
+        conn (repl/start! {:dir repl-dir :cwd cwd})
         r (when (and init (fs/exists? init))
             (repl/eval! conn (str "(load-file " (pr-str (str init)) ")") 30000))]
     (swap! s assoc :repl conn)
@@ -215,9 +216,69 @@
     (swap! s assoc :model model :engine engine)
     model))
 
+(defn- conversation-ids
+  "The other saved conversations beside this one, newest first."
+  [s]
+  (let [dir (fs/path (:dir @s))]
+    (->> (fs/list-dir (fs/parent dir))
+         (filter #(fs/exists? (fs/path % "messages.jsonl")))
+         (map #(str (fs/file-name %)))
+         (remove #{(str (fs/file-name dir))})
+         sort
+         reverse)))
+
+(defn- one-line [text n]
+  (let [line (str/trim (str/replace (str text) #"\s+" " "))]
+    (if (> (count line) n) (str (subs line 0 (dec n)) "…") line)))
+
+(defn- list-conversations [s]
+  (let [root (fs/parent (fs/path (:dir @s)))
+        ids (take 10 (conversation-ids s))]
+    (if (empty? ids)
+      "No other conversations."
+      (str/join "\n"
+                (concat
+                 (for [id ids
+                       :let [messages (transcript/load-messages (fs/path root id))
+                             prompt (some #(when (= "user" (:role %)) (:content %)) messages)]]
+                   (str id "  " (count messages) " messages  "
+                        (one-line (str/replace (str prompt) #"(?s).*</skill>" "") 60)))
+                 ["/resume ID or /resume last continues one."])))))
+
+(defn resume!
+  "Move S to the saved conversation ID, or to the newest other one for last,
+  in a fresh REPL. Returns a description for the user."
+  [s id]
+  (let [ids (conversation-ids s)
+        id (if (= "last" id) (first ids) id)]
+    (if-not (some #{id} ids)
+      "No such conversation. /resume lists them."
+      (let [dir (str (fs/path (fs/parent (fs/path (:dir @s))) id))
+            messages (transcript/load-messages dir)
+            _ (stop-engine! s)
+            _ (swap! s assoc :dir dir :messages messages :compaction (transcript/load-compaction dir)
+                     :notes ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
+            problem (restart-repl! s)
+            reply (some #(when (and (= "assistant" (:role %)) (not (str/blank? (:content %)))) (:content %))
+                        (rseq messages))]
+        (str "Resumed " id " with " (count messages) " messages."
+             (when reply (str "\nLast reply: " (one-line reply 300)))
+             (when problem (str "\n" problem)))))))
+
+(declare commands)
+
+(defn all-commands
+  "bbh's commands, then the bbh.env/commands its expand-prompt handles, as
+  {:name :description} maps."
+  [s]
+  (let [{:keys [value]} (repl/call (:repl @s) "(when-let [f (resolve 'bbh.env/commands)] (f))" 10000)]
+    (concat (for [[k {:keys [doc]}] (sort commands)] {:name k :description doc})
+            (when (sequential? value) value))))
+
 (def commands
   {"help" {:doc "List commands."
-           :run (fn [_ _] (str/join "\n" (for [[k {:keys [doc]}] (sort commands)] (str "/" k "  " doc))))}
+           :run (fn [s _] (str/join "\n" (for [{:keys [name description]} (all-commands s)]
+                                              (str "/" name "  " description))))}
    "port" {:doc "Show the nREPL port for cider-connect."
            :run (fn [s _] (str "nREPL 127.0.0.1:" (:port (:repl @s))))}
    "restart" {:doc "Kill and restart the REPL. The transcript stays."
@@ -232,6 +293,8 @@
                      (str "Model: " (set-model! s (str/trim args)))))}
    "compact" {:doc "Summarize older messages now. /compact TEXT says what the summary should keep."
               :run (fn [s args] (compact! s args))}
+   "resume" {:doc "List other conversations, or continue one with /resume ID or /resume last."
+             :run (fn [s args] (if (str/blank? args) (list-conversations s) (resume! s (str/trim args))))}
    "usage" {:doc "Show subscription limits and spend."
             :run (fn [s _] (usage/report {:limits (:limits @s) :spent (:spent @s)}))}})
 
@@ -257,15 +320,21 @@
 
 (defn prompt!
   "Handle one user input: a bbh command, an env reply, or a model turn.
-  Returns :end-turn or :cancelled."
+  Returns :end-turn or :cancelled, and throws for a /command nothing handles."
   [s text]
   (swap! s assoc :interrupted false)
   (let [[_ cmd args] (re-matches #"(?s)/(\S+)\s*(.*)" text)]
     (if-let [{:keys [run]} (get commands cmd)]
       (do (emit! s {:type :text :text (run s args)}) :end-turn)
       (let [{:keys [prompt reply]} (expand s text)]
-        (if reply
+        (cond
+          reply
           (do (emit! s {:type :text :text reply}) :end-turn)
+
+          (and (= prompt text) (re-matches #"(?s)/[^\s/]+(\s.*)?" text))
+          (throw (ex-info (str "Unknown command " (first (str/split text #"\s")) ". /help lists commands.") {}))
+
+          :else
           (let [notes (take-notes! s)]
             (record! s {:role "user"
                         :content (if (seq notes) (str "[bbh] " (str/join " " notes) "\n\n" prompt) prompt)})

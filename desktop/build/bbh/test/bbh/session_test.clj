@@ -12,8 +12,8 @@
      :tool_calls [{:id (str "call-" (hash step)) :type "function"
                    :function {:name "clojure" :arguments (json/generate-string step)}}]}))
 
-(defn- harness [init-src steps]
-  (let [dir (str (fs/create-temp-dir {:prefix "bbh-test"}))
+(defn- harness [init-src steps & [dir]]
+  (let [dir (or dir (str (fs/create-temp-dir {:prefix "bbh-test"})))
         init (str (fs/path dir "init.clj"))
         requests (atom [])
         events (atom [])
@@ -125,8 +125,48 @@
     (is (= (str "nREPL 127.0.0.1:" (:port (:repl @(:s h)))) (:text (first @(:events h)))))
     (is (= 0 (count @(:requests h))))))
 
+(deftest an-unknown-command-is-an-error-but-a-path-is-a-prompt
+  (let [h (harness "(ns bbh.env) (defn commands [] [{:name \"new\" :description \"Start fresh.\"}])"
+                   ["looked"])]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Unknown command /nope\. /help lists commands\.$"
+                          (session/prompt! (:s h) "/nope with args")))
+    (session/prompt! (:s h) "/tmp/x is broken")
+    (session/prompt! (:s h) "/help")
+    (stop! h)
+    (is (= ["/tmp/x is broken"] (map :content (filter #(= "user" (:role %)) (:messages @(:s h))))))
+    (is (= 1 (count @(:requests h))))
+    (is (str/ends-with? (last (map :text @(:events h))) "/usage  Show subscription limits and spend.\n/new  Start fresh."))))
+
 (defn- texts [{:keys [events]}]
   (->> @events (filter #(= :text (:type %))) (mapv :text)))
+
+(deftest resume-lists-and-continues-another-conversation
+  (let [root (fs/create-temp-dir {:prefix "bbh-conversations"})
+        old (str (fs/path root "20260101-000000-000"))
+        current (str (fs/create-dirs (fs/path root "20261020-000000-000")))
+        _ (spit (str (fs/path (fs/create-dirs old) "messages.jsonl"))
+                (str (json/generate-string {:role "user" :content "<skill name=\"poteto-mode\">\nrules\n</skill>\n\nfix the bug"}) "\n"
+                     (json/generate-string {:role "assistant" :content "Fixed it."}) "\n"))
+        h (harness "" ["continuing"] current)]
+    (session/prompt! (:s h) "/resume")
+    (session/prompt! (:s h) "/resume nope")
+    (session/prompt! (:s h) "/resume last")
+    (session/prompt! (:s h) "go on")
+    (stop! h)
+    (is (= ["20260101-000000-000  2 messages  fix the bug\n/resume ID or /resume last continues one."
+            "No such conversation. /resume lists them."
+            "Resumed 20260101-000000-000 with 2 messages.\nLast reply: Fixed it."
+            "continuing"]
+           (texts h)))
+    (is (= ["Fixed it."
+            "[bbh] This conversation resumed in a new REPL, so earlier live definitions are gone.\n\ngo on"
+            "continuing"]
+           (->> (fs/read-all-lines (str (fs/path old "messages.jsonl")))
+                (drop 1)
+                (mapv #(:content (json/parse-string % true))))))
+    (is (= ["system" "user" "assistant" "user"] (mapv :role (get-in @(:requests h) [0 :messages]))))
+    (is (fs/exists? (fs/path current "repl.port")))
+    (is (not (fs/exists? (fs/path old "repl.port"))))))
 
 (def ^:private long-answer (apply str (repeat 400 "x")))
 

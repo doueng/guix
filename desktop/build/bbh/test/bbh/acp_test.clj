@@ -58,6 +58,26 @@
           (is (= "end_turn" (get-in (last events) [:result :stopReason])))))
       (finally (stop! c)))))
 
+(deftest resume-continues-a-saved-conversation-under-the-same-session
+  (let [c (client ["continued"])
+        root (fs/path (:dir c) "bbh" "conversations")
+        old (fs/create-dirs (fs/path root "20200101-000000-000"))]
+    (spit (str (fs/path old "messages.jsonl"))
+          (str (json/generate-string {:role "user" :content "hello"}) "\n"
+               (json/generate-string {:role "assistant" :content "Hi."}) "\n"))
+    (try
+      (let [sid (start! c)
+            commands (until! c #(= "available_commands_update" (get-in % [:params :update :sessionUpdate])))]
+        (is (some #{"resume"} (map :name (get-in (last commands) [:params :update :availableCommands]))))
+        (send! c 3 "session/prompt" {:sessionId sid :prompt [{:type "text" :text "/resume last"}]})
+        (is (= ["Resumed 20200101-000000-000 with 2 messages.\nLast reply: Hi."]
+               (keep #(get-in % [:params :update :content :text]) (until! c #(= 3 (:id %))))))
+        (send! c 4 "session/prompt" {:sessionId sid :prompt [{:type "text" :text "and?"}]})
+        (is (= ["continued"] (keep #(get-in % [:params :update :content :text]) (until! c #(= 4 (:id %))))))
+        (is (= 4 (count (fs/read-all-lines (str (fs/path old "messages.jsonl"))))))
+        (is (fs/exists? (fs/path root sid "repl.port"))))
+      (finally (stop! c)))))
+
 (deftest bad-requests-do-not-kill-the-agent
   (let [c (client [])]
     (try

@@ -50,14 +50,9 @@
 
 (def ^:private sessions (atom {}))
 
-(defn- commands-update
-  "bbh's commands, then any bbh.env/commands the env's expand-prompt handles."
-  [sid s]
-  (let [{:keys [value]} (repl/call (:repl @s) "(when-let [f (resolve 'bbh.env/commands)] (f))" 10000)]
-    (update! sid {:sessionUpdate "available_commands_update"
-                  :availableCommands (concat (for [[k {:keys [doc]}] (sort session/commands)]
-                                               {:name k :description doc})
-                                             (when (sequential? value) value))})))
+(defn- commands-update [sid s]
+  (update! sid {:sessionUpdate "available_commands_update"
+                :availableCommands (session/all-commands s)}))
 
 (defn- new-session [{:keys [cwd]}]
   (let [sid (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS"))

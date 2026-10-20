@@ -23,11 +23,33 @@
 
 (defun eng/bbh-send ()
   "Send the draft and keep the bottom composer ready for another prompt.
-/new starts a fresh conversation instead, as it does in Pi."
+/new starts a fresh conversation instead, as it does in Pi, and resuming a
+saved conversation clears the transcript the same way."
   (interactive)
-  (if (equal (string-trim (buffer-string)) "/new")
-      (progn (erase-buffer) (eng/bbh-new))
-    (agent-shell-viewport-compose-send t)))
+  (let ((draft (string-trim (buffer-string))))
+    (if (equal draft "/new")
+        (progn (erase-buffer) (eng/bbh-new))
+      (when (eng/bbh--resumes-p draft)
+        (eng/bbh-clear-transcript))
+      (agent-shell-viewport-compose-send t))))
+
+(defun eng/bbh--conversation-file (id file)
+  (expand-file-name (format "bbh/conversations/%s/%s" id file)
+                    (or (getenv "XDG_DATA_HOME") "~/.local/share")))
+
+(defun eng/bbh--resumes-p (draft)
+  "Whether DRAFT names a conversation /resume can switch to."
+  (and (string-match "\\`/resume[ \t]+\\(\\S-+\\)\\'" draft)
+       (let ((id (match-string 1 draft)))
+         (or (equal id "last")
+             (file-exists-p (eng/bbh--conversation-file id "messages.jsonl"))))))
+
+(defun eng/bbh-clear-transcript ()
+  "Empty the transcript of the bbh session in the current buffer."
+  (with-current-buffer (eng/bbh--transcript (or (eng/bbh--shell) (user-error "No bbh session in this buffer")))
+    (let ((inhibit-read-only t)) (erase-buffer))
+    (setq eng/bbh-transcript--reply nil)
+    (clrhash eng/bbh-transcript--tools)))
 
 (defun eng/bbh--shell ()
   "The bbh shell behind the current transcript or composer."
@@ -192,6 +214,13 @@ followed by the result's fence."
          (puthash id start eng/bbh-transcript--tools)
          (eng/bbh-transcript--fold-tool start (not eng/bbh-transcript-tools-shown)))))))
 
+(defun eng/bbh-transcript--error (message)
+  (setq eng/bbh-transcript--reply nil)
+  (eng/bbh-transcript--edit
+   (lambda ()
+     (insert (eng/bbh-transcript--separator)
+             (propertize (concat "Error: " message) 'font-lock-face 'error) "\n"))))
+
 (defun eng/bbh-transcript--on-event (transcript event)
   (when (buffer-live-p transcript)
     (with-current-buffer transcript
@@ -201,7 +230,8 @@ followed by the result's fence."
           ('agent-message-chunk (eng/bbh-transcript--reply-chunk (map-elt data :text-chunk)))
           ('tool-call-update (eng/bbh-transcript--tool (map-elt data :tool-call-id)
                                                        (map-elt data :tool-call)))
-          ((or 'turn-complete 'error) (setq eng/bbh-transcript--reply nil)))))))
+          ('error (eng/bbh-transcript--error (or (map-elt data :message) "the request failed")))
+          ('turn-complete (setq eng/bbh-transcript--reply nil)))))))
 
 (defun eng/bbh--result-label (status lines)
   (concat (propertize (pcase status ("done" "✓") ("failed" "✗") (_ "…"))
@@ -349,8 +379,7 @@ called interactively, restore this layout for the current session."
          (id (or (with-current-buffer shell
                    (map-nested-elt (agent-shell--state) '(:session :id)))
                  (user-error "The bbh session is still starting")))
-         (port-file (expand-file-name (format "bbh/conversations/%s/repl.port" id)
-                                      (or (getenv "XDG_DATA_HOME") "~/.local/share"))))
+         (port-file (eng/bbh--conversation-file id "repl.port")))
     (cider-connect-clj (list :host "127.0.0.1"
                              :port (string-to-number (with-temp-buffer
                                                        (insert-file-contents port-file)

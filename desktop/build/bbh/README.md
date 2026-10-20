@@ -20,7 +20,7 @@ The Emacs layout has a transcript above a persistent composer. The composer keep
 | `M-p`, `M-n` | Browse prompt history. |
 | `C-c C-p` | Peek at the last response. |
 
-`M-x eng/bbh-layout` restores the split. The composer header shows whether `C-n` sends immediately or queues a prompt. Sending `/new` works as it does in Pi. It ends the session, starts a fresh one in the same windows, and clears the transcript.
+`M-x eng/bbh-layout` restores the split. The composer header shows whether `C-n` sends immediately or queues a prompt. Sending `/new` works as it does in Pi. It ends the session, starts a fresh one in the same windows, and clears the transcript. `/resume ID` and `/resume last` clear the transcript too, unless no saved conversation has that id.
 
 In a terminal:
 
@@ -30,7 +30,7 @@ bbh --resume last                     # continue the newest transcript in a fres
 bbh --model openrouter/deepseek/deepseek-v4.1-flash
 ```
 
-Both front ends share the commands `/compact`, `/help`, `/model`, `/port`, `/restart` and `/usage`. Ctrl-C, or agent-shell's interrupt, aborts the model's turn and kills the REPL when an evaluation is running.
+Both front ends share the commands `/compact`, `/help`, `/model`, `/port`, `/restart`, `/resume` and `/usage`. `/resume` lists the ten newest other conversations, and `/resume ID` or `/resume last` moves the session to one of them in a fresh REPL. The REPL's port file stays in the directory the session started in, so `eng/bbh-cider-connect` keeps working. A `/word` that neither bbh nor the env handles is an error rather than a prompt, and `/help` lists both kinds of command. Ctrl-C, or agent-shell's interrupt, aborts the model's turn and kills the REPL when an evaluation is running.
 
 ## Models
 
