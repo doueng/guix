@@ -8,7 +8,8 @@
 (require '[babashka.process :as p]
          '[cheshire.core :as json]
          '[clojure.string :as str]
-         '[herdr.client :as herdr])
+         '[herdr.client :as herdr]
+         '[hypr.dispatch :as hypr])
 
 (def workspace 1)
 
@@ -35,13 +36,13 @@
           active (:address (hyprctl "activewindow" "-j"))]
       (cond
         (nil? target)
-        (p/shell "hyprctl" "dispatch" "workspace" (str workspace))
+        (hypr/dispatch! ["focus" {:workspace workspace}])
 
         (= active target)
         (herdr/focus-tab! tab)
 
         :else
-        (p/shell "hyprctl" "dispatch" "focuswindow" (str "address:" target)))
+        (hypr/dispatch! ["focus" {:window (str "address:" target)}]))
       0)
     (do
       (herdr/eprintln "Usage: workspace-or-herdr-tab <1..9>")

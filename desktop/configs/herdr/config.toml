@@ -18,6 +18,8 @@ delivery = "system"
 # Keep the tmux-style prefix familiar while adding direct project-tab chords.
 # previous_tab is unbound: prefix+p is taken over by herdr-annotate (annotate.capture).
 prefix = "ctrl+b"
+help = "prefix+?"
+edit_scrollback = "prefix+shift+e"
 new_tab = "prefix+c"
 next_tab = "prefix+n"
 # keyd turns Cmd+digits into Ctrl+digits.
@@ -28,6 +30,71 @@ switch_tab = ["prefix+1..9", "ctrl+1..9"]
 workspace_picker = ["prefix+w", "prefix+e"]
 navigate_workspace_up = "w"
 navigate_workspace_down = "e"
+
+# Ctrl+h/j/k/l move focus, or go to the programs in leader.edn's
+# :terminal :passthrough. Ctrl+b h/j/k/l always move focus, so they leave
+# those programs. Both continue to Hyprland at the pane edge or when zoomed.
+focus_pane_left = []
+focus_pane_down = []
+focus_pane_up = []
+focus_pane_right = []
+
+# prefix+Space opens the shared leader menu from keybindings/leader.edn.
+[[keys.command]]
+key = "prefix+space"
+type = "popup"
+command = "$HOME/.local/bin/keyleader herdr"
+description = "leader menu"
+width = "50%"
+height = "45%"
+
+[[keys.command]]
+key = "ctrl+h"
+type = "shell"
+command = "$HOME/.local/bin/keyleader term-nav left"
+description = "focus left or pass to Vim, Emacs and Pi"
+
+[[keys.command]]
+key = "ctrl+j"
+type = "shell"
+command = "$HOME/.local/bin/keyleader term-nav down"
+description = "focus down or pass to Vim, Emacs and Pi"
+
+[[keys.command]]
+key = "ctrl+k"
+type = "shell"
+command = "$HOME/.local/bin/keyleader term-nav up"
+description = "focus up or pass to Vim, Emacs and Pi"
+
+[[keys.command]]
+key = "ctrl+l"
+type = "shell"
+command = "$HOME/.local/bin/keyleader term-nav right"
+description = "focus right or pass to Vim, Emacs and Pi"
+
+[[keys.command]]
+key = "prefix+h"
+type = "shell"
+command = "$HOME/.local/bin/keyleader nav left 'Ctrl+b h'"
+description = "focus left, then the desktop"
+
+[[keys.command]]
+key = "prefix+j"
+type = "shell"
+command = "$HOME/.local/bin/keyleader nav down 'Ctrl+b j'"
+description = "focus down, then the desktop"
+
+[[keys.command]]
+key = "prefix+k"
+type = "shell"
+command = "$HOME/.local/bin/keyleader nav up 'Ctrl+b k'"
+description = "focus up, then the desktop"
+
+[[keys.command]]
+key = "prefix+l"
+type = "shell"
+command = "$HOME/.local/bin/keyleader nav right 'Ctrl+b l'"
+description = "focus right, then the desktop"
 
 # Pick an agent from any workspace with an fzf selector that previews its pane.
 [[keys.command]]
@@ -64,14 +131,14 @@ description = "switch to the previous workspace"
 # Show letter hints for URLs, paths, SHAs, and other visible text, then copy
 # the selected match to the clipboard.
 [[keys.command]]
-key = "ctrl+s"
+key = "prefix+f"
 type = "plugin_action"
 command = "hotchpotch.herdr-tiny-fingers.open"
 description = "copy visible text by hint"
 
 # herdr-annotate: comment on terminal selections, review documents and agent
 # replies, send feedback back to the agent. prefix+a is taken by the agent
-# picker and prefix+e is edit-scrollback, so capture lives on prefix+p.
+# picker and prefix+e opens workspaces, so capture lives on prefix+p.
 [[keys.command]]
 key = "prefix+p"
 type = "plugin_action"

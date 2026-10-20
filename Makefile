@@ -16,7 +16,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help pull channels-current check system-facts dry-run build repro-build switch gc \
         nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test \
-        doom-check doom-baseline
+        doom-check doom-baseline keybindings-check hypr-nested-check
 
 help:
 	@echo 'pull          update the user Guix profile from $(CHANNELS)'
@@ -153,6 +153,16 @@ doom-check:
 	new=$$(printf '%s\n' "$$warnings" | LC_ALL=C comm -23 - "$(DOOM_BASELINE)"); \
 	test -z "$$new" || { printf 'New doom doctor warnings (accept with make doom-baseline):\n%s\n' "$$new" >&2; exit 1; }; \
 	echo 'doom doctor: no new warnings'
+
+keybindings-check:
+	bb desktop/build/keybindings/generate.bb --check
+	Hyprland --verify-config -c desktop/configs/hypr/hyprland.lua
+	bb desktop/build/keybindings/test.clj
+	bb desktop/build/keybindings/leader-test.clj
+	bb desktop/build/keybindings/review-test.clj
+
+hypr-nested-check:
+	bb desktop/build/keybindings/hypr-nested.bb
 
 doom-baseline:
 	@$(DOOM_WARNINGS) > "$(DOOM_BASELINE)"

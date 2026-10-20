@@ -13,7 +13,7 @@
   (process/shell {:inherit true} stow (str "--dir=" dir)
                  (str "--target=" target) "--no-folding" "--ignore=node_modules" "--restow" package))
 
-(doseq [app ["bbh" "btop" "doom" "fish" "ghostty" "git" "herdr" "hypr" "keymapper" "vimium"
+(doseq [app ["bbh" "btop" "doom" "fish" "ghostty" "git" "herdr" "hypr" "keymapper" "keybindings" "vimium"
              "jj" "jjui" "dusk" "nvim"]]
   (stow-package! (str repo "/configs") (str home "/.config/" app) app))
 

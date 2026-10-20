@@ -1,0 +1,30 @@
+#!/bin/sh
+# Records which keybinding ran, what it did, and which program handled it.
+# Writers call `keylog add`; editors and keyleader append the same format.
+set -eu
+file="${KEYLOG_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/keybindings/keys.tsv}"
+tab=$(printf '\t')
+clean() { printf '%s' "$1" | tr '\t\n' '  '; }
+
+case "${1:-}" in
+  add)
+    [ $# -eq 4 ] || { echo 'usage: keylog add PROGRAM KEYS EFFECT' >&2; exit 2; }
+    mkdir -p "$(dirname "$file")"
+    printf '%s\t%s\t%s\t%s\n' "$(date +%FT%T)" "$(clean "$2")" "$(clean "$3")" "$(clean "$4")" >> "$file"
+    ;;
+  top)
+    [ -f "$file" ] || exit 0
+    cut -f2-4 "$file" | sort | uniq -c | sort -rn | head -n "${2:-20}"
+    ;;
+  path)
+    printf '%s\n' "$file"
+    ;;
+  ''|[0-9]*)
+    if [ ! -f "$file" ]; then echo "No keybindings logged yet: $file"; exit 0; fi
+    { printf 'TIME%sPROGRAM%sKEYS%sEFFECT\n' "$tab" "$tab" "$tab"; tail -n "${1:-30}" "$file"; } | column -t -s "$tab"
+    ;;
+  *)
+    echo 'usage: keylog [COUNT] | keylog top [COUNT] | keylog path | keylog add PROGRAM KEYS EFFECT' >&2
+    exit 2
+    ;;
+esac

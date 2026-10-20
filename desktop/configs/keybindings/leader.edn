@@ -1,0 +1,60 @@
+;; The shared leader grammar. Editors enter it with Space in normal mode,
+;; Herdr with Ctrl+b Space or Cmd+Space, and the desktop with Alt+Space.
+;; Space after the leader opens each context's command palette.
+;; Contexts per entry: :nav (all, falls through editor > Herdr > Hyprland),
+;; :nvim, :doom and :idea (editor commands; IdeaVim stops at its own splits),
+;; :desktop (a Hyprland dispatcher such as ["focus" {:workspace 2}], see
+;; desktop/lib/hypr/dispatch.clj, or an action keyword), :desktop-command
+;; (argv), :herdr (CLI vector or action keyword).
+;; :confirm asks before the desktop or Herdr action; editor actions never ask.
+;; :terminal :passthrough names the programs that receive bare Ctrl+h/j/k/l
+;; inside Herdr instead of Herdr moving focus. It matches the lower-cased
+;; foreground process name, which Linux truncates to 15 characters (Guix's
+;; Emacs wrapper shows as .emacs-31.1-rea). Pi uses Ctrl+j, Ctrl+k and Ctrl+l.
+{:terminal {:passthrough "^(g?(view|l?n?vim?x?)(diff)?|\\.?emacs.*|pi)$"}
+ :groups [["w" "Windows and panes"]
+          ["b" "Buffers, tabs and windows"]
+          ["f" "Files"]
+          ["s" "Search"]
+          ["c" "Code"]
+          ["a" "Applications"]]
+ :bindings
+ [{:keys ["w" "h"] :label "Focus left" :nav "left"}
+  {:keys ["w" "j"] :label "Focus down" :nav "down"}
+  {:keys ["w" "k"] :label "Focus up" :nav "up"}
+  {:keys ["w" "l"] :label "Focus right" :nav "right"}
+  {:keys ["w" "s"] :label "Split below" :idea "<C-w>s" :nvim "<cmd>split<cr>" :doom "split-window-below"
+   :herdr ["pane" "split" "--direction" "down" "--focus"]}
+  {:keys ["w" "v"] :label "Split right" :idea "<C-w>v" :nvim "<cmd>vsplit<cr>" :doom "split-window-right"
+   :herdr ["pane" "split" "--direction" "right" "--focus"]}
+  {:keys ["w" "d"] :label "Close window or pane" :idea "<C-w>c" :nvim "<cmd>close<cr>" :doom "delete-window"
+   :desktop ["window.close"] :herdr :close-pane :confirm true}
+  {:keys ["w" "m"] :label "Maximize or zoom" :idea "<Action>(HideAllWindows)" :nvim "<cmd>lua Snacks.zoom()<cr>"
+   :doom "doom/window-maximize-buffer" :desktop ["window.fullscreen" {:mode "maximized"}]
+   :herdr ["pane" "zoom" "--toggle"]}
+  {:keys ["w" "="] :label "Balance windows" :nvim "<C-w>=" :doom "balance-windows"}
+  {:keys ["b" "b"] :label "Choose buffer, tab or window" :idea "<Action>(RecentFiles)"
+   :nvim "<cmd>Telescope buffers sort_mru=true ignore_current_buffer=true<cr>"
+   :doom "switch-to-buffer" :desktop :choose-window :herdr :choose-tab}
+  {:keys ["b" "n"] :label "Next buffer, tab or window" :idea "<Action>(NextTab)" :nvim "<cmd>bnext<cr>" :doom "next-buffer"
+   :desktop ["window.cycle_next"] :herdr :next-tab}
+  {:keys ["b" "p"] :label "Previous buffer, tab or window" :idea "<Action>(PreviousTab)" :nvim "<cmd>bprevious<cr>"
+   :doom "previous-buffer" :desktop ["window.cycle_next" {:next false}] :herdr :previous-tab}
+  {:keys ["b" "d"] :label "Close buffer or tab" :idea "<Action>(CloseContent)" :nvim "<cmd>lua Snacks.bufdelete()<cr>"
+   :doom "kill-current-buffer" :herdr :close-tab :confirm true}
+  {:keys ["f" "s"] :label "Save file" :idea "<Action>(SaveAll)" :nvim "<cmd>write<cr>" :doom "save-buffer"}
+  {:keys ["f" "r"] :label "Recent files" :idea "<Action>(RecentFiles)" :nvim "<cmd>Telescope oldfiles<cr>" :doom "recentf-open-files"}
+  {:keys ["s" "b"] :label "Search buffer" :idea "<Action>(Find)" :nvim "<cmd>Telescope current_buffer_fuzzy_find<cr>"
+   :doom "consult-line"}
+  {:keys ["c" "d"] :label "Find definition" :idea "<Action>(GotoDeclaration)" :nvim "<cmd>lua vim.lsp.buf.definition()<cr>"
+   :doom "eng/lsp-find-definition"}
+  {:keys ["c" "R"] :label "Find references" :idea "<Action>(FindUsages)" :nvim "<cmd>lua vim.lsp.buf.references()<cr>"
+   :doom "eng/lsp-find-references"}
+  {:keys ["c" "r"] :label "Rename symbol" :idea "<Action>(RenameElement)" :nvim "<cmd>lua vim.lsp.buf.rename()<cr>" :doom "eng/lsp-rename"}
+  {:keys ["c" "a"] :label "Code action" :idea "<Action>(ShowIntentionActions)" :nvim "<cmd>lua vim.lsp.buf.code_action()<cr>"
+   :doom "eng/lsp-code-actions"}
+  {:keys ["c" "x"] :label "Diagnostics" :idea "<Action>(ActivateProblemsViewToolWindow)" :nvim "<cmd>Telescope diagnostics<cr>" :doom "eng/lsp-diagnostics"}
+  {:keys ["a" "a"] :label "Launch application" :desktop-command ["~/.local/bin/custom-launcher"]}
+  {:keys ["a" "t"] :label "Terminal" :desktop-command ["~/.local/bin/workspace-or-herdr-tab" "1"]}
+  {:keys ["a" "b"] :label "Browser workspace" :desktop ["focus" {:workspace 2}]}
+  {:keys ["a" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}]}

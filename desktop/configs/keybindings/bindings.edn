@@ -1,0 +1,43 @@
+{:groups
+ [{:id "w" :label "Windows"
+   :entries [{:id "h" :label "Focus left" :hypr ["CTRL ALT" "H" ["focus" {:direction "left"}]]}
+             {:id "j" :label "Focus down" :hypr ["CTRL ALT" "J" ["focus" {:direction "down"}]]}
+             {:id "k" :label "Focus up" :hypr ["CTRL ALT" "K" ["focus" {:direction "up"}]]}
+             {:id "l" :label "Focus right" :hypr ["CTRL ALT" "L" ["focus" {:direction "right"}]]}
+             {:id "H" :label "Move left" :hypr ["CTRL ALT SHIFT" "H" ["window.move" {:direction "left"}]]}
+             {:id "J" :label "Move down" :hypr ["CTRL ALT SHIFT" "J" ["window.move" {:direction "down"}]]}
+             {:id "K" :label "Move up" :hypr ["CTRL ALT SHIFT" "K" ["window.move" {:direction "up"}]]}
+             {:id "L" :label "Move right" :hypr ["CTRL ALT SHIFT" "L" ["window.move" {:direction "right"}]]}
+             {:id "f" :label "Fullscreen" :hypr ["CTRL ALT" "F" ["window.fullscreen"]]}
+             {:id "v" :label "Toggle floating" :hypr ["CTRL ALT" "V" ["window.float" {:action "toggle"}]]}
+             {:id "q" :label "Close window" :hypr ["CTRL ALT" "W" ["window.close"]] :confirm true}]}
+  {:id "s" :label "Workspaces" :workspace-digits true}
+  {:id "a" :label "Applications"
+   :entries [{:id "t" :label "Terminal" :chord "Cmd+Return" :command ["~/.local/bin/workspace-or-herdr-tab" "1"]}
+             {:id "e" :label "Editor terminal" :chord "Cmd+E" :command ["~/.local/bin/workspace-or-herdr-tab" "2"]}
+             {:id "b" :label "Browser workspace" :chord "Cmd+U" :dispatch ["focus" {:workspace 2}]}
+             {:id "c" :label "Open Chrome" :command ["~/.local/bin/chrome-unified"]}
+             {:id "i" :label "IntelliJ workspace" :chord "Cmd+I" :dispatch ["focus" {:workspace 4}]}
+             {:id "h" :label "Herdr" :chord "Cmd+B" :command ["herdr"]}]}
+  {:id "b" :label "Chrome and Vimium"
+   :entries [{:id "?" :label "Vimium help" :chord "?" :tip "On a web page, press Esc then ?. Vimium does not run on chrome:// pages or the Chrome Web Store."}
+             {:id "f" :label "Follow a link" :chord "f / F" :tip "Use f for link hints, F to open in a new tab. Avoid tabbing through every link."}
+             {:id "o" :label "Open URL, bookmark or history" :chord "o / O" :tip "Use o for the Vomnibar, O for a new tab. Ctrl+L also focuses Chrome's address bar. Cmd+L is an arrow in keyd."}
+             {:id "t" :label "Find an open tab" :chord "T" :tip "Use T and type a tab title instead of cycling through tabs. ^ returns to the previous tab."}
+             {:id "j" :label "Navigate a long page" :chord "d / u / gg / G" :tip "Use d and u for half pages, gg and G for top and bottom, or / to search instead of repeated j/k."}
+             {:id "i" :label "Focus a field or pass keys to a site" :chord "gi / i / Esc" :tip "gi focuses an input. i enters Vimium insert mode. Esc returns to normal mode. Configure site exclusions for web editors."}
+             {:id "c" :label "Chrome native shortcuts" :chord "Ctrl+L / Cmd+T / Cmd+W" :tip "Ctrl+L focuses the address bar. Cmd+T opens a tab, Cmd+Shift+T restores one, Cmd+W closes it, Cmd+F finds text."}
+             {:id "v" :label "Vimium options" :command ["~/.local/bin/chrome-unified" "chrome-extension://dbepggeogbaibhgnhhndojpepiihcmeb/pages/options.html"]}]}
+  {:id "e" :label "Editors and terminal"
+   :entries [{:id "e" :label "Doom discovery" :chord "SPC / SPC h b b" :tip "Pause after SPC for which-key. SPC SPC runs a command. SPC w h/j/k/l continues to Herdr and the desktop at the edge. SPC h b b describes bindings."}
+             {:id "n" :label "Neovim discovery" :chord "SPC / g / z / Ctrl+w" :tip "Pause after a prefix for which-key. SPC SPC is the command palette. SPC w h/j/k/l and Ctrl+h/j/k/l continue to Herdr and the desktop at the edge. SPC u h toggles Hardtime hints."}
+             {:id "i" :label "IntelliJ discovery" :chord "SPC SPC" :tip "Use Goto Action to search IDE commands. IdeaVim leader descriptions come from idea-doom-emacs. Alt+digits now reach the IDE."}
+             {:id "h" :label "Herdr discovery" :chord "Ctrl+b Space / Ctrl+b ?" :tip "Ctrl+b Space opens the shared leader menu. Ctrl+b ? opens Herdr's native binding help."}
+             {:id "m" :label "Move by intent" :chord "w / b / f / s / /" :tip "Prefer words, text objects, search and jump labels over repeated hjkl. Use counts for known distances. Cmd+hjkl remains available as arrows."}
+             {:id "s" :label "Shell editing" :chord "Ctrl+a / Ctrl+e / Ctrl+r" :tip "Use line boundaries and history search. Alt+Backspace deletes a word. keyd sends Ctrl+Left/Right for Alt+Left/Right."}]}
+  {:id "herdr" :label "Herdr prefix"
+   :entries [{:id "c" :label "New tab" :chord "Ctrl+b c" :tip "Create a tab with Ctrl+b c. Cmd+1 through Cmd+9 select tabs directly."}
+             {:id "a" :label "Find agent" :chord "Ctrl+b a" :tip "Find an agent by name instead of scanning panes."}
+             {:id "b" :label "Find workspace" :chord "Ctrl+b b" :tip "Ctrl+b b searches open workspaces. Ctrl+b Shift+O searches projects."}
+             {:id "p" :label "Annotate selection" :chord "Ctrl+b p" :tip "Ctrl+b p captures a selection. Ctrl+b o reviews documents. Ctrl+b m manages annotations."}
+             {:id "s" :label "Copy visible text by hint" :chord "Ctrl+b f" :tip "Ctrl+b f opens tiny-fingers. Ctrl+S and Cmd+S now reach terminal editors for save. Ctrl+b Shift+E edits scrollback."}]}]}

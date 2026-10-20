@@ -218,10 +218,38 @@
             (ui/text text)))))))
 
 
+(defonce leader-hint (dusk/state nil))
+
+;; keyleader listen sends {:title "Cmd+Space w" :rows [["h" "Focus left"] ...]}
+;; on each leader submap change, and {} when the submap ends.
+(dusk/on-request :leader-hint
+  (fn [{:keys [rows] :as panel} respond]
+    (reset! leader-hint (when (seq rows) panel))
+    (respond true)))
+
+(defn leader-panel []
+  (when-let [{:keys [title rows]} @leader-hint]
+    (ui/layer {:id :leader-hint
+               :layer :overlay
+               :anchor #{:bottom}
+               :margin [0 0 24 0]
+               :keyboard :none
+               :width 420
+               :height :auto
+               :padding 8}
+      (ui/column (merge (card-style 0.9) {:padding [10 14] :gap 4 :shadow :lg})
+        (ui/text {:font-size 13 :color (:on-surface-variant theme)} title)
+        (for [[k label] rows]
+          (ui/row {:key k :gap 12 :height 22}
+            (ui/text {:width 40 :font-size 14 :font-weight :semibold :color (:primary theme)} k)
+            (ui/text {:font-size 14} label)))
+        (ui/text {:font-size 12 :color (:on-surface-variant theme)} "Esc  Cancel")))))
+
 (defn shell []
   [(wallpaper)
    (notification-stack)
    (osd-popup)
-   (launcher-panel)])
+   (launcher-panel)
+   (leader-panel)])
 
 (dusk/shell! #'shell)

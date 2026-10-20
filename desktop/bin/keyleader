@@ -1,0 +1,451 @@
+#!/usr/bin/env bb
+(ns keyleader
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.string :as str]))
+
+(load-file (str (fs/parent (fs/real-path *file*)) "/keyguide"))
+(require '[hypr.dispatch :as hypr])
+
+(def desktop-leader "Alt+Space")
+
+(def contexts
+  {:desktop #(or (:nav %) (:desktop %) (:desktop-command %))
+   :herdr #(or (:nav %) (:herdr %))
+   :nvim #(or (:nav %) (:nvim %))
+   :doom #(or (:nav %) (:doom %))
+   :idea #(or (:nav %) (:idea %))})
+
+(defn config-path []
+  (or (System/getenv "KEYLEADER_CONFIG")
+      (str (or (System/getenv "XDG_CONFIG_HOME") (str (fs/home) "/.config"))
+           "/keybindings/leader.edn")))
+
+(def directions #{"left" "down" "up" "right"})
+(def action-keywords {:desktop #{:choose-window}
+                      :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane}})
+(def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :herdr :confirm})
+
+(defn- text? [v] (and (string? v) (not (str/blank? v))))
+(defn- argv? [v] (and (vector? v) (seq v) (every? string? v)))
+
+(defn binding-problem
+  "Why binding B cannot run in every context it claims, or nil."
+  [b]
+  (let [has? #(contains? b %)]
+    (cond
+      (seq (remove binding-fields (keys b))) (str "unknown fields " (vec (remove binding-fields (keys b))))
+      (not (text? (:label b))) "the label must be nonblank text"
+      (and (has? :nav) (not (directions (:nav b)))) "nav must be left, down, up or right"
+      (and (has? :nav) (some has? [:nvim :doom :idea :desktop :desktop-command :herdr]))
+      "nav already defines every context, so it takes no other action"
+      (some #(and (has? %) (not (text? (get b %)))) [:nvim :doom :idea]) "editor actions must be nonblank text"
+      (and (has? :desktop) (has? :desktop-command)) "use either :desktop or :desktop-command"
+      (and (has? :desktop) (not (or ((action-keywords :desktop) (:desktop b)) (hypr/valid? (:desktop b)))))
+      "desktop must be :choose-window or a dispatcher such as [\"focus\" {:workspace 2}]"
+      (and (has? :desktop-command) (not (argv? (:desktop-command b)))) "desktop-command must be an argv vector"
+      (and (has? :herdr) (not (or ((action-keywords :herdr) (:herdr b))
+                                  (and (argv? (:herdr b)) (= "pane" (first (:herdr b)))))))
+      (str "herdr must be one of " (sort (action-keywords :herdr)) " or a herdr pane command vector")
+      (and (has? :confirm) (not (boolean? (:confirm b)))) "confirm must be true or false")))
+
+(defn validate! [{:keys [groups bindings terminal] :as grammar}]
+  (let [group-keys (set (map first groups))]
+    (when-not (and (text? (:passthrough terminal))
+                   (try (re-pattern (:passthrough terminal)) (catch Exception _ nil)))
+      (throw (ex-info "Leader grammar needs :terminal {:passthrough REGEX}" {:terminal terminal})))
+    (when-not (every? (fn [[k label]] (and (text? k) (text? label))) groups)
+      (throw (ex-info "Leader groups need a key and a label" {:groups groups})))
+    (when-not (= (count groups) (count group-keys))
+      (throw (ex-info "Duplicate leader group" {:groups groups})))
+    (when (contains? group-keys " ")
+      (throw (ex-info "Space is reserved for the command palette" {})))
+    (doseq [{:keys [keys] :as b} bindings]
+      (when-not (and (= 2 (count keys)) (group-keys (first keys)))
+        (throw (ex-info "Leader keys must be a known group and one key" {:binding b})))
+      (when-not (some #(% b) (vals contexts))
+        (throw (ex-info "Leader binding has no context" {:binding b})))
+      (when-let [problem (binding-problem b)]
+        (throw (ex-info (str "Invalid leader binding " (pr-str keys) ": " problem) {:binding b}))))
+    (when-not (= (count bindings) (count (distinct (map :keys bindings))))
+      (throw (ex-info "Duplicate leader sequence" {}))))
+  grammar)
+
+(defn load-grammar [] (validate! (edn/read-string (slurp (config-path)))))
+
+(defn in-context [grammar context]
+  (filter (contexts context) (:bindings grammar)))
+
+(defn menu
+  "Rows shown after the leader, or after a group key, in CONTEXT."
+  [grammar context group]
+  (let [bs (in-context grammar context)]
+    (if group
+      (for [b bs :when (= group (first (:keys b)))] [(second (:keys b)) (:label b)])
+      (cons ["SPC" "Command palette"]
+            (for [[k label] (:groups grammar) :when (some #(= k (first (:keys %))) bs)]
+              [k (str label " ...")])))))
+
+(defn menu-text [rows]
+  (str/join "\n" (for [[k label] rows] (format "%-4s %s" k label))))
+
+(defn run! [argv & [opts]]
+  (let [{:keys [exit out err]} @(p/process argv (merge {:out :string :err :string} opts))]
+    (when-not (zero? exit)
+      (throw (ex-info (str "Command failed: " (str/join " " argv)) {:exit exit :error err})))
+    out))
+
+(defn herdr-json [& args] (json/parse-string (apply run! [(into ["herdr"] args)]) true))
+
+(defn expand-home [argv] (mapv #(str/replace % #"^~/" (str (fs/home) "/")) argv))
+
+(defn spawn! [argv]
+  (p/process (expand-home argv) {:in :inherit :out :inherit :err :inherit}))
+
+(defn herdr-pane []
+  (some not-empty [(System/getenv "HERDR_PANE_ID") (System/getenv "HERDR_ACTIVE_PANE_ID")]))
+
+(defn log-path []
+  (or (System/getenv "KEYLOG_FILE")
+      (str (or (System/getenv "XDG_STATE_HOME") (str (fs/home) "/.local/state"))
+           "/keybindings/keys.tsv")))
+
+(defn log!
+  "Append which KEYS ran, the EFFECT, and the PROGRAM that handled it. Never typed text."
+  [program keys effect]
+  (let [clean #(str/replace (str %) #"[\t\n]" " ")
+        path (log-path)]
+    (fs/create-dirs (fs/parent path))
+    (spit path (str (str/join "\t" (map clean [(str (.truncatedTo (java.time.LocalDateTime/now) java.time.temporal.ChronoUnit/SECONDS)) program keys effect])) "\n")
+          :append true)))
+
+(defn- move-desktop-focus! [direction keys]
+  (hypr/dispatch! ["focus" {:direction direction}])
+  (log! "Hyprland" keys (str "Focus " direction " window")))
+
+(defn nav!
+  "Focus DIRECTION in the innermost layer that has a neighbor: the Herdr pane
+  containing the caller, then Hyprland. Editors call this at their own edge.
+  Inside Herdr, focus leaves the terminal only when Herdr reports the edge.
+  A zoomed pane fills the terminal, so focus leaves it for Hyprland."
+  [direction & [keys]]
+  (let [keys (or keys (str "focus " direction))]
+    (if-let [pane (herdr-pane)]
+      (let [edges (try (get-in (herdr-json "pane" "edges" "--pane" pane) [:result :edges])
+                       (catch Exception e
+                         (throw (ex-info "Herdr did not report pane edges" {:pane pane} e))))
+            at-edge (get edges (keyword direction))]
+        (cond
+          (or (true? at-edge) (and (false? at-edge) (true? (get-in edges [:layout :zoomed]))))
+          (move-desktop-focus! direction keys)
+          (false? at-edge)
+          (do (run! ["herdr" "pane" "focus" "--direction" direction "--pane" pane])
+              (log! "Herdr" keys (str "Focus " direction " pane")))
+          :else (throw (ex-info "Herdr did not report pane edges" {:pane pane :direction direction}))))
+      (move-desktop-focus! direction keys))))
+
+(def nav-keys {"left" "h" "down" "j" "up" "k" "right" "l"})
+
+(defn foreground-programs [pane]
+  (map :name (get-in (herdr-json "pane" "process-info" "--pane" pane)
+                     [:result :process_info :foreground_processes])))
+
+(defn term-nav!
+  "Bare Ctrl+h/j/k/l in Herdr. Programs that use these keys themselves get the
+  key; elsewhere focus moves like Ctrl+b h/j/k/l."
+  [grammar direction]
+  (let [pane (herdr-pane)
+        key (str "ctrl+" (nav-keys direction))
+        keys (str "Ctrl+" (nav-keys direction))
+        passthrough (re-pattern (get-in grammar [:terminal :passthrough]))]
+    (if-let [program (some #(when (re-find passthrough (str/lower-case (str %))) %)
+                           (foreground-programs pane))]
+      (do (run! ["herdr" "pane" "send-keys" pane key])
+          (log! program keys (str "Forwarded to " program)))
+      (nav! direction keys))))
+
+;; Desktop context. Hyprland submaps capture the keys and `listen` shows the
+;; which-key panel; these run the steps that need a script.
+
+(defn submap-panel
+  "The which-key panel for Hyprland submap NAME, or nil when no leader submap is active."
+  [grammar name]
+  (cond
+    (= "leader" name) {:title desktop-leader :rows (menu grammar :desktop nil)}
+    (str/starts-with? (str name) "leader-")
+    (let [group (subs name 7)]
+      {:title (str desktop-leader " " group) :rows (menu grammar :desktop group)})))
+
+(defn show-panel! [panel]
+  (run! [(str (fs/home) "/.local/bin/dusk") "msg" "call" "leader-hint"
+         (pr-str (or panel {}))]))
+
+(defn listen!
+  "Follow Hyprland's event socket and keep the Dusk which-key panel in step
+  with the leader submap. One listener per session."
+  []
+  (let [lock-path (str (System/getenv "XDG_RUNTIME_DIR") "/keyleader-listen.lock")
+        lock (.tryLock (java.nio.channels.FileChannel/open
+                        (fs/path lock-path)
+                        (into-array java.nio.file.OpenOption
+                                    [java.nio.file.StandardOpenOption/CREATE
+                                     java.nio.file.StandardOpenOption/WRITE])))
+        socket (str (System/getenv "XDG_RUNTIME_DIR") "/hypr/"
+                    (System/getenv "HYPRLAND_INSTANCE_SIGNATURE") "/.socket2.sock")]
+    (if-not lock
+      (println "keyleader listen is already running")
+      (loop []
+        (try
+          (with-open [channel (java.nio.channels.SocketChannel/open
+                               (java.net.UnixDomainSocketAddress/of socket))
+                      reader (java.io.BufferedReader.
+                              (java.io.InputStreamReader.
+                               (java.nio.channels.Channels/newInputStream channel)))]
+            (doseq [line (line-seq reader)
+                    :let [[_ name] (re-matches #"submap>>(.*)" line)]
+                    :when name]
+              (try (show-panel! (submap-panel (load-grammar) name))
+                   (catch Exception e
+                     (binding [*out* *err*] (println "keyleader listen:" (ex-message e)))))))
+          (catch Exception e
+            (binding [*out* *err*] (println "keyleader listen: reconnecting:" (ex-message e)))))
+        (Thread/sleep 1000)
+        (recur)))))
+
+(defn dmenu [prompt lines]
+  (let [{:keys [exit out err]}
+        @(p/process [(str (fs/home) "/.local/bin/dusk") "dmenu" "-p" prompt]
+                    {:in (str (str/join "\n" lines) "\n") :out :string :err :string})]
+    (cond
+      (zero? exit) (str/trim-newline out)
+      (and (= 1 exit) (str/blank? err)) nil
+      :else (throw (ex-info "Dusk menu failed" {:exit exit :error err})))))
+
+(defn confirm-desktop? [label]
+  (= "Yes" (dmenu (str label "?") ["No" "Yes"])))
+
+(defn choose-window! []
+  (let [clients (json/parse-string (run! ["hyprctl" "-j" "clients"]) true)
+        lines (mapv #(format "%s  %s  [%s]" (:class %) (:title %) (:address %)) clients)]
+    (when-let [line (dmenu "Windows" lines)]
+      (hypr/dispatch! ["focus" {:window (str "address:" (second (re-find #"\[(0x[0-9a-f]+)\]$" line)))}]))))
+
+(defn palette-lines [grammar context]
+  (for [b (in-context grammar context)]
+    (format "SPC %s  %s" (str/join " " (:keys b)) (:label b))))
+
+(declare run-desktop!)
+
+(defn guide-path [] (keyguide/config-path))
+
+(defn desktop-palette! [grammar]
+  (let [guide (keyguide/validate! (keyguide/groups (edn/read-string (slurp (guide-path)))))
+        guide-entries (mapcat :entries guide)
+        choice (dmenu "Command palette"
+                      (concat (palette-lines grammar :desktop) (map keyguide/line guide-entries)))]
+    (cond
+      (nil? choice) nil
+      (str/starts-with? choice "SPC ")
+      (run-desktop! grammar (str/split (second (re-find #"^SPC (.+?)  " choice)) #" "))
+      :else (when-let [entry (some #(when (= choice (keyguide/line %)) %) guide-entries)]
+              (when (keyguide/run-entry! entry confirm-desktop?)
+                (log! "Hyprland" (str desktop-leader " Space") (:label entry)))))))
+
+(defn run-desktop! [grammar keys]
+  (if (= keys ["SPC"])
+    (desktop-palette! grammar)
+    (let [b (some #(when (= keys (:keys %)) %) (in-context grammar :desktop))
+          pressed (str desktop-leader " " (str/join " " keys))]
+      (when (or (not (:confirm b)) (confirm-desktop? (:label b)))
+        (if (:nav b)
+          (move-desktop-focus! (:nav b) pressed)
+          (do (cond
+                (:desktop-command b) (spawn! (:desktop-command b))
+                (= :choose-window (:desktop b)) (choose-window!)
+                (vector? (:desktop b)) (hypr/dispatch! (:desktop b)))
+              (log! "Hyprland" pressed (:label b))))))))
+
+(defn hypr-key [k]
+  (get {"=" "equal" "SPC" "SPACE" "/" "slash"} k (str/upper-case k)))
+
+(defn desktop-dispatcher
+  "The dispatcher that a desktop binding runs inside Hyprland, or nil when it
+  needs keyleader (confirmation, menus, commands)."
+  [b]
+  (when-not (:confirm b)
+    (cond (:nav b) ["focus" {:direction (:nav b)}]
+          (vector? (:desktop b)) (:desktop b))))
+
+(defn hypr-config
+  "leader.lua: the desktop leader submaps, generated from the grammar. Each key
+  also works with Alt still held from Alt+Space."
+  [grammar]
+  (let [bs (in-context grammar :desktop)
+        groups (filter (fn [[k]] (some #(= k (first (:keys %))) bs)) (:groups grammar))
+        q hypr/lua-value
+        submap (fn [name lines]
+                 (concat [(str "hl.define_submap(" (q name) ", function()")
+                          "  for _, mods in ipairs({ \"\", \"ALT + \" }) do"]
+                         (map #(str "    " %) lines)
+                         ["  end"
+                          "  hl.bind(\"escape\", hl.dsp.submap(\"reset\"))"
+                          (str "  hl.bind(\"catchall\", keys.cancel(" (q name) "))")
+                          "end)"]))
+        bind (fn [k action] (str "hl.bind(mods .. " (q (hypr-key k)) ", " action ")"))
+        run (fn [keys] (str "keys.leave(hl.dsp.exec_cmd(" (q (str "~/.local/bin/keyleader run " (str/join " " keys))) "))"))]
+    (str/join
+     "\n"
+     (concat
+      ["-- Generated by desktop/build/keybindings/generate.bb. Edit keybindings/leader.edn."
+       "-- keyleader listen shows the which-key panel from Hyprland's submap events."
+       "local keys = require(\"keys\")"
+       "hl.bind(\"ALT + SPACE\", hl.dsp.submap(\"leader\"))"]
+      (submap "leader"
+              (cons (bind "SPC" (run ["SPC"]))
+                    (for [[k] groups] (bind k (str "hl.dsp.submap(" (q (str "leader-" k)) ")")))))
+      (mapcat
+       (fn [[g]]
+         (submap (str "leader-" g)
+                 (for [b (filter #(= g (first (:keys %))) bs)
+                       :let [k (second (:keys b))]]
+                   (bind k (if-let [d (desktop-dispatcher b)]
+                             (str "keys.leave(" (hypr/lua d) ", "
+                                  (q (str desktop-leader " " (str/join " " (:keys b)))) ", " (q (:label b)) ")")
+                             (run (:keys b)))))))
+       groups)
+      [""]))))
+
+;; Herdr context: a popup that reads single keys like which-key.
+
+(defn read-key []
+  (let [saved (str/trim (run! ["stty" "-g"] {:in :inherit}))]
+    (run! ["stty" "-icanon" "-echo" "min" "1"] {:in :inherit})
+    (try (let [c (.read System/in)]
+           (case c 27 :escape 32 "SPC" (str (char c))))
+         (finally (run! ["stty" saved] {:in :inherit})))))
+
+(defn show! [title rows]
+  (print (str "\u001b[2J\u001b[H" title "\n\n" (menu-text rows) "\n\nEsc  Close\n"))
+  (flush))
+
+(defn fzf [prompt lines]
+  (let [{:keys [exit out]} @(p/process ["fzf" "--prompt" (str prompt " ")]
+                                       {:in (str/join "\n" lines) :out :string :err :inherit})]
+    (when (zero? exit) (str/trim out))))
+
+(defn tabs []
+  (get-in (herdr-json "tab" "list" "--workspace" (System/getenv "HERDR_ACTIVE_WORKSPACE_ID"))
+          [:result :tabs]))
+
+(defn step-tab! [delta]
+  (let [ts (vec (tabs))
+        i (first (keep-indexed #(when (:focused %2) %1) ts))]
+    (cond
+      (empty? ts) (throw (ex-info "Herdr reported no tabs" {}))
+      (nil? i) (throw (ex-info "Herdr reported no focused tab" {:tabs (mapv :tab_id ts)}))
+      :else (run! ["herdr" "tab" "focus" (:tab_id (nth ts (mod (+ i delta) (count ts))))]))))
+
+(defn confirm-herdr? [label]
+  (show! (str label "?") [["y" "Yes"] ["n" "No"]])
+  (= "y" (read-key)))
+
+(declare herdr-palette!)
+
+(defn run-herdr! [grammar keys]
+  (if (= keys ["SPC"])
+    (herdr-palette! grammar)
+    (let [b (some #(when (= keys (:keys %)) %) (in-context grammar :herdr))
+          pane (herdr-pane)
+          action (:herdr b)
+          pressed (str "Ctrl+b Space " (str/join " " keys))]
+      (when (or (not (:confirm b)) (confirm-herdr? (:label b)))
+        (when-not (:nav b) (log! "Herdr" pressed (:label b)))
+        (cond
+          (:nav b) (nav! (:nav b) pressed)
+          (vector? action) (run! (concat ["herdr"] (take 2 action) ["--pane" pane] (drop 2 action)))
+          (= :close-pane action) (run! ["herdr" "pane" "close" pane])
+          (= :close-tab action) (run! ["herdr" "tab" "close" (System/getenv "HERDR_ACTIVE_TAB_ID")])
+          (= :next-tab action) (step-tab! 1)
+          (= :previous-tab action) (step-tab! -1)
+          (= :choose-tab action)
+          (let [ts (tabs)]
+            (when-let [line (fzf "Tab" (map #(str (:tab_id %) "  " (:label %)) ts))]
+              (run! ["herdr" "tab" "focus" (first (str/split line #"  "))]))))))))
+
+(defn herdr-palette! [grammar]
+  (when-let [line (fzf "Command" (palette-lines grammar :herdr))]
+    (run-herdr! grammar (str/split (second (re-find #"^SPC (.+?)  " line)) #" "))))
+
+(defn herdr-leader! [grammar]
+  (show! "Leader" (menu grammar :herdr nil))
+  (let [k (read-key)]
+    (cond
+      (= k "SPC") (run-herdr! grammar ["SPC"])
+      (some #(= k (first (:keys %))) (in-context grammar :herdr))
+      (do (show! (str "Leader " k) (menu grammar :herdr k))
+          (let [k2 (read-key)]
+            (when (some #(= [k k2] (:keys %)) (in-context grammar :herdr))
+              (run-herdr! grammar [k k2])))))))
+
+(defn expected-binds
+  "The [submap modmask key] triples that leader.lua binds for GRAMMAR."
+  [grammar]
+  (let [bs (in-context grammar :desktop)
+        groups (filter (fn [[k]] (some #(= k (first (:keys %))) bs)) (:groups grammar))
+        keyed (fn [submap ks] (concat (for [m [0 8] k ks] [submap m (str/lower-case (hypr-key k))])
+                                      [[submap 0 "escape"] [submap 0 "catchall"]]))]
+    (set (concat [["" 8 "space"]]
+                 (keyed "leader" (cons "SPC" (map first groups)))
+                 (mapcat (fn [[g]] (keyed (str "leader-" g)
+                                          (for [b bs :when (= g (first (:keys b)))] (second (:keys b)))))
+                         groups)))))
+
+(defn live-binds
+  "The leader binds Hyprland reports, as [submap modmask key] triples."
+  [binds]
+  (set (for [b binds
+             :when (or (str/starts-with? (:submap b) "leader")
+                       (and (= "" (:submap b)) (= 8 (:modmask b)) (= "space" (str/lower-case (:key b)))))]
+         [(:submap b) (:modmask b) (if (:catch_all b) "catchall" (str/lower-case (:key b)))])))
+
+(defn hypr-drift [expected live]
+  (when-not (= expected live)
+    {:missing (sort (remove live expected)) :unexpected (sort (remove expected live))}))
+
+(defn verify-hypr! []
+  (let [expected (expected-binds (load-grammar))
+        live (live-binds (json/parse-string (run! ["hyprctl" "-j" "binds"]) true))]
+    (if-let [drift (hypr-drift expected live)]
+      (throw (ex-info (str "Hyprland's loaded leader binds differ from leader.edn: " (pr-str drift)) drift))
+      (println (str "Hyprland has loaded all " (count expected) " leader binds")))))
+
+(defn report-failure! [command e]
+  (binding [*out* *err*] (println "keyleader:" (ex-message e)))
+  (if (= "herdr" command)
+    (do (show! "Leader failed" [["" (ex-message e)]]) (read-key))
+    (when (#{"nav" "term-nav" "run"} command)
+      (run! ["notify-send" "-u" "critical" "-a" "Leader" "Leader failed" (ex-message e)]))))
+
+(defn dispatch [[command & args]]
+  (case command
+    "nav" (nav! (first args) (second args))
+    "term-nav" (term-nav! (load-grammar) (first args))
+    "listen" (listen!)
+    "run" (run-desktop! (load-grammar) (vec args))
+    "herdr" (herdr-leader! (load-grammar))
+    "--check" (do (load-grammar) (println "Leader grammar is valid"))
+    "--verify-hypr" (verify-hypr!)
+    (do (binding [*out* *err*]
+          (println "usage: keyleader nav DIR [KEYS] | term-nav DIR | listen | run KEYS... | herdr | --check | --verify-hypr"))
+        (System/exit 2))))
+
+(defn main [args]
+  (try (dispatch args)
+       (catch Exception e
+         (report-failure! (first args) e)
+         (System/exit 1))))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (main *command-line-args*))
