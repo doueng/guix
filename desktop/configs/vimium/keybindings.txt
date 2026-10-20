@@ -1,0 +1,6 @@
+# Keep Vimium defaults. These g-prefix aliases match the global guide.
+map g? showHelp
+map gb Vomnibar.activateTabSelection
+map g/ enterFindMode
+map gh goBack
+map gl goForward
