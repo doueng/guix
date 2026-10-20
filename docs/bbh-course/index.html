@@ -1,0 +1,771 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>bbh internals: a course</title>
+<style>
+  :root { --ink:#1d1f21; --muted:#5b6170; --rule:#dde1e5; --wash:#f4f7ff; --accent:#2f5fd0; --code:#f6f8fa; --ok:#dcf5e3; --warn:#fff3d6; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 16px/1.62 system-ui, -apple-system, sans-serif; color:var(--ink); background:#fff; display:grid; grid-template-columns: 15rem minmax(0,48rem); gap:2.5rem; justify-content:center; padding:2rem 1.25rem; }
+  nav.toc { position:sticky; top:1.5rem; align-self:start; font-size:14.5px; }
+  nav.toc h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 .5rem; }
+  nav.toc ol { padding-left:1.2rem; margin:0; }
+  nav.toc li { margin:.25rem 0; }
+  nav.toc a { color:var(--ink); text-decoration:none; }
+  nav.toc a:hover { color:var(--accent); text-decoration:underline; }
+  main { min-width:0; }
+  h1 { font-size:2.1rem; margin:.1rem 0 .3rem; }
+  h2.lesson { font-size:1.55rem; margin-top:3.2rem; padding-top:.4rem; border-top:3px solid var(--accent); }
+  h3 { margin-top:1.8rem; font-size:1.15rem; }
+  code, pre { font: 13.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { background:#f2f4f7; padding:.05rem .3rem; border-radius:3px; }
+  pre { background:var(--code); border:1px solid #e4e7eb; padding:.8rem 1rem; overflow-x:auto; border-radius:4px; }
+  pre code { background:none; padding:0; }
+  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:14.5px; }
+  th, td { border:1px solid var(--rule); padding:.4rem .55rem; text-align:left; vertical-align:top; }
+  th { background:#f2f4f7; }
+  .meta { color:var(--muted); }
+  .goals { background:var(--wash); border-left:4px solid var(--accent); padding:.6rem 1rem; margin:1rem 0; }
+  .goals p { margin:.2rem 0; }
+  .try { background:var(--ok); border-left:4px solid #2e8b57; padding:.6rem 1rem; margin:1rem 0; }
+  .note { background:var(--warn); border-left:4px solid #d98a00; padding:.6rem 1rem; margin:1rem 0; }
+  details { margin:.6rem 0; border:1px solid var(--rule); border-radius:4px; padding:.4rem .8rem; background:#fcfcfd; }
+  summary { cursor:pointer; font-weight:600; color:var(--accent); }
+  .pill { font-size:12px; padding:1px 7px; border-radius:3px; background:#eef1f6; color:#334; white-space:nowrap; }
+  @media (max-width: 860px) { body { grid-template-columns: 1fr; } nav.toc { position:static; } }
+</style>
+</head>
+<body>
+<nav class='toc'>
+  <h2>Course</h2>
+  <ol>
+    <li><a href='#orientation'>0. Orientation</a></li>
+    <li><a href='#repl-owned'>1. The model owns a REPL</a></li>
+    <li><a href='#disk'>2. Conversations on disk</a></li>
+    <li><a href='#session'>3. The session and the turn loop</a></li>
+    <li><a href='#events'>4. One event stream</a></li>
+    <li><a href='#repl-process'>5. The REPL process</a></li>
+    <li><a href='#env'>6. The environment and the manifest</a></li>
+    <li><a href='#openrouter'>7. Engine one: OpenRouter</a></li>
+    <li><a href='#claude'>8. Engine two: Claude Code</a></li>
+    <li><a href='#context'>9. Context, trimming and compaction</a></li>
+    <li><a href='#frontends'>10. Front ends: terminal and ACP</a></li>
+    <li><a href='#models'>11. Models and credentials</a></li>
+    <li><a href='#testing'>12. Testing</a></li>
+    <li><a href='#evals'>13. Evaluation from traces</a></li>
+    <li><a href='#decisions'>14. Design decisions</a></li>
+    <li><a href='#limits'>15. Limits and open questions</a></li>
+    <li><a href='#exercises'>16. Exercises</a></li>
+    <li><a href='#glossary'>Glossary</a></li>
+  </ol>
+</nav>
+<main>
+
+<h1>bbh internals</h1>
+<p class='meta'>A course on how bbh works and why it is built the way it is. Source: <code>desktop/build/bbh</code>, as of 2026-10-20.</p>
+
+<p>bbh is a coding agent harness written in babashka. It lets a language model work in a persistent Clojure REPL through one tool, and it runs the same conversation from a terminal or from Emacs. This course walks through the code layer by layer. Each lesson starts from a question, shows the code that answers it, and ends with a check you can open.</p>
+
+<h3>How to use this course</h3>
+<ul>
+  <li>Read the lessons in order. Later ones assume the vocabulary and the diagrams of earlier ones.</li>
+  <li>Open the source file named in each lesson beside this page. The course quotes function names exactly, so you can search for them.</li>
+  <li>Each lesson has a <em>Try it</em> box with commands to run. The commands are read-only unless marked.</li>
+  <li>Click <em>Check yourself</em> to reveal answers. Try the question first.</li>
+  <li>Evidence matters here. Where a claim comes from the design log (<code>decisions.tsv</code>) or from a test, the lesson says so. Where it is only my reading of the code, the lesson says that too.</li>
+</ul>
+
+<h2 id='orientation' class='lesson'>0. Orientation</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Name the main parts of bbh. Draw the path from a keystroke to a model and back. Find the file that owns each responsibility.</p>
+</div>
+
+<h3>The one-sentence design</h3>
+<p>Every conversation gets its own babashka REPL process. The model has exactly one tool, <code>clojure</code>, which evaluates code in that REPL. Because the REPL lives as long as the conversation, the model can define helpers once and reuse them, and it can change its own environment by redefining <code>bbh.env/manifest</code>.</p>
+
+<h3>The map of the code</h3>
+<table>
+<tr><th>File</th><th>Lines</th><th>Responsibility</th></tr>
+<tr><td><code>src/bbh/session.clj</code></td><td>269</td><td>One conversation: transcript, REPL, the turn loop, commands and events. The center of the system.</td></tr>
+<tr><td><code>src/bbh/repl.clj</code></td><td>146</td><td>Starts the REPL process and talks to it over nREPL. Reads the manifest and checks it.</td></tr>
+<tr><td><code>src/bbh/llm.clj</code></td><td>106</td><td>OpenRouter streaming, retries and cancellation.</td></tr>
+<tr><td><code>src/bbh/claude.clj</code></td><td>153</td><td>Runs a turn through Claude Code and its stream-json protocol.</td></tr>
+<tr><td><code>src/bbh/mcp.clj</code></td><td>44</td><td>A small MCP server that Claude Code starts. It forwards tool calls back to the session.</td></tr>
+<tr><td><code>src/bbh/context.clj</code></td><td>78</td><td>The view of the transcript the model sees: summaries, trimming, cut points.</td></tr>
+<tr><td><code>src/bbh/transcript.clj</code></td><td>34</td><td>Append-only files for messages and compactions.</td></tr>
+<tr><td><code>src/bbh/main.clj</code></td><td>76</td><td>The terminal front end and the command-line entry point.</td></tr>
+<tr><td><code>src/bbh/acp.clj</code></td><td>144</td><td>The Agent Client Protocol front end for Emacs agent-shell.</td></tr>
+<tr><td><code>src/bbh/models.clj</code></td><td>34</td><td>Model ids, the default model, and the engine each provider uses.</td></tr>
+<tr><td><code>src/bbh/auth.clj</code></td><td>42</td><td>Credentials shared with Pi and Claude Code.</td></tr>
+<tr><td><code>src/bbh/usage.clj</code></td><td>77</td><td><code>/usage</code>: subscription limits and session spend.</td></tr>
+</table>
+
+<h3>The picture to keep in mind</h3>
+<pre>
+ terminal (main.clj)            Emacs agent-shell (acp.clj)
+          |                              |
+          |        JSON-RPC over stdio   |
+          v                              v
+    +------------------------------------------+
+    |  session.clj                             |   events: text, tool-call,
+    |  transcript, turn loop, commands         |-----&gt; tool-result, usage
+    +------------------------------------------+
+          |                              |
+   engine :loop                   engine :claude
+   llm.clj (OpenRouter)           claude.clj  &lt;--stream-json--&gt;  claude CLI
+   context.clj                              |  MCP over stdio
+                                            v
+                                        mcp.clj  --loopback socket--&gt;  session
+          |
+          v
+   REPL process (repl.clj): bb with an nREPL server
+   owns *ns*, every def, and bbh.env/manifest
+</pre>
+
+<div class='try'>
+<p><strong>Try it.</strong> From <code>desktop/build/bbh</code>, print the sizes and count the tests:</p>
+<pre><code>wc -l src/bbh/*.clj
+grep -c 'deftest' test/bbh/*.clj</code></pre>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>Which file would you open first to change what the model sees before each request? <em>Answer:</em> the manifest is read in <code>repl.clj</code> (<code>manifest</code>) and used in <code>session.clj</code> (<code>system-prompt!</code>). What the model sees from the transcript is shaped by <code>context.clj</code>.</p>
+</details>
+
+<h2 id='repl-owned' class='lesson'>1. The model owns a REPL</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Explain why bbh exposes one tool instead of many. State what persists between turns, and what the tradeoff costs.</p>
+</div>
+
+<h3>Why one tool that evaluates code</h3>
+<p>Most coding agents give the model many tools: read a file, run a shell command, edit a file. bbh gives it one, <code>clojure</code>. Babashka is a small Clojure that starts quickly and ships many libraries, so one evaluator can already read files, run processes, parse JSON and make HTTP requests. The model writes a small program instead of choosing among tools.</p>
+<p>The design log records the consequence. A model that could not find the <code>jev-classify-task</code> helper spent about fifteen rounds hunting for it. After the helper was referred into <code>user</code>, it was called in the first tool call. <span class='pill'>decisions.tsv, 2026-10-17 env</span></p>
+
+<h3>What persists</h3>
+<ul>
+  <li><strong>Definitions.</strong> Every <code>def</code> and <code>defn</code> stays in the REPL until the process restarts. The model can build a helper once and call it in later turns. The live test in the decisions log defined 41 in one turn and evaluated 42 in the next. <span class='pill'>measured</span></li>
+  <li><strong>The environment.</strong> The model can redefine <code>bbh.env/manifest</code>, and bbh re-reads it before every request. The model can change its own system prompt and its own limits.</li>
+  <li><strong>Not the transcript alone.</strong> The transcript is what bbh saves on disk. The REPL state is in memory and is lost when the process restarts.</li>
+</ul>
+
+<h3>The tradeoff</h3>
+<table>
+<tr><th>Gains</th><th>Costs</th></tr>
+<tr><td>Helpers survive across turns, so the model spends fewer calls rebuilding them.</td><td>A restart, a timeout or an interrupt loses every definition. bbh reloads <code>init.clj</code> and tells the model.</td></tr>
+<tr><td>One tool means one schema and no tool-choice confusion.</td><td>A mistaken <code>(delete-file ...)</code> is final. The REPL runs with your permissions and is not a sandbox.</td></tr>
+<tr><td>The model can change its environment through ordinary code.</td><td>A bad manifest is possible. bbh validates it and falls back to defaults (lesson 6).</td></tr>
+</table>
+
+<div class='try'>
+<p><strong>Try it.</strong> Open <code>src/bbh/repl.clj</code> and find <code>manifest</code> and <code>validate</code>. Then find the call site in <code>src/bbh/session.clj</code> (<code>system-prompt!</code>).</p>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>If the model redefines <code>bbh.env/manifest</code> with <code>:deadline-ms 5000</code> during a turn, when does the change take effect? <em>Answer:</em> <code>system-prompt!</code> re-reads the manifest before every model request, and <code>run-code!</code> reads <code>:deadline-ms</code> from the stored manifest each time it evaluates. So the new deadline applies from the next evaluation after the next request refreshes the manifest.</p>
+</details>
+
+<h2 id='disk' class='lesson'>2. Conversations on disk</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Name the files a conversation writes and what each one is for. Explain why the transcript is plain chat messages.</p>
+</div>
+
+<h3>Layout</h3>
+<p>Each conversation is a directory under <code>~/.local/share/bbh/conversations/&lt;id&gt;/</code>, where <code>id</code> is a timestamp such as <code>20261020-101530-245</code>. The Emacs front end creates its ids the same way. <span class='pill'>main.clj, acp.clj</span></p>
+<table>
+<tr><th>File</th><th>Written by</th><th>Purpose</th></tr>
+<tr><td><code>messages.jsonl</code></td><td><code>transcript/append!</code></td><td>The append-only transcript, one chat message per line.</td></tr>
+<tr><td><code>compactions.jsonl</code></td><td><code>transcript/append-compaction!</code></td><td>Each compaction: where the kept suffix starts, and the summary.</td></tr>
+<tr><td><code>repl.port</code></td><td><code>repl/start!</code></td><td>The nREPL port of the live REPL, for CIDER.</td></tr>
+<tr><td><code>repl.log</code></td><td><code>repl/start!</code></td><td>Stdout and stderr of the REPL process.</td></tr>
+<tr><td><code>claude-session</code></td><td><code>claude.clj</code></td><td>The Claude Code session id, so a later process can resume it.</td></tr>
+<tr><td><code>claude.log</code></td><td><code>claude.clj</code></td><td>Stderr of the Claude Code process.</td></tr>
+</table>
+
+<h3>Why the transcript is plain chat messages</h3>
+<p>Each line of <code>messages.jsonl</code> is an OpenAI-style message: <code>role</code>, <code>content</code>, and optionally <code>tool_calls</code> or a <code>tool_call_id</code>. The design log says the transcript should stay plain chat messages so the eval tools and the Claude adapter can read it. The summary and trimming are a view computed on top of the transcript, not a change to it. <span class='pill'>decisions.tsv, 2026-10-18 context</span></p>
+
+<h3>Resume</h3>
+<p><code>bbh --resume last</code> picks the lexically largest directory under <code>conversations/</code>. Timestamp ids make that the newest one. It starts a fresh REPL, and the notes list tells the model that earlier definitions are gone.</p>
+
+<div class='try'>
+<p><strong>Try it.</strong> Look at the newest conversation without changing it:</p>
+<pre><code>d=$(ls -d ~/.local/share/bbh/conversations/* | sort | tail -1)
+ls -la &quot;$d&quot;
+jq -c '{role, content: ((.content // &quot;&quot;) | tostring | .[0:80])}' &quot;$d/messages.jsonl&quot; | head -20</code></pre>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>Why does <code>append-compaction!</code> not rewrite <code>messages.jsonl</code>? <em>Answer:</em> the transcript is the durable record. A compaction only records where the model's view starts and what the summary says, so the original messages stay available for eval tools and for display.</p>
+</details>
+
+<h2 id='session' class='lesson'>3. The session and the turn loop</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> List the state a session holds. Trace what happens between a user's Enter and the next model request.</p>
+</div>
+
+<h3>The session is one atom</h3>
+<p><code>session/new-session</code> returns an atom holding everything about one conversation. The important keys are:</p>
+<table>
+<tr><th>Key</th><th>Meaning</th></tr>
+<tr><td><code>:dir</code>, <code>:cwd</code>, <code>:init</code></td><td>Where the transcript lives, where the REPL runs, and the init file it loads.</td></tr>
+<tr><td><code>:model</code>, <code>:engine</code>, <code>:make-engine</code></td><td>The model id, the engine built from it, and the factory used to rebuild it on <code>/model</code>.</td></tr>
+<tr><td><code>:messages</code>, <code>:compaction</code></td><td>The transcript loaded from disk, and the latest compaction.</td></tr>
+<tr><td><code>:repl</code>, <code>:manifest</code></td><td>The live REPL connection, and the last manifest that passed validation.</td></tr>
+<tr><td><code>:cancel</code>, <code>:interrupted</code>, <code>:evaluating</code></td><td>What to call to abort the current model request, and flags that tell the loop why it stopped.</td></tr>
+<tr><td><code>:spent</code>, <code>:limits</code>, <code>:notes</code></td><td>Session cost, the latest Claude rate-limit windows, and messages the model should see on its next turn.</td></tr>
+<tr><td><code>:code-lock</code></td><td>Serializes evaluations, so two tool calls never run at once in one REPL.</td></tr>
+</table>
+
+<h3>From input to model</h3>
+<p>The terminal and ACP both call <code>session/prompt!</code>. It does four things in order:</p>
+<ol>
+  <li><strong>Commands.</strong> If the input starts with <code>/</code> and names a built-in command (<code>/help</code>, <code>/model</code>, <code>/compact</code>, <code>/usage</code>, <code>/restart</code>, <code>/port</code>), bbh runs it without the model.</li>
+  <li><strong>Env expansion.</strong> Otherwise <code>expand</code> asks <code>bbh.env/expand-prompt</code> in the REPL. The env may return a rewritten prompt, or a <code>{:reply ...}</code> that answers without the model. This is how <code>/skill:NAME</code> and <code>/poteto-mode-off</code> work.</li>
+  <li><strong>Record.</strong> The user's message is appended to the transcript. Any pending notes, such as &ldquo;the REPL restarted&rdquo;, are prefixed as a <code>[bbh]</code> line.</li>
+  <li><strong>Turn.</strong> <code>turn!</code> dispatches on the engine's <code>:kind</code>. It is a multimethod with two methods: <code>:loop</code> (in <code>session.clj</code>) and <code>:claude</code> (in <code>claude.clj</code>).</li>
+</ol>
+
+<h3>The loop engine</h3>
+<p>For <code>:loop</code> engines, <code>turn!</code> repeats rounds until the model stops calling tools or the round limit of 100 is reached. Each round does this:</p>
+<pre>
+round n
+  system     = system-prompt!          ; re-reads bbh.env/manifest, validates it
+  if tokens(context) &gt; :compact-at-tokens  -&gt; compact!
+  result     = sample!                 ; one streamed request; on-text emits events
+  if overflow -&gt; compact! once, then retry the round
+  record assistant message             ; only if it has text or tool calls
+  add-usage!                           ; tokens and cost, as an event
+  for each tool call:
+      record tool message = run-code!  ; evaluates, emits call and result
+  no tool calls -&gt; the turn ends
+  interrupted   -&gt; the turn ends and partial tool calls are dropped
+</pre>
+<p>Two details matter. First, the assistant's message is recorded before its tool results, so the transcript reads in the order the model produced it. Second, a cancelled request drops its partial <code>tool_calls</code>, so the transcript never shows a call that did not run.</p>
+
+<div class='try'>
+<p><strong>Try it.</strong> Run the session tests. They drive <code>prompt!</code> through scripted replies:</p>
+<pre><code>cd desktop/build/bbh
+bb -cp src:test -e &quot;(require 'bbh.session-test) (clojure.test/run-tests 'bbh.session-test)&quot;</code></pre>
+<p>Then open <code>test/bbh/session_test.clj</code> and read <code>definitions-survive-across-turns</code>. It is the shortest complete example of a turn.</p>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>What happens if the model asks for a tool call and the user presses Ctrl-C during the evaluation? <em>Answer:</em> <code>interrupt!</code> sets <code>:interrupted</code>. Since <code>:evaluating</code> is true, it also kills the REPL. <code>run-code!</code> then returns the failure text, and the REPL is restarted with a fresh init. The loop sees <code>:interrupted</code> and ends the turn without another round.</p>
+</details>
+
+<h2 id='events' class='lesson'>4. One event stream</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Name the four event types. Explain why bbh has one stream instead of callbacks for each front end.</p>
+</div>
+
+<h3>The events</h3>
+<p>The session never prints or sends anything itself. It calls <code>emit!</code> with a map that has a <code>:type</code>:</p>
+<table>
+<tr><th>Type</th><th>Fields</th><th>Sent when</th></tr>
+<tr><td><code>:text</code></td><td><code>:text</code></td><td>A chunk of model text, or a <code>[bbh]</code> note such as a retry.</td></tr>
+<tr><td><code>:tool-call</code></td><td><code>:id</code>, <code>:code</code></td><td>Before an evaluation starts.</td></tr>
+<tr><td><code>:tool-result</code></td><td><code>:id</code>, <code>:code</code>, <code>:text</code>, <code>:status</code></td><td>After it finishes, with <code>:completed</code> or <code>:failed</code>.</td></tr>
+<tr><td><code>:usage</code></td><td><code>:used</code>, <code>:size</code>, <code>:spent</code></td><td>After each model sample, with prompt tokens and total session cost.</td></tr>
+</table>
+
+<h3>Three consumers</h3>
+<ul>
+  <li><strong>Terminal</strong>: <code>print-event</code> in <code>main.clj</code> prints text as it arrives, shows the code in dim text, and shows at most 15 lines of each result.</li>
+  <li><strong>ACP</strong>: <code>event-&gt;update</code> in <code>acp.clj</code> turns each event into a <code>session/update</code> notification.</li>
+  <li><strong>Tests</strong>: the session tests collect events and assert on them.</li>
+</ul>
+<p>The design log records the change that introduced this. The four UI callbacks were replaced with one event stream, and the tests passed afterward. ACP and the terminal both consume the same text, tool-call, tool-result and usage events. <span class='pill'>decisions.tsv, 2026-10-17 events</span></p>
+
+<h3>A consequence for ACP</h3>
+<p>Agent-shell collapses each tool call into one line. By default that line showed only the word <code>clojure</code>, so a waiting call was invisible. The fix is in <code>acp.clj</code>: the tool block's title is the first line of the code, cut at 72 characters and marked with an ellipsis when more code follows. The result block repeats the code above its output, so output is never mistaken for coming from different code. <span class='pill'>decisions.tsv, 2026-10-17 acp</span></p>
+
+<div class='try'>
+<p><strong>Try it.</strong> In <code>src/bbh/acp.clj</code>, find <code>title</code> and trace how one <code>:tool-call</code> event becomes a <code>tool_call</code> update. Then find the same event in <code>main.clj</code>'s <code>print-event</code>.</p>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>Why doesn't the session know whether the terminal or ACP is listening? <em>Answer:</em> <code>new-session</code> takes an <code>:emit</code> function. Each front end passes its own, so the session stays unaware of presentation.</p>
+</details>
+
+<h2 id='repl-process' class='lesson'>5. The REPL process</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Explain how bbh starts a REPL, talks to it, and recovers from a timeout. Explain why bbh kills the process instead of interrupting it.</p>
+</div>
+
+<h3>Starting it</h3>
+<p><code>repl/start!</code> launches <code>bb -e</code> with a short bootstrap program. The bootstrap starts babashka's nREPL server on a free port, writes the port into the file named by <code>BBH_PORT_FILE</code>, and then waits forever. bbh polls that file, opens a socket, and starts a reader thread. The process's output goes to <code>repl.log</code>.</p>
+<p>Then bbh clones two sessions from the server:</p>
+<ul>
+  <li>The <strong>user session</strong> runs the model's code. Its <code>*ns*</code> and its definitions belong to the model.</li>
+  <li>The <strong>control session</strong> runs bbh's own questions, such as reading the manifest or calling <code>bbh.env/expand-prompt</code>. It does not change the model's <code>*ns*</code>, so <code>repl/call</code> can ask questions without disturbing the model's state.</li>
+</ul>
+
+<h3>Talking to it</h3>
+<p>nREPL speaks bencode. <code>request!</code> writes a message with a fresh id, and a reader thread routes each reply to a queue by that id. The request ends at a reply whose <code>status</code> includes <code>done</code>, when the deadline passes, or when the connection closes. The result map is <code>{:out :err :value :error?}</code>, plus <code>:timeout</code> or <code>:died</code> when no complete reply arrived.</p>
+
+<h3>Why kill rather than interrupt</h3>
+<p>Babashka cannot interrupt a thread that is busy in user code. So when a deadline passes or the user interrupts an evaluation, bbh destroys the whole process tree with <code>p/destroy-tree</code>, starts a new REPL, and reloads <code>init.clj</code>. The transcript survives, but the definitions do not. The model is told so in the same tool result that reports the timeout.</p>
+<p>The session tests cover this path. <code>deadline-kills-the-repl-and-reloads-init</code> checks that a timed-out evaluation restarts the REPL and reloads init. <span class='pill'>test/bbh/session_test.clj</span></p>
+
+<div class='try'>
+<p><strong>Try it.</strong> Start a REPL by hand and talk to it through bbh's own functions, without a model. This writes only a scratch directory under <code>/tmp</code>:</p>
+<pre><code>cd desktop/build/bbh
+bb -cp src -e &quot;(require '[bbh.repl :as r])
+(def c (r/start! {:dir &quot;/tmp/bbh-course-repl&quot; :cwd &quot;.&quot;}))
+(prn (r/eval! c &quot;(def x 41) (inc x)&quot; 5000))
+(prn (r/eval! c &quot;x&quot; 5000))
+(r/kill! c)&quot;</code></pre>
+<p>The second evaluation returns <code>41</code>, which shows the definition survived between requests.</p>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>Why does the manifest read use the control session? <em>Answer:</em> the model's code could have changed <code>*ns*</code> or bound a variable that bbh's own question depends on. The control session keeps bbh's questions separate from the model's state.</p>
+</details>
+
+<div class='note'>
+<p><strong>Observation.</strong> On a timeout, <code>run-code!</code> restarts the REPL and reports the failure in one result. The model then has to rebuild every helper it had. This is the largest reliability cost of the design. The eval assertion <code>repl-restart</code> counts how often it happens (lesson 13).</p>
+</div>
+
+
+<h2 id='env' class='lesson'>6. The environment and the manifest</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Explain what the env controls, how bbh reads it, and how bbh stays usable when the model breaks it.</p>
+</div>
+
+<h3>What the env is</h3>
+<p><code>~/.config/bbh/init.clj</code> is the environment. In the repository it is <code>desktop/configs/bbh/init.clj</code>, which is stowed to the home directory. <code>start-repl!</code> loads it with <code>load-file</code> into every new REPL. <span class='pill'>session.clj</span> The <code>BBH_INIT</code> variable overrides the path, which the tests use.</p>
+<p>The file defines four things the rest of bbh reads by name:</p>
+<table>
+<tr><th>Var</th><th>Read by</th><th>Effect</th></tr>
+<tr><td><code>bbh.env/manifest</code></td><td><code>repl/manifest</code>, before every request</td><td>Supplies the system prompt, the tool description and the limits.</td></tr>
+<tr><td><code>bbh.env/expand-prompt</code></td><td><code>session/expand</code>, for every user input</td><td>Rewrites the prompt, answers without the model, or passes it through.</td></tr>
+<tr><td><code>bbh.env/commands</code></td><td><code>acp/commands-update</code></td><td>Extra slash commands offered for completion in agent-shell.</td></tr>
+<tr><td><code>bbh.env/jev-classify-task</code></td><td>The model, through the user namespace</td><td>A helper that routes a task with TypeSafe Jev. It is referred into <code>user</code> so the model can call it directly.</td></tr>
+</table>
+
+<h3>How the manifest is read and checked</h3>
+<p>The manifest may be a map, or a function that returns one. <code>repl/manifest</code> asks the control session for it, with a 10-second timeout. The result goes through <code>validate</code>, which checks each known key against a predicate:</p>
+<pre>
+:system, :tool-description     must be strings
+:deadline-ms                   positive integer  (default 120000)
+:max-output-chars              positive integer  (default 30000)
+:compact-at-tokens             positive integer  (default 200000)
+:keep-recent-tokens            positive integer  (default 20000)
+:trim-tool-chars               positive integer  (default 4000)
+</pre>
+<p>A key that fails its check falls back to its default, and the failure is recorded as a problem. If the whole manifest is not a map, every default applies. <code>system-prompt!</code> then appends a <code>[bbh]</code> paragraph to the system prompt that lists the problems, so the model knows its own edit did not take effect.</p>
+
+<div class='note'>
+<p><strong>Observation.</strong> <code>validate</code> only looks at keys in its <code>checks</code> table. A misspelled key such as <code>:max-output-char</code> is ignored without a problem message. A typo in a limit fails silently. Adding a check for unknown keys is a small, useful change.</p>
+</div>
+
+<h3>Why the model may edit its own env</h3>
+<p>The design log records the decision that the env, not the controller, owns skills and poteto-mode. The model can change how its own input is expanded, the same way it changes everything else in the REPL. Expansion runs in the control session with a 10-second timeout, and an error in <code>expand-prompt</code> is reported as a <code>[bbh]</code> line before the original prompt goes to the model. <span class='pill'>decisions.tsv, 2026-10-17 env</span></p>
+
+<h3>Expansion, in practice</h3>
+<p>When the user types <code>/skill:NAME look at the diff</code>, the env's <code>expand-prompt</code> finds the skill file and returns the prompt with the skill's body inlined. Typing a plain sentence in a new conversation prefixes it with <code>/skill:poteto-mode</code> while poteto-mode is on. A <code>{:reply ...}</code> answers without the model, which is how <code>/poteto-mode-off</code> works.</p>
+
+<div class='try'>
+<p><strong>Try it.</strong> Read the env's expansion function and the test that pins it down:</p>
+<pre><code>cd desktop/build/bbh
+grep -n 'expand-prompt' ~/.config/bbh/init.clj test/bbh/session_test.clj</code></pre>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>The model sets <code>:deadline-ms</code> to the string <code>&quot;slow&quot;</code>. What does the next request use? <em>Answer:</em> the default of 120000 ms. The check fails, the problem is recorded, and <code>system-prompt!</code> tells the model that the defaults apply. The rest of the manifest still applies.</p>
+</details>
+
+<h2 id='openrouter' class='lesson'>7. Engine one: OpenRouter</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Explain how bbh streams a chat completion, accumulates tool calls, retries transient failures, and cancels cleanly.</p>
+</div>
+
+<h3>The request</h3>
+<p><code>llm/openrouter</code> returns a sample function for a model id. It posts to <code>openrouter.ai/api/v1/chat/completions</code> with <code>stream</code> set to true and <code>usage.include</code> set to true, so the final chunk carries token counts and cost. The tools list is sent only when there is one.</p>
+
+<h3>Reading the stream</h3>
+<p>The body is server-sent events. <code>chunks</code> keeps lines that start with <code>data:</code>, stops at <code>[DONE]</code>, and parses each JSON payload. <code>step</code> folds each chunk into an accumulator. Text deltas are concatenated. Tool calls arrive in fragments: each fragment has an <code>index</code>, and its id, name and argument text are appended to the call at that index. <code>finish</code> sorts the calls by index and returns the message and usage.</p>
+<p>Each text delta is also passed to <code>on-text</code> immediately, which is how the terminal and ACP show text as it arrives.</p>
+
+<h3>Retries</h3>
+<p><code>post!</code> retries three kinds of failure: a thrown I/O exception, HTTP 429, and HTTP 5xx. The waits are 1, 2, 4, 8 and 16 seconds. A <code>Retry-After</code> header, in seconds, replaces the wait and is capped at 60 seconds. Each retry reports a note through <code>on-retry</code>, which the session turns into a <code>[bbh]</code> line. The wait polls the cancellation flag every 50 ms, so Ctrl-C stops a retry at once. <span class='pill'>decisions.tsv, 2026-10-18 retry</span></p>
+<p>Other errors are not retried. A 400 whose body mentions a context limit gets <code>:overflow true</code> in its ex-data, and the session uses that to compact and try once more.</p>
+
+<h3>Cancellation</h3>
+<p>The sample function creates a <code>cancelled</code> atom and gives the session a function that sets it and closes the response body. If the stream breaks after cancellation, <code>llm/openrouter</code> returns the partial text with <code>:interrupted true</code> and no tool calls. A break without cancellation throws, so a network failure is an error, not a silent success. <span class='pill'>decisions.tsv, 2026-10-18 streaming</span></p>
+
+<div class='try'>
+<p><strong>Try it.</strong> The retry and stream tests use stubbed HTTP responses, so they run offline:</p>
+<pre><code>cd desktop/build/bbh
+bb -cp src:test -e &quot;(require 'bbh.llm-test) (clojure.test/run-tests 'bbh.llm-test)&quot;</code></pre>
+<p>Read <code>rate-limits-and-server-errors-are-retried</code>, and note what the test does not cover: the decision log says no live 429 was observed.</p>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>A stream delivers half a tool call and then the connection drops, and the user did not cancel. What happens? <em>Answer:</em> the <code>IOException</code> is rethrown, because <code>cancelled</code> is false. The session records no partial tool call, and the error ends the turn. The user sees the error, not a half-finished call.</p>
+</details>
+
+<h2 id='claude' class='lesson'>8. Engine two: Claude Code</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Explain why Claude Code runs the loop, how the tool gets back into the session, and how the transcript and the process stay in step.</p>
+</div>
+
+<h3>Why</h3>
+<p>The design log records the decision to run Claude Code as the agent loop. It keeps the Claude subscription path that Pi's bridge already used. The CLI already owns sampling, retries and caching, so bbh does not reimplement them for Claude. <span class='pill'>decisions.tsv, 2026-10-17 claude</span></p>
+
+<h3>Starting the process</h3>
+<p><code>start-claude!</code> runs <code>claude</code> in print mode with stream-json input and output and partial messages. The flags carry the design:</p>
+<table>
+<tr><th>Flag</th><th>Why it is there</th></tr>
+<tr><td><code>--tools &quot;&quot;</code></td><td>Turns off Claude Code's built-in tools, so the model's only tool is bbh's.</td></tr>
+<tr><td><code>--strict-mcp-config --mcp-config ...</code></td><td>Loads exactly one MCP server, bbh's, and ignores any others the user has configured.</td></tr>
+<tr><td><code>--allowedTools mcp__bbh__clojure</code></td><td>Permits that one tool without asking.</td></tr>
+<tr><td><code>--setting-sources &quot;&quot;</code></td><td>Ignores the user's and project's Claude settings, so the run is reproducible.</td></tr>
+<tr><td><code>--system-prompt</code></td><td>The manifest's system prompt, read at start.</td></tr>
+<tr><td><code>--resume</code></td><td>The session id saved in <code>claude-session</code>, if there is one.</td></tr>
+</table>
+<p>A reader thread parses each stdout line into a queue. When stdout closes, it puts a sentinel on the queue so the turn fails cleanly instead of waiting forever.</p>
+
+<h3>The tool, through MCP and back</h3>
+<p>This is the part to understand carefully. Claude Code starts <code>mcp.clj</code> as a child process, and that child speaks MCP over stdio. It does not run code itself. It forwards every call to the bbh session:</p>
+<pre>
+Claude Code  --MCP tools/call-->  mcp.clj (bb -m bbh.mcp)
+                                     |  one JSON line over a loopback socket,
+                                     |  with the session's random token
+                                     v
+                          claude.clj serve-bridge
+                                     |
+                                     v
+                          session/run-code!  (the same path as the loop engine)
+                                     |
+                          REPL evaluates, events are emitted, result returned
+</pre>
+<p>The bridge listens on <code>127.0.0.1</code> with a random port, and every request must carry the token that bbh generated for this session. The token is passed to the MCP child in its environment. The <code>describe</code> operation returns the tool description from the manifest, so the description the model sees is the same one the loop engine uses.</p>
+<p>Because the call goes through <code>run-code!</code>, a Claude tool call produces the same events and the same REPL state as an OpenRouter one. Claude's own tool results are recorded when the stream reports them, in <code>record-tool-results!</code>.</p>
+
+<h3>Turns, in order</h3>
+<ol>
+  <li><code>system-prompt!</code> refreshes the manifest.</li>
+  <li><code>ensure-claude!</code> starts the bridge once, and starts a Claude process if none is running or the system prompt changed. A new system prompt needs a new process, because <code>--system-prompt</code> is fixed at start.</li>
+  <li>If the process is new and the transcript already has assistant turns, the prompt is prefixed with the earlier transcript as text. This covers a Claude session that joins a conversation late, such as after <code>--resume</code> in another front end.</li>
+  <li>The user message goes to stdin as one JSON line. The interrupt action sends a <code>control_request</code> on the same stdin.</li>
+  <li>The loop takes events from the queue. Text deltas are emitted. <code>message_start</code> gives input tokens, including cache reads and writes. <code>assistant</code> and <code>user</code> messages are recorded. <code>system init</code> saves the session id. <code>rate_limit_event</code> updates the limits for <code>/usage</code>. <code>result</code> adds the cost and throws if the result is an error.</li>
+</ol>
+
+<div class='note'>
+<p><strong>Observation.</strong> In the streaming path, separate text blocks are joined with a blank line for display. In <code>record-assistant!</code>, the stored text is the blocks joined with no separator. A transcript replayed later can therefore run two sentences together that the user saw on separate lines. It is a small inconsistency between what is shown and what is saved.</p>
+</div>
+
+<div class='try'>
+<p><strong>Try it.</strong> The Claude adapter is tested against a fake CLI, <code>test/fake-claude.clj</code>, so the tests need no subscription. Run them:</p>
+<pre><code>cd desktop/build/bbh
+bb -cp src:test -e &quot;(require 'bbh.claude-test) (clojure.test/run-tests 'bbh.claude-test)&quot;</code></pre>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>Why does changing the manifest's system prompt restart the Claude process, while changing the tool description does not? <em>Answer:</em> <code>--system-prompt</code> is passed when the process starts, so a new system prompt needs a new process. The tool description is fetched through <code>describe</code> each time the MCP server lists tools, so it can change without a restart.</p>
+</details>
+
+<h2 id='context' class='lesson'>9. Context, trimming and compaction</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Explain the difference between the transcript and the context. Explain why bbh trims tool output only from earlier turns, and how a compaction cut point is chosen.</p>
+</div>
+
+<h3>Two views of one conversation</h3>
+<p>The transcript keeps every message forever. The context is what the model sees. <code>context/view</code> builds it from the transcript and the latest compaction:</p>
+<ol>
+  <li>If there is a compaction, a user message with the summary comes first, under a header that says earlier messages were compacted.</li>
+  <li>Messages from the first kept index up to the start of the current turn come next. Tool output in them is cut to <code>:trim-tool-chars</code>, 4000 by default. The cut keeps the head and the tail and says how many characters it removed.</li>
+  <li>The current turn is included in full, so the model always sees its own latest tool results at full size.</li>
+</ol>
+
+<h3>Why only earlier turns</h3>
+<p>The design log says why. Trimming old output once per turn keeps the prompt-cache prefix stable within a turn. A provider caches the start of a request, so if bbh changed earlier messages on every round, the cache would miss on every round. Trimming only at the turn boundary means each turn costs at most one rewrite of the prefix. <span class='pill'>decisions.tsv, 2026-10-18 context</span></p>
+
+<h3>When compaction runs</h3>
+<p>Before each round, <code>turn!</code> checks whether the context has passed <code>:compact-at-tokens</code>, 200000 by default. A provider overflow error also triggers one compaction and one retry. The user can ask for one with <code>/compact</code>, and the text after the command becomes the focus of the summary. Tokens are estimated as one quarter of the JSON character count. That is a rough figure, and the design says so.</p>
+
+<h3>Where the cut goes</h3>
+<p><code>cut-point</code> picks the message index where the kept suffix begins. It considers only indices after the previous cut and never a tool message, because a tool result must stay with the call that asked for it. It takes the earliest candidate whose suffix fits within <code>:keep-recent-tokens</code>, 20000 by default. If none fits, it takes the latest candidate. If nothing lies before the cut, there is nothing to compact.</p>
+<p>The summary request asks a model for a fixed set of Markdown sections: goal, constraints, progress, decisions, next steps and critical context. It tells the model to keep the user's words, to name every file and value, and to record the REPL helpers that still exist. The new summary replaces the previous one, which is included in the request.</p>
+<p>The compaction is recorded in <code>compactions.jsonl</code> as <code>{first-kept, summary}</code>. The transcript is not changed, so an earlier compaction can always be reconstructed.</p>
+
+<div class='try'>
+<p><strong>Try it.</strong> Compute a cut point on a small transcript without a model. The first argument is the list of messages, the second is the index to start from, and the third is the token budget for the kept suffix:</p>
+<pre><code>cd desktop/build/bbh
+bb -cp src -e &quot;(require '[bbh.context :as c])
+(def msgs (vec (for [i (range 10)] {:role (if (even? i) &quot;user&quot; &quot;assistant&quot;) :content (apply str (repeat 400 &quot;x&quot;))})))
+(prn (c/cut-point msgs 0 300))
+(prn (c/cut-point msgs 0 100000))&quot;</code></pre>
+<p>The first call prints 8: with a 300-token budget only the last two messages fit, so eight messages are summarized. The second prints 1: with a generous budget the earliest candidate fits, so only the first message would be summarized. Both outputs match what the function's rule says.</p>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>A transcript ends with an assistant message that has a tool call, then a tool result, and the suffix budget would cut right before the tool result. What does <code>cut-point</code> do? <em>Answer:</em> tool messages are never candidates, so it moves the cut to an earlier user or assistant message, keeping the call and its result together.</p>
+</details>
+
+<h2 id='frontends' class='lesson'>10. Front ends: terminal and ACP</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Describe both front ends, show how each one drives the same session, and list the rules ACP enforces.</p>
+</div>
+
+<h3>The terminal</h3>
+<p><code>main.clj</code> is the entry point. <code>bbh</code> with no arguments starts a terminal session. It builds a conversation directory, starts the session, and reads lines with a JLine reader that keeps history in <code>~/.local/share/bbh/history</code>. Each line goes to <code>session/prompt!</code>. A Ctrl-C handler calls <code>interrupt!</code>, and <code>/quit</code> leaves. The terminal prints events as they arrive, with the code of each call in dim text and at most 15 lines of each result.</p>
+
+<h3>ACP</h3>
+<p><code>bbh acp</code> runs the Agent Client Protocol over stdin and stdout. Each line is a JSON-RPC request. The methods are:</p>
+<table>
+<tr><th>Method</th><th>What bbh does</th></tr>
+<tr><td><code>initialize</code></td><td>Answers protocol version 1. Declares that bbh cannot load sessions and accepts text prompts only.</td></tr>
+<tr><td><code>session/new</code></td><td>Creates a session with a timestamp id, starts its REPL, lists the available models, and sends the command list, which includes <code>bbh.env/commands</code>.</td></tr>
+<tr><td><code>session/prompt</code></td><td>Rejects anything but a non-empty list of text blocks. Refuses a second prompt while one is running. Runs <code>prompt!</code> in a future and answers with <code>end_turn</code> or <code>cancelled</code>.</td></tr>
+<tr><td><code>session/set_model</code></td><td>Changes the model, unless a turn is running.</td></tr>
+<tr><td><code>session/cancel</code></td><td>Calls <code>interrupt!</code>.</td></tr>
+</table>
+<p>Malformed JSON gets error -32700. A request that is not an object with a method gets -32600. Unknown methods get -32601. Errors inside a request are answered with that request's id, so one bad call never ends the process. <span class='pill'>decisions.tsv, 2026-10-17 reliability</span></p>
+<p>The ACP front end also turns events into agent-shell updates. Tool blocks are titled with the first line of their code, which fixed the invisible-call problem described in lesson 4.</p>
+
+<div class='note'>
+<p><strong>Observations.</strong> The session id is a timestamp with millisecond resolution, so two sessions created in the same millisecond would collide. This is unlikely for one user. A separate point is that <code>loadSession</code> is false, so agent-shell cannot restore an ACP session after Emacs restarts. Resume works only from the terminal with <code>--resume</code>.</p>
+</div>
+
+<div class='try'>
+<p><strong>Try it.</strong> Send ACP requests by hand and watch the replies. This starts a session, which creates a scratch REPL under the data directory:</p>
+<pre><code>cd desktop/build/bbh
+printf '%s\n' '{&quot;id&quot;:1,&quot;method&quot;:&quot;initialize&quot;,&quot;params&quot;:{}}' '{&quot;id&quot;:2,&quot;method&quot;:&quot;nope&quot;}' | BBH_MODEL=script/test/script.edn bb -cp src -m bbh.acp 2>/dev/null</code></pre>
+<p>The first reply reports protocol version 1. The second is an error, -32601, because <code>nope</code> is not a method.</p>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>Why does the ACP front end run <code>prompt!</code> in a future rather than inline? <em>Answer:</em> the reader thread must keep reading. If it blocked during a turn, a <code>session/cancel</code> request could not be read, so the user could not stop the turn.</p>
+</details>
+
+<h2 id='models' class='lesson'>11. Models and credentials</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Explain how a model id selects an engine, and where credentials come from.</p>
+</div>
+
+<h3>Model ids</h3>
+<p>A model id is <code>PROVIDER/MODEL</code>. The split happens at the first slash, so <code>openrouter/deepseek/deepseek-v4.1-flash</code> means provider <code>openrouter</code> and model <code>deepseek/deepseek-v4.1-flash</code>. <code>models/engine</code> maps the provider to an engine:</p>
+<table>
+<tr><th>Provider</th><th>Engine</th><th>Notes</th></tr>
+<tr><td><code>claude</code></td><td><code>:claude</code></td><td>Claude Code as the loop, on the subscription.</td></tr>
+<tr><td><code>openrouter</code></td><td><code>:loop</code> with <code>llm/openrouter</code></td><td>bbh's own loop against any OpenRouter model.</td></tr>
+<tr><td><code>script</code></td><td><code>:loop</code> with a scripted sampler</td><td>For tests and demos. Replies come from an EDN file, where a string is an answer and <code>{:code ...}</code> is a tool call.</td></tr>
+</table>
+<p>The default is <code>claude/haiku</code>, and <code>BBH_MODEL</code> overrides it. The model list offered in ACP is fixed in <code>models/available</code>. Any other provider stops with an error that names the three valid ones.</p>
+
+<h3>Credentials</h3>
+<p><code>auth.clj</code> shares credentials with Pi and Claude Code instead of storing its own:</p>
+<ul>
+  <li><strong>API keys</strong> come from an environment variable first, such as <code>OPENROUTER_API_KEY</code>. Otherwise they come from the provider's entry in Pi's <code>auth.json</code>.</li>
+  <li><strong>Key values</strong> follow Pi's convention. A value that begins with <code>!</code> is a shell command whose output is the key. A value that names a set environment variable reads that variable. Anything else is the key itself.</li>
+  <li><strong>OAuth tokens</strong> for Codex come from Pi's file, and only while they are unexpired.</li>
+  <li><strong>The Claude subscription</strong> comes from Claude Code's own credentials file, which the CLI refreshes. bbh reads it only for <code>/usage</code>.</li>
+</ul>
+
+<div class='try'>
+<p><strong>Try it.</strong> Check which provider keys bbh can see, without printing them:</p>
+<pre><code>cd desktop/build/bbh
+bb -cp src -e &quot;(require '[bbh.auth :as a]) (prn (boolean (a/api-key &quot;OPENROUTER_API_KEY&quot; &quot;openrouter&quot;)))&quot;</code></pre>
+<p>The output is <code>true</code> or <code>false</code>. The key itself is never printed.</p>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>An auth.json entry has the key <code>!pass show openrouter</code>. What does bbh do with it? <em>Answer:</em> <code>resolve-key</code> runs that command through bash and uses its trimmed output as the key. The key is never stored in bbh.</p>
+</details>
+
+
+<h2 id='testing' class='lesson'>12. Testing</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Name each test layer and what it proves. Explain why the tests use scripted models.</p>
+</div>
+
+<h3>Layers</h3>
+<table>
+<tr><th>Layer</th><th>Command</th><th>What it proves</th></tr>
+<tr><td>Unit and integration, offline</td><td><code>bb test</code></td><td>Sessions, streaming, the ACP process, the Claude adapter, MCP, env examples and eval code.</td></tr>
+<tr><td>Emacs, batch</td><td><code>bb test:emacs</code></td><td>The composer, history, cancellation and the nREPL endpoint, through Doom's agent-shell config in <code>emacs --batch</code>.</td></tr>
+<tr><td>Doom, in a terminal</td><td><code>bb test:doom</code></td><td>Cold Doom startup and the Ctrl-N send path, in a real PTY. The launcher variant also tests <code>emacs-bbh</code>.</td></tr>
+<tr><td>Live model</td><td><code>bb try MODEL PROMPT...</code></td><td>Real prompts through agent-shell, printing the buffer. This spends quota.</td></tr>
+</table>
+
+<h3>Test files and what they cover</h3>
+<table>
+<tr><th>File</th><th>Covers</th></tr>
+<tr><td><code>session_test.clj</code></td><td>Definitions across turns, failing evaluations, deadlines that restart the REPL, manifest redefinition and fallback, interrupts, prompt expansion, commands without a model, compaction on large contexts, overflow retry, the focused <code>/compact</code>, and output elision.</td></tr>
+<tr><td><code>llm_test.clj</code></td><td>Stream accumulation, broken streams, cancellation, retries with stubbed responses, overflow messages, and releasing the response body.</td></tr>
+<tr><td><code>context_test.clj</code></td><td>Trimming before the current turn, replacing compacted messages with the summary, and cut points that never orphan a tool result.</td></tr>
+<tr><td><code>acp_test.clj</code></td><td>Whitespace chunks, rejected invalid or overlapping requests, and an agent process that stays up after bad input.</td></tr>
+<tr><td><code>claude_test.clj</code></td><td>Cancellation, closing the MCP listener on stop, and provider errors reported as errors. Uses <code>fake-claude.clj</code>.</td></tr>
+<tr><td><code>env_test.clj</code></td><td>The documented examples in the prompt run in a real REPL.</td></tr>
+<tr><td><code>eval_test.clj</code></td><td>Assertions, labels, and source fingerprints of the eval harness.</td></tr>
+</table>
+
+<h3>Design choices in the tests</h3>
+<ul>
+  <li><strong>Scripted models.</strong> <code>models/script</code> replays a fixed list of replies. A test that depends on the model's choices would be flaky, and this one is deterministic.</li>
+  <li><strong>A fake Claude CLI.</strong> The Claude adapter is tested against a process that speaks stream-json, so cancellation and listener cleanup can be checked without a subscription. The decision log is explicit that this does not establish live provider behavior. <span class='pill'>decisions.tsv, 2026-10-18 claude</span></li>
+  <li><strong>Private data directories.</strong> Emacs tests run with a temporary <code>XDG_DATA_HOME</code>, so they never write sessions into the user's conversation directory. The log records the cleanup of test sessions that had been written there. <span class='pill'>decisions.tsv, 2026-10-17 cleanup</span></li>
+  <li><strong>Startup tests must not overwrite the saved workspace.</strong> The Doom startup test isolates its history and workspace writes, because an earlier version could overwrite the user's saved layout. <span class='pill'>decisions.tsv, 2026-10-18 verification</span></li>
+  <li><strong>Tests for bugs seen in use.</strong> Several regressions began as a symptom in a live run: dropped whitespace in ACP chunks, a leaked MCP listener, a broken stream reported as success, and a helper that was not found. Each has a test that fails on the old behavior.</li>
+</ul>
+
+<div class='try'>
+<p><strong>Try it.</strong> Run the whole offline suite, the same command the repository uses:</p>
+<pre><code>cd desktop/build/bbh
+bb test</code></pre>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>Why does <code>bb test</code> not exercise a real Claude subscription? <em>Answer:</em> the test suite must run offline and without quota, so the Claude adapter is tested against a fake CLI. Live behavior is checked separately with <code>bb try</code>, and the decision log lists the live system-prompt restart as still unverified.</p>
+</details>
+
+<h2 id='evals' class='lesson'>13. Evaluation from traces</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Explain the two evaluation tools, the assertion registry, the label and judge loop, and why the reported results are provisional.</p>
+</div>
+
+<h3>Every conversation is a trace</h3>
+<p>A trace is one conversation directory with a <code>messages.jsonl</code>. Because the transcript is plain chat messages (lesson 2), the eval tools can read every real conversation, and every archived comparison run, without any extra logging. This is the payoff of that early decision.</p>
+
+<h3>Cheap assertions from observed failures</h3>
+<p>The design follows Hamel Husain's advice to start with cheap assertions taken from failures you have actually seen. <code>eval/bbh/traces.clj</code> holds the registry. Each assertion is a function over a trace:</p>
+<table>
+<tr><th>Assertion</th><th>Hit when</th></tr>
+<tr><td><code>guessed-arity</code></td><td>A step raised <code>ArityException</code>, usually a guessed helper signature.</td></tr>
+<tr><td><code>unresolved-symbol</code></td><td>A step named a function or namespace the REPL does not have.</td></tr>
+<tr><td><code>pi-idiom</code></td><td>The code used Pi codemode conventions such as <code>await</code>, <code>tools/...</code>, <code>fs/read</code> or <code>fs/list</code>.</td></tr>
+<tr><td><code>root-blind-glob</code></td><td>The code used a <code>**/</code> glob, which skips root-level files.</td></tr>
+<tr><td><code>repl-restart</code></td><td>An evaluation timed out or died, and the REPL lost its definitions.</td></tr>
+<tr><td><code>error-streak</code></td><td>Three or more failed evaluations ran in a row.</td></tr>
+<tr><td><code>no-final-answer</code></td><td>A turn ended without assistant text after its last tool call.</td></tr>
+</table>
+<p>A cohort is one comparison run and profile, or one day of real conversations. <code>bb eval:lint</code> counts, for each cohort, how many traces hit each assertion. That is how a change can be shown to make a failure rarer. The signature prompt change is the worked example: the root-blind glob hit 10 of 12 first-iteration traces, and none of the final ones. <span class='pill'>decisions.tsv, 2026-10-18 eval-traces</span></p>
+
+<h3>Labels and a judge</h3>
+<p>Labels are binary, good or bad, and each carries a critique. They are appended to one file, so the history is never rewritten. An LLM judge reads a trace without the grader's verdict, using <code>eval/judge.md</code> as its system prompt. Its labeler name includes a hash of <code>judge.md</code>, so an edited prompt starts a new labeler and old verdicts remain comparable.</p>
+<p><code>eval:agreement</code> reports precision and recall with bad as the positive class. Raw agreement is not reported, because when most traces are good it misleads. The command prints every disagreement with both critiques, which is what you use to edit the judge. The stated rule is to trust the judge on unlabeled traces only after its precision and recall hold on 25 to 50 of your labels, and to keep sampling afterward.</p>
+
+<h3>Comparisons</h3>
+<p><code>eval:compare</code> runs fixed tasks through three profiles: Pi with its native tools, Pi with the production SCI extension, and bbh. The tasks give the same generated projects to every profile. <code>eval:contracts</code> checks the protocol with a scripted provider and makes no model calls.</p>
+<p>The results are small and should be read that way. The first live cohort was Pi 12 of 12, Pi with SCI 12 of 12, and bbh 11 of 12, and the log records no performance verdict. The signature cohort moved bbh from 70 calls with 16 errors to 48 calls with 3 errors, against Pi with SCI at 65 calls and 6 errors. These are four tasks, three repetitions, and profiles that differ in prompts and tools, so the log does not declare a winner. <span class='pill'>decisions.tsv, 2026-10-18 eval-live, eval-review</span></p>
+
+<div class='try'>
+<p><strong>Try it.</strong> Run the lint over the archived traces. It makes no model calls:</p>
+<pre><code>cd desktop/build/bbh
+bb eval:lint</code></pre>
+<p>Pick one cohort in the output, then render one of its traces with <code>bb eval:show DIR</code>.</p>
+</div>
+
+<details><summary>Check yourself</summary>
+<p>Why does the judge get the trace without the grader's verdict? <em>Answer:</em> the verdict is the answer key. If the judge saw it, agreement with the labels would measure copying, not judgment.</p>
+</details>
+
+<h2 id='decisions' class='lesson'>14. Design decisions</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Explain the main design choices, the alternatives they replaced, and what each one cost. Use the decision log as the evidence.</p>
+</div>
+
+<p>The project keeps a decision log, <code>decisions.tsv</code>, with one row per decision. It records the time, the phase, the decision, why, the evidence and the result. The table below gathers the decisions that shape the internals. Open items are listed in lesson 15.</p>
+
+<table>
+<tr><th>Decision</th><th>Why</th><th>What it cost or what it bought</th></tr>
+<tr><td>One tool, <code>clojure</code>, evaluated in a persistent REPL</td><td>The model can keep helpers and change its environment through ordinary code.</td><td>Restarts lose state. The REPL is not a sandbox.</td></tr>
+<tr><td>Claude Code runs the loop for <code>claude/...</code></td><td>Keeps the subscription path. The CLI owns sampling, retries and caching.</td><td>Two engines with two code paths. The tool must cross an MCP bridge.</td></tr>
+<tr><td>One event stream, not UI callbacks</td><td>ACP and the terminal consume the same events, and the tests can check them.</td><td>Front ends must translate events. The ACP title fix came from that translation.</td></tr>
+<tr><td>The env owns <code>expand-prompt</code> and skills</td><td>The model can change how its own input is expanded.</td><td>The env can break input handling, so expansion errors are reported in the transcript.</td></tr>
+<tr><td>Transcript is plain chat messages; the context is a view</td><td>The eval tools and the Claude adapter read the same files, and compaction never rewrites history.</td><td>Every turn recomputes the view. Trimming and summaries must be pure functions.</td></tr>
+<tr><td>Trim tool output only from earlier turns</td><td>The provider's prompt cache stays valid within a turn.</td><td>Old tool output is shortened once per turn, not on every round.</td></tr>
+<tr><td>Compact at a token threshold and on overflow</td><td>The budget controls cost and focus, and overflow recovery covers smaller context windows.</td><td>Token counts are estimates. The live check compacted twice and still answered correctly.</td></tr>
+<tr><td>Retry transient failures with capped backoff; interrupts cancel waits</td><td>One transient error used to end the whole turn.</td><td>Verified with stubbed responses. Not yet seen against a live 429.</td></tr>
+<tr><td>Kill and restart the REPL on timeout or interrupt</td><td>Babashka cannot interrupt a busy thread.</td><td>Definitions are lost. The model is told in the same result.</td></tr>
+<tr><td>Read limits from Claude Code's rate-limit events</td><td>The CLI already streams the utilization, so no polling during turns.</td><td>Only the windows the CLI reports are available.</td></tr>
+<tr><td>Default to <code>claude/haiku</code>, keep <code>BBH_MODEL</code></td><td>The user asked for Haiku as the default.</td><td>Other models must be chosen explicitly.</td></tr>
+<tr><td>Eval traces read from the same archive as real use</td><td>The eval tools need no extra logging.</td><td>Trends come from archived run directories, not a ledger of results.</td></tr>
+<tr><td>Source-level assertions, then judge and labels after</td><td>Cheap checks come first. The judge is trusted only after it matches your labels.</td><td>Assertions are a registry that grows with observed failures.</td></tr>
+</table>
+
+<div class='note'>
+<p><strong>Reading the log.</strong> Each row carries its evidence: a test name, a live run, or a measured number. Some rows are marked <em>open</em> or <em>unverified</em>. Those are the honest limits of the design, and they are the next place to look.</p>
+</div>
+
+<h2 id='limits' class='lesson'>15. Limits and open questions</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Separate what the design guarantees from what it only hopes for. Know where to look before trusting a behavior.</p>
+</div>
+
+<h3>Open in the decision log</h3>
+<ul>
+  <li><strong>Provider cost semantics.</strong> Cumulative cost from Claude Code's result events was not verified against a real subscription run.</li>
+  <li><strong>Live Claude restart with a new system prompt.</strong> The fake-CLI test covers the restart logic. A live restart was not checked, because real quota was deliberately not spent.</li>
+  <li><strong>ACP resume.</strong> bbh does not load ACP sessions, so there is no resume in Emacs yet.</li>
+  <li><strong>The doom-check PATH warning.</strong> <code>make doom-check</code> still reports an environment PATH warning. The log chose not to hide it by changing the env file or the baseline. <span class='pill'>decisions.tsv, 2026-10-17 doom</span></li>
+  <li><strong>Judge trust.</strong> Two labels prove the pipeline, not alignment. The judge needs 25 to 50 labels before its verdicts can stand in for yours.</li>
+  <li><strong>Persistent helpers and queued prompts.</strong> The eval contracts list these scenarios as untested.</li>
+</ul>
+
+<h3>Limits you will meet in use</h3>
+<ul>
+  <li><strong>No rollback and no branching.</strong> The transcript only grows. You can compact or restart, but you cannot undo a turn.</li>
+  <li><strong>The REPL is not a sandbox.</strong> Model code runs with your permissions. Everything the REPL can reach, bbh can reach.</li>
+  <li><strong>Restarts lose definitions.</strong> A deadline, an interrupt or <code>/restart</code> resets the REPL. The transcript and the init file survive, and nothing else does.</li>
+  <li><strong>Estimated tokens.</strong> One quarter of the JSON character count is a rough guide. Compaction thresholds inherit that error.</li>
+  <li><strong>Round limit.</strong> A turn stops after 100 tool rounds, and the model is told so in a note. It is a fixed constant, not a manifest key.</li>
+</ul>
+
+<h3>Observations from reading the code</h3>
+<p>These are not in the decision log. They come from reading the source for this course, and each one can be checked with a small test:</p>
+<ul>
+  <li><code>validate</code> ignores keys it does not know, so a misspelled limit fails silently (lesson 6).</li>
+  <li><code>record-assistant!</code> joins text blocks with no separator, while the display separates them (lesson 8).</li>
+  <li>ACP session ids have millisecond resolution, so ids could collide if two sessions start in the same millisecond (lesson 10).</li>
+</ul>
+
+<h2 id='exercises' class='lesson'>16. Exercises</h2>
+<div class='goals'>
+<p><strong>Learning goals.</strong> Apply what you learned by making a small, verifiable change to bbh.</p>
+</div>
+
+<ol>
+  <li><strong>Trace one turn.</strong> Write a scripted reply file with one text step and one code step, then run the terminal with <code>BBH_MODEL=script/PATH</code>. Name each event you see, and which function emitted it.</li>
+  <li><strong>Reject unknown manifest keys.</strong> Extend <code>repl/validate</code> so an unknown key produces a problem line. Write a test in <code>env_test.clj</code> that fails before your change and passes after it. Consider whether the fallback text should name the valid keys.</li>
+  <li><strong>Add a built-in command.</strong> Add <code>/tokens</code> to <code>session/commands</code>, which reports the current <code>context/tokens</code> estimate. Make sure it runs without the model, and add a test in <code>session_test.clj</code> modelled on <code>commands-run-without-the-model</code>.</li>
+  <li><strong>Find the cut.</strong> Using <code>cut-point</code>, construct a transcript where the earliest fitting cut would land on a tool message. Show that the function moves the cut and explain why in one paragraph.</li>
+  <li><strong>Add an assertion.</strong> Follow the README's instructions to add an assertion to <code>traces.clj</code> for a failure you have seen in a trace. Add a test in <code>eval_test.clj</code> that builds a conversation with the failure, then run <code>bb eval:lint</code> over it.</li>
+  <li><strong>Settle a question.</strong> Verify or refute the observation about joined text blocks. Write the test that shows the difference between display and storage, and propose the change that makes them agree.</li>
+</ol>
+
+<h2 id='glossary' class='lesson'>Glossary</h2>
+<dl>
+  <dt>ACP</dt><dd>Agent Client Protocol. JSON-RPC over stdio, used by Emacs agent-shell to talk to bbh.</dd>
+  <dt>Cohort</dt><dd>A set of eval traces grouped by comparison run and profile, or by day for real conversations.</dd>
+  <dt>Compaction</dt><dd>Replacing older messages in the model's view with a summary. The transcript itself is not changed.</dd>
+  <dt>Control session</dt><dd>The nREPL session bbh uses for its own questions, which leaves the model's namespace alone.</dd>
+  <dt>Cut point</dt><dd>The message index where the kept suffix begins during compaction. Never a tool message.</dd>
+  <dt>Engine</dt><dd>The thing that runs a turn: <code>:loop</code> for OpenRouter and scripts, or <code>:claude</code> for Claude Code.</dd>
+  <dt>Env</dt><dd>The init file and the vars it defines, which bbh reads by name: manifest, expand-prompt and commands.</dd>
+  <dt>Event</dt><dd>A map with a <code>:type</code> that the session emits and a front end renders.</dd>
+  <dt>Judge</dt><dd>An LLM that labels traces good or bad, using <code>judge.md</code>. Checked against your labels before its verdicts count.</dd>
+  <dt>Label</dt><dd>A binary good or bad verdict with a critique, appended to <code>labels.jsonl</code>.</dd>
+  <dt>Manifest</dt><dd><code>bbh.env/manifest</code>: the system prompt, tool description and limits, read before every request.</dd>
+  <dt>MCP</dt><dd>Model Context Protocol. How Claude Code calls bbh's tool, through <code>mcp.clj</code>.</dd>
+  <dt>nREPL</dt><dd>The network REPL protocol, spoken in bencode, that bbh uses to talk to the REPL process.</dd>
+  <dt>Poteto-mode</dt><dd>A workflow that starts each new conversation with a skill that routes tasks through Jev. Turned off with <code>/poteto-mode-off</code>.</dd>
+  <dt>Skill</dt><dd>A <code>SKILL.md</code> file that the env can inline into a prompt with <code>/skill:NAME</code>.</dd>
+  <dt>Trace</dt><dd>One conversation directory, read by the eval tools.</dd>
+  <dt>Transcript</dt><dd><code>messages.jsonl</code>: the durable, append-only record of a conversation.</dd>
+  <dt>Trimming</dt><dd>Shortening tool output from earlier turns in the context view, with head and tail kept.</dd>
+  <dt>Turn</dt><dd>One user prompt and the model's full response, including any tool rounds.</dd>
+  <dt>User session</dt><dd>The nREPL session that runs the model's code and keeps its definitions.</dd>
+</dl>
+
+<h2 class='lesson'>Where to go next</h2>
+<p>Read the source with the course open beside it. Start with <code>session.clj</code> and follow one prompt into the engine and back out through the events. The exercises are small enough to finish in an afternoon, and each one changes a single place the course has named.</p>
+
+</main>
+</body>
+</html>
+
+
