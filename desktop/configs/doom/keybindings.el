@@ -1,5 +1,14 @@
 ;;; keybindings.el --- Doom keybindings -*- lexical-binding: t; -*-
 
+
+(load! "key-coach")
+(eng/key-coach-mode 1)
+(after! which-key
+  (setq which-key-idle-delay 0.35))
+(map! :leader
+      :desc "Toggle motion coaching" "t h" #'eng/key-coach-mode
+      :desc "Motion coaching report" "t H" #'eng/key-coach-report)
+
 (map! :leader
       :desc "Toggle Treemacs" "e" #'+treemacs/toggle)
 
@@ -69,11 +78,12 @@
       (call-interactively #'flycheck-list-errors)
     (call-interactively #'flymake-show-buffer-diagnostics)))
 
+(load! "key-navigate")
 (map! :map general-override-mode-map
-      :desc "Window left"  "C-h" #'evil-window-left
-      :desc "Window down"  "C-j" #'evil-window-down
-      :desc "Window up"    "C-k" #'evil-window-up
-      :desc "Window right" "C-l" #'evil-window-right)
+      :desc "Focus left"  "C-h" (eng/keylog-command "Ctrl+h" "Focus left" (cmd! (eng/navigate "left")))
+      :desc "Focus down"  "C-j" (eng/keylog-command "Ctrl+j" "Focus down" (cmd! (eng/navigate "down")))
+      :desc "Focus up"    "C-k" (eng/keylog-command "Ctrl+k" "Focus up" (cmd! (eng/navigate "up")))
+      :desc "Focus right" "C-l" (eng/keylog-command "Ctrl+l" "Focus right" (cmd! (eng/navigate "right"))))
 
 (map! :leader
       :desc "Find file"             "f f" #'find-file
@@ -209,3 +219,5 @@
     (map! :map clojure-ts-mode-map
           :localleader
           :desc "Start REPL" "r J" #'eng/clojure-start-repl)))
+
+(load! "shared-keys")

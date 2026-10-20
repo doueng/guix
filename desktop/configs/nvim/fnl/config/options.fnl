@@ -72,7 +72,7 @@
 (set vim.opt.guicursor "n-v-c-sm:block,i-ci-ve:ver25-HiddenCursor,r-cr-o:hor20")
 (set vim.opt.signcolumn :yes)
 (set vim.opt.updatetime 250)
-(set vim.opt.timeoutlen 300)
+(set vim.opt.timeoutlen 600)
 
 (set vim.opt.splitright true)
 (set vim.opt.splitbelow true)

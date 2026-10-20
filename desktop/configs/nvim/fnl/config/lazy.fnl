@@ -20,6 +20,8 @@
                        :plugins.mason
                        :plugins.colorscheme
                        :plugins.which-key
+                       :plugins.hardtime
+                       :plugins.smart-splits
                        :plugins.dashboard
                        :plugins.telescope
                        :plugins.lualine

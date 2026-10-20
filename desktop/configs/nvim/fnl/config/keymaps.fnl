@@ -4,22 +4,15 @@
 (vim.keymap.set [:n :x] :k "v:count == 0 ? 'gk' : 'k'"
                 {:expr true :silent true})
 
-(vim.keymap.set :n :<C-h> :<C-w>h {:desc "Go to left window" :remap true})
-(vim.keymap.set :n :<C-j> :<C-w>j {:desc "Go to lower window" :remap true})
-(vim.keymap.set :n :<C-k> :<C-w>k {:desc "Go to upper window" :remap true})
-(vim.keymap.set :n :<C-l> :<C-w>l {:desc "Go to right window" :remap true})
-
-(vim.keymap.set :n :<C-Up> "<cmd>resize +2<cr>"
-                {:desc "Increase window height"})
-
-(vim.keymap.set :n :<C-Down> "<cmd>resize -2<cr>"
-                {:desc "Decrease window height"})
-
-(vim.keymap.set :n :<C-Left> "<cmd>vertical resize -2<cr>"
-                {:desc "Decrease window width"})
-
-(vim.keymap.set :n :<C-Right> "<cmd>vertical resize +2<cr>"
-                {:desc "Increase window width"})
+;; smart-splits moves between windows, then Herdr panes, then hands off to
+;; keyleader for Hyprland. Resizing grows the Herdr pane once Neovim fills it.
+(let [keylog (require :config.keylog)]
+  (each [_ [key direction] (ipairs [[:h :left] [:j :down] [:k :up] [:l :right]])]
+    (keylog.map (.. :<C- key ">") #((. (require :smart-splits) (.. :move_cursor_ direction)))
+                (.. "Focus " direction) (.. :Ctrl+ key)))
+  (each [_ [key direction] (ipairs [[:Left :left] [:Down :down] [:Up :up] [:Right :right]])]
+    (keylog.map (.. :<C- key ">") #((. (require :smart-splits) (.. :resize_ direction)))
+                (.. "Resize " direction) (.. :Ctrl+ key))))
 
 (vim.keymap.set :n :<A-j> "<cmd>m .+1<cr>==" {:desc "Move down"})
 (vim.keymap.set :n :<A-k> "<cmd>m .-2<cr>==" {:desc "Move up"})
@@ -54,3 +47,5 @@
 
 (vim.keymap.set [:n :v] :<C-c> "\"+y" {:desc "Copy to clipboard"})
 (vim.keymap.set [:n :v] :<C-x> "\"+d" {:desc "Cut to clipboard"})
+
+(require :config.shared-keys)

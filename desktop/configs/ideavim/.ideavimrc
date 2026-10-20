@@ -55,3 +55,6 @@ nmap gi :action GotoImplementation<CR>
 nmap gI :action GotoSuperMethod<CR>
 
 set nofoldenable
+
+" Shared leader grammar, after idea-doom-emacs so these meanings win.
+source ~/.config/ideavim/shared-keys.vim
