@@ -58,6 +58,7 @@ Skills come from Pi's directories, so the pstack pack and project skills load as
 - `src/bbh/session.clj` owns a conversation: transcript, REPL, commands, events and the bbh tool loop.
 - `src/bbh/claude.clj` and `src/bbh/mcp.clj` run turns through Claude Code.
 - `src/bbh/acp.clj` translates events into ACP updates. `src/bbh/main.clj` is the terminal front end and the entry point.
+- `src/bbh/delimiters.clj` heals the model's code before it runs, as pi-sci's `src/delimiters.ts` does. It appends the closers of a form truncated within its last 10 lines, or drops extra closers at the very end, and adds an `[auto-repair]` line to the result. Anything else runs unchanged.
 - `src/bbh/repl.clj` starts the REPL process and evaluates over nREPL. `src/bbh/llm.clj` streams OpenRouter.
 - `src/bbh/usage.clj` reports Claude, Codex and OpenRouter limits, after Pi's `pi-usage` extension.
 

@@ -56,6 +56,16 @@
            (for [{:keys [type code text status]} @(:events h)]
              (case type :tool-call [type code] :tool-result [type text status] :text [type text]))))))
 
+(deftest a-truncated-call-is-healed-and-says-so
+  (let [h (harness "" [{:code "(+ 20 (* 2 11)"} {:code "(def x (+ 1 2)\n(inc x)"} "done"])]
+    (session/prompt! (:s h) "add")
+    (stop! h)
+    (let [[healed swallowed] (tool-results h)]
+      (is (= "[auto-repair] Unbalanced delimiters: appended `)` to close the `(` opened at line 1, column 1. If that placement is wrong, resend the corrected text.\n=> 42"
+             healed))
+      (is (str/includes? swallowed "EOF while reading"))
+      (is (not (str/includes? swallowed "auto-repair"))))))
+
 (deftest a-failing-evaluation-reports-failed
   (let [h (harness "" [{:code "(/ 1 0)"} "done"])]
     (session/prompt! (:s h) "divide")

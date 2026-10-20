@@ -4,6 +4,7 @@
   Events are maps with a :type of :text, :tool-call, :tool-result or :usage."
   (:require [babashka.fs :as fs]
             [bbh.context :as context]
+            [bbh.delimiters :as delimiters]
             [bbh.repl :as repl]
             [bbh.transcript :as transcript]
             [bbh.usage :as usage]
@@ -94,15 +95,17 @@
                           (str/join "\n" problems)))))
 
 (defn run-code!
-  "Evaluate CODE for tool call ID. Emits the call and its result and returns the
-  text the model sees."
+  "Evaluate CODE for tool call ID, healing a truncated form or extra trailing
+  closers first. Emits the call and its result and returns the text the model
+  sees."
   [s id code]
   (locking (:code-lock @s)
     (emit! s {:type :tool-call :id id :code code})
     (let [{:keys [repl manifest interrupted]} @s
+          {:keys [content note]} (delimiters/repair code)
           r (when-not interrupted
               (swap! s assoc :evaluating true)
-              (try (repl/eval! repl code (:deadline-ms manifest))
+              (try (repl/eval! repl (or content code) (:deadline-ms manifest))
                    (finally (swap! s assoc :evaluating false))))
           [text status]
           (cond interrupted
@@ -118,7 +121,8 @@
                         (when (seq partial) (str "\nOutput before that:\n" partial)))
                    :failed])
                 :else
-                [(render r (:max-output-chars manifest)) (if (:error? r) :failed :completed)])]
+                [(render r (:max-output-chars manifest)) (if (:error? r) :failed :completed)])
+          text (cond->> text note (str note "\n"))]
       (emit! s {:type :tool-result :id id :code code :text text :status status})
       text)))
 
