@@ -182,9 +182,41 @@
                                                        (map-elt data :tool-call)))
           ((or 'turn-complete 'error) (setq eng/bbh-transcript--reply nil)))))))
 
+(defun eng/bbh--tool-label (status title)
+  (concat (propertize (pcase status ("done" "✓") ("failed" "✗") (_ "…"))
+                      'face (pcase status ("done" 'success) ("failed" 'error) (_ 'warning)))
+          " " (propertize title 'face 'font-lock-function-name-face)))
+
+(defun eng/bbh--fontify-nested-blocks (limit)
+  "Fontify src and example blocks up to LIMIT as code.
+Org fontifies a tool block as one special block and skips the blocks inside it."
+  (while (re-search-forward "^#\\+begin_\\(src\\|example\\)\\(?: +\\(\\S-+\\)\\)?.*\n" limit t)
+    (let ((beg (match-end 0))
+          (type (match-string 1))
+          (lang (match-string 2)))
+      (when (re-search-forward (format "^#\\+end_%s$" type) nil t)
+        (let ((end (match-beginning 0)))
+          (when (and lang (< beg end))
+            (org-src-font-lock-fontify-block lang beg end))
+          (add-face-text-property beg end 'org-block t)))))
+  nil)
+
+(defconst eng/bbh-transcript--markup
+  '((eng/bbh--fontify-nested-blocks)
+    ("^#\\+begin_\\(?:src\\|example\\|quote\\).*\n\\|\n#\\+end_\\(?:src\\|example\\|quote\\|tool\\)$"
+     (0 (progn (put-text-property (match-beginning 0) (match-end 0) 'display "") nil)))
+    ("^#\\+begin_tool \\([a-z]+\\) \\(.*\\)$"
+     (0 (progn (put-text-property (match-beginning 0) (match-end 0) 'display
+                                  (eng/bbh--tool-label (match-string 1) (match-string 2)))
+               nil))))
+  "Format nested blocks as code and hide the org markup lines around blocks.")
+
 (define-derived-mode eng/bbh-transcript-mode org-mode "bbh"
   "A read-only org rendering of a bbh conversation."
   (setq buffer-read-only t)
+  (setq-local font-lock-extra-managed-props
+              (cl-adjoin 'display font-lock-extra-managed-props))
+  (font-lock-add-keywords nil eng/bbh-transcript--markup 'append)
   (visual-line-mode 1))
 
 (defun eng/bbh--transcript (shell &optional buffer)

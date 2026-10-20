@@ -46,6 +46,22 @@
   (should (equal (eng/bbh--md->org "# Plan\n* use `(+ 1 2)` and **bold** [docs](https://x.org)\n```clojure\n* not a heading\n```\n| a | b |\n|:--|--:|\n```\nunclosed")
                  "*Plan*\n- use ~(+ 1 2)~ and *bold* [[https://x.org][docs]]\n#+begin_src clojure\n,* not a heading\n#+end_src\n| a | b |\n|---|---|\n#+begin_example\nunclosed\n#+end_example")))
 
+(defun bbh-test--screen (buffer)
+  "BUFFER's text as displayed, with display strings and without invisible text."
+  (with-current-buffer buffer
+    (font-lock-ensure)
+    (let ((pos (point-min)) (out ""))
+      (while (< pos (point-max))
+        (let ((display (get-char-property pos 'display))
+              (next (min (next-single-char-property-change pos 'display)
+                         (next-single-char-property-change pos 'invisible))))
+          (unless (invisible-p pos)
+            (setq out (concat out (if (stringp display)
+                                      (substring-no-properties display)
+                                    (buffer-substring-no-properties pos next)))))
+          (setq pos next)))
+      out)))
+
 (defun bbh-test--tool-folded-p (transcript)
   (with-current-buffer transcript
     (save-excursion
@@ -73,10 +89,19 @@
                      "* add forty\n#+begin_quote\nadd forty\nand two\n#+end_quote\n\n#+begin_tool done (+ 40 2)\n#+begin_src clojure\n(+ 40 2)\n#+end_src\n\n#+begin_example\n=> 42\n#+end_example\n#+end_tool\n\nThe answer is 42.\n"))
       (with-current-buffer transcript
         (should (derived-mode-p 'org-mode))
-        (should buffer-read-only))
+        (should buffer-read-only)
+        (font-lock-ensure)
+        (dolist (text '("(+ 40 2)\n#+end_src" "=> 42"))
+          (goto-char (point-min))
+          (search-forward text)
+          (should (memq 'org-block (ensure-list (get-text-property (match-beginning 0) 'face))))))
+      (should (equal (bbh-test--screen transcript)
+                     "* add forty\nadd forty\nand two\n\n✓ (+ 40 2)\n\nThe answer is 42.\n"))
       (should (bbh-test--tool-folded-p transcript))
       (call-interactively (key-binding (kbd "C-c C-t")))
       (should-not (bbh-test--tool-folded-p transcript))
+      (should (equal (bbh-test--screen transcript)
+                     "* add forty\nadd forty\nand two\n\n✓ (+ 40 2)\n(+ 40 2)\n\n=> 42\n\nThe answer is 42.\n"))
       (with-current-buffer transcript
         (call-interactively (key-binding (kbd "C-c C-t"))))
       (should (bbh-test--tool-folded-p transcript))
