@@ -302,6 +302,18 @@ Org leaves result blocks, a special block, without the code background."
 
 (define-key eng/bbh-transcript-mode-map (kbd "C-c C-t") #'eng/bbh-toggle-tools)
 
+;; Magit's section keys in evil normal state: n and p move between headings,
+;; M-n and M-p between prompts, ^ up, S-TAB cycles all tool results, q buries.
+(with-eval-after-load 'evil
+  (evil-define-key 'normal eng/bbh-transcript-mode-map
+    (kbd "n") #'org-next-visible-heading
+    (kbd "p") #'org-previous-visible-heading
+    (kbd "M-n") #'org-forward-heading-same-level
+    (kbd "M-p") #'org-backward-heading-same-level
+    (kbd "^") #'outline-up-heading
+    (kbd "<backtab>") #'eng/bbh-toggle-tools
+    (kbd "q") #'bury-buffer))
+
 (defvar-local eng/bbh-composer nil)
 (put 'eng/bbh-composer 'permanent-local t)
 
