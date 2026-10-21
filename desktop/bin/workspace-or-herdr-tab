@@ -7,11 +7,11 @@
 
 (require '[babashka.process :as p]
          '[cheshire.core :as json]
-         '[clojure.string :as str]
          '[herdr.client :as herdr]
          '[hypr.dispatch :as hypr])
 
-(def workspace 1)
+;; desktop/bin/herdr-terminal starts Herdr's Ghostty with this class.
+(def herdr-class "com.mitchellh.ghostty.herdr")
 
 (defn hyprctl [& args]
   (let [result @(p/process (into ["hyprctl"] args)
@@ -20,23 +20,15 @@
       (json/parse-string (:out result) true)
       (throw (ex-info "hyprctl failed" {:args args :result result})))))
 
-(defn ghostty? [window]
-  (some #(str/includes? (str/lower-case (str (get window % ""))) "ghostty")
-        [:class :initialClass :title]))
-
 (defn main [& args]
   (if-let [tab (and (= 1 (count args))
                     (some-> (parse-long (first args)) #{1 2 3 4 5 6 7 8 9}))]
-    (let [target (some (fn [window]
-                         (let [window-workspace (:workspace window)]
-                           (when (and (= workspace (:id window-workspace))
-                                      (ghostty? window))
-                             (:address window))))
+    (let [target (some #(when (= herdr-class (:class %)) (:address %))
                        (hyprctl "clients" "-j"))
           active (:address (hyprctl "activewindow" "-j"))]
       (cond
         (nil? target)
-        (hypr/dispatch! ["focus" {:workspace workspace}])
+        (hypr/dispatch! ["exec_cmd" "~/.local/bin/herdr-terminal"])
 
         (= active target)
         (herdr/focus-tab! tab)

@@ -43,7 +43,7 @@
   (keys! "1:1" "1:0")
   (assert (wait-for #(not (launcher?))) "Escape did not close the global guide")
   (keys! "125:1" "57:1" "57:0" "125:0")
-  (assert (wait-for #(= "com.mitchellh.ghostty" (:class (query "activewindow"))))
+  (assert (wait-for #(= "com.mitchellh.ghostty.herdr" (:class (query "activewindow"))))
           "Cmd+Space did not focus the Herdr terminal")
   (assert (wait-for #(some-> (last-log) (str/includes? "Cmd+Space\tHerdr leader menu")))
           "Cmd+Space did not log the Herdr menu")

@@ -42,8 +42,8 @@ require("startup")
 hl.workspace_rule({ workspace = "4", on_created_empty = "flatpak run com.jetbrains.IntelliJ-IDEA-Community" })
 hl.window_rule({ name = "intellij-workspace", match = { class = "jetbrains-idea" }, workspace = "4" })
 
--- Cmd application shortcuts. Terminal bindings focus the existing Ghostty
--- window, then select its Herdr tab when it is already focused.
+-- Cmd application shortcuts. Terminal bindings focus the Herdr terminal,
+-- then select its Herdr tab when it is already focused.
 hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 1"))
 hl.bind("SUPER + U", hl.dsp.focus({ workspace = 2 }))
 hl.bind("SUPER + SHIFT + U", hl.dsp.focus({ workspace = 3 }))
@@ -51,7 +51,7 @@ hl.bind("SUPER + I", hl.dsp.focus({ workspace = 4 }))
 hl.bind("SUPER + E", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 2"))
 hl.bind("SUPER + D", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 3"))
 hl.bind("SUPER + G", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 4"))
-hl.bind("SUPER + B", hl.dsp.exec_cmd("herdr"))
+hl.bind("SUPER + B", hl.dsp.exec_cmd("~/.local/bin/herdr-terminal"))
 hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("ghostty nvim ~/.config/hypr/hyprland.lua"))
 hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
 

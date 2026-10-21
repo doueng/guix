@@ -39,16 +39,17 @@ function M.cancel(submap)
   end
 end
 
-local terminal_class = "com.mitchellh.ghostty"
+-- desktop/bin/herdr-terminal starts Herdr's Ghostty with this class.
+M.herdr_class = "com.mitchellh.ghostty.herdr"
 
--- Cmd+Space: open Herdr's leader menu (Ctrl+b Space). From another app, focus
--- the Herdr terminal on workspace 1 first.
+-- Cmd+Space: open Herdr's leader menu (Ctrl+b Space). From another window,
+-- focus the Herdr terminal first, or start one.
 function M.herdr_menu()
   local active = hl.get_active_window()
-  if not (active and active.class == terminal_class) then
-    local terminal = hl.get_windows({ class = terminal_class, workspace = 1 })[1]
+  if not (active and active.class == M.herdr_class) then
+    local terminal = hl.get_windows({ class = M.herdr_class })[1]
     if not terminal then
-      hl.dispatch(hl.dsp.focus({ workspace = 1 }))
+      hl.exec_cmd("~/.local/bin/herdr-terminal")
       return
     end
     hl.dispatch(hl.dsp.focus({ window = "address:" .. terminal.address }))
