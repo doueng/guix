@@ -30,7 +30,9 @@
   rcmd (multi rmet (layer-while-held cmd))
   ;; An app's Cmd layer sits on cmd and lists only the keys that differ.
   lcmd-intellij (multi lmet (layer-while-held cmd) (layer-while-held cmd-intellij))
-  rcmd-intellij (multi rmet (layer-while-held cmd) (layer-while-held cmd-intellij)))
+  rcmd-intellij (multi rmet (layer-while-held cmd) (layer-while-held cmd-intellij))
+  lcmd-terminal (multi lmet (layer-while-held cmd) (layer-while-held cmd-terminal))
+  rcmd-terminal (multi rmet (layer-while-held cmd) (layer-while-held cmd-terminal)))
 
 (deflayermap (base)
   caps @caps
@@ -89,3 +91,12 @@
 ;; IntelliJ's default keymap redoes on Ctrl+Shift+Z. Its Ctrl+Y deletes a line.
 (deflayermap (cmd-intellij)
   z (unmod $meta lctl z))
+
+(deflayermap (terminal)
+  lmet @lcmd-terminal
+  rmet @rcmd-terminal)
+
+;; fish ignores Shift+Home, so the shared Cmd+Backspace deleted one character.
+;; Ctrl+U deletes to the line start in fish, Pi, and Neovim and Doom insert mode.
+(deflayermap (cmd-terminal)
+  bspc (unmod $meta lctl u))

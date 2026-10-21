@@ -1,3 +1,5 @@
 ;; Window class -> kanata base layer, applied by hyprkan on focus.
 ;; Windows without an entry use base. Each layer is defined in desktop/kanata.kbd.
-{"jetbrains-idea" "intellij"}
+{"jetbrains-idea" "intellij"
+ "com.mitchellh.ghostty" "terminal"
+ "com.mitchellh.ghostty.herdr" "terminal"}
