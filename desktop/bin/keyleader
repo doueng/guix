@@ -57,9 +57,10 @@
 
 (defn validate! [{:keys [groups bindings terminal] :as grammar}]
   (let [group-keys (set (map first groups))]
-    (when-not (and (text? (:passthrough terminal))
-                   (try (re-pattern (:passthrough terminal)) (catch Exception _ nil)))
-      (throw (ex-info "Leader grammar needs :terminal {:passthrough REGEX}" {:terminal terminal})))
+    (when-not (every? #(and (text? (get terminal %))
+                            (try (re-pattern (get terminal %)) (catch Exception _ nil)))
+                      [:passthrough :clear-screen])
+      (throw (ex-info "Leader grammar needs :terminal {:passthrough REGEX :clear-screen REGEX}" {:terminal terminal})))
     (when-not (every? (fn [[k label]] (and (text? k) (text? label))) groups)
       (throw (ex-info "Leader groups need a key and a label" {:groups groups})))
     (when-not (= (count groups) (count group-keys))
@@ -180,13 +181,14 @@
 
 (defn term-nav!
   "Bare Ctrl+h/j/k/l in Herdr. Programs that use these keys themselves get the
-  key; elsewhere focus moves like Ctrl+b h/j/k/l."
+  key, and shells get Ctrl+l; elsewhere focus moves like Ctrl+b h/j/k/l."
   [grammar direction]
   (let [pane (herdr-pane)
         key (str "ctrl+" (nav-keys direction))
         keys (str "Ctrl+" (nav-keys direction))
-        passthrough (re-pattern (get-in grammar [:terminal :passthrough]))]
-    (if-let [program (some #(when (re-find passthrough (str/lower-case (str %))) %)
+        {:keys [passthrough clear-screen]} (:terminal grammar)
+        keeps-key (re-pattern (if (= "right" direction) (str passthrough "|" clear-screen) passthrough))]
+    (if-let [program (some #(when (re-find keeps-key (str/lower-case (str %))) %)
                            (foreground-programs pane))]
       (do (run! ["herdr" "pane" "send-keys" pane key])
           (log! program keys (str "Forwarded to " program)))

@@ -70,7 +70,7 @@ description = "focus up or pass to Vim, Emacs and Pi"
 key = "ctrl+l"
 type = "shell"
 command = "$HOME/.local/bin/keyleader term-nav right"
-description = "focus right or pass to Vim, Emacs and Pi"
+description = "focus right or pass to Vim, Emacs, Pi and shells"
 
 [[keys.command]]
 key = "prefix+h"

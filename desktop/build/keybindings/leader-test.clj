@@ -26,6 +26,22 @@
   (is (= [["focus" {:direction "left"}]]
          (nav-with nil nil))))
 
+(defn term-nav-with [program direction]
+  (let [calls (atom [])]
+    (with-redefs [keyleader/herdr-pane (constantly "w1:p2")
+                  keyleader/foreground-programs (constantly [program])
+                  keyleader/log! (fn [& _] nil)
+                  keyleader/nav! (fn [d _] (swap! calls conj [:nav d]))
+                  keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")]
+      (keyleader/term-nav! grammar direction))
+    @calls))
+
+(deftest shells-keep-ctrl-l-and-editors-keep-all-four
+  (is (= [["herdr" "pane" "send-keys" "w1:p2" "ctrl+l"]] (term-nav-with "fish" "right")))
+  (is (= [[:nav "left"]] (term-nav-with "fish" "left")))
+  (is (= [["herdr" "pane" "send-keys" "w1:p2" "ctrl+h"]] (term-nav-with "nvim" "left")))
+  (is (= [[:nav "right"]] (term-nav-with "btop" "right"))))
+
 (deftest window-keys-mean-the-same-in-every-context
   (doseq [context [:desktop :herdr :nvim :doom :idea]]
     (is (= [["h" "Focus left"] ["j" "Focus down"] ["k" "Focus up"] ["l" "Focus right"]]
@@ -66,19 +82,19 @@
 
 (deftest grammar-rejects-ambiguity
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate leader sequence"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$"} :groups [["w" "W"]]
+        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]]
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"} {:keys ["w" "h"] :label "Right" :nav "right"}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"known group"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$"} :groups [["w" "W"]] :bindings [{:keys ["x" "h"] :label "Left" :nav "left"}]})))
+        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]] :bindings [{:keys ["x" "h"] :label "Left" :nav "left"}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Herdr-only"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$"} :groups [["w" "W"]]
+        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]]
                               :bindings [{:keys ["e"] :label "Edit" :herdr :edit-scrollback :doom "x"}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"also a Herdr leader group"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$"} :groups [["w" "W"]]
+        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]]
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}
                                          {:keys ["w"] :label "Edit" :herdr :edit-scrollback}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no context"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$"} :groups [["w" "W"]] :bindings [{:keys ["w" "h"] :label "x"}]}))))
+        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]] :bindings [{:keys ["w" "h"] :label "x"}]}))))
 
 (let [{:keys [fail error]} (run-tests)]
   (System/exit (if (zero? (+ fail error)) 0 1)))

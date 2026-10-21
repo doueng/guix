@@ -78,7 +78,8 @@ Run `keyleader --check` to validate the table. `make keybindings-check` also fai
 ### Focus falls through to the next layer
 
 Ctrl+h/j/k/l is the same move everywhere. In Neovim, smart-splits moves between windows, then Herdr panes. In Doom it moves between windows. In a Herdr pane running a shell or another program, Herdr moves between panes. In a Herdr pane running Vim, Neovim, Emacs or Pi, Herdr forwards the key, so the program can move within its own splits first. `leader.edn`'s `:terminal :passthrough` lists those programs. Use Ctrl+b h/j/k/l to leave such a pane directly.
-At Herdr's edge, or from a zoomed pane, focus continues to the next Hyprland window. Ctrl+h no longer acts as Backspace in shells, and Ctrl+l no longer clears the screen.
+Shells listed in `:terminal :clear-screen` keep Ctrl+l, which clears the screen. Ctrl+h/j/k still move focus from a shell, and Ctrl+b l moves right.
+At Herdr's edge, or from a zoomed pane, focus continues to the next Hyprland window. Ctrl+h no longer acts as Backspace in shells.
 Ctrl+arrows resize the Neovim window, then the Herdr pane once Neovim fills that direction.
 
 Space w h/j/k/l and Ctrl+h/j/k/l move between Neovim or Doom windows first.

@@ -40,15 +40,8 @@ keybind = shift+insert=paste_from_clipboard
 keybind = shift+ctrl+alt+r=reload_config
 keybind = super+left=text:\x01
 keybind = super+right=text:\x05
-keybind = alt+left=esc:b
-keybind = alt+right=esc:f
-# kanata emits Ctrl+arrows for physical Alt+arrows.
-keybind = ctrl+left=esc:b
-keybind = ctrl+right=esc:f
 keybind = super+up=jump_to_prompt:-1
 keybind = super+down=jump_to_prompt:1
 keybind = super+shift+up=jump_to_prompt:-1
 keybind = super+shift+down=jump_to_prompt:1
 keybind = super+p=toggle_quick_terminal
-keybind = super+shift+j=write_scrollback_file:paste
-keybind = super+alt+shift+j=write_scrollback_file:open

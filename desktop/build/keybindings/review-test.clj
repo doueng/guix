@@ -62,7 +62,7 @@
                    ["argv shape" {:keys ["w" "h"] :label "x" :desktop-command "launcher"}]
                    ["nav with another action" {:keys ["w" "h"] :label "x" :nav "left" :nvim "<C-w>h"}]]]
     (is (thrown? clojure.lang.ExceptionInfo
-                 (keyleader/validate! {:terminal {:passthrough "^nvim$"} :groups [["w" "W"]] :bindings [b]}))
+                 (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]] :bindings [b]}))
         why)))
 
 (deftest tab-cycling-reports-missing-tabs
