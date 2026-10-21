@@ -68,6 +68,10 @@ You can keep Alt held after Alt+Space. Each key also works with Alt.
 | s b | Search the buffer | Editors |
 | c d, c R, c r, c a, c x | Definition, references, rename, code action, diagnostics | Editors |
 | a a, a t, a b, a i | Application launcher, terminal, browser workspace, IntelliJ workspace | Desktop |
+| f | Copy visible text by hint (tiny-fingers) | Herdr |
+| e | Edit scrollback in `$EDITOR` | Herdr |
+
+Herdr's `f` and `e` are single keys, not groups. A single key is Herdr-only, and `keyleader --check` rejects one that is also a Herdr group. Ctrl+b f and Ctrl+b Shift+E still work.
 
 Run `keyleader --check` to validate the table. `make keybindings-check` also fails when a generated file is stale.
 

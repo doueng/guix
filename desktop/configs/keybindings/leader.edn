@@ -5,7 +5,8 @@
 ;; :nvim, :doom and :idea (editor commands; IdeaVim stops at its own splits),
 ;; :desktop (a Hyprland dispatcher such as ["focus" {:workspace 2}], see
 ;; desktop/lib/hypr/dispatch.clj, or an action keyword), :desktop-command
-;; (argv), :herdr (CLI vector or action keyword).
+;; (argv), :herdr (CLI vector, action keyword, or {:plugin ID :action ID}).
+;; A single key, such as ["f"], is Herdr-only and must not be a Herdr group.
 ;; :terminal :passthrough names the programs that receive bare Ctrl+h/j/k/l
 ;; inside Herdr instead of Herdr moving focus. It matches the lower-cased
 ;; foreground process name, which Linux truncates to 15 characters (Guix's
@@ -41,6 +42,8 @@
    :doom "previous-buffer" :desktop ["window.cycle_next" {:next false}] :herdr :previous-tab}
   {:keys ["b" "d"] :label "Close buffer or tab" :idea "<Action>(CloseContent)" :nvim "<cmd>lua Snacks.bufdelete()<cr>"
    :doom "kill-current-buffer" :herdr :close-tab}
+  {:keys ["f"] :label "Copy visible text by hint" :herdr {:plugin "hotchpotch.herdr-tiny-fingers" :action "open"}}
+  {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
   {:keys ["f" "s"] :label "Save file" :idea "<Action>(SaveAll)" :nvim "<cmd>write<cr>" :doom "save-buffer"}
   {:keys ["f" "r"] :label "Recent files" :idea "<Action>(RecentFiles)" :nvim "<cmd>Telescope oldfiles<cr>" :doom "recentf-open-files"}
   {:keys ["s" "b"] :label "Search buffer" :idea "<Action>(Find)" :nvim "<cmd>Telescope current_buffer_fuzzy_find<cr>"

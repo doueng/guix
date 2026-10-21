@@ -25,7 +25,7 @@
 
 (def directions #{"left" "down" "up" "right"})
 (def action-keywords {:desktop #{:choose-window}
-                      :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane}})
+                      :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane :edit-scrollback}})
 (def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :herdr})
 
 (defn- text? [v] (and (string? v) (not (str/blank? v))))
@@ -47,8 +47,13 @@
       "desktop must be :choose-window or a dispatcher such as [\"focus\" {:workspace 2}]"
       (and (has? :desktop-command) (not (argv? (:desktop-command b)))) "desktop-command must be an argv vector"
       (and (has? :herdr) (not (or ((action-keywords :herdr) (:herdr b))
-                                  (and (argv? (:herdr b)) (= "pane" (first (:herdr b)))))))
-      (str "herdr must be one of " (sort (action-keywords :herdr)) " or a herdr pane command vector"))))
+                                  (and (argv? (:herdr b)) (= "pane" (first (:herdr b))))
+                                  (and (map? (:herdr b)) (= #{:plugin :action} (set (keys (:herdr b))))
+                                       (every? text? (vals (:herdr b)))))))
+      (str "herdr must be one of " (sort (action-keywords :herdr))
+           ", a herdr pane command vector, or {:plugin ID :action ID}")
+      (and (= 1 (count (:keys b))) (not= #{:keys :label :herdr} (set (keys b))))
+      "a single leader key is Herdr-only, so it takes just :herdr")))
 
 (defn validate! [{:keys [groups bindings terminal] :as grammar}]
   (let [group-keys (set (map first groups))]
@@ -62,14 +67,19 @@
     (when (contains? group-keys " ")
       (throw (ex-info "Space is reserved for the command palette" {})))
     (doseq [{:keys [keys] :as b} bindings]
-      (when-not (and (= 2 (count keys)) (group-keys (first keys)))
-        (throw (ex-info "Leader keys must be a known group and one key" {:binding b})))
+      (when-not (or (and (= 2 (count keys)) (group-keys (first keys)))
+                    (and (= 1 (count keys)) (text? (first keys)) (not (#{" " "SPC"} (first keys)))))
+        (throw (ex-info "Leader keys must be a known group and one key, or one Herdr key" {:binding b})))
       (when-not (some #(% b) (vals contexts))
         (throw (ex-info "Leader binding has no context" {:binding b})))
       (when-let [problem (binding-problem b)]
         (throw (ex-info (str "Invalid leader binding " (pr-str keys) ": " problem) {:binding b}))))
     (when-not (= (count bindings) (count (distinct (map :keys bindings))))
-      (throw (ex-info "Duplicate leader sequence" {}))))
+      (throw (ex-info "Duplicate leader sequence" {})))
+    (let [herdr (filter (:herdr contexts) bindings)
+          herdr-groups (set (for [b herdr :when (= 2 (count (:keys b)))] (first (:keys b))))]
+      (doseq [b herdr :when (herdr-groups (first (:keys b))) :when (= 1 (count (:keys b)))]
+        (throw (ex-info (str "Herdr key " (first (:keys b)) " is also a Herdr leader group") {:binding b})))))
   grammar)
 
 (defn load-grammar [] (validate! (edn/read-string (slurp (config-path)))))
@@ -80,12 +90,14 @@
 (defn menu
   "Rows shown after the leader, or after a group key, in CONTEXT."
   [grammar context group]
-  (let [bs (in-context grammar context)]
+  (let [bs (in-context grammar context)
+        grouped (filter #(= 2 (count (:keys %))) bs)]
     (if group
-      (for [b bs :when (= group (first (:keys b)))] [(second (:keys b)) (:label b)])
-      (cons ["SPC" "Command palette"]
-            (for [[k label] (:groups grammar) :when (some #(= k (first (:keys %))) bs)]
-              [k (str label " ...")])))))
+      (for [b grouped :when (= group (first (:keys b)))] [(second (:keys b)) (:label b)])
+      (concat [["SPC" "Command palette"]]
+              (for [b bs :when (= 1 (count (:keys b)))] [(first (:keys b)) (:label b)])
+              (for [[k label] (:groups grammar) :when (some #(= k (first (:keys %))) grouped)]
+                [k (str label " ...")])))))
 
 (defn menu-text [rows]
   (str/join "\n" (for [[k label] rows] (format "%-4s %s" k label))))
@@ -102,6 +114,21 @@
 
 (defn spawn! [argv]
   (p/process (expand-home argv) {:in :inherit :out :inherit :err :inherit}))
+
+(defn herdr-api!
+  "Send METHOD with PARAMS on Herdr's socket and return the result. The CLI has
+  no command for scrollback editing or for passing a plugin the focused pane."
+  [method params]
+  (let [path (or (System/getenv "HERDR_SOCKET_PATH") (str (fs/home) "/.config/herdr/herdr.sock"))]
+    (with-open [channel (java.nio.channels.SocketChannel/open (java.net.UnixDomainSocketAddress/of path))]
+      (let [out (java.nio.channels.Channels/newOutputStream channel)
+            in (java.io.BufferedReader. (java.io.InputStreamReader. (java.nio.channels.Channels/newInputStream channel)))]
+        (.write out (.getBytes (str (json/generate-string {:id "keyleader" :method method :params params}) "\n")))
+        (.flush out)
+        (let [reply (json/parse-string (.readLine in) true)]
+          (if-let [error (:error reply)]
+            (throw (ex-info (str "Herdr " method ": " (:message error)) error))
+            (:result reply)))))))
 
 (defn herdr-pane []
   (some not-empty [(System/getenv "HERDR_PANE_ID") (System/getenv "HERDR_ACTIVE_PANE_ID")]))
@@ -355,6 +382,9 @@
         (:nav b) (nav! (:nav b) pressed)
         (vector? action) (run! (concat ["herdr"] (take 2 action) ["--pane" pane] (drop 2 action)))
         (= :close-pane action) (run! ["herdr" "pane" "close" pane])
+        (= :edit-scrollback action) (herdr-api! "pane.edit_scrollback" {:pane_id pane})
+        (map? action) (herdr-api! "plugin.action.invoke" {:plugin_id (:plugin action) :action_id (:action action)
+                                                            :context {:focused_pane_id pane}})
         (= :close-tab action) (run! ["herdr" "tab" "close" (System/getenv "HERDR_ACTIVE_TAB_ID")])
         (= :next-tab action) (step-tab! 1)
         (= :previous-tab action) (step-tab! -1)
@@ -372,6 +402,7 @@
   (let [k (read-key)]
     (cond
       (= k "SPC") (run-herdr! grammar ["SPC"])
+      (some #(= [k] (:keys %)) (in-context grammar :herdr)) (run-herdr! grammar [k])
       (some #(= k (first (:keys %))) (in-context grammar :herdr))
       (do (show! (str "Leader " k) (menu grammar :herdr k))
           (let [k2 (read-key)]
