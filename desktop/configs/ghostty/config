@@ -37,6 +37,8 @@ gtk-single-instance = desktop
 
 # Key Bindings (custom)
 keybind = shift+insert=paste_from_clipboard
+# The default toggles fullscreen, which Ctrl+Alt+f owns, and hides C-RET from Emacs and TUIs.
+keybind = ctrl+enter=unbind
 keybind = shift+ctrl+alt+r=reload_config
 keybind = super+left=text:\x01
 keybind = super+right=text:\x05
