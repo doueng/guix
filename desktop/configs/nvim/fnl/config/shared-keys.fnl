@@ -28,4 +28,4 @@
                     {1 "<leader>f" :group "Files"}
                     {1 "<leader>s" :group "Search"}
                     {1 "<leader>c" :group "Code"}
-                    {1 "<leader>a" :group "Applications"}])))
+                    {1 "<leader>o" :group "Open"}])))

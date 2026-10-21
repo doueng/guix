@@ -21,7 +21,7 @@
           ["f" "Files"]
           ["s" "Search"]
           ["c" "Code"]
-          ["a" "Applications"]]
+          ["o" "Open"]]
  :bindings
  [{:keys ["w" "h"] :label "Focus left" :nav "left"}
   {:keys ["w" "j"] :label "Focus down" :nav "down"}
@@ -46,12 +46,12 @@
    :doom "previous-buffer" :desktop ["window.cycle_next" {:next false}] :herdr :previous-tab}
   {:keys ["b" "d"] :label "Close buffer or tab" :idea "<Action>(CloseContent)" :nvim "<cmd>lua Snacks.bufdelete()<cr>"
    :doom "kill-current-buffer" :herdr :close-tab}
-  {:keys ["f"] :label "Copy visible text by hint" :herdr {:plugin "hotchpotch.herdr-tiny-fingers" :action "open"}}
   {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
   {:keys ["f" "s"] :label "Save file" :idea "<Action>(SaveAll)" :nvim "<cmd>write<cr>" :doom "save-buffer"}
   {:keys ["f" "r"] :label "Recent files" :idea "<Action>(RecentFiles)" :nvim "<cmd>Telescope oldfiles<cr>" :doom "recentf-open-files"}
   {:keys ["s" "b"] :label "Search buffer" :idea "<Action>(Find)" :nvim "<cmd>Telescope current_buffer_fuzzy_find<cr>"
    :doom "consult-line"}
+  {:keys ["s" "l"] :label "Copy visible text by hint" :herdr {:plugin "hotchpotch.herdr-tiny-fingers" :action "open"}}
   {:keys ["c" "d"] :label "Find definition" :idea "<Action>(GotoDeclaration)" :nvim "<cmd>lua vim.lsp.buf.definition()<cr>"
    :doom "eng/lsp-find-definition"}
   {:keys ["c" "R"] :label "Find references" :idea "<Action>(FindUsages)" :nvim "<cmd>lua vim.lsp.buf.references()<cr>"
@@ -60,7 +60,7 @@
   {:keys ["c" "a"] :label "Code action" :idea "<Action>(ShowIntentionActions)" :nvim "<cmd>lua vim.lsp.buf.code_action()<cr>"
    :doom "eng/lsp-code-actions"}
   {:keys ["c" "x"] :label "Diagnostics" :idea "<Action>(ActivateProblemsViewToolWindow)" :nvim "<cmd>Telescope diagnostics<cr>" :doom "eng/lsp-diagnostics"}
-  {:keys ["a" "a"] :label "Launch application" :desktop-command ["~/.local/bin/custom-launcher"]}
-  {:keys ["a" "t"] :label "Terminal" :desktop-command ["~/.local/bin/workspace-or-herdr-tab" "1"]}
-  {:keys ["a" "b"] :label "Browser workspace" :desktop ["focus" {:workspace 2}]}
-  {:keys ["a" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}]}
+  {:keys ["o" "a"] :label "Launch application" :desktop-command ["~/.local/bin/custom-launcher"]}
+  {:keys ["o" "t"] :label "Terminal" :desktop-command ["~/.local/bin/workspace-or-herdr-tab" "1"]}
+  {:keys ["o" "b"] :label "Browser workspace" :desktop ["focus" {:workspace 2}]}
+  {:keys ["o" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}]}

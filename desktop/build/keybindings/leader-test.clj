@@ -57,19 +57,20 @@
 (deftest root-menu-starts-with-the-palette
   (is (= ["SPC" "Command palette"] (first (keyleader/menu grammar :herdr nil))))
   (is (= ["SPC" "Command palette"] (first (keyleader/menu grammar :desktop nil))))
-  (is (not-any? #(= "a" (first %)) (keyleader/menu grammar :herdr nil))
-      "Herdr has no application entries, so its menu must not offer the a group"))
+  (is (not-any? #(= "o" (first %)) (keyleader/menu grammar :herdr nil))
+      "Herdr has no application entries, so its menu must not offer the o group"))
 
-(deftest herdr-single-keys-run-without-a-group
-  (is (= [["SPC" "Command palette"] ["f" "Copy visible text by hint"] ["e" "Edit scrollback"]
-          ["w" "Windows and panes ..."] ["b" "Buffers, tabs and windows ..."]]
+(deftest herdr-runs-single-keys-and-plugin-actions
+  (is (= [["SPC" "Command palette"] ["e" "Edit scrollback"]
+          ["w" "Windows and panes ..."] ["b" "Buffers, tabs and windows ..."] ["s" "Search ..."]]
          (keyleader/menu grammar :herdr nil)))
-  (is (not-any? #(= "f" (first %)) (keyleader/menu grammar :desktop nil)))
+  (is (= [["l" "Copy visible text by hint"]] (keyleader/menu grammar :herdr "s"))
+      "Doom's SPC s l jumps to a visible link")
   (let [calls (atom [])]
     (with-redefs [keyleader/herdr-pane (constantly "w1:p2")
                   keyleader/log! (fn [& _] nil)
                   keyleader/herdr-api! (fn [method params] (swap! calls conj [method params]))]
-      (keyleader/run-herdr! grammar ["f"])
+      (keyleader/run-herdr! grammar ["s" "l"])
       (keyleader/run-herdr! grammar ["e"]))
     (is (= [["plugin.action.invoke" {:plugin_id "hotchpotch.herdr-tiny-fingers" :action_id "open"
                                      :context {:focused_pane_id "w1:p2"}}]
@@ -99,6 +100,10 @@
         (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}
                                          {:keys ["w"] :label "Edit" :herdr :edit-scrollback}]})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"differ only by case"
+        (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["c" "Code"]]
+                              :bindings [{:keys ["c" "r"] :label "Run" :desktop-command ["a"]}
+                                         {:keys ["c" "R"] :label "Restart" :desktop-command ["b"]}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"KEYS from hjkl"
         (keyleader/validate! {:terminal {:keeps [["^fish$" "x"]]} :groups [["w" "W"]]
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}]})))

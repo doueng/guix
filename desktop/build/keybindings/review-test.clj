@@ -20,7 +20,7 @@
     @ran))
 
 (deftest palette-closes-a-window-without-asking
-  (is (= [["window.close"]] (palette-run ["q  Close window   [CTRL+ALT+W]"]))))
+  (is (= [["window.close"]] (palette-run ["w  Close window   [CTRL+ALT+W]"]))))
 
 (deftest hyprland-drift-reports-missing-and-unexpected-binds
   (let [expected (keyleader/expected-binds leader-grammar)

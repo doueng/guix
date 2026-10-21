@@ -80,6 +80,9 @@
         (throw (ex-info (str "Invalid leader binding " (pr-str keys) ": " problem) {:binding b}))))
     (when-not (= (count bindings) (count (distinct (map :keys bindings))))
       (throw (ex-info "Duplicate leader sequence" {})))
+    (let [desktop (map #(mapv str/lower-case (:keys %)) (filter (:desktop contexts) bindings))]
+      (when-not (= (count desktop) (count (distinct desktop)))
+        (throw (ex-info "Desktop leader keys differ only by case, which Hyprland submaps cannot tell apart" {}))))
     (let [herdr (filter (:herdr contexts) bindings)
           herdr-groups (set (for [b herdr :when (= 2 (count (:keys b)))] (first (:keys b))))]
       (doseq [b herdr :when (herdr-groups (first (:keys b))) :when (= 1 (count (:keys b)))]
