@@ -61,9 +61,11 @@
       "Herdr has no application entries, so its menu must not offer the o group"))
 
 (deftest herdr-runs-single-keys-and-plugin-actions
-  (is (= [["SPC" "Command palette"] ["e" "Edit scrollback"]
-          ["w" "Windows and panes ..."] ["b" "Buffers, tabs and windows ..."] ["s" "Search ..."]]
+  (is (= [["SPC" "Command palette"] ["," "Switch buffer, tab or window"] ["e" "Edit scrollback"]
+          ["w" "Windows and panes ..."] ["b" "Buffers, tabs and windows ..."] ["s" "Search ..."]
+          ["p" "Projects ..."] ["TAB" "Workspaces ..."]]
          (keyleader/menu grammar :herdr nil)))
+  (is (= [["." "Switch workspace"] ["`" "Last workspace"]] (keyleader/menu grammar :herdr "TAB")))
   (is (= [["l" "Copy visible text by hint"]] (keyleader/menu grammar :herdr "s"))
       "Doom's SPC s l jumps to a visible link")
   (let [calls (atom [])]
@@ -71,11 +73,26 @@
                   keyleader/log! (fn [& _] nil)
                   keyleader/herdr-api! (fn [method params] (swap! calls conj [method params]))]
       (keyleader/run-herdr! grammar ["s" "l"])
-      (keyleader/run-herdr! grammar ["e"]))
+      (keyleader/run-herdr! grammar ["e"])
+      (keyleader/run-herdr! grammar ["TAB" "`"]))
     (is (= [["plugin.action.invoke" {:plugin_id "hotchpotch.herdr-tiny-fingers" :action_id "open"
                                      :context {:focused_pane_id "w1:p2"}}]
-            ["pane.edit_scrollback" {:pane_id "w1:p2"}]]
+            ["pane.edit_scrollback" {:pane_id "w1:p2"}]
+            ["plugin.action.invoke" {:plugin_id "fullerzz.sesh" :action_id "last"
+                                     :context {:focused_pane_id "w1:p2"}}]]
            @calls))))
+
+(deftest frequent-actions-take-one-key-on-the-desktop
+  (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
+    (is (lines "hl.bind(mods .. \"period\", keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/keyleader run '.'\")))")
+        "Alt+Space . launches an application")
+    (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ last = true }), \"Alt+Space `\", \"Last buffer or window\"))"))
+    (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ workspace = \"previous\" }), \"Alt+Space TAB `\", \"Last workspace\"))")))
+  (let [ran (atom [])]
+    (with-redefs [keyleader/log! (fn [& _] nil)
+                  keyleader/spawn! (fn [argv] (swap! ran conj argv))]
+      (keyleader/run-desktop! grammar ["."]))
+    (is (= [["~/.local/bin/custom-launcher"]] @ran))))
 
 (deftest hyprland-leader-runs-dispatchers-or-the-script
   (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
@@ -93,10 +110,10 @@
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"} {:keys ["w" "h"] :label "Right" :nav "right"}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"known group"
         (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]] :bindings [{:keys ["x" "h"] :label "Left" :nav "left"}]})))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Herdr-only"
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"doom-match must be one of"
         (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
-                              :bindings [{:keys ["e"] :label "Edit" :herdr :edit-scrollback :doom "x"}]})))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"also a Herdr leader group"
+                              :bindings [{:keys [","] :label "Switch" :doom "x" :doom-match :same}]})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"one key that is not a group"
         (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}
                                          {:keys ["w"] :label "Edit" :herdr :edit-scrollback}]})))

@@ -6,7 +6,10 @@
 ;; :desktop (a Hyprland dispatcher such as ["focus" {:workspace 2}], see
 ;; desktop/lib/hypr/dispatch.clj, or an action keyword), :desktop-command
 ;; (argv), :herdr (CLI vector, action keyword, or {:plugin ID :action ID}).
-;; A single key, such as ["f"], is Herdr-only and must not be a Herdr group.
+;; A single key, such as [","], is a frequent action and must not be a group key.
+;; :doom-match records how the meaning compares with upstream Doom at the same
+;; keys: :exact, :analogous (same idea, different object) or :differs. The
+;; reference shows a sequence Doom also binds without it as unverified.
 ;; :terminal :keeps names the programs that receive bare Ctrl+h/j/k/l inside
 ;; Herdr instead of Herdr moving focus. Each rule pairs a regex for the
 ;; lower-cased foreground process name, which Linux truncates to 15 characters
@@ -21,46 +24,60 @@
           ["f" "Files"]
           ["s" "Search"]
           ["c" "Code"]
-          ["o" "Open"]]
+          ["o" "Open"]
+          ["p" "Projects"]
+          ["TAB" "Workspaces"]]
  :bindings
- [{:keys ["w" "h"] :label "Focus left" :nav "left"}
-  {:keys ["w" "j"] :label "Focus down" :nav "down"}
-  {:keys ["w" "k"] :label "Focus up" :nav "up"}
-  {:keys ["w" "l"] :label "Focus right" :nav "right"}
+ [{:keys [","] :label "Switch buffer, tab or window" :doom-match :exact :idea "<Action>(Switcher)"
+   :nvim "<cmd>Telescope buffers sort_mru=true ignore_current_buffer=true<cr>"
+   :doom "+vertico/switch-workspace-buffer" :desktop :choose-window :herdr :choose-tab}
+  {:keys ["`"] :label "Last buffer or window" :doom-match :exact :nvim "<cmd>e #<cr>"
+   :doom "evil-switch-to-windows-last-buffer" :desktop ["focus" {:last true}]}
+  {:keys ["."] :label "Find file or launch app" :doom-match :analogous :idea "<Action>(GotoFile)"
+   :doom "eng/project-find-file" :desktop-command ["~/.local/bin/custom-launcher"]}
+  {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
+  {:keys ["w" "h"] :label "Focus left" :doom-match :exact :nav "left"}
+  {:keys ["w" "j"] :label "Focus down" :doom-match :exact :nav "down"}
+  {:keys ["w" "k"] :label "Focus up" :doom-match :exact :nav "up"}
+  {:keys ["w" "l"] :label "Focus right" :doom-match :exact :nav "right"}
   {:keys ["w" "s"] :label "Split below" :idea "<C-w>s" :nvim "<cmd>split<cr>" :doom "split-window-below"
    :herdr ["pane" "split" "--direction" "down" "--focus"]}
   {:keys ["w" "v"] :label "Split right" :idea "<C-w>v" :nvim "<cmd>vsplit<cr>" :doom "split-window-right"
    :herdr ["pane" "split" "--direction" "right" "--focus"]}
-  {:keys ["w" "d"] :label "Close window or pane" :idea "<C-w>c" :nvim "<cmd>close<cr>" :doom "delete-window"
+  {:keys ["w" "d"] :label "Close window or pane" :doom-match :exact :idea "<C-w>c" :nvim "<cmd>close<cr>" :doom "delete-window"
    :desktop ["window.close"] :herdr :close-pane}
-  {:keys ["w" "m"] :label "Maximize or zoom" :idea "<Action>(HideAllWindows)" :nvim "<cmd>lua Snacks.zoom()<cr>"
+  {:keys ["w" "m"] :label "Maximize or zoom" :doom-match :exact :idea "<Action>(HideAllWindows)" :nvim "<cmd>lua Snacks.zoom()<cr>"
    :doom "doom/window-maximize-buffer" :desktop ["window.fullscreen" {:mode "maximized"}]
    :herdr ["pane" "zoom" "--toggle"]}
-  {:keys ["w" "="] :label "Balance windows" :nvim "<C-w>=" :doom "balance-windows"}
-  {:keys ["b" "b"] :label "Choose buffer, tab or window" :idea "<Action>(RecentFiles)"
+  {:keys ["w" "="] :label "Balance windows" :doom-match :exact :nvim "<C-w>=" :doom "balance-windows"}
+  {:keys ["b" "b"] :label "Choose buffer, tab or window" :doom-match :exact :idea "<Action>(Switcher)"
    :nvim "<cmd>Telescope buffers sort_mru=true ignore_current_buffer=true<cr>"
    :doom "switch-to-buffer" :desktop :choose-window :herdr :choose-tab}
-  {:keys ["b" "n"] :label "Next buffer, tab or window" :idea "<Action>(NextTab)" :nvim "<cmd>bnext<cr>" :doom "next-buffer"
+  {:keys ["b" "n"] :label "Next buffer, tab or window" :doom-match :exact :idea "<Action>(NextTab)" :nvim "<cmd>bnext<cr>" :doom "next-buffer"
    :desktop ["window.cycle_next"] :herdr :next-tab}
-  {:keys ["b" "p"] :label "Previous buffer, tab or window" :idea "<Action>(PreviousTab)" :nvim "<cmd>bprevious<cr>"
+  {:keys ["b" "p"] :label "Previous buffer, tab or window" :doom-match :exact :idea "<Action>(PreviousTab)" :nvim "<cmd>bprevious<cr>"
    :doom "previous-buffer" :desktop ["window.cycle_next" {:next false}] :herdr :previous-tab}
-  {:keys ["b" "d"] :label "Close buffer or tab" :idea "<Action>(CloseContent)" :nvim "<cmd>lua Snacks.bufdelete()<cr>"
+  {:keys ["b" "d"] :label "Close buffer or tab" :doom-match :exact :idea "<Action>(CloseContent)" :nvim "<cmd>lua Snacks.bufdelete()<cr>"
    :doom "kill-current-buffer" :herdr :close-tab}
-  {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
-  {:keys ["f" "s"] :label "Save file" :idea "<Action>(SaveAll)" :nvim "<cmd>write<cr>" :doom "save-buffer"}
-  {:keys ["f" "r"] :label "Recent files" :idea "<Action>(RecentFiles)" :nvim "<cmd>Telescope oldfiles<cr>" :doom "recentf-open-files"}
-  {:keys ["s" "b"] :label "Search buffer" :idea "<Action>(Find)" :nvim "<cmd>Telescope current_buffer_fuzzy_find<cr>"
+  {:keys ["f" "s"] :label "Save file" :doom-match :exact :idea "<Action>(SaveAll)" :nvim "<cmd>write<cr>" :doom "save-buffer"}
+  {:keys ["f" "r"] :label "Recent files" :doom-match :exact :idea "<Action>(RecentFiles)" :nvim "<cmd>Telescope oldfiles<cr>" :doom "recentf-open-files"}
+  {:keys ["s" "b"] :label "Search buffer" :doom-match :exact :idea "<Action>(Find)" :nvim "<cmd>Telescope current_buffer_fuzzy_find<cr>"
    :doom "consult-line"}
-  {:keys ["s" "l"] :label "Copy visible text by hint" :herdr {:plugin "hotchpotch.herdr-tiny-fingers" :action "open"}}
-  {:keys ["c" "d"] :label "Find definition" :idea "<Action>(GotoDeclaration)" :nvim "<cmd>lua vim.lsp.buf.definition()<cr>"
+  {:keys ["s" "l"] :label "Copy visible text by hint" :doom-match :analogous :herdr {:plugin "hotchpotch.herdr-tiny-fingers" :action "open"}}
+  {:keys ["c" "d"] :label "Find definition" :doom-match :exact :idea "<Action>(GotoDeclaration)" :nvim "<cmd>lua vim.lsp.buf.definition()<cr>"
    :doom "eng/lsp-find-definition"}
-  {:keys ["c" "R"] :label "Find references" :idea "<Action>(FindUsages)" :nvim "<cmd>lua vim.lsp.buf.references()<cr>"
+  {:keys ["c" "D"] :label "Find references" :doom-match :exact :idea "<Action>(FindUsages)" :nvim "<cmd>lua vim.lsp.buf.references()<cr>"
    :doom "eng/lsp-find-references"}
-  {:keys ["c" "r"] :label "Rename symbol" :idea "<Action>(RenameElement)" :nvim "<cmd>lua vim.lsp.buf.rename()<cr>" :doom "eng/lsp-rename"}
-  {:keys ["c" "a"] :label "Code action" :idea "<Action>(ShowIntentionActions)" :nvim "<cmd>lua vim.lsp.buf.code_action()<cr>"
+  {:keys ["c" "r"] :label "Rename symbol" :doom-match :exact :idea "<Action>(RenameElement)" :nvim "<cmd>lua vim.lsp.buf.rename()<cr>" :doom "eng/lsp-rename"}
+  {:keys ["c" "a"] :label "Code action" :doom-match :exact :idea "<Action>(ShowIntentionActions)" :nvim "<cmd>lua vim.lsp.buf.code_action()<cr>"
    :doom "eng/lsp-code-actions"}
-  {:keys ["c" "x"] :label "Diagnostics" :idea "<Action>(ActivateProblemsViewToolWindow)" :nvim "<cmd>Telescope diagnostics<cr>" :doom "eng/lsp-diagnostics"}
-  {:keys ["o" "a"] :label "Launch application" :desktop-command ["~/.local/bin/custom-launcher"]}
-  {:keys ["o" "t"] :label "Terminal" :desktop-command ["~/.local/bin/workspace-or-herdr-tab" "1"]}
-  {:keys ["o" "b"] :label "Browser workspace" :desktop ["focus" {:workspace 2}]}
-  {:keys ["o" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}]}
+  {:keys ["c" "x"] :label "Diagnostics" :doom-match :exact :idea "<Action>(ActivateProblemsViewToolWindow)" :nvim "<cmd>Telescope diagnostics<cr>" :doom "eng/lsp-diagnostics"}
+  {:keys ["o" "t"] :label "Terminal" :doom-match :exact :desktop-command ["~/.local/bin/workspace-or-herdr-tab" "1"]
+   :doom "+vterm/toggle" :nvim "<cmd>lua Snacks.terminal()<cr>" :idea "<Action>(ActivateTerminalToolWindow)"}
+  {:keys ["o" "b"] :label "Browser workspace" :doom-match :analogous :desktop ["focus" {:workspace 2}]}
+  {:keys ["o" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}
+  {:keys ["p" "p"] :label "Switch project" :doom-match :exact :doom "projectile-switch-project"
+   :idea "<Action>(ManageRecentProjects)" :herdr {:plugin "fullerzz.sesh" :action "open-picker"}}
+  {:keys ["TAB" "."] :label "Switch workspace" :doom-match :exact :doom "+workspace/switch-to" :herdr :choose-workspace}
+  {:keys ["TAB" "`"] :label "Last workspace" :doom-match :exact :doom "+workspace/other"
+   :herdr {:plugin "fullerzz.sesh" :action "last"} :desktop ["focus" {:workspace "previous"}]}]}

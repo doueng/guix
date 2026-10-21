@@ -9,9 +9,6 @@
       :desc "Toggle motion coaching" "t h" #'eng/key-coach-mode
       :desc "Motion coaching report" "t H" #'eng/key-coach-report)
 
-(map! :leader
-      :desc "Toggle Treemacs" "e" #'+treemacs/toggle)
-
 (defun eng/lsp-rename ()
   (interactive)
   (if (bound-and-true-p lsp-mode)
@@ -119,7 +116,6 @@
       :desc "Format buffer"         "c f" #'+format/buffer
       :desc "LSP rename"            "c r" #'eng/lsp-rename
       :desc "LSP find definition"   "c d" #'eng/lsp-find-definition
-      :desc "LSP find references"   "c R" #'eng/lsp-find-references
       :desc "LSP code actions"      "c a" #'eng/lsp-code-actions
       :desc "LSP diagnostics"       "c x" #'eng/lsp-diagnostics
       :desc "Comment line"          "c /" #'comment-line)
@@ -160,15 +156,12 @@
 
 (map! :leader
       :desc "Open project"          "p p" #'projectile-switch-project
-      :desc "Find file in project"  "." #'eng/project-find-file
       :desc "Search in project"     "p s" #'projectile-grep
       :desc "Recent project files"  "p r" #'projectile-recentf)
 
 (map! :leader
-      :desc "Toggle treemacs"       "e" #'+treemacs/toggle
       :desc "Toggle line numbers"   "t l" #'doom/toggle-line-numbers
-      :desc "Toggle word wrap"      "t w" #'visual-line-mode
-      :desc "Toggle terminal"       "t T" #'+vterm/toggle)
+      :desc "Toggle word wrap"      "t w" #'visual-line-mode)
 
 (map! :leader
       :desc "Split window below"    "w s" #'split-window-below

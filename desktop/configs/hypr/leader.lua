@@ -5,9 +5,13 @@ hl.bind("ALT + SPACE", hl.dsp.submap("leader"))
 hl.define_submap("leader", function()
   for _, mods in ipairs({ "", "ALT + " }) do
     hl.bind(mods .. "SPACE", keys.leave(hl.dsp.exec_cmd("~/.local/bin/keyleader run SPC")))
+    hl.bind(mods .. "comma", keys.leave(hl.dsp.exec_cmd("~/.local/bin/keyleader run ','")))
+    hl.bind(mods .. "grave", keys.leave(hl.dsp.focus({ last = true }), "Alt+Space `", "Last buffer or window"))
+    hl.bind(mods .. "period", keys.leave(hl.dsp.exec_cmd("~/.local/bin/keyleader run '.'")))
     hl.bind(mods .. "W", hl.dsp.submap("leader-w"))
     hl.bind(mods .. "B", hl.dsp.submap("leader-b"))
     hl.bind(mods .. "O", hl.dsp.submap("leader-o"))
+    hl.bind(mods .. "TAB", hl.dsp.submap("leader-TAB"))
   end
   hl.bind("escape", hl.dsp.submap("reset"))
   hl.bind("catchall", keys.cancel("leader"))
@@ -35,11 +39,17 @@ hl.define_submap("leader-b", function()
 end)
 hl.define_submap("leader-o", function()
   for _, mods in ipairs({ "", "ALT + " }) do
-    hl.bind(mods .. "A", keys.leave(hl.dsp.exec_cmd("~/.local/bin/keyleader run o a")))
     hl.bind(mods .. "T", keys.leave(hl.dsp.exec_cmd("~/.local/bin/keyleader run o t")))
     hl.bind(mods .. "B", keys.leave(hl.dsp.focus({ workspace = 2 }), "Alt+Space o b", "Browser workspace"))
     hl.bind(mods .. "I", keys.leave(hl.dsp.focus({ workspace = 4 }), "Alt+Space o i", "IntelliJ workspace"))
   end
   hl.bind("escape", hl.dsp.submap("reset"))
   hl.bind("catchall", keys.cancel("leader-o"))
+end)
+hl.define_submap("leader-TAB", function()
+  for _, mods in ipairs({ "", "ALT + " }) do
+    hl.bind(mods .. "grave", keys.leave(hl.dsp.focus({ workspace = "previous" }), "Alt+Space TAB `", "Last workspace"))
+  end
+  hl.bind("escape", hl.dsp.submap("reset"))
+  hl.bind("catchall", keys.cancel("leader-TAB"))
 end)

@@ -25,8 +25,11 @@
 
 (def directions #{"left" "down" "up" "right"})
 (def action-keywords {:desktop #{:choose-window}
-                      :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane :edit-scrollback}})
-(def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :herdr})
+                      :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane :edit-scrollback
+                               :choose-workspace}})
+(def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :herdr :doom-match})
+;; How a binding's meaning compares with upstream Doom's at the same keys.
+(def doom-matches #{:exact :analogous :differs})
 
 (defn- text? [v] (and (string? v) (not (str/blank? v))))
 (defn- argv? [v] (and (vector? v) (seq v) (every? string? v)))
@@ -52,8 +55,8 @@
                                        (every? text? (vals (:herdr b)))))))
       (str "herdr must be one of " (sort (action-keywords :herdr))
            ", a herdr pane command vector, or {:plugin ID :action ID}")
-      (and (= 1 (count (:keys b))) (not= #{:keys :label :herdr} (set (keys b))))
-      "a single leader key is Herdr-only, so it takes just :herdr")))
+      (and (has? :doom-match) (not (doom-matches (:doom-match b))))
+      (str "doom-match must be one of " (sort doom-matches)))))
 
 (defn validate! [{:keys [groups bindings terminal] :as grammar}]
   (let [group-keys (set (map first groups))]
@@ -72,8 +75,9 @@
       (throw (ex-info "Space is reserved for the command palette" {})))
     (doseq [{:keys [keys] :as b} bindings]
       (when-not (or (and (= 2 (count keys)) (group-keys (first keys)))
-                    (and (= 1 (count keys)) (text? (first keys)) (not (#{" " "SPC"} (first keys)))))
-        (throw (ex-info "Leader keys must be a known group and one key, or one Herdr key" {:binding b})))
+                    (and (= 1 (count keys)) (text? (first keys)) (not (#{" " "SPC"} (first keys)))
+                         (not (group-keys (first keys)))))
+        (throw (ex-info "Leader keys must be a known group and one key, or one key that is not a group" {:binding b})))
       (when-not (some #(% b) (vals contexts))
         (throw (ex-info "Leader binding has no context" {:binding b})))
       (when-let [problem (binding-problem b)]
@@ -82,11 +86,7 @@
       (throw (ex-info "Duplicate leader sequence" {})))
     (let [desktop (map #(mapv str/lower-case (:keys %)) (filter (:desktop contexts) bindings))]
       (when-not (= (count desktop) (count (distinct desktop)))
-        (throw (ex-info "Desktop leader keys differ only by case, which Hyprland submaps cannot tell apart" {}))))
-    (let [herdr (filter (:herdr contexts) bindings)
-          herdr-groups (set (for [b herdr :when (= 2 (count (:keys b)))] (first (:keys b))))]
-      (doseq [b herdr :when (herdr-groups (first (:keys b))) :when (= 1 (count (:keys b)))]
-        (throw (ex-info (str "Herdr key " (first (:keys b)) " is also a Herdr leader group") {:binding b})))))
+        (throw (ex-info "Desktop leader keys differ only by case, which Hyprland submaps cannot tell apart" {})))))
   grammar)
 
 (defn load-grammar [] (validate! (edn/read-string (slurp (config-path)))))
@@ -303,7 +303,8 @@
             (log! "Hyprland" pressed (:label b)))))))
 
 (defn hypr-key [k]
-  (get {"=" "equal" "SPC" "SPACE" "/" "slash"} k (str/upper-case k)))
+  (get {"=" "equal" "SPC" "SPACE" "/" "slash" "," "comma" "." "period" "`" "grave" "TAB" "TAB"}
+       k (str/upper-case k)))
 
 (defn desktop-dispatcher
   "The dispatcher that a desktop binding runs inside Hyprland, or nil when it
@@ -328,7 +329,12 @@
                           (str "  hl.bind(\"catchall\", keys.cancel(" (q name) "))")
                           "end)"]))
         bind (fn [k action] (str "hl.bind(mods .. " (q (hypr-key k)) ", " action ")"))
-        run (fn [keys] (str "keys.leave(hl.dsp.exec_cmd(" (q (str "~/.local/bin/keyleader run " (str/join " " keys))) "))"))]
+        shell-word #(if (re-matches #"\w+" %) % (str "'" % "'"))
+        run (fn [keys] (str "keys.leave(hl.dsp.exec_cmd(" (q (str "~/.local/bin/keyleader run " (str/join " " (map shell-word keys)))) "))"))
+        action (fn [b] (if-let [d (desktop-dispatcher b)]
+                         (str "keys.leave(" (hypr/lua d) ", "
+                              (q (str desktop-leader " " (str/join " " (:keys b)))) ", " (q (:label b)) ")")
+                         (run (:keys b))))]
     (str/join
      "\n"
      (concat
@@ -337,17 +343,14 @@
        "local keys = require(\"keys\")"
        "hl.bind(\"ALT + SPACE\", hl.dsp.submap(\"leader\"))"]
       (submap "leader"
-              (cons (bind "SPC" (run ["SPC"]))
-                    (for [[k] groups] (bind k (str "hl.dsp.submap(" (q (str "leader-" k)) ")")))))
+              (concat [(bind "SPC" (run ["SPC"]))]
+                      (for [b bs :when (= 1 (count (:keys b)))] (bind (first (:keys b)) (action b)))
+                      (for [[k] groups] (bind k (str "hl.dsp.submap(" (q (str "leader-" k)) ")")))))
       (mapcat
        (fn [[g]]
          (submap (str "leader-" g)
-                 (for [b (filter #(= g (first (:keys %))) bs)
-                       :let [k (second (:keys b))]]
-                   (bind k (if-let [d (desktop-dispatcher b)]
-                             (str "keys.leave(" (hypr/lua d) ", "
-                                  (q (str desktop-leader " " (str/join " " (:keys b)))) ", " (q (:label b)) ")")
-                             (run (:keys b)))))))
+                 (for [b bs :when (= 2 (count (:keys b))) :when (= g (first (:keys b)))]
+                   (bind (second (:keys b)) (action b)))))
        groups)
       [""]))))
 
@@ -357,7 +360,7 @@
   (let [saved (str/trim (run! ["stty" "-g"] {:in :inherit}))]
     (run! ["stty" "-icanon" "-echo" "min" "1"] {:in :inherit})
     (try (let [c (.read System/in)]
-           (case c 27 :escape 32 "SPC" (str (char c))))
+           (case c 27 :escape 32 "SPC" 9 "TAB" (str (char c))))
          (finally (run! ["stty" saved] {:in :inherit})))))
 
 (defn show! [title rows]
@@ -396,6 +399,8 @@
         (vector? action) (run! (concat ["herdr"] (take 2 action) ["--pane" pane] (drop 2 action)))
         (= :close-pane action) (run! ["herdr" "pane" "close" pane])
         (= :edit-scrollback action) (herdr-api! "pane.edit_scrollback" {:pane_id pane})
+        (= :choose-workspace action) @(p/process [(str (fs/home) "/.local/bin/herdr-workspace-pick")]
+                                                  {:in :inherit :out :inherit :err :inherit})
         (map? action) (herdr-api! "plugin.action.invoke" {:plugin_id (:plugin action) :action_id (:action action)
                                                             :context {:focused_pane_id pane}})
         (= :close-tab action) (run! ["herdr" "tab" "close" (System/getenv "HERDR_ACTIVE_TAB_ID")])
@@ -430,9 +435,11 @@
         keyed (fn [submap ks] (concat (for [m [0 8] k ks] [submap m (str/lower-case (hypr-key k))])
                                       [[submap 0 "escape"] [submap 0 "catchall"]]))]
     (set (concat [["" 8 "space"]]
-                 (keyed "leader" (cons "SPC" (map first groups)))
+                 (keyed "leader" (concat ["SPC"] (for [b bs :when (= 1 (count (:keys b)))] (first (:keys b)))
+                                         (map first groups)))
                  (mapcat (fn [[g]] (keyed (str "leader-" g)
-                                          (for [b bs :when (= g (first (:keys b)))] (second (:keys b)))))
+                                          (for [b bs :when (= 2 (count (:keys b))) :when (= g (first (:keys b)))]
+                                            (second (:keys b)))))
                          groups)))))
 
 (defn live-binds
