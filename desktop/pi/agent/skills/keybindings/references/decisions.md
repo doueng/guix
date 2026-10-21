@@ -26,6 +26,17 @@ These entries supersede the hold time above and the Cmd+Space and leader entries
 - 2026-10-21. `leader.edn`'s `:terminal :keeps` pairs each program regex with the keys it keeps. Pi had received Ctrl+h, which it does not use, and fzf had lost Ctrl+j/k. Status: tests, and the rules checked against this Pi pane's live process list.
 - 2026-10-21. Tiny-fingers moved from Ctrl+b Space f to Ctrl+b Space s l, and the desktop application group from Alt+Space a to Alt+Space o. Doom binds SPC f to files, SPC s l to jump to a visible link, and SPC o to open terminals and the browser. Ctrl+b f still opens tiny-fingers. Status: tests and `keyleader --verify-hypr`.
 
+## Leader regrouping
+
+These entries supersede the o a launcher, c R, IdeaVim b b and terminal Cmd chord entries above.
+
+- 2026-10-21. Single leader keys work in every context. `,` switches buffer, Herdr tab or window, `` ` `` returns to the last buffer or window, and `.` finds a file or, on the desktop, launches an application. Doom uses the same three keys. Alt+Space o a is gone, since launching was the most used desktop leader action and took three keys. Status: Alt+Space ., Alt+Space ` and Alt+Space TAB ` observed with ydotool; Doom and Neovim keys checked in a headless daemon and the Neovim test.
+- 2026-10-21. p p switches project and TAB . and TAB ` choose and return to a workspace, following Doom. Herdr runs sesh and `herdr-workspace-pick` for them, and Hyprland focuses the previous workspace. Herdr's Ctrl+b Shift+O, Ctrl+b w and Ctrl+b Shift+B still work. Status: the Herdr popup observed for TAB ., TAB ` and `,` through the keybinding log.
+- 2026-10-21. References moved from c R to c D. Doom's duplicate SPC e Treemacs binds and SPC t T are gone, so Treemacs is on upstream SPC o p and o t toggles the terminal. Status: checked in a headless Doom daemon.
+- 2026-10-21. The terminal kanata layer sends nothing for Cmd+Z, Cmd+Shift+Z, Cmd+W and Cmd+T. Ctrl+Z suspended Neovim and foreground jobs, and fish's vi insert mode binds no undo to it. Status: fish bindings read with `bind -M insert`, the layer simulated, live after `make switch`.
+- 2026-10-21. Cmd+T for a new Herdr tab was dropped for now. It needs a Herdr-only kanata layer, and `hyprkan` reads `apps.edn` live while kanata learns new layers only at `make switch`. Measured: kanata ignores an unknown layer and stays on base, which would break Cmd+Backspace in Herdr until the switch. Ctrl+b c still opens a tab.
+- 2026-10-21. The reference shows `:doom-match` from `leader.edn` instead of matching label words. Word matching reported s l, o b and c R as Doom's meaning and c x as different. Status: `review-test.clj` fails on a sequence Doom binds without a recorded match.
+
 ## Update from this implementation
 
 The entries below retain the earlier investigation record. These decisions supersede the corresponding open items.

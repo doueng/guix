@@ -3,6 +3,10 @@
 (vim.api.nvim_exec_autocmds :User {:pattern :VeryLazy})
 (assert (vim.wait 2000 #(= (desc "<Space>wh") "Focus left")) "Space w h must focus left")
 (assert (= (desc "<Space>cd") "Find definition") "Space c d must match Doom")
+(assert (= (desc "<Space>cD") "Find references") "Space c D must find references, as in Doom")
+(assert (= (desc "<Space>,") "Switch buffer, tab or window") "Space , must switch buffers")
+(assert (= (desc "<Space>`") "Last buffer or window") "Space ` must return to the last buffer")
+(assert (= (desc "<Space>ot") "Terminal") "Space o t must open a terminal")
 (assert (= (desc "<Space><Space>") "Command Palette") "Space Space must open the command palette")
 (assert (= (desc "<C-l>") "Focus right") "Ctrl+l must focus right")
 

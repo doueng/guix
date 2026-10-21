@@ -33,7 +33,7 @@ An application whose native chord differs gets its own layer. That layer lists o
 | Window class | Layer | Change |
 | --- | --- | --- |
 | `jetbrains-idea` | `intellij` | Cmd+Shift+Z sends Ctrl+Shift+Z, IntelliJ's redo. Elsewhere it sends Ctrl+Y, which deletes a line in IntelliJ. |
-| `com.mitchellh.ghostty`, `com.mitchellh.ghostty.herdr` | `terminal` | Cmd+Backspace sends Ctrl+U. Elsewhere it sends Shift+Home then Backspace, and fish ignores Shift+Home. |
+| `com.mitchellh.ghostty`, `com.mitchellh.ghostty.herdr` | `terminal` | Cmd+Backspace sends Ctrl+U. Elsewhere it sends Shift+Home then Backspace, and fish ignores Shift+Home. Cmd+Z, Cmd+Shift+Z, Cmd+W and Cmd+T send nothing, so they never suspend Neovim or a job, delete a path component or transpose characters. |
 
 Emacs runs inside Ghostty and Herdr, so Hyprland sees only the terminal's class. A layer cannot single out Emacs or any other terminal program.
 `herdr-terminal` starts Herdr in a Ghostty window with its own class. Cmd+Space, Cmd+Return and Cmd+B find Herdr by that class, so they never type into another Ghostty window.
@@ -57,8 +57,14 @@ The desktop leader is a Hyprland submap. It captures the following keys before a
 `keyleader listen` draws the panel. It follows Hyprland's submap events and asks Dusk to show the menu for the active submap. Hyprland starts it at login.
 You can keep Alt held after Alt+Space. Each key also works with Alt.
 
+Single keys after the leader carry the most frequent actions, as in Doom. Groups hold the rest, one object per letter.
+
 | Keys | Meaning | Contexts |
 | --- | --- | --- |
+| , | Switch buffer, Herdr tab, or desktop window | All |
+| ` | Last buffer or window | Neovim, Doom, desktop |
+| . | Find a file, or launch an application on the desktop | Doom, IntelliJ, desktop. Neovim's own Space . finds a file |
+| e | Edit scrollback in `$EDITOR` | Herdr |
 | w h, w j, w k, w l | Focus left, down, up, or right | All |
 | w s, w v | Split below, split right | Editors, Herdr |
 | w d | Close the window or pane | All |
@@ -69,12 +75,15 @@ You can keep Alt held after Alt+Space. Each key also works with Alt.
 | b d | Close the buffer or Herdr tab | Editors, Herdr |
 | f s, f r | Save, recent files | Editors |
 | s b | Search the buffer | Editors |
-| c d, c R, c r, c a, c x | Definition, references, rename, code action, diagnostics | Editors |
+| c d, c D, c r, c a, c x | Definition, references, rename, code action, diagnostics | Editors |
 | s l | Copy visible text by hint (tiny-fingers), like Doom's jump to visible link | Herdr |
-| o a, o t, o b, o i | Open the application launcher, terminal, browser workspace, IntelliJ workspace | Desktop |
-| e | Edit scrollback in `$EDITOR` | Herdr |
+| o t | Terminal: vterm, a Snacks terminal, IntelliJ's terminal, or the Herdr terminal | Editors, desktop |
+| o b, o i | Browser and IntelliJ workspaces | Desktop |
+| p p | Switch project: projectile, IntelliJ recent projects, or the Herdr sesh picker | Doom, IntelliJ, Herdr |
+| TAB . | Choose a workspace | Doom, Herdr |
+| TAB ` | Last workspace | Doom, Herdr, desktop |
 
-Herdr's `e` is a single key, not a group. A single key is Herdr-only, and `keyleader --check` rejects one that is also a Herdr group. Ctrl+b f and Ctrl+b Shift+E still work.
+`keyleader --check` rejects a single key that is also a group key. Doom's Treemacs toggle stays on its upstream SPC o p. Ctrl+b f and Ctrl+b Shift+E still work.
 `keyleader --check` also rejects desktop sequences that differ only by case, because Hyprland submaps cannot tell `c r` from `c R`.
 `reference.html` maps every binding against Doom Emacs; see [Reference](#reference).
 
@@ -146,6 +155,11 @@ No global keyboard listener or browser content script has been added.
 | IntelliJ Space w, b, c follow idea-doom-emacs | They follow `leader.edn` where the table defines them | Same meanings as the editors |
 | Ctrl+b Space f copies text by hint | Ctrl+b Space s l | Doom's SPC f is the file group and SPC s l jumps to a visible link |
 | Alt+Space a a/t/b/i | Alt+Space o a/t/b/i | Doom's SPC o opens terminals and the browser |
+| Alt+Space o a launches an application | Alt+Space . | Two keys for the most used desktop action, like Doom's SPC . |
+| Space c R finds references | Space c D | Doom pairs c d with c D |
+| Doom Space e toggles Treemacs, Space t T toggles vterm | Space o p and Space o t | Upstream Doom's keys |
+| IdeaVim Space b b opens recent files | The Switcher | f r already opens recent files |
+| Cmd+Z, Cmd+W and Cmd+T in a terminal send Ctrl+Z, Ctrl+W and Ctrl+T | Nothing | Ctrl+Z suspended Neovim, and fish's vi insert mode has no undo on it |
 | Ctrl+Shift+4 copies a region | Cmd+Shift+4 sends Shift+Print, Cmd+Shift+3 sends Print | Ctrl belongs to applications |
 | Ghostty Ctrl+Enter toggles fullscreen | Ctrl+Enter reaches the program | Ctrl+Alt+f owns fullscreen |
 | Pi receives bare Ctrl+h | Ctrl+h moves focus from Pi | Pi does not use Ctrl+h |
@@ -157,7 +171,7 @@ Cmd+n still sends a bbh composer message. This existing local override is not a 
 
 ## Reference
 
-`reference.html` is a single page that lists every binding by layer, compares the shared leader with Doom Emacs's `SPC` tree, and records the open inconsistencies. `bb desktop/build/keybindings/reference.bb` regenerates it from `leader.edn`, `bindings.edn`, `kanata.kbd`, `herdr/config.toml`, `hyprland.lua` and the installed Doom's `+evil-bindings.el`.
+`reference.html` is a single page that lists every binding by layer, compares the shared leader with Doom Emacs's `SPC` tree, and records the open inconsistencies. The comparison shows each binding's `:doom-match` from `leader.edn`, and `review-test.clj` fails when a sequence Doom binds has none. `bb desktop/build/keybindings/reference.bb` regenerates it from `leader.edn`, `bindings.edn`, `kanata.kbd`, `herdr/config.toml`, `hyprland.lua` and the installed Doom's `+evil-bindings.el`.
 
 ## Maintenance
 
@@ -165,5 +179,5 @@ Cmd+n still sends a bbh composer message. This existing local override is not a 
 Hyprland reads `hypr/hyprland.lua`. Dispatchers are data such as `["focus" {:direction "left"}]`, and `desktop/lib/hypr/dispatch.clj` renders them for the Lua config and for `hyprctl dispatch`.
 `bindings.edn` owns the direct Ctrl+Alt bindings and the Cmd+/ guide entries.
 Application-specific keymaps remain native configuration. Guide entries do not claim to be an exhaustive inventory.
-`make keybindings-check` compares every generated file with its source.
+`make keybindings-check` compares every generated file with its source. Its `test.clj` also fails when `hyprland.lua` binds a Cmd chord that `bindings.edn` does not list.
 See [the installation instructions](install.md) to regenerate bindings or install Vimium aliases.

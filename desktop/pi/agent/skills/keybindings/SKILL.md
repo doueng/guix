@@ -17,7 +17,7 @@ Use `keyguide --list` for the curated discovery menu.
 
 ## Choose the owner
 
-1. Name the action's scope and frequency. If the action exists in more than one of Neovim, Doom, IntelliJ, Herdr, and the desktop, it belongs in `desktop/configs/keybindings/leader.edn`. Give it the same leader keys in every context that has it.
+1. Name the action's scope and frequency. If the action exists in more than one of Neovim, Doom, IntelliJ, Herdr, and the desktop, it belongs in `desktop/configs/keybindings/leader.edn`. Give it the same leader keys in every context that has it. The most frequent actions take one key after the leader, as Doom's `,` `` ` `` and `.` do. Rarer ones go under the group for their object. Record `:doom-match` for any sequence that upstream Doom also binds.
 2. Check at least three candidate chords in the relevant family.
 3. Trace candidates through `desktop/kanata.kbd`, including the layer `kanata/apps.edn` picks for the focused window, before checking Hyprland and the application.
 4. Inspect `hyprctl -j binds` and exercise the chord through `ydotool` before declaring it reachable. After a leader change, `keyleader --verify-hypr` confirms that Hyprland loaded the generated submaps in order.
@@ -34,7 +34,7 @@ Hard constraints override the score.
 
 - Ctrl+Alt is desktop control. Add Shift for the corresponding move action.
 - Plain Alt belongs to applications. Do not globally consume Emacs M-f, M-w, or IdeaVim Alt+digits. Alt+Space, the desktop leader, is the only exception.
-- Cmd is partly rewritten by kanata. Cmd+S becomes Ctrl+S and Cmd+L becomes Right. Do not assume physical Cmd means Super.
+- Cmd is partly rewritten by kanata. Cmd+S becomes Ctrl+S and Cmd+L becomes Right. Do not assume physical Cmd means Super. In Ghostty and Herdr the `terminal` layer sends nothing for Cmd+Z, Cmd+Shift+Z, Cmd+W and Cmd+T, because their Ctrl chords suspend or edit there. `hyprkan` reads `apps.edn` live, but kanata reads `kanata.kbd` only after `make switch`, so do not point `apps.edn` at a layer before the switch installs it.
 - Herdr runs in the Ghostty class `com.mitchellh.ghostty.herdr`, started by `desktop/bin/herdr-terminal`. Target Herdr by that class, never by `com.mitchellh.ghostty`, which every other Ghostty window shares.
 - Check upstream defaults on the real surface. `ghostty +list-keybinds` lists what Ghostty consumes before a program sees it.
 - Caps held is Ctrl. Caps tapped is Escape. Keep that escape path available.
