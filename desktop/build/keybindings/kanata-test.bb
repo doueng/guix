@@ -73,7 +73,15 @@
    ["Terminal Cmd+Backspace deletes to the line start with Ctrl+U" "ls:terminal d:lmet d:bspc u:bspc u:lmet"
     "↓LGui ↑LGui ↓LCtrl ↓U ↑LCtrl ↑U ↓LGui ↑LGui"]
    ["Terminal Cmd+C still copies" "ls:terminal d:lmet d:c u:c u:lmet"
-    "↓LGui ↑LGui ↓LCtrl ↓Insert ↑LCtrl ↑Insert ↓LGui ↑LGui"]])
+    "↓LGui ↑LGui ↓LCtrl ↓Insert ↑LCtrl ↑Insert ↓LGui ↑LGui"]
+   ["Terminal Cmd+Z never suspends with Ctrl+Z" "ls:terminal d:lmet d:z u:z u:lmet" "↓LGui ↑LGui"]
+   ["Terminal Cmd+Shift+Z sends nothing" "ls:terminal d:lmet d:lsft d:z u:z u:lsft u:lmet" "↓LGui ↓LShift ↑LShift ↑LGui"]
+   ["Terminal Cmd+W sends nothing" "ls:terminal d:lmet d:w u:w u:lmet" "↓LGui ↑LGui"]
+   ["Terminal Cmd+T sends nothing" "ls:terminal d:lmet d:t u:t u:lmet" "↓LGui ↑LGui"]
+   ["Terminal Cmd+N still sends Ctrl+N for Pi and bbh" "ls:terminal d:lmet d:n u:n u:lmet"
+    "↓LGui ↑LGui ↓LCtrl ↓N ↑LCtrl ↑N ↓LGui ↑LGui"]
+   ["Cmd+Z outside terminals still undoes" "d:lmet d:z u:z u:lmet"
+    "↓LGui ↑LGui ↓LCtrl ↓Z ↑LCtrl ↑Z ↓LGui ↑LGui"]])
 
 (def defined-layers
   (set (map second (re-seq #"\(deflayermap \(([^)\s]+)\)" (slurp config)))))

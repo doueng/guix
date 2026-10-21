@@ -98,5 +98,11 @@
 
 ;; fish ignores Shift+Home, so the shared Cmd+Backspace deleted one character.
 ;; Ctrl+U deletes to the line start in fish, Pi, and Neovim and Doom insert mode.
+;; Ctrl+Z suspends Neovim or a running job, and fish's vi insert mode has no
+;; undo on it, so Cmd+Z and Cmd+Shift+Z do nothing here. Cmd+W and Cmd+T do
+;; nothing rather than delete a path component or transpose characters.
 (deflayermap (cmd-terminal)
-  bspc (unmod $meta lctl u))
+  bspc (unmod $meta lctl u)
+  z XX
+  w XX
+  t XX)
