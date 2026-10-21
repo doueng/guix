@@ -63,7 +63,8 @@ require("keybindings")
 require("leader")
 
 hl.bind("PRINT", hl.dsp.exec_cmd("sh -c 'mkdir -p ~/Pictures; grim ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png'"))
-hl.bind("CTRL + SHIFT + 4", hl.dsp.exec_cmd("sh -c 'region=$(slurp) && grim -g \"$region\" - | wl-copy --type image/png'"))
+-- kanata sends Print for Cmd+Shift+3 and Shift+Print for Cmd+Shift+4.
+hl.bind("SHIFT + PRINT", hl.dsp.exec_cmd("sh -c 'region=$(slurp) && grim -g \"$region\" - | wl-copy --type image/png'"))
 hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"), { locked = true, repeating = true })
 hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"), { locked = true, repeating = true })
 hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"))

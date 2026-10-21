@@ -36,10 +36,11 @@
     "↓LGui ↑LGui ↓LShift ↓Home ↑LShift ↑Home ↓LGui ↑LGui ↓BSpace ↑BSpace ↓LGui ↑LGui"]
    ["Cmd+Shift+H selects left" "d:lmet d:lsft d:h u:h u:lsft u:lmet"
     "↓LGui ↓LShift ↑LGui ↓Left ↑Left ↓LGui ↑LShift ↑LGui"]
+   ;; keyberon names Linux KEY_SYSRQ SysReq. XKB reads it as Print.
    ["Cmd+Shift+3 sends Print" "d:lmet d:lsft d:3 u:3 u:lsft u:lmet"
-    "↓LGui ↓LShift ↑LGui ↑LShift ↓Print ↑Print ↓LGui ↓LShift ↑LShift ↑LGui"]
+    "↓LGui ↓LShift ↑LGui ↑LShift ↓SysReq ↑SysReq ↓LGui ↓LShift ↑LShift ↑LGui"]
    ["Cmd+Shift+4 sends Shift+Print" "d:lmet d:lsft d:4 u:4 u:lsft u:lmet"
-    "↓LGui ↓LShift ↑LGui ↓Print ↑Print ↓LGui ↑LShift ↑LGui"]
+    "↓LGui ↓LShift ↑LGui ↓SysReq ↑SysReq ↓LGui ↑LShift ↑LGui"]
    ["Right Cmd+5 sends Ctrl+5" "d:rmet d:5 u:5 u:rmet"
     "↓RGui ↑RGui ↓LCtrl ↓Kb5 ↑LCtrl ↑Kb5 ↓RGui ↑RGui"]
    ["Caps tapped is Escape" "d:caps u:caps" "↓Escape ↑Escape"]

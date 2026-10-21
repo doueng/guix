@@ -60,8 +60,10 @@
   bspc (macro (unmod $meta lsft home) 40 (unmod $meta bspc))
   1 (unmod $meta lctl 1)
   2 (unmod $meta lctl 2)
-  3 (unmod $meta lctl 3)
-  4 (unmod $meta lctl 4)
+  ;; Cmd+Shift+3 and Cmd+Shift+4 take screenshots as on macOS, through Print
+  ;; rather than a Ctrl chord that applications own.
+  3 (fork (unmod $meta lctl 3) (unmod (lmet rmet lsft rsft) prnt) (lsft rsft))
+  4 (fork (unmod $meta lctl 4) (unmod $meta prnt) (lsft rsft))
   5 (unmod $meta lctl 5)
   6 (unmod $meta lctl 6)
   7 (unmod $meta lctl 7)
