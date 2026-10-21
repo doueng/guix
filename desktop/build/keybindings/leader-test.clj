@@ -42,6 +42,12 @@
   (is (= [["herdr" "pane" "send-keys" "w1:p2" "ctrl+h"]] (term-nav-with "nvim" "left")))
   (is (= [[:nav "right"]] (term-nav-with "btop" "right"))))
 
+(deftest programs-keep-only-the-keys-they-use
+  (is (= [[:nav "left"]] (term-nav-with "pi" "left")) "Pi has no Ctrl+h, so focus moves")
+  (is (= [["herdr" "pane" "send-keys" "w1:p2" "ctrl+j"]] (term-nav-with "pi" "down")))
+  (is (= [["herdr" "pane" "send-keys" "w1:p2" "ctrl+k"]] (term-nav-with "fzf" "up")) "fzf moves its selection with Ctrl+j/k")
+  (is (= [[:nav "right"]] (term-nav-with "fzf" "right"))))
+
 (deftest window-keys-mean-the-same-in-every-context
   (doseq [context [:desktop :herdr :nvim :doom :idea]]
     (is (= [["h" "Focus left"] ["j" "Focus down"] ["k" "Focus up"] ["l" "Focus right"]]

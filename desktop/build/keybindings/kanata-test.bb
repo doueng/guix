@@ -36,10 +36,17 @@
     "↓LGui ↑LGui ↓LShift ↓Home ↑LShift ↑Home ↓LGui ↑LGui ↓BSpace ↑BSpace ↓LGui ↑LGui"]
    ["Cmd+Shift+H selects left" "d:lmet d:lsft d:h u:h u:lsft u:lmet"
     "↓LGui ↓LShift ↑LGui ↓Left ↑Left ↓LGui ↑LShift ↑LGui"]
+   ["Cmd+Shift+3 sends Print" "d:lmet d:lsft d:3 u:3 u:lsft u:lmet"
+    "↓LGui ↓LShift ↑LGui ↑LShift ↓Print ↑Print ↓LGui ↓LShift ↑LShift ↑LGui"]
+   ["Cmd+Shift+4 sends Shift+Print" "d:lmet d:lsft d:4 u:4 u:lsft u:lmet"
+    "↓LGui ↓LShift ↑LGui ↓Print ↑Print ↓LGui ↑LShift ↑LGui"]
    ["Right Cmd+5 sends Ctrl+5" "d:rmet d:5 u:5 u:rmet"
     "↓RGui ↑RGui ↓LCtrl ↓Kb5 ↑LCtrl ↑Kb5 ↓RGui ↑RGui"]
    ["Caps tapped is Escape" "d:caps u:caps" "↓Escape ↑Escape"]
    ["Caps held alone becomes Ctrl" "d:caps t:600 u:caps" "↓LCtrl ↑LCtrl"]
+   ;; A mouse click is not a key, so only the hold time separates Ctrl+click from Escape.
+   ["Caps held 300 ms for a click is Ctrl, not Escape" "d:caps t:300 u:caps" "↓LCtrl ↑LCtrl"]
+   ["Shift held 300 ms for a click types no parenthesis" "d:lsft t:300 u:lsft" "↓LShift ↑LShift"]
    ["Caps+Alt+H is Ctrl+Alt+H" "d:caps d:lalt d:h u:h u:lalt u:caps"
     "↓LCtrl ↓LAlt ↓H ↑H ↑LAlt ↑LCtrl"]
    ["Caps+Alt+Shift+H is Ctrl+Alt+Shift+H" "d:caps d:lalt d:lsft d:h u:h u:lsft u:lalt u:caps"
@@ -59,7 +66,12 @@
     "↓LGui ↓LShift ↑LGui ↓LCtrl ↓Z ↑LCtrl ↑Z ↓LGui ↑LShift ↑LGui"]
    ["IntelliJ Cmd+C still copies" "ls:intellij d:lmet d:c u:c u:lmet"
     "↓LGui ↑LGui ↓LCtrl ↓Insert ↑LCtrl ↑Insert ↓LGui ↑LGui"]
-   ["IntelliJ keeps Caps as Escape" "ls:intellij d:caps u:caps" "↓Escape ↑Escape"]])
+   ["IntelliJ keeps Caps as Escape" "ls:intellij d:caps u:caps" "↓Escape ↑Escape"]
+   ;; fish ignores Shift+Home, so the shared Shift+Home Backspace deleted one character.
+   ["Terminal Cmd+Backspace deletes to the line start with Ctrl+U" "ls:terminal d:lmet d:bspc u:bspc u:lmet"
+    "↓LGui ↑LGui ↓LCtrl ↓U ↑LCtrl ↑U ↓LGui ↑LGui"]
+   ["Terminal Cmd+C still copies" "ls:terminal d:lmet d:c u:c u:lmet"
+    "↓LGui ↑LGui ↓LCtrl ↓Insert ↑LCtrl ↑Insert ↓LGui ↑LGui"]])
 
 (def defined-layers
   (set (map second (re-seq #"\(deflayermap \(([^)\s]+)\)" (slurp config)))))
@@ -68,7 +80,7 @@
 (def failures
   (concat
    (for [[label input expected] cases
-         :let [actual (emitted input)]
+         :let [actual (try (emitted input) (catch clojure.lang.ExceptionInfo e (str/trim (last (str/split-lines (:error (ex-data e)))))))]
          :when (not= expected actual)]
      (str label "\n  expected " expected "\n  actual   " actual))
    (for [layer app-layers :when (not (defined-layers layer))]

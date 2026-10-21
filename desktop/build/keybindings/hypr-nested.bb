@@ -65,7 +65,8 @@
                      (when class [(str "--class=" class)])
                      ["-e"] cmd)
              {:out :discard :err :discard :extra-env env})
-  (wait-for #(str/includes? (hypr "-j" "clients") (or class "com.mitchellh.ghostty"))))
+  (let [class (or class "com.mitchellh.ghostty")]
+    (wait-for #(some (fn [c] (= class (:class c))) (json/parse-string (hypr "-j" "clients") true)))))
 
 (try
   (hide-window!)
@@ -92,14 +93,17 @@
   (check (some #(and (= "" (:submap %)) (= 64 (:modmask %)) (= "SPACE" (:key %)))
                (json/parse-string (hypr "-j" "binds") true))
          "Cmd+Space (SUPER + SPACE) is bound at the top level")
-  (client! nil "sh" "-c" (str "stty raw -echo; head -c 2 > " work "/received"))
-  (hypr "dispatch" "hl.dsp.focus({ window = \"class:kt.left\" })")
-  (check (= "kt.left" (active)) "another app has focus before Cmd+Space")
+  (client! "com.mitchellh.ghostty.herdr" "sh" "-c" (str "stty raw -echo; head -c 2 > " work "/received"))
+  (client! nil "sh" "-c" (str "stty raw -echo; head -c 2 > " work "/plain"))
+  (check (= "com.mitchellh.ghostty" (active)) (str "a Ghostty window without Herdr has focus before Cmd+Space, got " (active)))
   (check (= "ok" (hypr "eval" "require('keys').herdr_menu()")) "the Cmd+Space handler runs")
-  (check (= "com.mitchellh.ghostty" (active)) "Cmd+Space focuses the Herdr terminal")
+  (check (= "com.mitchellh.ghostty.herdr" (active)) "Cmd+Space focuses the Herdr terminal")
   (let [f (str work "/received")
         got (when (wait-for #(and (fs/exists? f) (pos? (fs/size f)))) (slurp f))]
-    (check (= "\u0002 " got) (str "Cmd+Space sends Ctrl+b Space to the focused terminal, got " (pr-str got))))
+    (check (= "\u0002 " got) (str "Cmd+Space sends Ctrl+b Space to the Herdr terminal, got " (pr-str got))))
+  (let [f (str work "/plain")]
+    (check (not (and (fs/exists? f) (pos? (fs/size f))))
+           (str "the other Ghostty window receives nothing, got " (pr-str (when (fs/exists? f) (slurp f))))))
   (wait-for #(= 5 (count (logged))))
   (check (= [["Hyprland" "Alt+Space w h" "Focus left"]
              ["Hyprland" "Alt+Space w l" "Focus right"]

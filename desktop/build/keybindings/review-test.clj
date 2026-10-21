@@ -84,5 +84,10 @@
       (is (some #(and (= (str "leader " context) (first %)) (= "SPC w h" (second %))) leader-rows) context))
     (is (some #(str/starts-with? (nth % 3) "keybindings/leader.edn:") leader-rows))))
 
+(deftest ghostty-leaves-application-chords-alone
+  (let [binds (set (re-seq #"(?m)^keybind = ([^=]+)=" (:out (p/shell {:out :string} "ghostty" "+list-keybinds"))))]
+    (doseq [chord ["ctrl+enter"]]
+      (is (not (contains? (set (map second binds)) chord)) (str "Ghostty consumes " chord)))))
+
 (let [{:keys [fail error]} (run-tests)]
   (System/exit (if (zero? (+ fail error)) 0 1)))
