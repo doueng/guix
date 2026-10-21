@@ -22,34 +22,42 @@
   (get (edn/read-string (slurp (apps-path))) class "base"))
 
 (defn send!
-  "Send MESSAGE to kanata. With REPLY, return that field of kanata's answer."
+  "Send MESSAGE to kanata. With UNTIL, read kanata's messages and return the
+  first non-nil result of UNTIL applied to the sequence of messages so far."
   ([message] (send! message nil))
-  ([message reply]
+  ([message until]
    (let [[host port] kanata-address]
      (with-open [socket (java.net.Socket. ^String host ^int port)]
        (doto (.getOutputStream socket)
          (.write (.getBytes (str (json/generate-string message) "\n")))
          (.flush))
-       (when reply
-         (some #(get (json/parse-string % true) reply)
-               (line-seq (io/reader (.getInputStream socket)))))))))
+       (when until
+         (some until (reductions conj [] (map #(json/parse-string % true)
+                                             (line-seq (io/reader (.getInputStream socket)))))))))))
+
+(defn reply [field] (fn [messages] (get (peek messages) field)))
+
+(defn reset-after-reload
+  "kanata reports ConfigFileReload, then the LayerChange that resets it to base."
+  [messages]
+  (some :LayerChange (drop-while (complement :ConfigFileReload) messages)))
 
 (defn warn [& parts]
   (binding [*out* *err*] (apply println "hyprkan:" parts)))
 
+;; kanata returns to its first layer when it reloads or restarts, so send the
+;; layer on every focus change instead of only when it differs from the last.
+(defn focus! [class]
+  (try (send! {:ChangeLayer {:new (layer-for class)}})
+       (catch Exception e (warn "cannot reach kanata:" (ex-message e)))))
+
+(defn active-class []
+  (:class (json/parse-string (:out (p/sh "hyprctl" "-j" "activewindow")) true)))
+
 (defn follow-focus! []
-  (let [sent (atom nil)
-        focus! (fn [class]
-                 (let [layer (layer-for class)]
-                   (when (not= layer @sent)
-                     (try (send! {:ChangeLayer {:new layer}})
-                          (reset! sent layer)
-                          (catch Exception e
-                            (reset! sent nil)
-                            (warn "cannot reach kanata:" (ex-message e)))))))
-        socket (str (System/getenv "XDG_RUNTIME_DIR") "/hypr/"
+  (let [socket (str (System/getenv "XDG_RUNTIME_DIR") "/hypr/"
                     (System/getenv "HYPRLAND_INSTANCE_SIGNATURE") "/.socket2.sock")]
-    (focus! (:class (json/parse-string (:out (p/sh "hyprctl" "-j" "activewindow")) true)))
+    (focus! (active-class))
     ;; The socket closes with the session, and the next session starts a new hyprkan.
     (with-open [channel (java.nio.channels.SocketChannel/open
                          (java.net.UnixDomainSocketAddress/of socket))
@@ -63,6 +71,6 @@
 
 (case (first *command-line-args*)
   nil (follow-focus!)
-  "layer" (println (:name (send! {:RequestCurrentLayerName {}} :CurrentLayerName)))
-  "reload" (send! {:Reload {}})
+  "layer" (println (:name (send! {:RequestCurrentLayerName {}} (reply :CurrentLayerName))))
+  "reload" (do (send! {:Reload {}} reset-after-reload) (focus! (active-class)))
   (do (warn "usage: hyprkan [layer|reload]") (System/exit 2)))
