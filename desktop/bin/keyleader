@@ -57,10 +57,13 @@
 
 (defn validate! [{:keys [groups bindings terminal] :as grammar}]
   (let [group-keys (set (map first groups))]
-    (when-not (every? #(and (text? (get terminal %))
-                            (try (re-pattern (get terminal %)) (catch Exception _ nil)))
-                      [:passthrough :clear-screen])
-      (throw (ex-info "Leader grammar needs :terminal {:passthrough REGEX :clear-screen REGEX}" {:terminal terminal})))
+    (when-not (and (vector? (:keeps terminal)) (seq (:keeps terminal))
+                   (every? (fn [[regex ks :as rule]]
+                             (and (= 2 (count rule)) (text? regex) (text? ks) (every? (set "hjkl") ks)
+                                  (try (re-pattern regex) (catch Exception _ nil))))
+                           (:keeps terminal)))
+      (throw (ex-info "Leader grammar needs :terminal {:keeps [[PROGRAM-REGEX KEYS] ...]} with KEYS from hjkl"
+                      {:terminal terminal})))
     (when-not (every? (fn [[k label]] (and (text? k) (text? label))) groups)
       (throw (ex-info "Leader groups need a key and a label" {:groups groups})))
     (when-not (= (count groups) (count group-keys))
@@ -179,17 +182,22 @@
   (map :name (get-in (herdr-json "pane" "process-info" "--pane" pane)
                      [:result :process_info :foreground_processes])))
 
+(defn keeper
+  "The first of PROGRAMS that keeps Ctrl+KEY under the :terminal :keeps RULES."
+  [rules key programs]
+  (first (for [program programs
+               [regex ks] rules
+               :when (and (str/includes? ks key) (re-find (re-pattern regex) (str/lower-case (str program))))]
+           program)))
+
 (defn term-nav!
-  "Bare Ctrl+h/j/k/l in Herdr. Programs that use these keys themselves get the
-  key, and shells get Ctrl+l; elsewhere focus moves like Ctrl+b h/j/k/l."
+  "Bare Ctrl+h/j/k/l in Herdr. A program that keeps the key under :terminal
+  :keeps gets it; elsewhere focus moves like Ctrl+b h/j/k/l."
   [grammar direction]
   (let [pane (herdr-pane)
         key (str "ctrl+" (nav-keys direction))
-        keys (str "Ctrl+" (nav-keys direction))
-        {:keys [passthrough clear-screen]} (:terminal grammar)
-        keeps-key (re-pattern (if (= "right" direction) (str passthrough "|" clear-screen) passthrough))]
-    (if-let [program (some #(when (re-find keeps-key (str/lower-case (str %))) %)
-                           (foreground-programs pane))]
+        keys (str "Ctrl+" (nav-keys direction))]
+    (if-let [program (keeper (get-in grammar [:terminal :keeps]) (nav-keys direction) (foreground-programs pane))]
       (do (run! ["herdr" "pane" "send-keys" pane key])
           (log! program keys (str "Forwarded to " program)))
       (nav! direction keys))))

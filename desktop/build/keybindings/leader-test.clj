@@ -88,19 +88,22 @@
 
 (deftest grammar-rejects-ambiguity
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate leader sequence"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]]
+        (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"} {:keys ["w" "h"] :label "Right" :nav "right"}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"known group"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]] :bindings [{:keys ["x" "h"] :label "Left" :nav "left"}]})))
+        (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]] :bindings [{:keys ["x" "h"] :label "Left" :nav "left"}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Herdr-only"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]]
+        (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
                               :bindings [{:keys ["e"] :label "Edit" :herdr :edit-scrollback :doom "x"}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"also a Herdr leader group"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]]
+        (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}
                                          {:keys ["w"] :label "Edit" :herdr :edit-scrollback}]})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"KEYS from hjkl"
+        (keyleader/validate! {:terminal {:keeps [["^fish$" "x"]]} :groups [["w" "W"]]
+                              :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}]})))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no context"
-        (keyleader/validate! {:terminal {:passthrough "^nvim$" :clear-screen "^fish$"} :groups [["w" "W"]] :bindings [{:keys ["w" "h"] :label "x"}]}))))
+        (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]] :bindings [{:keys ["w" "h"] :label "x"}]}))))
 
 (let [{:keys [fail error]} (run-tests)]
   (System/exit (if (zero? (+ fail error)) 0 1)))

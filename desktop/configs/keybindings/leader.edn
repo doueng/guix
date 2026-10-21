@@ -7,14 +7,15 @@
 ;; desktop/lib/hypr/dispatch.clj, or an action keyword), :desktop-command
 ;; (argv), :herdr (CLI vector, action keyword, or {:plugin ID :action ID}).
 ;; A single key, such as ["f"], is Herdr-only and must not be a Herdr group.
-;; :terminal :passthrough names the programs that receive bare Ctrl+h/j/k/l
-;; inside Herdr instead of Herdr moving focus. It matches the lower-cased
-;; foreground process name, which Linux truncates to 15 characters (Guix's
-;; Emacs wrapper shows as .emacs-31.1-rea). Pi uses Ctrl+j, Ctrl+k and Ctrl+l.
-;; :clear-screen names the programs that receive only Ctrl+l, which clears the
-;; screen in a shell. Ctrl+h/j/k still move focus there.
-{:terminal {:passthrough "^(g?(view|l?n?vim?x?)(diff)?|\\.?emacs.*|pi)$"
-            :clear-screen "^(fish|bash|zsh)$"}
+;; :terminal :keeps names the programs that receive bare Ctrl+h/j/k/l inside
+;; Herdr instead of Herdr moving focus. Each rule pairs a regex for the
+;; lower-cased foreground process name, which Linux truncates to 15 characters
+;; (Guix's Emacs wrapper shows as .emacs-31.1-rea), with the keys it keeps.
+;; Shells keep only Ctrl+l, which clears the screen.
+{:terminal {:keeps [["^(g?(view|l?n?vim?x?)(diff)?|\\.?emacs.*)$" "hjkl"]
+                    ["^pi$" "jkl"]
+                    ["^fzf$" "jk"]
+                    ["^(fish|bash|zsh)$" "l"]]}
  :groups [["w" "Windows and panes"]
           ["b" "Buffers, tabs and windows"]
           ["f" "Files"]

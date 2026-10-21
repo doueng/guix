@@ -31,8 +31,8 @@ workspace_picker = ["prefix+w", "prefix+e"]
 navigate_workspace_up = "w"
 navigate_workspace_down = "e"
 
-# Ctrl+h/j/k/l move focus, or go to the programs in leader.edn's
-# :terminal :passthrough. Ctrl+b h/j/k/l always move focus, so they leave
+# Ctrl+h/j/k/l move focus, or go to the programs that keep them under
+# leader.edn's :terminal :keeps. Ctrl+b h/j/k/l always move focus, so they leave
 # those programs. Both continue to Hyprland at the pane edge or when zoomed.
 focus_pane_left = []
 focus_pane_down = []
@@ -52,19 +52,19 @@ height = "45%"
 key = "ctrl+h"
 type = "shell"
 command = "$HOME/.local/bin/keyleader term-nav left"
-description = "focus left or pass to Vim, Emacs and Pi"
+description = "focus left or pass to Vim and Emacs"
 
 [[keys.command]]
 key = "ctrl+j"
 type = "shell"
 command = "$HOME/.local/bin/keyleader term-nav down"
-description = "focus down or pass to Vim, Emacs and Pi"
+description = "focus down or pass to Vim, Emacs, Pi and fzf"
 
 [[keys.command]]
 key = "ctrl+k"
 type = "shell"
 command = "$HOME/.local/bin/keyleader term-nav up"
-description = "focus up or pass to Vim, Emacs and Pi"
+description = "focus up or pass to Vim, Emacs, Pi and fzf"
 
 [[keys.command]]
 key = "ctrl+l"
