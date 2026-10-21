@@ -3,6 +3,7 @@
 (ns generate-leaders
   (:require [clojure.edn :as edn] [clojure.string :as str]))
 (load-file "desktop/bin/keyleader")
+(load-file "desktop/build/keybindings/reference.clj")
 
 (defn nvim-rhs [{:keys [nav nvim]}]
   (if nav
@@ -48,7 +49,9 @@
                            rhs (or (:idea b) (str "<C-w>" (subs ({"left" "h" "down" "j" "up" "k" "right" "l"} (:nav b)) 0 1)))]]
                  (str "nmap " lhs " " rhs "\n"
                       "let g:WhichKeyDesc_shared_" (str/join "_" (map #(if (= "=" %) "equal" %) (:keys b)))
-                      " = '" lhs " " (:label b) "'\n"))))})
+                      " = '" lhs " " (:label b) "'\n"))))
+   "desktop/configs/keybindings/reference.html"
+   (keybindings-reference/html (keybindings-reference/sources "." grammar))})
 
 (let [grammar (keyleader/validate! (edn/read-string (slurp "desktop/configs/keybindings/leader.edn")))
       check? (= "--check" (first *command-line-args*))

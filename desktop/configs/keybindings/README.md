@@ -14,6 +14,7 @@
 | Fullscreen, floating, close | Ctrl+Alt+f, Ctrl+Alt+v, Ctrl+Alt+w | Generated `hypr/keybindings.lua` |
 | Application launch and focus | Unrewritten Cmd chords | `hypr/hyprland.lua` |
 | Terminal multiplexer | Ctrl+b prefix, Cmd+digits | `herdr/config.toml` |
+| Herdr terminal window | Ghostty class `com.mitchellh.ghostty.herdr` | `desktop/bin/herdr-terminal` |
 | Editor commands | Space leader from `leader.edn`, then native leader keys | Doom, Neovim, IdeaVim |
 | Web pages | Vimium normal mode and ? help | Vimium extension |
 | Line editing | Native Ctrl and Alt keys | fish and the focused application |
@@ -32,8 +33,10 @@ An application whose native chord differs gets its own layer. That layer lists o
 | Window class | Layer | Change |
 | --- | --- | --- |
 | `jetbrains-idea` | `intellij` | Cmd+Shift+Z sends Ctrl+Shift+Z, IntelliJ's redo. Elsewhere it sends Ctrl+Y, which deletes a line in IntelliJ. |
+| `com.mitchellh.ghostty`, `com.mitchellh.ghostty.herdr` | `terminal` | Cmd+Backspace sends Ctrl+U. Elsewhere it sends Shift+Home then Backspace, and fish ignores Shift+Home. |
 
 Emacs runs inside Ghostty and Herdr, so Hyprland sees only the terminal's class. A layer cannot single out Emacs or any other terminal program.
+`herdr-terminal` starts Herdr in a Ghostty window with its own class. Cmd+Space, Cmd+Return and Cmd+B find Herdr by that class, so they never type into another Ghostty window.
 `hyprkan layer` prints kanata's active layer. After a system switch, `hyprkan reload` makes kanata reread `/etc/kanata/kanata.kbd` without root.
 Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typing.
 `make kanata-check` replays chords through kanata's simulator and checks that every layer in `apps.edn` exists.
@@ -49,7 +52,7 @@ Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typi
 | Desktop | Alt+Space | Dusk palette with the desktop leader actions and the guide entries |
 
 Herdr and the desktop never treat a bare Space as the leader, so typing a space always types a space.
-Cmd+Space sends Ctrl+b Space to the terminal. From another window it first focuses the terminal on workspace 1.
+Cmd+Space sends Ctrl+b Space to the Herdr terminal. From another window it first focuses the Herdr terminal, or starts one when none is open.
 The desktop leader is a Hyprland submap. It captures the following keys before any application sees them. A panel at the bottom of the screen lists the next keys. Escape or any unbound key cancels.
 `keyleader listen` draws the panel. It follows Hyprland's submap events and asks Dusk to show the menu for the active submap. Hyprland starts it at login.
 You can keep Alt held after Alt+Space. Each key also works with Alt.
@@ -67,18 +70,20 @@ You can keep Alt held after Alt+Space. Each key also works with Alt.
 | f s, f r | Save, recent files | Editors |
 | s b | Search the buffer | Editors |
 | c d, c R, c r, c a, c x | Definition, references, rename, code action, diagnostics | Editors |
-| a a, a t, a b, a i | Application launcher, terminal, browser workspace, IntelliJ workspace | Desktop |
-| f | Copy visible text by hint (tiny-fingers) | Herdr |
+| s l | Copy visible text by hint (tiny-fingers), like Doom's jump to visible link | Herdr |
+| o a, o t, o b, o i | Open the application launcher, terminal, browser workspace, IntelliJ workspace | Desktop |
 | e | Edit scrollback in `$EDITOR` | Herdr |
 
-Herdr's `f` and `e` are single keys, not groups. A single key is Herdr-only, and `keyleader --check` rejects one that is also a Herdr group. Ctrl+b f and Ctrl+b Shift+E still work.
+Herdr's `e` is a single key, not a group. A single key is Herdr-only, and `keyleader --check` rejects one that is also a Herdr group. Ctrl+b f and Ctrl+b Shift+E still work.
+`keyleader --check` also rejects desktop sequences that differ only by case, because Hyprland submaps cannot tell `c r` from `c R`.
+`reference.html` maps every binding against Doom Emacs; see [Reference](#reference).
 
 Run `keyleader --check` to validate the table. `make keybindings-check` also fails when a generated file is stale.
 
 ### Focus falls through to the next layer
 
-Ctrl+h/j/k/l is the same move everywhere. In Neovim, smart-splits moves between windows, then Herdr panes. In Doom it moves between windows. In a Herdr pane running a shell or another program, Herdr moves between panes. In a Herdr pane running Vim, Neovim, Emacs or Pi, Herdr forwards the key, so the program can move within its own splits first. `leader.edn`'s `:terminal :passthrough` lists those programs. Use Ctrl+b h/j/k/l to leave such a pane directly.
-Shells listed in `:terminal :clear-screen` keep Ctrl+l, which clears the screen. Ctrl+h/j/k still move focus from a shell, and Ctrl+b l moves right.
+Ctrl+h/j/k/l is the same move everywhere. In Neovim, smart-splits moves between windows, then Herdr panes. In Doom it moves between windows. In a Herdr pane, Herdr forwards the key when the foreground program keeps it under `leader.edn`'s `:terminal :keeps`, and moves between panes otherwise. Vim, Neovim and Emacs keep all four keys, so they can move within their own splits first. Pi keeps Ctrl+j/k/l, fzf keeps Ctrl+j/k for its selection, and shells keep Ctrl+l to clear the screen. Use Ctrl+b h/j/k/l to leave such a pane directly.
+Ctrl+k is therefore focus, not kill-line, at a shell prompt.
 At Herdr's edge, or from a zoomed pane, focus continues to the next Hyprland window. Ctrl+h no longer acts as Backspace in shells.
 Ctrl+arrows resize the Neovim window, then the Herdr pane once Neovim fills that direction.
 
@@ -139,10 +144,20 @@ No global keyboard listener or browser content script has been added.
 | Neovim and Doom Ctrl+h/j/k/l stop at the last window | They continue to Herdr panes and Hyprland | Same behavior as Space w h/j/k/l |
 | Neovim Space c d shows line diagnostics | Space c d finds the definition, Space c x lists diagnostics | Match Doom and IntelliJ |
 | IntelliJ Space w, b, c follow idea-doom-emacs | They follow `leader.edn` where the table defines them | Same meanings as the editors |
+| Ctrl+b Space f copies text by hint | Ctrl+b Space s l | Doom's SPC f is the file group and SPC s l jumps to a visible link |
+| Alt+Space a a/t/b/i | Alt+Space o a/t/b/i | Doom's SPC o opens terminals and the browser |
+| Ctrl+Shift+4 copies a region | Cmd+Shift+4 sends Shift+Print, Cmd+Shift+3 sends Print | Ctrl belongs to applications |
+| Ghostty Ctrl+Enter toggles fullscreen | Ctrl+Enter reaches the program | Ctrl+Alt+f owns fullscreen |
+| Pi receives bare Ctrl+h | Ctrl+h moves focus from Pi | Pi does not use Ctrl+h |
+| Caps or Shift become modifiers after 500 ms alone | After 200 ms | Ctrl+click and Shift+click lose the modifier until then |
 
 Herdr's Ctrl+b prefix still captures readline backward-char. Use Left or Cmd+h there.
 Existing custom Herdr actions also override native defaults for Ctrl+b b, p, Shift+P, and o.
 Cmd+n still sends a bbh composer message. This existing local override is not a new-window command in that buffer.
+
+## Reference
+
+`reference.html` is a single page that lists every binding by layer, compares the shared leader with Doom Emacs's `SPC` tree, and records the open inconsistencies. `bb desktop/build/keybindings/reference.bb` regenerates it from `leader.edn`, `bindings.edn`, `kanata.kbd`, `herdr/config.toml`, `hyprland.lua` and the installed Doom's `+evil-bindings.el`.
 
 ## Maintenance
 

@@ -35,9 +35,11 @@ Hard constraints override the score.
 - Ctrl+Alt is desktop control. Add Shift for the corresponding move action.
 - Plain Alt belongs to applications. Do not globally consume Emacs M-f, M-w, or IdeaVim Alt+digits. Alt+Space, the desktop leader, is the only exception.
 - Cmd is partly rewritten by kanata. Cmd+S becomes Ctrl+S and Cmd+L becomes Right. Do not assume physical Cmd means Super.
+- Herdr runs in the Ghostty class `com.mitchellh.ghostty.herdr`, started by `desktop/bin/herdr-terminal`. Target Herdr by that class, never by `com.mitchellh.ghostty`, which every other Ghostty window shares.
+- Check upstream defaults on the real surface. `ghostty +list-keybinds` lists what Ghostty consumes before a program sees it.
 - Caps held is Ctrl. Caps tapped is Escape. Keep that escape path available.
 - Never make a bare Space the leader where Space can type text. The editors use Space in normal mode, Herdr uses Ctrl+b Space or Cmd+Space, and the desktop uses Alt+Space. Space after any leader opens that context's command palette, so no leader group may use Space.
-- Bare Ctrl+h/j/k/l is window focus in every layer. Herdr forwards it to programs matching `leader.edn`'s `:terminal :passthrough`, forwards only Ctrl+l to shells matching `:clear-screen`, and moves focus elsewhere. Do not give Ctrl+h/j/k/l another meaning in a shell, editor or TUI without adding that program to the pass-through list.
+- Bare Ctrl+h/j/k/l is window focus in every layer. Herdr forwards a key to the foreground program when `leader.edn`'s `:terminal :keeps` gives that program the key, and moves focus otherwise. Do not give Ctrl+h/j/k/l another meaning in a shell, editor or TUI without adding a `:keeps` rule for it.
 - Window focus falls through from the editor to Herdr to Hyprland through `keyleader nav`. Keep editor Ctrl+h/j/k/l and Herdr Ctrl+b h/j/k/l on that path.
 - Hyprland reads `hypr/hyprland.lua`. In a Lua session `hyprctl dispatch` takes Lua such as `hl.dsp.focus({ direction = "left" })`, not the old dispatcher names. Write dispatchers as data and run them with `desktop/lib/hypr/dispatch.clj`.
 - Generated submap actions use `keys.leave`, which runs the action and then leaves the submap. The catch-all uses `keys.cancel`, because Hyprland also runs the catch-all after a bound key. `make hypr-nested-check` exercises both.
