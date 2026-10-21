@@ -1,5 +1,5 @@
 #!/usr/bin/env bb
-;; Presses real keys through keyd on the live desktop. It changes workspaces
+;; Presses real keys through kanata on the live desktop. It changes workspaces
 ;; and opens the Herdr menu briefly, then restores the original workspace.
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs]

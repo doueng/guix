@@ -9,19 +9,20 @@
   #:export (feature-familiar-agent-control))
 
 ;;; Everything an agent may do on the desktop without a password.  Root
-;;; equivalents stay out: the keyd socket accepts command() bindings that run
-;;; as root, and reconfigure builds whatever the writable repo describes.
+;;; equivalents stay out: reconfigure builds whatever the writable repo
+;;; describes.
 
 (define %ydotool-socket "/run/ydotoold.socket")
 
-;; ydotoold's uinput device advertises media keys, so keyd's [ids] * grabs it
-;; and injected chords pass through the same layers as the built-in keyboard.
+;; ydotoold's uinput device advertises keys and pointer motion, so kanata
+;; grabs it and injected chords pass through the same layers as the built-in
+;; keyboard.
 (define %ydotoold-service
   (simple-service 'familiar-ydotoold shepherd-root-service-type
     (list (shepherd-service
            (provision '(ydotoold))
            (requirement '(udev kernel-module-loader))
-           (documentation "Inject input upstream of keyd for the user.")
+           (documentation "Inject input upstream of kanata for the user.")
            (start #~(let ((user (getpwnam "engstrand")))
                       (make-forkexec-constructor
                        (list #$(file-append ydotool "/bin/ydotoold")
@@ -37,10 +38,7 @@
     (list (string-append
            "engstrand ALL=(root) NOPASSWD: "
            "/run/current-system/profile/bin/herd status, "
-           "/run/current-system/profile/bin/herd status *, "
-           "/run/current-system/profile/bin/keyd monitor, "
-           "/run/current-system/profile/bin/keyd monitor -t, "
-           "/run/current-system/profile/bin/keyd reload"))))
+           "/run/current-system/profile/bin/herd status *"))))
 
 (define (feature-familiar-agent-control)
   (feature-package-set

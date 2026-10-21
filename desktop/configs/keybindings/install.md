@@ -13,7 +13,7 @@
 8. Start the which-key panel listener once with `setsid -f ~/.local/bin/keyleader listen`. Hyprland starts it at later logins. A second copy exits immediately.
 9. In Neovim, run `:Lazy install` for smart-splits and its Herdr backend.
 
-No keyd change or system switch is required for these additions.
+No kanata change or system switch is required for these additions.
 
 ## Add or change a leader sequence
 
@@ -38,6 +38,16 @@ Run `keyleader --verify-hypr` after `hyprctl reload`. It fails when Hyprland's l
 Use `keyguide --list` for a terminal reference.
 The existing inventory command also includes native application bindings.
 
+## Add an application layer
+
+1. Focus the application and read its class from `hyprctl -j activewindow`.
+2. In `desktop/kanata.kbd`, copy the `intellij` and `cmd-intellij` layers and their two aliases. Keep only the Cmd keys whose chord differs in the new application.
+3. Map the class to the new layer in `desktop/configs/kanata/apps.edn`.
+4. Add a case for each changed chord to `desktop/build/keybindings/kanata-test.bb`, then run `make kanata-check`.
+5. Run `make switch`, then `hyprkan reload` so kanata rereads `/etc/kanata/kanata.kbd`.
+
+`hyprkan` rereads `apps.edn` on every focus change, so a class change that reuses an existing layer needs only step 3.
+
 ## Add Vimium aliases without replacing settings
 
 The supplied `blob:chrome-extension://...` URL is a temporary browser object, not a portable configuration file.
@@ -61,7 +71,7 @@ Run `make keybindings-check` for the registry, Doom coach tests, and Neovim moti
 The Neovim check uses the installed user configuration and needs its plugins installed.
 Run `make doom-check` after Doom changes.
 Run `ghostty +validate-config` after Ghostty changes.
-Run `bb desktop/build/keybindings/verify.bb` to exercise Cmd+/, Escape, and Ctrl+Alt+0 through keyd on the live desktop.
+Run `bb desktop/build/keybindings/verify.bb` to exercise Cmd+/, Escape, and Ctrl+Alt+0 through kanata on the live desktop.
 That check temporarily changes workspaces, opens the Herdr menu with Cmd+Space, and restores the original workspace.
 Run `make hypr-nested-check` to load `hypr/hyprland.lua` in a nested Hyprland and type the leader, Ctrl+Alt and Cmd+Space keys into it with wtype. The nested window stays on a hidden special workspace, so it does not take focus.
 

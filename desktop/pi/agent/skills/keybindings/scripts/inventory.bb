@@ -21,26 +21,20 @@
           :let [[_ chord action] (re-matches lua-bind l)]
           :when chord]
     (emit! "hypr" chord action file ln)))
-(defn
- keyd!
- []
- (let
-  [section (atom nil)]
-  (doseq
-   [[ln l]
-    (numbered (path "desktop/keyd.conf"))
-    :let
-    [t (str/trim l)]
-    :when
-    (and (seq t) (not (str/starts-with? t "#")))]
-   (if-let
-    [[_ s] (re-matches #"\[(.+)\]" t)]
-    (reset! section s)
-    (when-let
-     [[_ k v] (re-matches #"(\S+)\s*=\s*(.+)" t)]
-     (when
-      (and @section (not= "ids" @section))
-      (emit! (str "keyd " @section) k v "keyd.conf" ln)))))))
+(defn- balanced
+  "S without the closing parentheses that end the enclosing form."
+  [s]
+  (if (> (count (filter #{\)} s)) (count (filter #{\(} s)))
+    (recur (subs s 0 (dec (count s))))
+    s))
+(defn kanata! []
+  (let [layer (atom nil)]
+    (doseq [[ln l] (numbered (path "desktop/kanata.kbd"))]
+      (if-let [[_ name] (re-find #"^\(deflayermap \(([^)]+)\)" l)]
+        (reset! layer name)
+        (if-let [[_ k action] (and @layer (re-matches #"\s+(\S+)\s+(.+)" l))]
+          (emit! (str "kanata " @layer) k (balanced action) "kanata.kbd" ln)
+          (reset! layer nil))))))
 (defn
  ghostty!
  []
@@ -164,23 +158,6 @@
   (when
    (re-find #"\"/quit\"" l)
    (emit! "bbh terminal" "/quit" "quit" "main.clj" ln))))
-(defn
- keymapper!
- []
- (let
-  [ctx (atom "default")]
-  (doseq
-   [[ln l] (numbered (path "desktop/configs/keymapper/keymapper.conf"))
-    :let [t (str/trim l)]
-    :when (and (seq t) (not (str/starts-with? t "#")) (not (str/starts-with? t "@")))]
-   (cond
-    (re-matches #"\[default\]" t) (reset! ctx "default")
-    (re-matches #"\[class = \"(.+)\"\]" t)
-    (reset! ctx (second (re-matches #"\[class = \"(.+)\"\]" t)))
-    :else
-    (when-let [[_ chord action] (re-matches #"(.+?)\s*>>\s*(.*)" t)]
-      (emit! (str "keymapper " @ctx) (str/trim chord) (str/trim action) "keymapper.conf" ln))))))
-
 (def leader-contexts
   {:desktop ["Alt+Space" "generated hypr/leader.lua"]
    :herdr ["Ctrl+b Space" "bin/keyleader reads leader.edn at run time"]
@@ -216,4 +193,4 @@
     (when-let [[_ chord action] (re-matches #"map\s+(\S+)\s+(.+)" line)]
       (emit! "vimium" chord action "vimium/keybindings.txt" ln))))
 
-(doseq [f [hypr! keyd! ghostty! herdr! nvim! fish! doom! bbh! bbh-terminal! keymapper! vimium! leader!]] (f))
+(doseq [f [hypr! kanata! ghostty! herdr! nvim! fish! doom! bbh! bbh-terminal! vimium! leader!]] (f))

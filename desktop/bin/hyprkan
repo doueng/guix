@@ -1,0 +1,68 @@
+#!/usr/bin/env bb
+;; A minimal hyprkan: switch kanata's base layer to match the focused Hyprland
+;; window. ~/.config/kanata/apps.edn maps window classes to layers.
+;;   hyprkan          follow focus; Hyprland starts it at login
+;;   hyprkan layer    print kanata's current layer
+;;   hyprkan reload   make kanata reread /etc/kanata/kanata.kbd after a switch
+(ns hyprkan
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
+
+;; modules/engstrand/features/kanata.scm starts kanata on this address.
+(def kanata-address ["127.0.0.1" 7333])
+
+(defn apps-path []
+  (str (or (System/getenv "XDG_CONFIG_HOME") (str (fs/home) "/.config")) "/kanata/apps.edn"))
+
+(defn layer-for [class]
+  (get (edn/read-string (slurp (apps-path))) class "base"))
+
+(defn send!
+  "Send MESSAGE to kanata. With REPLY, return that field of kanata's answer."
+  ([message] (send! message nil))
+  ([message reply]
+   (let [[host port] kanata-address]
+     (with-open [socket (java.net.Socket. ^String host ^int port)]
+       (doto (.getOutputStream socket)
+         (.write (.getBytes (str (json/generate-string message) "\n")))
+         (.flush))
+       (when reply
+         (some #(get (json/parse-string % true) reply)
+               (line-seq (io/reader (.getInputStream socket)))))))))
+
+(defn warn [& parts]
+  (binding [*out* *err*] (apply println "hyprkan:" parts)))
+
+(defn follow-focus! []
+  (let [sent (atom nil)
+        focus! (fn [class]
+                 (let [layer (layer-for class)]
+                   (when (not= layer @sent)
+                     (try (send! {:ChangeLayer {:new layer}})
+                          (reset! sent layer)
+                          (catch Exception e
+                            (reset! sent nil)
+                            (warn "cannot reach kanata:" (ex-message e)))))))
+        socket (str (System/getenv "XDG_RUNTIME_DIR") "/hypr/"
+                    (System/getenv "HYPRLAND_INSTANCE_SIGNATURE") "/.socket2.sock")]
+    (focus! (:class (json/parse-string (:out (p/sh "hyprctl" "-j" "activewindow")) true)))
+    ;; The socket closes with the session, and the next session starts a new hyprkan.
+    (with-open [channel (java.nio.channels.SocketChannel/open
+                         (java.net.UnixDomainSocketAddress/of socket))
+                reader (java.io.BufferedReader.
+                        (java.io.InputStreamReader.
+                         (java.nio.channels.Channels/newInputStream channel)))]
+      (doseq [line (line-seq reader)
+              :let [[_ class] (re-matches #"activewindow>>([^,]*),.*" line)]
+              :when class]
+        (focus! class)))))
+
+(case (first *command-line-args*)
+  nil (follow-focus!)
+  "layer" (println (:name (send! {:RequestCurrentLayerName {}} :CurrentLayerName)))
+  "reload" (send! {:Reload {}})
+  (do (warn "usage: hyprkan [layer|reload]") (System/exit 2)))

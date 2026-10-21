@@ -2,6 +2,17 @@
 
 Each entry gives the date, the chord, the decision, the reason, and the status. Add an entry when a choice rejects an alternative for a stated reason, or when verification finds a conflict.
 
+## Kanata migration
+
+These entries supersede the keyd and keymapper items below.
+
+- 2026-10-21. Kanata replaces keyd and the staged keymapper config. `desktop/kanata.kbd` reproduces every keyd binding. `make kanata-check` replays 21 chords through kanata 1.11's simulator. Status: simulated, and `make build` passed. Live checks wait for `make switch`.
+- 2026-10-21. The keymapper Emacs block was dropped, not ported. Emacs is `emacs-no-x` inside Ghostty and Herdr, so Hyprland reports `com.mitchellh.ghostty` and a class rule never matches. The block also sent C-s for find, which this Doom config binds to `save-buffer`. Status: observed from the installed Emacs and `keybindings.el`.
+- 2026-10-21. IntelliJ gets the first application layer. Its default keymap binds Ctrl+Y to Delete Line and Ctrl+Shift+Z to Redo, so the shared Cmd+Shift+Z deleted a line. Status: inferred from IntelliJ's default Linux keymap, since no custom `keymap.xml` exists. The layer itself is simulated.
+- 2026-10-21. Kanata listens on 127.0.0.1:7333. moshi-hook polls 127.0.0.1:7070, kanata's documented example port, with HTTP requests. Status: observed with `ss`.
+- 2026-10-21. Caps and Shift become their modifier when another key is pressed, or after 500 ms held alone. keyd sent Escape or a parenthesis for a lone press of any length. Caps then a mouse click within 500 ms now clicks without Ctrl. Status: simulated.
+- 2026-10-21. Releasing Backspace within 40 ms of Cmd+Backspace leaves Super up until Cmd is pressed again. A 100 ms tap restores it. Status: simulated.
+
 ## Update from this implementation
 
 The entries below retain the earlier investigation record. These decisions supersede the corresponding open items.
@@ -10,7 +21,7 @@ The entries below retain the earlier investigation record. These decisions super
 - Herdr launch moved from unreachable Super+S to Super+B. Cmd+S remains Ctrl+S in keyd.
 - Herdr tiny-fingers moved from Ctrl+S to prefix+f. Editor save no longer competes with the plugin. Native help stays prefix+?. Scrollback editing now explicitly uses prefix+Shift+E, leaving prefix+e for the workspace picker.
 - Ghostty accepts Ctrl+Left and Ctrl+Right for word motion because keyd emits those for physical Alt+arrows.
-- Keymapper remains inactive. Its Emacs overrides are not promises about current behavior. The old statement that Alt+W kills a window no longer describes Hyprland.
+- Keymapper was removed in the kanata migration. The old statement that Alt+W kills a window no longer describes Hyprland.
 - Cmd+/ opens a Dusk discovery menu. It is on-demand discovery, not application prefix interception. The canonical desktop command registry is `desktop/configs/keybindings/bindings.edn`.
 - Neovim Hardtime and Doom's command coach suggest motions without blocking them. Browser guidance is available in the menu. No global input capture was added.
 - Vimium aliases in `desktop/configs/vimium/keybindings.txt` preserve defaults. They require merging into the extension's existing custom mappings. The supplied blob URL was not treated as a portable export.

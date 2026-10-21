@@ -4,7 +4,8 @@
 
 | Context | Family | Owner |
 | --- | --- | --- |
-| Physical keyboard | Caps held for Ctrl, Caps tapped for Esc, Cmd app rewrites | `desktop/keyd.conf` |
+| Physical keyboard | Caps held for Ctrl, Caps tapped for Esc, Shift tapped for parentheses, Cmd rewrites | `desktop/kanata.kbd` |
+| Per-application Cmd chords | Kanata layer for the focused window class | `kanata/apps.edn`, `desktop/bin/hyprkan` |
 | Desktop discovery | Cmd+/ | `desktop/bin/keyguide` and `bindings.edn` |
 | Leader sequences | Space, Alt+Space, Ctrl+b Space or Cmd+Space | `leader.edn`, `desktop/bin/keyleader`, generated files |
 | Window focus | Ctrl+Alt+h/j/k/l | Generated `hypr/keybindings.lua` |
@@ -20,7 +21,22 @@
 Caps+Alt provides Ctrl+Alt without reaching for the bottom-left Ctrl key.
 Plain Alt letters and digits belong to applications, not Hyprland. Alt+Space is the one exception, so Emacs M-SPC is not available.
 Cmd+hjkl remains the existing arrow layer. Cmd+L is not Chrome's address-bar shortcut. Use Ctrl+L or Vimium `o`.
-The staged `keymapper/keymapper.conf` is inactive. Do not start a second keyboard grab alongside keyd.
+Cmd chords can differ per application. See [Application layers](#application-layers).
+
+## Application layers
+
+Kanata owns the keyboard. `desktop/kanata.kbd` turns each Cmd chord into the Linux chord for the same command, such as Cmd+C into Ctrl+Insert. Cmd chords it does not list reach Hyprland as Super chords.
+An application whose native chord differs gets its own layer. That layer lists only the Cmd keys that differ and falls through to the shared ones.
+`hyprkan` follows Hyprland's focus events. It switches kanata to the layer that `~/.config/kanata/apps.edn` names for the focused window class, and to `base` for every other window.
+
+| Window class | Layer | Change |
+| --- | --- | --- |
+| `jetbrains-idea` | `intellij` | Cmd+Shift+Z sends Ctrl+Shift+Z, IntelliJ's redo. Elsewhere it sends Ctrl+Y, which deletes a line in IntelliJ. |
+
+Emacs runs inside Ghostty and Herdr, so Hyprland sees only the terminal's class. A layer cannot single out Emacs or any other terminal program.
+`hyprkan layer` prints kanata's active layer. After a system switch, `hyprkan reload` makes kanata reread `/etc/kanata/kanata.kbd` without root.
+Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typing.
+`make kanata-check` replays chords through kanata's simulator and checks that every layer in `apps.edn` exists.
 
 ## One leader grammar
 
@@ -107,9 +123,9 @@ No global keyboard listener or browser content script has been added.
 | --- | --- | --- |
 | Alt+w closes a window | Ctrl+Alt+w | Preserve Emacs M-w |
 | Alt+f toggles fullscreen | Ctrl+Alt+f | Preserve Emacs M-f and Vimium Alt+f |
-| Alt+arrows focus windows | Ctrl+Alt+hjkl | Preserve word movement and keyd's arrow rewrite |
+| Alt+arrows focus windows | Ctrl+Alt+hjkl | Preserve word movement and the Alt+arrow rewrite |
 | Alt+digits switch workspaces | Ctrl+Alt+digits | Preserve application tabs |
-| Cmd+s launches Herdr | Cmd+b | keyd rewrites Cmd+s to Ctrl+s |
+| Cmd+s launches Herdr | Cmd+b | Cmd+s becomes Ctrl+s |
 | Ctrl+s opens Herdr text hints | Ctrl+b f | Preserve editor save |
 | Herdr edit-scrollback default collides with workspace picker | Ctrl+b Shift+E | Keep Ctrl+b e for workspaces |
 | Cmd+Space opens the application launcher | Alt+Space a a, or Alt+Space Space | Alt+Space is the desktop leader |

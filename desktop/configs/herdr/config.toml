@@ -22,7 +22,7 @@ help = "prefix+?"
 edit_scrollback = "prefix+shift+e"
 new_tab = "prefix+c"
 next_tab = "prefix+n"
-# keyd turns Cmd+digits into Ctrl+digits.
+# kanata turns Cmd+digits into Ctrl+digits.
 switch_tab = ["prefix+1..9", "ctrl+1..9"]
 
 # Open Spaces navigation with prefix+w or prefix+e, then move the selection

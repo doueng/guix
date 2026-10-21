@@ -14,6 +14,7 @@
   #:use-module (guix modules)
   #:use-module (guix packages))
 
+;; Kanata needs uinput. The keyd name predates kanata; renaming rebuilds the kernel.
 (define-public asahi-linux-keyd
   (customize-linux
    #:name "asahi-linux-keyd"

@@ -16,7 +16,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help pull channels-current check system-facts dry-run build repro-build switch gc \
         nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test \
-        doom-check doom-baseline keybindings-check hypr-nested-check
+        doom-check doom-baseline keybindings-check kanata-check hypr-nested-check
 
 help:
 	@echo 'pull          update the user Guix profile from $(CHANNELS)'
@@ -154,7 +154,22 @@ doom-check:
 	test -z "$$new" || { printf 'New doom doctor warnings (accept with make doom-baseline):\n%s\n' "$$new" >&2; exit 1; }; \
 	echo 'doom doctor: no new warnings'
 
-keybindings-check:
+# The simulator parses desktop/kanata.kbd with the kanata version Guix installs.
+KANATA_VERSION := 1.11.0
+KANATA_SRC := $(HOME)/.cache/kanata-sim/$(KANATA_VERSION)
+KANATA_SIM := $(KANATA_SRC)/target/release/kanata_simulated_input
+
+$(KANATA_SIM):
+	rm -rf "$(KANATA_SRC)"
+	git clone --quiet --depth 1 --branch v$(KANATA_VERSION) https://github.com/jtroo/kanata "$(KANATA_SRC)"
+	cd "$(KANATA_SRC)" && "$(GUIX)" shell rust rust:cargo gcc-toolchain -- cargo build --release --quiet -p kanata-sim
+
+kanata-check: $(KANATA_SIM)
+	@test "$$("$(GUIX)" show kanata | sed -n 's/^version: //p')" = "$(KANATA_VERSION)" || \
+	  { echo 'Guix kanata differs from KANATA_VERSION; update it in the Makefile' >&2; exit 1; }
+	bb desktop/build/keybindings/kanata-test.bb "$(KANATA_SIM)"
+
+keybindings-check: kanata-check
 	bb desktop/build/keybindings/generate.bb --check
 	Hyprland --verify-config -c desktop/configs/hypr/hyprland.lua
 	bb desktop/build/keybindings/test.clj

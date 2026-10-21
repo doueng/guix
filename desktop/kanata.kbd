@@ -1,0 +1,87 @@
+;; Kanata grabs every keyboard, including ydotoold's virtual one, so injected
+;; chords pass through these layers too. Holding Left Ctrl, Space and Escape
+;; together stops kanata and returns the raw keyboard.
+(defcfg
+  process-unmapped-keys yes
+  ;; App layers map only Cmd. Their other keys fall through to base.
+  delegate-to-first-layer yes
+  linux-continue-if-no-devs-found yes)
+
+;; kanata 1.11 has no name for KEY_MICMUTE.
+(deflocalkeys-linux micmute 248)
+
+(defvar
+  meta (lmet rmet)
+  alt (lalt ralt)
+  ;; Holding Caps or Shift alone this long gives the modifier, not the tap.
+  hold-ms 500)
+
+(defsrc)
+
+(defalias
+  caps (tap-hold-press 0 $hold-ms esc lctl)
+  lsft (tap-hold-press 0 $hold-ms S-9 lsft)
+  rsft (tap-hold-press 0 $hold-ms S-0 rsft)
+  lalt (multi lalt (layer-while-held alt))
+  ralt (multi ralt (layer-while-held alt))
+  lcmd (multi lmet (layer-while-held cmd))
+  rcmd (multi rmet (layer-while-held cmd))
+  ;; An app's Cmd layer sits on cmd and lists only the keys that differ.
+  lcmd-intellij (multi lmet (layer-while-held cmd) (layer-while-held cmd-intellij))
+  rcmd-intellij (multi rmet (layer-while-held cmd) (layer-while-held cmd-intellij)))
+
+(deflayermap (base)
+  caps @caps
+  lsft @lsft
+  rsft @rsft
+  lalt @lalt
+  ralt @ralt
+  lmet @lcmd
+  rmet @rcmd
+  sleep micmute)
+
+;; Cmd chords become the Linux chords for the same command. Unmapped keys stay
+;; Super chords for Hyprland, and Shift passes through.
+(deflayermap (cmd)
+  c (unmod $meta lctl ins)
+  v (unmod $meta lsft ins)
+  x (unmod $meta lsft del)
+  z (fork (unmod $meta lctl z) (unmod (lmet rmet lsft rsft) lctl y) (lsft rsft))
+  a (unmod $meta lctl a)
+  s (unmod $meta lctl s)
+  f (unmod $meta lctl f)
+  w (unmod $meta lctl w)
+  q (unmod $meta lctl q)
+  n (unmod $meta lctl n)
+  t (unmod $meta lctl t)
+  r (unmod $meta lctl r)
+  bspc (macro (unmod $meta lsft home) 40 (unmod $meta bspc))
+  1 (unmod $meta lctl 1)
+  2 (unmod $meta lctl 2)
+  3 (unmod $meta lctl 3)
+  4 (unmod $meta lctl 4)
+  5 (unmod $meta lctl 5)
+  6 (unmod $meta lctl 6)
+  7 (unmod $meta lctl 7)
+  8 (unmod $meta lctl 8)
+  9 (unmod $meta lctl 9)
+  0 (unmod $meta lctl 0)
+  h (unmod $meta left)
+  j (unmod $meta down)
+  k (unmod $meta up)
+  l (unmod $meta right))
+
+(deflayermap (alt)
+  bspc (unmod $alt lctl bspc)
+  left (unmod $alt lctl left)
+  right (unmod $alt lctl right))
+
+;; App layers. hyprkan switches to them from ~/.config/kanata/apps.edn.
+
+(deflayermap (intellij)
+  lmet @lcmd-intellij
+  rmet @rcmd-intellij)
+
+;; IntelliJ's default keymap redoes on Ctrl+Shift+Z. Its Ctrl+Y deletes a line.
+(deflayermap (cmd-intellij)
+  z (unmod $meta lctl z))
