@@ -43,6 +43,7 @@
    ["Right Cmd+5 sends Ctrl+5" "d:rmet d:5 u:5 u:rmet"
     "↓RGui ↑RGui ↓LCtrl ↓Kb5 ↑LCtrl ↑Kb5 ↓RGui ↑RGui"]
    ["Caps tapped is Escape" "d:caps u:caps" "↓Escape ↑Escape"]
+   ["Caps tapped for 150 ms is still Escape" "d:caps t:150 u:caps" "↓Escape ↑Escape"]
    ["Caps held alone becomes Ctrl" "d:caps t:600 u:caps" "↓LCtrl ↑LCtrl"]
    ;; A mouse click is not a key, so only the hold time separates Ctrl+click from Escape.
    ["Caps held 300 ms for a click is Ctrl, not Escape" "d:caps t:300 u:caps" "↓LCtrl ↑LCtrl"]

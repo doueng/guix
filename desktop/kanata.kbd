@@ -14,7 +14,9 @@
   meta (lmet rmet)
   alt (lalt ralt)
   ;; Holding Caps or Shift alone this long gives the modifier, not the tap.
-  hold-ms 500)
+  ;; Kanata does not see mouse clicks, so Ctrl+click and Shift+click work
+  ;; only after this long. Taps are much shorter.
+  hold-ms 200)
 
 (defsrc)
 
