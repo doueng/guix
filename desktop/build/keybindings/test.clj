@@ -43,6 +43,25 @@
     (is (not-any? #(and (contains? % "ALT") (= 2 (count %)) (not (contains? % "SPACE"))) chords)
         "Alt plus a single key belongs to applications, except Alt+Space")))
 
+(defn chord-keys
+  "The set of upper-cased keys in a Hyprland chord such as \"SUPER + COMMA\" or a
+  guide chord such as \"Cmd+,\"."
+  [chord]
+  (set (for [k (str/split (str/upper-case chord) #"\s*\+\s*")]
+         (get {"SUPER" "CMD" "," "COMMA" "/" "SLASH"} k k))))
+
+(deftest the-guide-lists-every-cmd-chord
+  (let [bound (for [line (str/split-lines (slurp "desktop/configs/hypr/hyprland.lua"))
+                    :let [[_ chord] (re-find #"^hl\.bind\(\"(SUPER[^\"]+)\"" line)]
+                    :when chord]
+                (chord-keys chord))
+        listed (set (for [entry (mapcat :entries registry)
+                          chord (some-> (:chord entry) (str/split #" / "))
+                          :when (str/starts-with? chord "Cmd")]
+                      (chord-keys chord)))]
+    (is (seq bound))
+    (is (empty? (remove listed bound)) "hyprland.lua binds Cmd chords that bindings.edn does not list")))
+
 (deftest reject-ambiguous-and-invalid-entries
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate guide key"
         (keyguide/validate! [{:id "w"} {:id "w"}])))

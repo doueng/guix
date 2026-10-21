@@ -15,10 +15,15 @@
   {:id "a" :label "Applications"
    :entries [{:id "t" :label "Terminal" :chord "Cmd+Return" :command ["~/.local/bin/workspace-or-herdr-tab" "1"]}
              {:id "e" :label "Editor terminal" :chord "Cmd+E" :command ["~/.local/bin/workspace-or-herdr-tab" "2"]}
+             {:id "d" :label "Herdr tab 3" :chord "Cmd+D" :command ["~/.local/bin/workspace-or-herdr-tab" "3"]}
+             {:id "g" :label "Herdr tab 4" :chord "Cmd+G" :command ["~/.local/bin/workspace-or-herdr-tab" "4"]}
              {:id "b" :label "Browser workspace" :chord "Cmd+U" :dispatch ["focus" {:workspace 2}]}
              {:id "c" :label "Open Chrome" :command ["~/.local/bin/chrome-unified"]}
+             {:id "u" :label "Workspace 3" :chord "Cmd+Shift+U" :dispatch ["focus" {:workspace 3}]}
              {:id "i" :label "IntelliJ workspace" :chord "Cmd+I" :dispatch ["focus" {:workspace 4}]}
-             {:id "h" :label "Herdr" :chord "Cmd+B" :command ["~/.local/bin/herdr-terminal"]}]}
+             {:id "h" :label "Herdr" :chord "Cmd+B" :command ["~/.local/bin/herdr-terminal"]}
+             {:id "," :label "Edit hyprland.lua" :chord "Cmd+," :command ["ghostty" "nvim" "~/.config/hypr/hyprland.lua"]}
+             {:id "/" :label "This guide" :chord "Cmd+/" :tip "Cmd+/ opens this menu from any window. Type a group name, then an action."}]}
   {:id "b" :label "Chrome and Vimium"
    :entries [{:id "?" :label "Vimium help" :chord "?" :tip "On a web page, press Esc then ?. Vimium does not run on chrome:// pages or the Chrome Web Store."}
              {:id "f" :label "Follow a link" :chord "f / F" :tip "Use f for link hints, F to open in a new tab. Avoid tabbing through every link."}
@@ -36,7 +41,8 @@
              {:id "m" :label "Move by intent" :chord "w / b / f / s / /" :tip "Prefer words, text objects, search and jump labels over repeated hjkl. Use counts for known distances. Cmd+hjkl remains available as arrows."}
              {:id "s" :label "Shell editing" :chord "Ctrl+a / Ctrl+e / Ctrl+r" :tip "Use line boundaries and history search. Alt+Backspace deletes a word. kanata sends Ctrl+Left/Right for Alt+Left/Right."}]}
   {:id "herdr" :label "Herdr prefix"
-   :entries [{:id "c" :label "New tab" :chord "Ctrl+b c" :tip "Create a tab with Ctrl+b c. Cmd+1 through Cmd+9 select tabs directly."}
+   :entries [{:id "l" :label "Herdr leader" :chord "Cmd+Space / Ctrl+b Space" :tip "Cmd+Space opens the Herdr leader from any window. Ctrl+b Space does the same inside Herdr."}
+             {:id "c" :label "New tab" :chord "Ctrl+b c" :tip "Create a tab with Ctrl+b c. Cmd+1 through Cmd+9 select tabs directly."}
              {:id "a" :label "Find agent" :chord "Ctrl+b a" :tip "Find an agent by name instead of scanning panes."}
              {:id "b" :label "Find workspace" :chord "Ctrl+b b" :tip "Ctrl+b b searches open workspaces. Ctrl+b Shift+O searches projects."}
              {:id "p" :label "Annotate selection" :chord "Ctrl+b p" :tip "Ctrl+b p captures a selection. Ctrl+b o reviews documents. Ctrl+b m manages annotations."}

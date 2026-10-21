@@ -4,6 +4,7 @@
             [clojure.string :as str]))
 (load-file "desktop/bin/keyguide")
 (load-file "desktop/bin/keyleader")
+(load-file "desktop/build/keybindings/reference.clj")
 (require '[hypr.dispatch :as hypr])
 
 (def leader-grammar (keyleader/load-grammar))
@@ -83,6 +84,13 @@
     (doseq [context ["desktop" "herdr" "nvim" "doom" "idea"]]
       (is (some #(and (= (str "leader " context) (first %)) (= "SPC w h" (second %))) leader-rows) context))
     (is (some #(str/starts-with? (nth % 3) "keybindings/leader.edn:") leader-rows))))
+
+(deftest every-sequence-doom-binds-records-its-match
+  (let [{:keys [upstream mine windows]} (keybindings-reference/sources "." leader-grammar)]
+    (is (seq upstream) "the installed Doom's leader map was read")
+    (is (= [] (for [row (keybindings-reference/leader-rows leader-grammar upstream mine windows)
+                    :when (= :unverified (:alignment row))]
+                (:keys row))))))
 
 (deftest ghostty-leaves-application-chords-alone
   (let [binds (set (re-seq #"(?m)^keybind = ([^=]+)=" (:out (p/shell {:out :string} "ghostty" "+list-keybinds"))))]

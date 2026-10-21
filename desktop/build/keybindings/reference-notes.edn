@@ -4,7 +4,7 @@
   ["Hyprland" "Ctrl+Alt chords, the Alt+Space leader submap and the remaining Super (Cmd) chords. It sees window classes, not the program inside a terminal."]
   ["Ghostty" "Its own bindings and defaults, such as Ctrl+minus for the font size. Everything else goes to Herdr as terminal input."]
   ["Herdr" "The Ctrl+b prefix, Ctrl+digits and bare Ctrl+h/j/k/l. It forwards those four to a program that keeps them under leader.edn's :terminal :keeps."]
-  ["Program" "Neovim, Doom, fish or Pi. The editors read the Space leader in normal mode. At an editor's edge, focus moves back out through keyleader nav."]]
+  ["Program" "Neovim, Doom, fish or Pi. The editors read the Space leader in normal mode. At an editor's edge, Doom's eng/navigate (doom/key-navigate.el) and Neovim's smart-splits at_edge run keyleader nav, which asks Herdr for the pane's edges and focuses the next pane or the Hyprland window."]]
 
  :philosophy-intro
  "Doom Emacs organises commands under one leader with mnemonic groups, shows which-key after a pause, and gives the most frequent commands single keys. This setup applies that grammar beyond Emacs. Each context enters the leader its own way, and the keys after the leader mean the same thing everywhere. The table records where each Doom principle holds and where it bends."
@@ -12,7 +12,7 @@
  :principles
  [{:title "One leader, mnemonic groups"
    :doom "SPC followed by a group letter: b buffer, f file, w window, s search, c code, o open, p project, g git, t toggle, q quit, h help, TAB workspace."
-   :here "leader.edn defines w, b, f, s, c and o with Doom's letters. Desktop applications sit under o, as Doom's SPC o t opens a terminal and SPC o b the browser."
+   :here "leader.edn defines w, b, f, s, c, o, p and TAB with Doom's letters. Desktop applications sit under o, as Doom's SPC o t opens a terminal and SPC o b the browser."
    :status :match}
   {:title "Alternative leader where Space types text"
    :doom "doom-leader-alt-key is M-SPC for insert and Emacs states."
@@ -24,12 +24,12 @@
    :status :match}
   {:title "Single keys for the most frequent commands"
    :doom "SPC SPC finds a project file, SPC . a file, SPC , a buffer, SPC : runs M-x, SPC ` returns to the last buffer."
-   :here "SPC SPC opens the command palette in every context, which is Doom's SPC :. Your Doom config makes the same choice and moves project file search to SPC ."
-   :status :deviates}
+   :here "SPC SPC opens the command palette in every context, which is Doom's SPC :. SPC , switches buffer, Herdr tab or window, SPC ` returns to the last one, and SPC . finds a file or, on the desktop, launches an application. Doom's SPC : still runs M-x."
+   :status :partial}
   {:title "Lowercase acts, uppercase widens"
    :doom "b k kills a buffer and b K kills all, f s saves and f S saves as, s p searches the project and s P another project."
-   :here "Shared sequences are lowercase except c R for references. Doom pairs c d for definition with c D for references, and adds c R for a references tree only with treemacs and LSP."
-   :status :partial}
+   :here "c d finds the definition and c D the references, as in Doom."
+   :status :match}
   {:title "Paired operations"
    :doom "b n and b p, b ] and b [, TAB ] and TAB [ move to the next and previous item."
    :here "b n and b p step buffers, Herdr tabs and desktop windows alike."
@@ -40,50 +40,54 @@
    :status :match}
   {:title "Window keys are Vim's window keys"
    :doom "SPC w is evil-window-map, so SPC w h/j/k/l equal C-w h/j/k/l."
-   :here "w h/j/k/l and bare Ctrl+h/j/k/l move through editor splits, then Herdr panes, then Hyprland windows."
-   :status :match}]
+   :here "In Neovim and Doom, w h/j/k/l and bare Ctrl+h/j/k/l move through editor splits, then Herdr panes, then Hyprland windows. Herdr forwards bare Ctrl+h/j/k/l to the editor under :terminal :keeps, and the editor runs keyleader nav at its edge. IdeaVim cannot run a command, so IntelliJ stops at its own splits."
+   :status :partial}]
 
  :inconsistencies
  [{:title "SPC SPC is the command palette, not Doom's project file search"
    :evidence "Upstream Doom binds SPC SPC to projectile-find-file and SPC : to M-x. keybindings.el binds SPC SPC to M-x, and leader.edn uses SPC for the palette in every context."
-   :proposal "Keep SPC SPC as the palette, since it is consistent across five contexts. Also bind SPC : to the palette, so Doom's documented key works in every context."
-   :status :open}
-  {:title "References are c R, Doom uses c D"
-   :evidence "Upstream Doom binds c d to definition and c D to references, and c R to a references tree only when :ui treemacs +lsp is enabled. leader.edn and keybindings.el bind c R."
-   :proposal "Move references to c D in leader.edn, or add c D beside c R. Doom's uppercase-widens rule then holds, since references are the wide form of definition."
-   :status :open}
-  {:title "Single key e means different things in Herdr and Doom"
-   :evidence "leader.edn gives Herdr e for edit scrollback. keybindings.el binds SPC e to Treemacs, twice, at lines 12 and 173."
-   :proposal "Delete the duplicate SPC e in keybindings.el. Decide whether e is the side panel everywhere or scrollback editing everywhere. Doom itself leaves SPC e free."
-   :status :open}
+   :proposal "Kept, since it is consistent across five contexts. Doom's SPC : still runs M-x, so an alias adds nothing there."
+   :status :decided}
+  {:title "References were c R, Doom uses c D"
+   :evidence "Upstream Doom binds c d to definition and c D to references."
+   :proposal "leader.edn binds c D in Doom, Neovim and IntelliJ. keybindings.el no longer binds c R."
+   :status :fixed}
+  {:title "Single key e meant different things in Herdr and Doom"
+   :evidence "keybindings.el bound SPC e to Treemacs twice. Upstream Doom leaves SPC e free and toggles Treemacs on SPC o p."
+   :proposal "Both Doom binds are gone, so Treemacs is on Doom's SPC o p and e edits scrollback only in Herdr."
+   :status :fixed}
   {:title "No shared project or workspace groups"
-   :evidence "Doom has SPC p p to switch project and SPC TAB for workspaces. Herdr has the same actions on Ctrl+b Shift+O (sesh picker), Ctrl+b w or e (workspace picker) and Ctrl+b Shift+B (last workspace), outside the leader."
-   :proposal "Add p p (Herdr sesh picker, projectile, IntelliJ recent projects) and a TAB group (TAB . choose, TAB ` last) to leader.edn."
-   :status :open}
-  {:title "Terminal toggle lives on t T in Doom"
-   :evidence "keybindings.el binds SPC t T to +vterm/toggle. Upstream Doom puts it on SPC o t, which leader.edn uses on the desktop for the terminal."
-   :proposal "Bind SPC o t in Doom to the vterm toggle and drop t T, so o t opens a terminal in every context."
-   :status :open}
-  {:title "Cmd chords in a terminal reach the shell as Ctrl keys"
-   :evidence "kanata sends Ctrl+W, Ctrl+T, Ctrl+N and Ctrl+F for Cmd+W, Cmd+T, Cmd+N and Cmd+F. In fish, Ctrl+N moves down a line and Ctrl+F moves forward a character, where macOS habit expects a new window and a find."
-   :proposal "Extend kanata's terminal layer, for example Cmd+T to Ctrl+b c for a new Herdr tab. Cmd+W closing a pane without confirmation is risky, so decide that one deliberately."
-   :status :open}
+   :evidence "Herdr had these actions only on Ctrl+b Shift+O, Ctrl+b w or e, and Ctrl+b Shift+B."
+   :proposal "p p switches project in Doom, IntelliJ and Herdr (sesh). TAB . picks a workspace in Doom and Herdr. TAB ` returns to the last workspace in Doom, Herdr and Hyprland."
+   :status :fixed}
+  {:title "Terminal toggle lived on t T in Doom"
+   :evidence "Upstream Doom puts the vterm toggle on SPC o t."
+   :proposal "o t toggles vterm in Doom, a Snacks terminal in Neovim and the terminal tool window in IntelliJ, and focuses the Herdr terminal on the desktop."
+   :status :fixed}
+  {:title "Cmd chords in a terminal reached the shell as Ctrl keys"
+   :evidence "Cmd+Z sent Ctrl+Z, which suspends Neovim or a running job. fish uses vi key bindings here, and its insert mode has no undo on Ctrl+Z. Cmd+W and Cmd+T deleted a path component and transposed characters."
+   :proposal "The terminal layer sends nothing for Cmd+Z, Cmd+Shift+Z, Cmd+W and Cmd+T. Cmd+N still submits in Pi and bbh. A Herdr-only Cmd+T for a new tab needs its own layer, which hyprkan would select before make switch installs it."
+   :status :fixed}
   {:title "Ghostty keeps the font-size chords"
    :evidence "Ghostty consumed Ctrl+minus in a probe window, and its defaults also bind Ctrl+equal, Ctrl+plus and Ctrl+0. Emacs reads C-- as a negative argument."
    :proposal "Keep them if terminal zoom matters, or unbind them and zoom with Cmd chords through kanata."
    :status :open}
-  {:title "The Cmd+/ guide omits some Cmd chords"
-   :evidence "hyprland.lua binds Cmd+D and Cmd+G (Herdr tabs 3 and 4), Cmd+Shift+U (workspace 3) and Cmd+comma (edit hyprland.lua). bindings.edn lists none of them."
-   :proposal "Move those binds into bindings.edn so the guide and generated keybindings.lua include them."
-   :status :open}
-  {:title "IdeaVim b b and f r run the same action"
-   :evidence "Both map to RecentFiles in leader.edn."
-   :proposal "Use Switcher for b b, which lists open editors, and keep RecentFiles for f r."
-   :status :open}
-  {:title "Launch application sits on o a, Doom's org agenda prefix"
-   :evidence "Doom's SPC o a opens org agenda commands. The binding is desktop-only, so no context runs both."
-   :proposal "Kept for the mnemonic. Doom leaves o c, o g, o h, o j, o k, o n, o q, o u, o v, o w, o x, o y and o z free if strict alignment matters more."
-   :status :decided}
+  {:title "The Cmd+/ guide omitted some Cmd chords"
+   :evidence "hyprland.lua bound Cmd+D, Cmd+G, Cmd+Shift+U and Cmd+comma, and bindings.edn listed none of them."
+   :proposal "bindings.edn lists them, and the-guide-lists-every-cmd-chord in test.clj fails on a Cmd chord the guide omits."
+   :status :fixed}
+  {:title "IdeaVim b b and f r ran the same action"
+   :evidence "Both mapped to RecentFiles."
+   :proposal "b b and SPC , open the Switcher, which lists open editors."
+   :status :fixed}
+  {:title "Launch application sat on o a, Doom's org agenda prefix"
+   :evidence "Launching took three keys after Alt+Space."
+   :proposal "Alt+Space . launches applications, like Doom's SPC . finds a file. o a is gone."
+   :status :fixed}
+  {:title "The alignment column matched label words"
+   :evidence "s l, o b and c R read as matching Doom through one shared word, and c x read as different."
+   :proposal "leader.edn records :doom-match by hand. A sequence Doom binds without one shows as unverified."
+   :status :fixed}
   {:title "Herdr's Ctrl+b prefix hides readline backward-char"
    :evidence "Recorded in the decision log. Ctrl+b never reaches a shell inside Herdr."
    :proposal "Accept it and use Left or Cmd+h, or move the prefix. A prefix change touches every Herdr binding and the Cmd+Space handler."

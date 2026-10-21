@@ -40,9 +40,9 @@
   {:keys ["w" "j"] :label "Focus down" :doom-match :exact :nav "down"}
   {:keys ["w" "k"] :label "Focus up" :doom-match :exact :nav "up"}
   {:keys ["w" "l"] :label "Focus right" :doom-match :exact :nav "right"}
-  {:keys ["w" "s"] :label "Split below" :idea "<C-w>s" :nvim "<cmd>split<cr>" :doom "split-window-below"
+  {:keys ["w" "s"] :label "Split below" :doom-match :exact :idea "<C-w>s" :nvim "<cmd>split<cr>" :doom "split-window-below"
    :herdr ["pane" "split" "--direction" "down" "--focus"]}
-  {:keys ["w" "v"] :label "Split right" :idea "<C-w>v" :nvim "<cmd>vsplit<cr>" :doom "split-window-right"
+  {:keys ["w" "v"] :label "Split right" :doom-match :exact :idea "<C-w>v" :nvim "<cmd>vsplit<cr>" :doom "split-window-right"
    :herdr ["pane" "split" "--direction" "right" "--focus"]}
   {:keys ["w" "d"] :label "Close window or pane" :doom-match :exact :idea "<C-w>c" :nvim "<cmd>close<cr>" :doom "delete-window"
    :desktop ["window.close"] :herdr :close-pane}

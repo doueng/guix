@@ -95,7 +95,7 @@
                     rest
                     (take-while #(not (str/starts-with? % "[")))
                     (keep #(re-find #"^(\w+) = (.+)$" %))
-                    (map (fn [[_ action chord]] [(str/replace chord "\"" "") action])))
+                    (map (fn [[_ action chord]] [(if (= "[]" chord) "unbound" (str/replace chord "\"" "")) action])))
         commands (for [block (rest (str/split text #"\[\[keys\.command\]\]"))
                        :let [field #(second (re-find (re-pattern (str "(?m)^" % " = \"([^\"]*)\"")) block))]]
                    [(field "key") (or (field "description") (field "command"))])]
@@ -106,17 +106,14 @@
 
 ;; Doom alignment
 
-(defn- words [s] (remove #{"a" "or" "the" "to" "in" "and" "of" "by"} (re-seq #"[a-z]+" (str/lower-case (str s)))))
-
 (defn alignment
-  "How a shared LABEL compares with Doom's labels at the same keys. Labels
-  match when a word of one contains a word of the other, as split in vsplit."
-  [label doom-labels]
+  "How binding B compares with Doom's DOOM-LABELS at the same keys, as leader.edn
+  records it in :doom-match. Labels alone cannot tell copying text from jumping
+  to a link, so a sequence Doom binds without a recorded match is unverified."
+  [b doom-labels]
   (cond (empty? doom-labels) :doom-free
-        (some (fn [doom] (some (fn [[a b]] (or (str/includes? a b) (str/includes? b a)))
-                               (for [a (words label) b (words doom)] [a b])))
-              doom-labels) :same
-        :else :differs))
+        (:doom-match b) (:doom-match b)
+        :else :unverified))
 
 (def contexts [:desktop :herdr :nvim :doom :idea])
 
@@ -133,7 +130,7 @@
                        (when (= "w" (first (:keys b)))
                          (some-> (get windows (second (:keys b))) (#(vector (str % " (C-w " (second (:keys b)) ")"))))))]]
     {:keys seq-keys :label (:label b) :contexts (into {} (for [c contexts :let [a (context-action b c)] :when a] [c a]))
-     :doom doom :mine (get mine seq-keys) :alignment (alignment (:label b) doom)}))
+     :doom doom :mine (get mine seq-keys) :alignment (alignment b doom)}))
 
 ;; HTML
 
@@ -142,7 +139,8 @@
 (defn- table [headers rows]
   [:table [:thead [:tr (for [x headers] [:th x])]] [:tbody (for [r rows] [:tr (for [c r] [:td c])])]])
 
-(def status-label {:same "matches Doom" :doom-free "Doom binds nothing here" :differs "differs from Doom"
+(def status-label {:exact "matches Doom" :analogous "like Doom, another object" :differs "differs from Doom"
+                   :unverified "unverified" :doom-free "Doom binds nothing here"
                    :match "matches" :partial "partly" :deviates "deviates" :open "open" :fixed "fixed" :decided "decided"})
 
 (defn- badge [k] [:span {:class (str "badge " (name k))} (status-label k (name k))])
@@ -154,7 +152,7 @@ table{border-collapse:collapse;width:100%;margin:.5rem 0 1.5rem;font-size:13px}
 th,td{border:1px solid #e3e3e3;padding:.3rem .5rem;text-align:left;vertical-align:top}
 th{background:#f3f3f1;position:sticky;top:0} code{font:12px ui-monospace,monospace;background:#f3f3f1;padding:0 .2rem;border-radius:3px}
 .badge{font-size:11px;padding:.05rem .4rem;border-radius:8px;white-space:nowrap;background:#eee}
-.same,.match,.fixed,.decided{background:#dff3e0}.differs,.deviates,.open{background:#fde2dd}.doom-free,.partial{background:#fff3cc}
+.exact,.match,.fixed,.decided{background:#dff3e0}.differs,.unverified,.deviates,.open{background:#fde2dd}.analogous,.doom-free,.partial{background:#fff3cc}
 .flow{display:flex;flex-wrap:wrap;gap:.4rem;align-items:stretch;margin:1rem 0}
 .flow div{border:1px solid #ccc;border-radius:6px;padding:.5rem .7rem;background:#fff;flex:1 1 150px}
 .flow div b{display:block}.flow span.arrow{align-self:center;font-size:18px;color:#888}
@@ -200,8 +198,9 @@ document.getElementById('filter').addEventListener('input', e => {
 
         [:h2 "Shared leader against Doom"]
         [:p "Editors enter the leader with Space, Herdr with Ctrl+b Space or Cmd+Space, the desktop with Alt+Space. "
-         (str (get counts :same 0) " sequences share Doom's meaning, " (get counts :differs 0) " differ and " (get counts :doom-free 0)
-              " use keys that Doom leaves free. The comparison matches label words, so read a difference as a prompt to check.")]
+         (str (get counts :exact 0) " sequences share Doom's meaning, " (get counts :analogous 0) " apply it to another object, "
+              (get counts :differs 0) " differ, " (get counts :unverified 0) " are unverified and " (get counts :doom-free 0)
+              " use keys that Doom leaves free. leader.edn's :doom-match records each comparison by hand, and the Alignment column shows it.")]
         (table ["Keys" "Label" "Desktop" "Herdr" "Neovim" "Doom" "IdeaVim" "Upstream Doom SPC" "Your Doom config" "Alignment"]
                (for [{:keys [keys label doom mine alignment] actions :contexts} rows]
                  (concat [[:code keys] label]
