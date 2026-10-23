@@ -12,16 +12,22 @@
 (defn palette-run [answers]
   (let [answers (atom answers) ran (atom [])]
     (with-redefs [keyleader/log! (fn [& _] nil)
-                  keyleader/dmenu (fn [_ _] (let [a (first @answers)] (swap! answers rest) a))
                   keyleader/spawn! (fn [argv] (swap! ran conj argv))
                   keyleader/run! (fn [argv & _] (swap! ran conj (vec argv)) "")
                   hypr/dispatch! (fn [d] (swap! ran conj d))
                   keyguide/execute! (fn [argv] (swap! ran conj argv))]
-      (keyleader/desktop-palette! leader-grammar))
+      (doseq [label @answers]
+        (keyleader/run-desktop-entry! leader-grammar
+                                      (:value (some #(when (= label (:label %)) %) (keyleader/desktop-entries leader-grammar))))))
     @ran))
 
 (deftest palette-closes-a-window-without-asking
-  (is (= [["window.close"]] (palette-run ["w  Close window   [CTRL+ALT+W]"]))))
+  (is (= [["window.close"]] (palette-run ["Close window"]))))
+
+(deftest palette-runs-leader-entries-and-skips-focus-moves
+  (is (= [["~/.local/bin/custom-launcher"]] (palette-run ["Find file or launch app"])))
+  (is (not-any? #(= "leader:w h" (:value %)) (keyleader/desktop-entries leader-grammar))
+      "the leader's focus moves are left out; the guide's Ctrl+Alt chords teach them"))
 
 (deftest hyprland-drift-reports-missing-and-unexpected-binds
   (let [expected (keyleader/expected-binds leader-grammar)
@@ -70,7 +76,7 @@
   (doseq [[tabs message] [[[] "Herdr reported no tabs"]
                           [[{:tab_id "w1:t1" :focused false}] "Herdr reported no focused tab"]]]
     (with-redefs [keyleader/tabs (constantly tabs)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo (re-pattern message) (keyleader/step-tab! 1))))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo (re-pattern message) (keyleader/step-tab! "w1" 1))))))
 
 (deftest guide-path-is-independent-of-the-leader-path
   (with-redefs [keyleader/config-path (constantly "/tmp/custom/my-leader.edn")]

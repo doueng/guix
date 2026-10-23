@@ -1,0 +1,198 @@
+#!/usr/bin/env bb
+;; The global command palette. Alt+Space Space runs it from any window.
+;;   palette          open the palette for the focused window
+;;   palette fish     choose a fish command and print it, for fish's own binding
+;; Editors that can open the palette themselves are asked to: Emacs over its
+;; server, Neovim over its socket. Everything else gets one list, the focused
+;; program's commands first, then Herdr's and the desktop's, and the palette
+;; runs the choice.
+(ns palette
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.string :as str]))
+
+(load-file (str (fs/parent (fs/real-path *file*)) "/keyleader"))
+(require '[dusk.palette :as dusk])
+
+(def runtime-dir (or (System/getenv "XDG_RUNTIME_DIR") "/tmp"))
+
+(defn sh-out [& argv]
+  (let [{:keys [exit out]} @(p/process (vec argv) {:out :string :err :string})]
+    (when (zero? exit) out)))
+
+(defn notify! [message]
+  (p/process ["notify-send" "-a" "Palette" "Palette" message]))
+
+;; Context: the focused window and, in the Herdr terminal, its focused pane.
+
+(def window-contexts
+  {"com.mitchellh.ghostty.herdr" :herdr
+   "google-chrome" :chrome
+   "jetbrains-idea" :idea})
+
+;; Foreground programs in a Herdr pane, in priority order. Linux truncates the
+;; process name to 15 characters, and Guix's Emacs wrapper shows as .emacs-31.1-rea.
+(def programs
+  [[:emacs #"^\.?emacs"]
+   [:nvim #"^n?vim$"]
+   [:fish #"^fish$"]])
+
+(defn program-of [processes]
+  (first (for [[id re] programs
+               proc processes
+               :when (re-find re (str/lower-case (str (:name proc))))]
+           {:id id :pid (:pid proc)})))
+
+(defn herdr-focus
+  "The focused Herdr pane as a keyleader target, with its foreground program."
+  []
+  (let [panes (get-in (keyleader/herdr-json "pane" "list") [:result :panes])
+        pane (first (filter :focused panes))]
+    (when pane
+      (assoc {:pane (:pane_id pane) :tab (:tab_id pane) :workspace (:workspace_id pane)}
+             :program (program-of (get-in (keyleader/herdr-json "pane" "process-info" "--pane" (:pane_id pane))
+                                          [:result :process_info :foreground_processes]))))))
+
+(defn context []
+  (let [window (json/parse-string (sh-out "hyprctl" "-j" "activewindow") true)
+        kind (get window-contexts (:class window) :desktop)]
+    (cond-> {:kind kind :window (:address window)}
+      (= :herdr kind) (merge (herdr-focus)))))
+
+;; Editors open their own palette, which keeps their buffer, mode and history.
+
+(defn open-emacs! [pid]
+  (sh-out "emacsclient" "-s" (str "eng-" pid) "--eval" "(eng/palette-M-x)"))
+
+(defn open-nvim! [pid]
+  (sh-out "nvim" "--server" (str runtime-dir "/nvim." pid ".0")
+          "--remote-send" "<Cmd>lua require('config.palette').open()<CR>"))
+
+;; Entries the palette runs itself. Each :value names its runner before a colon.
+
+(defn config [k]
+  (get (edn/read-string (slurp (str (fs/parent (keyleader/config-path)) "/palette.edn"))) k))
+
+(defn fish-lines [& args]
+  (some-> (apply sh-out "fish" "-c" args) (str/split #"\x00|\n")))
+
+(defn fish-entries []
+  (concat
+   (for [cmd (distinct (remove str/blank? (fish-lines "history --max 500 -z")))]
+     {:label cmd :source "History" :value (str "text:" cmd)})
+   (for [f (fish-lines "functions -n")
+         :when (re-matches #"[a-z][\w-]+" f)
+         :when (not (str/starts-with? f "fish_"))]
+     {:label f :source "Function" :value (str "text:" f " ")})
+   (for [line (fish-lines "abbr --list") :when (not (str/blank? line))]
+     {:label line :source "Abbreviation" :value (str "text:" line " ")})))
+
+(defn chrome-entries []
+  (for [[i e] (map-indexed vector (config :chrome))]
+    (assoc (select-keys e [:label :keys]) :source "Chrome" :value (str "chrome:" i))))
+
+(defn idea-entries [grammar]
+  (let [from-leader (for [b (keyleader/in-context grammar :idea)
+                          :let [[_ id] (re-matches #"<Action>\((.+)\)" (str (:idea b)))]
+                          :when id]
+                      {:label (:label b) :keys (str "SPC " (str/join " " (:keys b))) :action id})]
+    (for [e (concat from-leader (config :idea))]
+      (assoc (select-keys e [:label :keys]) :source "IntelliJ" :value (str "idea:" (:action e))))))
+
+(def keycodes
+  (merge (zipmap (map str "1234567890") [2 3 4 5 6 7 8 9 10 11])
+         (zipmap (map str "qwertyuiop") (range 16 26))
+         (zipmap (map str "asdfghjkl") (range 30 39))
+         (zipmap (map str "zxcvbnm") (range 44 51))
+         {"ctrl" 29 "shift" 42 "alt" 56 "esc" 1 "enter" 28 "/" 53}))
+
+(defn chord-events
+  "ydotool key events for CHORD, such as \"ctrl+shift+t\": press in order, release in reverse."
+  [chord]
+  (let [codes (mapv #(or (keycodes %) (throw (ex-info (str "No keycode for " %) {:chord chord})))
+                    (str/split chord #"\+"))]
+    (concat (map #(str % ":1") codes) (map #(str % ":0") (rseq codes)))))
+
+(defn launcher-closed?
+  []
+  (not (str/includes? (str (sh-out "hyprctl" "layers")) "dusk-launcher")))
+
+(defn await-keyboard!
+  "Wait until Dusk's launcher layer is gone, so the window has the keyboard
+  again. Dusk replies before the compositor unmaps the layer."
+  []
+  (loop [tries 40]
+    (when (and (pos? tries) (not (launcher-closed?)))
+      (Thread/sleep 25)
+      (recur (dec tries))))
+  (Thread/sleep 50))
+
+(defn type-keys!
+  "Send keys to the focused window."
+  [{:keys [type chord]}]
+  (await-keyboard!)
+  (cond chord @(p/process (into ["ydotool" "key"] (chord-events chord)))
+        type @(p/process ["ydotool" "type" type])))
+
+(defn run-entry! [grammar ctx value]
+  (let [[_ runner arg] (re-matches #"(?s)([a-z]+):(.*)" value)]
+    (case runner
+      "text" (keyleader/run! ["herdr" "pane" "send-text" (:pane ctx) arg])
+      "herdr" (keyleader/run-herdr! grammar (keyleader/leader-keys arg) ctx)
+      "desktop" (keyleader/run-desktop-entry! grammar arg)
+      "chrome" (type-keys! (nth (config :chrome) (parse-long arg)))
+      "idea" (do (type-keys! {:chord "esc"})
+                 (type-keys! {:type (str ":action " arg)})
+                 (type-keys! {:chord "enter"})))))
+
+(defn tagged [runner entries]
+  (map #(update % :value (fn [v] (str runner ":" v))) entries))
+
+(defn entries [grammar {:keys [kind program]}]
+  (concat
+   (case kind
+     :chrome (chrome-entries)
+     :idea (idea-entries grammar)
+     :herdr (concat (when (= :fish (:id program)) (fish-entries))
+                    (tagged "herdr" (keyleader/herdr-entries grammar)))
+     nil)
+   (tagged "desktop" (keyleader/desktop-entries grammar))))
+
+(defn history-key
+  "Where this context's choices are remembered, apart from keyleader's own
+  Herdr palette, whose values differ."
+  [{:keys [kind program]}]
+  (keyword (str "global-" (name (or (:id program) kind)))))
+
+(defn open! []
+  (let [grammar (keyleader/load-grammar)
+        ctx (context)
+        {:keys [id pid]} (:program ctx)
+        opened (case id :emacs (open-emacs! pid) :nvim (open-nvim! pid) nil)]
+    (when-not (and (#{:emacs :nvim} id) opened)
+      (when (#{:emacs :nvim} id)
+        (notify! (str (name id) " did not answer, so the palette shows Herdr and the desktop")))
+      (let [k (history-key ctx)]
+        (when-let [value (dusk/pick! (str/capitalize (name (or (:id (:program ctx)) (:kind ctx))))
+                                     (dusk/by-history k (entries grammar ctx)))]
+          (dusk/remember! k value)
+          (keyleader/log! "Palette" "Alt+Space Space" value)
+          (run-entry! grammar ctx value))))))
+
+(defn fish! []
+  (when-let [value (dusk/pick! "Fish" (dusk/by-history :fish (fish-entries)))]
+    (dusk/remember! :fish value)
+    (print (subs value (count "text:")))
+    (flush)))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (try
+    (case (first *command-line-args*)
+      nil (open!)
+      "fish" (fish!))
+    (catch Exception e
+      (binding [*out* *err*] (println "palette:" (ex-message e)))
+      (notify! (ex-message e))
+      (System/exit 1))))

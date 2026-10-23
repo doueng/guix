@@ -1,0 +1,52 @@
+;; Commands the global palette offers in applications it cannot ask for their own.
+;; Each entry sends keys to the focused window after the palette closes.
+;; :type is text for ydotool type; :chord is a chord such as "ctrl+shift+t".
+{:chrome
+ [{:label "Search open tabs" :keys "T" :type "T"}
+  {:label "Open URL, bookmark or history" :keys "o" :type "o"}
+  {:label "Open URL in a new tab" :keys "O" :type "O"}
+  {:label "Open a bookmark" :keys "b" :type "b"}
+  {:label "Follow a link" :keys "f" :type "f"}
+  {:label "Open a link in a new tab" :keys "F" :type "F"}
+  {:label "Focus the first input" :keys "gi" :type "gi"}
+  {:label "Find in page" :keys "/" :type "/"}
+  {:label "Copy page URL" :keys "yy" :type "yy"}
+  {:label "Duplicate tab" :keys "yt" :type "yt"}
+  {:label "Edit the URL" :keys "ge" :type "ge"}
+  {:label "Go up one URL level" :keys "gu" :type "gu"}
+  {:label "Back" :keys "H" :type "H"}
+  {:label "Forward" :keys "L" :type "L"}
+  {:label "Previous tab" :keys "J" :type "J"}
+  {:label "Next tab" :keys "K" :type "K"}
+  {:label "Close tab" :keys "x" :type "x"}
+  {:label "Restore closed tab" :keys "X" :type "X"}
+  {:label "Reload page" :keys "r" :type "r"}
+  {:label "Scroll to top" :keys "gg" :type "gg"}
+  {:label "Scroll to bottom" :keys "G" :type "G"}
+  {:label "Visual mode" :keys "v" :type "v"}
+  {:label "View page source" :keys "gs" :type "gs"}
+  {:label "Vimium help" :keys "?" :type "?"}
+  {:label "New tab" :keys "Ctrl+T" :chord "ctrl+t"}
+  {:label "New window" :keys "Ctrl+N" :chord "ctrl+n"}
+  {:label "New incognito window" :keys "Ctrl+Shift+N" :chord "ctrl+shift+n"}
+  {:label "Address bar" :keys "Ctrl+L" :chord "ctrl+l"}
+  {:label "History" :keys "Ctrl+H" :chord "ctrl+h"}
+  {:label "Downloads" :keys "Ctrl+J" :chord "ctrl+j"}
+  {:label "Bookmark manager" :keys "Ctrl+Shift+O" :chord "ctrl+shift+o"}
+  {:label "Developer tools" :keys "Ctrl+Shift+I" :chord "ctrl+shift+i"}
+  {:label "Reset zoom" :keys "Ctrl+0" :chord "ctrl+0"}]
+ ;; IdeaVim runs :action ID from normal mode. leader.edn's :idea actions are added.
+ :idea
+ [{:label "Find action" :keys "Ctrl+Shift+A" :action "GotoAction"}
+  {:label "Go to file" :keys "Ctrl+Shift+N" :action "GotoFile"}
+  {:label "Go to class" :keys "Ctrl+N" :action "GotoClass"}
+  {:label "Go to symbol" :keys "Ctrl+Alt+Shift+N" :action "GotoSymbol"}
+  {:label "Find in files" :keys "Ctrl+Shift+F" :action "FindInPath"}
+  {:label "Run" :keys "Shift+F10" :action "Run"}
+  {:label "Debug" :keys "Shift+F9" :action "Debug"}
+  {:label "Reformat code" :keys "Ctrl+Alt+L" :action "ReformatCode"}
+  {:label "Optimize imports" :keys "Ctrl+Alt+O" :action "OptimizeImports"}
+  {:label "Refactor this" :keys "Ctrl+Alt+Shift+T" :action "Refactorings.QuickListPopupAction"}
+  {:label "Project tool window" :keys "Alt+1" :action "ActivateProjectToolWindow"}
+  {:label "Comment line" :keys "Ctrl+/" :action "CommentByLineComment"}
+  {:label "Go to implementation" :keys "gi" :action "GotoImplementation"}]}

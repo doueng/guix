@@ -7,7 +7,8 @@
             [clojure.string :as str]))
 
 (load-file (str (fs/parent (fs/real-path *file*)) "/keyguide"))
-(require '[hypr.dispatch :as hypr])
+(require '[hypr.dispatch :as hypr]
+         '[dusk.palette :as palette])
 
 (def desktop-leader "Alt+Space")
 
@@ -140,6 +141,14 @@
 (defn herdr-pane []
   (some not-empty [(System/getenv "HERDR_PANE_ID") (System/getenv "HERDR_ACTIVE_PANE_ID")]))
 
+(defn herdr-target
+  "The pane, tab and workspace that a Herdr action applies to, from the
+  environment Herdr gives its commands and popups."
+  []
+  {:pane (herdr-pane)
+   :tab (System/getenv "HERDR_ACTIVE_TAB_ID")
+   :workspace (System/getenv "HERDR_ACTIVE_WORKSPACE_ID")})
+
 (defn log-path []
   (or (System/getenv "KEYLOG_FILE")
       (str (or (System/getenv "XDG_STATE_HOME") (str (fs/home) "/.local/state"))
@@ -253,45 +262,49 @@
         (Thread/sleep 1000)
         (recur)))))
 
-(defn dmenu [prompt lines]
-  (let [{:keys [exit out err]}
-        @(p/process [(str (fs/home) "/.local/bin/dusk") "dmenu" "-p" prompt]
-                    {:in (str (str/join "\n" lines) "\n") :out :string :err :string})]
-    (cond
-      (zero? exit) (str/trim-newline out)
-      (and (= 1 exit) (str/blank? err)) nil
-      :else (throw (ex-info "Dusk menu failed" {:exit exit :error err})))))
-
 (defn choose-window! []
-  (let [clients (json/parse-string (run! ["hyprctl" "-j" "clients"]) true)
-        lines (mapv #(format "%s  %s  [%s]" (:class %) (:title %) (:address %)) clients)]
-    (when-let [line (dmenu "Windows" lines)]
-      (hypr/dispatch! ["focus" {:window (str "address:" (second (re-find #"\[(0x[0-9a-f]+)\]$" line)))}]))))
+  (let [clients (json/parse-string (run! ["hyprctl" "-j" "clients"]) true)]
+    (when-let [address (palette/pick! "Window" (for [c clients]
+                                                 {:label (:title c) :source (:class c) :value (:address c)}))]
+      (hypr/dispatch! ["focus" {:window (str "address:" address)}]))))
 
-(defn palette-lines [grammar context]
-  (for [b (in-context grammar context)]
-    (format "SPC %s  %s" (str/join " " (:keys b)) (:label b))))
+(defn leader-entries
+  "Palette entries for the leader bindings of CONTEXT, entered with LEADER.
+  Each :value is \"leader:\" and the keys."
+  [grammar context leader source]
+  (for [b (in-context grammar context) :when (not (:nav b)) :let [keys (str/join " " (:keys b))]]
+    {:label (:label b) :keys (str leader " " keys) :source source :value (str "leader:" keys)}))
+
+(defn leader-keys [value]
+  (some-> (re-matches #"leader:(.+)" value) second (str/split #" ")))
 
 (declare run-desktop!)
 
 (defn guide-path [] (keyguide/config-path))
 
-(defn desktop-palette! [grammar]
-  (let [guide (keyguide/validate! (keyguide/groups (edn/read-string (slurp (guide-path)))))
-        guide-entries (mapcat :entries guide)
-        choice (dmenu "Command palette"
-                      (concat (palette-lines grammar :desktop) (map keyguide/line guide-entries)))]
-    (cond
-      (nil? choice) nil
-      (str/starts-with? choice "SPC ")
-      (run-desktop! grammar (str/split (second (re-find #"^SPC (.+?)  " choice)) #" "))
-      :else (when-let [entry (some #(when (= choice (keyguide/line %)) %) guide-entries)]
-              (keyguide/run-entry! entry)
-              (log! "Hyprland" (str desktop-leader " Space") (:label entry))))))
+(defn guide-entries []
+  (for [g (keyguide/validate! (keyguide/groups (edn/read-string (slurp (guide-path)))))
+        e (:entries g)]
+    (assoc e :palette {:label (:label e) :keys (keyguide/shortcut e) :source "Guide"
+                       :value (str "guide:" (:id g) "/" (:id e))})))
+
+(defn desktop-entries [grammar]
+  (concat (leader-entries grammar :desktop desktop-leader "Desktop")
+          (map :palette (guide-entries))))
+
+(defn run-desktop-entry!
+  "Run the desktop palette entry whose :value is VALUE."
+  [grammar value]
+  (if-let [keys (leader-keys value)]
+    (run-desktop! grammar keys)
+    (when-let [entry (some #(when (= value (get-in % [:palette :value])) %) (guide-entries))]
+      (keyguide/run-entry! entry)
+      (log! "Hyprland" (str desktop-leader " Space") (:label entry)))))
 
 (defn run-desktop! [grammar keys]
   (if (= keys ["SPC"])
-    (desktop-palette! grammar)
+    ;; The palette offers the focused program's commands as well as these.
+    @(p/process [(str (fs/home) "/.local/bin/palette")] {:out :inherit :err :inherit})
     (let [b (some #(when (= keys (:keys %)) %) (in-context grammar :desktop))
           pressed (str desktop-leader " " (str/join " " keys))]
       (if (:nav b)
@@ -367,17 +380,24 @@
   (print (str "\u001b[2J\u001b[H" title "\n\n" (menu-text rows) "\n\nEsc  Close\n"))
   (flush))
 
-(defn fzf [prompt lines]
-  (let [{:keys [exit out]} @(p/process ["fzf" "--prompt" (str prompt " ")]
-                                       {:in (str/join "\n" lines) :out :string :err :inherit})]
-    (when (zero? exit) (str/trim out))))
+(defn tabs [workspace]
+  (get-in (herdr-json "tab" "list" "--workspace" workspace) [:result :tabs]))
 
-(defn tabs []
-  (get-in (herdr-json "tab" "list" "--workspace" (System/getenv "HERDR_ACTIVE_WORKSPACE_ID"))
-          [:result :tabs]))
+(defn choose-tab! [workspace]
+  (when-let [id (palette/pick! "Tab" (for [t (tabs workspace)]
+                                      {:label (str (:label t)) :source "Herdr" :value (:tab_id t)}))]
+    (run! ["herdr" "tab" "focus" id])))
 
-(defn step-tab! [delta]
-  (let [ts (vec (tabs))
+(defn choose-workspace!
+  "Focus an open Herdr workspace, offering the unfocused ones first."
+  []
+  (let [ws (get-in (herdr-json "workspace" "list") [:result :workspaces])]
+    (when-let [id (palette/pick! "Workspace" (for [w (sort-by :focused ws)]
+                                              {:label (str (:label w)) :source "Herdr" :value (:workspace_id w)}))]
+      (run! ["herdr" "workspace" "focus" id]))))
+
+(defn step-tab! [workspace delta]
+  (let [ts (vec (tabs workspace))
         i (first (keep-indexed #(when (:focused %2) %1) ts))]
     (cond
       (empty? ts) (throw (ex-info "Herdr reported no tabs" {}))
@@ -386,11 +406,14 @@
 
 (declare herdr-palette!)
 
-(defn run-herdr! [grammar keys]
+(defn run-herdr!
+  "Run the Herdr leader binding at KEYS for TARGET, which defaults to the
+  pane that Herdr's environment names."
+  [grammar keys & [target]]
   (if (= keys ["SPC"])
     (herdr-palette! grammar)
     (let [b (some #(when (= keys (:keys %)) %) (in-context grammar :herdr))
-          pane (herdr-pane)
+          {:keys [pane tab workspace]} (or target (herdr-target))
           action (:herdr b)
           pressed (str "Ctrl+b Space " (str/join " " keys))]
       (when-not (:nav b) (log! "Herdr" pressed (:label b)))
@@ -399,21 +422,21 @@
         (vector? action) (run! (concat ["herdr"] (take 2 action) ["--pane" pane] (drop 2 action)))
         (= :close-pane action) (run! ["herdr" "pane" "close" pane])
         (= :edit-scrollback action) (herdr-api! "pane.edit_scrollback" {:pane_id pane})
-        (= :choose-workspace action) @(p/process [(str (fs/home) "/.local/bin/herdr-workspace-pick")]
-                                                  {:in :inherit :out :inherit :err :inherit})
+        (= :choose-workspace action) (choose-workspace!)
         (map? action) (herdr-api! "plugin.action.invoke" {:plugin_id (:plugin action) :action_id (:action action)
                                                             :context {:focused_pane_id pane}})
-        (= :close-tab action) (run! ["herdr" "tab" "close" (System/getenv "HERDR_ACTIVE_TAB_ID")])
-        (= :next-tab action) (step-tab! 1)
-        (= :previous-tab action) (step-tab! -1)
-        (= :choose-tab action)
-        (let [ts (tabs)]
-          (when-let [line (fzf "Tab" (map #(str (:tab_id %) "  " (:label %)) ts))]
-            (run! ["herdr" "tab" "focus" (first (str/split line #"  "))])))))))
+        (= :close-tab action) (run! ["herdr" "tab" "close" tab])
+        (= :next-tab action) (step-tab! workspace 1)
+        (= :previous-tab action) (step-tab! workspace -1)
+        (= :choose-tab action) (choose-tab! workspace)))))
+
+(defn herdr-entries [grammar]
+  (leader-entries grammar :herdr "Ctrl+b Space" "Herdr"))
 
 (defn herdr-palette! [grammar]
-  (when-let [line (fzf "Command" (palette-lines grammar :herdr))]
-    (run-herdr! grammar (str/split (second (re-find #"^SPC (.+?)  " line)) #" "))))
+  (when-let [value (palette/pick! "Herdr" (palette/by-history :herdr (herdr-entries grammar)))]
+    (palette/remember! :herdr value)
+    (run-herdr! grammar (leader-keys value))))
 
 (defn herdr-leader! [grammar]
   (show! "Leader" (menu grammar :herdr nil))
