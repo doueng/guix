@@ -7,7 +7,7 @@ const TOOL = "jev_classify_task";
 const MODE_ENTRY = "poteto-mode";
 const TIMEOUT_MS = 20_000;
 
-// poteto-mode's SKILL.md Route map lists these keys; check-pi-port.mjs fails when they differ.
+// poteto-mode's SKILL.md Route map lists these keys; the bbh workflow test fails when they differ.
 const ROUTES = {
   investigation: "Read-only understanding, explanation, or diagnosis; no implementation is requested.",
   bug_fix: "Existing behavior is defective; reproduce, diagnose, fix, and verify it.",

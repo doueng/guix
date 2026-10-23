@@ -6,6 +6,6 @@ npm ci --ignore-scripts
 npm run check
 npm run lint
 npm test
-node ../../pi/agent/skills/pstack/poteto-mode/scripts/check-pi-port.mjs
+(cd ../bbh && bb test:workflow)
 sh -n build.sh verify.sh
 npm audit --audit-level=high

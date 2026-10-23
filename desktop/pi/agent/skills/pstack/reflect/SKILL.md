@@ -10,7 +10,7 @@ Review the current conversation for durable process lessons, then propose a smal
 
 ## Process
 
-1. Prefer the current transcript path from active Pi session metadata. Otherwise run `node ../poteto-mode/scripts/session-dir.mjs <workspace>` relative to this skill directory, passing any explicit CLI session directory. Confirm the transcript's workspace and conversation before reading messages. Never inspect unrelated workspaces. If unavailable, use a concise digest of the visible conversation and state the evidence limit.
+1. Prefer the current transcript path from active Pi session metadata. Otherwise run `wf session-dir <workspace> [explicit-dir]`, passing any explicit CLI session directory. Confirm the transcript's workspace and conversation before reading messages. Never inspect unrelated workspaces. If unavailable, use a concise digest of the visible conversation and state the evidence limit.
 2. Identify repeated friction, a corrected assumption, or a missing workflow. Distinguish a one-off from a repeatable lesson.
 3. If independent reviewers can be run with an available local delegation mechanism, give them distinct review lenses and read their reports. Otherwise perform those lenses sequentially and label them self-review.
 4. Check whether the lesson belongs in an existing skill, a new skill, or an enforceable script or lint. Prefer structure for rules that can be checked mechanically.

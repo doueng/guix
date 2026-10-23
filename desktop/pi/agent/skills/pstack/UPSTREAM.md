@@ -26,14 +26,14 @@ Local changes include Pi entry commands, Jev routing with a manual fallback, the
 
 ## Runtime and paths
 
-Guix Home's development packages provide Node and the checksum-pinned Bun 1.3.14 ARM64 release. The watcher and orchestration ledger bootstrap their npm dependencies using their own frozen `bun.lock`. Run `bun install --frozen-lockfile` in `poteto-mode/scripts/` before tests.
+Guix Home's development packages provide Node and the checksum-pinned Bun 1.3.14 ARM64 release. The TypeScript watcher and orchestration ledger were replaced by the bb workflow engine in `desktop/build/bbh`, so this bundle has no npm dependencies.
 
-Project skills belong in `.pi/skills/` or `.agents/skills/`. Personal skills belong in the configured Pi agent directory's `skills/`. Stow installs this bundle under `~/.pi/agent/skills/pstack/`. Resolve scripts relative to the skill location rather than the current repository. To find transcripts, prefer active Pi session metadata. The `poteto-mode/scripts/session-dir.mjs` helper resolves environment and settings overrides without reading transcript messages. An explicit CLI session directory must be supplied to the helper. Confirm workspace and conversation identity before reading any transcript.
+Project skills belong in `.pi/skills/` or `.agents/skills/`. Personal skills belong in the configured Pi agent directory's `skills/`. Stow installs this bundle under `~/.pi/agent/skills/pstack/`. Resolve scripts relative to the skill location rather than the current repository. To find transcripts, prefer active Pi session metadata. The `wf session-dir` command resolves environment and settings overrides without reading transcript messages. An explicit CLI session directory must be supplied to the helper. Confirm workspace and conversation identity before reading any transcript.
 
 ## Updating
 
 1. Refresh the upstream checkout through the librarian workflow. Choose and record a specific source commit and plugin version.
 2. Compare upstream `pstack/` changes since the baseline. Apply selected changes to the repository source under `desktop/pi/agent/skills/pstack/`. Preserve the local adaptations above. Do not copy host-specific agents, model rules, or automation into Pi unchanged.
 3. Update this baseline only after reconciling the selected upstream delta. List applied adaptations and omitted changes under Provenance.
-4. In `poteto-mode/scripts/`, run `bun install --frozen-lockfile`, `bun run test`, and `bun run typecheck`. Run `shellcheck worktree-audit.sh`. Port validation checks bundled references and runtime availability.
+4. Run `cd desktop/build/bbh && bb test:workflow`. Port validation checks bundled references and runtime availability.
 5. Refresh installed links with `stow --dir=desktop/pi --target="$HOME/.pi/agent" --no-folding --ignore=node_modules --restow agent`. Run Pi's `/reload` and verify `/skill:poteto-mode` is available. Do not activate Guix Home just to refresh skill files.
