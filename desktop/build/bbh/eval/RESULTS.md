@@ -79,3 +79,20 @@ Credential links and bbh's runtime data directory were excluded from the archive
 This report is self-reviewed. No independent reviewer was used.
 
 The live evaluation does not cover compaction, durable helper creation, model switching with history, images, MCP servers, or queued-prompt UI behavior. Personal skill packs were disabled. The first baseline did not fingerprint all loaded source files. Pi's thinking level was explicitly off; bbh used its existing OpenRouter request defaults, so provider sampling settings were not proven identical. No statistical significance, speed, or cost claim is made.
+
+## Harbor basic tasks
+
+Run against `examples/tasks` from harbor-framework/harbor with `bb eval:harbor -p TASK -o DIR`, model `openrouter/deepseek/deepseek-v4.1-flash`, rootless Podman on arm64. Each row is one trial.
+
+| Task | Reward | Notes |
+|---|---|---|
+| hello-world | 1.0 | Verifier found `hello.txt` with the exact content. The bbh transcript shows the write. |
+| hello-workdir | 1.0 | Writes the output of `pwd` to `workdir.txt`. |
+| hello-multi-step-simple | 1.0 | Multi-step task. Its trial recorded no exception. |
+| hello-alpine | 0.0 (infrastructure) | Fails in the bbh REPL start on Alpine, not in the agent's reasoning. In one run the agent wrote `hello.txt` and scored 1.0, but the same task then failed twice. The bbh REPL dies with a `StackOverflowError` while nREPL loads its CIDER namespace under gcompat. |
+
+Three infrastructure fixes were needed before any agent ran.
+
+- Compose's project network needs nftables rules this kernel rejects. `harbor/guix_podman.py` now adds `harbor/docker-compose-host-network.yaml`, which puts `main` on the host network.
+- The static babashka binary is glibc-linked. Alpine images need `gcompat`, and Harbor's ACP pipe needs `stdbuf` from `coreutils`. `harbor/bbh_agent.py` installs both on Alpine.
+- The Alpine REPL failure is still open.

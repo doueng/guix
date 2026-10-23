@@ -82,6 +82,8 @@ class Bbh(AcpAgent):
             environment,
             command=(
                 "set -eu; "
+                # The static babashka build is glibc-linked, so musl images need gcompat. Harbor's ACP pipe uses stdbuf from coreutils.
+                "if [ -e /etc/alpine-release ]; then apk add --no-cache gcompat libstdc++ coreutils >/dev/null; fi; "
                 'case "$(uname -m)" in aarch64|arm64) arch=aarch64;; *) arch=amd64;; esac; '
                 "curl -fsSL https://github.com/babashka/babashka/releases/download/"
                 f"v{BB_VERSION}/babashka-{BB_VERSION}-linux-$arch-static.tar.gz "

@@ -1,0 +1,5 @@
+# Run the task's main service on the host network. Podman-compose's project network needs
+# nftables rules, and this rootless Asahi kernel rejects them, so every compose run fails before the agent starts.
+services:
+  main:
+    network_mode: host
