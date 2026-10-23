@@ -20,7 +20,7 @@
          eval:agreement {:doc "Judge precision and recall against human labels, with disagreements."
                          :requires ([bbh.labels])
                          :task (bbh.labels/agreement!)}
-         eval:harbor {:doc "Harbor job with bbh in rootless Podman. Spends OpenRouter credits. Args: harbor run options, e.g. -d terminal-bench@2.0 -l 5 -o /tmp/bbh-harbor. BBH_MODEL picks the model."
+         eval:harbor {:doc "Harbor job with bbh in rootless Podman. Spends OpenRouter credits. Args: harbor run options, e.g. -d terminal-bench@2.0 -l 5 -o /tmp/bbh-harbor. BBH_MODEL picks the model, and BBH_HARBOR_AGENT another agent, e.g. terminus-2 or pi."
                       :requires ([bbh.auth])
                       :task (apply shell {:extra-env {"OPENROUTER_API_KEY" (bbh.auth/api-key "OPENROUTER_API_KEY" "openrouter")
                                                       "PYTHONPATH" (str (babashka.fs/absolutize "harbor"))
@@ -28,12 +28,16 @@
                                                       "UV_PYTHON_DOWNLOADS" "never"}}
                                    "uv" "tool" "run" "--python" (str (babashka.fs/which "python3")) "--from" "harbor==0.24.0"
                                    ;; Terminal-Bench's prebuilt images are amd64-only, so build each task's Dockerfile for arm64.
-                                   "harbor" "run" "--agent" "bbh_agent:Bbh" "--env" "guix_podman:GuixPodman" "--force-build"
+                                   "harbor" "run" "--agent" (or (System/getenv "BBH_HARBOR_AGENT") "bbh_agent:Bbh") "--env" "guix_podman:GuixPodman" "--force-build"
                                    "-m" (or (System/getenv "BBH_MODEL") "openrouter/deepseek/deepseek-v4.1-flash")
                                    *command-line-args*)}
          eval:graders {:doc "Reject untouched fixtures and accept reference solutions."
                        :requires ([bbh.tasks])
                        :task (bbh.tasks/verify-graders!)}
+         test:workflow {:doc "Run the workflow engine tests, including the route check against the Jev extension."
+                        :requires ([clojure.test :as t] [bbh.workflow-test])
+                        :task (let [{:keys [fail error]} (t/run-tests 'bbh.workflow-test)]
+                                (System/exit (if (zero? (+ fail error)) 0 1)))}
          test {:doc "Run the bbh tests."
                :requires ([clojure.test :as t] [bbh.llm-test] [bbh.context-test] [bbh.delimiters-test] [bbh.session-test] [bbh.acp-test] [bbh.claude-test] [bbh.env-test] [bbh.eval-test])
                :task (let [{:keys [fail error]} (t/run-tests 'bbh.llm-test 'bbh.context-test 'bbh.delimiters-test 'bbh.session-test 'bbh.acp-test 'bbh.claude-test 'bbh.env-test 'bbh.eval-test)]

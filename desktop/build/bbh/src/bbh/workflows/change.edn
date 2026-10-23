@@ -1,0 +1,26 @@
+{:workflow :change
+ :routes ["feature" "refactor"]
+ :requires [:check]
+ :start :shape
+ :phases
+ {:shape
+  {:brief "Name the data shape and the boundary it crosses before editing. For a change across a function boundary, settle the design first with the architect skill. Write shape.md in the evidence directory."
+   :gates [{:kind :artifact :path "shape.md"}]
+   :next :implement}
+  :implement
+  {:brief "Change the code to the shape. A refactor keeps behavior, so existing checks must stay green. Then run `wf attest`."
+   :gates [{:kind :command :cmd :check :expect :zero}]
+   :next :verify}
+  :verify
+  {:brief "Exercise the changed behavior on the real surface. Write verify.md in the evidence directory with what you observed."
+   :gates [{:kind :artifact :path "verify.md"}]
+   :next :review}
+  :review
+  {:brief "Review the diff for unrelated changes, comments that narrate phases, and drift from the shape. Record a verdict with `wf verdict` from a fresh session."
+   :gates [{:kind :verdict :criteria "The diff matches the shape, touches nothing unrelated, and has no phase-narrating comments."}]
+   :next :finish
+   :on-fail :implement}
+  :finish
+  {:brief "Commit with a message that states the why. Report what changed and how you verified it. Then run `wf attest`."
+   :gates []
+   :next nil}}}
