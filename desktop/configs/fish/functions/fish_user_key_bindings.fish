@@ -9,5 +9,7 @@ function fish_user_key_bindings
     bind -M insert \cl fish_clear
     bind -M insert \cr fzf_history
     bind -M default \cr fzf_history
+    bind -M insert ctrl-space palette_insert
+    bind -M default ctrl-space palette_insert
     bind -M insert ctrl-backspace backward-kill-word
 end
