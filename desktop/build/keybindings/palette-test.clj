@@ -57,6 +57,7 @@
   (let [asked (atom [])]
     (with-redefs [keyleader/load-grammar (constantly grammar)
                   palette/context (constantly {:kind :herdr :program {:id :nvim :pid 42}})
+                  palette/process-tree (constantly ["42"])
                   palette/process-sockets (constantly ["/tmp/custom.nvim"])
                   palette/sh-out (fn [& argv]
                                     (swap! asked conj (vec argv))
@@ -69,14 +70,26 @@
 
 (deftest nvim-must-acknowledge-opening-and-match-the-target-pid
   (doseq [reply [nil "0"]]
-    (with-redefs [palette/process-sockets (constantly ["/tmp/nvim"])
+    (with-redefs [palette/process-tree (constantly ["42"])
+                  palette/process-sockets (constantly ["/tmp/nvim"])
                   palette/sh-out (fn [& args] (if (= "getpid()" (last args)) "42" reply))]
       (is (not (palette/open-nvim! 42)))))
   (let [calls (atom [])]
-    (with-redefs [palette/process-sockets (constantly ["/tmp/wrong-instance"])
+    (with-redefs [palette/process-tree (constantly ["42"])
+                  palette/process-sockets (constantly ["/tmp/wrong-instance"])
                   palette/sh-out (fn [& args] (swap! calls conj (last args)) "99")]
       (is (not (palette/open-nvim! 42)))
       (is (= ["getpid()"] @calls)))))
+
+(deftest a-terminal-nvim-answers-through-its-embedded-server
+  (with-redefs [palette/process-sockets (fn [pid] (if (= "42" pid) ["/run/user/1000/nvim.42.0"] []))
+                palette/sh-out (fn [& argv]
+                                  (case (last argv)
+                                    "/proc/41/task/41/children" "42\n"
+                                    "/proc/42/task/42/children" ""
+                                    "getpid()" "42"
+                                    "1"))]
+    (is (palette/open-nvim! 41))))
 
 (let [{:keys [fail error]} (run-tests)]
   (System/exit (if (zero? (+ fail error)) 0 1)))

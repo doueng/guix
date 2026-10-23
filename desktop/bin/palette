@@ -79,12 +79,21 @@
                          (nth fields 7)))))
           (str/split-lines (or (sh-out "cat" "/proc/net/unix") "")))))
 
+(defn process-tree
+  "PID and its descendants, as strings. A terminal Neovim is a UI client whose
+  --embed child owns the server socket."
+  [pid]
+  (let [children (some-> (sh-out "cat" (str "/proc/" pid "/task/" pid "/children"))
+                         str/trim not-empty (str/split #"\s+"))]
+    (cons (str pid) (mapcat process-tree children))))
+
 (defn open-nvim! [pid]
-  (some (fn [socket]
-          (when (= (str pid) (some-> (sh-out "nvim" "--server" socket "--remote-expr" "getpid()") str/trim))
-            (= "1" (some-> (sh-out "nvim" "--server" socket "--remote-expr"
-                                   "luaeval(\"require('config.palette').open() and 1 or 0\")") str/trim))))
-        (process-sockets pid)))
+  (let [pids (set (process-tree pid))]
+    (some (fn [socket]
+            (when (pids (some-> (sh-out "nvim" "--server" socket "--remote-expr" "getpid()") str/trim))
+              (= "1" (some-> (sh-out "nvim" "--server" socket "--remote-expr"
+                                     "luaeval(\"require('config.palette').open() and 1 or 0\")") str/trim))))
+          (mapcat process-sockets pids))))
 
 ;; Entries the palette runs itself. Each :value names its runner before a colon.
 
