@@ -24,7 +24,7 @@
             (local pink "#F5C2E7")
             (vim.cmd "highlight clear")
             (vim.cmd "set termguicolors")
-            (vim.api.nvim_set_hl 0 :Normal {:fg fg :bg bg})
+            (vim.api.nvim_set_hl 0 :Normal {:fg fg})
             (vim.api.nvim_set_hl 0 :NormalFloat {:fg fg :bg surface})
             (vim.api.nvim_set_hl 0 :Comment {:fg muted :italic true})
             (vim.api.nvim_set_hl 0 :Constant {:fg peach})
