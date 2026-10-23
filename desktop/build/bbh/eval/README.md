@@ -38,6 +38,19 @@ The judge runs Claude Code without tools on your subscription. It uses `opus` un
 
 `eval:agreement` treats bad as the positive class. Precision is the share of the judge's bad verdicts that you also marked bad. Recall is the share of your bad labels that the judge caught. The true negative rate is the share of your good labels the judge kept good. Raw agreement misleads when most traces are good, so the command does not report it. The command prints every disagreement with both critiques. Use those critiques to edit `judge.md`, then rerun `eval:judge` and `eval:agreement`. Trust the judge on unlabeled traces only after its precision and recall hold on 25 to 50 of your labels, and keep labeling a sample after that.
 
+## Run Harbor benchmarks
+
+[Harbor](https://github.com/harbor-framework/harbor) runs benchmark tasks such as Terminal-Bench 2.0 in containers and grades each one with the task's own tests. `harbor/bbh_agent.py` runs bbh in the task container. It uploads `src/` and the same init file as the `bbh` comparison profile, installs a static bb, and drives `bbh acp` through Harbor's ACP runner.
+
+```sh
+bb eval:harbor -p ~/.cache/checkouts/github.com/harbor-framework/harbor/examples/tasks/hello-world -o /tmp/bbh-harbor-smoke
+bb eval:harbor -d terminal-bench@2.0 -l 5 -n 1 -o /tmp/bbh-tb2
+```
+
+Every argument goes to `harbor run`. `BBH_MODEL` picks the model and defaults to `openrouter/deepseek/deepseek-v4.1-flash`. The OpenRouter key comes from `OPENROUTER_API_KEY` or Pi's `auth.json`. Each trial's bbh conversation lands in `<job>/<trial>/agent/data/bbh/conversations`, so the trace tools above can read it.
+
+The task uses rootless Podman from `modules/engstrand/features/containers.scm`. Terminal-Bench's prebuilt images are amd64-only, so the task passes `--force-build` and builds each task's Dockerfile for arm64. Scores from those builds can differ from the official leaderboard environment.
+
 ## Compare Pi and bbh
 
 This evaluator compares three configurations on the same generated projects and model.
