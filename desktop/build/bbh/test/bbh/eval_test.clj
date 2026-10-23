@@ -44,6 +44,20 @@
            (traces/check trace)))
     (is (= :real (:source trace)))))
 
+(deftest harbor-trials-join-their-verdict-and-job
+  (let [job (str (fs/create-temp-dir {:prefix "bbh-harbor-test"}))
+        trial (fs/path job "reshard-c4-data__abc")
+        dir (str (fs/path trial "agent/data/bbh/conversations/20261023-200354-000"))]
+    (fs/create-dirs dir)
+    (fs/copy (fs/path (conversation!) "messages.jsonl") (fs/path dir "messages.jsonl"))
+    (spit (str (fs/path trial "result.json"))
+          (json/generate-string {:task_name "reshard-c4-data" :agent_info {:name "bbh"}
+                                 :verifier_result {:rewards {:reward 1.0}}}))
+    (let [[trace] (traces/find-traces [job])]
+      (is (= {:source :eval :task "reshard-c4-data" :passed true
+              :cohort (str (str/join "/" (take-last 2 (fs/components (fs/canonicalize job)))) " harbor bbh")}
+             (select-keys trace [:source :task :passed :cohort]))))))
+
 (deftest rendering-elides-skills-and-flags-steps
   (let [text (traces/render (traces/load-trace (conversation!)))]
     (is (str/includes? text "> [skill poteto-mode expanded here]"))
