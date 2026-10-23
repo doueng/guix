@@ -6,11 +6,11 @@ disable-model-invocation: true
 
 # Poteto mode
 
-Workflows are defined in `desktop/build/bbh/src/bbh/workflows/`. The `wf` command runs them. The runner executes every gate itself. A claim never advances a phase.
+Workflows are defined in `desktop/build/bbh/src/bbh/workflows/`. Run them with `wf`, from bash in Pi or with `(sh "wf ...")` in bbh. The runner executes every gate itself. A claim never advances a phase.
 
 ## Steps
 
-1. For a new task, call `jev_classify_task` with the user's text. Skip it for continuations such as "continue".
+1. For a new task, classify it with `jev_classify_task`. In bbh, call `(jev-classify-task task)`. Skip it for continuations such as "continue".
 2. Pick the workflow from the route table. A route with no workflow is manual. Say so, then do the work directly.
 3. Start the run: `wf start <workflow> --task "<task>" --cwd <repo> [--repro "<cmd>"] [--check "<cmd>"]`.
 4. Follow the brief that `wf` prints. Write the evidence files it names into the evidence directory. Then run `wf attest --claim "<what you did>"`.
