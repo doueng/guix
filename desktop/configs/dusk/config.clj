@@ -149,14 +149,16 @@
       (when (and keys (str/includes? (str/lower-case keys) (str/lower-case query))) 0.5)))
 
 (defn- ranked-items [items query]
-  (->> items
-       (keep-indexed (fn [i item] (let [e (entry item)]
-                                    (when-let [s (entry-score e query)] [s i e]))))
-       ;; Ties keep the caller's order, so callers rank recent entries first.
-       (sort-by (fn [[s i]] [(- s) i]))
-       ;; Identity comes from the original request, not the filtered position
-       ;; or display text (duplicate dmenu lines are valid).
-       (mapv (fn [[_ i e]] (assoc e :id i :text (:label e))))))
+  ;; An empty query already has the caller's history order. No scoring or sort.
+  (let [ranked (if (str/blank? query)
+                 (map-indexed (fn [i item] [0 i (entry item)]) items)
+                 (->> items
+                      (keep-indexed (fn [i item]
+                                      (let [e (entry item)]
+                                        (when-let [s (entry-score e query)] [s i e]))))
+                      (sort-by (fn [[s i]] [(- s) i]))))]
+    ;; Identity is the original index, even when labels are duplicated.
+    (mapv (fn [[_ i e]] (assoc e :id i :text (:label e))) ranked)))
 
 (defn matches [items query]
   (mapv :text (ranked-items items query)))
@@ -173,20 +175,31 @@
 
 (defn- open-launcher! [items prompt respond]
   (close-launcher! nil)
-  (reset! launcher {:items (vec items) :prompt prompt :query "" :selected 0
-                    :respond respond}))
+  (let [items (vec items)]
+    (reset! launcher {:items items :matches (ranked-items items "")
+                      :prompt prompt :query "" :selected 0 :respond respond})))
 
 (dusk/on-request :dmenu
   (fn [{:keys [items prompt]} respond]
     (open-launcher! items prompt respond)))
 
-;; `palette` sends {:prompt P :entries [{:label :keys :source :value} ...]} and
-;; receives the chosen entry's :value, or nil when cancelled.
+;; Compact rows [command keys?] choose the command itself. Maps can carry a
+;; different :value, and dmenu still sends plain strings.
 (dusk/on-request :palette
-  (fn [{:keys [entries prompt]} respond]
-    (open-launcher! entries prompt respond)))
+  (fn [{:keys [entries prompt source]} respond]
+    (open-launcher! (mapv #(if (vector? %)
+                            {:label (first %) :value (first %) :keys (second %) :source source}
+                            %)
+                         entries)
+                    prompt respond)))
 
-(defn- results [] (ranked-items (:items @launcher) (:query @launcher)))
+(defn search-launcher! [query]
+  (when (not= query (:query @launcher))
+    (swap! launcher assoc :query query :selected 0
+           :matches (ranked-items (:items @launcher) query)))
+  nil)
+
+(defn- results [] (:matches @launcher))
 
 (defn- move! [delta]
   (let [n (count (results))]
@@ -228,7 +241,7 @@
                    :gap 1
                    :radius (* 6 1.3)
                    :bg (ui/alpha (:surface-variant theme) 0.8)
-                   :on-change #(swap! launcher assoc :query % :selected 0)})
+                   :on-change search-launcher!})
         (for [[i {:keys [id text keys source value]}] (visible-results (results) selected)
               :let [chosen? (= i selected)
                     dim (if chosen? (:on-primary theme) (:on-surface-variant theme))]]

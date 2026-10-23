@@ -118,6 +118,7 @@ One Dusk palette at the bottom of the screen chooses commands in every applicati
 Emacs caches command entries and escaped text per buffer, rebuilding after files load or the active keymaps change. Applicability and history are still checked on every opening. A new buffer's first opening can still pay the catalogue-building cost.
 Herdr's tab, workspace and window pickers use the same palette.
 `dusk.palette` in `desktop/lib` is the client. It sends `{:op :request :name :palette :args {:prompt :entries}}` on Dusk's socket, and Dusk replies with the chosen entry's `:value`. Choices are remembered under `~/.local/state/palette/`.
+Emacs sends compact `[command keys?]` rows with one source label per request. Dusk computes matches only when the query changes. The [palette performance report](../../build/keybindings/palette-performance.md) records the phase timings and benchmark command.
 
 ## Discovery
 

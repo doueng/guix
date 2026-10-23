@@ -47,9 +47,7 @@ Asking where-is-internal for every key of every command took 2.4 s."
 (defun eng/palette--fragment (name keys)
   "One palette entry in EDN for the command NAME with KEYS."
   (let ((label (eng/palette--edn-string name)))
-    (concat "{:label " label
-            (if keys (concat " :keys " (eng/palette--edn-string keys)) "")
-            " :source \"Emacs\" :value " label "}")))
+    (concat "[" label (if keys (concat " " (eng/palette--edn-string keys)) "") "]")))
 
 ;; Key lookups and escaping are cached per buffer because bindings are local.
 ;; Applicability and history are evaluated on every opening.
@@ -102,7 +100,7 @@ Asking where-is-internal for every key of every command took 2.4 s."
 
 (defun eng/palette--request (names)
   (let ((fragments (eng/palette--catalog-fragments (eng/palette--cached))))
-    (concat "{:op :request :name :palette :args {:prompt \"M-x\" :entries ["
+    (concat "{:op :request :name :palette :args {:prompt \"M-x\" :source \"Emacs\" :entries ["
             (mapconcat (lambda (n) (or (gethash n fragments) (eng/palette--fragment n nil))) names " ")
             "]}}\n")))
 

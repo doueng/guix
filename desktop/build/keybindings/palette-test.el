@@ -25,8 +25,7 @@
   (let ((request (concat (eng/palette--fragment "save-buffer" "C-x C-s") (eng/palette--fragment "say \"hi\"" nil) "\n")))
     (should (string-suffix-p "\n" request))
     (should-not (string-match-p "\n" (substring request 0 -1)))
-    (should (string-match-p "{:label \"save-buffer\" :keys \"C-x C-s\" :source \"Emacs\" :value \"save-buffer\"}" request))
-    (should (string-match-p "{:label \"say \\\\\"hi\\\\\"\" :source" request))))
+    (should (equal request "[\"save-buffer\" \"C-x C-s\"][\"say \\\"hi\\\"\"]\n"))))
 
 (ert-deftest palette-rebuilds-after-a-file-loads ()
   (eng/palette--cached)
@@ -41,7 +40,7 @@
       (with-temp-buffer
         (use-local-map (make-sparse-keymap))
         (local-set-key (kbd key) #'save-buffer)
-        (should (string-match-p (regexp-quote (concat ":keys \"" key "\""))
+        (should (string-match-p (regexp-quote (concat "\"save-buffer\" \"" key "\""))
                                 (eng/palette--request '("save-buffer"))))))))
 
 (ert-deftest palette-reuses-the-catalogue-but-filters-for-the-buffer ()
@@ -54,7 +53,7 @@
 
 (ert-deftest palette-request-joins-the-cached-entries ()
   (let ((request (eng/palette--request '("save-buffer"))))
-    (should (string-prefix-p "{:op :request :name :palette :args {:prompt \"M-x\" :entries [{:label \"save-buffer\"" request))
+    (should (string-prefix-p "{:op :request :name :palette :args {:prompt \"M-x\" :source \"Emacs\" :entries [[\"save-buffer\"" request))
     (should (string-suffix-p "]}}\n" request))))
 
 (ert-deftest palette-reads-the-choice-or-a-cancel ()

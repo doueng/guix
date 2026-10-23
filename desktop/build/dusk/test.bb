@@ -4,6 +4,7 @@
   (:require [clojure.test :refer [deftest is testing run-tests use-fixtures]]
             [config :as config]
             [dusk.runtime :as runtime]
+            [dusk.core :as core]
             [dusk.ui :as ui]))
 
 (use-fixtures :each
@@ -12,7 +13,7 @@
       (try (f) (finally (reset! config/launcher before))))))
 
 (defn open-launcher! [items]
-  (reset! config/launcher {:items items :query "" :selected 0 :prompt "" :respond identity}))
+  ((get @core/request-handlers :dmenu) {:items items :prompt ""} identity))
 
 (defn rows [tree]
   (vec (drop 1 (get-in tree [:children 1 :children]))))
@@ -47,7 +48,7 @@
   (let [before (rows (serialize (config/launcher-panel)))]
     (is (= 3 (count (distinct (map :path before)))))
     (is (= 3 (count (distinct (map #(get-in % [:props :on-click]) before)))))
-    (swap! config/launcher assoc :query "same")
+    (config/search-launcher! "same")
     (let [after (rows (serialize (config/launcher-panel)))]
       (is (= (mapv :path [(first before) (last before)]) (mapv :path after))))))
 
@@ -59,7 +60,8 @@
   (open-launcher! [{:label "Rename symbol" :keys "SPC c r" :source "Neovim" :value "map:<leader>cr"}
                    {:label "Save file" :keys "SPC f s" :source "Neovim" :value "map:<leader>fs"}])
   (let [answer (atom nil)]
-    (swap! config/launcher assoc :query "spc f" :respond #(reset! answer %))
+    (swap! config/launcher assoc :respond #(reset! answer %))
+    (config/search-launcher! "spc f")
     (is (= ["Save file"] (map #(get-in % [:children 0 :children 0]) (rows (config/launcher-panel))))
         "a query that matches only the keys finds the entry")
     (config/launcher-key {:key "enter"})
@@ -79,6 +81,34 @@
 (deftest label-matches-rank-above-key-matches
   (is (= ["spc mode" "Save file"]
          (config/matches [{:label "Save file" :keys "SPC f s" :value 1} {:label "spc mode" :value 2}] "spc"))))
+
+(deftest compact-rows-preserve-labels-keys-source-and-values
+  (let [answer (atom nil)]
+    ((get @core/request-handlers :palette)
+     {:prompt "M-x" :source "Emacs" :entries [["save-buffer" "C-s"] ["other-command"]]}
+     #(reset! answer %))
+    (let [row (first (rows (config/launcher-panel)))]
+      (is (= "save-buffer" (get-in row [:children 0 :children 0])))
+      (is (= "C-s" (get-in row [:children 1 :children 0])))
+      (is (= "Emacs" (get-in row [:children 2 :children 0]))))
+    (config/launcher-key {:key "enter"})
+    (is (= "save-buffer" @answer))))
+
+(deftest navigation-and-redraw-reuse-the-current-search
+  (let [rank-var (ns-resolve 'config 'ranked-items)
+        rank @rank-var
+        calls (atom 0)]
+    (with-redefs-fn {rank-var (fn [items query] (swap! calls inc) (rank items query))}
+      (fn []
+        (open-launcher! ["save-buffer" "save-other" "unrelated"])
+        (config/search-launcher! "save")
+        (dotimes [_ 3] (config/launcher-panel) (config/launcher-key {:key "down"}))
+        (config/search-launcher! "save")
+        (is (= 2 @calls) "only opening and a changed query compute results")
+        (config/search-launcher! "other")
+        (is (= 3 @calls))
+        (is (= 0 (:selected @config/launcher)))
+        (is (= "save-other" (get-in (first (rows (config/launcher-panel))) [:children 0 :children 0])))))))
 
 (deftest sibling-keys-are-validated
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"duplicate sibling key"
