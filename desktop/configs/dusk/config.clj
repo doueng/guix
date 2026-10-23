@@ -136,13 +136,27 @@
       (subsequence? item query) 1
       :else nil)))
 
+;; A launcher entry is {:label :keys :source :value}. dmenu sends plain strings,
+;; which choose themselves.
+(defn- entry [item]
+  (if (string? item) {:label item :value item} item))
+
+(defn- entry-score
+  "Match the label first. A query that only matches the keys, such as SPC c,
+  still finds the entry, below every label match."
+  [{:keys [label keys]} query]
+  (or (score label query)
+      (when (and keys (str/includes? (str/lower-case keys) (str/lower-case query))) 0.5)))
+
 (defn- ranked-items [items query]
   (->> items
-       (keep-indexed (fn [i item] (when-let [s (score item query)] [s i item])))
+       (keep-indexed (fn [i item] (let [e (entry item)]
+                                    (when-let [s (entry-score e query)] [s i e]))))
+       ;; Ties keep the caller's order, so callers rank recent entries first.
        (sort-by (fn [[s i]] [(- s) i]))
        ;; Identity comes from the original request, not the filtered position
        ;; or display text (duplicate dmenu lines are valid).
-       (mapv (fn [[_ i item]] {:id i :text item}))))
+       (mapv (fn [[_ i e]] (assoc e :id i :text (:label e))))))
 
 (defn matches [items query]
   (mapv :text (ranked-items items query)))
@@ -157,11 +171,20 @@
     (reset! launcher nil)
     (respond choice)))
 
+(defn- open-launcher! [items prompt respond]
+  (close-launcher! nil)
+  (reset! launcher {:items (vec items) :prompt prompt :query "" :selected 0
+                    :respond respond}))
+
 (dusk/on-request :dmenu
   (fn [{:keys [items prompt]} respond]
-    (close-launcher! nil)
-    (reset! launcher {:items (vec items) :prompt prompt :query "" :selected 0
-                      :respond respond})))
+    (open-launcher! items prompt respond)))
+
+;; `palette` sends {:prompt P :entries [{:label :keys :source :value} ...]} and
+;; receives the chosen entry's :value, or nil when cancelled.
+(dusk/on-request :palette
+  (fn [{:keys [entries prompt]} respond]
+    (open-launcher! entries prompt respond)))
 
 (defn- results [] (ranked-items (:items @launcher) (:query @launcher)))
 
@@ -173,7 +196,7 @@
 (defn launcher-key [{:keys [key ctrl? shift?]}]
   (cond
     (= key "escape") (close-launcher! nil)
-    (= key "enter") (close-launcher! (:text (get (results) (:selected @launcher))))
+    (= key "enter") (close-launcher! (:value (get (results) (:selected @launcher))))
     (or (= key "down") (and (= key "tab") (not shift?)) (and ctrl? (#{"n" "j"} key))) (move! 1)
     (or (= key "up") (and (= key "tab") shift?) (and ctrl? (#{"p" "k"} key))) (move! -1)))
 
@@ -190,10 +213,11 @@
                :exclusive-zone -1
                :on-key launcher-key
                :align :center
-               :justify :center}
+               :justify :end
+               :padding [0 0 24 0]}
       (dismiss-backdrop)
       (ui/column (merge (card-style 0.85)
-                        {:width 520 :padding 12 :gap 8 :occlude true :shadow :lg})
+                        {:width 760 :padding 12 :gap 8 :occlude true :shadow :lg})
         (ui/input {:value query
                    :placeholder (if (str/blank? prompt) "Search" prompt)
                    :placeholder-color (:on-surface-variant theme)
@@ -205,17 +229,22 @@
                    :radius (* 6 1.3)
                    :bg (ui/alpha (:surface-variant theme) 0.8)
                    :on-change #(swap! launcher assoc :query % :selected 0)})
-        (for [[i {:keys [id text]}] (visible-results (results) selected)]
+        (for [[i {:keys [id text keys source value]}] (visible-results (results) selected)
+              :let [chosen? (= i selected)
+                    dim (if chosen? (:on-primary theme) (:on-surface-variant theme))]]
           (ui/row {:key id
                    :height 36
                    :padding [0 12]
+                   :gap 12
                    :radius (* 6 1.3)
                    :font-size 14
-                   :bg (when (= i selected) (:primary theme))
-                   :color (when (= i selected) (:on-primary theme))
-                   :hover (when (not= i selected) {:bg (ui/alpha (:surface-variant theme) 0.8)})
-                   :on-click #(close-launcher! text)}
-            (ui/text text)))))))
+                   :bg (when chosen? (:primary theme))
+                   :color (when chosen? (:on-primary theme))
+                   :hover (when-not chosen? {:bg (ui/alpha (:surface-variant theme) 0.8)})
+                   :on-click #(close-launcher! value)}
+            (ui/text {:grow true :line-clamp 1} text)
+            (when keys (ui/text {:font-size 13 :color dim} keys))
+            (when source (ui/text {:width 72 :text-align :right :font-size 12 :color dim} source))))))))
 
 
 (defonce leader-hint (dusk/state nil))

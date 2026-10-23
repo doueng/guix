@@ -55,6 +55,20 @@
   (is (= ["chrome-incognito" "chrome"]
          (config/matches ["ghostty" "chrome-incognito" "chrome"] "ch"))))
 
+(deftest palette-entries-return-their-value-and-match-their-keys
+  (open-launcher! [{:label "Rename symbol" :keys "SPC c r" :source "Neovim" :value "map:<leader>cr"}
+                   {:label "Save file" :keys "SPC f s" :source "Neovim" :value "map:<leader>fs"}])
+  (let [answer (atom nil)]
+    (swap! config/launcher assoc :query "spc f" :respond #(reset! answer %))
+    (is (= ["Save file"] (map #(get-in % [:children 0 :children 0]) (rows (config/launcher-panel))))
+        "a query that matches only the keys finds the entry")
+    (config/launcher-key {:key "enter"})
+    (is (= "map:<leader>fs" @answer) "Enter returns the entry's value, not its label")))
+
+(deftest label-matches-rank-above-key-matches
+  (is (= ["spc mode" "Save file"]
+         (config/matches [{:label "Save file" :keys "SPC f s" :value 1} {:label "spc mode" :value 2}] "spc"))))
+
 (deftest sibling-keys-are-validated
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"duplicate sibling key"
         (serialize (ui/column (ui/box {:key "same"}) (ui/box {:key "same"}))))))
