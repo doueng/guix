@@ -1,0 +1,29 @@
+{:workflow :performance
+ :routes ["performance"]
+ :requires [:bench]
+ :start :baseline
+ :phases
+ {:baseline
+  {:brief "Measure the current behavior with the bench command. Record the numbers, the metric, and the input in baseline.md in the evidence directory. Name the bottleneck you think it is, labeled as an inference."
+   :gates [{:kind :command :cmd :bench :expect :zero}
+           {:kind :artifact :path "baseline.md"}]
+   :next :change}
+  :change
+  {:brief "Make one change aimed at the bottleneck the baseline names. Keep it to one idea so the result can be attributed. Then run `wf attest`."
+   :gates [{:kind :command :cmd :check :expect :zero :optional true}]
+   :next :measure}
+  :measure
+  {:brief "Run the same bench command on the same input. Write measured.md with before and after numbers, the delta, and the run-to-run noise you saw. Label each claim measured or inferred."
+   :gates [{:kind :command :cmd :bench :expect :zero}
+           {:kind :artifact :path "measured.md"}]
+   :next :review
+   :on-fail :change}
+  :review
+  {:brief "Get an independent judgment of the numbers. Run `wf review`."
+   :gates [{:kind :verdict :criteria "The delta is measured on the same input, exceeds the run-to-run noise shown in measured.md, and the change explains it."}]
+   :next :finish
+   :on-fail :change}
+  :finish
+  {:brief "Report the baseline, the change, the measured delta, and what was not measured. Then run `wf attest`."
+   :gates []
+   :next nil}}}

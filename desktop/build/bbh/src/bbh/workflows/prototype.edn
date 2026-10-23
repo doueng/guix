@@ -1,0 +1,22 @@
+{:workflow :prototype
+ :routes ["prototype"]
+ :start :question
+ :phases
+ {:question
+  {:brief "State the question the prototype must answer and the observation that would settle it. Write question.md in the evidence directory."
+   :gates [{:kind :artifact :path "question.md"}]
+   :next :sketch}
+  :sketch
+  {:brief "Build the cheapest thing that can produce that observation. Throwaway code is fine. Keep it out of the product code, in a scratch directory. Write sketch.md with where it lives and how to run it."
+   :gates [{:kind :artifact :path "sketch.md"}]
+   :next :observe}
+  :observe
+  {:brief "Run the sketch and record what happened in observation.md, verbatim where it matters. Do not interpret yet."
+   :gates [{:kind :artifact :path "observation.md"}]
+   :next :answer}
+  :answer
+  {:brief "Answer the question from the observation. Write answer.md with the answer, your confidence, and what would change it. Label each claim measured or inferred. Then run `wf review`."
+   :gates [{:kind :artifact :path "answer.md"}
+           {:kind :verdict :criteria "The answer follows from the observation, and the observation came from running the sketch."}]
+   :next nil
+   :on-fail :observe}}}

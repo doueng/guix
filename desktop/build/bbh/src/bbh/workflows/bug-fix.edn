@@ -7,7 +7,7 @@
    :gates [{:kind :command :cmd :repro :expect :nonzero}]
    :next :diagnose}
   :diagnose
-  {:brief "Form hypotheses and rule them out with runtime evidence. Write mechanism.md in the evidence directory naming the surviving mechanism and its evidence. Then record a verdict with `wf verdict`."
+  {:brief "Form hypotheses and rule them out with runtime evidence. Write mechanism.md in the evidence directory naming the surviving mechanism and its evidence. Then run `wf review` for an independent verdict."
    :gates [{:kind :artifact :path "mechanism.md"}
            {:kind :verdict :criteria "The evidence causally supports the mechanism, not just correlates with the bug."}]
    :next :implement}

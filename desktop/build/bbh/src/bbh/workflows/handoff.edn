@@ -1,0 +1,8 @@
+{:workflow :handoff
+ :routes ["session_handoff"]
+ :start :capture
+ :phases
+ {:capture
+  {:brief "Write handoff.md in the evidence directory: the goal, the state of the work, the exact next step, the files touched with absolute paths, the commands that were running, and open questions. Then run `wf attest`."
+   :gates [{:kind :artifact :path "handoff.md"}]
+   :next nil}}}

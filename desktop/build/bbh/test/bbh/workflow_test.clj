@@ -104,6 +104,54 @@
     (is (= [{:type :block :phase :a :reason "phase a exceeded 1 visits"}]
            (wf/decide wf {:phase :a :visits {:a 1}} [{:pass? false}])))))
 
+(deftest a-torn-last-journal-line-is-dropped
+  (let [repo (buggy-repo)
+        id (wf/start! :bug-fix {:cwd repo :repro repro})
+        jf (#'wf/journal-file id)]
+    (spit jf "{:type :attest :phase :reprod" :append true)
+    (is (= [:reproduce 1] (at id)))
+    (is (= 1 (count (str/split-lines (slurp jf)))))
+    (is (= :pass (:outcome (wf/attest! id "repro fails"))))))
+
+(deftest a-corrupt-line-before_the-end-stops-reads
+  (let [repo (buggy-repo)
+        id (wf/start! :bug-fix {:cwd repo :repro repro})
+        jf (#'wf/journal-file id)]
+    (spit jf (str "not-edn{\n" (slurp jf)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"journal corrupt at line 1"
+                          (wf/status id)))))
+
+(deftest reviewer-runs-in-a-fresh-session-and-its-verdict-is-recorded
+  (let [repo (buggy-repo)
+        id (wf/start! :bug-fix {:cwd repo :repro repro})
+        script (str (fs/path (fs/create-temp-dir {:prefix "wf-script"}) "script.edn"))]
+    (spit script (pr-str ["VERDICT: pass\nThe mechanism explains the grep result."]))
+    (wf/attest! id "bug reproduces")
+    (wf/attest! id "mechanism")
+    (evidence! id "mechanism.md" "grep finds bug")
+    (let [review (wf/review! id :model (str "script/" script))
+          attested (wf/attest! id "mechanism")
+          verdict-gate (second (:results attested))]
+      (is (= :pass (:verdict review)))
+      (is (str/starts-with? (:reviewer review) "bbh-review/"))
+      (is (= :pass (:outcome attested)))
+      (is (str/starts-with? (:reviewer verdict-gate) "bbh-review/")))))
+
+(deftest reviewer-without-a-verdict-line-is-an-error
+  (let [repo (buggy-repo)
+        id (wf/start! :bug-fix {:cwd repo :repro repro})
+        script (str (fs/path (fs/create-temp-dir {:prefix "wf-script"}) "script.edn"))]
+    (spit script (pr-str ["Looks fine to me."]))
+    (wf/attest! id "bug reproduces")
+    (wf/attest! id "mechanism")
+    (evidence! id "mechanism.md" "grep finds bug")
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no VERDICT line"
+                          (wf/review! id :model (str "script/" script))))))
+
+(deftest performance-needs-a-bench-command
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"needs --bench"
+                        (wf/start! :performance {:cwd "."}))))
+
 (deftest session-dir-honors-an-explicit-directory
   (is (= "/tmp/explicit-sessions" (wf/session-dir "/tmp/workspace" "/tmp/explicit-sessions"))))
 
@@ -117,9 +165,9 @@
         init (slurp "../../configs/bbh/init.clj")
         init-block (second (re-find #"(?s)\(def routes(.*?)\(defn jev-classify-task" init))
         init-routes (set (map second (re-seq #":(\w+) \"" init-block)))
-        covered (set (mapcat #(:routes (wf/load-workflow %)) [:bug-fix :change :investigation]))
-        manual #{"performance" "prototype" "large_project" "pr_workflow"
-                 "session_handoff" "skill_work" "other"}
+        covered (set (mapcat #(:routes (wf/load-workflow %))
+                              [:bug-fix :change :investigation :performance :prototype :handoff :large-project]))
+        manual #{"pr_workflow" "skill_work" "other"}
         expected (set/union covered manual)]
     (is (= expected ts-routes))
     (is (= expected init-routes))

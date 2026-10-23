@@ -1,0 +1,13 @@
+{:workflow :large-project
+ :routes ["large_project"]
+ :start :decompose
+ :phases
+ {:decompose
+  {:brief "Split the work into stages. Each stage must end in a check you can run. Write plan.md in the evidence directory with the stages in order, the check for each, and the riskiest stage. Then run `wf attest`."
+   :gates [{:kind :artifact :path "plan.md"}]
+   :next :review}
+  :review
+  {:brief "Get an independent judgment of the plan. Run `wf review`."
+   :gates [{:kind :verdict :criteria "Every stage ends in a check that can be run, and the stages are ordered so each can be verified before the next starts."}]
+   :next nil
+   :on-fail :decompose}}}

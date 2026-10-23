@@ -5,6 +5,9 @@
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [bbh.claude]
+            [bbh.models :as models]
+            [bbh.session :as session]
             [clojure.string :as str]))
 
 (def default-max-visits 3)
@@ -26,7 +29,7 @@
 
 (defn fold-event [st {:keys [type] :as e}]
   (case type
-    :start   (merge st (select-keys e [:id :workflow :cwd :task :repro :check :phase])
+    :start   (merge st (select-keys e [:id :workflow :cwd :task :repro :check :bench :phase])
                     {:status :active :visits {(:phase e) 1} :verdicts []})
     :verdict (update st :verdicts conj e)
     :attest  (assoc st :last-attest e)
@@ -75,7 +78,7 @@
     (apply str (map #(format "%02x" (bit-and % 0xff)) digest))))
 
 (defn- command-text [st cmd]
-  (case cmd :repro (:repro st) :check (:check st) cmd))
+  (if (keyword? cmd) (get st cmd) cmd))
 
 (def default-timeout-seconds 600)
 
@@ -119,10 +122,22 @@
               :verdict  (run-verdict st phase visit i gate)))
           (get-in wf [:phases phase :gates])))))
 
-(defn- read-journal [id]
-  (->> (str/split-lines (slurp (journal-file id)))
-       (remove str/blank?)
-       (mapv edn/read-string)))
+(defn- read-journal
+  "A torn last line is what a crash mid-write leaves. It was never committed, so it is dropped and the file is
+  rewritten without it. A bad line anywhere else means corruption, and reading stops."
+  [id]
+  (let [lines (vec (remove str/blank? (str/split-lines (slurp (journal-file id)))))
+        parsed (mapv #(try (let [v (edn/read-string %)] (if (and (map? v) (:type v)) v ::torn))
+                           (catch Exception _ ::torn))
+                     lines)
+        torn (keep-indexed (fn [i v] (when (= ::torn v) i)) parsed)]
+    (cond
+      (empty? torn) parsed
+      (= [(dec (count lines))] (vec torn))
+      (do (spit (journal-file id) (apply str (map #(str % "\n") (butlast lines))))
+          (binding [*out* *err*] (println "wf: dropped a torn last journal line in run" id))
+          (vec (butlast parsed)))
+      :else (throw (ex-info (str "journal corrupt at line " (inc (first torn)) " of run " id) {:id id})))))
 
 (defn- current [id]
   (when-not (fs/exists? (journal-file id))
@@ -134,18 +149,24 @@
     (spit (journal-file id) (str (pr-str e) "\n") :append true)
     e))
 
-(defn start! [wf-name {:keys [cwd task repro check]}]
-  (let [wf (load-workflow wf-name)]
-    (when (and (some #{:check} (:requires wf)) (nil? check))
-      (throw (ex-info (str (name wf-name) " needs --check, a command that proves the change")
-                      {:workflow wf-name})))
+(def ^:private required-flag-help
+  {:check "a command that proves the change"
+   :bench "a command that measures the metric"})
+
+(defn start! [wf-name {:keys [cwd task repro check bench]}]
+  (let [wf (load-workflow wf-name)
+        given {:check check :bench bench}]
+    (doseq [req (:requires wf)]
+      (when (nil? (get given req))
+        (throw (ex-info (str (name wf-name) " needs --" (name req) ", " (required-flag-help req))
+                        {:workflow wf-name}))))
     (let [id (str (.format (java.time.LocalDateTime/now)
                            (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS"))
                   "-" (name wf-name))]
       (fs/create-dirs (evidence-dir id))
       (append! id {:type :start :id id :workflow wf-name
                    :cwd (str (fs/canonicalize (or cwd ".")))
-                   :task task :repro repro :check check :phase (:start wf)})
+                   :task task :repro repro :check check :bench bench :phase (:start wf)})
       id)))
 
 (defn status [id]
@@ -167,14 +188,62 @@
         (append! id e))
       {:outcome result :results results})))
 
-(defn verdict! [id reviewer verdict note]
+(defn verdict!
+  "Records a verdict from a named human. Agents use review!, which runs a reviewer they do not control."
+  [id reviewer verdict note]
   (let [st (current id)]
     (when (str/blank? reviewer)
-      (throw (ex-info "verdict needs --reviewer" {})))
+      (throw (ex-info "verdict needs --human NAME" {})))
     (when-not (#{:pass :fail} verdict)
       (throw (ex-info "verdict must be pass or fail" {:verdict verdict})))
     (append! id {:type :verdict :phase (:phase st) :visit (get-in st [:visits (:phase st)])
-                 :reviewer reviewer :verdict verdict :note note})))
+                 :reviewer reviewer :source :human :verdict verdict :note note})))
+
+(defn- last-assistant-text [messages]
+  (let [c (:content (last (filter #(= "assistant" (:role %)) messages)))]
+    (cond (string? c) c
+          (sequential? c) (str/join "\n" (keep :text c))
+          :else "")))
+
+(defn- parse-verdict [text]
+  (when-let [m (last (re-seq #"(?m)^\s*VERDICT:\s*(pass|fail)\b" text))]
+    (keyword (second m))))
+
+(def default-review-model
+  "A reviewer must be stronger than the agent it judges. Haiku accepted a sloppy mechanism note that Sonnet rejected."
+  "claude/sonnet")
+
+(defn review!
+  "Runs a fresh bbh conversation that judges the current verdict gate, then records its verdict.
+  The reviewer shares no context with the agent that did the work."
+  [id & {:keys [model]}]
+  (let [st (current id)
+        phase (:phase st)
+        visit (get-in st [:visits phase])
+        wf (load-workflow (:workflow st))
+        gate (first (filter #(= :verdict (:kind %)) (get-in wf [:phases phase :gates])))
+        _ (when-not gate (throw (ex-info (str "phase " (name phase) " has no review gate") {})))
+        dir (str (run-dir id) "/reviews/" (name phase) "-" visit "-" (System/currentTimeMillis))
+        brief (str "You are an independent reviewer. Judge one claim. Do not change any files.\n\n"
+                   "Criteria: " (:criteria gate) "\n"
+                   "Task: " (:task st) "\n"
+                   "Repo: " (:cwd st) "\n"
+                   "Evidence directory: " (evidence-dir id) "\n\n"
+                   "Read the evidence and the repo as needed. Finish with one line, VERDICT: pass or VERDICT: fail, then a short reason.")
+        s (session/new-session {:dir dir :init nil :cwd (:cwd st)
+                                :model (or model (System/getenv "WF_REVIEW_MODEL") default-review-model)
+                                :make-engine models/engine :emit (fn [_])})]
+    (try
+      (session/start-repl! s)
+      (session/prompt! s brief)
+      (let [text (last-assistant-text (:messages @s))
+            v (parse-verdict text)]
+        (when-not v
+          (throw (ex-info "reviewer gave no VERDICT line" {:reply text})))
+        (append! id {:type :verdict :phase phase :visit visit :reviewer (str "bbh-review/" (fs/file-name dir))
+                     :source :review :verdict v :note text})
+        {:verdict v :reviewer (str "bbh-review/" (fs/file-name dir)) :reply text})
+      (finally (session/close! s)))))
 
 (defn latest-id []
   (when (fs/exists? (state-root))
@@ -240,10 +309,12 @@
 
 (def ^:private usage
   "usage:
-  wf start <workflow> [--task T] [--repro CMD] [--check CMD] [--cwd DIR]
+  wf start <workflow> [--task T] [--repro CMD] [--check CMD] [--bench CMD] [--cwd DIR]
   wf status [RUN]
   wf attest [RUN] --claim TEXT
-  wf verdict [RUN] --reviewer NAME --verdict pass|fail [--note TEXT]
+  wf review [RUN]                       fresh reviewer judges the current verdict gate
+  wf verdict [RUN] --human NAME --verdict pass|fail [--note TEXT]
+  wf session-dir [WORKSPACE] [DIR]
 RUN defaults to the latest run.")
 
 (defn- parse-args [args]
@@ -261,15 +332,22 @@ RUN defaults to the latest run.")
     (try
       (case cmd
         "start" (print-status (status (start! (keyword (first pos))
-                                              (select-keys flags [:cwd :task :repro :check]))))
+                                              (select-keys flags [:cwd :task :repro :check :bench]))))
         "status" (print-status (status (run-id)))
         "attest" (let [id (run-id)]
                    (print-attest (attest! id (or (:claim flags)
                                                  (throw (ex-info "attest needs --claim" {})))))
                    (print-status (status id)))
         "session-dir" (println (session-dir (first pos) (second pos)))
+        "review" (let [id (run-id)
+                       {:keys [verdict reviewer reply]} (review! id)]
+                   (println (str "review: " (name verdict) " by " reviewer))
+                   (println (str/trim reply))
+                   (print-status (status id)))
         "verdict" (let [id (run-id)]
-                    (verdict! id (:reviewer flags) (keyword (:verdict flags)) (:note flags))
+                    (when-not (contains? flags :human)
+                      (throw (ex-info "agents run wf review; wf verdict --human NAME is for a person" {})))
+                    (verdict! id (:human flags) (keyword (:verdict flags)) (:note flags))
                     (print-status (status id)))
         (do (println usage) (System/exit 2)))
       (catch clojure.lang.ExceptionInfo e

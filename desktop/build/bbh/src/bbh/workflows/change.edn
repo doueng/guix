@@ -16,7 +16,7 @@
    :gates [{:kind :artifact :path "verify.md"}]
    :next :review}
   :review
-  {:brief "Review the diff for unrelated changes, comments that narrate phases, and drift from the shape. Record a verdict with `wf verdict` from a fresh session."
+  {:brief "Review the diff for unrelated changes, comments that narrate phases, and drift from the shape. Run `wf review` for an independent verdict."
    :gates [{:kind :verdict :criteria "The diff matches the shape, touches nothing unrelated, and has no phase-narrating comments."}]
    :next :finish
    :on-fail :implement}
