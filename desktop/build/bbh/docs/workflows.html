@@ -29,7 +29,7 @@
 <nav>
   <a href='#idea'>Idea</a><a href='#flow'>Flow</a><a href='#gates'>Gates</a><a href='#visits'>Visits</a>
   <a href='#commands'>Commands</a><a href='#example'>Example</a><a href='#journal'>Journal</a>
-  <a href='#routes'>Routes</a><a href='#tests'>Tests</a><a href='#limits'>Limits</a>
+  <a href='#routes'>Routes</a><a href='#tests'>Tests</a><a href='#runs'>Model runs</a><a href='#limits'>Limits</a>
 </nav>
 
 <h2 id='idea'>The idea</h2>
@@ -85,10 +85,11 @@
   <tr><th>Kind</th><th>What the runner checks</th><th>Example</th></tr>
   <tr><td><code>:command</code></td><td>Runs the command with <code>timeout</code> and <code>sh -c</code> in the run's repo. Passes when the exit code matches <code>:expect</code> (default <code>:zero</code>). A timeout always fails. Output and a SHA-256 are recorded.</td><td><code>{:kind :command :cmd :repro :expect :nonzero}</code></td></tr>
   <tr><td><code>:artifact</code></td><td>The named file exists in the evidence directory and is not empty. This only proves that something was written.</td><td><code>{:kind :artifact :path 'mechanism.md'}</code></td></tr>
-  <tr><td><code>:verdict</code></td><td>A verdict was recorded with <code>wf verdict</code> for the current visit. Until then the gate is pending. It passes only on <code>:pass</code>.</td><td><code>{:kind :verdict :criteria '...'}</code></td></tr>
+  <tr><td><code>:verdict</code></td><td>A verdict was recorded for the current visit. Agents get one from <code>wf review</code>, which starts a fresh bbh conversation with the criteria and the evidence. The reviewer's reply must end with a <code>VERDICT: pass</code> or <code>VERDICT: fail</code> line, or the review fails. A person can record one with <code>wf verdict --human NAME</code>. Until a verdict exists the gate is pending. It passes only on <code>:pass</code>.</td><td><code>{:kind :verdict :criteria '...'}</code></td></tr>
 </table>
 <p><code>:cmd :repro</code> and <code>:cmd :check</code> are placeholders. They resolve to the <code>--repro</code> and <code>--check</code> values given at start. A gate marked <code>:optional true</code> is skipped when its command was not given.</p>
 <p class='note'>A failed gate outranks a pending one. So a missing artifact is reported as a failure even while a verdict is still waiting.</p>
+<p>A command gate also has a timeout. It defaults to 600 seconds and can be set per gate with <code>:timeout</code>. A timeout always fails the gate, even when a nonzero exit was expected.</p>
 
 <h2 id='visits'>Visits and caps</h2>
 <p>Each entry into a phase counts as a visit. A failed attest that retries the same phase also counts. Every phase has a cap, <code>:max-visits</code>, which defaults to 3. Going past the cap blocks the run.</p>
@@ -99,12 +100,16 @@
   status: blocked, "phase implement exceeded 3 visits"</pre>
 <p>A blocked run refuses further attests. Only you can unblock it, by starting a new run.</p>
 
-<h2 id='workflows'>The three workflows</h2>
+<h2 id='workflows'>The workflows</h2>
 <table>
   <tr><th>Workflow</th><th>Phases</th><th>Routes it serves</th><th>Needs</th></tr>
   <tr><td><code>bug-fix</code></td><td>reproduce, diagnose, implement, verify, finish</td><td>bug_fix</td><td>--repro (recommended)</td></tr>
   <tr><td><code>change</code></td><td>shape, implement, verify, review, finish</td><td>feature, refactor</td><td>--check (required)</td></tr>
   <tr><td><code>investigation</code></td><td>answer</td><td>investigation, review</td><td>nothing</td></tr>
+  <tr><td><code>performance</code></td><td>baseline, change, measure, review, finish</td><td>performance</td><td>--bench (required), --check (optional)</td></tr>
+  <tr><td><code>prototype</code></td><td>question, sketch, observe, answer</td><td>prototype</td><td>nothing</td></tr>
+  <tr><td><code>handoff</code></td><td>capture</td><td>session_handoff</td><td>nothing</td></tr>
+  <tr><td><code>large-project</code></td><td>decompose, review</td><td>large_project</td><td>nothing</td></tr>
 </table>
 <p>Each phase carries a short brief. <code>wf status</code> prints the brief for the current phase. The briefs live in the workflow EDN files in <code>desktop/build/bbh/src/bbh/workflows/</code>. There is no separate playbook text.</p>
 
@@ -114,12 +119,14 @@
   <tr><td><code>wf start &lt;workflow&gt; --task T [--repro CMD] [--check CMD] [--cwd DIR]</code></td><td>Creates a run and prints its status and brief.</td></tr>
   <tr><td><code>wf status [RUN]</code></td><td>Phase, visit, status, brief, and evidence directory. <code>RUN</code> defaults to the latest run.</td></tr>
   <tr><td><code>wf attest [RUN] --claim TEXT</code></td><td>Runs the gates for the current phase and prints each result.</td></tr>
-  <tr><td><code>wf verdict [RUN] --reviewer NAME --verdict pass|fail [--note TEXT]</code></td><td>Records a review verdict for the current visit.</td></tr>
+  <tr><td><code>wf review [RUN]</code></td><td>Starts a fresh reviewer for the current verdict gate, records its verdict, and prints it with the reason.</td></tr>
+  <tr><td><code>wf verdict [RUN] --human NAME --verdict pass|fail [--note TEXT]</code></td><td>Records a verdict from a person. Agents are told not to use it.</td></tr>
   <tr><td><code>wf session-dir [WORKSPACE] [DIR]</code></td><td>Prints Pi's session directory for a workspace. Used by the recall, reflect, and show-me-your-work skills.</td></tr>
 </table>
 <p>From Pi, run these in bash. From bbh, use <code>(sh "wf status")</code> in the clojure tool. Runs and evidence live under <code>~/.local/state/bbh/workflows/</code>, outside the repo.</p>
 
 <h2 id='example'>Example</h2>
+<p class='note'>This transcript is from the first version, when the verdict was typed by hand with <code>wf verdict</code>. The model-driven runs under the current rules are covered in their own section.</p>
 <p>This is a real run from a toy project. Its <code>calc.clj</code> computed <code>(- a b)</code> for <code>add</code>. The repro script checked <code>(= 5 (add 2 3))</code>. Some lines are shortened.</p>
 <pre>$ wf start bug-fix --task 'add returns the difference' --repro 'sh repro.sh'
 run 20261023-224248-284-bug-fix
@@ -170,7 +177,7 @@ run is done</pre>
  :gates [{:kind :command, :cmd "sh repro.sh", :exit 1, :evidence "...reproduce-1-0.txt", :sha256 "e3b0...", :pass? true}]}
 {:type :enter, :phase :diagnose, :visit 1}</pre>
 <p>Replaying the journal gives the state, so a crashed or restarted process resumes where the run left off. Re-running a command gate in the same visit overwrites that visit's evidence file and appends a new event. Earlier events are never edited.</p>
-<p class='note'>Each event is one <code>spit</code> call. A crash in the middle of a write could leave a partial last line. The next read would then fail. This is a known gap. The fix would be to validate the last line on read.</p>
+<p>Each event is one append. A crash mid-write can leave a partial last line. Reads drop a partial last line and rewrite the file without it. The dropped event was never committed, so the run continues from the state before it. A bad line anywhere else means corruption, and reads stop with the line number.</p>
 
 <h2 id='routes'>Routes and where they live</h2>
 <p>Jev classifies a new task into a route, and each route maps to a workflow. The route list appears in three places.</p>
@@ -179,10 +186,10 @@ run is done</pre>
   <li><code>desktop/configs/bbh/init.clj</code>, the <code>routes</code> map that bbh passes to Jev.</li>
   <li><code>desktop/pi/agent/extensions/jev-pstack.ts</code>, the same list for Pi.</li>
 </ul>
-<p>The test <code>routes-match-the-jev-classifiers</code> fails when the two classifier lists differ from the workflow routes plus the manual list. The manual routes are <code>performance</code>, <code>prototype</code>, <code>large_project</code>, <code>pr_workflow</code>, <code>session_handoff</code>, <code>skill_work</code>, and <code>other</code>. A route in the manual list has no workflow yet, so the agent does the work directly and says so.</p>
+<p>The test <code>routes-match-the-jev-classifiers</code> fails when the two classifier lists differ from the workflow routes plus the manual list. The manual routes are <code>pr_workflow</code>, <code>skill_work</code>, and <code>other</code>. <code>pr_workflow</code> stays manual on purpose, since there are no pull requests. A manual route has no workflow, so the agent does the work directly and says so.</p>
 
 <h2 id='tests'>Tests</h2>
-<p>Run with <code>cd desktop/build/bbh &amp;&amp; bb test:workflow</code>. The suite has 10 tests and 34 assertions. They cover:</p>
+<p>Run with <code>cd desktop/build/bbh &amp;&amp; bb test:workflow</code>. The suite has 15 tests and 44 assertions. They cover:</p>
 <ul>
   <li>The bug-fix path from start to done, with a pending verdict, a fail, a retry, and a fix.</li>
   <li>A premature fixed claim, which stays at <code>reproduce</code>.</li>
@@ -193,18 +200,37 @@ run is done</pre>
   <li>The decision function on its own, with literal expected events.</li>
   <li>Route agreement across the workflows, Jev in Pi, and Jev in bbh.</li>
   <li>The Pi session directory rule, including the explicit-directory override.</li>
+  <li>A torn last journal line, which is dropped, and a corrupt line in the middle, which stops reads.</li>
+  <li>A review that runs a fresh conversation and records its verdict, and a review with no VERDICT line, which fails. These use a scripted model, so they cost nothing.</li>
+  <li><code>performance</code> refusing to start without <code>--bench</code>.</li>
 </ul>
 <p>The full bbh suite also passes (<code>bb test</code>, 44 tests). The end-to-end run above went through the real <code>wf</code> launcher on a real project.</p>
 
+<h2 id='runs'>Model-driven runs</h2>
+<p>A model was given a real bug in a toy project and the prompt <em>calc/add returns the difference, but it should return the sum. Fix it.</em> Run it with <code>bb eval:workflow [MODEL] [OUTPUT-DIR]</code> from <code>desktop/build/bbh</code>. It runs a real bbh conversation, with the poteto-mode skill injected on the first prompt, and it records what the run did.</p>
+<table>
+  <tr><th>Run</th><th>Rule in the skill</th><th>Reviewer</th><th>wf calls</th><th>Path</th><th>Result</th></tr>
+  <tr><td>1</td><td>Advisory: "pick the workflow"</td><td>none</td><td>0</td><td>Skipped the workflow, edited the file directly.</td><td class='note'>Bypassed the workflow entirely.</td></tr>
+  <tr><td>2</td><td>Mandatory: runs before any edit, size does not exempt</td><td>haiku</td><td>11</td><td>Full path. Jev, start, repro, diagnosis, review, fix, verify, finish.</td><td class='ok'>Done. Fixed. Repro exit 0.</td></tr>
+  <tr><td>3</td><td>Same</td><td>haiku</td><td>9</td><td>Full path.</td><td class='ok'>Done. Fixed. Repro exit 0.</td></tr>
+  <tr><td>4</td><td>Same</td><td>sonnet</td><td>9</td><td>Full path.</td><td class='ok'>Done. Fixed. Repro exit 0.</td></tr>
+</table>
+<p>Three findings came out of these runs.</p>
+<ul>
+  <li><strong>Advisory rules get skipped.</strong> Run 1 read the skill, called its own work a one-line change, and went around it. The fix was to make the rule mandatory and to say that size does not exempt a task. Runs 2 to 4 all started the run before their first edit.</li>
+  <li><strong>The reviewer has to be stronger than the agent.</strong> In run 2, the haiku reviewer passed a mechanism note that said <em>wait see output above</em>. A direct probe showed Sonnet rejects that note and passes a note that names the line and the repro output. The default reviewer is now Sonnet, and <code>WF_REVIEW_MODEL</code> overrides it.</li>
+  <li><strong>Gates re-run commands, but artifacts stay weak.</strong> The agents wrote their own repro output and their own mechanism notes. The command gates ran the repro again, so a faked output could not pass. Nothing checks that a mechanism note is true, and only the reviewer judges it.</li>
+</ul>
+<p class='note'>The eval runs wrote to the real state directory, so their runs appear in <code>wf status</code> history. Isolating the eval's state needs an environment variable set for the REPL, and that is not done yet.</p>
+
 <h2 id='limits'>Limits</h2>
 <ul>
-  <li><strong>Reviewer independence is a convention.</strong> The engine records any reviewer name. It cannot tell whether the reviewer was a separate session.</li>
+  <li><strong>Reviewer independence is by construction, not by proof.</strong> <code>wf review</code> gives the reviewer a fresh conversation and only the criteria, the task, and the evidence paths. A determined agent can still run <code>wf verdict --human</code>. The CLI requires that flag, and the rules forbid it, but nothing else stops it.</li>
   <li><strong>Artifact gates are weak.</strong> They check existence and size, not content. Command gates carry the real checks.</li>
   <li><strong>The implement phase is ungated.</strong> That is deliberate. The verify phase is the check that matters.</li>
   <li><strong>Commands run in the repo as the current user.</strong> A repro that writes files or hits the network will do so for real.</li>
   <li><strong>No parallel runs.</strong> Two agents on one run would interleave journal events. Use separate runs.</li>
-  <li><strong>Partial journal lines</strong> can break reads after a crash, as noted above.</li>
-  <li><strong>Only three workflows.</strong> Performance, prototype, and the other manual routes still have no workflow.</li>
+  <li><strong>Manual routes.</strong> <code>pr_workflow</code>, <code>skill_work</code>, and <code>other</code> still have no workflow.</li>
 </ul>
 
 </body>
