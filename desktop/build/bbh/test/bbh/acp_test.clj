@@ -92,6 +92,25 @@
         (is (= "end_turn" (get-in (response! c 6) [:result :stopReason]))))
       (finally (stop! c)))))
 
+(deftest the-model-config-option-switches-engines
+  (let [c (client ["first engine"])
+        other (str (fs/path (:dir c) "other.edn"))]
+    (spit other (pr-str ["second engine"]))
+    (try
+      (send! c 1 "initialize" {:protocolVersion 1})
+      (response! c 1)
+      (send! c 2 "session/new" {:cwd (:dir c)})
+      (let [{:keys [sessionId configOptions]} (:result (response! c 2))]
+        (is (= [["model" "model" (str "script/" (fs/path (:dir c) "script.edn"))]]
+               (map (juxt :id :category :currentValue) configOptions)))
+        (send! c 3 "session/set_config_option" {:sessionId sessionId :configId "model" :value (str "script/" other)})
+        (is (= (str "script/" other) (get-in (response! c 3) [:result :configOptions 0 :currentValue])))
+        (send! c 4 "session/set_config_option" {:sessionId sessionId :configId "mode" :value "x"})
+        (is (= -32602 (get-in (response! c 4) [:error :code])))
+        (send! c 5 "session/prompt" {:sessionId sessionId :prompt [{:type "text" :text "hi"}]})
+        (is (= ["second engine"] (keep #(get-in % [:params :update :content :text]) (until! c #(= 5 (:id %)))))))
+      (finally (stop! c)))))
+
 (deftest overlapping-turns-are-rejected-and-cancellation-recovers
   (let [c (client [{:code "(Thread/sleep 60000)"} "recovered"])]
     (try

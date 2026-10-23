@@ -50,6 +50,14 @@
 
 (def ^:private sessions (atom {}))
 
+(defn- config-options
+  "The model selector in the configOptions form that newer ACP clients, such as
+  Harbor's runner, read instead of the models field."
+  [s]
+  (let [current (:model @s)]
+    [{:id "model" :name "Model" :category "model" :type "select" :currentValue current
+      :options (for [m (distinct (cons current models/available))] {:value m :name m})}]))
+
 (defn- commands-update [sid s]
   (update! sid {:sessionUpdate "available_commands_update"
                 :availableCommands (session/all-commands s)}))
@@ -80,10 +88,10 @@
 
 (defn- handle [{:keys [id method params]}]
   (let [s (some->> (:sessionId params) (get @sessions))]
-    (when (and (contains? #{"session/prompt" "session/set_model" "session/cancel"} method)
+    (when (and (contains? #{"session/prompt" "session/set_model" "session/set_config_option" "session/cancel"} method)
                (nil? s))
       (throw (ex-info "Unknown session" {:rpc-code -32602})))
-    (when (and (contains? #{"session/prompt" "session/set_model"} method) (:busy @s))
+    (when (and (contains? #{"session/prompt" "session/set_model" "session/set_config_option"} method) (:busy @s))
       (throw (ex-info "This session is busy; cancel or wait for the current turn" {:rpc-code -32000})))
     (case method
       "initialize"
@@ -97,13 +105,20 @@
       (let [[sid problem] (new-session params)]
         (send! {:id id :result {:sessionId sid
                                 :models {:currentModelId (:model @(get @sessions sid))
-                                         :availableModels (for [m models/available] {:modelId m :name m})}}})
+                                         :availableModels (for [m models/available] {:modelId m :name m})}
+                                :configOptions (config-options (get @sessions sid))}})
         (commands-update sid (get @sessions sid))
         (when problem (update! sid (event->update {:type :text :text (str "[bbh] " problem)}))))
 
       "session/set_model"
       (do (session/set-model! s (:modelId params))
           (send! {:id id :result {}}))
+
+      "session/set_config_option"
+      (do (when-not (= "model" (:configId params))
+            (throw (ex-info (str "bbh has no config option " (:configId params)) {:rpc-code -32602})))
+          (session/set-model! s (:value params))
+          (send! {:id id :result {:configOptions (config-options s)}}))
 
       "session/prompt"
       (let [text (prompt-text (:prompt params))]
