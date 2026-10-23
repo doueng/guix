@@ -3,10 +3,8 @@
   "defaultModel": "claude-opus-5-5",
   "enabledModels": [
     "gpt-6-luna",
-    "gpt-6-astra",
     "gpt-6.1-sol",
     "openrouter/deepseek/deepseek-v4.1-flash",
-    "openrouter/anthropic/claude-opus-5.5",
     "claude-bridge/claude-opus-5-5"
   ],
   "defaultTools": [
