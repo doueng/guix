@@ -178,6 +178,7 @@ keybindings-check: kanata-check
 	bb desktop/build/keybindings/palette-test.clj
 	emacs --batch -Q -l desktop/build/keybindings/navigate-test.el -f ert-run-tests-batch-and-exit
 	emacs --batch -Q -l desktop/build/keybindings/coach-test.el -f ert-run-tests-batch-and-exit
+	emacs --batch -Q -l desktop/build/keybindings/palette-test.el -f ert-run-tests-batch-and-exit
 	nvim --headless '+lua local ok, err = pcall(require("fennel").dofile, "desktop/build/keybindings/nvim-test.fnl"); if not ok then print(err); vim.cmd("cquit 1") end'
 	log=$$(mktemp) && env -u HERDR_PANE_ID -u HERDR_ENV -u HERDR_SOCKET_PATH KEYLOG_FILE=$$log nvim --headless '+lua local ok, err = pcall(require("fennel").dofile, "desktop/build/keybindings/nvim-leader-test.fnl"); if not ok then print(err); vim.cmd("cquit 1") end'; status=$$?; rm -f $$log; exit $$status
 

@@ -14,12 +14,17 @@ Only bound commands are recorded, never typed text."
                           (funcall clean keys) "\t" (funcall clean effect) "\n")
                   nil file 'append 'silent)))
 
+(defvar eng/keylog-commands (make-hash-table :test #'eq :weakness 'key)
+  "The command that each eng/keylog-command wrapper runs, for eng/palette.")
+
 (defun eng/keylog-command (keys effect command)
   "Return a command that logs KEYS and EFFECT, then runs COMMAND."
-  (lambda ()
-    (interactive)
-    (eng/keylog keys effect)
-    (call-interactively command)))
+  (let ((wrapper (lambda ()
+                   (interactive)
+                   (eng/keylog keys effect)
+                   (call-interactively command))))
+    (puthash wrapper command eng/keylog-commands)
+    wrapper))
 
 (defun eng/navigate (direction)
   "Select the window in DIRECTION, a string such as \"left\".

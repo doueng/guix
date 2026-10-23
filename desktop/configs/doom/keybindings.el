@@ -76,6 +76,7 @@
     (call-interactively #'flymake-show-buffer-diagnostics)))
 
 (load! "key-navigate")
+(load! "palette")
 (map! :map general-override-mode-map
       :desc "Focus left"  "C-h" (eng/keylog-command "Ctrl+h" "Focus left" (cmd! (eng/navigate "left")))
       :desc "Focus down"  "C-j" (eng/keylog-command "Ctrl+j" "Focus down" (cmd! (eng/navigate "down")))

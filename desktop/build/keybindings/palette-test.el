@@ -1,0 +1,45 @@
+;;; palette-test.el -*- lexical-binding: t; -*-
+(require 'ert)
+(load-file "desktop/configs/doom/key-navigate.el")
+(load-file "desktop/configs/doom/palette.el")
+
+(defvar doom-leader-map)
+
+(ert-deftest palette-shows-leader-keys-through-labels-and-keylog-wrappers ()
+  (let ((doom-leader-map (make-sparse-keymap))
+        (files (make-sparse-keymap)))
+    (define-key files "s" (cons "Save file" (eng/keylog-command "Space f s" "Save file" #'save-buffer)))
+    (define-key doom-leader-map "f" files)
+    (let ((leader (eng/palette--leader-keys)))
+      (should (equal "SPC f s" (eng/palette--keys 'save-buffer leader))))))
+
+(ert-deftest palette-lists-recent-commands-first-and-only-once ()
+  (let ((extended-command-history '("save-buffer" "not-a-command-xyz" "save-buffer"))
+        (read-extended-command-predicate nil))
+    (let ((names (mapcar #'car (eng/palette--entries))))
+      (should (equal "save-buffer" (car names)))
+      (should (= 1 (seq-count (lambda (n) (equal n "save-buffer")) names)))
+      (should-not (member "not-a-command-xyz" names)))))
+
+(ert-deftest palette-request-is-one-line-of-edn ()
+  (let ((request (eng/palette--request '(("save-buffer" "C-x C-s") ("say \"hi\"" nil)))))
+    (should (string-suffix-p "\n" request))
+    (should-not (string-match-p "\n" (substring request 0 -1)))
+    (should (string-match-p "{:label \"save-buffer\" :keys \"C-x C-s\" :source \"Emacs\" :value \"save-buffer\"}" request))
+    (should (string-match-p "{:label \"say \\\\\"hi\\\\\"\" :source" request))))
+
+(ert-deftest palette-reads-the-choice-or-a-cancel ()
+  (should (equal "magit-status" (eng/palette--choice "{:ok true, :value \"magit-status\"}\n")))
+  (should (equal "say \"hi\"" (eng/palette--choice "{:ok true, :value \"say \\\"hi\\\"\"}")))
+  (should-not (eng/palette--choice "{:ok true, :value nil}")))
+
+(ert-deftest palette-runs-the-choice-like-m-x ()
+  (let (ran extended-command-history)
+    (cl-letf (((symbol-function 'execute-extended-command)
+               (lambda (prefix name typed) (setq ran (list prefix name typed current-prefix-arg)))))
+      (eng/palette--run (selected-window) '(4) "save-buffer"))
+    (should (equal '((4) "save-buffer" "save-buffer" (4)) ran))
+    (should (equal '("save-buffer") extended-command-history))))
+
+(ert-deftest palette-replaces-m-x ()
+  (should (eq #'eng/palette-M-x (command-remapping #'execute-extended-command))))
