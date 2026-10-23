@@ -7,7 +7,7 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define babashka-version "1.13.225")
+(define babashka-version "1.13.226")
 
 ;; Guix's pinned channel has no Babashka, so package the upstream aarch64 release.
 (define-public babashka
@@ -20,7 +20,7 @@
        (uri (string-append "https://github.com/babashka/babashka/releases/download/v"
                            version "/babashka-" version "-linux-aarch64-static.tar.gz"))
        (sha256
-        (base32 "1qhws5xcdby6dlrxki5jq255vyfnym4jm910dzymp5y9d8ncxm3z"))))
+        (base32 "0yd6zm39xnkn42wzbjmqga91zd2divn6gnw1kx7670qirqa2kml5"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (arguments

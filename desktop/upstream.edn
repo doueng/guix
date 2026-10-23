@@ -22,7 +22,7 @@
  "pi/agent/skills/autoresearch-hooks"
  {:repo "davebcn87/pi-autoresearch" :path "skills/autoresearch-hooks" :commit "84232861a09e753f63bceda46852f0ddbb4c9afd"}
  "pi/agent/skills/herdr"
- {:repo "herdrdev/herdr" :path "skills/herdr" :commit "9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c"}
+ {:repo "herdrdev/herdr" :path "skills/herdr" :commit "1cbd794559fb139f95f1bdb4b2a8998082017d0e"}
  "pi/agent/skills/librarian"
  {:repo "mitsuhiko/agent-stuff" :path "skills/librarian" :commit "0ad04e3302f30198bf31d4c8b4ba7b5d1d5f6714"}
  "pi/agent/skills/pstack"

@@ -6,7 +6,7 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define jjui-version "0.10.11")
+(define jjui-version "0.10.12")
 
 (define-public jjui
   (package
@@ -18,7 +18,7 @@
        (uri (string-append "https://github.com/idursun/jjui/releases/download/v"
                            version "/jjui-" version "-linux-arm64.zip"))
        (sha256
-        (base32 "117myfq09baf0v4qqvk47n4zm24b0rr3slnm7i8ixhnxrhla0yfd"))))
+        (base32 "0zamk4srb5qjhm24iysgkp96scm56a35fkycbsy8i9mhya2i1wmq"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (native-inputs (list unzip))

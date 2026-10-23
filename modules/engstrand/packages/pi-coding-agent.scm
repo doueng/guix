@@ -8,7 +8,7 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define pi-version "1.3.0")
+(define pi-version "1.4.0")
 
 (define-public pi-coding-agent
   (package
@@ -20,7 +20,7 @@
        (uri (string-append "https://github.com/earendil-works/pi/releases/download/v"
                            version "/pi-linux-arm64.tar.gz"))
        (sha256
-        (base32 "0nx6gqdkj60ihdcy9j3wvc9ksjvwy2pblf3lykwyp453zhafmlkz"))))
+        (base32 "0mh18kaqvadvxxa038585adzh8326341amq1pbmymzw3xz3jjn7s"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (arguments

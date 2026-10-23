@@ -5,7 +5,7 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define bluetui-version "0.8.1")
+(define bluetui-version "0.8.2")
 
 (define-public bluetui
   (package
@@ -18,7 +18,7 @@
                            version "/bluetui-aarch64-linux-musl"))
        (file-name "bluetui")
        (sha256
-        (base32 "0kr8y6hs09gn3p20cxm62lg609xxnhmwc9k9byh78lmbypdv39b6"))))
+        (base32 "0d3dmpagk2mgg4c5rikgzh81hbaam6rwp8h052q52kmgpdhm128i"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (arguments

@@ -11,14 +11,14 @@
 (define-public bun
   (package
     (name "bun")
-    (version "1.3.14")
+    (version "1.4.4")
     (source
      (origin
        (method url-fetch)
        (uri (string-append "https://github.com/oven-sh/bun/releases/download/bun-v"
                            version "/bun-linux-aarch64.zip"))
        (sha256
-        (base32 "0fwsl5rijcv53j17rhw8ig8xia3zw656cvqdds1pa0rim1iznzx2"))))
+        (base32 "03l5qzw8dgwbdrvnsgb79x2xza9qa21fmfq23rb5hvhxylvbp9ms"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (native-inputs (list unzip))

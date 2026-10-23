@@ -3,7 +3,7 @@
   (name 'guix)
   (url "https://codeberg.org/guix/guix")
   (branch "master")
-  (commit "6754acb1c65cd6f93c7444b1d4f96244e7bbf072")
+  (commit "37bb0f08195f8fd09a6c75bff9f07940d817605c")
   (introduction
    (make-channel-introduction
     "9edb3f66fd807b096b48283debdcddccfea34bad"
@@ -23,7 +23,7 @@
   (name 'rde)
   (url "https://git.sr.ht/~abcdw/rde")
   (branch "master")
-  (commit "022bd2a97e0eb3e31221c3eb0e6595cafb7894cb")
+  (commit "6821d6f604caf3e2bb8ddd38ca55c0aa5756b0e1")
   (introduction
    (make-channel-introduction
     "257cebd587b66e4d865b3537a9a88cccd7107c95"
