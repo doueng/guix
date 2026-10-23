@@ -87,6 +87,10 @@ This is a lightweight way to apply config changes without restarting Emacs."
 
 (setq doom-theme 'doom-one)
 
+(custom-set-faces
+ '(default ((((type tty)) (:background "unspecified-bg"))))
+ '(solaire-default-face ((((type tty)) (:background "unspecified-bg")))))
+
 (setq display-line-numbers-type nil)
 
 (after! doom-modeline
