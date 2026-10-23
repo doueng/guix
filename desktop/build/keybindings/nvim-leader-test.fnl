@@ -10,6 +10,19 @@
 (assert (= (desc "<Space><Space>") "Command Palette") "Space Space must open the command palette")
 (assert (= (desc "<C-l>") "Focus right") "Ctrl+l must focus right")
 
+(local palette (require :config.palette))
+(assert (= (palette.leader-keys " ff") "SPC f f") "leader mappings read as SPC f f")
+(assert (= (palette.leader-keys " <Tab>.") "SPC <Tab> .") "special keys stay whole")
+(assert (= (palette.choice "{:ok true, :value \"map: ff\"}") "map: ff"))
+(assert (= (palette.choice "{:ok true, :value \"cmd:say \\\"hi\\\"\"}") "cmd:say \"hi\""))
+(assert (= nil (palette.choice "{:ok true, :value nil}")) "a cancel chooses nothing")
+(let [request (palette.request [{:label "Save" :keys "SPC f s" :value "map: fs"}])]
+  (assert (= request "{:op :request :name :palette :args {:prompt \"Neovim\" :entries [{:label \"Save\" :keys \"SPC f s\" :source \"Neovim\" :value \"map: fs\"}]}}\n")
+          request))
+(let [chosen (icollect [_ e (ipairs (palette.entries))] e.value)]
+  (assert (vim.tbl_contains chosen "cmd:write") "built-in Ex commands are listed, not just user ones")
+  (assert (vim.tbl_contains chosen "map: cd") "described leader mappings are listed"))
+
 (local handed-off [])
 (local system vim.system)
 (set vim.system (fn [argv] (table.insert handed-off argv) {}))

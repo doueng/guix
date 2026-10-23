@@ -106,12 +106,14 @@
          :keys [(key :<leader><leader>
                      (fn []
                        (current-file-path)
-                       (_G.Snacks.picker {:title "Command Palette"
+                       ;; The desktop's Dusk palette, or Snacks when Dusk is not running.
+                       (when (not ((. (require :config.palette) :open)))
+                        (_G.Snacks.picker {:title "Command Palette"
                                           :multi [(command-palette-actions-source)
                                                   :commands
                                                   :keymaps]
                                           :confirm command-palette-confirm
-                                          :layout {:preset :vscode}}))
+                                          :layout {:preset :vscode}})))
                      {:desc "Command Palette"})
                 [:<leader>/ false]
                 [:<leader>ff false]
