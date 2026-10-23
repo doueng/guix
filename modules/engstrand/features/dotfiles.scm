@@ -16,6 +16,10 @@
       ("XCURSOR_SIZE" . "20")
       ("GTK_THEME" . "Adwaita:dark")
       ("LOCALE_ARCHIVE" . ,(nixpkgs-locale-archive))
+      ;; Trust the system nss-certs bundle instead of the roots node and uv
+      ;; bundle, which still trusted the compromised eMudhra intermediates.
+      ("NODE_OPTIONS" . "--use-openssl-ca")
+      ("UV_SYSTEM_CERTS" . "1")
       ;; Let launchers and xdg-open discover Flatpak's Chrome entry.
       ("XDG_DATA_DIRS" . "$XDG_DATA_DIRS:$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share"))))
 
