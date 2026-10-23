@@ -31,6 +31,9 @@
                                    "harbor" "run" "--agent" (or (System/getenv "BBH_HARBOR_AGENT") "bbh_agent:Bbh") "--env" "guix_podman:GuixPodman" "--force-build"
                                    "-m" (or (System/getenv "BBH_MODEL") "openrouter/deepseek/deepseek-v4.1-flash")
                                    *command-line-args*)}
+         eval:workflow {:doc "Model-driven workflow check: a bbh conversation fixes a toy bug through wf. Spends model credits. Args: [MODEL] [OUTPUT-DIR]."
+                        :requires ([bbh.workflow-eval])
+                        :task (apply bbh.workflow-eval/-main *command-line-args*)}
          eval:graders {:doc "Reject untouched fixtures and accept reference solutions."
                        :requires ([bbh.tasks])
                        :task (bbh.tasks/verify-graders!)}
