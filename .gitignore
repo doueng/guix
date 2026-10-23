@@ -11,5 +11,6 @@ desktop/build/dusk/.guix-profile*
 desktop/build/pi-sci/dist/
 desktop/build/pi-sci/node_modules/
 desktop/build/pi-sci/.cpcache/
+desktop/build/pierre-diff-ansi/node_modules/
 
 .nrepl-port

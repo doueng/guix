@@ -63,59 +63,12 @@ tug = ["bookmark", "advance"]
 diff-git = ["diff", "--config", "ui.diff-formatter=:git"]
 diff-jj = ["diff", "--config", "ui.diff-formatter=:color-words"]
 diff-difft = ["diff", "--tool", "difft"]
-jjui-show-fancy = ["util", "exec", "--", "bash", "-uo", "pipefail", "-c", '''
-  pierre="$(command -v pierre-diff-ansi || true)"
-  if [[ -x "$pierre" ]]; then
-    jj show --git --color never --ignore-working-copy -r "$1" | "$pierre" --width "${COLUMNS:-120}"
-    exit 0
-  fi
-
-  dsf="$(command -v diff-so-fancy || true)"
-  if [[ ! -x "$dsf" ]]; then
-    jj show --git --color always --ignore-working-copy -r "$1"
-    exit 0
-  fi
-  export GIT_CONFIG_COUNT=6
-  export GIT_CONFIG_KEY_0=color.diff-highlight.newnormal
-  export GIT_CONFIG_VALUE_0="green bold"
-  export GIT_CONFIG_KEY_1=color.diff-highlight.newhighlight
-  export GIT_CONFIG_VALUE_1="green bold 22"
-  export GIT_CONFIG_KEY_2=color.diff-highlight.newreset
-  export GIT_CONFIG_VALUE_2="reset"
-  export GIT_CONFIG_KEY_3=color.diff-highlight.oldnormal
-  export GIT_CONFIG_VALUE_3="red bold"
-  export GIT_CONFIG_KEY_4=color.diff-highlight.oldhighlight
-  export GIT_CONFIG_VALUE_4="red bold 52"
-  export GIT_CONFIG_KEY_5=color.diff-highlight.oldreset
-  export GIT_CONFIG_VALUE_5="reset"
-  jj show --git --color never --ignore-working-copy -r "$1" | "$dsf"
+jjui-show-fancy = ["util", "exec", "--", "bash", "-euo", "pipefail", "-c", '''
+  jj log --no-graph --color always --ignore-working-copy -T builtin_log_detailed -r "$1"
+  jj diff --git --color never --ignore-working-copy -r "$1" | pierre-diff-ansi --width "${COLUMNS:-120}"
 ''', ""]
-jjui-file-fancy = ["util", "exec", "--", "bash", "-uo", "pipefail", "-c", '''
-  pierre="$(command -v pierre-diff-ansi || true)"
-  if [[ -x "$pierre" ]]; then
-    jj diff --git --color never --ignore-working-copy -r "$1" -- "$2" | "$pierre" --width "${COLUMNS:-120}"
-    exit 0
-  fi
-
-  dsf="$(command -v diff-so-fancy || true)"
-  if [[ ! -x "$dsf" ]]; then
-    jj diff --git --color always --ignore-working-copy -r "$1" -- "$2"
-    exit 0
-  fi
-  export GIT_CONFIG_COUNT=6
-  export GIT_CONFIG_KEY_0=color.diff-highlight.newnormal
-  export GIT_CONFIG_VALUE_0="green bold"
-  export GIT_CONFIG_KEY_1=color.diff-highlight.newhighlight
-  export GIT_CONFIG_VALUE_1="green bold 22"
-  export GIT_CONFIG_KEY_2=color.diff-highlight.newreset
-  export GIT_CONFIG_VALUE_2="reset"
-  export GIT_CONFIG_KEY_3=color.diff-highlight.oldnormal
-  export GIT_CONFIG_VALUE_3="red bold"
-  export GIT_CONFIG_KEY_4=color.diff-highlight.oldhighlight
-  export GIT_CONFIG_VALUE_4="red bold 52"
-  export GIT_CONFIG_KEY_5=color.diff-highlight.oldreset
-  export GIT_CONFIG_VALUE_5="reset"
-  jj diff --git --color never --ignore-working-copy -r "$1" -- "$2" | "$dsf"
+jjui-file-fancy = ["util", "exec", "--", "bash", "-euo", "pipefail", "-c", '''
+  jj diff --git --color never --ignore-working-copy -r "$1" -- "$2" | pierre-diff-ansi --width "${COLUMNS:-120}"
 ''', ""]
 cascade = ["rebase", "-s", "roots(mutable() & (trunk().. & ~descendants(trunk())))", "-d", "trunk()"]
 chainify = ["util", "exec", "--", "bash", "-c", """

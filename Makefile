@@ -15,7 +15,7 @@ GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := -L "$(MODULES)"
 
 .PHONY: help pull channels-current check system-facts dry-run build repro-build switch gc \
-        nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow dusk dusk-test dusk-verify pi-sci pi-sci-test \
+        nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi dusk dusk-test dusk-verify pi-sci pi-sci-test \
         doom-check doom-baseline keybindings-check kanata-check hypr-nested-check
 
 help:
@@ -37,6 +37,7 @@ help:
 	@echo 'stow          build SCI and install live config links using GNU Stow'
 	@echo 'pi-sci        compile the pinned SCI codemode runtime'
 	@echo 'pi-sci-test   build and verify SCI codemode with the installed Pi'
+	@echo 'pierre-diff-ansi install the highlighter behind jjui diff previews'
 	@echo 'dusk          build the dusk shell (desktop/build/dusk)'
 	@echo 'dusk-test     run isolated runtime and headless GPUI tests'
 	@echo 'dusk-verify   run dusk end-to-end checks on the live session'
@@ -125,7 +126,15 @@ pi-sci: $(PI_SCI_OUTPUTS)
 pi-sci-test:
 	desktop/build/pi-sci/verify.sh
 
-stow: pi-sci
+PIERRE_DIFF := desktop/build/pierre-diff-ansi
+
+$(PIERRE_DIFF)/node_modules: $(PIERRE_DIFF)/package.json $(PIERRE_DIFF)/bun.lock
+	cd $(PIERRE_DIFF) && bun install --frozen-lockfile
+	touch $@
+
+pierre-diff-ansi: $(PIERRE_DIFF)/node_modules
+
+stow: pi-sci pierre-diff-ansi
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/stow-home
 
 home-apply: channels-current nixpkgs-import
