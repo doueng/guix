@@ -77,15 +77,21 @@
 (defn- command-text [st cmd]
   (case cmd :repro (:repro st) :check (:check st) cmd))
 
+(def default-timeout-seconds 600)
+
 (defn- run-command [id st phase visit i gate]
   (if-let [cmd (command-text st (:cmd gate))]
-    (let [{:keys [exit out err]} (p/shell {:dir (:cwd st) :out :string :err :string :continue true}
-                                          "sh" "-c" cmd)
-          text (str out err)
+    (let [limit (get gate :timeout default-timeout-seconds)
+          {:keys [exit out err]} (p/shell {:dir (:cwd st) :out :string :err :string :continue true}
+                                          "timeout" (str limit) "sh" "-c" cmd)
+          timed-out? (= 124 exit)
+          text (str out err (when timed-out? (str "\ntimed out after " limit "s")))
           evidence (str (evidence-dir id) "/" (name phase) "-" visit "-" i ".txt")]
       (spit evidence (str "$ " cmd "\n" text "\nexit " exit "\n"))
       {:index i :kind :command :cmd cmd :exit exit :evidence evidence :sha256 (sha256 text)
-       :pass? (if (= :zero (get gate :expect :zero)) (zero? exit) (not (zero? exit)))})
+       :timed-out? timed-out?
+       :pass? (and (not timed-out?)
+                   (if (= :zero (get gate :expect :zero)) (zero? exit) (not (zero? exit))))})
     (if (:optional gate)
       {:index i :kind :command :skipped? true :pass? true}
       {:index i :kind :command :pass? false
@@ -118,7 +124,10 @@
        (remove str/blank?)
        (mapv edn/read-string)))
 
-(defn- current [id] (replay (read-journal id)))
+(defn- current [id]
+  (when-not (fs/exists? (journal-file id))
+    (throw (ex-info (str "no run named " id) {:id id})))
+  (replay (read-journal id)))
 
 (defn- append! [id event]
   (let [e (assoc event :at (str (java.time.Instant/now)))]
@@ -207,8 +216,9 @@
 
 (defn- describe-gate [g]
   (case (:kind g)
-    :command (cond (:skipped? g) "command skipped, none given"
+    :command (cond (:skipped? g) "optional check skipped, none given at start"
                    (:detail g) (:detail g)
+                   (:timed-out? g) (str "`" (:cmd g) "` timed out, output in " (:evidence g))
                    :else (str "`" (:cmd g) "` exited " (:exit g) ", output in " (:evidence g)))
     :artifact (str "artifact " (:path g))
     :verdict (if (:pending? g)

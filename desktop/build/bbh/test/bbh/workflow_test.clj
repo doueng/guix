@@ -76,6 +76,19 @@
       (is (= :blocked (:status st)))
       (is (= "phase implement exceeded 3 visits" (:block-reason st))))))
 
+(deftest hanging-gate-fails-even-when-nonzero-was-expected
+  (let [repo (buggy-repo)
+        id (wf/start! :bug-fix {:cwd repo :repro "sleep 30"})
+        st (wf/status id)
+        gate {:kind :command :cmd :repro :expect :nonzero :timeout 1}
+        result (#'wf/run-command id st :reproduce 1 0 gate)]
+    (is (:timed-out? result))
+    (is (false? (:pass? result)))))
+
+(deftest unknown-run-is-a-clean-error
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no run named nope"
+                        (wf/status "nope"))))
+
 (deftest change-requires-a-check-command
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"needs --check"
                         (wf/start! :change {:cwd "."}))))
@@ -97,12 +110,17 @@
 (deftest session-dir-uses-the-pi-workspace-slug
   (is (str/ends-with? (wf/session-dir "/home/engstrand/guix") "/sessions/--home-engstrand-guix--")))
 
-(deftest routes-match-the-jev-extension
-  (let [src (slurp "../../pi/agent/extensions/jev-pstack.ts")
-        block (second (re-find #"(?s)ROUTES = \{(.*?)\n\};?" src))
-        extension (set (map second (re-seq #"(?m)^\s+(\w+):" block)))
+(deftest routes-match-the-jev-classifiers
+  (let [ts (slurp "../../pi/agent/extensions/jev-pstack.ts")
+        ts-block (second (re-find #"(?s)ROUTES = \{(.*?)\n\};?" ts))
+        ts-routes (set (map second (re-seq #"(?m)^\s+(\w+):" ts-block)))
+        init (slurp "../../configs/bbh/init.clj")
+        init-block (second (re-find #"(?s)\(def routes(.*?)\(defn jev-classify-task" init))
+        init-routes (set (map second (re-seq #":(\w+) \"" init-block)))
         covered (set (mapcat #(:routes (wf/load-workflow %)) [:bug-fix :change :investigation]))
         manual #{"performance" "prototype" "large_project" "pr_workflow"
-                 "session_handoff" "skill_work" "other"}]
-    (is (= extension (set/union covered manual)))
+                 "session_handoff" "skill_work" "other"}
+        expected (set/union covered manual)]
+    (is (= expected ts-routes))
+    (is (= expected init-routes))
     (is (empty? (set/intersection covered manual)))))
