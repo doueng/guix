@@ -16,8 +16,6 @@
 (load-file (str (fs/parent (fs/real-path *file*)) "/keyleader"))
 (require '[dusk.palette :as dusk])
 
-(def runtime-dir (or (System/getenv "XDG_RUNTIME_DIR") "/tmp"))
-
 (defn sh-out [& argv]
   (let [{:keys [exit out]} @(p/process (vec argv) {:out :string :err :string})]
     (when (zero? exit) out)))
@@ -66,9 +64,27 @@
 (defn open-emacs! [pid]
   (sh-out "emacsclient" "-s" (str "eng-" pid) "--eval" "(eng/palette-M-x)"))
 
+(defn process-sockets
+  "Paths of Unix sockets owned by PID, including explicitly named Neovim servers."
+  [pid]
+  (let [inodes (set (keep (fn [fd]
+                            (try (second (re-matches #"socket:\[(\d+)\]" (str (fs/read-link fd))))
+                                 (catch Exception _ nil)))
+                          (fs/list-dir (str "/proc/" pid "/fd"))))]
+    ;; This kernel's proc/net/unix rejects Babashka's JVM-style reads with
+    ;; EINVAL. cat reads it successfully on the same machine.
+    (into [] (keep (fn [line]
+                     (let [fields (str/split (str/trim line) #"\s+" 8)]
+                       (when (and (= 8 (count fields)) (inodes (nth fields 6)))
+                         (nth fields 7)))))
+          (str/split-lines (or (sh-out "cat" "/proc/net/unix") "")))))
+
 (defn open-nvim! [pid]
-  (sh-out "nvim" "--server" (str runtime-dir "/nvim." pid ".0")
-          "--remote-send" "<Cmd>lua require('config.palette').open()<CR>"))
+  (some (fn [socket]
+          (when (= (str pid) (some-> (sh-out "nvim" "--server" socket "--remote-expr" "getpid()") str/trim))
+            (= "1" (some-> (sh-out "nvim" "--server" socket "--remote-expr"
+                                   "luaeval(\"require('config.palette').open() and 1 or 0\")") str/trim))))
+        (process-sockets pid)))
 
 ;; Entries the palette runs itself. Each :value names its runner before a colon.
 

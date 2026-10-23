@@ -53,6 +53,8 @@ Hard constraints override the score.
 
 ## Discovery and coaching
 
+Alt+Space Space, SPC SPC in the editors and Ctrl+Space in fish open the Dusk command palette. The README's Command palette section explains it. Add an application's commands to its own adapter, or to `keybindings/palette.edn` for Chrome and IntelliJ. When testing it with ydotool, type only after `hyprctl layers` lists `dusk-launcher`, or the keys reach the focused window.
+
 Cmd+/ opens `desktop/bin/keyguide`. Entries marked `guide` explain native shortcuts without injecting input.
 Doom and Neovim use which-key. Herdr uses Ctrl+b ?. Vimium uses ? on supported pages.
 Do not describe the global picker as automatic prefix detection.

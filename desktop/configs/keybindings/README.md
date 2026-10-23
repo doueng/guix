@@ -102,6 +102,23 @@ Herdr's Ctrl+b h/j/k/l use the same command, so they also continue to Hyprland.
 The desktop leader moves Hyprland windows only, because it cannot see editor windows inside a terminal.
 IntelliJ stops at its own splits. IdeaVim cannot run an external command.
 
+## Command palette
+
+One Dusk palette at the bottom of the screen chooses commands in every application. Each row shows the command, its keys and where it comes from, so a search also teaches the direct binding. Recent choices come first.
+
+| Where | Key | What it lists | How the choice runs |
+| --- | --- | --- | --- |
+| Any window | Alt+Space Space | The focused program's commands, then Herdr's and the desktop's | Where it came from |
+| Doom | M-x, SPC SPC | M-x's commands for the buffer | `execute-extended-command`, so prefix arguments and prompts work |
+| Neovim | SPC SPC | Described mappings and every Ex command | A mapping runs as if typed. An Ex command opens the command line with its name filled in |
+| fish | Ctrl+Space | History, functions and abbreviations | Inserted at the cursor, never run |
+| Herdr | Ctrl+b Space Space, Cmd+Space Space | Herdr's leader actions | `keyleader` |
+
+`desktop/bin/palette` decides from the focused window. In the Herdr terminal it reads the focused pane's foreground program. Emacs and Neovim are asked to open their own palette, Emacs over the server `eng-PID` that `palette.el` starts and Neovim over a socket owned by its PID, including a custom `--listen` path. A fish pane gets its history and functions, inserted with `herdr pane send-text`. Chrome gets Vimium and Chrome shortcuts and IntelliJ gets IdeaVim `:action` calls, typed once Dusk releases the keyboard. Those two lists live in `palette.edn`. Plain Ghostty windows share one process, so they get the desktop palette.
+Emacs caches command entries and escaped text per buffer, rebuilding after files load or the active keymaps change. Applicability and history are still checked on every opening. A new buffer's first opening can still pay the catalogue-building cost.
+Herdr's tab, workspace and window pickers use the same palette.
+`dusk.palette` in `desktop/lib` is the client. It sends `{:op :request :name :palette :args {:prompt :entries}}` on Dusk's socket, and Dusk replies with the chosen entry's `:value`. Choices are remembered under `~/.local/state/palette/`.
+
 ## Discovery
 
 Cmd+/ opens a grouped, searchable Dusk menu in every application.

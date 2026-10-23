@@ -57,11 +57,26 @@
   (let [asked (atom [])]
     (with-redefs [keyleader/load-grammar (constantly grammar)
                   palette/context (constantly {:kind :herdr :program {:id :nvim :pid 42}})
-                  palette/sh-out (fn [& argv] (swap! asked conj (vec argv)) "")
+                  palette/process-sockets (constantly ["/tmp/custom.nvim"])
+                  palette/sh-out (fn [& argv]
+                                    (swap! asked conj (vec argv))
+                                    (if (= "getpid()" (last argv)) "42" "1"))
                   dusk/pick! (fn [& _] (throw (ex-info "must not show the list" {})))]
       (palette/open!))
-    (is (= [["nvim" "--server" (str palette/runtime-dir "/nvim.42.0") "--remote-send"
-             "<Cmd>lua require('config.palette').open()<CR>"]] @asked))))
+    (is (= [["nvim" "--server" "/tmp/custom.nvim" "--remote-expr" "getpid()"]
+            ["nvim" "--server" "/tmp/custom.nvim" "--remote-expr"
+             "luaeval(\"require('config.palette').open() and 1 or 0\")"]] @asked))))
+
+(deftest nvim-must-acknowledge-opening-and-match-the-target-pid
+  (doseq [reply [nil "0"]]
+    (with-redefs [palette/process-sockets (constantly ["/tmp/nvim"])
+                  palette/sh-out (fn [& args] (if (= "getpid()" (last args)) "42" reply))]
+      (is (not (palette/open-nvim! 42)))))
+  (let [calls (atom [])]
+    (with-redefs [palette/process-sockets (constantly ["/tmp/wrong-instance"])
+                  palette/sh-out (fn [& args] (swap! calls conj (last args)) "99")]
+      (is (not (palette/open-nvim! 42)))
+      (is (= ["getpid()"] @calls)))))
 
 (let [{:keys [fail error]} (run-tests)]
   (System/exit (if (zero? (+ fail error)) 0 1)))

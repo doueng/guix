@@ -26,6 +26,16 @@ These entries supersede the hold time above and the Cmd+Space and leader entries
 - 2026-10-21. `leader.edn`'s `:terminal :keeps` pairs each program regex with the keys it keeps. Pi had received Ctrl+h, which it does not use, and fzf had lost Ctrl+j/k. Status: tests, and the rules checked against this Pi pane's live process list.
 - 2026-10-21. Tiny-fingers moved from Ctrl+b Space f to Ctrl+b Space s l, and the desktop application group from Alt+Space a to Alt+Space o. Doom binds SPC f to files, SPC s l to jump to a visible link, and SPC o to open terminals and the browser. Ctrl+b f still opens tiny-fingers. Status: tests and `keyleader --verify-hypr`.
 
+## Command palette
+
+- 2026-10-23. Alt+Space Space opens one Dusk palette for the focused window, replacing the desktop-only palette. Emacs and Neovim open their own, so the buffer, mode, prefix argument and history stay theirs. Status: router, Emacs, Neovim, Chrome and Herdr paths observed live with ydotool; IntelliJ and a Herdr fish pane tested only in unit tests.
+- 2026-10-23. Dusk got a :palette request in its runtime config instead of a Rust change. Its socket already took one EDN line, and config.clj reloads live. Status: tested, and measured 135 ms to show 6638 Emacs entries.
+- 2026-10-23. Emacs keys come from a walk of doom-leader-map plus where-is-internal's first key. Asking for every key of every command took 2.4 s, the walk and first keys 76 ms. Status: measured in a headless Doom.
+- 2026-10-23. Neovim lists getcompletion's Ex commands, since nvim_get_commands lists only user commands (26 of 583 in a clean Neovim). Ex commands open the command line instead of running, because built-in commands' arguments are unknown. Status: tested.
+- 2026-10-23. fish inserts and never runs, in its Ctrl+Space binding and in the global palette's send-text. Ctrl+Space replaces fish's preset literal space. Status: tested in an interactive fish on a pseudo-terminal.
+- 2026-10-23. Keys for Chrome and IntelliJ wait until Hyprland no longer lists the dusk-launcher layer. Sending them 80 ms after Dusk replied lost Ctrl+T in Chrome. Status: observed before and after.
+- 2026-10-23. No Chrome extension or IntelliJ plugin yet. Vimium's commands are not reachable from outside, and the typed fallback covers the commands in palette.edn.
+
 ## Leader regrouping
 
 These entries supersede the o a launcher, c R, IdeaVim b b and terminal Cmd chord entries above.

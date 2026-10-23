@@ -222,8 +222,8 @@
                    :placeholder (if (str/blank? prompt) "Search" prompt)
                    :placeholder-color (:on-surface-variant theme)
                    :caret-color (:primary theme)
-                   :font-size 16
-                   :height 38
+                   :font-size 14
+                   :height 32
                    :padding [0 12]
                    :gap 1
                    :radius (* 6 1.3)
@@ -233,18 +233,18 @@
               :let [chosen? (= i selected)
                     dim (if chosen? (:on-primary theme) (:on-surface-variant theme))]]
           (ui/row {:key id
-                   :height 36
+                   :height 28
                    :padding [0 12]
                    :gap 12
                    :radius (* 6 1.3)
-                   :font-size 14
+                   :font-size 12
                    :bg (when chosen? (:primary theme))
                    :color (when chosen? (:on-primary theme))
                    :hover (when-not chosen? {:bg (ui/alpha (:surface-variant theme) 0.8)})
                    :on-click #(close-launcher! value)}
             (ui/text {:grow true :line-clamp 1} text)
-            (when keys (ui/text {:font-size 13 :color dim} keys))
-            (when source (ui/text {:width 72 :text-align :right :font-size 12 :color dim} source))))))))
+            (when keys (ui/text {:font-size 11 :color dim} keys))
+            (when source (ui/text {:width 64 :text-align :right :font-size 10 :color dim} source))))))))
 
 
 (defonce leader-hint (dusk/state nil))

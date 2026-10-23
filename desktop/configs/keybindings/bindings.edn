@@ -34,7 +34,8 @@
              {:id "c" :label "Chrome native shortcuts" :chord "Ctrl+L / Cmd+T / Cmd+W" :tip "Ctrl+L focuses the address bar. Cmd+T opens a tab, Cmd+Shift+T restores one, Cmd+W closes it, Cmd+F finds text."}
              {:id "v" :label "Vimium options" :command ["~/.local/bin/chrome-unified" "chrome-extension://dbepggeogbaibhgnhhndojpepiihcmeb/pages/options.html"]}]}
   {:id "e" :label "Editors and terminal"
-   :entries [{:id "e" :label "Doom discovery" :chord "SPC / SPC h b b" :tip "Pause after SPC for which-key. SPC SPC runs a command. SPC w h/j/k/l continues to Herdr and the desktop at the edge. SPC h b b describes bindings."}
+   :entries [{:id "p" :label "Command palette" :chord "Alt+Space Space / SPC SPC / Ctrl+Space" :tip "Alt+Space Space searches the focused program's commands from any window. SPC SPC in Doom and Neovim and Ctrl+Space in fish open the same palette there."}
+             {:id "e" :label "Doom discovery" :chord "SPC / SPC h b b" :tip "Pause after SPC for which-key. SPC SPC runs a command. SPC w h/j/k/l continues to Herdr and the desktop at the edge. SPC h b b describes bindings."}
              {:id "n" :label "Neovim discovery" :chord "SPC / g / z / Ctrl+w" :tip "Pause after a prefix for which-key. SPC SPC is the command palette. SPC w h/j/k/l and Ctrl+h/j/k/l continue to Herdr and the desktop at the edge. SPC u h toggles Hardtime hints."}
              {:id "i" :label "IntelliJ discovery" :chord "SPC SPC" :tip "Use Goto Action to search IDE commands. IdeaVim leader descriptions come from idea-doom-emacs. Alt+digits now reach the IDE."}
              {:id "h" :label "Herdr discovery" :chord "Ctrl+b Space / Ctrl+b ?" :tip "Ctrl+b Space opens the shared leader menu. Ctrl+b ? opens Herdr's native binding help."}

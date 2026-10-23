@@ -40,34 +40,71 @@ Asking where-is-internal for every key of every command took 2.4 s."
       (when-let* ((key (where-is-internal command nil t)))
         (key-description key))))
 
-(defun eng/palette--entries ()
-  "M-x's commands for the current buffer, the most recently used first."
-  (let ((pred (or read-extended-command-predicate (lambda (_ _) t)))
-        (buffer (current-buffer))
-        (recent (delete-dups (copy-sequence extended-command-history)))
-        names)
-    (mapatoms (lambda (s) (when (and (commandp s) (funcall pred s buffer)) (push (symbol-name s) names))))
-    (let ((commands (make-hash-table :test #'equal))
-          (leader (eng/palette--leader-keys)))
-      (dolist (n names) (puthash n t commands))
-      (mapcar (lambda (name)
-                (list name (eng/palette--keys (intern name) leader)))
-              (append (seq-filter (lambda (n) (gethash n commands)) recent)
-                      (sort (seq-remove (lambda (n) (member n recent)) names) #'string<))))))
-
 (defun eng/palette--edn-string (s)
   (let ((print-escape-newlines t) (print-escape-control-characters t))
     (prin1-to-string (substring-no-properties s))))
 
-(defun eng/palette--request (entries)
-  (concat "{:op :request :name :palette :args {:prompt \"M-x\" :entries ["
-          (mapconcat (lambda (e)
-                       (pcase-let ((`(,name ,keys) e))
-                         (concat "{:label " (eng/palette--edn-string name)
-                                 (if keys (concat " :keys " (eng/palette--edn-string keys)) "")
-                                 " :source \"Emacs\" :value " (eng/palette--edn-string name) "}")))
-                     entries " ")
-          "]}}\n"))
+(defun eng/palette--fragment (name keys)
+  "One palette entry in EDN for the command NAME with KEYS."
+  (let ((label (eng/palette--edn-string name)))
+    (concat "{:label " label
+            (if keys (concat " :keys " (eng/palette--edn-string keys)) "")
+            " :source \"Emacs\" :value " label "}")))
+
+;; Key lookups and escaping are cached per buffer because bindings are local.
+;; Applicability and history are evaluated on every opening.
+(cl-defstruct eng/palette--catalog generation maps names fragments)
+(defvar-local eng/palette--cache nil)
+(defvar eng/palette--generation 0)
+
+(defun eng/palette--build ()
+  (let ((leader (eng/palette--leader-keys))
+        (fragments (make-hash-table :test #'equal :size 8000))
+        names)
+    (mapatoms (lambda (s) (when (commandp s) (push (symbol-name s) names))))
+    (dolist (name names)
+      (puthash name (eng/palette--fragment name (eng/palette--keys (intern name) leader)) fragments))
+    (make-eng/palette--catalog :generation eng/palette--generation
+                               :maps (current-active-maps t)
+                               :names (sort names #'string<) :fragments fragments)))
+
+(defun eng/palette--cached ()
+  (unless (and eng/palette--cache
+               (= (eng/palette--catalog-generation eng/palette--cache) eng/palette--generation)
+               (equal (eng/palette--catalog-maps eng/palette--cache) (current-active-maps t)))
+    (setq eng/palette--cache (eng/palette--build)))
+  eng/palette--cache)
+
+(defvar eng/palette--warm-timer nil)
+
+(defun eng/palette--flush (&rest _)
+  "Forget the cache and rebuild it the next time Emacs is idle."
+  (cl-incf eng/palette--generation)
+  (unless (timerp eng/palette--warm-timer)
+    (setq eng/palette--warm-timer
+          (run-with-idle-timer 2 nil (lambda () (setq eng/palette--warm-timer nil) (eng/palette--cached))))))
+
+(add-hook 'after-load-functions #'eng/palette--flush)
+
+(defun eng/palette--entries ()
+  "M-x's command names for the current buffer, the most recently used first."
+  (let* ((pred (or read-extended-command-predicate (lambda (_ _) t)))
+         (buffer (current-buffer))
+         (fragments (eng/palette--catalog-fragments (eng/palette--cached)))
+         (keep (lambda (n) (let ((s (intern-soft n))) (and s (commandp s) (funcall pred s buffer)))))
+         (recent (seq-filter (lambda (n) (and (gethash n fragments) (funcall keep n)))
+                             (delete-dups (copy-sequence extended-command-history))))
+         (seen (make-hash-table :test #'equal)))
+    (dolist (n recent) (puthash n t seen))
+    (append recent
+            (seq-filter (lambda (n) (and (not (gethash n seen)) (funcall keep n)))
+                        (eng/palette--catalog-names (eng/palette--cached))))))
+
+(defun eng/palette--request (names)
+  (let ((fragments (eng/palette--catalog-fragments (eng/palette--cached))))
+    (concat "{:op :request :name :palette :args {:prompt \"M-x\" :entries ["
+            (mapconcat (lambda (n) (or (gethash n fragments) (eng/palette--fragment n nil))) names " ")
+            "]}}\n")))
 
 (defun eng/palette--choice (reply)
   "The chosen value in Dusk's REPLY, or nil when the palette was cancelled."
