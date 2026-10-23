@@ -163,10 +163,236 @@ Only the final expression's value is returned. Print intermediate results with p
         (for [{:keys [name description]} (skills)]
           {:name (str "skill:" name) :description description})))
 
+;; Delegation: a fresh model conversation with one bash tool, for independent verifiers.
+(def
+ delegate-system
+ "You are a delegated agent working for another agent. Your one tool, bash, runs in the working directory. Do the brief and nothing else. Do not edit tracked files in the working directory. Run every check you report, and never report a check you did not run. End with the report format the brief asks for.")
+
+(def
+ bash-tool
+ {:type "function",
+  :function
+  {:name "bash",
+   :description
+   "Run a bash command in the working directory. Each call is a fresh shell. Returns the exit code, stdout and stderr.",
+   :parameters
+   {:type "object",
+    :properties {:command {:type "string"}},
+    :required ["command"]}}})
+
+(defn-
+ clip
+ [s]
+ (if
+  (> (count s) 20000)
+  (str (subs s 0 20000) "\n[output truncated]")
+  s))
+
+(defn-
+ run-bash
+ [command]
+ (clip
+  (try
+   (let
+    [{:keys [exit out err]}
+     (p/shell
+      {:continue true, :out :string, :err :string, :timeout 600000}
+      "bash"
+      "-c"
+      command)]
+    (str "exit " exit "\n" out err))
+   (catch Exception e (str "error: " (ex-message e))))))
+
+(defn-
+ chat!
+ [model messages]
+ (let
+  [key
+   (or
+    (System/getenv "OPENROUTER_API_KEY")
+    (pi-key "openrouter")
+    (throw
+     (ex-info
+      "Set OPENROUTER_API_KEY or log in to OpenRouter in Pi"
+      {})))
+   resp
+   (http/post
+    "https://openrouter.ai/api/v1/chat/completions"
+    {:headers
+     {"Authorization" (str "Bearer " key),
+      "Content-Type" "application/json"},
+     :body
+     (json/generate-string
+      {:model model,
+       :messages messages,
+       :tools [bash-tool],
+       :usage {:include true}}),
+     :throw false,
+     :timeout 300000})]
+  (when-not
+   (= 200 (:status resp))
+   (throw
+    (ex-info (str "OpenRouter " (:status resp) ": " (:body resp)) {})))
+  (json/parse-string (:body resp) true)))
+
+(def delegate-model "claude/claude-opus-5-5")
+
+(defn-
+ openrouter-delegate
+ [model brief max-turns]
+ (loop
+  [messages
+   [{:role "system", :content delegate-system}
+    {:role "user", :content brief}]
+   turn
+   0
+   tokens
+   0]
+  (let
+   [{:keys [choices usage]}
+    (chat! model messages)
+    msg
+    (:message (first choices))
+    tokens
+    (+ tokens (or (:total_tokens usage) 0))
+    messages
+    (conj
+     messages
+     (cond->
+      {:role "assistant", :content (:content msg)}
+      (seq (:tool_calls msg))
+      (assoc :tool_calls (:tool_calls msg))))]
+   (cond
+    (empty? (:tool_calls msg))
+    {:reply (:content msg), :turns turn, :total-tokens tokens}
+    (>= turn max-turns)
+    {:reply "Stopped at the turn limit.",
+     :turns turn,
+     :total-tokens tokens}
+    :else
+    (recur
+     (into
+      messages
+      (for
+       [{:keys [id function]} (:tool_calls msg)]
+       {:role "tool",
+        :tool_call_id id,
+        :content
+        (run-bash
+         (:command (json/parse-string (:arguments function) true)))}))
+     (inc turn)
+     tokens)))))
+
+(defn-
+ claude-delegate
+ [model brief]
+ (let
+  [{:keys [exit out err]}
+   (p/shell
+    {:continue true,
+     :in brief,
+     :out :string,
+     :err :string,
+     :timeout 1200000}
+    (or (System/getenv "BBH_CLAUDE") "claude")
+    "-p"
+    "--model"
+    model
+    "--output-format"
+    "json"
+    "--system-prompt"
+    delegate-system
+    "--tools"
+    "Bash,Read,Grep,Glob"
+    "--allowedTools"
+    "Bash,Read,Grep,Glob"
+    "--setting-sources"
+    ""
+    "--strict-mcp-config"
+    "--mcp-config"
+    "{\"mcpServers\":{}}")
+   {:keys [result is_error num_turns usage]}
+   (try (json/parse-string out true) (catch Exception _ nil))]
+  (when
+   (or (not= 0 exit) is_error (nil? result))
+   (throw
+    (ex-info
+     (str
+      "claude delegate failed (exit "
+      exit
+      "): "
+      (or result err out))
+     {})))
+  {:reply result,
+   :turns num_turns,
+   :total-tokens
+   (reduce
+    +
+    (map
+     (fn* [%1#] (or (get usage %1#) 0))
+     [:input_tokens
+      :cache_creation_input_tokens
+      :cache_read_input_tokens
+      :output_tokens]))}))
+
+(defn
+ delegate
+ "Run BRIEF in a fresh conversation with one bash tool. MODEL is bbh-style: claude/ runs Claude Code, openrouter/ runs the bash loop, which stops after MAX-TURNS tool rounds. Returns {:reply :turns :total-tokens}."
+ [brief
+  &
+  {:keys [model max-turns], :or {model delegate-model, max-turns 40}}]
+ (cond
+  (str/starts-with? model "claude/")
+  (claude-delegate (subs model (count "claude/")) brief)
+  (str/starts-with? model "openrouter/")
+  (openrouter-delegate
+   (subs model (count "openrouter/"))
+   brief
+   max-turns)
+  :else
+  (throw
+   (ex-info
+    (str "Unknown provider in " model "; use claude/ or openrouter/")
+    {}))))
+
+(defn
+ pre-ship-verdict
+ "Verify GitHub PR NUMBER independently before it ships. A fresh agent checks the head out in a new directory, runs the checks and exercises the surface. :verdict is PASS, PASS+NOTES, FAIL, or nil when no verdict line came back."
+ [number]
+ (let
+  [brief
+   (str/join
+    \newline
+    [(str
+      "You verify GitHub PR #"
+      number
+      " independently before it lands. You did not write this change, so judge it from its artifacts.")
+     ""
+     (str
+      "1. Run `gh pr view "
+      number
+      " --json headRefOid,baseRefName,title,body` and `gh pr diff "
+      number
+      "`. Record the head SHA.")
+     "2. Create a new empty directory outside the working copy and check out the head SHA there from origin. Do not touch the working copy."
+     "3. Run the build and tests that AGENTS.md or the README names for this change."
+     "4. Exercise the real surface the change affects the way a user would, and record what you saw. Passing tests alone do not count."
+     "5. Compare the diff with the PR body and flag any mismatch."
+     ""
+     "Finish with a report that gives the head SHA, each check with its command and result, and what you could not verify. The last line must be exactly one of `VERDICT: PASS`, `VERDICT: PASS+NOTES` or `VERDICT: FAIL`. Use PASS+NOTES only for non-blocking issues you list. Use FAIL when a check fails or the surface cannot be exercised."])
+   result
+   (delegate brief)
+   [_ verdict]
+   (re-find
+    #"VERDICT:[ ]*(PASS[+]NOTES|PASS|FAIL)"
+    (or (:reply result) ""))]
+  (assoc result :verdict verdict)))
+
+
 (ns user
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
-            [bbh.env :refer [jev-classify-task]]
+            [bbh.env :refer [jev-classify-task delegate pre-ship-verdict]]
             [clojure.string :as str]))
 
 (defn sh
