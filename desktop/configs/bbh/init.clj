@@ -419,3 +419,50 @@ Only the final expression's value is returned. Print intermediate results with p
       (throw (ex-info (str "Expected one match in " path ", found " hits) {})))
     (spit path (str/replace-first text old new))
     :ok))
+
+;; Pstack workflow runs. A run is a journal under ~/.local/state/bbh/workflows; the gates run in this REPL,
+;; so a claim alone never advances a phase. Start a run before editing any file.
+;; The REPL process does not have bbh's source on its classpath, so add it from the repo beside this file.
+(require '[babashka.classpath :as cp])
+(cp/add-classpath (str (fs/path (fs/parent (fs/parent (fs/parent (fs/real-path (fs/expand-home "~/.config/bbh/init.clj")))))
+                               "build" "bbh" "src")))
+(require '[bbh.workflow :as wf])
+
+(defn- print-gates [results]
+  (doseq [g results]
+    (println (str "  [" (cond (:pending? g) "wait" (:pass? g) "ok" :else "FAIL") "] " (name (:kind g))
+                  (or (:cmd g) (:path g) (:criteria g))))))
+
+(defn wf-start
+  "Start a workflow run before editing. WORKFLOW is a keyword such as :change or :bug-fix. OPTS takes :task :cwd
+  :repro :check :bench. Returns the run id."
+  [workflow opts]
+  (let [id (wf/start! workflow opts)]
+    (println (str "run " id " in phase " (name (:phase (wf/status id)))))
+    id))
+
+(defn wf-status
+  "Status of run ID, or of the latest run."
+  ([] (wf-status nil))
+  ([id]
+   (let [st (wf/status (or id (wf/latest-id) (throw (ex-info "no runs yet" {}))))]
+     (select-keys st [:id :workflow :phase :status :block-reason :brief :evidence]))))
+
+(defn wf-attest
+  "Attest the current phase of run ID (default: latest) with CLAIM. The gates run now and print each result."
+  ([claim] (wf-attest nil claim))
+  ([id claim]
+   (let [id (or id (wf/latest-id) (throw (ex-info "no runs yet" {})))
+         {:keys [outcome results]} (wf/attest! id claim)]
+     (println (str "attest: " (name outcome)))
+     (print-gates results)
+     (wf-status id))))
+
+(defn wf-review
+  "Run a fresh reviewer on the current verdict gate of run ID (default: latest). Agents never record a human verdict."
+  ([] (wf-review nil))
+  ([id]
+   (let [id (or id (wf/latest-id) (throw (ex-info "no runs yet" {})))
+         {:keys [verdict reviewer]} (wf/review! id)]
+     (println (str "review: " (name verdict) " by " reviewer))
+     (wf-status id))))
