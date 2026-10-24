@@ -355,44 +355,13 @@ Only the final expression's value is returned. Print intermediate results with p
     (str "Unknown provider in " model "; use claude/ or openrouter/")
     {}))))
 
-(defn
- pre-ship-verdict
- "Verify GitHub PR NUMBER independently before it ships. A fresh agent checks the head out in a new directory, runs the checks and exercises the surface. :verdict is PASS, PASS+NOTES, FAIL, or nil when no verdict line came back."
- [number]
- (let
-  [brief
-   (str/join
-    \newline
-    [(str
-      "You verify GitHub PR #"
-      number
-      " independently before it lands. You did not write this change, so judge it from its artifacts.")
-     ""
-     (str
-      "1. Run `gh pr view "
-      number
-      " --json headRefOid,baseRefName,title,body` and `gh pr diff "
-      number
-      "`. Record the head SHA.")
-     "2. Create a new empty directory outside the working copy and check out the head SHA there from origin. Do not touch the working copy."
-     "3. Run the build and tests that AGENTS.md or the README names for this change."
-     "4. Exercise the real surface the change affects the way a user would, and record what you saw. Passing tests alone do not count."
-     "5. Compare the diff with the PR body and flag any mismatch."
-     ""
-     "Finish with a report that gives the head SHA, each check with its command and result, and what you could not verify. The last line must be exactly one of `VERDICT: PASS`, `VERDICT: PASS+NOTES` or `VERDICT: FAIL`. Use PASS+NOTES only for non-blocking issues you list. Use FAIL when a check fails or the surface cannot be exercised."])
-   result
-   (delegate brief)
-   [_ verdict]
-   (re-find
-    #"VERDICT:[ ]*(PASS[+]NOTES|PASS|FAIL)"
-    (or (:reply result) ""))]
-  (assoc result :verdict verdict)))
+
 
 
 (ns user
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
-            [bbh.env :refer [jev-classify-task delegate pre-ship-verdict]]
+            [bbh.env :refer [jev-classify-task delegate]]
             [clojure.string :as str]))
 
 (defn sh
@@ -422,16 +391,11 @@ Only the final expression's value is returned. Print intermediate results with p
 
 ;; Pstack workflow runs. A run is a journal under ~/.local/state/bbh/workflows; the gates run in this REPL,
 ;; so a claim alone never advances a phase. Start a run before editing any file.
-;; The REPL process does not have bbh's source on its classpath, so add it from the repo beside this file.
-(require '[babashka.classpath :as cp])
-(cp/add-classpath (str (fs/path (fs/parent (fs/parent (fs/parent (fs/real-path (fs/expand-home "~/.config/bbh/init.clj")))))
-                               "build" "bbh" "src")))
 (require '[bbh.workflow :as wf])
 
 (defn- print-gates [results]
   (doseq [g results]
-    (println (str "  [" (cond (:pending? g) "wait" (:pass? g) "ok" :else "FAIL") "] " (name (:kind g))
-                  (or (:cmd g) (:path g) (:criteria g))))))
+    (println (str "  [" (cond (:pending? g) "wait" (:pass? g) "ok" :else "FAIL") "] " (wf/describe-gate g)))))
 
 (defn wf-start
   "Start a workflow run before editing. WORKFLOW is a keyword such as :change or :bug-fix. OPTS takes :task :cwd

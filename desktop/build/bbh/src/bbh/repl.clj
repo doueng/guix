@@ -67,9 +67,10 @@
   (let [port-file (str (fs/path dir "repl.port"))
         log (fs/file dir "repl.log")
         _ (fs/delete-if-exists port-file)
-        proc (p/process {:dir cwd :extra-env {"BBH_PORT_FILE" port-file}
-                         :out :append :out-file log :err :append :err-file log}
-                        "bb" "-e" bootstrap)
+        config (System/getProperty "babashka.config")
+        proc (apply p/process {:dir cwd :extra-env {"BBH_PORT_FILE" port-file}
+                               :out :append :out-file log :err :append :err-file log}
+                    (concat ["bb"] (when config ["--config" config]) ["-e" bootstrap]))
         port (wait-for-port port-file proc)
         sock (java.net.Socket. "127.0.0.1" (int port))
         conn {:proc proc :port port :sock sock

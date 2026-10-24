@@ -283,7 +283,7 @@
                         (str/replace #"[/\\:]" "-"))]
            (str (fs/path agent "sessions" (str "--" slug "--")))))))))
 
-(defn- describe-gate [g]
+(defn describe-gate [g]
   (case (:kind g)
     :command (cond (:skipped? g) "optional check skipped, none given at start"
                    (:detail g) (:detail g)
@@ -347,6 +347,11 @@ RUN defaults to the latest run.")
         "verdict" (let [id (run-id)]
                     (when-not (contains? flags :human)
                       (throw (ex-info "agents run wf review; wf verdict --human NAME is for a person" {})))
+                    (when-not (System/console)
+                      (throw (ex-info "wf verdict needs a terminal; agents have none, so they run wf review" {})))
+                    (print (str "Type the run id " id " to confirm: ")) (flush)
+                    (when-not (= id (str/trim (or (read-line) "")))
+                      (throw (ex-info "confirmation did not match the run id; no verdict recorded" {})))
                     (verdict! id (:human flags) (keyword (:verdict flags)) (:note flags))
                     (print-status (status id)))
         (do (println usage) (System/exit 2)))

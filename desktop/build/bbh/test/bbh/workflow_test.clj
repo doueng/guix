@@ -171,4 +171,18 @@
         expected (set/union covered manual)]
     (is (= expected ts-routes))
     (is (= expected init-routes))
-    (is (empty? (set/intersection covered manual)))))
+    (is (empty? (set/intersection covered manual)))
+    ;; The route table in the poteto-mode skill is the one a human reads. It must agree too.
+    (let [skill (slurp "../../pi/agent/skills/pstack/poteto-mode/SKILL.md")
+          rows (for [[_ routes workflow] (re-seq #"(?m)^\| ([\w, ]+?) \| ([\w-]+) \|" skill)
+                     r (str/split routes #", ")
+                     :when (not= "Route" r)]
+                 [r workflow])
+          skill-routes (set (map first rows))
+          skill-covered (set (for [[r w] rows :when (not= "manual" w)] r))]
+      (is (= expected skill-routes))
+      (is (= covered skill-covered))
+      (is (every? (fn [[r w]]
+                    (or (= "manual" w)
+                        (some #{r} (:routes (wf/load-workflow w)))))
+                  rows)))))
