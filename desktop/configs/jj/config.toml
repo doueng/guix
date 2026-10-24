@@ -7,7 +7,9 @@ editor = "nvim"
 pager = "less"
 default-command = "status"
 paginate = "never"
-diff-formatter = ":git"
+# Plain `jj diff` (and jjui's fullscreen diff) goes through jj-diff-pierre, which
+# pipes git-format output into pierre-diff-ansi for syntax highlighting.
+diff-formatter = "pierre"
 conflict-marker-style = "diff-experimental"
 diff-editor = ":builtin"
 merge-editor = ":builtin"
@@ -192,6 +194,10 @@ prepare-branch = ["util", "exec", "--", "bash", "-c", """
   git checkout "$branch"
   """, ""]
 isempty = [ "log", "-r", "@", "-T", """if(empty && description.first_line() == "", "true", "false")""", "--no-graph" ]
+
+[merge-tools.pierre]
+program = "jj-diff-pierre"
+diff-args = ["$left", "$right"]
 
 [merge-tools.difft]
 diff-args = ["--color=always", "$left", "$right"]
