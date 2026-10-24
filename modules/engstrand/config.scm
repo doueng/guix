@@ -1,6 +1,5 @@
 (define-module (engstrand config)
   #:use-module (engstrand features agent-control)
-  #:use-module (engstrand features containers)
   #:use-module (engstrand features desktop)
   #:use-module (engstrand features development)
   #:use-module (engstrand features dotfiles)
@@ -36,7 +35,7 @@
             #:user-name "engstrand"
             #:full-name "Engstrand"
             #:email ""
-            #:user-groups '("wheel" "netdev" "audio" "video" "cgroup"))
+            #:user-groups '("wheel" "netdev" "audio" "video"))
            ;; Supply the package value rde needs without adopting its patched
            ;; Shepherd or adding a Home Shepherd service during this migration.
            (feature
@@ -46,7 +45,6 @@
            (feature-familiar-shell)
            (feature-familiar-editor)
            (feature-familiar-development)
-           (feature-familiar-containers)
            ;; This precedes dotfiles because Herdr activation consumes its live config.
            (feature-familiar-herdr)
            (feature-familiar-moshi)
