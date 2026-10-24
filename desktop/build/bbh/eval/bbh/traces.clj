@@ -48,23 +48,13 @@
        (partition-all 2)
        (mapv second)))
 
-(defn- trial-result
-  "The task, profile and verdict of an eval:compare or Harbor trial result."
-  [trial]
-  (let [result (json/parse-string (slurp (str (fs/path trial "result.json"))) true)]
-    (if (:task_name result)
-      {:task (:task_name result)
-       :profile (str "harbor " (get-in result [:agent_info :name]))
-       :passed (some->> (get-in result [:verifier_result :rewards :reward]) (== 1))
-       :run (fs/parent trial)}
-      (assoc result :run (ancestor-with trial "manifest.json")))))
-
 (defn load-trace [dir]
   (let [dir (str (fs/canonicalize dir))
         messages (transcript/load-messages dir)
         trial (ancestor-with dir "result.json")
-        result (when trial (trial-result trial))
-        run-name (some->> (:run result) fs/components (take-last 2) (str/join "/"))]
+        run (ancestor-with dir "manifest.json")
+        result (when trial (json/parse-string (slurp (str (fs/path trial "result.json"))) true))
+        run-name (some->> run fs/components (take-last 2) (str/join "/"))]
     {:dir dir
      :source (if trial :eval :real)
      :task (:task result)

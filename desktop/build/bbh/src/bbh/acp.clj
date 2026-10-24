@@ -51,8 +51,8 @@
 (def ^:private sessions (atom {}))
 
 (defn- config-options
-  "The model selector in the configOptions form that newer ACP clients, such as
-  Harbor's runner, read instead of the models field."
+  "The model selector in the configOptions form that newer ACP clients read
+  instead of the models field."
   [s]
   (let [current (:model @s)]
     [{:id "model" :name "Model" :category "model" :type "select" :currentValue current
