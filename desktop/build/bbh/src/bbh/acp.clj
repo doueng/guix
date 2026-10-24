@@ -1,7 +1,6 @@
 (ns bbh.acp
   "bbh as an Agent Client Protocol agent over stdio, for Emacs agent-shell."
   (:require [babashka.fs :as fs]
-            [bbh.claude]
             [bbh.models :as models]
             [bbh.repl :as repl]
             [bbh.session :as session]
@@ -36,14 +35,25 @@
 (defn- event->update [{:keys [type] :as ev}]
   (case type
     :text {:sessionUpdate "agent_message_chunk" :content {:type "text" :text (:text ev)}}
+    :thought {:sessionUpdate "agent_thought_chunk" :content {:type "text" :text (:text ev)}}
     :tool-call {:sessionUpdate "tool_call" :toolCallId (:id ev) :title (title (:code ev)) :kind "execute"
                 :status "in_progress" :rawInput {:code (:code ev)}
                 :content (text-block (clojure-block (:code ev)))}
     :tool-result {:sessionUpdate "tool_call_update" :toolCallId (:id ev) :status (name (:status ev))
                   :content (text-block (str (clojure-block (:code ev)) "\n\n```\n" (:text ev) "\n```"))}
+    ;; _meta.bbh.request is one model request's tokens and whether its prefix
+    ;; came from the prompt cache, which the Doom config shows.
     :usage (cond-> {:sessionUpdate "usage_update" :cost {:amount (:spent ev) :currency "USD"}}
              (:used ev) (assoc :used (:used ev))
-             (:size ev) (assoc :size (:size ev)))))
+             (:size ev) (assoc :size (:size ev))
+             (:request ev) (assoc :_meta {:bbh {:request (:request ev)}}))))
+
+(defn- turn-usage
+  "A turn's tokens in the PromptResponse usage form."
+  [{:keys [input cached written output thinking requests]}]
+  (when requests
+    {:inputTokens input :outputTokens output :cachedReadTokens cached :cachedWriteTokens written
+     :thoughtTokens thinking :totalTokens (+ input output)}))
 
 (defn- data-dir []
   (fs/path (or (System/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh" "conversations"))
@@ -125,8 +135,9 @@
         (swap! s assoc :busy true)
         (future
           (let [response (try
-                           {:id id :result {:stopReason ({:end-turn "end_turn" :cancelled "cancelled"}
-                                                         (session/prompt! s text))}}
+                           (let [stop ({:end-turn "end_turn" :cancelled "cancelled"} (session/prompt! s text))]
+                             {:id id :result (cond-> {:stopReason stop}
+                                               (turn-usage (:turn-usage @s)) (assoc :usage (turn-usage (:turn-usage @s))))})
                            (catch Exception e
                              {:id id :error {:code -32000 :message (or (ex-message e) (str e))}}))]
             (swap! s assoc :busy false)

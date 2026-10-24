@@ -1,7 +1,8 @@
 (ns bbh.session
   "A conversation: its transcript, REPL and model engine, reported as events.
 
-  Events are maps with a :type of :text, :tool-call, :tool-result or :usage."
+  Events are maps with a :type of :text, :thought, :tool-call, :tool-result or
+  :usage."
   (:require [babashka.fs :as fs]
             [bbh.context :as context]
             [bbh.delimiters :as delimiters]
@@ -34,6 +35,7 @@
          :compaction (transcript/load-compaction dir)
          :interrupted false :evaluating false :cancel nil
          :manifest repl/defaults :repl nil :spent 0.0 :limits nil
+         :context-size nil :last-input nil :turn-usage nil
          :code-lock (Object.)}))
 
 (defn emit! [s event]
@@ -80,11 +82,40 @@
     (some-> cancel (apply []))
     (when evaluating (some-> repl repl/kill!))))
 
+(defn- add-request [turn {:keys [input cached written output thinking cache] :as request}]
+  (-> (or turn {})
+      (update :requests (fnil inc 0))
+      (update :input (fnil + 0) input)
+      (update :cached (fnil + 0) cached)
+      (update :written (fnil + 0) (or written 0))
+      (update :output (fnil + 0) (or output 0))
+      (update :thinking (fnil + 0) (or thinking 0))
+      (cond-> (= :miss cache) (update :misses (fnil conj []) (select-keys request [:n :ratio :input])))))
+
 (defn add-usage!
-  "Report a sample's tokens in context and its cost."
-  [s {:keys [used size cost]}]
-  (let [spent (:spent (swap! s update :spent + (or cost 0)))]
-    (emit! s {:type :usage :used used :size size :spent spent})))
+  "Account for one usage report, a map of :input :cached :written :output
+  :thinking :cost and :size, any of which may be missing. A report with :input
+  is one model request, classified against the request before it: :cold when
+  there was none to reuse, :miss when less than half of that request's input
+  was read back from the cache, and :hit otherwise."
+  [s {:keys [input cost size] :as report}]
+  (let [{:keys [last-input turn-usage]} @s
+        cached (or (:cached report) 0)
+        request (when input
+                  (assoc (select-keys report [:input :written :output :thinking])
+                         :cached cached
+                         :n (inc (:requests turn-usage 0))
+                         :cache (cond (nil? last-input) :cold
+                                      (< cached (* 0.5 last-input)) :miss
+                                      :else :hit)
+                         :ratio (if (pos? input) (/ (double cached) input) 0.0)))
+        st (swap! s #(cond-> (-> % (update :spent + (or cost 0))
+                                 (update-in [:turn-usage :cost] (fnil + 0) (or cost 0)))
+                       size (assoc :context-size size)
+                       request (-> (assoc :last-input input)
+                                   (update :turn-usage add-request request))))]
+    (emit! s {:type :usage :used (:last-input st) :size (:context-size st) :spent (:spent st)
+              :request request})))
 
 (defn system-prompt!
   "Refresh the manifest and return the system prompt, noting invalid entries."
@@ -157,63 +188,95 @@
           :else
           (let [{:keys [message usage]}
                 (try ((:sample engine)
-                      {:messages (context/summary-request (:summary compaction) (subvec messages from cut) focus)}
+                      {:messages (context/summary-request (:summary compaction) (subvec messages from cut) focus)
+                       :effort (:effort manifest)}
                       {:on-text (fn [_]) :on-open #(swap! s assoc :cancel %)})
                      (finally (swap! s assoc :cancel nil)))
                 summary (str/trim (str (:content message)))]
-            (swap! s update :spent + (or (:cost usage) 0))
+            (add-usage! s {:cost (:cost usage)})
             (cond (:interrupted @s) "Compaction was interrupted."
                   (str/blank? summary) "Compaction failed because the model returned an empty summary."
-                  :else (let [c (transcript/append-compaction! dir {:first-kept cut :summary summary})]
-                          (swap! s assoc :compaction c)
+                  :else (let [c (transcript/append-compaction!
+                                 dir {:first-kept cut :summary summary
+                                      :trim-before (context/turn-start messages)})]
+                          ;; The next request has a new prefix, so it starts the cache over.
+                          (swap! s assoc :compaction c :last-input nil)
                           (str "Compacted " (- cut from) " messages into a summary of about "
                                (context/tokens summary) " tokens.")))))))
 
 (defn- note! [s text]
   (emit! s {:type :text :text (str "[bbh] " text "\n\n")}))
 
-(defn- sample! [s system]
-  (let [{:keys [engine manifest]} @s]
+(defn- sample! [s system messages]
+  (let [{:keys [engine manifest dir]} @s]
     (try
       ((:sample engine)
-       {:messages (into [{:role "system" :content system}] (context s))
+       {:messages (into [{:role "system" :content system}] messages)
         :tools [{:type "function"
                  :function {:name "clojure" :description (:tool-description manifest)
-                            :parameters tool-input-schema}}]}
+                            :parameters tool-input-schema}}]
+        :effort (:effort manifest)
+        :max-tokens (:max-tokens manifest)
+        :session-id (str (fs/file-name dir))}
        {:on-text #(when (seq %) (emit! s {:type :text :text %}))
+        :on-thought #(when (seq %) (emit! s {:type :thought :text %}))
         :on-open #(swap! s assoc :cancel %)
         :on-retry #(note! s %)})
       (finally (swap! s assoc :cancel nil)))))
 
+(def quiet-rounds
+  "Tool rounds in a row without text for the user before bbh asks for an update."
+  5)
+
+(def ^:private max-reminders 3)
+
+(def quiet-reminder
+  "[bbh] The user hasn't heard from you in a while. Say in a few words what you're doing, then continue.")
+
+(defn- request-context
+  "The context for the next request, compacting first when it is too large."
+  [s]
+  (let [ctx (context s)]
+    (if (> (context/tokens ctx) (:compact-at-tokens (:manifest @s)))
+      (do (note! s (compact! s nil)) (context s))
+      ctx)))
+
 (defmethod turn! :loop [s]
-  (loop [round 1 overflowed false]
+  (loop [round 1 overflowed false quiet 0 reminders 0]
     (let [system (system-prompt! s)
-          _ (when (> (context/tokens (context s)) (:compact-at-tokens (:manifest @s)))
-              (note! s (compact! s nil)))
           result (when-not (:interrupted @s)
-                   (try (sample! s system)
+                   (try (sample! s system (request-context s))
                         (catch clojure.lang.ExceptionInfo e
                           (if (and (:overflow (ex-data e)) (not overflowed)) ::overflow (throw e)))))]
       (if (= ::overflow result)
         (do (note! s (str "The request exceeded the model's context. " (compact! s nil)))
-            (when-not (:interrupted @s) (recur round true)))
+            (when-not (:interrupted @s) (recur round true quiet reminders)))
         (let [{:keys [message usage]} result
-              message (cond-> message (:interrupted @s) (dissoc :tool_calls))]
-          (when (or (seq (:content message)) (seq (:tool_calls message)))
+              message (cond-> message (:interrupted @s) (dissoc :tool_calls))
+              calls (:tool_calls message)]
+          (when (or (seq (:content message)) (seq calls))
             (record! s message))
           (when usage
-            (add-usage! s {:used (:prompt_tokens usage) :cost (:cost usage)}))
-          (when (seq (:tool_calls message))
-            (doseq [call (:tool_calls message)]
-              (record! s {:role "tool" :tool_call_id (:id call) :content (call-tool! s call)}))
-            (cond (:interrupted @s) nil
-                  (< round max-rounds) (recur (inc round) false)
-                  :else (swap! s update :notes conj (str "The previous turn stopped after " max-rounds " tool rounds.")))))))))
+            (add-usage! s usage))
+          (when (seq calls)
+            ;; The reminder goes into the tool result as it is recorded, so the
+            ;; prefix of every later request stays the same.
+            (let [quiet (if (str/blank? (:content message)) (inc quiet) 0)
+                  remind? (and (>= quiet quiet-rounds) (< reminders max-reminders))
+                  last-id (:id (peek calls))]
+              (doseq [call calls]
+                (let [text (call-tool! s call)]
+                  (record! s {:role "tool" :tool_call_id (:id call)
+                              :content (cond-> text (and remind? (= last-id (:id call)))
+                                         (str "\n\n" quiet-reminder))})))
+              (cond (:interrupted @s) nil
+                    (< round max-rounds) (recur (inc round) false (if remind? 0 quiet) (cond-> reminders remind? inc))
+                    :else (swap! s update :notes conj (str "The previous turn stopped after " max-rounds " tool rounds."))))))))))
 
 (defn set-model! [s model]
   (let [engine ((:make-engine @s) model)]
     (stop-engine! s)
-    (swap! s assoc :model model :engine engine)
+    (swap! s assoc :model model :engine engine :last-input nil :context-size nil)
     model))
 
 (defn- conversation-ids
@@ -257,6 +320,7 @@
             messages (transcript/load-messages dir)
             _ (stop-engine! s)
             _ (swap! s assoc :dir dir :messages messages :compaction (transcript/load-compaction dir)
+                     :last-input nil
                      :notes ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
             problem (restart-repl! s)
             reply (some #(when (and (= "assistant" (:role %)) (not (str/blank? (:content %)))) (:content %))
@@ -322,7 +386,7 @@
   "Handle one user input: a bbh command, an env reply, or a model turn.
   Returns :end-turn or :cancelled, and throws for a /command nothing handles."
   [s text]
-  (swap! s assoc :interrupted false)
+  (swap! s assoc :interrupted false :turn-usage nil)
   (let [[_ cmd args] (re-matches #"(?s)/(\S+)\s*(.*)" text)]
     (if-let [{:keys [run]} (get commands cmd)]
       (do (emit! s {:type :text :text (run s args)}) :end-turn)

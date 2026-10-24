@@ -32,8 +32,8 @@
                     :task (let [{:keys [fail error]} (t/run-tests 'bbh.init-test)]
                             (System/exit (if (zero? (+ fail error)) 0 1)))}
          test {:doc "Run the bbh tests."
-               :requires ([clojure.test :as t] [bbh.llm-test] [bbh.context-test] [bbh.delimiters-test] [bbh.session-test] [bbh.acp-test] [bbh.claude-test] [bbh.env-test] [bbh.eval-test] [bbh.init-test])
-               :task (let [{:keys [fail error]} (t/run-tests 'bbh.llm-test 'bbh.context-test 'bbh.delimiters-test 'bbh.session-test 'bbh.acp-test 'bbh.claude-test 'bbh.env-test 'bbh.eval-test 'bbh.init-test)]
+               :requires ([clojure.test :as t] [bbh.llm-test] [bbh.context-test] [bbh.delimiters-test] [bbh.session-test] [bbh.acp-test] [bbh.claude-test] [bbh.env-test] [bbh.eval-test] [bbh.init-test] [bbh.workflow-test])
+               :task (let [{:keys [fail error]} (t/run-tests 'bbh.llm-test 'bbh.context-test 'bbh.delimiters-test 'bbh.session-test 'bbh.acp-test 'bbh.claude-test 'bbh.env-test 'bbh.eval-test 'bbh.init-test 'bbh.workflow-test)]
                        (System/exit (if (zero? (+ fail error)) 0 1)))}
          try {:doc "bb try MODEL PROMPT...: run real prompts through agent-shell headlessly."
               :task (let [[model & prompts] *command-line-args*

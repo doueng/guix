@@ -1,6 +1,8 @@
 (ns bbh.models
   "Model ids are PROVIDER/MODEL. The provider decides which engine runs turns."
-  (:require [bbh.llm :as llm]
+  (:require [bbh.claude]
+            [bbh.llm :as llm]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
@@ -12,18 +14,21 @@
   (or (System/getenv "BBH_MODEL") "claude/haiku"))
 
 (defn- script
-  "Replies read in order from an EDN file of steps: a string answers, and
-  {:code ...} calls the clojure tool. For tests and demos."
+  "Replies read in order from an EDN file of steps: a string answers, {:code ...}
+  calls the clojure tool, and {:text ...} answers too. A map step's :usage is
+  the request's usage record. For tests and demos."
   [path]
   (let [steps (atom (edn/read-string (slurp path)))]
     (fn [_ {:keys [on-text]}]
-      (let [step (or (first @steps) "(script exhausted)")]
+      (let [step (or (first @steps) "(script exhausted)")
+            text (if (string? step) step (:text step))]
         (swap! steps rest)
-        (if (string? step)
-          (do (on-text step) {:message {:role "assistant" :content step}})
+        (if text
+          (do (on-text text) {:message {:role "assistant" :content text} :usage (:usage step)})
           {:message {:role "assistant" :content ""
                      :tool_calls [{:id (str (random-uuid)) :type "function"
-                                   :function {:name "clojure" :arguments (cheshire.core/generate-string step)}}]}})))))
+                                   :function {:name "clojure" :arguments (json/generate-string (select-keys step [:code]))}}]}
+           :usage (:usage step)})))))
 
 (defn engine [id]
   (let [[provider model] (str/split id #"/" 2)]

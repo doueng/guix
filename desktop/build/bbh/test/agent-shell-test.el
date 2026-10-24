@@ -269,3 +269,35 @@
       (should (bbh-test--wait (lambda () (bbh-test--idle-p buf)) 15))
       (should (< (- (float-time) start) 10)))
     (should (string-match-p "user interrupted the evaluation" (bbh-test--text buf)))))
+
+(ert-deftest bbh-token-counts-are-compact ()
+  (should (equal (mapcar #'eng/bbh--tokens '(950 1200 45000 1000000 1048576 2500000))
+                 '("950" "1.2k" "45k" "1m" "1m" "2.5m"))))
+
+(ert-deftest bbh-usage-shows-cache-hits-and-misses ()
+  (save-window-excursion
+    (delete-other-windows)
+    (let* ((script (make-temp-file "bbh-usage" nil ".edn"
+                                   (concat "[{:code \"(+ 40 2)\" :usage {:input 1000 :cached 0 :written 1000 :output 10 :size 200000 :cost 0.01}}"
+                                           " {:code \"(* 6 7)\" :usage {:input 1100 :cached 1000 :written 100 :output 10}}"
+                                           " {:text \"The answer is 42.\" :usage {:input 1200 :cached 100 :written 1100 :output 20 :cost 0.002}}]")))
+           (shell (bbh-test--start))
+           (composer (eng/bbh-layout shell))
+           (transcript (buffer-local-value 'eng/bbh-transcript shell)))
+      (insert (concat "/model script/" script))
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+      (should-not (eng/bbh-usage-header shell))
+      (insert "add forty")
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 60))
+      (should (bbh-test--wait (lambda () (string-match-p "^Usage:" (bbh-test--text transcript))) 10))
+      (should (string-match-p
+               (regexp-quote "Usage: 3 requests · 3.3k in, 33% cached · miss on request 3 (8% of 1.2k) · 40 out · $0.0120")
+               (bbh-test--text transcript)))
+      (should (equal (substring-no-properties (eng/bbh-usage-header shell))
+                     "ctx 1.2k/200k · cache miss 8% · $0.01"))
+      ;; Batch Emacs renders no header line, so evaluate the composer's :eval form.
+      (with-current-buffer composer
+        (should (string-match-p "Ready · C-n send   ctx 1\\.2k/200k · cache miss 8% · \\$0\\.01   RET newline"
+                                (eval (cadr header-line-format) t)))))))

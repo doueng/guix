@@ -5,7 +5,6 @@
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [bbh.claude]
             [bbh.models :as models]
             [bbh.session :as session]
             [clojure.string :as str]))
@@ -210,8 +209,13 @@
     (keyword (second m))))
 
 (def default-review-model
-  "A reviewer must be stronger than the agent it judges. Haiku accepted a sloppy mechanism note that Sonnet rejected."
-  "claude/sonnet")
+  "A reviewer must be at least as strong as the agent it judges. Haiku accepted a sloppy mechanism note that Sonnet
+  rejected, and the agents doing the work include Opus."
+  "claude/opus")
+
+(def ^:private verdict-nudges
+  "Follow-ups asking for the missing VERDICT line. A turn that ends in text is a report, not always the end of the work."
+  2)
 
 (defn review!
   "Runs a fresh bbh conversation that judges the current verdict gate, then records its verdict.
@@ -236,6 +240,10 @@
     (try
       (session/start-repl! s)
       (session/prompt! s brief)
+      (loop [n 0]
+        (when (and (< n verdict-nudges) (not (parse-verdict (last-assistant-text (:messages @s)))))
+          (session/prompt! s "Your reply has no VERDICT line yet. Finish the review, then end with one line, VERDICT: pass or VERDICT: fail, and a short reason.")
+          (recur (inc n))))
       (let [text (last-assistant-text (:messages @s))
             v (parse-verdict text)]
         (when-not v
@@ -245,9 +253,26 @@
         {:verdict v :reviewer (str "bbh-review/" (fs/file-name dir)) :reply text})
       (finally (session/close! s)))))
 
-(defn latest-id []
-  (when (fs/exists? (state-root))
-    (->> (fs/list-dir (state-root)) (map fs/file-name) sort last)))
+(defn- run-cwd [id]
+  (try (some-> (journal-file id) slurp str/split-lines first edn/read-string :cwd)
+       (catch Exception _ nil)))
+
+(defn latest-id
+  "The newest run started for DIR or a directory containing it, or the newest run of all without DIR."
+  ([] (latest-id nil))
+  ([dir]
+   (when (fs/exists? (state-root))
+     (let [here (when dir (str (fs/canonicalize dir)))
+           mine? (fn [id] (or (nil? here)
+                              (when-let [cwd (run-cwd id)]
+                                (or (= here cwd) (str/starts-with? here (str cwd "/"))))))]
+       (->> (fs/list-dir (state-root)) (map (comp str fs/file-name)) sort reverse (filter mine?) first)))))
+
+(defn default-id
+  "The run a command means when it names none: $WF_RUN, else the newest run for the current directory.
+  Other agents' runs in other repositories never qualify."
+  []
+  (or (System/getenv "WF_RUN") (latest-id (fs/cwd))))
 
 (defn- configured-session-dir [files]
   (reduce (fn [acc file]
@@ -315,7 +340,7 @@
   wf review [RUN]                       fresh reviewer judges the current verdict gate
   wf verdict [RUN] --human NAME --verdict pass|fail [--note TEXT]
   wf session-dir [WORKSPACE] [DIR]
-RUN defaults to the latest run.")
+RUN defaults to $WF_RUN, else the newest run started for this directory or one containing it.")
 
 (defn- parse-args [args]
   (loop [xs args, pos [], flags {}]
@@ -328,7 +353,7 @@ RUN defaults to the latest run.")
 (defn -main [& argv]
   (let [[cmd & more] argv
         {:keys [pos flags]} (parse-args more)
-        run-id (fn [] (or (first pos) (latest-id) (throw (ex-info "no runs yet" {}))))]
+        run-id (fn [] (or (first pos) (default-id) (throw (ex-info "no runs for this directory; pass RUN or set WF_RUN" {}))))]
     (try
       (case cmd
         "start" (print-status (status (start! (keyword (first pos))

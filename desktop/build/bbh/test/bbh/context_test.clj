@@ -15,15 +15,21 @@
    call
    {:role "tool" :tool_call_id "c1" :content "0123456789abcdefghij"}])
 
-(deftest view-trims-tool-output-before-the-current-turn
-  (is (= [{:role "user" :content "read f"}
+(deftest view-only-grows-between-compactions
+  (is (= transcript (context/view transcript nil {:trim-tool-chars 10})))
+  (let [before (context/view (subvec transcript 0 4) nil {:trim-tool-chars 10})
+        after (context/view transcript nil {:trim-tool-chars 10})]
+    (is (= before (subvec after 0 (count before))))))
+
+(deftest view-trims-tool-output-below-the-compactions-mark
+  (is (= [{:role "user" :content "[bbh] Earlier messages in this conversation were compacted into this summary:\n\nS"}
           call
           {:role "tool" :tool_call_id "c1" :content "01234\n[... 10 chars elided ...]\nfghij"}
           {:role "assistant" :content "done"}
           {:role "user" :content "again"}
           call
           {:role "tool" :tool_call_id "c1" :content "0123456789abcdefghij"}]
-         (context/view transcript nil {:trim-tool-chars 10}))))
+         (context/view transcript {:first-kept 1 :summary "S" :trim-before 4} {:trim-tool-chars 10}))))
 
 (deftest view-replaces-compacted-messages-with-the-summary
   (is (= [{:role "user" :content "[bbh] Earlier messages in this conversation were compacted into this summary:\n\nRead f."}

@@ -20,6 +20,8 @@ The Emacs layout has a transcript above a persistent composer. The composer keep
 | `M-p`, `M-n` | Browse prompt history. |
 | `C-c C-p` | Peek at the last response. |
 
+The composer header shows the context in use, how much of the latest model request came from the prompt cache, and the session's cost, for example `ctx 45k/1m · cache 98% · $0.04`. A request reads `cache miss` when less than half of the previous request's input was read back from the cache, and `cache cold` when there was no previous request to reuse. After each turn the transcript adds one line with the turn's requests, input, cached share, any misses, output and cost.
+
 `M-x eng/bbh-layout` restores the split. The composer header shows whether `C-n` sends immediately or queues a prompt. Sending `/new` works as it does in Pi. It ends the session, starts a fresh one in the same windows, and clears the transcript. `/resume ID` and `/resume last` clear the transcript too, unless no saved conversation has that id.
 
 In a terminal:
@@ -36,17 +38,17 @@ Both front ends share the commands `/compact`, `/help`, `/model`, `/port`, `/res
 
 Model ids are `PROVIDER/MODEL`, and `BBH_MODEL` overrides the default, `claude/haiku`.
 
-- `claude/...` runs Claude Code on the Claude subscription. Claude Code owns the agent loop and calls the `clojure` tool through `bbh.mcp`, an MCP server that forwards each call to the session over a loopback socket. Its rate-limit events feed `/usage`.
-- `openrouter/...` runs bbh's own loop against OpenRouter, with the key from `OPENROUTER_API_KEY` or Pi's `auth.json`. Rate limits, server errors and failed connections are retried five times with backoff, honoring `Retry-After`.
+- `claude/...` runs Claude Code on the Claude subscription with `--effort` from the manifest. Claude Code owns the agent loop, its prompt caching and its output limit, and calls the `clojure` tool through `bbh.mcp`, an MCP server that forwards each call to the session over a loopback socket. Its rate-limit events feed `/usage`.
+- `openrouter/...` runs bbh's own loop against OpenRouter, with the key from `OPENROUTER_API_KEY` or Pi's `auth.json`. Each request sends the conversation id as `session_id` for sticky routing, `reasoning.effort` mapped to the nearest level the model supports, and `max_tokens` up to 128,000. Anthropic models get OpenRouter's automatic `cache_control` breakpoint, and their reasoning details are sent back unchanged across tool calls. Rate limits, server errors and failed connections are retried five times with backoff, honoring `Retry-After`.
 - `script/PATH` replays an EDN file of replies, for tests.
 
-Switching models mid-conversation keeps the transcript. A Claude Code session that starts late receives the earlier transcript with the next prompt.
+Switching models mid-conversation keeps the transcript. A Claude Code session that starts late receives the earlier transcript with the next prompt, and a resumed one receives whatever another model said since it last took part.
 
 ## The env
 
 `desktop/configs/bbh/init.clj` is stowed to `~/.config/bbh/init.clj` and loaded into every new REPL. It defines:
 
-- `bbh.env/manifest`, read before every model request: the system prompt, the skill index and the project's `AGENTS.md`.
+- `bbh.env/manifest`, read before every model request: the system prompt, the skill index and the project's `AGENTS.md`. `bbh.repl/defaults` lists its other keys. `:effort` defaults to `medium` and `:max-tokens` to the model's limit, capped at 128,000. Changing `:system`, `:tool-description` or `:effort` mid-conversation costs one cache miss.
 - `bbh.env/expand-prompt`, which rewrites user input. It expands `/skill:NAME`, starts new conversations in poteto-mode, and answers `/poteto-mode-off` without the model.
 - `bbh.env/commands`, which agent-shell offers for completion.
 - `jev-classify-task`, the TypeSafe Jev router poteto-mode calls, plus the `sh`, `read-lines` and `edit!` helpers.
@@ -66,14 +68,14 @@ Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.json
 
 ## Lifetimes
 
-The transcript is durable and only grows. The model sees a context derived from it in `src/bbh/context.clj`. Tool output from earlier user turns is cut to `:trim-tool-chars`. When the context passes `:compact-at-tokens`, or the provider reports an overflow, the OpenRouter loop asks the model to summarize everything except the last `:keep-recent-tokens` and appends the summary to `compactions.jsonl`. `/compact TEXT` does the same on demand and tells the summary what to keep. All three limits are manifest keys. Claude Code compacts its own context, but a Claude Code session that joins late receives the compacted history. The REPL's live state lasts until the process restarts, which happens on a deadline, on an interrupted evaluation, on `/restart` and on resume. There is no rollback and no branching. bb cannot interrupt a busy thread, so bbh kills the REPL process tree instead.
+The transcript is durable and only grows. The model sees a context derived from it in `src/bbh/context.clj`. Between compactions the context only grows at the end, so each request starts with the previous one and the prompt cache keeps hitting. A compaction cuts the tool output of turns that were already over to `:trim-tool-chars`. A long run of tool calls without text gets a reminder to update the user appended to a tool result as it is recorded, never inserted later. When the context passes `:compact-at-tokens`, or the provider reports an overflow, the OpenRouter loop asks the model to summarize everything except the last `:keep-recent-tokens` and appends the summary to `compactions.jsonl`. `/compact TEXT` does the same on demand and tells the summary what to keep. All three limits are manifest keys. Claude Code compacts its own context, but a Claude Code session that joins late receives the compacted history. The REPL's live state lasts until the process restarts, which happens on a deadline, on an interrupted evaluation, on `/restart` and on resume. There is no rollback and no branching. bb cannot interrupt a busy thread, so bbh kills the REPL process tree instead.
 
 ## Checks
 
 [The evaluation guide](eval/README.md) covers two kinds of checks. The trace tools assert, render, and label every conversation, and score an LLM judge against your labels. The paired Pi evaluation compares live task completion and scripted protocol behavior. [Its baseline report](eval/RESULTS.md) includes the observed UI tradeoffs.
 
 ```sh
-bb test                  # sessions, streaming, ACP process, Claude adapter and MCP
+bb test                  # sessions, streaming, ACP process, Claude adapter, MCP and workflows
 bb test:emacs            # composer, history, cancellation and nREPL endpoint
 bb test:doom             # installed Doom startup and Ctrl-N, in a separate terminal
 bb test:doom launcher    # installed emacs-bbh launcher, including automatic session startup

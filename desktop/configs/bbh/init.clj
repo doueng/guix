@@ -1,6 +1,7 @@
 (ns bbh.env
   (:require [babashka.fs :as fs]
             [babashka.http-client :as http]
+            [bbh.auth :as auth]
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.string :as str]))
@@ -10,7 +11,7 @@
 
 - Each call evaluates Clojure in the user namespace and returns printed output and the last value. Prefer one call that does several steps over many small calls.
 - Definitions persist for the whole conversation until the REPL process restarts. A restart happens when an evaluation exceeds its deadline, when the user interrupts an evaluation, or on /restart. The tool result tells you when it happened.
-- You own this environment. Require any namespace bb ships, define helpers, and change how you are prompted by redefining `bbh.env/manifest`: a map, or a function returning one, with optional keys :system, :tool-description, :deadline-ms and :max-output-chars. It is read before every model request. `bbh.env/expand-prompt` rewrites user input before you see it.
+- You own this environment. Require any namespace bb ships, define helpers, and change how you are prompted by redefining `bbh.env/manifest`: a map, or a function returning one, with optional keys :system, :tool-description, :effort (none, minimal, low, medium, high, xhigh or max; default medium), :max-tokens, :deadline-ms, :max-output-chars, :compact-at-tokens, :keep-recent-tokens and :trim-tool-chars. It is read before every model request. Changing :system, :tool-description or :effort makes the next request miss the prompt cache, and on Claude Code it restarts the process, so change them rarely. `bbh.env/expand-prompt` rewrites user input before you see it.
 - To keep a change across restarts and conversations, edit ~/.config/bbh/init.clj, which every new REPL loads.
 - Run host programs with `sh`, or babashka.process directly. Read files with `read-lines` and edit them with `edit!`.
 - The user may be connected to this same REPL from their editor over nREPL.")
@@ -33,16 +34,6 @@ Only the final expression's value is returned. Print intermediate results with p
 
 (def pi-helpers
   "Skills written for Pi's codemode name Pi helpers. Here every call blocks, so drop `await`, and use these instead: `(tools/jev_classify_task {:task t})` is `(jev-classify-task t)`; `fs/read`, `tools/read` and `fs/list` are `read-lines`, `slurp` and `fs/glob`; `tools/bash` is `sh`; `tools/edit` is `edit!`; `jj/...` and `make/...` are `sh` with jj or make. Run tool calls in parallel with `pmap` or `future`.")
-
-(defn- resolve-key
-  "Pi's auth.json convention: !CMD runs CMD, anything else is the key."
-  [v]
-  (if (str/starts-with? v "!")
-    (str/trim (:out (p/shell {:out :string} "bash" "-c" (subs v 1))))
-    v))
-
-(defn- pi-key [provider]
-  (some-> (fs/expand-home "~/.pi/agent/auth.json") str slurp (json/parse-string true) (get-in [(keyword provider) :key]) resolve-key))
 
 ;; Skills
 
@@ -104,7 +95,7 @@ Only the final expression's value is returned. Print intermediate results with p
   "Classify a new poteto-mode task into a pstack route with TypeSafe Jev."
   [task]
   (let [{:keys [status body]} (http/post "https://api.typesafe.ai/v1/systemone"
-                                         {:headers {"Authorization" (str "Bearer " (pi-key "typesafe"))
+                                         {:headers {"Authorization" (str "Bearer " (auth/api-key "TYPESAFE_API_KEY" "typesafe"))
                                                     "Content-Type" "application/json"}
                                           :body (json/generate-string
                                                  {:model "jev-latest"
@@ -115,7 +106,7 @@ Only the final expression's value is returned. Print intermediate results with p
                                           :throw false :timeout 20000})
         _ (when (not= 200 status) (throw (ex-info (str "TypeSafe " status ": " body) {})))
         {:keys [choice probabilities confidence]} (get-in (json/parse-string body true) [:answers :task])
-        p (get probabilities (keyword choice))
+        p (or (get probabilities (keyword choice)) 0.0)
         advice (cond (or (= choice "other") (< p 0.5)) "No strong route. Classify the task yourself with poteto-mode's Route map and label the route as manual."
                      (>= p 0.75) "High-probability route. Confirm it matches the request, then pick a playbook for it from the Route map."
                      :else "Moderate route. Decide yourself whether it fits, then pick a playbook from the Route map.")]
@@ -164,199 +155,79 @@ Only the final expression's value is returned. Print intermediate results with p
           {:name (str "skill:" name) :description description})))
 
 ;; Delegation: a fresh model conversation with one bash tool, for independent verifiers.
-(def
- delegate-system
- "You are a delegated agent working for another agent. Your one tool, bash, runs in the working directory. Do the brief and nothing else. Do not edit tracked files in the working directory. Run every check you report, and never report a check you did not run. End with the report format the brief asks for.")
 
-(def
- bash-tool
- {:type "function",
-  :function
-  {:name "bash",
-   :description
-   "Run a bash command in the working directory. Each call is a fresh shell. Returns the exit code, stdout and stderr.",
-   :parameters
-   {:type "object",
-    :properties {:command {:type "string"}},
-    :required ["command"]}}})
+(def delegate-system
+  "You are a delegated agent working for another agent. Your one tool, bash, runs in the working directory. Do the brief and nothing else. Do not edit tracked files in the working directory. Run every check you report, and never report a check you did not run. End with the report format the brief asks for.")
 
-(defn-
- clip
- [s]
- (if
-  (> (count s) 20000)
-  (str (subs s 0 20000) "\n[output truncated]")
-  s))
+(def bash-tool
+  {:type "function"
+   :function {:name "bash"
+              :description "Run a bash command in the working directory. Each call is a fresh shell. Returns the exit code, stdout and stderr."
+              :parameters {:type "object" :properties {:command {:type "string"}} :required ["command"]}}})
 
-(defn-
- run-bash
- [command]
- (clip
-  (try
-   (let
-    [{:keys [exit out err]}
-     (p/shell
-      {:continue true, :out :string, :err :string, :timeout 600000}
-      "bash"
-      "-c"
-      command)]
-    (str "exit " exit "\n" out err))
-   (catch Exception e (str "error: " (ex-message e))))))
+(defn- clip [s]
+  (if (> (count s) 20000) (str (subs s 0 20000) "\n[output truncated]") s))
 
-(defn-
- chat!
- [model messages]
- (let
-  [key
-   (or
-    (System/getenv "OPENROUTER_API_KEY")
-    (pi-key "openrouter")
-    (throw
-     (ex-info
-      "Set OPENROUTER_API_KEY or log in to OpenRouter in Pi"
-      {})))
-   resp
-   (http/post
-    "https://openrouter.ai/api/v1/chat/completions"
-    {:headers
-     {"Authorization" (str "Bearer " key),
-      "Content-Type" "application/json"},
-     :body
-     (json/generate-string
-      {:model model,
-       :messages messages,
-       :tools [bash-tool],
-       :usage {:include true}}),
-     :throw false,
-     :timeout 300000})]
-  (when-not
-   (= 200 (:status resp))
-   (throw
-    (ex-info (str "OpenRouter " (:status resp) ": " (:body resp)) {})))
-  (json/parse-string (:body resp) true)))
+(defn- run-bash [command]
+  (clip (try (let [{:keys [exit out err]} (p/shell {:continue true :out :string :err :string :timeout 600000}
+                                                   "bash" "-c" command)]
+               (str "exit " exit "\n" out err))
+             (catch Exception e (str "error: " (ex-message e))))))
+
+(defn- chat! [model messages]
+  (let [key (or (auth/api-key "OPENROUTER_API_KEY" "openrouter")
+                (throw (ex-info "Set OPENROUTER_API_KEY or log in to OpenRouter in Pi" {})))
+        resp (http/post "https://openrouter.ai/api/v1/chat/completions"
+                        {:headers {"Authorization" (str "Bearer " key) "Content-Type" "application/json"}
+                         :body (json/generate-string {:model model :messages messages :tools [bash-tool]
+                                                      :usage {:include true}})
+                         :throw false :timeout 300000})]
+    (when-not (= 200 (:status resp))
+      (throw (ex-info (str "OpenRouter " (:status resp) ": " (:body resp)) {})))
+    (json/parse-string (:body resp) true)))
 
 (def delegate-model "claude/claude-opus-5-5")
 
-(defn-
- openrouter-delegate
- [model brief max-turns]
- (loop
-  [messages
-   [{:role "system", :content delegate-system}
-    {:role "user", :content brief}]
-   turn
-   0
-   tokens
-   0]
-  (let
-   [{:keys [choices usage]}
-    (chat! model messages)
-    msg
-    (:message (first choices))
-    tokens
-    (+ tokens (or (:total_tokens usage) 0))
-    messages
-    (conj
-     messages
-     (cond->
-      {:role "assistant", :content (:content msg)}
-      (seq (:tool_calls msg))
-      (assoc :tool_calls (:tool_calls msg))))]
-   (cond
-    (empty? (:tool_calls msg))
-    {:reply (:content msg), :turns turn, :total-tokens tokens}
-    (>= turn max-turns)
-    {:reply "Stopped at the turn limit.",
-     :turns turn,
-     :total-tokens tokens}
-    :else
-    (recur
-     (into
-      messages
-      (for
-       [{:keys [id function]} (:tool_calls msg)]
-       {:role "tool",
-        :tool_call_id id,
-        :content
-        (run-bash
-         (:command (json/parse-string (:arguments function) true)))}))
-     (inc turn)
-     tokens)))))
+(defn- openrouter-delegate [model brief max-turns]
+  (loop [messages [{:role "system" :content delegate-system} {:role "user" :content brief}]
+         turn 0
+         tokens 0]
+    (let [{:keys [choices usage]} (chat! model messages)
+          msg (:message (first choices))
+          tokens (+ tokens (or (:total_tokens usage) 0))
+          messages (conj messages (cond-> {:role "assistant" :content (:content msg)}
+                                    (seq (:tool_calls msg)) (assoc :tool_calls (:tool_calls msg))))]
+      (cond (empty? (:tool_calls msg)) {:reply (:content msg) :turns turn :total-tokens tokens}
+            (>= turn max-turns) {:reply "Stopped at the turn limit." :turns turn :total-tokens tokens}
+            :else (recur (into messages
+                               (for [{:keys [id function]} (:tool_calls msg)]
+                                 {:role "tool" :tool_call_id id
+                                  :content (run-bash (:command (json/parse-string (:arguments function) true)))}))
+                         (inc turn)
+                         tokens)))))
 
-(defn-
- claude-delegate
- [model brief]
- (let
-  [{:keys [exit out err]}
-   (p/shell
-    {:continue true,
-     :in brief,
-     :out :string,
-     :err :string,
-     :timeout 1200000}
-    (or (System/getenv "BBH_CLAUDE") "claude")
-    "-p"
-    "--model"
-    model
-    "--output-format"
-    "json"
-    "--system-prompt"
-    delegate-system
-    "--tools"
-    "Bash,Read,Grep,Glob"
-    "--allowedTools"
-    "Bash,Read,Grep,Glob"
-    "--setting-sources"
-    ""
-    "--strict-mcp-config"
-    "--mcp-config"
-    "{\"mcpServers\":{}}")
-   {:keys [result is_error num_turns usage]}
-   (try (json/parse-string out true) (catch Exception _ nil))]
-  (when
-   (or (not= 0 exit) is_error (nil? result))
-   (throw
-    (ex-info
-     (str
-      "claude delegate failed (exit "
-      exit
-      "): "
-      (or result err out))
-     {})))
-  {:reply result,
-   :turns num_turns,
-   :total-tokens
-   (reduce
-    +
-    (map
-     (fn* [%1#] (or (get usage %1#) 0))
-     [:input_tokens
-      :cache_creation_input_tokens
-      :cache_read_input_tokens
-      :output_tokens]))}))
+(defn- claude-delegate [model brief]
+  (let [{:keys [exit out err]} (p/shell {:continue true :in brief :out :string :err :string :timeout 1200000}
+                                        (or (System/getenv "BBH_CLAUDE") "claude")
+                                        "-p" "--model" model "--output-format" "json"
+                                        "--system-prompt" delegate-system
+                                        "--tools" "Bash,Read,Grep,Glob" "--allowedTools" "Bash,Read,Grep,Glob"
+                                        "--setting-sources" "" "--strict-mcp-config" "--mcp-config" "{\"mcpServers\":{}}")
+        {:keys [result is_error num_turns usage]} (try (json/parse-string out true) (catch Exception _ nil))]
+    (when (or (not= 0 exit) is_error (nil? result))
+      (throw (ex-info (str "claude delegate failed (exit " exit "): " (or result err out)) {})))
+    {:reply result
+     :turns num_turns
+     :total-tokens (reduce + (map #(or (get usage %) 0)
+                                  [:input_tokens :cache_creation_input_tokens :cache_read_input_tokens :output_tokens]))}))
 
-(defn
- delegate
- "Run BRIEF in a fresh conversation with one bash tool. MODEL is bbh-style: claude/ runs Claude Code, openrouter/ runs the bash loop, which stops after MAX-TURNS tool rounds. Returns {:reply :turns :total-tokens}."
- [brief
-  &
-  {:keys [model max-turns], :or {model delegate-model, max-turns 40}}]
- (cond
-  (str/starts-with? model "claude/")
-  (claude-delegate (subs model (count "claude/")) brief)
-  (str/starts-with? model "openrouter/")
-  (openrouter-delegate
-   (subs model (count "openrouter/"))
-   brief
-   max-turns)
-  :else
-  (throw
-   (ex-info
-    (str "Unknown provider in " model "; use claude/ or openrouter/")
-    {}))))
-
-
-
+(defn delegate
+  "Run BRIEF in a fresh conversation with one bash tool. MODEL is bbh-style: claude/ runs Claude Code, openrouter/ runs
+  the bash loop, which stops after MAX-TURNS tool rounds. Returns {:reply :turns :total-tokens}."
+  [brief & {:keys [model max-turns] :or {model delegate-model max-turns 40}}]
+  (cond (str/starts-with? model "claude/") (claude-delegate (subs model (count "claude/")) brief)
+        (str/starts-with? model "openrouter/") (openrouter-delegate (subs model (count "openrouter/")) brief max-turns)
+        :else (throw (ex-info (str "Unknown provider in " model "; use claude/ or openrouter/") {}))))
 
 (ns user
   (:require [babashka.fs :as fs]
@@ -409,14 +280,14 @@ Only the final expression's value is returned. Print intermediate results with p
   "Status of run ID, or of the latest run."
   ([] (wf-status nil))
   ([id]
-   (let [st (wf/status (or id (wf/latest-id) (throw (ex-info "no runs yet" {}))))]
+   (let [st (wf/status (or id (wf/default-id) (throw (ex-info "no runs for this directory" {}))))]
      (select-keys st [:id :workflow :phase :status :block-reason :brief :evidence]))))
 
 (defn wf-attest
   "Attest the current phase of run ID (default: latest) with CLAIM. The gates run now and print each result."
   ([claim] (wf-attest nil claim))
   ([id claim]
-   (let [id (or id (wf/latest-id) (throw (ex-info "no runs yet" {})))
+   (let [id (or id (wf/default-id) (throw (ex-info "no runs for this directory" {})))
          {:keys [outcome results]} (wf/attest! id claim)]
      (println (str "attest: " (name outcome)))
      (print-gates results)
@@ -426,7 +297,7 @@ Only the final expression's value is returned. Print intermediate results with p
   "Run a fresh reviewer on the current verdict gate of run ID (default: latest). Agents never record a human verdict."
   ([] (wf-review nil))
   ([id]
-   (let [id (or id (wf/latest-id) (throw (ex-info "no runs yet" {})))
+   (let [id (or id (wf/default-id) (throw (ex-info "no runs for this directory" {})))
          {:keys [verdict reviewer]} (wf/review! id)]
      (println (str "review: " (name verdict) " by " reviewer))
      (wf-status id))))

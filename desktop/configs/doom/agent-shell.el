@@ -221,17 +221,116 @@ followed by the result's fence."
      (insert (eng/bbh-transcript--separator)
              (propertize (concat "Error: " message) 'font-lock-face 'error) "\n"))))
 
+;;; Usage
+
+(defvar-local eng/bbh-usage-requests nil
+  "This turn's model requests as bbh reported them, newest first.
+Each is bbh's request record: input, cached, written, output, n, ratio
+and cache, which is \"hit\", \"miss\" or \"cold\".")
+
+(defvar-local eng/bbh-usage-last nil
+  "The latest model request bbh reported.")
+
+(defvar-local eng/bbh-usage-turn-cost nil
+  "The session's cost when the current turn started.")
+
+(defun eng/bbh--record-usage (&rest args)
+  "Keep the request bbh attaches to a usage_update, for the header and transcript."
+  (when-let* ((shell (map-elt (plist-get args :state) :buffer))
+              ((buffer-live-p shell))
+              (request (map-nested-elt (plist-get args :acp-update) '(_meta bbh request))))
+    (with-current-buffer shell
+      (setq eng/bbh-usage-last request)
+      (push request eng/bbh-usage-requests))
+    (force-mode-line-update t)))
+
+(defun eng/bbh--tokens (n)
+  "N tokens compactly: 950, 1.2k, 45k or 1m."
+  (cond ((< n 1000) (format "%d" n))
+        ((< n 10000) (format "%.1fk" (/ n 1000.0)))
+        ((< n 1000000) (format "%.0fk" (/ n 1000.0)))
+        (t (replace-regexp-in-string "\\.0m\\'" "m" (format "%.1fm" (/ n 1000000.0))))))
+
+(defun eng/bbh--percent (ratio)
+  (round (* 100 (or ratio 0))))
+
+(defun eng/bbh--cache-label (request)
+  "How much of REQUEST's input came from the prompt cache."
+  (pcase (map-elt request 'cache)
+    ("miss" (propertize (format "cache miss %d%%" (eng/bbh--percent (map-elt request 'ratio))) 'face 'error))
+    ("cold" (propertize "cache cold" 'face 'warning))
+    (_ (propertize (format "cache %d%%" (eng/bbh--percent (map-elt request 'ratio))) 'face 'success))))
+
+(defun eng/bbh-usage-header (shell)
+  "Context, cache and cost for SHELL's composer header, or nil before a request."
+  (when (buffer-live-p shell)
+    (with-current-buffer shell
+      (when eng/bbh-usage-last
+        (let* ((usage (map-elt agent-shell--state :usage))
+               (used (map-elt usage :context-used))
+               (size (map-elt usage :context-size)))
+          (string-join
+           (delq nil (list (when used
+                             (format "ctx %s%s" (eng/bbh--tokens used)
+                                     (if size (concat "/" (eng/bbh--tokens size)) "")))
+                           (eng/bbh--cache-label eng/bbh-usage-last)
+                           (format "$%.2f" (or (map-elt usage :cost-amount) 0))))
+           " · "))))))
+
+(defun eng/bbh--turn-usage (requests cost)
+  "One line about a turn's REQUESTS, oldest first, which cost COST dollars."
+  (let* ((sum (lambda (key) (apply #'+ (mapcar (lambda (r) (or (map-elt r key) 0)) requests))))
+         (input (funcall sum 'input))
+         (cached (funcall sum 'cached))
+         (misses (seq-filter (lambda (r) (equal (map-elt r 'cache) "miss")) requests))
+         (n (length requests)))
+    (string-join
+     (list (format "Usage: %d request%s" n (if (= n 1) "" "s"))
+           (format "%s in, %d%% cached" (eng/bbh--tokens input)
+                   (if (> input 0) (round (* 100.0 (/ (float cached) input))) 0))
+           (if misses
+               (mapconcat (lambda (r) (format "miss on request %d (%d%% of %s)" (map-elt r 'n)
+                                              (eng/bbh--percent (map-elt r 'ratio))
+                                              (eng/bbh--tokens (map-elt r 'input))))
+                          misses ", ")
+             "no cache misses")
+           (format "%s out" (eng/bbh--tokens (funcall sum 'output)))
+           (format "$%.4f" (or cost 0)))
+     " · ")))
+
+(defun eng/bbh-transcript--turn-start ()
+  (when-let* ((shell eng/bbh-transcript-shell) ((buffer-live-p shell)))
+    (with-current-buffer shell
+      (setq eng/bbh-usage-requests nil
+            eng/bbh-usage-turn-cost (or (map-nested-elt agent-shell--state '(:usage :cost-amount)) 0)))))
+
+(defun eng/bbh-transcript--usage ()
+  "Note the finished turn's usage at the end of the transcript."
+  (when-let* ((shell eng/bbh-transcript-shell)
+              ((buffer-live-p shell))
+              (requests (buffer-local-value 'eng/bbh-usage-requests shell)))
+    (let ((cost (with-current-buffer shell
+                  (- (or (map-nested-elt agent-shell--state '(:usage :cost-amount)) 0)
+                     (or eng/bbh-usage-turn-cost 0)))))
+      (with-current-buffer shell (setq eng/bbh-usage-requests nil))
+      (eng/bbh-transcript--edit
+       (lambda ()
+         (insert (eng/bbh-transcript--separator)
+                 (propertize (eng/bbh--turn-usage (reverse requests) cost) 'font-lock-face 'shadow) "\n"))))))
+
 (defun eng/bbh-transcript--on-event (transcript event)
   (when (buffer-live-p transcript)
     (with-current-buffer transcript
       (let ((data (map-elt event :data)))
         (pcase (map-elt event :event)
-          ('input-submitted (eng/bbh-transcript--prompt (map-elt data :prompt)))
+          ('input-submitted (eng/bbh-transcript--turn-start)
+                            (eng/bbh-transcript--prompt (map-elt data :prompt)))
           ('agent-message-chunk (eng/bbh-transcript--reply-chunk (map-elt data :text-chunk)))
           ('tool-call-update (eng/bbh-transcript--tool (map-elt data :tool-call-id)
                                                        (map-elt data :tool-call)))
           ('error (eng/bbh-transcript--error (or (map-elt data :message) "the request failed")))
-          ('turn-complete (setq eng/bbh-transcript--reply nil)))))))
+          ('turn-complete (setq eng/bbh-transcript--reply nil)
+                          (eng/bbh-transcript--usage)))))))
 
 (defun eng/bbh--result-label (status lines)
   (concat (propertize (pcase status ("done" "✓") ("failed" "✗") (_ "…"))
@@ -322,6 +421,9 @@ Org leaves result blocks, a special block, without the code background."
   (when (and eng/bbh-composer (derived-mode-p 'agent-shell-viewport-edit-mode))
     (setq-local header-line-format
                 '(:eval (concat " " (if (agent-shell-viewport--busy-p) "Working · C-n queue" "Ready · C-n send")
+                                (if-let* ((usage (eng/bbh-usage-header (agent-shell-viewport--shell-buffer))))
+                                    (concat "   " usage)
+                                  "")
                                 "   RET newline   M-p history   M-v/C-v scroll   C-c C-t tools   C-c C-k stop")))))
 
 (defun eng/bbh-scroll-output (backward)
@@ -402,6 +504,7 @@ called interactively, restore this layout for the current session."
   (advice-add 'agent-shell-viewport--update-header :after #'eng/bbh-composer-header))
 
 (after! agent-shell
+  (advice-add 'agent-shell--update-usage-from-notification :after #'eng/bbh--record-usage)
   ;; Loading system-sleep warns even when this Emacs has no usable backend.
   (unless (or (featurep 'dbusbind) (featurep 'ns) (featurep 'w32))
     (setq agent-shell-inhibit-system-sleep nil))

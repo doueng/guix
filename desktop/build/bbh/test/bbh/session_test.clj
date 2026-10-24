@@ -26,7 +26,8 @@
                             (when (= :overflow s)
                               (throw (ex-info "OpenRouter 400: maximum context length" {:overflow true})))
                             (when (string? s) (on-text s))
-                            {:message (reply s)}))}
+                            {:message (reply (cond-> s (map? s) (dissoc :usage)))
+                             :usage (when (map? s) (:usage s))}))}
         s (session/new-session {:dir dir :init init :model "faux" :make-engine (constantly engine)
                                 :emit #(swap! events conj %)})]
     (spit init init-src)
@@ -184,7 +185,7 @@
            (:messages (get @(:requests h) 2))))
     (is (= ["hello" long-answer "next" "second"] (mapv :content (:messages @(:s h)))))
     (is (= "[bbh] Compacted 2 messages into a summary of about 2 tokens.\n\n" (get (texts h) 1)))
-    (is (= {:first-kept 2 :summary "SUMMARY"} (:compaction @resumed)))))
+    (is (= {:first-kept 2 :summary "SUMMARY" :trim-before 2} (:compaction @resumed)))))
 
 (deftest an-overflowing-request-compacts-and-retries-once
   (let [h (harness "" [long-answer :overflow "SUMMARY" "after"])]
@@ -206,3 +207,43 @@
 
 (deftest render-elides-the-middle-of-long-output
   (is (= "out\n[... 9 chars elided ...]\nhij" (session/render {:out "abcdefghij"} 6))))
+
+(defn- sent [{:keys [requests]}]
+  (mapv #(vec (rest (:messages %))) @requests))
+
+(deftest every-request-extends-the-previous-one-so-the-cache-hits
+  (let [h (harness "(ns bbh.env) (def manifest {:trim-tool-chars 10})"
+                   [{:code "(apply str (repeat 50 \"x\"))"} "ok" {:code "(apply str (repeat 50 \"y\"))"} "ok"])]
+    (session/prompt! (:s h) "one")
+    (session/prompt! (:s h) "two")
+    (stop! h)
+    (is (= 4 (count (sent h))))
+    (doseq [[a b] (partition 2 1 (sent h))]
+      (is (= a (subvec b 0 (count a)))))
+    (is (= "medium" (:effort (first @(:requests h)))))))
+
+(deftest requests-are-classified-as-cache-hits-and-misses
+  (let [h (harness "" [{:code "1" :usage {:input 1000 :cached 0 :written 1000 :output 5 :size 200000}}
+                       {:code "2" :usage {:input 1100 :cached 1000 :written 100 :output 5 :cost 0.01}}
+                       {:code "3" :usage {:input 1200 :cached 100 :output 5}}
+                       "done"])]
+    (session/prompt! (:s h) "go")
+    (stop! h)
+    (let [usage (filter #(= :usage (:type %)) @(:events h))]
+      (is (= [:cold :hit :miss] (map (comp :cache :request) usage)))
+      (is (= [1 2 3] (map (comp :n :request) usage)))
+      (is (= [1000 1100 1200] (map :used usage)))
+      (is (= [200000 200000 200000] (map :size usage))))
+    (is (= {:requests 3 :input 3300 :cached 1100 :written 1100 :output 15 :thinking 0 :cost 0.01
+            :misses [{:n 3 :ratio (/ 100.0 1200) :input 1200}]}
+           (:turn-usage @(:s h))))
+    (is (= 0.01 (:spent @(:s h))))))
+
+(deftest a-long-quiet-turn-gets-one-reminder-in-a-tool-result
+  (let [steps (conj (vec (for [i (range 6)] {:code (str i)})) "done")
+        h (harness "" steps)]
+    (session/prompt! (:s h) "go")
+    (stop! h)
+    (let [results (tool-results h)]
+      (is (= (str "=> 4\n\n" session/quiet-reminder) (nth results 4)))
+      (is (= ["=> 0" "=> 1" "=> 2" "=> 3" "=> 5"] (map results [0 1 2 3 5]))))))

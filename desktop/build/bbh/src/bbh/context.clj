@@ -1,8 +1,9 @@
 (ns bbh.context
   "What the model sees of a transcript. The transcript keeps every message. The
   context replaces messages before the latest compaction with its summary and
-  shortens tool output from earlier user turns, which stay fixed during a turn
-  so the provider's prompt cache keeps hitting."
+  shortens the tool output of turns that were already over when it was made.
+  Between compactions the context only grows at the end, so every request's
+  prefix is the previous request and the provider's prompt cache keeps hitting."
   (:require [cheshire.core :as json]
             [clojure.string :as str]))
 
@@ -20,20 +21,24 @@
 (def ^:private summary-header
   "[bbh] Earlier messages in this conversation were compacted into this summary:\n\n")
 
-(defn- turn-start [messages]
+(defn turn-start
+  "The index of the latest user message, which starts the current turn."
+  [messages]
   (or (last (keep-indexed #(when (= "user" (:role %2)) %1) messages)) 0))
 
 (defn view
   "The messages to send, given the transcript, the latest compaction and the
-  manifest's :trim-tool-chars."
-  [messages {:keys [first-kept summary]} {:keys [trim-tool-chars]}]
-  (let [kept (subvec messages (or first-kept 0))
-        turn (turn-start kept)]
+  manifest's :trim-tool-chars. Tool output is shortened only below the
+  compaction's :trim-before, so the view changes only when a compaction does."
+  [messages {:keys [first-kept summary trim-before]} {:keys [trim-tool-chars]}]
+  (let [from (or first-kept 0)
+        kept (subvec messages from)
+        trim-end (-> (or trim-before 0) (- from) (max 0) (min (count kept)))]
     (cond-> []
       summary (conj {:role "user" :content (str summary-header summary)})
       true (into (map #(cond-> % (= "tool" (:role %)) (update :content cap trim-tool-chars)))
-                 (subvec kept 0 turn))
-      true (into (subvec kept turn)))))
+                 (subvec kept 0 trim-end))
+      true (into (subvec kept trim-end)))))
 
 (defn cut-point
   "The index of the first message to keep after compacting from index FROM: the

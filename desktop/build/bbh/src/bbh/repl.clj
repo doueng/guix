@@ -101,6 +101,7 @@
 (def defaults
   {:system "You work inside a persistent babashka REPL through the clojure tool. Definitions persist until the REPL process restarts."
    :tool-description "Evaluate Clojure in the persistent babashka REPL. Returns printed output and the last value."
+   :effort "medium"
    :deadline-ms 120000
    :max-output-chars 30000
    :compact-at-tokens 200000
@@ -110,6 +111,8 @@
 (def ^:private checks
   {:system [string? "a string"]
    :tool-description [string? "a string"]
+   :effort [#{"none" "minimal" "low" "medium" "high" "xhigh" "max"} "one of none, minimal, low, medium, high, xhigh or max"]
+   :max-tokens [pos-int? "a positive integer"]
    :deadline-ms [pos-int? "a positive integer"]
    :max-output-chars [pos-int? "a positive integer"]
    :compact-at-tokens [pos-int? "a positive integer"]

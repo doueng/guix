@@ -53,3 +53,43 @@
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"synthetic provider failure"
                                (session/prompt! s "fail")))
           (finally (session/close! s)))))))
+
+(deftest usage-is-per-request-and-cost-is-per-turn
+  (with-cli
+    (fn []
+      (let [{:keys [s events]} (harness)]
+        (try
+          (session/prompt! s "one")
+          (session/prompt! s "two")
+          (let [requests (keep :request (filter #(= :usage (:type %)) @events))]
+            (is (= [{:input 1000 :cached 900 :written 98 :output 7 :thinking 0 :n 1 :cache :cold :ratio 0.9}
+                    {:input 1000 :cached 900 :written 98 :output 7 :thinking 0 :n 1 :cache :hit :ratio 0.9}]
+                   requests)))
+          (is (= 200000 (:size (last @events))))
+          (is (< (abs (- 0.002 (:spent @s))) 1e-9))
+          (finally (session/close! s)))))))
+
+(deftest a-resumed-claude-session-hears-what-another-model-said
+  (with-cli
+    (fn []
+      (let [sent (atom [])
+            send-line @#'bbh.claude/send-line!
+            script (str (fs/create-temp-file {:suffix ".edn"}))]
+        (spit script (pr-str ["the script model's reply"]))
+        (with-redefs [bbh.claude/send-line! (fn [w msg]
+                                              (when (= "user" (:type msg)) (swap! sent conj (get-in msg [:message :content])))
+                                              (send-line w msg))]
+          (let [{:keys [s]} (harness)]
+            (try
+              (session/prompt! s "first")
+              (session/set-model! s (str "script/" script))
+              (session/prompt! s "told only to the script model")
+              (session/set-model! s "claude/fake")
+              (session/prompt! s "back")
+              (session/prompt! s "again")
+              (is (= ["first"
+                      (str "[bbh] Messages in this conversation since you last took part:\n\n"
+                           "user: told only to the script model\n\nassistant: the script model's reply\n\nback")
+                      "again"]
+                     @sent))
+              (finally (session/close! s)))))))))

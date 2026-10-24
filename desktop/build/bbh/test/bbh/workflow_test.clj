@@ -186,3 +186,16 @@
                     (or (= "manual" w)
                         (some #{r} (:routes (wf/load-workflow w)))))
                   rows)))))
+
+(deftest the-default-run-belongs-to-this-directory
+  (let [mine (buggy-repo)
+        theirs (buggy-repo)
+        sub (str (fs/create-dirs (fs/path mine "sub")))
+        id (wf/start! :bug-fix {:cwd mine :repro repro})
+        _ (Thread/sleep 5)
+        other (wf/start! :bug-fix {:cwd theirs :repro repro})]
+    (is (= other (wf/latest-id)))
+    (is (= id (wf/latest-id mine)))
+    (is (= id (wf/latest-id sub)))
+    (is (= other (wf/latest-id theirs)))
+    (is (nil? (wf/latest-id (str (fs/create-temp-dir {:prefix "wf-elsewhere"})))))))

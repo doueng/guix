@@ -41,6 +41,17 @@
 
 (defn- session-file [s] (str (fs/path (:dir @s) "claude-session")))
 
+(defn- seen-file
+  "How many transcript messages the Claude Code session has seen. A resumed
+  session that has seen fewer gets the rest as history, such as the turns
+  another model took after a /model switch."
+  [s]
+  (str (fs/path (:dir @s) "claude-seen")))
+
+(defn- seen [s]
+  (let [f (seen-file s)]
+    (when (fs/exists? f) (parse-long (str/trim (slurp f))))))
+
 (defn- history
   "The transcript so far as text, for a Claude Code session that never saw it."
   [messages]
@@ -49,7 +60,7 @@
               (str role ": " content
                    (str/join (for [c tool_calls] (str "\n[clojure] " (get-in c [:function :arguments]))))))))
 
-(defn- start-claude! [s system]
+(defn- start-claude! [s system effort]
   (let [{:keys [dir cwd engine bridge]} @s
         resume (let [f (session-file s)] (when (fs/exists? f) (str/trim (slurp f))))
         mcp {:mcpServers {:bbh {:command "bb"
@@ -65,7 +76,8 @@
                     "--tools" "" "--strict-mcp-config" "--mcp-config" (json/generate-string mcp)
                     "--allowedTools" tool-name "--setting-sources" ""
                     "--system-prompt" system "--model" (:model engine)
-                    (when resume ["--resume" resume]))
+                    (concat (when effort ["--effort" effort])
+                            (when resume ["--resume" resume])))
         queue (LinkedBlockingQueue.)]
     (future
       (try
@@ -73,7 +85,8 @@
           (.put queue (try (json/parse-string line true) (catch Exception _ {:type "unparsed" :line line}))))
         (catch Exception _ nil)
         (finally (.put queue {:type ::exit}))))
-    (swap! s assoc :claude {:proc proc :queue queue :in (io/writer (:in proc)) :system system :fresh (nil? resume)})))
+    (swap! s assoc :claude {:proc proc :queue queue :in (io/writer (:in proc)) :system system :effort effort
+                            :fresh (nil? resume) :cost 0.0})))
 
 (defmethod session/stop-engine! :claude [s]
   (when-let [proc (get-in @s [:claude :proc])]
@@ -82,14 +95,26 @@
     (.close ^ServerSocket server))
   (swap! s dissoc :claude :bridge))
 
-(defn- ensure-claude! [s system]
+(defn- ensure-claude!
+  "A running Claude Code for SYSTEM and EFFORT. Changing either restarts it on
+  the same session, which also starts its prompt cache over."
+  [s system effort]
   (let [{:keys [proc] :as c} (:claude @s)]
-    (when (and c (or (not (p/alive? proc)) (not= system (:system c))))
+    (when (and c (or (not (p/alive? proc)) (not= [system effort] [(:system c) (:effort c)])))
       (session/stop-engine! s)))
   (when-not (:bridge @s)
     (swap! s assoc :bridge (serve-bridge s (str (random-uuid)))))
   (when-not (:claude @s)
-    (start-claude! s system)))
+    (start-claude! s system effort)))
+
+(defn- request-usage
+  "A Messages API usage object as bbh's usage record."
+  [{:keys [input_tokens cache_read_input_tokens cache_creation_input_tokens output_tokens output_tokens_details]}]
+  {:input (+ (or input_tokens 0) (or cache_read_input_tokens 0) (or cache_creation_input_tokens 0))
+   :cached (or cache_read_input_tokens 0)
+   :written (or cache_creation_input_tokens 0)
+   :output (or output_tokens 0)
+   :thinking (or (:thinking_tokens output_tokens_details) 0)})
 
 (defn- record-assistant! [s content]
   (let [text (str/join (keep #(when (= "text" (:type %)) (:text %)) content))
@@ -108,40 +133,51 @@
 (defmethod session/turn! :claude [s]
   (let [system (session/system-prompt! s)
         prior (pop (:messages @s))
-        _ (ensure-claude! s system)
+        _ (ensure-claude! s system (get-in @s [:manifest :effort]))
         {:keys [in queue fresh]} (:claude @s)
+        missed (when-not fresh
+                 (subvec prior (min (count prior) (or (seen s) (count prior)))))
         text (:content (peek (:messages @s)))
-        text (if (and fresh (some #(= "assistant" (:role %)) prior))
-               (str "[bbh] Earlier in this conversation, before you joined it:\n\n"
-                    (history (pop (session/context s))) "\n\n" text)
-               text)]
+        text (cond (and fresh (some #(= "assistant" (:role %)) prior))
+                   (str "[bbh] Earlier in this conversation, before you joined it:\n\n"
+                        (history (pop (session/context s))) "\n\n" text)
+                   (seq missed)
+                   (str "[bbh] Messages in this conversation since you last took part:\n\n"
+                        (history missed) "\n\n" text)
+                   :else text)]
     (swap! s assoc-in [:claude :fresh] false)
     (swap! s assoc :cancel #(send-line! in {:type "control_request" :request_id (str (random-uuid))
                                             :request {:subtype "interrupt"}}))
     (send-line! in {:type "user" :message {:role "user" :content text}})
     (try
-      (loop [used nil texts 0]
+      (loop [texts 0]
         (let [{:keys [type event message] :as ev} (.take ^LinkedBlockingQueue queue)]
           (case type
             "stream_event"
             (let [{etype :type :keys [delta content_block]} event]
               (cond (and (= "content_block_delta" etype) (= "text_delta" (:type delta)) (seq (:text delta)))
-                    (do (session/emit! s {:type :text :text (:text delta)}) (recur used texts))
+                    (do (session/emit! s {:type :text :text (:text delta)}) (recur texts))
+                    (and (= "content_block_delta" etype) (= "thinking_delta" (:type delta)) (seq (:thinking delta)))
+                    (do (session/emit! s {:type :thought :text (:thinking delta)}) (recur texts))
                     (and (= "content_block_start" etype) (= "text" (:type content_block)))
-                    (do (when (pos? texts) (session/emit! s {:type :text :text "\n\n"})) (recur used (inc texts)))
-                    (= "message_start" etype)
-                    (let [{:keys [input_tokens cache_read_input_tokens cache_creation_input_tokens]} (:usage (:message event))]
-                      (recur (+ (or input_tokens 0) (or cache_read_input_tokens 0) (or cache_creation_input_tokens 0)) texts))
-                    :else (recur used texts)))
-            "assistant" (do (record-assistant! s (:content message)) (recur used texts))
-            "user" (do (record-tool-results! s (:content message)) (recur used texts))
+                    (do (when (pos? texts) (session/emit! s {:type :text :text "\n\n"})) (recur (inc texts)))
+                    ;; One per model request, with that request's final token counts.
+                    (and (= "message_delta" etype) (:usage event))
+                    (do (session/add-usage! s (request-usage (:usage event))) (recur texts))
+                    :else (recur texts)))
+            "assistant" (do (record-assistant! s (:content message)) (recur texts))
+            "user" (do (record-tool-results! s (:content message)) (recur texts))
             "system" (do (when (and (= "init" (:subtype ev)) (:session_id ev))
                            (spit (session-file s) (:session_id ev)))
-                         (recur used texts))
+                         (recur texts))
             "rate_limit_event" (do (swap! s assoc :limits (get-in ev [:rate_limit_info :unifiedWindows]))
-                                   (recur used texts))
-            "result" (do
-                       (session/add-usage! s {:used used :cost (:total_cost_usd ev)})
+                                   (recur texts))
+            "result" (let [total (or (:total_cost_usd ev) 0)
+                           ;; Claude Code's total covers its whole process, not this turn.
+                           cost (- total (get-in @s [:claude :cost] 0))]
+                       (swap! s assoc-in [:claude :cost] total)
+                       (session/add-usage! s {:cost (max 0 cost)
+                                              :size (some :contextWindow (vals (:modelUsage ev)))})
                        (when (and (:is_error ev) (not (:interrupted @s)))
                          (throw (ex-info (str "Claude Code: "
                                               (or (not-empty (str/join "\n" (:errors ev)))
@@ -149,5 +185,7 @@
                                          {:subtype (:subtype ev)}))))
             ::exit (do (session/stop-engine! s)
                        (throw (ex-info (str "Claude Code exited; see " (fs/path (:dir @s) "claude.log")) {})))
-            (recur used texts))))
-      (finally (swap! s assoc :cancel nil)))))
+            (recur texts))))
+      (finally
+        (swap! s assoc :cancel nil)
+        (spit (seen-file s) (str (count (:messages @s))))))))
