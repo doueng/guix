@@ -23,7 +23,7 @@
   "theme": "dark",
   "defaultThinkingLevel": "medium",
   "shellPath": "/run/current-system/profile/bin/bash",
-  "lastChangelogVersion": "1.3.0",
+  "lastChangelogVersion": "1.4.0",
   "hideThinkingBlock": true,
   "packages": [
     "npm:pi-claude-bridge@0.9.3"
