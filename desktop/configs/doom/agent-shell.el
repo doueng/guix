@@ -447,9 +447,21 @@ Org leaves result blocks, a special block, without the code background."
   (interactive)
   (eng/bbh-scroll-output nil))
 
+(defvar-local eng/bbh-composer-padding nil
+  "Overlay that shows one blank row above the composer's draft.")
+
+(defun eng/bbh-composer-padding ()
+  "Leave one blank row between the composer header and the draft.
+The overlay only displays a newline, so the draft and what is sent are unchanged.
+Its start stays at the top of the buffer, so text typed or sent there does not move it."
+  (unless (overlayp eng/bbh-composer-padding)
+    (setq eng/bbh-composer-padding (make-overlay (point-min) (point-min) nil nil t))
+    (overlay-put eng/bbh-composer-padding 'before-string "\n")))
+
 (defun eng/bbh-setup-composer ()
   "Restore bbh bindings after returning from agent-shell's history view."
   (when eng/bbh-composer
+    (eng/bbh-composer-padding)
     (use-local-map (copy-keymap (current-local-map)))
     (dolist (binding '(("C-n" . eng/bbh-send)
                        ("C-c C-c" . eng/bbh-send)
