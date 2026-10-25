@@ -78,6 +78,10 @@
           (setq pos next)))
       out)))
 
+(defun bbh-test--main-windows ()
+  "Windows of the transcript and composer, leaving out the workflow side panel."
+  (cl-remove-if (lambda (w) (window-parameter w 'window-side)) (window-list)))
+
 (defun bbh-test--tool-folded-p (transcript)
   (with-current-buffer transcript
     (save-excursion
@@ -141,10 +145,10 @@
       (should (string-match-p "C-n" (format "%s" header-line-format)))
       (should (equal (string-trim (bbh-test--text composer)) "draft while output arrives"))
       (eng/bbh-layout shell)
-      (should (= (length (window-list)) 2))
+      (should (= (length (bbh-test--main-windows)) 2))
       (delete-window output)
       (eng/bbh-layout shell)
-      (should (= (length (window-list)) 2))
+      (should (= (length (bbh-test--main-windows)) 2))
       (should (eq (selected-window) input))
       (should (< (nth 1 (window-edges (get-buffer-window transcript)))
                  (nth 1 (window-edges input))))
@@ -180,7 +184,7 @@
       (should-not (buffer-live-p composer))
       (should (equal (bbh-test--text transcript) ""))
       (should (eq (window-buffer output) transcript))
-      (should (= (length (window-list)) 2))
+      (should (= (length (bbh-test--main-windows)) 2))
       (should (eq (selected-window) input))
       (let ((shell (eng/bbh--shell)))
         (should (eq (buffer-local-value 'eng/bbh-transcript shell) transcript))
@@ -301,3 +305,34 @@
       (with-current-buffer composer
         (should (string-match-p "Ready · C-n send   ctx 1\\.2k/200k · cache miss 8% · \\$0\\.01   RET newline"
                                 (eval (cadr header-line-format) t)))))))
+
+(defconst bbh-test-workflow-json
+  "{\"run\":\"r1\",\"workflow\":\"change\",\"status\":\"active\",\"phase\":\"implement\",\"visit\":1,\"block_reason\":null,\"phases\":[{\"name\":\"shape\",\"brief\":\"Shape it.\",\"visits\":1,\"gates\":[\"artifact shape.md\"]},{\"name\":\"implement\",\"brief\":\"Change it.\",\"visits\":1,\"gates\":[\"command check\"]},{\"name\":\"verify\",\"brief\":\"Check it.\",\"visits\":0,\"gates\":[]}]}")
+
+(ert-deftest bbh-workflow-panel-shows-current-phase-and-moves-selection-only ()
+  (let ((data (eng/bbh-workflow--parse bbh-test-workflow-json)))
+    (should-not (alist-get 'block_reason data))
+    (with-current-buffer (get-buffer-create eng/bbh-workflow-buffer)
+      (eng/bbh-workflow-mode)
+      (eng/bbh-workflow--apply data)
+      (should buffer-read-only)
+      (should (string-match-p "▶ implement" (buffer-string)))
+      (should (= eng/bbh-workflow--selected 1))
+      (should (string-match-p "command check" (buffer-string)))
+      (eng/bbh-workflow-next)
+      (should (= eng/bbh-workflow--selected 2))
+      (should (string-match-p "Check it." (buffer-string)))
+      (eng/bbh-workflow-next)
+      (should (= eng/bbh-workflow--selected 2))
+      (eng/bbh-workflow-previous)
+      (eng/bbh-workflow-previous)
+      (eng/bbh-workflow-previous)
+      (should (= eng/bbh-workflow--selected 0))
+      (should (string-match-p "Shape it." (buffer-string)))
+      (should (equal data eng/bbh-workflow--data)))))
+
+(ert-deftest bbh-workflow-panel-reports-a-missing-run ()
+  (with-current-buffer (get-buffer-create eng/bbh-workflow-buffer)
+    (eng/bbh-workflow-mode)
+    (eng/bbh-workflow--apply '((error . "no runs for this directory")))
+    (should (string-match-p "no runs for this directory" (buffer-string)))))

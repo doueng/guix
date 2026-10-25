@@ -199,3 +199,13 @@
     (is (= id (wf/latest-id sub)))
     (is (= other (wf/latest-id theirs)))
     (is (nil? (wf/latest-id (str (fs/create-temp-dir {:prefix "wf-elsewhere"})))))))
+
+(deftest status-json-lists-phases-in-run-order
+  (let [j (wf/status-json {:id "r" :workflow :change :status :active :phase :implement
+                           :visits {:shape 1 :implement 1}})]
+    (is (= ["shape" "implement" "verify" "review" "finish"] (map :name (:phases j))))
+    (is (= "implement" (:phase j)))
+    (is (= 1 (:visit j)))
+    (is (= [1 1 0 0 0] (map :visits (:phases j))))
+    (is (= ["artifact shape.md"] (:gates (first (:phases j)))))
+    (is (= ["command `bb test`"] (:gates (second (:phases (wf/status-json {:id "r" :workflow :change :status :active :phase :implement :visits {} :check "bb test"}))))))))

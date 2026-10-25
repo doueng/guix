@@ -324,6 +324,42 @@
   (doseq [g results]
     (println (str "  [" (cond (:pending? g) "wait" (:pass? g) "ok" :else "FAIL") "] " (describe-gate g)))))
 
+(defn- phase-order
+  "Phases in the order a run takes them: from :start along :next, then any phase that walk never reaches."
+  [wf]
+  (let [walk (loop [p (:start wf), acc []]
+               (if (or (nil? p) (some #{p} acc))
+                 acc
+                 (recur (get-in wf [:phases p :next]) (conj acc p))))]
+    (vec (concat walk (remove (set walk) (keys (:phases wf)))))))
+
+(defn- spec-gate-text
+  "How the panel describes a gate in the spec. Commands show the run's own text, such as its check."
+  [st gate]
+  (case (:kind gate)
+    :artifact (str "artifact " (:path gate))
+    :command (str "command `" (get st (:cmd gate)) "`")
+    :verdict (str "verdict: " (:criteria gate))
+    (str (name (:kind gate)))))
+
+(defn status-json
+  "Read-only view of a run for other programs, such as the Emacs panel. Writes nothing."
+  [st]
+  (let [wf (load-workflow (:workflow st))]
+    {:run (:id st)
+     :workflow (name (:workflow st))
+     :status (name (:status st))
+     :phase (name (:phase st))
+     :visit (get-in st [:visits (:phase st)])
+     :block_reason (:block-reason st)
+     :phases (mapv (fn [p]
+                     (let [spec (get-in wf [:phases p])]
+                       {:name (name p)
+                        :brief (:brief spec)
+                        :visits (get-in st [:visits p] 0)
+                        :gates (mapv #(spec-gate-text st %) (:gates spec))}))
+                   (phase-order wf))}))
+
 (defn- print-status [st]
   (println (str "run " (:id st)))
   (println (str "workflow " (name (:workflow st)) "  phase " (name (:phase st))
@@ -335,7 +371,7 @@
 (def ^:private usage
   "usage:
   wf start <workflow> [--task T] [--repro CMD] [--check CMD] [--bench CMD] [--cwd DIR]
-  wf status [RUN]
+  wf status [RUN] [--json]
   wf attest [RUN] --claim TEXT
   wf review [RUN]                       fresh reviewer judges the current verdict gate
   wf verdict [RUN] --human NAME --verdict pass|fail [--note TEXT]
@@ -351,14 +387,18 @@ RUN defaults to $WF_RUN, else the newest run started for this directory or one c
       :else (recur (rest xs) (conj pos (first xs)) flags))))
 
 (defn -main [& argv]
-  (let [[cmd & more] argv
+  (let [json? (boolean (some #{"--json"} argv))
+        argv (remove #{"--json"} argv)
+        [cmd & more] argv
         {:keys [pos flags]} (parse-args more)
         run-id (fn [] (or (first pos) (default-id) (throw (ex-info "no runs for this directory; pass RUN or set WF_RUN" {}))))]
     (try
       (case cmd
         "start" (print-status (status (start! (keyword (first pos))
                                               (select-keys flags [:cwd :task :repro :check :bench]))))
-        "status" (print-status (status (run-id)))
+        "status" (if json?
+                    (println (json/generate-string (status-json (status (run-id)))))
+                    (print-status (status (run-id))))
         "attest" (let [id (run-id)]
                    (print-attest (attest! id (or (:claim flags)
                                                  (throw (ex-info "attest needs --claim" {})))))
@@ -381,5 +421,7 @@ RUN defaults to $WF_RUN, else the newest run started for this directory or one c
                     (print-status (status id)))
         (do (println usage) (System/exit 2)))
       (catch clojure.lang.ExceptionInfo e
-        (binding [*out* *err*] (println (ex-message e)))
+        (if json?
+          (println (json/generate-string {:error (ex-message e)}))
+          (binding [*out* *err*] (println (ex-message e))))
         (System/exit 1)))))
