@@ -372,6 +372,10 @@ Org leaves result blocks, a special block, without the code background."
   (setq-local font-lock-extra-managed-props
               (cl-adjoin 'display font-lock-extra-managed-props))
   (font-lock-add-keywords nil eng/bbh-transcript--markup 'append)
+  ;; Doom-one paints org-block with an opaque background. In a terminal that
+  ;; band hides the transparent default, so drop it in this buffer only.
+  (unless (display-graphic-p)
+    (face-remap-add-relative 'org-block '(:background "unspecified-bg")))
   (visual-line-mode 1))
 
 (defun eng/bbh--transcript (shell &optional buffer)
