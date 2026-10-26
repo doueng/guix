@@ -25,11 +25,12 @@
 <body>
 
 <h1>bbh workflow engine</h1>
-<p class='lead'>How pstack workflows run inside bbh, what the gates check, and how to drive a run from Pi or bbh.</p>
+<p class='lead'>How pstack workflows run inside bbh, what the gates check, how to drive a run from Pi or bbh, and how this compares with upstream pstack. Updated 2026-10-26.</p>
 <nav>
   <a href='#idea'>Idea</a><a href='#flow'>Flow</a><a href='#gates'>Gates</a><a href='#visits'>Visits</a>
   <a href='#commands'>Commands</a><a href='#example'>Example</a><a href='#journal'>Journal</a>
-  <a href='#routes'>Routes</a><a href='#tests'>Tests</a><a href='#runs'>Model runs</a><a href='#limits'>Limits</a>
+  <a href='#routes'>Routes</a><a href='#panel'>Panel</a><a href='#tests'>Tests</a><a href='#runs'>Model runs</a>
+  <a href='#pstack'>pstack</a><a href='#limits'>Limits</a>
 </nav>
 
 <h2 id='idea'>The idea</h2>
@@ -42,7 +43,7 @@
 </ul>
 
 <h2 id='flow'>Flow</h2>
-<p>The <code>bug-fix</code> workflow is shown below. The other two workflows are linear.</p>
+<p>The <code>bug-fix</code> workflow is shown below. Every workflow is a chain along <code>:next</code>. Some phases also name an <code>:on-fail</code> phase to go back to. These are verify in <code>bug-fix</code>, review in <code>change</code>, measure and review in <code>performance</code>, answer in <code>prototype</code>, and review in <code>large-project</code>.</p>
 <svg viewBox='0 0 760 210' role='img' aria-label='bug-fix phases: reproduce, diagnose, implement, verify, finish'>
   <defs>
     <marker id='arr' markerWidth='10' markerHeight='10' refX='9' refY='5' orient='auto'>
@@ -73,7 +74,7 @@
 
 <h3>What one attest does</h3>
 <ol>
-  <li>Read the run's journal and fold it into the current state: phase, visit count, and recorded verdicts.</li>
+  <li>Read the run's journal and fold it into the current state. That is the phase, the visit count, the recorded verdicts, and the workflow definition the run started with.</li>
   <li>Run every gate of the current phase, in order. Command gates write their output to the evidence directory. Artifact gates check the file. Verdict gates look for a verdict recorded for this visit.</li>
   <li>Append an <code>attest</code> event with every gate result.</li>
   <li>Decide the next step from the results. A pending verdict changes nothing. A pass moves to the next phase. A fail moves to <code>on-fail</code>, or retries the same phase when there is none.</li>
@@ -85,10 +86,11 @@
   <tr><th>Kind</th><th>What the runner checks</th><th>Example</th></tr>
   <tr><td><code>:command</code></td><td>Runs the command with <code>timeout</code> and <code>sh -c</code> in the run's repo. Passes when the exit code matches <code>:expect</code> (default <code>:zero</code>). A timeout always fails. Output and a SHA-256 are recorded.</td><td><code>{:kind :command :cmd :repro :expect :nonzero}</code></td></tr>
   <tr><td><code>:artifact</code></td><td>The named file exists in the evidence directory and is not empty. This only proves that something was written.</td><td><code>{:kind :artifact :path 'mechanism.md'}</code></td></tr>
-  <tr><td><code>:verdict</code></td><td>A verdict was recorded for the current visit. Agents get one from <code>wf review</code>, which starts a fresh bbh conversation with the criteria and the evidence. The reviewer's reply must end with a <code>VERDICT: pass</code> or <code>VERDICT: fail</code> line, or the review fails. A person can record one with <code>wf verdict --human NAME</code>. Until a verdict exists the gate is pending. It passes only on <code>:pass</code>.</td><td><code>{:kind :verdict :criteria '...'}</code></td></tr>
+  <tr><td><code>:verdict</code></td><td>A verdict was recorded for the current visit. Agents get one from <code>wf review</code>, which starts a fresh bbh conversation with the criteria and the evidence. The reviewer model defaults to <code>claude/opus</code>, and <code>WF_REVIEW_MODEL</code> overrides it. If the reply has no <code>VERDICT: pass</code> or <code>VERDICT: fail</code> line, the reviewer is asked for it up to two more times, then the review fails. A person can record one with <code>wf verdict --human NAME</code>. Until a verdict exists the gate is pending. It passes only on <code>:pass</code>.</td><td><code>{:kind :verdict :criteria '...'}</code></td></tr>
 </table>
 <p><code>:cmd :repro</code> and <code>:cmd :check</code> are placeholders. They resolve to the <code>--repro</code> and <code>--check</code> values given at start. A gate marked <code>:optional true</code> is skipped when its command was not given.</p>
 <p class='note'>A failed gate outranks a pending one. So a missing artifact is reported as a failure even while a verdict is still waiting.</p>
+<p><code>:cmd :bench</code> works the same way with <code>--bench</code>. A workflow's <code>:requires</code> list names flags that <code>wf start</code> refuses to go without. <code>change</code> requires <code>--check</code> and <code>performance</code> requires <code>--bench</code>.</p>
 <p>A command gate also has a timeout. It defaults to 600 seconds and can be set per gate with <code>:timeout</code>. A timeout always fails the gate, even when a nonzero exit was expected.</p>
 
 <h2 id='visits'>Visits and caps</h2>
@@ -98,12 +100,13 @@
   implement  visit 2  -> verify 2  -> fail -> implement 3
   implement  visit 3  -> verify 3  -> fail -> implement 4   (4 &gt; 3)
   status: blocked, "phase implement exceeded 3 visits"</pre>
-<p>A blocked run refuses further attests. Only you can unblock it, by starting a new run.</p>
+<p>A blocked run refuses further attests. Only you can unblock it, by starting a new run. Entering a phase the definition does not have also blocks the run, instead of finishing it.</p>
+<p>Workflow files are validated when they load, and every problem is reported at once. A run stores the definition it started with, so editing a workflow file never changes a run in progress.</p>
 
 <h2 id='workflows'>The workflows</h2>
 <table>
   <tr><th>Workflow</th><th>Phases</th><th>Routes it serves</th><th>Needs</th></tr>
-  <tr><td><code>bug-fix</code></td><td>reproduce, diagnose, implement, verify, finish</td><td>bug_fix</td><td>--repro (recommended)</td></tr>
+  <tr><td><code>bug-fix</code></td><td>reproduce, diagnose, implement, verify, finish</td><td>bug_fix</td><td>--repro (not enforced at start, but the reproduce gate fails without it), --check (optional)</td></tr>
   <tr><td><code>change</code></td><td>shape, implement, verify, review, finish</td><td>feature, refactor</td><td>--check (required)</td></tr>
   <tr><td><code>investigation</code></td><td>answer</td><td>investigation, review</td><td>nothing</td></tr>
   <tr><td><code>performance</code></td><td>baseline, change, measure, review, finish</td><td>performance</td><td>--bench (required), --check (optional)</td></tr>
@@ -116,17 +119,18 @@
 <h2 id='commands'>Commands</h2>
 <table>
   <tr><th>Command</th><th>Effect</th></tr>
-  <tr><td><code>wf start &lt;workflow&gt; --task T [--repro CMD] [--check CMD] [--cwd DIR]</code></td><td>Creates a run and prints its status and brief.</td></tr>
-  <tr><td><code>wf status [RUN]</code></td><td>Phase, visit, status, brief, and evidence directory. <code>RUN</code> defaults to the latest run.</td></tr>
+  <tr><td><code>wf start &lt;workflow&gt; --task T [--repro CMD] [--check CMD] [--bench CMD] [--cwd DIR]</code></td><td>Creates a run and prints its status and brief.</td></tr>
+  <tr><td><code>wf status [RUN] [--json]</code></td><td>Phase, visit, status, brief, and evidence directory. <code>--json</code> prints every phase with its brief, visits and gates, for the Emacs panel. It writes nothing.</td></tr>
   <tr><td><code>wf attest [RUN] --claim TEXT</code></td><td>Runs the gates for the current phase and prints each result.</td></tr>
   <tr><td><code>wf review [RUN]</code></td><td>Starts a fresh reviewer for the current verdict gate, records its verdict, and prints it with the reason.</td></tr>
-  <tr><td><code>wf verdict [RUN] --human NAME --verdict pass|fail [--note TEXT]</code></td><td>Records a verdict from a person. Agents are told not to use it.</td></tr>
+  <tr><td><code>wf verdict [RUN] --human NAME --verdict pass|fail [--note TEXT]</code></td><td>Records a verdict from a person. It needs a terminal and asks you to type the run ID to confirm, so an agent's shell cannot use it.</td></tr>
   <tr><td><code>wf session-dir [WORKSPACE] [DIR]</code></td><td>Prints Pi's session directory for a workspace. Used by the recall, reflect, and show-me-your-work skills.</td></tr>
 </table>
-<p>From Pi, run these in bash. From bbh, use <code>(sh "wf status")</code> in the clojure tool. Runs and evidence live under <code>~/.local/state/bbh/workflows/</code>, outside the repo.</p>
+<p>When <code>RUN</code> is omitted, <code>wf</code> uses <code>$WF_RUN</code>. Otherwise it uses the run this bbh conversation started, recorded in a <code>workflow-run</code> file beside the conversation's <code>repl.port</code>. Otherwise it uses the newest run started for the current directory or one containing it. Runs from other repositories never qualify.</p>
+<p>From Pi, run these in bash. From bbh, use <code>(sh "wf status")</code> in the clojure tool. Runs and evidence live under <code>$XDG_STATE_HOME/bbh/workflows/</code>, which defaults to <code>~/.local/state/bbh/workflows/</code>, outside the repo.</p>
 
 <h2 id='example'>Example</h2>
-<p class='note'>This transcript is from the first version, when the verdict was typed by hand with <code>wf verdict</code>. The model-driven runs under the current rules are covered in their own section.</p>
+<p class='note'>This transcript is from the first version, when the verdict was typed by hand with <code>wf verdict --reviewer</code>. That flag is now <code>--human</code>, and agents run <code>wf review</code> instead. The model-driven runs under the current rules are covered in their own section.</p>
 <p>This is a real run from a toy project. Its <code>calc.clj</code> computed <code>(- a b)</code> for <code>add</code>. The repro script checked <code>(= 5 (add 2 3))</code>. Some lines are shortened.</p>
 <pre>$ wf start bug-fix --task 'add returns the difference' --repro 'sh repro.sh'
 run 20261023-224248-284-bug-fix
@@ -173,6 +177,7 @@ run is done</pre>
 <h2 id='journal'>Journal and state</h2>
 <p>Each run lives in <code>~/.local/state/bbh/workflows/&lt;run-id&gt;/</code>. It holds <code>journal.edn</code> and an <code>evidence/</code> directory. The journal is an append-only list of EDN maps. The current state is recomputed from it on every call. Here are the first three events of the run above, trimmed.</p>
 <pre>{:type :start, :workflow :bug-fix, :phase :reproduce, :repro "sh repro.sh", :cwd "/tmp/...", :id "20261023-224248-284-bug-fix"}
+;; current runs also store :definition, the whole workflow map, in the start event
 {:type :attest, :phase :reproduce, :visit 1, :claim "repro fails", :outcome :pass,
  :gates [{:kind :command, :cmd "sh repro.sh", :exit 1, :evidence "...reproduce-1-0.txt", :sha256 "e3b0...", :pass? true}]}
 {:type :enter, :phase :diagnose, :visit 1}</pre>
@@ -188,8 +193,11 @@ run is done</pre>
 </ul>
 <p>The test <code>routes-match-the-jev-classifiers</code> fails when the two classifier lists differ from the workflow routes plus the manual list. The manual routes are <code>pr_workflow</code>, <code>skill_work</code>, and <code>other</code>. <code>pr_workflow</code> stays manual on purpose, since there are no pull requests. A manual route has no workflow, so the agent does the work directly and says so.</p>
 
+<h2 id='panel'>Emacs panel</h2>
+<p>Opening a bbh conversation in Doom's agent-shell also opens a <code>*bbh workflow*</code> buffer (<code>desktop/configs/doom/agent-shell.el</code>). It reads <code>wf status --json</code> for that conversation's run and lists the phases in run order with their briefs, visits and gates. <kbd>j</kbd> and <kbd>k</kbd> move the selection and <kbd>g</kbd> refreshes. The panel is read-only. Moving the selection changes only what it shows. The composer status line also shows the run as <code>workflow: phase</code>.</p>
+
 <h2 id='tests'>Tests</h2>
-<p>Run with <code>cd desktop/build/bbh &amp;&amp; bb test:workflow</code>. The suite has 15 tests and 44 assertions. They cover:</p>
+<p>Run with <code>cd desktop/build/bbh &amp;&amp; bb test:workflow</code>. The suite has 22 tests and 78 assertions. They cover:</p>
 <ul>
   <li>The bug-fix path from start to done, with a pending verdict, a fail, a retry, and a fix.</li>
   <li>A premature fixed claim, which stays at <code>reproduce</code>.</li>
@@ -203,11 +211,17 @@ run is done</pre>
   <li>A torn last journal line, which is dropped, and a corrupt line in the middle, which stops reads.</li>
   <li>A review that runs a fresh conversation and records its verdict, and a review with no VERDICT line, which fails. These use a scripted model, so they cost nothing.</li>
   <li><code>performance</code> refusing to start without <code>--bench</code>.</li>
+  <li>The default run, which belongs to the current directory and never to another repository.</li>
+  <li><code>status --json</code> listing phases in run order.</li>
+  <li>Validation. Every shipped workflow is valid, and an invalid one is rejected with every problem listed.</li>
+  <li>An unknown phase, which blocks the run instead of finishing it.</li>
+  <li>A run keeping the definition it started with after the file changes.</li>
+  <li>A property test. Random gate outcomes only ever enter real phases, and a run finishes only from a passing terminal phase.</li>
 </ul>
-<p>The full bbh suite also passes (<code>bb test</code>, 44 tests). The end-to-end run above went through the real <code>wf</code> launcher on a real project.</p>
+<p>The full bbh suite also passes (<code>bb test</code>, 83 tests and 243 assertions on 2026-10-26). The end-to-end run above went through the real <code>wf</code> launcher on a real project.</p>
 
 <h2 id='runs'>Model-driven runs</h2>
-<p>A model was given a real bug in a toy project and the prompt <em>calc/add returns the difference, but it should return the sum. Fix it.</em> Run it with <code>bb eval:workflow [MODEL] [OUTPUT-DIR]</code> from <code>desktop/build/bbh</code>. It runs a real bbh conversation, with the poteto-mode skill injected on the first prompt, and it records what the run did.</p>
+<p>A model was given a real bug in a toy project and the prompt <em>calc/add returns the difference, but it should return the sum. Fix it.</em> Run it with <code>bb -m bbh.workflow-eval [MODEL] [OUTPUT-DIR]</code> from <code>desktop/build/bbh</code>. The <code>eval:workflow</code> task was removed from <code>bb.edn</code>, but the namespace is still on the classpath. It spends model credits. It runs a real bbh conversation, with the poteto-mode skill injected on the first prompt, and it records what the run did.</p>
 <table>
   <tr><th>Run</th><th>Rule in the skill</th><th>Reviewer</th><th>wf calls</th><th>Path</th><th>Result</th></tr>
   <tr><td>1</td><td>Advisory: "pick the workflow"</td><td>none</td><td>0</td><td>Skipped the workflow, edited the file directly.</td><td class='note'>Bypassed the workflow entirely.</td></tr>
@@ -218,19 +232,33 @@ run is done</pre>
 <p>Three findings came out of these runs.</p>
 <ul>
   <li><strong>Advisory rules get skipped.</strong> Run 1 read the skill, called its own work a one-line change, and went around it. The fix was to make the rule mandatory and to say that size does not exempt a task. Runs 2 to 4 all started the run before their first edit.</li>
-  <li><strong>The reviewer has to be stronger than the agent.</strong> In run 2, the haiku reviewer passed a mechanism note that said <em>wait see output above</em>. A direct probe showed Sonnet rejects that note and passes a note that names the line and the repro output. The default reviewer is now Sonnet, and <code>WF_REVIEW_MODEL</code> overrides it.</li>
+  <li><strong>The reviewer has to be stronger than the agent.</strong> In run 2, the haiku reviewer passed a mechanism note that said <em>wait see output above</em>. A direct probe showed Sonnet rejects that note and passes a note that names the line and the repro output. The default reviewer became Sonnet, and is now Opus, because the agents doing the work include Opus. <code>WF_REVIEW_MODEL</code> overrides it.</li>
   <li><strong>Gates re-run commands, but artifacts stay weak.</strong> The agents wrote their own repro output and their own mechanism notes. The command gates ran the repro again, so a faked output could not pass. Nothing checks that a mechanism note is true, and only the reviewer judges it.</li>
 </ul>
-<p class='note'>The eval runs wrote to the real state directory, so their runs appear in <code>wf status</code> history. Isolating the eval's state needs an environment variable set for the REPL, and that is not done yet.</p>
+<p class='note'>The eval runs wrote to the real state directory, so their runs appear in <code>wf status</code> history. The state root now honors <code>XDG_STATE_HOME</code>, but the eval does not set it yet.</p>
+
+<h2 id='pstack'>Compared with upstream pstack</h2>
+<p>The workflows adapt pstack's poteto-mode playbooks from <a href='https://github.com/cursor/plugins/tree/main/pstack'>cursor/plugins</a>. Upstream was at 0.15.32, commit <code>e73df47</code>, on 2026-10-26. The vendored bundle in <code>desktop/pi/agent/skills/pstack/</code> records 0.15.13, commit <code>2cbf585</code>, in <code>UPSTREAM.md</code>. 64 upstream commits touch <code>pstack/</code> since that baseline.</p>
+<table>
+  <tr><th></th><th>pstack</th><th>bbh <code>wf</code></th></tr>
+  <tr><td>Enforcement</td><td>Written playbooks. The agent copies the steps into a todo list. Nothing checks it followed them.</td><td>The runner executes every gate. A claim never advances a phase.</td></tr>
+  <tr><td>Size</td><td><code>poteto-mode/SKILL.md</code> is 149 lines, with 23 playbooks, about 30 skills and 24 principle skills.</td><td>Seven EDN workflows, 133 lines, on a 490-line engine. The local <code>poteto-mode/SKILL.md</code> is 44 lines and has no playbooks.</td></tr>
+  <tr><td>Repro and measurement</td><td>Asked for in the bug-fix and perf playbooks.</td><td>Command gates. The repro must fail first and pass after. <code>--check</code> and <code>--bench</code> are required where they apply.</td></tr>
+  <tr><td>Review</td><td>Diverse-model subagents and <code>interrogate</code>, when the agent chooses to run them.</td><td>One fresh reviewer per verdict gate. The run waits for it.</td></tr>
+  <tr><td>Long work</td><td><code>orch</code> keeps a ledger of PR verdicts, a merge frontier and parked gates. <code>watch-pr</code> polls CI and reviews.</td><td><code>large-project</code> stops once the plan is reviewed. Nothing carries out the stages.</td></tr>
+  <tr><td>Coverage</td><td>Also hillclimb, runtime and trace forensics, babysit, shipping, orchestrate, autopilot, eval, visual parity, session pickup and pause.</td><td>None of those. <code>pr_workflow</code>, <code>skill_work</code> and <code>other</code> are manual.</td></tr>
+</table>
+<p>pstack's playbooks carry judgment the one-line briefs drop. Examples are seeding hypotheses with <code>how</code> and <code>why</code>, committing the failing repro before the fix, and the benchmark noise checklist. The sibling skills are still in the bundle, but only <code>change</code> points to one, <code>architect</code>. Whether gates beat prose on outcomes has not been measured. <code>eval/RESULTS.md</code> compares harnesses, not workflow systems.</p>
 
 <h2 id='limits'>Limits</h2>
 <ul>
-  <li><strong>Reviewer independence is by construction, not by proof.</strong> <code>wf review</code> gives the reviewer a fresh conversation and only the criteria, the task, and the evidence paths. A determined agent can still run <code>wf verdict --human</code>. The CLI requires that flag, and the rules forbid it, but nothing else stops it.</li>
-  <li><strong>Artifact gates are weak.</strong> They check existence and size, not content. Command gates carry the real checks.</li>
+  <li><strong>Reviewer independence is by construction, not by proof.</strong> <code>wf review</code> gives the reviewer a fresh conversation and only the criteria, the task, and the evidence paths. <code>wf verdict</code> needs a terminal and a typed run ID, which an agent's shell lacks. An agent that can drive a real terminal, for example through Herdr, could still get past that.</li>
+  <li><strong>Artifact gates are weak.</strong> They check existence and size, not content. Command gates carry the real checks. <code>investigation</code>, <code>handoff</code>, and the first three phases of <code>prototype</code> have only artifact gates, so a placeholder file passes them.</li>
   <li><strong>The implement phase is ungated.</strong> That is deliberate. The verify phase is the check that matters.</li>
   <li><strong>Commands run in the repo as the current user.</strong> A repro that writes files or hits the network will do so for real.</li>
   <li><strong>No parallel runs.</strong> Two agents on one run would interleave journal events. Use separate runs.</li>
   <li><strong>Manual routes.</strong> <code>pr_workflow</code>, <code>skill_work</code>, and <code>other</code> still have no workflow.</li>
+  <li><strong>Vendored pstack is behind.</strong> The bundle tracks 0.15.13 while upstream is at 0.15.32.</li>
 </ul>
 
 </body>
