@@ -106,7 +106,7 @@
       (insert "draft while output arrives")
       (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 60))
       (should (equal (bbh-test--text transcript)
-                     "* add forty\n#+begin_quote\nadd forty\nand two\n#+end_quote\n\n#+begin_src clojure\n(+ 40 2)\n#+end_src\n#+begin_result done 1\n=> 42\n#+end_result\n\nThe answer is 42.\n"))
+                     "* add forty\n#+begin_quote\nand two\n#+end_quote\n\n#+begin_src clojure\n(+ 40 2)\n#+end_src\n#+begin_result done 1\n=> 42\n#+end_result\n\nThe answer is 42.\n"))
       (with-current-buffer transcript
         (should (derived-mode-p 'org-mode))
         (should buffer-read-only)
@@ -116,12 +116,12 @@
           (search-forward text)
           (should (memq 'org-block (ensure-list (get-text-property (match-beginning 0) 'face))))))
       (should (equal (bbh-test--screen transcript)
-                     "* add forty\nadd forty\nand two\n\n(+ 40 2)\n✓ output (1 line)\n\nThe answer is 42.\n"))
+                     "* add forty\nand two\n\n(+ 40 2)\n✓ output (1 line)\n\nThe answer is 42.\n"))
       (should (bbh-test--tool-folded-p transcript))
       (call-interactively (key-binding (kbd "C-c C-t")))
       (should-not (bbh-test--tool-folded-p transcript))
       (should (equal (bbh-test--screen transcript)
-                     "* add forty\nadd forty\nand two\n\n(+ 40 2)\n✓ output (1 line)\n=> 42\n\nThe answer is 42.\n"))
+                     "* add forty\nand two\n\n(+ 40 2)\n✓ output (1 line)\n=> 42\n\nThe answer is 42.\n"))
       (with-current-buffer transcript
         (call-interactively (key-binding (kbd "C-c C-t"))))
       (should (bbh-test--tool-folded-p transcript))
@@ -274,6 +274,25 @@
       (should (< (- (float-time) start) 10)))
     (should (string-match-p "user interrupted the evaluation" (bbh-test--text buf)))))
 
+(ert-deftest bbh-turn-usage-omits-empty-parts ()
+  (should (equal (eng/bbh--turn-usage '(((input . 1000) (cached . 900) (output . 50) (cache . "hit") (n . 1))) 0 "4s")
+                 "Usage: 1 request in 4s · 1.0k in, 90% cached · 50 out")))
+
+(ert-deftest bbh-markup-stays-hidden-after-partial-fontification ()
+  (with-temp-buffer
+    (eng/bbh-transcript-mode)
+    (setq eng/bbh-transcript--tools (make-hash-table :test #'equal))
+    (eng/bbh-transcript--prompt "one\ntwo")
+    (eng/bbh-transcript--tool "a" '((:raw-input . ((code . "(+ 1 2)"))) (:status . "completed")
+                                    (:content . (((content . ((text . "```clojure\n(+ 1 2)\n```\n```\n3\n```"))))))))
+    ;; Org's block fontifier strips display text properties from whole blocks.
+    (goto-char (point-min))
+    (search-forward "#+begin_src")
+    (font-lock-fontify-region (match-beginning 0) (point-max))
+    (font-lock-fontify-region (point-min) (+ (point-min) 3))
+    (should (equal (bbh-test--screen (current-buffer))
+                   "* one\ntwo\n\n(+ 1 2)\n✓ output (1 line)\n"))))
+
 (ert-deftest bbh-token-counts-are-compact ()
   (should (equal (mapcar #'eng/bbh--tokens '(950 1200 45000 1000000 1048576 2500000))
                  '("950" "1.2k" "45k" "1m" "1m" "2.5m"))))
@@ -297,13 +316,14 @@
       (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 60))
       (should (bbh-test--wait (lambda () (string-match-p "^Usage:" (bbh-test--text transcript))) 10))
       (should (string-match-p
-               (regexp-quote "Usage: 3 requests · 3.3k in, 33% cached · miss on request 3 (8% of 1.2k) · 40 out · $0.0120")
+               (concat "Usage: 3 requests in [0-9]+s · "
+                       (regexp-quote "3.3k in, 33% cached · miss on request 3 (8% of 1.2k) · 40 out · $0.0120"))
                (bbh-test--text transcript)))
       (should (equal (substring-no-properties (eng/bbh-usage-header shell))
                      "ctx 1.2k/200k · cache miss 8% · $0.01"))
       ;; Batch Emacs renders no header line, so evaluate the composer's :eval form.
       (with-current-buffer composer
-        (should (string-match-p "Ready .*ctx 1\\.2k/200k · cache miss 8%% · \\$0\\.01 · 2026"
+        (should (string-match-p "Ready .*ctx 1\\.2k/200k · cache miss 8%% · \\$0\\.01\\'"
                                 (eval (cadr header-line-format) t)))))))
 
 (defconst bbh-test-workflow-json

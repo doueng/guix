@@ -143,15 +143,54 @@ followed by the result's fence."
             (if (string-empty-p result) 0 (length (split-string result "\n")))
             (if (string-empty-p result) "" (concat (org-escape-code-in-string result) "\n")))))
 
+(defvar-local eng/bbh-transcript--dirty nil
+  "(BEG . END) that the running transcript edit changed, or nil.")
+
+(defun eng/bbh-transcript--note-change (beg end _length)
+  (setq eng/bbh-transcript--dirty
+        (if eng/bbh-transcript--dirty
+            (cons (min beg (car eng/bbh-transcript--dirty)) (max end (cdr eng/bbh-transcript--dirty)))
+          (cons beg end))))
+
+(defun eng/bbh-transcript--markup-overlay (beg end display)
+  (let ((overlay (make-overlay beg end)))
+    (overlay-put overlay 'eng/bbh-markup t)
+    (overlay-put overlay 'evaporate t)
+    (overlay-put overlay 'display display)))
+
+(defun eng/bbh-transcript--decorate (beg end)
+  "Hide the org markup lines of blocks between BEG and END and label results.
+Overlays do this rather than font-lock, because org's block fontification
+strips `display' text properties from whole blocks on partial redisplays."
+  (save-excursion
+    (setq beg (progn (goto-char beg) (line-beginning-position))
+          end (progn (goto-char (min end (point-max))) (min (point-max) (1+ (line-end-position)))))
+    (dolist (overlay (overlays-in beg end))
+      (when (overlay-get overlay 'eng/bbh-markup) (delete-overlay overlay)))
+    (goto-char beg)
+    (while (re-search-forward "^#\\+\\(begin\\|end\\)_\\(src\\|example\\|quote\\|result\\)\\(?: \\([a-z]+\\) \\([0-9]+\\)\\)?.*$" end t)
+      (let ((begin (equal (match-string 1) "begin")))
+        (cond ((and begin (equal (match-string 2) "result") (match-string 3))
+               (eng/bbh-transcript--markup-overlay
+                (match-beginning 0) (match-end 0)
+                (eng/bbh--result-label (match-string 3) (match-string 4))))
+              (begin
+               (eng/bbh-transcript--markup-overlay (match-beginning 0) (min (point-max) (1+ (match-end 0))) ""))
+              ((> (match-beginning 0) (point-min))
+               (eng/bbh-transcript--markup-overlay (1- (match-beginning 0)) (match-end 0) "")))))))
+
 (defun eng/bbh-transcript--edit (change)
   "Call CHANGE at the end of the transcript, keeping followers at the end."
   (let ((inhibit-read-only t)
+        (eng/bbh-transcript--dirty nil)
         (followers (seq-filter (lambda (w) (= (window-point w) (point-max)))
                                (get-buffer-window-list nil nil t)))
         (at-end (= (point) (point-max))))
     (save-excursion
       (goto-char (point-max))
-      (funcall change))
+      (funcall change)
+      (when eng/bbh-transcript--dirty
+        (eng/bbh-transcript--decorate (car eng/bbh-transcript--dirty) (cdr eng/bbh-transcript--dirty))))
     (when at-end (goto-char (point-max)))
     (dolist (w followers) (set-window-point w (point-max)))))
 
@@ -178,14 +217,16 @@ followed by the result's fence."
     (and (not (looking-at-p "#\\+end_result")) (invisible-p (point)))))
 
 (defun eng/bbh-transcript--prompt (prompt)
+  "Insert PROMPT with its first line as the heading and the rest as a quote.
+The heading wraps instead of truncating, so no line of the prompt shows twice."
   (setq eng/bbh-transcript--reply nil)
-  (let* ((prompt (string-trim prompt))
-         (title (truncate-string-to-width (car (split-string prompt "\n")) 72 nil nil "…")))
+  (let* ((lines (split-string (string-trim prompt) "\n"))
+         (rest (string-trim (string-join (cdr lines) "\n"))))
     (eng/bbh-transcript--edit
      (lambda ()
-       (insert (eng/bbh-transcript--separator) "* " title "\n"
-               (if (equal title prompt) ""
-                 (concat "#+begin_quote\n" (eng/bbh--md->org prompt) "\n#+end_quote\n")))))))
+       (insert (eng/bbh-transcript--separator) "* " (car lines) "\n"
+               (if (string-empty-p rest) ""
+                 (concat "#+begin_quote\n" (eng/bbh--md->org rest) "\n#+end_quote\n")))))))
 
 (defun eng/bbh-transcript--reply-chunk (text)
   (eng/bbh-transcript--edit
@@ -274,28 +315,34 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
                              (format "ctx %s%s" (eng/bbh--tokens used)
                                      (if (and size (> size 0)) (concat "/" (eng/bbh--tokens size)) "")))
                            (eng/bbh--cache-label eng/bbh-usage-last)
-                           (format "$%.2f" (or (map-elt usage :cost-amount) 0))))
+                           (eng/bbh--cost "$%.2f" (map-elt usage :cost-amount))))
            " · "))))))
 
-(defun eng/bbh--turn-usage (requests cost)
-  "One line about a turn's REQUESTS, oldest first, which cost COST dollars."
+(defun eng/bbh--cost (fmt amount)
+  "AMOUNT dollars in FMT, or nil when nothing was billed, as on a subscription."
+  (when (and amount (> amount 0)) (format fmt amount)))
+
+(defun eng/bbh--turn-usage (requests cost &optional elapsed)
+  "One line about a turn's REQUESTS, oldest first, which cost COST dollars
+and took ELAPSED, such as 12s.  Cache misses and cost appear only when present."
   (let* ((sum (lambda (key) (apply #'+ (mapcar (lambda (r) (or (map-elt r key) 0)) requests))))
          (input (funcall sum 'input))
          (cached (funcall sum 'cached))
          (misses (seq-filter (lambda (r) (equal (map-elt r 'cache) "miss")) requests))
          (n (length requests)))
     (string-join
-     (list (format "Usage: %d request%s" n (if (= n 1) "" "s"))
-           (format "%s in, %d%% cached" (eng/bbh--tokens input)
-                   (if (> input 0) (round (* 100.0 (/ (float cached) input))) 0))
-           (if misses
-               (mapconcat (lambda (r) (format "miss on request %d (%d%% of %s)" (map-elt r 'n)
-                                              (eng/bbh--percent (map-elt r 'ratio))
-                                              (eng/bbh--tokens (map-elt r 'input))))
-                          misses ", ")
-             "no cache misses")
-           (format "%s out" (eng/bbh--tokens (funcall sum 'output)))
-           (format "$%.4f" (or cost 0)))
+     (delq nil
+           (list (format "Usage: %d request%s%s" n (if (= n 1) "" "s")
+                         (if elapsed (concat " in " elapsed) ""))
+                 (format "%s in, %d%% cached" (eng/bbh--tokens input)
+                         (if (> input 0) (round (* 100.0 (/ (float cached) input))) 0))
+                 (when misses
+                   (mapconcat (lambda (r) (format "miss on request %d (%d%% of %s)" (map-elt r 'n)
+                                                  (eng/bbh--percent (map-elt r 'ratio))
+                                                  (eng/bbh--tokens (map-elt r 'input))))
+                              misses ", "))
+                 (format "%s out" (eng/bbh--tokens (funcall sum 'output)))
+                 (eng/bbh--cost "$%.4f" cost)))
      " · ")))
 
 (defvar-local eng/bbh-turn-started nil
@@ -328,8 +375,8 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
             eng/bbh-usage-turn-cost (or (map-nested-elt agent-shell--state '(:usage :cost-amount)) 0))
       (eng/bbh--begin-turn))))
 
-(defun eng/bbh-transcript--usage ()
-  "Note the finished turn's usage at the end of the transcript."
+(defun eng/bbh-transcript--usage (&optional elapsed)
+  "Note the finished turn's usage, and its duration ELAPSED, at the end of the transcript."
   (when-let* ((shell eng/bbh-transcript-shell)
               ((buffer-live-p shell))
               (requests (buffer-local-value 'eng/bbh-usage-requests shell)))
@@ -340,7 +387,7 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
       (eng/bbh-transcript--edit
        (lambda ()
          (insert (eng/bbh-transcript--separator)
-                 (propertize (eng/bbh--turn-usage (reverse requests) cost) 'font-lock-face 'shadow) "\n"))))))
+                 (propertize (eng/bbh--turn-usage (reverse requests) cost elapsed) 'font-lock-face 'shadow) "\n"))))))
 
 (defun eng/bbh-transcript--on-event (transcript event)
   (when (buffer-live-p transcript)
@@ -355,8 +402,9 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
           ('error (eng/bbh-transcript--end-turn)
                   (eng/bbh-transcript--error (or (map-elt data :message) "the request failed")))
           ('turn-complete (setq eng/bbh-transcript--reply nil)
-                          (eng/bbh-transcript--end-turn)
-                          (eng/bbh-transcript--usage)))
+                          (let ((elapsed (eng/bbh--elapsed eng/bbh-transcript-shell)))
+                            (eng/bbh-transcript--end-turn)
+                            (eng/bbh-transcript--usage elapsed))))
         (when (or (memq (map-elt event :event) '(input-submitted turn-complete))
                   (and (eq (map-elt event :event) 'tool-call-update)
                        (equal (map-nested-elt data '(:tool-call :status)) "completed")))
@@ -387,20 +435,16 @@ Org leaves result blocks, a special block, without the code background."
   nil)
 
 (defconst eng/bbh-transcript--markup
-  '((eng/bbh--fontify-nested-blocks)
-    ("^#\\+begin_\\(?:src\\|example\\|quote\\).*\n\\|\n#\\+end_\\(?:src\\|example\\|quote\\|result\\)$"
-     (0 (progn (put-text-property (match-beginning 0) (match-end 0) 'display "") nil)))
-    ("^#\\+begin_result \\([a-z]+\\) \\([0-9]+\\)$"
-     (0 (progn (put-text-property (match-beginning 0) (match-end 0) 'display
-                                  (eng/bbh--result-label (match-string 1) (match-string 2)))
-               nil))))
-  "Format nested blocks as code and hide the org markup lines around blocks.")
+  '((eng/bbh--fontify-nested-blocks))
+  "Format nested blocks as code.  `eng/bbh-transcript--decorate' hides their markup.")
 
 (define-derived-mode eng/bbh-transcript-mode org-mode "bbh"
   "A read-only org rendering of a bbh conversation."
   (setq buffer-read-only t)
-  (setq-local font-lock-extra-managed-props
-              (cl-adjoin 'display font-lock-extra-managed-props))
+  ;; The composer's status line below separates the windows; the buffer
+  ;; size, position and mode name here say nothing useful.
+  (setq-local mode-line-format nil)
+  (add-hook 'after-change-functions #'eng/bbh-transcript--note-change nil t)
   (font-lock-add-keywords nil eng/bbh-transcript--markup 'append)
   ;; Doom-one paints org-block with an opaque background. In a terminal that
   ;; band hides the transparent default, so drop it in this buffer only.
@@ -456,11 +500,28 @@ Org leaves result blocks, a special block, without the code background."
     (map-nested-elt (buffer-local-value 'agent-shell--state shell) '(:session :id))))
 
 (defun eng/bbh--model-name (shell)
-  "The model SHELL's agent-shell reports as its current model, or nil."
-  (when (buffer-live-p shell)
-    (seq-some (lambda (option)
-                (and (equal (map-elt option :id) "model") (map-elt option :current-value)))
-              (agent-shell--config-options (buffer-local-value 'agent-shell--state shell)))))
+  "The model SHELL's agent-shell reports as its current model, or nil.
+A provider prefix the model name repeats, as in claude/claude-opus, is dropped."
+  (when-let* (((buffer-live-p shell))
+              (model (seq-some (lambda (option)
+                                 (and (equal (map-elt option :id) "model") (map-elt option :current-value)))
+                               (agent-shell--config-options (buffer-local-value 'agent-shell--state shell)))))
+    (if (string-match "\\`\\([^/]+\\)/\\(\\1.*\\)\\'" model) (match-string 2 model) model)))
+
+(defun eng/bbh--workflow-label (shell)
+  "SHELL's workflow run as WORKFLOW: PHASE from the panel's last read, or nil.
+This reads no process, so it is cheap enough for the status line."
+  (when-let* ((buffer (get-buffer eng/bbh-workflow-buffer))
+              (session (eng/bbh--session-id shell))
+              ((equal session (buffer-local-value 'eng/bbh-workflow--session buffer)))
+              (data (buffer-local-value 'eng/bbh-workflow--data buffer))
+              ((not (alist-get 'error data))))
+    (let ((status (alist-get 'status data)))
+      (concat (alist-get 'workflow data) ": "
+              (pcase status
+                ("blocked" (propertize "blocked" 'face 'error))
+                ("done" (propertize "done" 'face 'success))
+                (_ (alist-get 'phase data)))))))
 
 (defun eng/bbh--effort (shell)
   "The effort bbh sent with the latest request of SHELL, or nil before one."
@@ -482,23 +543,24 @@ Org leaves result blocks, a special block, without the code background."
       (when (> n 0) (format "%d queued" n)))))
 
 (defun eng/bbh--header ()
-  "The composer status line: state, timing, model, effort, usage and conversation id.
-The key hints are in `eng/bbh-keys'.  % is escaped because the header is a mode-line."
+  "The composer status line: state, timing, workflow phase, model, effort and usage.
+The key hints and conversation id are in `eng/bbh-keys'.  % is escaped because the header is a mode-line."
   (let* ((shell (agent-shell-viewport--shell-buffer))
          (busy (agent-shell-viewport--busy-p))
          (parts (delq nil (list (if busy "Working" "Ready")
                                 (and busy (eng/bbh--elapsed shell))
                                 (eng/bbh--queued shell)
+                                (eng/bbh--workflow-label shell)
                                 (eng/bbh--model-name shell)
                                 (eng/bbh--effort shell)
-                                (eng/bbh-usage-header shell)
-                                (eng/bbh--session-id shell)))))
+                                (eng/bbh-usage-header shell)))))
     (replace-regexp-in-string "%" "%%" (concat " " (string-join parts " · ")) t t)))
 
 (defun eng/bbh-keys ()
   "Show the composer keys in the echo area."
   (interactive)
-  (message "%s" "C-n send or queue · RET newline · M-p/M-n history · M-k/M-j scroll · C-c C-t tools · C-c C-k stop"))
+  (message "%s%s" "C-n send or queue · RET newline · M-p/M-n history · M-k/M-j scroll · C-c C-t tools · C-c C-k stop"
+           (if-let* ((id (eng/bbh--session-id (eng/bbh--shell)))) (concat " · /resume " id) "")))
 
 (defun eng/bbh-composer-header (&rest _)
   "Keep the composer status line current when agent-shell refreshes its header."
@@ -537,6 +599,8 @@ Its start stays at the top of the buffer, so text typed or sent there does not m
   "Restore bbh bindings after returning from agent-shell's history view."
   (when eng/bbh-composer
     (eng/bbh-composer-padding)
+    ;; The header line carries the status; Doom's mode-line only repeats the buffer name.
+    (setq-local mode-line-format nil)
     (use-local-map (copy-keymap (current-local-map)))
     (dolist (binding '(("C-n" . eng/bbh-send)
                        ("C-c C-c" . eng/bbh-send)
@@ -601,6 +665,7 @@ called interactively, restore this layout for the current session."
   "Read-only view of the pstack workflow run in a bbh session.
 Moving the selection changes only what this panel shows. Only `wf' advances a phase."
   (setq buffer-read-only t)
+  (setq-local mode-line-format nil)
   (visual-line-mode 1))
 
 (define-key eng/bbh-workflow-mode-map (kbd "j") #'eng/bbh-workflow-next)
@@ -664,7 +729,6 @@ Other runs in the repository are never shown, so the panel matches the session's
       (insert (alist-get 'error data) "\n"))
      (t
       (insert (format "%s  %s\n" (alist-get 'workflow data) (alist-get 'status data)))
-      (insert (format "run %s\n" (alist-get 'run data)))
       (when-let* ((reason (alist-get 'block_reason data)))
         (insert (propertize (format "blocked: %s\n" reason) 'face 'error)))
       (insert "\n")
