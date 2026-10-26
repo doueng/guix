@@ -262,7 +262,7 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
     (_ (propertize (format "cache %d%%" (eng/bbh--percent (map-elt request 'ratio))) 'face 'success))))
 
 (defun eng/bbh-usage-header (shell)
-  "Context, cache and cost for SHELL's composer header, or nil before a request."
+  "Context, cache and cost for SHELL's status line, or nil before a request."
   (when (buffer-live-p shell)
     (with-current-buffer shell
       (when eng/bbh-usage-last
@@ -272,7 +272,7 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
           (string-join
            (delq nil (list (when used
                              (format "ctx %s%s" (eng/bbh--tokens used)
-                                     (if size (concat "/" (eng/bbh--tokens size)) "")))
+                                     (if (and size (> size 0)) (concat "/" (eng/bbh--tokens size)) "")))
                            (eng/bbh--cache-label eng/bbh-usage-last)
                            (format "$%.2f" (or (map-elt usage :cost-amount) 0))))
            " · "))))))
@@ -298,11 +298,35 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
            (format "$%.4f" (or cost 0)))
      " · ")))
 
+(defvar-local eng/bbh-turn-started nil
+  "When the current turn started, as `float-time', or nil between turns.")
+
+(defvar-local eng/bbh-turn-timer nil
+  "Repeating timer that redraws the status line while a turn runs.")
+
+(defun eng/bbh--end-turn ()
+  "Stop the elapsed-time clock of this shell's turn."
+  (when (timerp eng/bbh-turn-timer) (cancel-timer eng/bbh-turn-timer))
+  (setq eng/bbh-turn-timer nil eng/bbh-turn-started nil)
+  (force-mode-line-update t))
+
+(defun eng/bbh--begin-turn ()
+  "Start the elapsed-time clock of this shell's turn."
+  (eng/bbh--end-turn)
+  (setq eng/bbh-turn-started (float-time)
+        eng/bbh-turn-timer (run-with-timer 1 1 #'force-mode-line-update t)))
+
+(defun eng/bbh-transcript--end-turn ()
+  "End the turn clock of the shell behind this transcript."
+  (when (buffer-live-p eng/bbh-transcript-shell)
+    (with-current-buffer eng/bbh-transcript-shell (eng/bbh--end-turn))))
+
 (defun eng/bbh-transcript--turn-start ()
   (when-let* ((shell eng/bbh-transcript-shell) ((buffer-live-p shell)))
     (with-current-buffer shell
       (setq eng/bbh-usage-requests nil
-            eng/bbh-usage-turn-cost (or (map-nested-elt agent-shell--state '(:usage :cost-amount)) 0)))))
+            eng/bbh-usage-turn-cost (or (map-nested-elt agent-shell--state '(:usage :cost-amount)) 0))
+      (eng/bbh--begin-turn))))
 
 (defun eng/bbh-transcript--usage ()
   "Note the finished turn's usage at the end of the transcript."
@@ -328,8 +352,10 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
           ('agent-message-chunk (eng/bbh-transcript--reply-chunk (map-elt data :text-chunk)))
           ('tool-call-update (eng/bbh-transcript--tool (map-elt data :tool-call-id)
                                                        (map-elt data :tool-call)))
-          ('error (eng/bbh-transcript--error (or (map-elt data :message) "the request failed")))
+          ('error (eng/bbh-transcript--end-turn)
+                  (eng/bbh-transcript--error (or (map-elt data :message) "the request failed")))
           ('turn-complete (setq eng/bbh-transcript--reply nil)
+                          (eng/bbh-transcript--end-turn)
                           (eng/bbh-transcript--usage)))
         (when (or (memq (map-elt event :event) '(input-submitted turn-complete))
                   (and (eq (map-elt event :event) 'tool-call-update)
@@ -424,15 +450,60 @@ Org leaves result blocks, a special block, without the code background."
 (defvar-local eng/bbh-composer nil)
 (put 'eng/bbh-composer 'permanent-local t)
 
+(defun eng/bbh--session-id (shell)
+  "The bbh conversation id of SHELL, which /resume takes, or nil."
+  (when (buffer-live-p shell)
+    (map-nested-elt (buffer-local-value 'agent-shell--state shell) '(:session :id))))
+
+(defun eng/bbh--model-name (shell)
+  "The model SHELL's agent-shell reports as its current model, or nil."
+  (when (buffer-live-p shell)
+    (seq-some (lambda (option)
+                (and (equal (map-elt option :id) "model") (map-elt option :current-value)))
+              (agent-shell--config-options (buffer-local-value 'agent-shell--state shell)))))
+
+(defun eng/bbh--effort (shell)
+  "The effort bbh sent with the latest request of SHELL, or nil before one."
+  (when-let* (((buffer-live-p shell))
+              (effort (map-elt (buffer-local-value 'eng/bbh-usage-last shell) 'effort)))
+    (format "effort %s" effort)))
+
+(defun eng/bbh--elapsed (shell)
+  "How long SHELL's current turn has run, such as 12s or 1m04s, or nil."
+  (when-let* (((buffer-live-p shell))
+              (started (buffer-local-value 'eng/bbh-turn-started shell)))
+    (let ((s (floor (- (float-time) started))))
+      (if (< s 60) (format "%ds" s) (format "%dm%02ds" (/ s 60) (% s 60))))))
+
+(defun eng/bbh--queued (shell)
+  "How many prompts are waiting behind SHELL's turn, or nil."
+  (when (buffer-live-p shell)
+    (let ((n (length (map-elt (buffer-local-value 'agent-shell--state shell) :pending-prompts))))
+      (when (> n 0) (format "%d queued" n)))))
+
+(defun eng/bbh--header ()
+  "The composer status line: state, timing, model, effort, usage and conversation id.
+The key hints are in `eng/bbh-keys'.  % is escaped because the header is a mode-line."
+  (let* ((shell (agent-shell-viewport--shell-buffer))
+         (busy (agent-shell-viewport--busy-p))
+         (parts (delq nil (list (if busy "Working" "Ready")
+                                (and busy (eng/bbh--elapsed shell))
+                                (eng/bbh--queued shell)
+                                (eng/bbh--model-name shell)
+                                (eng/bbh--effort shell)
+                                (eng/bbh-usage-header shell)
+                                (eng/bbh--session-id shell)))))
+    (replace-regexp-in-string "%" "%%" (concat " " (string-join parts " · ")) t t)))
+
+(defun eng/bbh-keys ()
+  "Show the composer keys in the echo area."
+  (interactive)
+  (message "%s" "C-n send or queue · RET newline · M-p/M-n history · M-k/M-j scroll · C-c C-t tools · C-c C-k stop"))
+
 (defun eng/bbh-composer-header (&rest _)
-  "Keep the send hint visible when agent-shell refreshes its header."
+  "Keep the composer status line current when agent-shell refreshes its header."
   (when (and eng/bbh-composer (derived-mode-p 'agent-shell-viewport-edit-mode))
-    (setq-local header-line-format
-                '(:eval (concat " " (if (agent-shell-viewport--busy-p) "Working · C-n queue" "Ready · C-n send")
-                                (if-let* ((usage (eng/bbh-usage-header (agent-shell-viewport--shell-buffer))))
-                                    (concat "   " usage)
-                                  "")
-                                "   RET newline   M-p history   M-k/M-j scroll   C-c C-t tools   C-c C-k stop")))))
+    (setq-local header-line-format '(:eval (eng/bbh--header)))))
 
 (defun eng/bbh-scroll-output (backward)
   "Scroll this composer's transcript without moving input focus."
@@ -472,6 +543,7 @@ Its start stays at the top of the buffer, so text typed or sent there does not m
                        ("M-RET" . eng/bbh-send)
                        ("C-c C-k" . agent-shell-viewport-interrupt)
                        ("C-c C-t" . eng/bbh-toggle-tools)
+                       ("C-c ?" . eng/bbh-keys)
                        ("M-k" . eng/bbh-output-page-up)
                        ("M-j" . eng/bbh-output-page-down)))
       (local-set-key (kbd (car binding)) (cdr binding))

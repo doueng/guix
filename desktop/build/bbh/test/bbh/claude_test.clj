@@ -62,8 +62,8 @@
           (session/prompt! s "one")
           (session/prompt! s "two")
           (let [requests (keep :request (filter #(= :usage (:type %)) @events))]
-            (is (= [{:input 1000 :cached 900 :written 98 :output 7 :thinking 0 :n 1 :cache :cold :ratio 0.9}
-                    {:input 1000 :cached 900 :written 98 :output 7 :thinking 0 :n 1 :cache :hit :ratio 0.9}]
+            (is (= [{:input 1000 :cached 900 :written 98 :output 7 :thinking 0 :effort "medium" :n 1 :cache :cold :ratio 0.9}
+                    {:input 1000 :cached 900 :written 98 :output 7 :thinking 0 :effort "medium" :n 1 :cache :hit :ratio 0.9}]
                    requests)))
           (is (= 200000 (:size (last @events))))
           (is (< (abs (- 0.002 (:spent @s))) 1e-9))

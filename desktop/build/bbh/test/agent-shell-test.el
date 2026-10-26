@@ -142,7 +142,7 @@
       (call-interactively (key-binding (kbd "C-c C-p")))
       (agent-shell-viewport-reply)
       (should (eq (key-binding (kbd "C-n")) #'eng/bbh-send))
-      (should (string-match-p "C-n" (format "%s" header-line-format)))
+      (should (string-match-p "Ready" (eval (cadr header-line-format) t)))
       (should (equal (string-trim (bbh-test--text composer)) "draft while output arrives"))
       (eng/bbh-layout shell)
       (should (= (length (bbh-test--main-windows)) 2))
@@ -303,7 +303,7 @@
                      "ctx 1.2k/200k · cache miss 8% · $0.01"))
       ;; Batch Emacs renders no header line, so evaluate the composer's :eval form.
       (with-current-buffer composer
-        (should (string-match-p "Ready · C-n send   ctx 1\\.2k/200k · cache miss 8% · \\$0\\.01   RET newline"
+        (should (string-match-p "Ready .*ctx 1\\.2k/200k · cache miss 8%% · \\$0\\.01 · 2026"
                                 (eval (cadr header-line-format) t)))))))
 
 (defconst bbh-test-workflow-json

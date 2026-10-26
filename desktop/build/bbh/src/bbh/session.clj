@@ -104,6 +104,7 @@
         request (when input
                   (assoc (select-keys report [:input :written :output :thinking])
                          :cached cached
+                         :effort (:effort (:manifest @s))
                          :n (inc (:requests turn-usage 0))
                          :cache (cond (nil? last-input) :cold
                                       (< cached (* 0.5 last-input)) :miss
