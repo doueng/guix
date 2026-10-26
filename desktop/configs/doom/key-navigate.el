@@ -29,11 +29,13 @@ never typed text."
 
 (defun eng/navigate (direction)
   "Select the window in DIRECTION, a string such as \"left\".
+Windows marked `no-other-window', such as Treemacs under Doom, are included.
 At the frame edge, ask keyleader to move to the next Herdr pane or Hyprland window."
-  (condition-case nil
-      (windmove-do-window-select (intern direction))
-    (user-error
-     (call-process (expand-file-name "~/.local/bin/keyleader") nil 0 nil
-                   "nav" direction "from Emacs edge"))))
+  (let ((windmove-allow-all-windows t))
+    (condition-case nil
+        (windmove-do-window-select (intern direction))
+      (user-error
+       (call-process (expand-file-name "~/.local/bin/keyleader") nil 0 nil
+                     "nav" direction "from Emacs edge")))))
 
 (provide 'key-navigate)

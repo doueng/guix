@@ -161,6 +161,7 @@
       :desc "Recent project files"  "p r" #'projectile-recentf)
 
 (map! :leader
+      :desc "Toggle treemacs"       "e" #'+treemacs/toggle
       :desc "Toggle line numbers"   "t l" #'doom/toggle-line-numbers
       :desc "Toggle word wrap"      "t w" #'visual-line-mode)
 

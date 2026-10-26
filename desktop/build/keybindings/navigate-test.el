@@ -19,6 +19,19 @@
       (eng/navigate "left")
       (should (eq left (selected-window))))))
 
+(ert-deftest navigate-reaches-no-other-window-windows ()
+  ;; Doom marks the Treemacs window no-other-window.
+  (delete-other-windows)
+  (let ((left (selected-window))
+        (calls nil))
+    (select-window (split-window-right))
+    (set-window-parameter left 'no-other-window t)
+    (cl-letf (((symbol-function 'call-process)
+               (lambda (&rest args) (push args calls) 0)))
+      (eng/navigate "left")
+      (should (eq left (selected-window)))
+      (should-not calls))))
+
 (ert-deftest keylog-command-records-the-binding-and-runs-the-command ()
   (let* ((file (make-temp-file "keylog"))
          (process-environment (cons (concat "KEYLOG_FILE=" file) process-environment))
