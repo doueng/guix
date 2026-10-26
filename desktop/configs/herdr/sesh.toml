@@ -6,8 +6,8 @@ name = "emacs"
 startup_script = "emacs-project-start"
 
 [[window]]
-name = "pi"
-startup_script = "pi"
+name = "bbh"
+startup_script = "emacs-bbh"
 
 [[window]]
 name = "jjui"
@@ -16,4 +16,4 @@ startup_script = "jjui"
 # Apply the project layout to every new directory from zoxide or a direct path.
 [[wildcard]]
 pattern = "/**"
-windows = ["emacs", "pi", "jjui"]
+windows = ["emacs", "bbh", "jjui"]
