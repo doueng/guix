@@ -514,7 +514,10 @@ called interactively, restore this layout for the current session."
   "The last `wf status --json' answer, as an alist.")
 
 (defvar-local eng/bbh-workflow--dir nil
-  "The directory whose newest workflow run the panel shows.")
+  "The directory the panel runs `wf' in.")
+
+(defvar-local eng/bbh-workflow--session nil
+  "The bbh conversation whose workflow run the panel shows.")
 
 (defvar-local eng/bbh-workflow--selected 0
   "Index of the phase whose brief and gates the panel describes.")
@@ -546,19 +549,32 @@ Moving the selection changes only what this panel shows. Only `wf' advances a ph
   (json-parse-string json :object-type 'alist :array-type 'list
                      :null-object nil :false-object nil))
 
-(defun eng/bbh-workflow--fetch (dir)
-  "The newest workflow run for DIR from `wf status --json', or an alist with `error'."
-  (let ((default-directory (file-name-as-directory (expand-file-name dir))))
-    (with-temp-buffer
-      (let* ((code (call-process "wf" nil t nil "status" "--json"))
-             (text (buffer-string)))
-        (condition-case nil
-            (let ((data (eng/bbh-workflow--parse text)))
-              (cond ((alist-get 'error data) data)
-                    ((zerop code) data)
-                    (t (list (cons 'error "wf status failed")))))
-          (error (list (cons 'error (let ((msg (string-trim text)))
-                                      (if (string-empty-p msg) "wf status failed" msg))))))))))
+(defun eng/bbh-workflow--session-run (session)
+  "The workflow run SESSION started, or nil when it has none."
+  (let ((file (and session (eng/bbh--conversation-file session "workflow-run"))))
+    (when (and file (file-exists-p file))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (string-trim (buffer-string))))))
+
+(defun eng/bbh-workflow--fetch (dir session)
+  "The run SESSION started, from `wf status --json' in DIR, or an alist with `error'.
+Other runs in the repository are never shown, so the panel matches the session's own wf."
+  (let ((run (eng/bbh-workflow--session-run session)))
+    (if (null run)
+        (list (cons 'error "This session has no workflow run yet."))
+      (let ((default-directory (file-name-as-directory (expand-file-name dir)))
+            (process-environment (cons (concat "WF_RUN=" run) process-environment)))
+        (with-temp-buffer
+          (let* ((code (call-process "wf" nil t nil "status" "--json"))
+                 (text (buffer-string)))
+            (condition-case nil
+                (let ((data (eng/bbh-workflow--parse text)))
+                  (cond ((alist-get 'error data) data)
+                        ((zerop code) data)
+                        (t (list (cons 'error "wf status failed")))))
+              (error (list (cons 'error (let ((msg (string-trim text)))
+                                          (if (string-empty-p msg) "wf status failed" msg))))))))))))
 
 (defun eng/bbh-workflow--current-index (data)
   (or (seq-position (alist-get 'phases data) (alist-get 'phase data)
@@ -618,7 +634,8 @@ Moving the selection changes only what this panel shows. Only `wf' advances a ph
   (with-current-buffer (get-buffer-create eng/bbh-workflow-buffer)
     (unless (derived-mode-p 'eng/bbh-workflow-mode) (eng/bbh-workflow-mode))
     (eng/bbh-workflow--apply
-     (eng/bbh-workflow--fetch (or eng/bbh-workflow--dir default-directory)))))
+     (eng/bbh-workflow--fetch (or eng/bbh-workflow--dir default-directory)
+                              eng/bbh-workflow--session))))
 
 (defun eng/bbh-workflow--move (delta)
   (with-current-buffer (get-buffer-create eng/bbh-workflow-buffer)
@@ -644,7 +661,9 @@ Moving the selection changes only what this panel shows. Only `wf' advances a ph
         (buffer (get-buffer-create eng/bbh-workflow-buffer)))
     (with-current-buffer buffer
       (unless (derived-mode-p 'eng/bbh-workflow-mode) (eng/bbh-workflow-mode))
-      (setq eng/bbh-workflow--dir dir))
+      (setq eng/bbh-workflow--dir dir
+            eng/bbh-workflow--session
+            (with-current-buffer shell (map-nested-elt (agent-shell--state) '(:session :id)))))
     (eng/bbh-workflow-refresh)
     (display-buffer-in-side-window buffer '((side . right) (window-width . 40)))))
 

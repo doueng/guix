@@ -15,6 +15,19 @@
   (str (fs/path (or (System/getenv "XDG_STATE_HOME") (fs/expand-home "~/.local/state"))
                 "bbh" "workflows")))
 
+(defn session-run-file
+  "The file that holds the run this bbh conversation started. It sits beside the conversation's repl.port.
+  Nil outside a bbh conversation."
+  []
+  (when-let [port (System/getenv "BBH_PORT_FILE")]
+    (str (fs/path (fs/parent port) "workflow-run"))))
+
+(defn session-run-id
+  "The run this bbh conversation started, or nil when it has none."
+  []
+  (when-let [file (session-run-file)]
+    (when (fs/exists? file) (str/trim (slurp file)))))
+
 (defn- run-dir [id] (str (fs/path (state-root) id)))
 (defn- journal-file [id] (str (fs/path (run-dir id) "journal.edn")))
 (defn- evidence-dir [id] (str (fs/path (run-dir id) "evidence")))
@@ -166,6 +179,7 @@
       (append! id {:type :start :id id :workflow wf-name
                    :cwd (str (fs/canonicalize (or cwd ".")))
                    :task task :repro repro :check check :bench bench :phase (:start wf)})
+      (when-let [file (session-run-file)] (spit file id))
       id)))
 
 (defn status [id]
@@ -269,10 +283,10 @@
        (->> (fs/list-dir (state-root)) (map (comp str fs/file-name)) sort reverse (filter mine?) first)))))
 
 (defn default-id
-  "The run a command means when it names none: $WF_RUN, else the newest run for the current directory.
-  Other agents' runs in other repositories never qualify."
+  "The run a command means when it names none: $WF_RUN, else the run this bbh conversation started, else the
+  newest run for the current directory. Other agents' runs in other repositories never qualify."
   []
-  (or (System/getenv "WF_RUN") (latest-id (fs/cwd))))
+  (or (System/getenv "WF_RUN") (session-run-id) (latest-id (fs/cwd))))
 
 (defn- configured-session-dir [files]
   (reduce (fn [acc file]
