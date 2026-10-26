@@ -168,11 +168,13 @@ dusk-test:
 dusk-verify:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/dusk/verify.bb
 
+# Doom's CLI reads a piped stdin to EOF before running, so an agent's open pipe
+# hangs it; give it /dev/null.
 # doom doctor exits 0 even when an enabled module lacks its tools, so compare its
 # warnings, prefixed with their module, against an accepted baseline.
 DOOM ?= $(HOME)/.config/emacs/bin/doom
 DOOM_BASELINE := desktop/build/doom/doctor-baseline.txt
-DOOM_WARNINGS = out=$$(cd "$(HOME)" && "$(DOOM)" doctor 2>&1) || { printf '%s\n' "$$out" >&2; exit 1; }; \
+DOOM_WARNINGS = out=$$(cd "$(HOME)" && "$(DOOM)" doctor 2>&1 </dev/null) || { printf '%s\n' "$$out" >&2; exit 1; }; \
 	printf '%s\n' "$$out" | awk '/^ *> :/ { m = $$2 " " $$3 ": " } /^ *! / { sub(/^ *! /, ""); print m $$0 }' | LC_ALL=C sort
 
 doom-check:
