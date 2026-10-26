@@ -24,9 +24,13 @@
 (defun eng/bbh-send ()
   "Send the draft and keep the bottom composer ready for another prompt.
 /new starts a fresh conversation instead, as it does in Pi, and resuming a
-saved conversation clears the transcript the same way."
+saved conversation clears the transcript the same way.  A bare /model or
+/resume opens a popup to choose the model or conversation first."
   (interactive)
-  (let ((draft (string-trim (buffer-string))))
+  (let ((draft (eng/bbh--choose (string-trim (buffer-string)))))
+    (unless (equal draft (string-trim (buffer-string)))
+      (erase-buffer)
+      (insert draft))
     (if (equal draft "/new")
         (progn (erase-buffer) (eng/bbh-new))
       (when (eng/bbh--resumes-p draft)
@@ -36,6 +40,61 @@ saved conversation clears the transcript the same way."
 (defun eng/bbh--conversation-file (id file)
   (expand-file-name (format "bbh/conversations/%s/%s" id file)
                     (or (getenv "XDG_DATA_HOME") "~/.local/share")))
+
+(defun eng/bbh--choose (draft)
+  "DRAFT with an argument chosen in a popup when it is a bare /model or /resume."
+  (pcase draft
+    ("/model" (concat "/model " (eng/bbh--read-model)))
+    ("/resume" (concat "/resume " (eng/bbh--read-conversation)))
+    (_ draft)))
+
+(defun eng/bbh--read-model ()
+  "Choose one of the models the bbh session offers."
+  (let* ((shell (or (eng/bbh--shell) (user-error "No bbh session in this buffer")))
+         (state (buffer-local-value 'agent-shell--state shell))
+         (ids (or (mapcar (lambda (model) (map-elt model :model-id))
+                          (agent-shell--get-available-models state))
+                  (user-error "bbh offers no models")))
+         (current (agent-shell--current-model-id state)))
+    (completing-read (format "Model (%s): " current) ids nil t nil nil current)))
+
+(defun eng/bbh--first-prompt (id)
+  "The first user prompt of conversation ID on one line, without skill text."
+  (with-temp-buffer
+    (insert-file-contents (eng/bbh--conversation-file id "messages.jsonl") nil 0 200000)
+    (goto-char (point-min))
+    (let (prompt)
+      (while (and (not prompt) (not (eobp)))
+        (let ((message (ignore-errors
+                         (json-parse-string (buffer-substring (point) (line-end-position))
+                                            :object-type 'alist))))
+          (when (equal "user" (alist-get 'role message))
+            (setq prompt (alist-get 'content message))))
+        (forward-line 1))
+      (let ((text (string-trim (replace-regexp-in-string
+                                "[ \t\n]+" " "
+                                (replace-regexp-in-string "\\`\\(?:.\\|\n\\)*</skill>" "" (or prompt ""))))))
+        (truncate-string-to-width text 80 nil nil "…")))))
+
+(defun eng/bbh--read-conversation ()
+  "Choose a saved conversation other than this one, newest first."
+  (let* ((root (file-name-directory (directory-file-name (eng/bbh--conversation-file "x" ""))))
+         (current (eng/bbh--session-id (eng/bbh--shell)))
+         (ids (seq-filter (lambda (id)
+                            (and (not (equal id current))
+                                 (file-exists-p (eng/bbh--conversation-file id "messages.jsonl"))))
+                          (and (file-directory-p root)
+                               (reverse (directory-files root nil "\\`[^.]")))))
+         (choices (or (mapcar (lambda (id) (cons (concat id "  " (eng/bbh--first-prompt id)) id)) ids)
+                      (user-error "No other conversations"))))
+    (cdr (assoc (completing-read "Resume: "
+                                 (lambda (string pred action)
+                                   (if (eq action 'metadata)
+                                       '(metadata (display-sort-function . identity)
+                                                  (cycle-sort-function . identity))
+                                     (complete-with-action action choices string pred)))
+                                 nil t)
+                choices))))
 
 (defun eng/bbh--resumes-p (draft)
   "Whether DRAFT names a conversation /resume can switch to."
