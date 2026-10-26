@@ -11,7 +11,7 @@
    "openrouter/anthropic/claude-opus-5.5" "openrouter/deepseek/deepseek-v4.1-flash"])
 
 (defn default-model []
-  (or (System/getenv "BBH_MODEL") "claude/haiku"))
+  (or (System/getenv "BBH_MODEL") "claude/claude-opus-5-5"))
 
 (defn- script
   "Replies read in order from an EDN file of steps: a string answers, {:code ...}
