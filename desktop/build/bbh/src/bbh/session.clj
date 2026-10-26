@@ -22,6 +22,19 @@
             (str/join "\n"))
        max-chars))
 
+(defn spill!
+  "TEXT for the model. When it is longer than MAX-CHARS, the full text is saved
+  under the conversation's outputs/ directory and the capped text starts with
+  its path, which compaction trimming keeps because it keeps the head."
+  [s id text max-chars]
+  (if (<= (count text) max-chars)
+    text
+    (let [f (fs/path (:dir @s) "outputs" (str (str/replace (str id) #"[^A-Za-z0-9_.-]" "_") ".txt"))]
+      (fs/create-dirs (fs/parent f))
+      (spit (str f) text)
+      (str "[bbh] Full output (" (count text) " chars) saved to " f ". Read parts with read-lines.\n"
+           (context/cap text max-chars)))))
+
 (defn new-session
   "DIR holds the transcript and logs, INIT is loaded into every new REPL, CWD is
   where the REPL runs, MODEL names the engine MAKE-ENGINE builds, and EMIT
@@ -148,13 +161,13 @@
                                 (:timeout r) (str "Timed out after " (:deadline-ms manifest) " ms.")
                                 :else "The REPL process exited.")
                       init-problem (restart-repl! s)
-                      partial (render r (:max-output-chars manifest))]
+                      partial (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest))]
                   [(str why " The REPL process was killed and restarted, so live definitions are gone and init.clj was reloaded."
                         (when init-problem (str "\n" init-problem))
                         (when (seq partial) (str "\nOutput before that:\n" partial)))
                    :failed])
                 :else
-                [(render r (:max-output-chars manifest)) (if (:error? r) :failed :completed)])
+                [(spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (if (:error? r) :failed :completed)])
           text (cond->> text note (str note "\n"))]
       (emit! s {:type :tool-result :id id :code code :text text :status status})
       text)))
@@ -231,6 +244,19 @@
 
 (def ^:private max-reminders 3)
 
+(def cut-off-call
+  "[bbh] Your reply hit the model's output limit, so this call's code is incomplete and did not run. Split the work into smaller evaluations.")
+
+(defn- close-cut-off-call
+  "MESSAGE with its last call's arguments replaced by {} when the output limit
+  left them as invalid JSON, which providers reject in later requests."
+  [message]
+  (let [i (dec (count (:tool_calls message)))
+        args (get-in message [:tool_calls i :function :arguments])]
+    (if (try (json/parse-string args) true (catch Exception _ false))
+      message
+      (assoc-in message [:tool_calls i :function :arguments] "{}"))))
+
 (def quiet-reminder
   "[bbh] The user hasn't heard from you in a while. Say in a few words what you're doing, then continue.")
 
@@ -252,13 +278,17 @@
       (if (= ::overflow result)
         (do (note! s (str "The request exceeded the model's context. " (compact! s nil)))
             (when-not (:interrupted @s) (recur round true quiet reminders)))
-        (let [{:keys [message usage]} result
-              message (cond-> message (:interrupted @s) (dissoc :tool_calls))
+        (let [{:keys [message usage truncated]} result
+              message (cond-> message
+                        (:interrupted @s) (dissoc :tool_calls)
+                        (and truncated (seq (:tool_calls message))) close-cut-off-call)
               calls (:tool_calls message)]
           (when (or (seq (:content message)) (seq calls))
             (record! s message))
           (when usage
             (add-usage! s usage))
+          (when (and truncated (empty? calls) (not (:interrupted @s)))
+            (note! s "The reply hit the model's output limit and was cut off."))
           (when (seq calls)
             ;; The reminder goes into the tool result as it is recorded, so the
             ;; prefix of every later request stays the same.
@@ -266,7 +296,9 @@
                   remind? (and (>= quiet quiet-rounds) (< reminders max-reminders))
                   last-id (:id (peek calls))]
               (doseq [call calls]
-                (let [text (call-tool! s call)]
+                (let [text (if (and truncated (= last-id (:id call)))
+                             cut-off-call
+                             (call-tool! s call))]
                   (record! s {:role "tool" :tool_call_id (:id call)
                               :content (cond-> text (and remind? (= last-id (:id call)))
                                          (str "\n\n" quiet-reminder))})))

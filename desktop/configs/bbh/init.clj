@@ -134,8 +134,27 @@ Only the final expression's value is returned. Print intermediate results with p
           (and first? @poteto? (not (str/starts-with? text "/")))
           (expand-prompt {:text (str "/skill:poteto-mode " text)}))))
 
+(defn- instruction-file [dir]
+  (some #(let [f (fs/path dir %)] (when (fs/regular-file? f) f)) ["AGENTS.md" "CLAUDE.md"]))
+
+(defn- instruction-files
+  "~/.config/bbh/AGENTS.md, then AGENTS.md (or CLAUDE.md) in each directory from
+  the repository root down to the working directory, so the nearest comes last."
+  []
+  (let [cwd (fs/canonicalize (fs/cwd))
+        up (take-while some? (iterate fs/parent cwd))
+        root (some #(when (or (fs/exists? (fs/path % ".jj")) (fs/exists? (fs/path % ".git"))) %) up)
+        dirs (if root (reverse (take-while #(not= % (fs/parent root)) up)) [cwd])
+        global (fs/path (fs/home) ".config" "bbh" "AGENTS.md")]
+    (cond->> (keep instruction-file dirs)
+      (fs/regular-file? global) (cons global))))
+
 (defn- project-instructions []
-  (some->> ["AGENTS.md" "CLAUDE.md"] (filter fs/exists?) first slurp))
+  (let [files (instruction-files)]
+    (case (count files)
+      0 nil
+      1 (slurp (str (first files)))
+      (str/join "\n\n" (for [f files] (str "## " f "\n\n" (str/trim (slurp (str f)))))))))
 
 (defn manifest []
   {:system (str base-prompt

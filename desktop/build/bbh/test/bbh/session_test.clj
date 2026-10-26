@@ -6,11 +6,11 @@
             [clojure.test :refer [deftest is]]))
 
 (defn- reply [step]
-  (if (string? step)
-    {:role "assistant" :content step}
-    {:role "assistant" :content ""
-     :tool_calls [{:id (str "call-" (hash step)) :type "function"
-                   :function {:name "clojure" :arguments (json/generate-string step)}}]}))
+  (cond (string? step) {:role "assistant" :content step}
+        (vector? step) {:role "assistant" :content "" :tool_calls (vec (mapcat (comp :tool_calls reply) step))}
+        :else {:role "assistant" :content ""
+               :tool_calls [{:id (str "call-" (hash step)) :type "function"
+                             :function {:name "clojure" :arguments (or (:raw step) (json/generate-string step))}}]}))
 
 (defn- harness [init-src steps & [dir]]
   (let [dir (or dir (str (fs/create-temp-dir {:prefix "bbh-test"})))
@@ -21,13 +21,16 @@
         engine {:kind :loop
                 :sample (fn [req {:keys [on-text]}]
                           (swap! requests conj req)
-                          (let [s (first @script)]
+                          (let [s (first @script)
+                                cut (and (map? s) (contains? s :cut))
+                                s (if cut (:cut s) s)]
                             (swap! script rest)
                             (when (= :overflow s)
                               (throw (ex-info "OpenRouter 400: maximum context length" {:overflow true})))
                             (when (string? s) (on-text s))
-                            {:message (reply (cond-> s (map? s) (dissoc :usage)))
-                             :usage (when (map? s) (:usage s))}))}
+                            (cond-> {:message (reply (cond-> s (map? s) (dissoc :usage)))
+                                     :usage (when (map? s) (:usage s))}
+                              cut (assoc :truncated true))))}
         s (session/new-session {:dir dir :init init :model "faux" :make-engine (constantly engine)
                                 :emit #(swap! events conj %)})]
     (spit init init-src)
@@ -207,6 +210,42 @@
 
 (deftest render-elides-the-middle-of-long-output
   (is (= "out\n[... 9 chars elided ...]\nhij" (session/render {:out "abcdefghij"} 6))))
+
+(deftest long-output-is-saved-and-the-result-names-the-file
+  (let [h (harness "(ns bbh.env) (def manifest {:max-output-chars 40})"
+                   [{:code "(apply str (range 100))"} "ok"])]
+    (session/prompt! (:s h) "count")
+    (stop! h)
+    (let [[result] (tool-results h)
+          path (second (re-find #"saved to (\S+)\. " result))]
+      (is (str/starts-with? result "[bbh] Full output ("))
+      (is (str/starts-with? path (str (:dir h) "/outputs/")))
+      (is (= (str "=> " (pr-str (apply str (range 100)))) (slurp path)))
+      (is (str/includes? result "chars elided")))))
+
+(deftest short-output-writes-no-file
+  (let [h (harness "" [{:code "(+ 1 2)"} "ok"])]
+    (session/prompt! (:s h) "add")
+    (stop! h)
+    (is (= ["=> 3"] (tool-results h)))
+    (is (not (fs/exists? (fs/path (:dir h) "outputs"))))))
+
+(deftest a-call-cut-off-by-the-output-limit-does-not-run
+  (let [h (harness "" [{:cut [{:code "(def ran 1)"} {:raw "{\"code\": \"(def cut (+ 1"}]} {:code "[ran (resolve 'cut)]"} "ok"])]
+    (session/prompt! (:s h) "go")
+    (stop! h)
+    (let [results (tool-results h)]
+      (is (= "=> #'user/ran" (first results)))
+      (is (= session/cut-off-call (second results)))
+      (is (= "=> [1 nil]" (nth results 2))))
+    (is (= "{}" (-> (filter :tool_calls (:messages @(:s h))) first :tool_calls second :function :arguments)))))
+
+(deftest a-reply-cut-off-by-the-output-limit-tells-the-user
+  (let [h (harness "" [{:cut "Here is the start of"}])]
+    (session/prompt! (:s h) "explain")
+    (stop! h)
+    (is (some #(and (= :text (:type %)) (str/includes? (:text %) "output limit")) @(:events h)))
+    (is (= "Here is the start of" (:content (last (:messages @(:s h))))))))
 
 (defn- sent [{:keys [requests]}]
   (mapv #(vec (rest (:messages %))) @requests))

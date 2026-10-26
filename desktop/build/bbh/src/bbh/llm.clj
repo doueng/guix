@@ -34,7 +34,15 @@
                     (update msg :content str (:content delta))
                     (:tool_calls delta))
       (seq (:reasoning_details delta)) (update :reasoning_details #(reduce merge-detail (or % (sorted-map)) (:reasoning_details delta)))
-      (:usage chunk) (assoc :usage (:usage chunk)))))
+      (:usage chunk) (assoc :usage (:usage chunk))
+      (get-in chunk [:choices 0 :finish_reason]) (assoc :finish_reason (get-in chunk [:choices 0 :finish_reason]))
+      (get-in chunk [:choices 0 :native_finish_reason]) (assoc :native_finish_reason (get-in chunk [:choices 0 :native_finish_reason])))))
+
+(def ^:private output-limit-reasons
+  "Stop reasons meaning the output limit cut the reply off. OpenRouter can report
+  a cut-off tool call as tool_calls, with the provider's own reason, such as
+  DeepSeek's length or Anthropic's max_tokens, in native_finish_reason."
+  #{"length" "max_tokens"})
 
 (defn usage-record
   "OpenRouter's usage object as bbh's per-request usage record."
@@ -50,13 +58,15 @@
 (defn- finish [msg]
   (let [calls (->> (:tool_calls msg) (sort-by key) (mapv val))
         details (vec (vals (:reasoning_details msg)))]
-    {:message (cond-> {:role "assistant" :content (:content msg)}
-                (seq details) (assoc :reasoning_details details)
-                (seq calls) (assoc :tool_calls calls))
-     :usage (usage-record (:usage msg))}))
+    (cond-> {:message (cond-> {:role "assistant" :content (:content msg)}
+                        (seq details) (assoc :reasoning_details details)
+                        (seq calls) (assoc :tool_calls calls))
+             :usage (usage-record (:usage msg))}
+      (some output-limit-reasons [(:finish_reason msg) (:native_finish_reason msg)]) (assoc :truncated true))))
 
 (defn accumulate
-  "Fold streamed chunks into {:message :usage}."
+  "Fold streamed chunks into {:message :usage :truncated}, where :truncated means
+  the reply stopped at the output limit."
   [chunks]
   (finish (reduce step {:content ""} chunks)))
 

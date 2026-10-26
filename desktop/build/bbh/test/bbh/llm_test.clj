@@ -18,6 +18,12 @@
                           {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "de\":\"1\"}"}}]}}]}
                           {:usage {:prompt_tokens 3}}]))))
 
+(deftest a-reply-stopped-at-the-output-limit-is-truncated
+  (is (:truncated (llm/accumulate [{:choices [{:delta {:content "Hel"}}]}
+                                   {:choices [{:delta {} :finish_reason "length"}]}])))
+  (is (:truncated (llm/accumulate [{:choices [{:delta {} :finish_reason "tool_calls" :native_finish_reason "length"}]}])))
+  (is (nil? (:truncated (llm/accumulate [{:choices [{:delta {:content "Hi"} :finish_reason "stop"}]}])))))
+
 (deftest broken-streams-are-errors-unless-the-user-cancelled
   (let [path (str (fs/create-temp-file {:prefix "bbh-stream-test"}))
         stream (java.io.FileInputStream. path)]
