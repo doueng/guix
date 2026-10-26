@@ -32,16 +32,62 @@
 (defn- journal-file [id] (str (fs/path (run-dir id) "journal.edn")))
 (defn- evidence-dir [id] (str (fs/path (run-dir id) "evidence")))
 
+(def gate-kinds #{:command :artifact :verdict})
+(def run-commands #{:repro :check :bench})
+
+(defn workflow-problems
+  "Why a workflow definition cannot run, as strings. Empty when it can.
+  A reference to a missing phase would otherwise enter a phase with no gates and finish the run."
+  [wf]
+  (let [phases (:phases wf)
+        ref-problem (fn [where target]
+                      (when-not (contains? phases target)
+                        (str where " names missing phase " (pr-str target))))]
+    (vec
+     (concat
+      (when-not (and (map? phases) (seq phases)) ["no :phases"])
+      (keep identity [(ref-problem ":start" (:start wf))])
+      (for [r (:requires wf) :when (not (#{:check :bench} r))]
+        (str ":requires names unknown flag " (pr-str r)))
+      (for [[p spec] phases
+            problem (concat
+                     [(when (some? (:next spec)) (ref-problem (str p " :next") (:next spec)))
+                      (when (some? (:on-fail spec)) (ref-problem (str p " :on-fail") (:on-fail spec)))]
+                     (map-indexed
+                      (fn [i {:keys [kind cmd path] :as g}]
+                        (let [at (str p " gate " i)]
+                          (cond
+                            (not (gate-kinds kind)) (str at " has unknown :kind " (pr-str kind))
+                            (and (= :command kind) (not (or (run-commands cmd) (string? cmd))))
+                            (str at " has :cmd " (pr-str cmd) ", not a string or one of " (pr-str run-commands))
+                            (and (= :artifact kind) (not (string? path))) (str at " has no string :path")
+                            (and (= :verdict kind) (not (string? (:criteria g)))) (str at " has no string :criteria"))))
+                      (:gates spec)))
+            :when problem]
+        problem)))))
+
+(defn validate-workflow [wf]
+  (when-let [problems (seq (workflow-problems wf))]
+    (throw (ex-info (str "invalid workflow " (some-> (:workflow wf) name) ": " (str/join "; " problems))
+                    {:workflow (:workflow wf) :problems (vec problems)})))
+  wf)
+
 (defn load-workflow [wf-name]
   (if-let [res (io/resource (str "bbh/workflows/" (name wf-name) ".edn"))]
-    (edn/read-string (slurp res))
+    (validate-workflow (edn/read-string (slurp res)))
     (throw (ex-info (str "unknown workflow " (name wf-name)) {:workflow wf-name}))))
+
+(defn run-workflow
+  "The definition a run started with, so editing a workflow file never changes a run in progress.
+  Runs started before definitions were journaled fall back to the current file."
+  [st]
+  (or (:definition st) (load-workflow (:workflow st))))
 
 ;; The journal is the source of truth. State is folded from it.
 
 (defn fold-event [st {:keys [type] :as e}]
   (case type
-    :start   (merge st (select-keys e [:id :workflow :cwd :task :repro :check :bench :phase])
+    :start   (merge st (select-keys e [:id :workflow :definition :cwd :task :repro :check :bench :phase])
                     {:status :active :visits {(:phase e) 1} :verdicts []})
     :verdict (update st :verdicts conj e)
     :attest  (assoc st :last-attest e)
@@ -59,9 +105,12 @@
 (defn- enter [wf st phase]
   (let [visit (inc (get-in st [:visits phase] 0))
         cap (get (get-in wf [:phases phase]) :max-visits default-max-visits)]
-    (if (> visit cap)
+    (cond
+      (not (contains? (:phases wf) phase))
+      [{:type :block :phase phase :reason (str "unknown phase " (pr-str phase))}]
+      (> visit cap)
       [{:type :block :phase phase :reason (str "phase " (name phase) " exceeded " cap " visits")}]
-      [{:type :enter :phase phase :visit visit}])))
+      :else [{:type :enter :phase phase :visit visit}])))
 
 (defn- failed? [g] (and (not (:pass? g)) (not (:pending? g))))
 
@@ -176,7 +225,7 @@
                            (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS"))
                   "-" (name wf-name))]
       (fs/create-dirs (evidence-dir id))
-      (append! id {:type :start :id id :workflow wf-name
+      (append! id {:type :start :id id :workflow wf-name :definition wf
                    :cwd (str (fs/canonicalize (or cwd ".")))
                    :task task :repro repro :check check :bench bench :phase (:start wf)})
       (when-let [file (session-run-file)] (spit file id))
@@ -184,14 +233,14 @@
 
 (defn status [id]
   (let [st (current id)]
-    (assoc st :brief (get-in (load-workflow (:workflow st)) [:phases (:phase st) :brief])
+    (assoc st :brief (get-in (run-workflow st) [:phases (:phase st) :brief])
               :evidence (evidence-dir id))))
 
 (defn attest! [id claim]
   (let [st (current id)]
     (when-not (= :active (:status st))
       (throw (ex-info (str "run is " (name (:status st))) {:id id})))
-    (let [wf (load-workflow (:workflow st))
+    (let [wf (run-workflow st)
           results (run-gates wf id st)
           result (outcome results)
           attested (append! id {:type :attest :phase (:phase st)
@@ -238,7 +287,7 @@
   (let [st (current id)
         phase (:phase st)
         visit (get-in st [:visits phase])
-        wf (load-workflow (:workflow st))
+        wf (run-workflow st)
         gate (first (filter #(= :verdict (:kind %)) (get-in wf [:phases phase :gates])))
         _ (when-not gate (throw (ex-info (str "phase " (name phase) " has no review gate") {})))
         dir (str (run-dir id) "/reviews/" (name phase) "-" visit "-" (System/currentTimeMillis))
@@ -359,7 +408,7 @@
 (defn status-json
   "Read-only view of a run for other programs, such as the Emacs panel. Writes nothing."
   [st]
-  (let [wf (load-workflow (:workflow st))]
+  (let [wf (run-workflow st)]
     {:run (:id st)
      :workflow (name (:workflow st))
      :status (name (:status st))

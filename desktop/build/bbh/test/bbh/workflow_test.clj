@@ -3,13 +3,17 @@
             [bbh.workflow :as wf]
             [clojure.set :as set]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]))
+            [clojure.test :refer [deftest is use-fixtures]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]))
 
 (def ^:private repro "! grep -q bug file.txt")
 
 (defn- with-temp-state [f]
   (let [root (str (fs/create-temp-dir {:prefix "wf-state"}))]
-    (with-redefs [wf/state-root (fn [] root)]
+    (with-redefs [wf/state-root (fn [] root)
+                  wf/session-run-file (constantly nil)]
       (f))))
 
 (use-fixtures :each with-temp-state)
@@ -209,3 +213,73 @@
     (is (= [1 1 0 0 0] (map :visits (:phases j))))
     (is (= ["artifact shape.md"] (:gates (first (:phases j)))))
     (is (= ["command `bb test`"] (:gates (second (:phases (wf/status-json {:id "r" :workflow :change :status :active :phase :implement :visits {} :check "bb test"}))))))))
+
+(def ^:private shipped
+  [:bug-fix :change :investigation :performance :prototype :handoff :large-project])
+
+(deftest shipped-workflows-are-valid
+  (doseq [w shipped]
+    (is (= [] (wf/workflow-problems (wf/load-workflow w))) (name w))))
+
+(deftest invalid-workflows-are-rejected-with-every-problem
+  (let [good (wf/load-workflow :bug-fix)
+        problems (fn [f] (wf/workflow-problems (f good)))]
+    (is (= [":implement :next names missing phase :verfy"]
+           (problems #(assoc-in % [:phases :implement :next] :verfy))))
+    (is (= [":verify :on-fail names missing phase :nope"]
+           (problems #(assoc-in % [:phases :verify :on-fail] :nope))))
+    (is (= [":start names missing phase :begin"] (problems #(assoc % :start :begin))))
+    (is (= [":reproduce gate 0 has unknown :kind :comand"]
+           (problems #(assoc-in % [:phases :reproduce :gates 0 :kind] :comand))))
+    (is (re-find #"has :cmd :tset" (first (problems #(assoc-in % [:phases :reproduce :gates 0 :cmd] :tset)))))
+    (is (= [":diagnose gate 0 has no string :path"]
+           (problems #(update-in % [:phases :diagnose :gates 0] dissoc :path))))
+    (is (= [":requires names unknown flag :repo"] (problems #(assoc % :requires [:repo]))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid workflow bug-fix: :implement :next"
+                          (wf/validate-workflow (assoc-in good [:phases :implement :next] :verfy))))))
+
+(deftest an-unknown-phase-blocks-instead-of-finishing
+  (let [wf {:phases {:a {:next :gone}}}]
+    (is (= [{:type :block :phase :gone :reason "unknown phase :gone"}]
+           (wf/decide wf {:phase :a :visits {:a 1}} [{:pass? true}])))))
+
+(deftest a-run-keeps-the-definition-it-started-with
+  (let [repo (buggy-repo)
+        id (wf/start! :bug-fix {:cwd repo :repro repro})
+        original (wf/load-workflow :bug-fix)
+        edited (assoc-in original [:phases :reproduce :brief] "edited")]
+    (with-redefs [wf/load-workflow (constantly edited)]
+      (is (= (get-in original [:phases :reproduce :brief]) (:brief (wf/status id))))
+      (is (= :pass (:outcome (wf/attest! id "repro fails"))))
+      (is (= [:diagnose 1] (at id))))))
+
+(defn- simulate
+  "Drives decide and fold-event from the start phase with one gate outcome per attest.
+  Returns the events in order, stopping when the run is done or blocked."
+  [wf outcomes]
+  (loop [st (wf/fold-event {} {:type :start :workflow (:workflow wf) :phase (:start wf)})
+         [o & more] outcomes
+         events []]
+    (if (or (nil? o) (not= :active (:status st)))
+      events
+      (let [es (wf/decide wf st [o])]
+        (recur (reduce wf/fold-event st es) more (into events (map #(assoc % :from (:phase st) :result o)) es))))))
+
+(def ^:private gate-outcome (gen/elements [{:pass? true} {:pass? false} {:pending? true}]))
+
+(deftest property-runs-only-enter-real-phases-and-finish-from-a-terminal-pass
+  (let [result
+        (tc/quick-check
+         300
+         (prop/for-all [w (gen/elements shipped)
+                        outcomes (gen/vector gate-outcome 0 40)]
+           (let [wf (wf/load-workflow w)
+                 events (simulate wf outcomes)]
+             (every? (fn [{:keys [type phase visit from result]}]
+                       (case type
+                         :enter (and (contains? (:phases wf) phase)
+                                     (<= visit (get-in wf [:phases phase :max-visits] wf/default-max-visits)))
+                         :done (and (:pass? result) (nil? (get-in wf [:phases from :next])))
+                         :block (contains? (:phases wf) phase)))
+                     events))))]
+    (is (:pass? result) (pr-str (:shrunk result)))))
