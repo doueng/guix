@@ -432,7 +432,7 @@ Org leaves result blocks, a special block, without the code background."
                                 (if-let* ((usage (eng/bbh-usage-header (agent-shell-viewport--shell-buffer))))
                                     (concat "   " usage)
                                   "")
-                                "   RET newline   M-p history   M-v/C-v scroll   C-c C-t tools   C-c C-k stop")))))
+                                "   RET newline   M-p history   M-k/M-j scroll   C-c C-t tools   C-c C-k stop")))))
 
 (defun eng/bbh-scroll-output (backward)
   "Scroll this composer's transcript without moving input focus."
@@ -472,8 +472,8 @@ Its start stays at the top of the buffer, so text typed or sent there does not m
                        ("M-RET" . eng/bbh-send)
                        ("C-c C-k" . agent-shell-viewport-interrupt)
                        ("C-c C-t" . eng/bbh-toggle-tools)
-                       ("M-v" . eng/bbh-output-page-up)
-                       ("C-v" . eng/bbh-output-page-down)))
+                       ("M-k" . eng/bbh-output-page-up)
+                       ("M-j" . eng/bbh-output-page-down)))
       (local-set-key (kbd (car binding)) (cdr binding))
       (when (fboundp 'evil-local-set-key)
         (dolist (state '(normal insert))
