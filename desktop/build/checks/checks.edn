@@ -1,0 +1,42 @@
+;; Which check covers which path. `make affected` matches changed files against
+;; :paths (Java globs relative to the repo root) and prints :checks, which are
+;; cheap enough to run on every change, and :slow, which take minutes or the
+;; network. `make lint` fails when a glob here matches no tracked file or a
+;; check names a missing make target. Add a rule when you add a component.
+{:rules
+ [{:name "lint"
+   :paths ["Makefile" "AGENTS.md" "channels.scm" "desktop/build/checks/**"
+           "**/*.scm" "**/*.fish" "**/*.json" "**/*.edn" "**/*.sh" "desktop/bin/*"]
+   :checks ["make lint"]}
+  {:name "guix system"
+   :paths ["modules/**" "desktop/system.scm" "desktop/system-facts.scm" "channels.scm" "desktop/build/nixpkgs/**"]
+   :checks ["make lint"]
+   :slow ["make check"]}
+  {:name "guix home"
+   :paths ["modules/engstrand/features/**" "desktop/home.scm"]
+   :slow ["make home-build"]}
+  {:name "nixpkgs bridge"
+   :paths ["modules/engstrand/nixpkgs/**" "modules/engstrand/nixpkgs.scm" "desktop/build/nixpkgs/**"]
+   :slow ["make nixpkgs-verify"]}
+  {:name "doom"
+   :paths ["desktop/configs/doom/**" "desktop/build/doom/**"]
+   :checks ["make doom-check"]}
+  {:name "keybindings"
+   :paths ["desktop/kanata.kbd" "desktop/build/keybindings/**" "desktop/lib/**"
+           "desktop/configs/{keybindings,hypr,doom,nvim,kanata,ideavim,vimium,ghostty,herdr}/**"
+           "desktop/bin/{keyleader,keyguide,keylog,palette,winhint,hyprkan}"]
+   :checks ["make keybindings-check"]
+   :slow ["make hypr-nested-check"]}
+  {:name "bbh"
+   :paths ["desktop/build/bbh/**" "desktop/configs/bbh/**" "desktop/bin/{bbh,wf,emacs-bbh}"]
+   :checks ["cd desktop/build/bbh && bb test"]}
+  {:name "pi-sci"
+   :paths ["desktop/build/pi-sci/**" "desktop/pi/agent/extensions/**"]
+   :checks ["make pi-sci-test"]}
+  {:name "dusk"
+   :paths ["desktop/build/dusk/**" "desktop/configs/dusk/**" "desktop/bin/dusk" "desktop/lib/dusk/**"]
+   :checks ["make dusk-test"]
+   :slow ["make dusk-verify"]}
+  {:name "pierre-diff-ansi"
+   :paths ["desktop/build/pierre-diff-ansi/**" "desktop/bin/{pierre-diff-ansi,jj-diff-pierre}"]
+   :checks ["make pierre-diff-ansi"]}]}

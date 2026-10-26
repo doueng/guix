@@ -14,12 +14,16 @@ GC_AGE ?= 2w
 GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := -L "$(MODULES)"
 
-.PHONY: help pull channels-current check system-facts dry-run build repro-build switch gc \
+.PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi dusk dusk-test dusk-verify pi-sci pi-sci-test \
         doom-check doom-baseline keybindings-check kanata-check hypr-nested-check
 
 help:
+	@echo 'lint          fast checks for every change: Scheme compiles, scripts parse, docs agree'
+	@echo 'affected      list the checks covering files changed in REV (default @)'
+	@echo 'verify        run lint and the affected checks; SLOW=1 adds the slow ones'
 	@echo 'pull          update the user Guix profile from $(CHANNELS)'
+	@echo 'channels-current fail unless the pulled Guix matches $(CHANNELS)'
 	@echo 'check         check system facts, then build system and Home without activating'
 	@echo 'system-facts  print folded daemon, sysctl, Shepherd and mount config; lint mounts'
 	@echo 'dry-run       show what system build would fetch or build'
@@ -43,6 +47,20 @@ help:
 	@echo 'dusk-verify   run dusk end-to-end checks on the live session'
 	@echo 'doom-check    fail on doom doctor warnings missing from the baseline'
 	@echo 'doom-baseline accept the current doom doctor warnings'
+	@echo 'kanata-check  run kanata.kbd chord tests in the kanata simulator'
+	@echo 'keybindings-check kanata-check plus generated-binding, Hyprland, Emacs and Neovim tests'
+	@echo 'hypr-nested-check test Hyprland keybindings in a nested session'
+
+# desktop/build/checks/checks.edn maps paths to the checks that cover them.
+REV ?= @
+lint:
+	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/checks/lint.bb
+
+affected:
+	@"$(HOME)/.guix-home/profile/bin/bb" desktop/build/checks/affected.bb $(REV)
+
+verify:
+	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/checks/affected.bb --run $(if $(SLOW),--slow) $(REV)
 
 pull:
 	"$(GUIX)" pull -C "$(CHANNELS)"
