@@ -6,12 +6,13 @@
   (pick-values 1 (: (tostring s) :gsub "[\t\n]" " ")))
 
 (fn log [keys effect]
-  "Append which KEYS ran and their EFFECT in Neovim. Never typed text."
+  "Append that KEYS ran with EFFECT in Neovim, as a schema 2 row of
+  desktop/lib/keylog.clj. Never typed text."
   (vim.fn.mkdir (vim.fn.fnamemodify path ":h") :p)
   (match (io.open path :a)
     file (do
-           (file:write (table.concat [(os.date "%Y-%m-%dT%H:%M:%S") :Neovim
-                                      (clean keys) (clean effect)]
+           (file:write (table.concat [(os.date "%Y-%m-%dT%H:%M:%S") :neovim
+                                      (clean keys) (clean effect) :action "2"]
                                      "\t")
                        "\n")
            (file:close))))

@@ -144,8 +144,12 @@ The global guide remains available on pages where Chrome forbids extensions.
 ## Your keybinding log
 
 `keylog` shows the bindings you used, what each did, and which program handled it. Run `keylog` for the last 30, `keylog 100` for more, and `keylog top` for the most used. The file is `~/.local/state/keybindings/keys.tsv`, with one tab-separated row per binding.
-These write to it: every leader sequence in Neovim, Doom and Herdr, Ctrl+h/j/k/l in Neovim, Doom and Herdr, the desktop leader, the Ctrl+Alt desktop bindings, and actions run from Cmd+/ or the palette.
+These write to it: every leader sequence in Neovim, Doom and Herdr, Ctrl+h/j/k/l in Neovim, Doom and Herdr, the desktop leader, the Ctrl+Alt desktop bindings, Cmd+F, and choices in Cmd+/ or the palette.
 It records bindings and their effects only, never typed text or file names. Native application shortcuts that these configs do not wrap, such as Vimium or IntelliJ keys, are not recorded.
+
+Rows are `TIME PROGRAM KEYS EFFECT KIND 2`, where 2 is the schema version and `desktop/lib/keylog.clj` defines the rest. PROGRAM is a stable lower-case id such as `hyprland`, `herdr`, `emacs` or `neovim`. KIND is `action` when a binding ran, `leader` when Alt+Space or Ctrl+b Space starts waiting for keys, `cancel` when a leader or menu closes without acting, and `forward` when a key is passed on, such as Ctrl+l from Herdr to fish or Cmd+Space from Hyprland to Herdr's leader. A palette choice is one action under the keys that opened the palette. Rows from before 2026-10-26 have four fields; readers treat them as schema 1 and normalise them. Editors log completed bindings only, not Space opening their leader or their palettes.
+
+`keylog report` weights each binding's cost by how often you used it. Cost is physical key presses, modifiers included, and a Keystroke-Level Model estimate in seconds. It also lists the costliest bindings, longer leader bindings used more than a one-key binding, leader bindings never used, and how often each leader was cancelled. `--since` and `--until` take dates, so you can compare a period before a redesign with a period after it.
 
 ## Coaching
 

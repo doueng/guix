@@ -1,16 +1,20 @@
 #!/bin/sh
 # Records which keybinding ran, what it did, and which program handled it.
+# Rows are TIME PROGRAM KEYS EFFECT KIND 2, as desktop/lib/keylog.clj describes.
 # Writers call `keylog add`; editors and keyleader append the same format.
 set -eu
 file="${KEYLOG_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/keybindings/keys.tsv}"
 tab=$(printf '\t')
 clean() { printf '%s' "$1" | tr '\t\n' '  '; }
+usage='usage: keylog [COUNT] | keylog top [COUNT] | keylog path | keylog report [--since DATE] [--top N] | keylog add KIND PROGRAM KEYS EFFECT'
 
 case "${1:-}" in
   add)
-    [ $# -eq 4 ] || { echo 'usage: keylog add PROGRAM KEYS EFFECT' >&2; exit 2; }
+    [ $# -eq 5 ] || { echo 'usage: keylog add KIND PROGRAM KEYS EFFECT' >&2; exit 2; }
+    case "$2" in action|leader|cancel|forward) ;; *) echo "keylog: unknown kind $2" >&2; exit 2 ;; esac
+    case "$3" in ''|*[!a-z0-9-]*) echo "keylog: program ids are lower-case, such as hyprland: $3" >&2; exit 2 ;; esac
     mkdir -p "$(dirname "$file")"
-    printf '%s\t%s\t%s\t%s\n' "$(date +%FT%T)" "$(clean "$2")" "$(clean "$3")" "$(clean "$4")" >> "$file"
+    printf '%s\t%s\t%s\t%s\t%s\t2\n' "$(date +%FT%T)" "$3" "$(clean "$4")" "$(clean "$5")" "$2" >> "$file"
     ;;
   top)
     [ -f "$file" ] || exit 0
@@ -19,12 +23,17 @@ case "${1:-}" in
   path)
     printf '%s\n' "$file"
     ;;
+  report)
+    shift
+    # Stowed as a symlink; the report lives in the repository.
+    exec bb "$(dirname "$(readlink -f "$0")")/../build/keybindings/usage.clj" --log "$file" "$@"
+    ;;
   ''|[0-9]*)
     if [ ! -f "$file" ]; then echo "No keybindings logged yet: $file"; exit 0; fi
-    { printf 'TIME%sPROGRAM%sKEYS%sEFFECT\n' "$tab" "$tab" "$tab"; tail -n "${1:-30}" "$file"; } | column -t -s "$tab"
+    { printf 'TIME%sPROGRAM%sKEYS%sEFFECT%sKIND%sV\n' "$tab" "$tab" "$tab" "$tab" "$tab"; tail -n "${1:-30}" "$file"; } | column -t -s "$tab"
     ;;
   *)
-    echo 'usage: keylog [COUNT] | keylog top [COUNT] | keylog path | keylog add PROGRAM KEYS EFFECT' >&2
+    echo "$usage" >&2
     exit 2
     ;;
 esac

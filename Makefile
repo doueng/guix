@@ -178,6 +178,9 @@ kanata-check: $(KANATA_SIM)
 	  { echo 'Guix kanata differs from KANATA_VERSION; update it in the Makefile' >&2; exit 1; }
 	bb desktop/build/keybindings/kanata-test.bb "$(KANATA_SIM)"
 
+# Tests that need the keybinding log set KEYLOG_FILE themselves; the rest must
+# not write to the real one.
+keybindings-check: export KEYLOG_FILE = /dev/null
 keybindings-check: kanata-check
 	bb desktop/build/keybindings/generate.bb --check
 	Hyprland --verify-config -c desktop/configs/hypr/hyprland.lua
@@ -186,6 +189,7 @@ keybindings-check: kanata-check
 	bb desktop/build/keybindings/review-test.clj
 	bb desktop/build/keybindings/palette-test.clj
 	bb desktop/build/keybindings/winhint-test.clj
+	bb desktop/build/keybindings/usage-test.clj
 	emacs --batch -Q -l desktop/build/keybindings/navigate-test.el -f ert-run-tests-batch-and-exit
 	emacs --batch -Q -l desktop/build/keybindings/coach-test.el -f ert-run-tests-batch-and-exit
 	emacs --batch -Q -l desktop/build/keybindings/palette-test.el -f ert-run-tests-batch-and-exit

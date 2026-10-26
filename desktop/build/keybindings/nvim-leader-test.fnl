@@ -44,7 +44,7 @@
 
 (local lines (vim.fn.readfile vim.env.KEYLOG_FILE))
 (assert (= 3 (length lines)) (.. "Expected three log rows, got " (length lines)))
-(assert (: (. lines 1) :match "\tNeovim\tCtrl%+l\tFocus right$") (. lines 1))
-(assert (: (. lines 3) :match "\tNeovim\tSpace w h\tFocus left$") (. lines 3))
+(assert (: (. lines 1) :match "\tneovim\tCtrl%+l\tFocus right\taction\t2$") (. lines 1))
+(assert (: (. lines 3) :match "\tneovim\tSpace w h\tFocus left\taction\t2$") (. lines 3))
 (print "Neovim leader, smart-splits, edge hand-off and log checks passed")
 (vim.cmd "qa!")

@@ -12,7 +12,7 @@
   (let [calls (atom [])]
     (with-redefs [keyleader/herdr-pane (constantly pane)
                   keyleader/herdr-json (fn [& _] {:result {:edges edges}})
-                  keyleader/log! (fn [& _] nil)
+                  keylog/log! (fn [& _] nil)
                   hypr/dispatch! (fn [d] (swap! calls conj d))
                   keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")]
       (keyleader/nav! "left"))
@@ -30,7 +30,7 @@
   (let [calls (atom [])]
     (with-redefs [keyleader/herdr-pane (constantly "w1:p2")
                   keyleader/foreground-programs (constantly [program])
-                  keyleader/log! (fn [& _] nil)
+                  keylog/log! (fn [& _] nil)
                   keyleader/nav! (fn [d _] (swap! calls conj [:nav d]))
                   keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")]
       (keyleader/term-nav! grammar direction))
@@ -70,7 +70,7 @@
       "Doom's SPC s l jumps to a visible link")
   (let [calls (atom [])]
     (with-redefs [keyleader/herdr-pane (constantly "w1:p2")
-                  keyleader/log! (fn [& _] nil)
+                  keylog/log! (fn [& _] nil)
                   keyleader/herdr-api! (fn [method params] (swap! calls conj [method params]))]
       (keyleader/run-herdr! grammar ["s" "l"])
       (keyleader/run-herdr! grammar ["e"])
@@ -89,20 +89,64 @@
     (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ last = true }), \"Alt+Space `\", \"Last buffer or window\"))"))
     (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ workspace = \"previous\" }), \"Alt+Space TAB `\", \"Last workspace\"))")))
   (let [ran (atom [])]
-    (with-redefs [keyleader/log! (fn [& _] nil)
+    (with-redefs [keylog/log! (fn [& _] nil)
                   keyleader/spawn! (fn [argv] (swap! ran conj argv))]
       (keyleader/run-desktop! grammar ["."]))
     (is (= [["~/.local/bin/custom-launcher"]] @ran))))
 
 (deftest hyprland-leader-runs-dispatchers-or-the-script
   (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
-    (is (lines "hl.bind(\"ALT + SPACE\", hl.dsp.submap(\"leader\"))"))
+    (is (lines "hl.bind(\"ALT + SPACE\", keys.enter(\"leader\", \"Alt+Space\"))")
+        "Entering the leader logs a leader row")
     (is (lines "hl.bind(mods .. \"H\", keys.leave(hl.dsp.focus({ direction = \"left\" }), \"Alt+Space w h\", \"Focus left\"))"))
     (is (lines "hl.bind(mods .. \"D\", keys.leave(hl.dsp.window.close(), \"Alt+Space w d\", \"Close window or pane\"))")
         "Closing runs in Hyprland without asking")
     (is (lines "hl.bind(mods .. \"B\", keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/keyleader run b b\")))")
         "Menus go through the script")
-    (is (lines "hl.bind(\"catchall\", keys.cancel(\"leader-w\"))"))))
+    (is (lines "hl.bind(\"catchall\", keys.cancel(\"leader-w\", \"Alt+Space w\"))"))
+    (is (lines "hl.bind(\"escape\", keys.cancel(\"leader\", \"Alt+Space\", \"Escape\"))")
+        "Cancels log the keys pressed before them")))
+
+(defn herdr-leader-with
+  "The keylog rows and herdr calls when the Herdr popup reads KEYS."
+  [& keys]
+  (let [rows (atom []) calls (atom []) pending (atom keys)]
+    (with-redefs [keyleader/herdr-pane (constantly "w1:p2")
+                  keyleader/show! (fn [& _] nil)
+                  keyleader/read-key (fn [] (let [k (first @pending)] (swap! pending rest) k))
+                  keylog/log! (fn [& row] (when-not keylog/*silent* (swap! rows conj (vec row))))
+                  keyleader/herdr-api! (fn [method _] (swap! calls conj method))
+                  dusk.palette/pick! (fn [_ entries] (some #(when (= "Edit scrollback" (:label %)) (:value %)) entries))
+                  dusk.palette/by-history (fn [_ entries] entries)
+                  dusk.palette/remember! (fn [& _] nil)]
+      (apply keyleader/herdr-leader! [grammar]))
+    {:rows @rows :calls @calls}))
+
+(deftest herdr-leader-logs-opening-acting-and-cancelling
+  (is (= [["leader" "herdr" "Ctrl+b Space" "Herdr leader menu"]
+          ["action" "herdr" "Ctrl+b Space e" "Edit scrollback"]]
+         (:rows (herdr-leader-with "e"))))
+  (is (= [["leader" "herdr" "Ctrl+b Space" "Herdr leader menu"]
+          ["cancel" "herdr" "Ctrl+b Space" "Cancelled with Escape"]]
+         (:rows (herdr-leader-with :escape))))
+  (is (= [["leader" "herdr" "Ctrl+b Space" "Herdr leader menu"]
+          ["cancel" "herdr" "Ctrl+b Space w" "Cancelled by unbound z"]]
+         (:rows (herdr-leader-with "w" "z"))))
+  (let [{:keys [rows calls]} (herdr-leader-with "SPC")]
+    (is (= ["pane.edit_scrollback"] calls) "the palette runs its choice")
+    (is (= [["leader" "herdr" "Ctrl+b Space" "Herdr leader menu"]
+            ["action" "herdr" "Ctrl+b Space Space" "Edit scrollback"]]
+           rows)
+        "a palette choice is logged once, under the keys that chose it")))
+
+(deftest kept-keys-are-logged-as-forwarded-by-herdr
+  (let [rows (atom [])]
+    (with-redefs [keyleader/herdr-pane (constantly "w1:p2")
+                  keyleader/foreground-programs (constantly [".emacs-31.1-rea"])
+                  keylog/log! (fn [& row] (swap! rows conj (vec row)))
+                  keyleader/run! (fn [& _] "")]
+      (keyleader/term-nav! grammar "left"))
+    (is (= [["forward" "herdr" "Ctrl+h" "Forwarded to emacs"]] @rows))))
 
 (deftest grammar-rejects-ambiguity
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate leader sequence"

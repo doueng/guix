@@ -27,6 +27,6 @@
         (progn
           (funcall (eng/keylog-command "Space w s" "Split\tbelow" (lambda () (interactive) (setq ran t))))
           (should ran)
-          (should (string-match-p "\\`[0-9T:-]+\tEmacs\tSpace w s\tSplit below\n\\'"
+          (should (string-match-p "\\`[0-9T:-]+\temacs\tSpace w s\tSplit below\taction\t2\n\\'"
                                   (with-temp-buffer (insert-file-contents file) (buffer-string)))))
       (delete-file file))))

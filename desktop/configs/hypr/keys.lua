@@ -5,9 +5,18 @@ local function quote(s)
   return "'" .. (s:gsub("'", "'\\''")) .. "'"
 end
 
--- Append the binding to the personal log that `keylog` shows.
-function M.log(keys, effect)
-  hl.exec_cmd("~/.local/bin/keylog add Hyprland " .. quote(keys) .. " " .. quote(effect))
+-- Append the binding to the personal log that `keylog` shows. KIND is one of
+-- desktop/lib/keylog.clj's kinds and defaults to action.
+function M.log(keys, effect, kind)
+  hl.exec_cmd("~/.local/bin/keylog add " .. (kind or "action") .. " hyprland " .. quote(keys) .. " " .. quote(effect))
+end
+
+-- Enter the leader SUBMAP that KEYS open.
+function M.enter(submap, keys)
+  return function()
+    hl.dispatch(hl.dsp.submap(submap))
+    M.log(keys, "Desktop leader menu", "leader")
+  end
 end
 
 -- Bind CHORD to DISPATCHER and log it as KEYS doing EFFECT.
@@ -29,12 +38,14 @@ function M.leave(dispatcher, keys, effect)
   end
 end
 
--- The catch-all for keys a submap does not bind. Hyprland also runs it after
--- a bound key in the same submap, so it leaves only if that key did not.
-function M.cancel(submap)
+-- Leave SUBMAP, entered with KEYS, without acting: on KEY, or on any key it
+-- does not bind when KEY is nil. Hyprland also runs the catch-all after a bound
+-- key in the same submap, so it leaves only if that key did not.
+function M.cancel(submap, keys, key)
   return function()
     if hl.get_current_submap() == submap then
       hl.dispatch(hl.dsp.submap("reset"))
+      M.log(keys, key and ("Cancelled with " .. key) or "Cancelled by an unbound key", "cancel")
     end
   end
 end
@@ -60,7 +71,7 @@ function M.herdr_menu()
       hl.dispatch(hl.dsp.send_key_state({ mods = k.mods, key = k.key, state = state }))
     end
   end
-  M.log("Cmd+Space", "Herdr leader menu")
+  M.log("Cmd+Space", "Forwarded to herdr", "forward")
 end
 
 return M

@@ -60,6 +60,7 @@
   (apply sh env "guix" "shell" "wtype" "--" "wtype" args)
   (Thread/sleep 400))
 (defn logged [] (if (fs/exists? keylog) (map #(vec (rest (str/split % #"\t"))) (fs/read-all-lines keylog)) []))
+(defn row [kind keys effect] ["hyprland" keys effect kind "2"])
 (defn client! [class & cmd]
   (p/process (concat ["ghostty" "--gtk-single-instance=false"]
                      (when class [(str "--class=" class)])
@@ -104,14 +105,22 @@
   (let [f (str work "/plain")]
     (check (not (and (fs/exists? f) (pos? (fs/size f))))
            (str "the other Ghostty window receives nothing, got " (pr-str (when (fs/exists? f) (slurp f))))))
-  (wait-for #(= 5 (count (logged))))
-  (check (= [["Hyprland" "Alt+Space w h" "Focus left"]
-             ["Hyprland" "Alt+Space w l" "Focus right"]
-             ["Hyprland" "CTRL+ALT+H" "Focus left"]
-             ["Hyprland" "CTRL+ALT+L" "Focus right"]
-             ["Hyprland" "Cmd+Space" "Herdr leader menu"]]
-            (logged))
-         (str "the keybinding log has one row per action, and none for cancelled keys, got " (pr-str (logged))))
+  ;; Each row is its own keylog process, so rows within one wtype call may land
+  ;; in either order.
+  (wait-for #(= 11 (count (logged))))
+  (check (= (frequencies [(row "leader" "Alt+Space" "Desktop leader menu")
+                          (row "cancel" "Alt+Space" "Cancelled with Escape")
+                          (row "leader" "Alt+Space" "Desktop leader menu")
+                          (row "action" "Alt+Space w h" "Focus left")
+                          (row "leader" "Alt+Space" "Desktop leader menu")
+                          (row "action" "Alt+Space w l" "Focus right")
+                          (row "leader" "Alt+Space" "Desktop leader menu")
+                          (row "cancel" "Alt+Space w" "Cancelled by an unbound key")
+                          (row "action" "CTRL+ALT+H" "Focus left")
+                          (row "action" "CTRL+ALT+L" "Focus right")
+                          (row "forward" "Cmd+Space" "Forwarded to herdr")])
+            (frequencies (logged)))
+         (str "the keybinding log has one row per leader, action, cancel and forward, got " (pr-str (logged))))
   (check (= "ok" (hypr "dispatch" "hl.dsp.focus({ workspace = 3 })")) "hyprctl accepts Lua dispatchers")
   (let [out (sh env (str repo "/desktop/bin/keyleader") "--verify-hypr")]
     (check (str/starts-with? out "Hyprland has loaded all") (str "keyleader --verify-hypr: " out)))

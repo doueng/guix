@@ -8,7 +8,8 @@
 
 ;; Scripts are stowed as symlinks; load shared code from the repository.
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
-(require '[hypr.dispatch :as hypr])
+(require '[hypr.dispatch :as hypr]
+         '[keylog])
 
 (defn groups [config]
   (mapv (fn [group]
@@ -54,9 +55,6 @@
   (str (:id entry) "  " (:label entry)
        (when-let [chord (shortcut entry)] (str "   [" chord "]"))
        (when (:tip entry) "   (guide)")))
-
-(defn log-command [keys label]
-  (str "~/.local/bin/keylog add Hyprland '" keys "' '" (str/replace label "'" "'\\''") "'"))
 
 (defn lua-chord [mods key]
   (str/join " + " (concat (remove str/blank? (str/split mods #" ")) [key])))
@@ -108,15 +106,15 @@
 
 (defn browse! [gs start]
   (loop [group (some #(when (= start (:id %)) %) gs)]
-    (if group
-      (when-let [entry (choose (str (:label group) " | Esc closes")
-                               (cons {:id ".." :label "Back"} (:entries group)))]
-        (if (= ".." (:id entry))
-          (recur nil)
-          (do (run-entry! entry)
-              (execute! ["sh" "-c" (str/replace (log-command "Cmd+/" (:label entry)) "~/" (str (fs/home) "/"))]))))
-      (when-let [selected (choose "Keyguide | type a group, Enter | Esc closes" gs)]
-        (recur selected)))))
+    (let [choice (if group
+                   (choose (str (:label group) " | Esc closes") (cons {:id ".." :label "Back"} (:entries group)))
+                   (choose "Keyguide | type a group, Enter | Esc closes" gs))]
+      (cond
+        (nil? choice) (keylog/log! "cancel" "keyguide" "Cmd+/" "Closed the guide")
+        (not group) (recur choice)
+        (= ".." (:id choice)) (recur nil)
+        :else (do (run-entry! choice)
+                  (keylog/log! "action" "keyguide" "Cmd+/" (:label choice)))))))
 
 (defn main [args]
   (let [gs (validate! (groups (edn/read-string (slurp (config-path)))))]

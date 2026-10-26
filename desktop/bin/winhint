@@ -10,7 +10,8 @@
 
 (load-file (str (fs/parent (fs/real-path *file*)) "/palette"))
 (require '[dusk.palette :as dusk]
-         '[hypr.dispatch :as hypr])
+         '[hypr.dispatch :as hypr]
+         '[keylog])
 
 (def alphabet "asdfghjklqwertyuiopzxcvbnm")
 
@@ -125,10 +126,11 @@
 
 (defn main! []
   (let [ts (targets)]
-    (when-let [label (pick! ts)]
+    (if-let [label (pick! ts)]
       (let [{:keys [path]} (first (filter #(= label (:label %)) ts))]
         (run! focus-step! path)
-        (keyleader/log! "Winhint" "Cmd+F" (str "Focus " (name (first (peek path)))))))))
+        (keylog/log! "action" "winhint" "Cmd+F" (str "Focus " (name (first (peek path))))))
+      (keylog/log! "cancel" "winhint" "Cmd+F" "Closed the hints"))))
 
 (when (= *file* (System/getProperty "babashka.file"))
   (try

@@ -11,7 +11,7 @@
 
 (defn palette-run [answers]
   (let [answers (atom answers) ran (atom [])]
-    (with-redefs [keyleader/log! (fn [& _] nil)
+    (with-redefs [keylog/log! (fn [& _] nil)
                   keyleader/spawn! (fn [argv] (swap! ran conj argv))
                   keyleader/run! (fn [argv & _] (swap! ran conj (vec argv)) "")
                   hypr/dispatch! (fn [d] (swap! ran conj d))
@@ -45,7 +45,7 @@
 (defn nav-calls [pane herdr]
   (let [calls (atom [])]
     (with-redefs [keyleader/herdr-pane (constantly pane)
-                  keyleader/log! (fn [& _] nil)
+                  keylog/log! (fn [& _] nil)
                   keyleader/herdr-json herdr
                   hypr/dispatch! (fn [d] (swap! calls conj d))
                   keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")]

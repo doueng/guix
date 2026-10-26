@@ -24,7 +24,7 @@
 (defn run-with [value ctx]
   (let [calls (atom [])]
     (with-redefs [keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")
-                  keyleader/log! (fn [& _] nil)
+                  keylog/log! (fn [& _] nil)
                   keyleader/herdr-api! (fn [m params] (swap! calls conj [m params]))
                   palette/type-keys! (fn [k] (swap! calls conj k))]
       (palette/run-entry! grammar ctx value))
@@ -43,15 +43,18 @@
   (is (= ["29:1" "42:1" "20:1" "20:0" "42:0" "29:0"] (palette/chord-events "ctrl+shift+t"))))
 
 (deftest an-editor-that-does-not-answer-falls-back-to-the-list
-  (let [shown (atom nil)]
+  (let [shown (atom nil) rows (atom [])]
     (with-redefs [keyleader/load-grammar (constantly grammar)
+                  keylog/log! (fn [& row] (swap! rows conj (vec row)))
                   palette/context (constantly {:kind :herdr :pane "w1:p2" :program {:id :emacs :pid 42}})
                   palette/sh-out (constantly nil)
                   palette/notify! (fn [_] nil)
                   dusk/pick! (fn [prompt entries] (reset! shown [prompt (count entries)]) nil)]
       (palette/open!))
     (is (= "Emacs" (first @shown)))
-    (is (pos? (second @shown)))))
+    (is (pos? (second @shown)))
+    (is (= [["cancel" "palette" "Alt+Space Space" "Closed the palette"]] @rows)
+        "closing the list logs a cancel")))
 
 (deftest an-editor-that-answers-opens-its-own-palette
   (let [asked (atom [])]
