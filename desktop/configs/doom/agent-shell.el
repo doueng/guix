@@ -130,6 +130,64 @@ saved conversation clears the transcript the same way.  A bare /model or
         (when (buffer-live-p old-composer) (kill-buffer old-composer))
         (kill-buffer old)))))
 
+;;; Program status
+
+;; Tell the terminal whether bbh is working or waiting for the user.  The
+;; report is OSC 7501, the Program Status Protocol
+;; <https://www.superlogical.com/rex/docs/build/program-status>.  Herdr does
+;; not read OSC 7501 yet, so inside herdr the same state also goes to
+;; `herdr pane report-agent', which shows it and notifies on a finished turn.
+
+(defvar eng/bbh-status--seq 0
+  "The last sequence number sent to herdr.  Herdr drops reports that do not increase it.")
+
+(defun eng/bbh-status--osc (state &optional msg)
+  "The OSC 7501 report of STATE, with MSG as one line of base64 UTF-8."
+  (concat "\e]7501;state=" (symbol-name state)
+          (unless (eq state 'clear) ":app=bbh")
+          (when msg
+            (concat ":msg="
+                    (base64-encode-string
+                     (encode-coding-string
+                      (truncate-string-to-width
+                       (replace-regexp-in-string (rx (+ (any (0 . 31) (127 . 159)))) " " msg) 500)
+                      'utf-8)
+                     t)))
+          "\e\\"))
+
+(defun eng/bbh-status--herdr (state &optional msg)
+  "Report STATE to herdr in the background, when Emacs runs in a herdr pane."
+  (let ((bin (getenv "HERDR_BIN_PATH"))
+        (pane (getenv "HERDR_PANE_ID")))
+    (when (and (equal (getenv "HERDR_ENV") "1") bin pane)
+      (setq eng/bbh-status--seq (max (1+ eng/bbh-status--seq)
+                                     (truncate (* 1000 (float-time)))))
+      (ignore-errors
+        (make-process
+         :name "bbh-herdr-status" :noquery t :buffer nil :connection-type 'pipe
+         :command (append (list bin "pane" (if (eq state 'clear) "release-agent" "report-agent")
+                                pane "--source" "bbh-emacs" "--agent" "bbh"
+                                "--seq" (number-to-string eng/bbh-status--seq))
+                          (unless (eq state 'clear)
+                            (list "--state" (if (eq state 'working) "working" "idle")))
+                          (when (and msg (not (eq state 'clear)))
+                            (list "--message" msg))))))))
+
+(defun eng/bbh-status (state &optional msg)
+  "Report STATE, one of working, done, error or clear, with an optional MSG."
+  (unless (or noninteractive (display-graphic-p))
+    (send-string-to-terminal (eng/bbh-status--osc state msg)))
+  (eng/bbh-status--herdr state msg))
+
+(defun eng/bbh-status--on-event (event)
+  (pcase (map-elt event :event)
+    ('input-submitted (eng/bbh-status 'working "Working"))
+    ('turn-complete (eng/bbh-status 'done "bbh is waiting for input"))
+    ('error (eng/bbh-status 'error (or (map-nested-elt event '(:data :message)) "The request failed")))))
+
+(defun eng/bbh-status--clear ()
+  (eng/bbh-status 'clear))
+
 ;;; Org transcript
 
 (defvar-local eng/bbh-transcript nil
@@ -525,7 +583,10 @@ Org leaves result blocks, a special block, without the code background."
                 eng/bbh-transcript--tools (make-hash-table :test #'equal)))
         (agent-shell-subscribe-to :shell-buffer shell
                                   :on-event (lambda (event) (eng/bbh-transcript--on-event transcript event)))
-        (with-current-buffer shell (setq eng/bbh-transcript transcript))))))
+        (agent-shell-subscribe-to :shell-buffer shell :on-event #'eng/bbh-status--on-event)
+        (with-current-buffer shell
+          (add-hook 'kill-buffer-hook #'eng/bbh-status--clear nil t)
+          (setq eng/bbh-transcript transcript))))))
 
 (defun eng/bbh-toggle-tools ()
   "Expand every tool result in the transcript, or fold them all."

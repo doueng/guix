@@ -42,7 +42,8 @@
                                           "BBH_TRY_PROMPTS" (clojure.string/join "\n---\n" prompts)
                                           "BBH_ELISP_BUILD" (or (System/getenv "BBH_ELISP_BUILD")
                                                                 (str home "/.config/emacs/.local/straight/build-31.1"))
-                                          "BBH_DOOM_AGENT_SHELL" (str (babashka.fs/absolutize "../../configs/doom/agent-shell.el"))}}
+                                          "BBH_DOOM_AGENT_SHELL" (str (babashka.fs/absolutize "../../configs/doom/agent-shell.el"))
+                                          "HERDR_ENV" ""}}
                              "emacs" "-Q" "--batch" "-l" "test/try.el"))}
          test:doom {:doc "Start real Doom in a PTY and test the installed bbh configuration."
                     :task (let [dir (babashka.fs/create-temp-dir {:prefix "bbh-doom-test"})
@@ -55,7 +56,9 @@
                                                   "XDG_DATA_HOME" (str dir)
                                                   "BBH_MODEL" (str "script/" (babashka.fs/absolutize "test/script.edn"))
                                                   "BBH_STARTUP_REPORT" report
-                                                  "BBH_STARTUP_LAUNCHED" (if launcher? "1" "0")}}
+                                                  "BBH_STARTUP_LAUNCHED" (if launcher? "1" "0")
+                                                  ;; Keep agent status reports away from the herdr pane running the test.
+                                                  "HERDR_ENV" ""}}
                                      "timeout" "60" "script" "-q" "-e" "-c"
                                      (str (System/getProperty "user.home")
                                           (if launcher? "/.local/bin/emacs-bbh" "/.local/bin/emacs") " -nw -l "
@@ -69,5 +72,6 @@
                                                  "XDG_DATA_HOME" (str (babashka.fs/create-temp-dir {:prefix "bbh-emacs-test"}))
                                                  "BBH_ELISP_BUILD" (or (System/getenv "BBH_ELISP_BUILD")
                                                                        (str home "/.config/emacs/.local/straight/build-31.1"))
-                                                 "BBH_DOOM_AGENT_SHELL" (str (babashka.fs/absolutize "../../configs/doom/agent-shell.el"))}}
+                                                 "BBH_DOOM_AGENT_SHELL" (str (babashka.fs/absolutize "../../configs/doom/agent-shell.el"))
+                                                 "HERDR_ENV" ""}}
                                     "emacs" "-Q" "--batch" "-l" "test/agent-shell-test.el" "-f" "ert-run-tests-batch-and-exit"))}}}
