@@ -360,7 +360,7 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
         (when (or (memq (map-elt event :event) '(input-submitted turn-complete))
                   (and (eq (map-elt event :event) 'tool-call-update)
                        (equal (map-nested-elt data '(:tool-call :status)) "completed")))
-          (eng/bbh-workflow-refresh-if-shown))))))
+          (eng/bbh-workflow-refresh-if-shown eng/bbh-transcript-shell))))))
 
 (defun eng/bbh--result-label (status lines)
   (concat (propertize (pcase status ("done" "✓") ("failed" "✗") (_ "…"))
@@ -728,28 +728,33 @@ Other runs in the repository are never shown, so the panel matches the session's
   (eng/bbh-workflow--move -1))
 
 (defun eng/bbh-workflow-show (shell)
-  "Show the workflow panel for SHELL's directory in a side window on the right."
+  "Show the workflow panel for SHELL's session in a side window on the right.
+The panel appears only when the session has started a run.  Return the window, or nil."
   (let ((dir (or (buffer-local-value 'default-directory shell) default-directory))
         (buffer (get-buffer-create eng/bbh-workflow-buffer)))
     (with-current-buffer buffer
       (unless (derived-mode-p 'eng/bbh-workflow-mode) (eng/bbh-workflow-mode))
       (setq eng/bbh-workflow--dir dir
-            eng/bbh-workflow--session
-            (with-current-buffer shell (map-nested-elt (agent-shell--state) '(:session :id)))))
+            eng/bbh-workflow--session (eng/bbh--session-id shell)))
     (eng/bbh-workflow-refresh)
-    (display-buffer-in-side-window buffer '((side . right) (window-width . 40)))))
+    (if (eng/bbh-workflow--session-run (buffer-local-value 'eng/bbh-workflow--session buffer))
+        (display-buffer-in-side-window buffer '((side . right) (window-width . 40)))
+      (when-let* ((window (get-buffer-window buffer t))) (delete-window window))
+      nil)))
 
 (defun eng/bbh-workflow-toggle ()
   "Hide the workflow panel, or show it for the current bbh session."
   (interactive)
   (if-let* ((window (get-buffer-window eng/bbh-workflow-buffer)))
       (delete-window window)
-    (eng/bbh-workflow-show (or (eng/bbh--shell) (user-error "No bbh session in this buffer")))))
+    (unless (eng/bbh-workflow-show (or (eng/bbh--shell) (user-error "No bbh session in this buffer")))
+      (message "This session has no workflow run yet."))))
 
-(defun eng/bbh-workflow-refresh-if-shown ()
-  "Refresh the panel after a transcript event, when it is on screen."
-  (when (get-buffer-window eng/bbh-workflow-buffer t)
-    (eng/bbh-workflow-refresh)))
+(defun eng/bbh-workflow-refresh-if-shown (&optional shell)
+  "Refresh the panel after a transcript event.  Show it when SHELL starts a run."
+  (cond ((get-buffer-window eng/bbh-workflow-buffer t) (eng/bbh-workflow-refresh))
+        ((and shell (eng/bbh-workflow--session-run (eng/bbh--session-id shell)))
+         (eng/bbh-workflow-show shell))))
 
 (defun eng/bbh-cider-connect ()
   "Connect CIDER to the REPL of the bbh session in the current buffer."

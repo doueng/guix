@@ -336,3 +336,9 @@
     (eng/bbh-workflow-mode)
     (eng/bbh-workflow--apply '((error . "no runs for this directory")))
     (should (string-match-p "no runs for this directory" (buffer-string)))))
+
+(ert-deftest bbh-workflow-panel-stays-hidden-without-a-run ()
+  (let ((shell (generate-new-buffer " bbh-test-shell")))
+    (unwind-protect
+        (should-not (eng/bbh-workflow-show shell))
+      (kill-buffer shell))))
