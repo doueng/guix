@@ -83,8 +83,8 @@ fi
 trim_repo_input() {
   local s="$1"
   # Trim leading/trailing whitespace.
-  s="${s#${s%%[![:space:]]*}}"
-  s="${s%${s##*[![:space:]]}}"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
   printf '%s' "$s"
 }
 
