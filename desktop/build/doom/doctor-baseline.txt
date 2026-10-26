@@ -10,3 +10,4 @@
 :term ghostel: Couldn't find zig. Pre-built binaries cover most platforms; only needed if you want to compile the ghostel module from source via M-x ghostel-module-compile
 Failed to locate 'Symbols Nerd Font Mono' font on your system
 Failed to locate the 'Symbola' font on your system
+Your $PATH has changed since you last generated your envvar file!
