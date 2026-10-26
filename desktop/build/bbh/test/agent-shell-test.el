@@ -166,6 +166,30 @@
       (should (equal (string-trim (bbh-test--text composer)) "draft survives cancellation"))
       (should (eq (window-buffer input) composer)))))
 
+(defun bbh-test--leading-rows (buf)
+  "Blank rows shown above BUF's draft, counting the padding overlay."
+  (with-current-buffer buf
+    (+ (save-excursion (goto-char (point-min)) (skip-chars-forward "\n"))
+       (cl-loop for ov in (overlays-in (point-min) (min (point-max) (1+ (point-min))))
+                when (= (overlay-start ov) (point-min)) sum (cl-count ?\n (or (overlay-get ov 'before-string) ""))))))
+
+(ert-deftest bbh-composer-pads-one-row-after-reinitializing ()
+  (let* ((shell (bbh-test--start))
+         (composer (eng/bbh-layout shell)))
+    (unwind-protect
+        (with-current-buffer composer
+          (should (= (bbh-test--leading-rows composer) 1))
+          (insert "draft")
+          ;; History navigation and replies rebuild the buffer through upstream's initialize.
+          (agent-shell-viewport--initialize :prompt "older prompt")
+          (should (= (bbh-test--leading-rows composer) 1))
+          (agent-shell-viewport--initialize)
+          (should (= (bbh-test--leading-rows composer) 1))
+          (insert "typed")
+          (should (equal (bbh-test--text composer) "typed")))
+      (cl-letf (((symbol-function 'y-or-n-p) #'always))
+        (kill-buffer shell)))))
+
 (ert-deftest bbh-new-replaces-the-session-and-clears-the-transcript ()
   (save-window-excursion
     (delete-other-windows)

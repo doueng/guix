@@ -595,6 +595,16 @@ Its start stays at the top of the buffer, so text typed or sent there does not m
     (setq eng/bbh-composer-padding (make-overlay (point-min) (point-min) nil nil t))
     (overlay-put eng/bbh-composer-padding 'before-string "\n")))
 
+(defun eng/bbh-composer-drop-layout-newline (&rest _)
+  "Remove the newline agent-shell inserts above the draft when it rebuilds the composer.
+Without a graphical header, `agent-shell-viewport--initialize' inserts one on
+history navigation and replies, which doubles `eng/bbh-composer-padding'."
+  (when (and eng/bbh-composer
+             (eq (char-after (point-min)) ?\n)
+             (get-text-property (point-min) 'cursor-intangible))
+    (let ((inhibit-read-only t))
+      (delete-region (point-min) (1+ (point-min))))))
+
 (defun eng/bbh-setup-composer ()
   "Restore bbh bindings after returning from agent-shell's history view."
   (when eng/bbh-composer
@@ -836,7 +846,8 @@ The panel appears only when the session has started a run.  Return the window, o
 
 (after! agent-shell-viewport
   (add-hook 'agent-shell-viewport-edit-mode-hook #'eng/bbh-setup-composer)
-  (advice-add 'agent-shell-viewport--update-header :after #'eng/bbh-composer-header))
+  (advice-add 'agent-shell-viewport--update-header :after #'eng/bbh-composer-header)
+  (advice-add 'agent-shell-viewport--initialize :after #'eng/bbh-composer-drop-layout-newline))
 
 (after! agent-shell
   (advice-add 'agent-shell--update-usage-from-notification :after #'eng/bbh--record-usage)
