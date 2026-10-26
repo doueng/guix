@@ -53,7 +53,7 @@
   z (fork (unmod $meta lctl z) (unmod (lmet rmet lsft rsft) lctl y) (lsft rsft))
   a (unmod $meta lctl a)
   s (unmod $meta lctl s)
-  f (unmod $meta lctl f)
+  ;; f stays Super+F, which Hyprland runs as winhint. Ctrl+F (Caps+F) still finds.
   w (unmod $meta lctl w)
   q (unmod $meta lctl q)
   n (unmod $meta lctl n)

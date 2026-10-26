@@ -287,11 +287,61 @@
             (ui/text {:font-size 14} label)))
         (ui/text {:font-size 12 :color (:on-surface-variant theme)} "Esc  Cancel")))))
 
+(defonce window-hints (dusk/state nil))
+
+(defn close-window-hints! [choice]
+  (when-let [{:keys [respond]} @window-hints]
+    (reset! window-hints nil)
+    (respond choice)))
+
+;; winhint sends {:targets [{:label "a" :x :y :w :h} ...]} in logical pixels of
+;; the focused monitor and gets back the typed label, or nil.
+(dusk/on-request :window-hints
+  (fn [{:keys [targets]} respond]
+    (close-window-hints! nil)
+    (reset! window-hints {:targets targets :typed "" :respond respond})))
+
+(defn window-hints-key [{:keys [key]}]
+  (let [{:keys [targets typed]} @window-hints
+        typed (str typed key)
+        matching (filter #(str/starts-with? (:label %) typed) targets)]
+    (cond
+      (= key "escape") (close-window-hints! nil)
+      (= key "backspace") (swap! window-hints update :typed #(subs % 0 (max 0 (dec (count %)))))
+      (not= 1 (count key)) nil
+      (empty? matching) (close-window-hints! nil)
+      (some #(= typed (:label %)) matching) (close-window-hints! typed)
+      :else (swap! window-hints assoc :typed typed))))
+
+(defn window-hints-panel []
+  (when-let [{:keys [targets typed]} @window-hints]
+    (ui/layer {:id :window-hints
+               :layer :overlay
+               :anchor #{:top :bottom :left :right}
+               :keyboard :exclusive
+               :exclusive-zone -1
+               :scale 1
+               :on-key window-hints-key}
+      (ui/box {:position :absolute :top 0 :left 0 :width :full :height :full
+               :on-click #(close-window-hints! nil)})
+      (for [{:keys [label x y w h]} targets
+            :when (str/starts-with? label typed)]
+        (ui/column {:key label :position :absolute :left x :top y :width w :height h
+                    :align :center :justify :center
+                    :border 2 :border-color (:primary theme) :radius radius
+                    :bg (ui/alpha (:surface theme) 0.25)
+                    :on-click #(close-window-hints! label)}
+          (ui/row (merge (card-style 0.9) {:padding [6 16] :shadow :lg})
+            (when (seq typed)
+              (ui/text {:font-size 40 :font-weight :bold :color (:on-surface-variant theme)} typed))
+            (ui/text {:font-size 40 :font-weight :bold :color (:primary theme)} (subs label (count typed)))))))))
+
 (defn shell []
   [(wallpaper)
    (notification-stack)
    (osd-popup)
    (launcher-panel)
-   (leader-panel)])
+   (leader-panel)
+   (window-hints-panel)])
 
 (dusk/shell! #'shell)

@@ -9,6 +9,7 @@
 | Desktop discovery | Cmd+/ | `desktop/bin/keyguide` and `bindings.edn` |
 | Leader sequences | Space, Alt+Space, Ctrl+b Space or Cmd+Space | `leader.edn`, `desktop/bin/keyleader`, generated files |
 | Window focus | Ctrl+Alt+h/j/k/l | Generated `hypr/keybindings.lua` |
+| Window hints | Cmd+F | `desktop/bin/winhint`, the Dusk `:window-hints` overlay |
 | Move windows | Ctrl+Alt+Shift+h/j/k/l | Generated `hypr/keybindings.lua` |
 | Workspaces | Ctrl+Alt+1..0, add Shift to move a window | Generated `hypr/keybindings.lua` |
 | Fullscreen, floating, close | Ctrl+Alt+f, Ctrl+Alt+v, Ctrl+Alt+w | Generated `hypr/keybindings.lua` |
@@ -102,6 +103,12 @@ Herdr's Ctrl+b h/j/k/l use the same command, so they also continue to Hyprland.
 The desktop leader moves Hyprland windows only, because it cannot see editor windows inside a terminal.
 IntelliJ stops at its own splits. IdeaVim cannot run an external command.
 
+### Pick a window by hint
+
+Cmd+F labels everything you can focus on the current screen, tiny-fingers style: each Hyprland window, each pane of the Herdr terminal's tab, and each Neovim or Emacs window inside those panes. Type a label to focus it through every layer, Hyprland first, then Herdr, then the editor. Escape or a key that matches no label cancels.
+`winhint` collects the targets. Hyprland gives window rects, `herdr pane layout` gives pane rects in cells, and the editors report their windows over the same Neovim socket and `eng-PID` Emacs server the palette uses. Dusk draws the labels and returns the typed one. `winhint --list` prints the targets without showing anything.
+Plain Ghostty windows get one label each, because they share one process and their programs cannot be told apart. Only the focused monitor is labelled.
+
 ## Command palette
 
 One Dusk palette at the bottom of the screen chooses commands in every application. Each row shows the command, its keys and where it comes from, so a search also teaches the direct binding. Recent choices come first.
@@ -182,6 +189,7 @@ No global keyboard listener or browser content script has been added.
 | Ghostty Ctrl+Enter toggles fullscreen | Ctrl+Enter reaches the program | Ctrl+Alt+f owns fullscreen |
 | Pi receives bare Ctrl+h | Ctrl+h moves focus from Pi | Pi does not use Ctrl+h |
 | Caps or Shift become modifiers after 500 ms alone | After 200 ms | Ctrl+click and Shift+click lose the modifier until then |
+| Cmd+F sends Ctrl+F, find | Cmd+F picks a window by hint. Ctrl+F (Caps+F) still finds in Chrome, and Vimium has / | One key for window hints in every application |
 
 Herdr's Ctrl+b prefix still captures readline backward-char. Use Left or Cmd+h there.
 Existing custom Herdr actions also override native defaults for Ctrl+b b, p, Shift+P, and o.

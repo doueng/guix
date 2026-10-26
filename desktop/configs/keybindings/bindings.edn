@@ -10,7 +10,8 @@
              {:id "L" :label "Move right" :hypr ["CTRL ALT SHIFT" "L" ["window.move" {:direction "right"}]]}
              {:id "f" :label "Fullscreen" :hypr ["CTRL ALT" "F" ["window.fullscreen"]]}
              {:id "v" :label "Toggle floating" :hypr ["CTRL ALT" "V" ["window.float" {:action "toggle"}]]}
-             {:id "w" :label "Close window" :hypr ["CTRL ALT" "W" ["window.close"]]}]}
+             {:id "w" :label "Close window" :hypr ["CTRL ALT" "W" ["window.close"]]}
+             {:id "p" :label "Pick a window, pane or editor window by hint" :chord "Cmd+F" :command ["~/.local/bin/winhint"]}]}
   {:id "s" :label "Workspaces" :workspace-digits true}
   {:id "a" :label "Applications"
    :entries [{:id "t" :label "Terminal" :chord "Cmd+Return" :command ["~/.local/bin/workspace-or-herdr-tab" "1"]}
@@ -31,7 +32,7 @@
              {:id "t" :label "Find an open tab" :chord "T" :tip "Use T and type a tab title instead of cycling through tabs. ^ returns to the previous tab."}
              {:id "j" :label "Navigate a long page" :chord "d / u / gg / G" :tip "Use d and u for half pages, gg and G for top and bottom, or / to search instead of repeated j/k."}
              {:id "i" :label "Focus a field or pass keys to a site" :chord "gi / i / Esc" :tip "gi focuses an input. i enters Vimium insert mode. Esc returns to normal mode. Configure site exclusions for web editors."}
-             {:id "c" :label "Chrome native shortcuts" :chord "Ctrl+L / Cmd+T / Cmd+W" :tip "Ctrl+L focuses the address bar. Cmd+T opens a tab, Cmd+Shift+T restores one, Cmd+W closes it, Cmd+F finds text."}
+             {:id "c" :label "Chrome native shortcuts" :chord "Ctrl+L / Cmd+T / Cmd+W" :tip "Ctrl+L focuses the address bar. Cmd+T opens a tab, Cmd+Shift+T restores one, Cmd+W closes it, Ctrl+F (Caps+F) finds text. Cmd+F picks a window by hint."}
              {:id "v" :label "Vimium options" :command ["~/.local/bin/chrome-unified" "chrome-extension://dbepggeogbaibhgnhhndojpepiihcmeb/pages/options.html"]}]}
   {:id "e" :label "Editors and terminal"
    :entries [{:id "p" :label "Command palette" :chord "Alt+Space Space / SPC SPC / Ctrl+Space" :tip "Alt+Space Space searches the focused program's commands from any window. SPC SPC in Doom and Neovim and Ctrl+Space in fish open the same palette there."}

@@ -54,6 +54,8 @@ hl.bind("SUPER + G", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 4"))
 hl.bind("SUPER + B", hl.dsp.exec_cmd("~/.local/bin/herdr-terminal"))
 hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("ghostty nvim ~/.config/hypr/hyprland.lua"))
 hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
+-- Label every visible window, Herdr pane and editor window, then focus the typed one.
+hl.bind("SUPER + F", hl.dsp.exec_cmd("~/.local/bin/winhint"))
 
 -- Top-level menus: Space Space in editors, Alt+Space for Hyprland (leader.lua),
 -- Cmd+Space for Herdr.

@@ -1,0 +1,141 @@
+#!/usr/bin/env bb
+;; Cmd+F labels every window you can see, tiny-fingers style: Hyprland windows,
+;; the panes of the Herdr terminal, and Neovim and Emacs windows inside those
+;; panes. Typing a label focuses that window through every layer above it.
+(ns winhint
+  (:require [babashka.fs :as fs]
+            [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.string :as str]))
+
+(load-file (str (fs/parent (fs/real-path *file*)) "/palette"))
+(require '[dusk.palette :as dusk]
+         '[hypr.dispatch :as hypr])
+
+(def alphabet "asdfghjklqwertyuiopzxcvbnm")
+
+(defn labels
+  "N prefix-free labels: single keys while they last, then two keys each."
+  [n]
+  (let [keys (map str alphabet)]
+    (vec (take n (if (<= n (count keys)) keys (for [a keys b keys] (str a b)))))))
+
+(defn cell-rect
+  "Pixel rect of RECT, in cells, inside BOX of COLS by ROWS cells."
+  [{:keys [x y w h]} cols rows rect]
+  (let [cw (/ w cols) ch (/ h rows)]
+    {:x (+ x (* (:x rect) cw)) :y (+ y (* (:y rect) ch))
+     :w (* (:width rect) cw) :h (* (:height rect) ch)}))
+
+;; Hyprland
+
+(defn hypr-json [& args] (json/parse-string (palette/sh-out "hyprctl" "-j" (str/join " " args)) true))
+
+(def herdr-class "com.mitchellh.ghostty.herdr")
+
+(defn visible-windows
+  "Windows shown on MONITOR, with rects relative to it. A fullscreen window
+  hides the rest of its workspace."
+  [monitor clients]
+  (let [shown (disj #{(get-in monitor [:activeWorkspace :id]) (get-in monitor [:specialWorkspace :id])} 0)
+        on (filter #(and (:mapped %) (not (:hidden %)) (shown (get-in % [:workspace :id]))) clients)
+        on (or (seq (filter #(pos? (:fullscreen %)) on)) on)]
+    (for [{:keys [address class] [x y] :at [w h] :size} on]
+      {:path [[:hypr address]] :class class
+       :x (- x (:x monitor)) :y (- y (:y monitor)) :w w :h h})))
+
+;; Herdr. Its tab bar takes the row above the pane area.
+
+(defn herdr-panes [window]
+  (let [{:keys [area panes]} (get-in (keyleader/herdr-json "pane" "layout") [:result :layout])
+        cols (+ (:x area) (:width area))
+        rows (+ (:y area) (:height area) 1)]
+    (for [{:keys [pane_id rect]} panes]
+      (merge (cell-rect window cols rows (update rect :y inc))
+             {:path (conj (:path window) [:herdr pane_id]) :pane pane_id
+              :cols (:width rect) :rows (:height rect)}))))
+
+(defn pane-program [pane]
+  (palette/program-of (get-in (keyleader/herdr-json "pane" "process-info" "--pane" pane)
+                              [:result :process_info :foreground_processes])))
+
+;; Editors. Each returns window rects in cells of the editor's own grid.
+
+(defn nvim-socket [pid]
+  (let [pids (set (palette/process-tree pid))]
+    (some #(when (pids (some-> (palette/sh-out "nvim" "--server" % "--remote-expr" "getpid()") str/trim)) %)
+          (mapcat palette/process-sockets pids))))
+
+(def nvim-windows-lua
+  "luaeval(\"(function() local out = {} for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do if vim.api.nvim_win_get_config(w).relative == '' then local p = vim.api.nvim_win_get_position(w) table.insert(out, {w, p[2], p[1], vim.api.nvim_win_get_width(w), vim.api.nvim_win_get_height(w)}) end end return vim.json.encode(out) end)()\")")
+
+(defn nvim-windows [pid]
+  (when-let [socket (nvim-socket pid)]
+    (for [[id x y w h] (some-> (palette/sh-out "nvim" "--server" socket "--remote-expr" nvim-windows-lua) json/parse-string)]
+      {:step [:nvim socket id] :rect {:x x :y y :width w :height h}})))
+
+(def emacs-windows-form "(window-list nil 'nomini (frame-first-window))")
+
+(defn emacs-windows [pid]
+  (when-let [out (palette/sh-out "emacsclient" "-s" (str "eng-" pid) "--eval"
+                                 (str "(mapcar #'window-edges " emacs-windows-form ")"))]
+    (map-indexed (fn [i [left top right bottom]]
+                   {:step [:emacs pid i] :rect {:x left :y top :width (- right left) :height (- bottom top)}})
+                 (edn/read-string out))))
+
+(defn editor-windows
+  "PANE split into its editor's windows, or PANE alone."
+  [pane]
+  (let [{:keys [id pid]} (pane-program (:pane pane))
+        windows (try (case id :nvim (nvim-windows pid) :emacs (emacs-windows pid) nil)
+                     (catch Exception _ nil))]
+    (if (< 1 (count windows))
+      (for [{:keys [step rect]} windows]
+        (assoc (cell-rect pane (:cols pane) (:rows pane) rect) :path (conj (:path pane) step)))
+      [pane])))
+
+(defn targets []
+  (let [monitor (first (filter :focused (hypr-json "monitors")))
+        windows (visible-windows monitor (hypr-json "clients"))
+        expand (fn [w] (if (= herdr-class (:class w))
+                         (mapcat editor-windows (herdr-panes w))
+                         [w]))
+        found (sort-by (juxt :y :x) (mapcat expand windows))]
+    (mapv (fn [t label] (assoc (select-keys t [:path]) :label label
+                               :x (Math/round (double (:x t))) :y (Math/round (double (:y t)))
+                               :w (Math/round (double (:w t))) :h (Math/round (double (:h t)))))
+          found (labels (count found)))))
+
+;; Focus, outermost layer first.
+
+(defn focus-step! [[kind a b]]
+  (case kind
+    :hypr (hypr/dispatch! ["focus" {:window (str "address:" a)}])
+    :herdr (keyleader/herdr-api! "pane.focus" {:pane_id a})
+    :nvim (palette/sh-out "nvim" "--server" a "--remote-expr" (str "win_gotoid(" b ")"))
+    :emacs (palette/sh-out "emacsclient" "-s" (str "eng-" a) "--eval"
+                           (str "(progn (select-window (nth " b " " emacs-windows-form ")) nil)"))))
+
+(defn pick! [targets]
+  (let [reply (dusk/request! {:op :request :name :window-hints
+                              :args {:targets (mapv #(select-keys % [:label :x :y :w :h]) targets)}})]
+    (when-not (:ok reply)
+      (throw (ex-info (str "Dusk window hints failed: " (:error reply)) reply)))
+    (:value reply)))
+
+(defn main! []
+  (let [ts (targets)]
+    (when-let [label (pick! ts)]
+      (let [{:keys [path]} (first (filter #(= label (:label %)) ts))]
+        (run! focus-step! path)
+        (keyleader/log! "Winhint" "Cmd+F" (str "Focus " (name (first (peek path)))))))))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (try
+    (case (first *command-line-args*)
+      nil (main!)
+      "--list" (run! prn (targets)))
+    (catch Exception e
+      (binding [*out* *err*] (println "winhint:" (ex-message e)))
+      (palette/notify! (ex-message e))
+      (System/exit 1))))

@@ -28,6 +28,10 @@
     "↓LGui ↑LGui ↓LCtrl ↓Insert ↑LCtrl ↑Insert ↓LGui ↑LGui"]
    ["Unmapped Cmd chords reach Hyprland as Super" "d:lmet d:b u:b u:lmet"
     "↓LGui ↓B ↑B ↑LGui"]
+   ["Cmd+F reaches Hyprland as Super+F for window hints" "d:lmet d:f u:f u:lmet"
+    "↓LGui ↓F ↑F ↑LGui"]
+   ["Terminal Cmd+F also reaches Hyprland" "ls:terminal d:lmet d:f u:f u:lmet"
+    "↓LGui ↓F ↑F ↑LGui"]
    ["Cmd+Shift+Z redoes with Ctrl+Y" "d:lmet d:lsft d:z u:z u:lsft u:lmet"
     "↓LGui ↓LShift ↑LGui ↑LShift ↓LCtrl ↓Y ↑LCtrl ↑Y ↓LGui ↓LShift ↑LShift ↑LGui"]
    ["Cmd+Shift+T keeps Shift" "d:lmet d:lsft d:t u:t u:lsft u:lmet"

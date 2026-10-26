@@ -185,6 +185,7 @@ keybindings-check: kanata-check
 	bb desktop/build/keybindings/leader-test.clj
 	bb desktop/build/keybindings/review-test.clj
 	bb desktop/build/keybindings/palette-test.clj
+	bb desktop/build/keybindings/winhint-test.clj
 	emacs --batch -Q -l desktop/build/keybindings/navigate-test.el -f ert-run-tests-batch-and-exit
 	emacs --batch -Q -l desktop/build/keybindings/coach-test.el -f ert-run-tests-batch-and-exit
 	emacs --batch -Q -l desktop/build/keybindings/palette-test.el -f ert-run-tests-batch-and-exit
