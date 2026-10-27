@@ -32,3 +32,20 @@
   (fs/create-dirs dir)
   (spit (compactions-file dir) (str (json/generate-string compaction) "\n") :append true)
   compaction)
+
+(defn- prompts-file [dir]
+  (str (fs/path dir "prompts.jsonl")))
+
+(defn load-prompts
+  "Every recorded {:at :time :model :effort :system :tool-description}, oldest
+  first, where :at is the message count when the prompt took effect."
+  [dir]
+  (let [f (prompts-file dir)]
+    (if (fs/exists? f)
+      (->> (fs/read-all-lines f) (remove str/blank?) (mapv #(json/parse-string % true)))
+      [])))
+
+(defn append-prompt! [dir prompt]
+  (fs/create-dirs dir)
+  (spit (prompts-file dir) (str (json/generate-string prompt) "\n") :append true)
+  prompt)

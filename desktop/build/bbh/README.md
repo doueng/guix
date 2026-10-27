@@ -64,7 +64,7 @@ Skills come from Pi's directories, so the pstack pack and project skills load as
 - `src/bbh/repl.clj` starts the REPL process and evaluates over nREPL. `src/bbh/llm.clj` streams OpenRouter.
 - `src/bbh/usage.clj` reports Claude, Codex and OpenRouter limits, after Pi's `pi-usage` extension.
 
-Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.jsonl`, `compactions.jsonl`, `outputs/`, `repl.log`, `repl.port` and, for Claude, `claude-session` and `claude.log`.
+Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.jsonl`, `compactions.jsonl`, `prompts.jsonl` (each distinct system prompt, tool description, model and effort, with the message count where it took effect), `outputs/`, `repl.log`, `repl.port` and, for Claude, `claude-session` and `claude.log`.
 
 ## Lifetimes
 
@@ -80,6 +80,7 @@ bb test:emacs            # composer, history, cancellation and nREPL endpoint
 bb test:doom             # installed Doom startup and Ctrl-N, in a separate terminal
 bb test:doom launcher    # installed emacs-bbh launcher, including automatic session startup
 bb try MODEL PROMPT...   # real prompts through agent-shell, printing the buffer
+bb runs:html [N] [OUT]   # HTML page of the newest N conversations with prompts, tool calls, workflow journals, evidence and reviews; `make bbh-runs` from the repo root
 bb stats                 # timeouts, restarts and errors per conversation, live workflow runs, review times
 bb eval:lint             # assertion hits per cohort over real and eval conversations
 bb eval:review           # label conversations good or bad with a critique

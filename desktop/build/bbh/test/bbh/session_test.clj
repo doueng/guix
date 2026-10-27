@@ -94,6 +94,14 @@
     (stop! h)
     (is (= "Speak like a pirate." (system-prompt h 1)))))
 
+(deftest the-transcript-records-each-distinct-system-prompt-once
+  (let [h (harness "(ns bbh.env) (def manifest {:system \"Be brief.\"})"
+                   [{:code "(+ 1 1)"} {:code "(intern (create-ns 'bbh.env) 'manifest {:system \"Be loud.\"})"} "OK"])]
+    (session/prompt! (:s h) "go")
+    (stop! h)
+    (is (= [[1 "faux" "Be brief."] [5 "faux" "Be loud."]]
+           (map (juxt :at :model :system) (bbh.transcript/load-prompts (:dir h)))))))
+
 (deftest invalid-manifest-falls-back-and-says-why
   (let [h (harness "(ns bbh.env) (def manifest {:deadline-ms \"soon\" :system \"Custom.\"})" ["ok"])]
     (session/prompt! (:s h) "go")

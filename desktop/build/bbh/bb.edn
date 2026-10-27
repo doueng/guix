@@ -29,6 +29,9 @@
          eval:graders {:doc "Reject untouched fixtures and accept reference solutions."
                        :requires ([bbh.tasks])
                        :task (bbh.tasks/verify-graders!)}
+         runs:html {:doc "HTML page of the newest bbh conversations: prompts, tool calls, workflow runs and reviews. Args: [N] [OUT]."
+                    :requires ([bbh.runs-page])
+                    :task (apply bbh.runs-page/-main *command-line-args*)}
          stats {:doc "Harness health: timeouts, restarts and errors per conversation, plus workflow runs. Args: [--since ID] [--until ID] [ROOT...]."
                 :requires ([bbh.stats])
                 :task (apply bbh.stats/-main *command-line-args*)}
@@ -41,8 +44,8 @@
                     :task (let [{:keys [fail error]} (t/run-tests 'bbh.init-test)]
                             (System/exit (if (zero? (+ fail error)) 0 1)))}
          test {:doc "Run the bbh tests."
-               :requires ([clojure.test :as t] [bbh.llm-test] [bbh.context-test] [bbh.delimiters-test] [bbh.session-test] [bbh.acp-test] [bbh.claude-test] [bbh.env-test] [bbh.eval-test] [bbh.swe-report-test] [bbh.init-test] [bbh.workflow-test])
-               :task (let [{:keys [fail error]} (t/run-tests 'bbh.llm-test 'bbh.context-test 'bbh.delimiters-test 'bbh.session-test 'bbh.acp-test 'bbh.claude-test 'bbh.env-test 'bbh.eval-test 'bbh.swe-report-test 'bbh.init-test 'bbh.workflow-test)]
+               :requires ([clojure.test :as t] [bbh.llm-test] [bbh.context-test] [bbh.delimiters-test] [bbh.session-test] [bbh.acp-test] [bbh.claude-test] [bbh.env-test] [bbh.eval-test] [bbh.swe-report-test] [bbh.init-test] [bbh.workflow-test] [bbh.runs-page-test])
+               :task (let [{:keys [fail error]} (t/run-tests 'bbh.llm-test 'bbh.context-test 'bbh.delimiters-test 'bbh.session-test 'bbh.acp-test 'bbh.claude-test 'bbh.env-test 'bbh.eval-test 'bbh.swe-report-test 'bbh.init-test 'bbh.workflow-test 'bbh.runs-page-test)]
                        (System/exit (if (zero? (+ fail error)) 0 1)))}
          try {:doc "bb try MODEL PROMPT...: run real prompts through agent-shell headlessly."
               :task (let [[model & prompts] *command-line-args*

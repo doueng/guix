@@ -143,14 +143,34 @@
     (emit! s {:type :usage :used (:last-input st) :size (:context-size st) :spent (:spent st)
               :request request})))
 
+(defn- prompt-key [p]
+  ((juxt :model :effort :system :tool-description) p))
+
+(defn- record-prompt!
+  "Append the prompt to prompts.jsonl when it differs from the conversation's
+  last recorded one, so the transcript says what the model was told."
+  [s system]
+  (let [{:keys [dir model manifest messages recorded-prompt]} @s
+        p {:at (count messages) :time (str (java.time.Instant/now)) :model model
+           :effort (some-> (:effort manifest) name) :system system
+           :tool-description (:tool-description manifest)}
+        last-key (if (= dir (first recorded-prompt))
+                   (second recorded-prompt)
+                   (some-> (peek (transcript/load-prompts dir)) prompt-key))]
+    (when (not= last-key (prompt-key p))
+      (transcript/append-prompt! dir p))
+    (swap! s assoc :recorded-prompt [dir (prompt-key p)])))
+
 (defn system-prompt!
   "Refresh the manifest and return the system prompt, noting invalid entries."
   [s]
-  (let [{:keys [manifest problems]} (repl/manifest (:repl @s))]
-    (swap! s assoc :manifest manifest)
-    (cond-> (:system manifest)
-      (seq problems) (str "\n\n[bbh] bbh.env/manifest is invalid, so these defaults apply:\n"
-                          (str/join "\n" problems)))))
+  (let [{:keys [manifest problems]} (repl/manifest (:repl @s))
+        _ (swap! s assoc :manifest manifest)
+        system (cond-> (:system manifest)
+                 (seq problems) (str "\n\n[bbh] bbh.env/manifest is invalid, so these defaults apply:\n"
+                                     (str/join "\n" problems)))]
+    (record-prompt! s system)
+    system))
 
 (defn run-code!
   "Evaluate CODE for tool call ID, healing a truncated form or extra trailing

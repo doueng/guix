@@ -16,7 +16,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi dusk dusk-test dusk-verify pi-sci pi-sci-test \
-        doom-check doom-baseline skill-diet-check keybindings-check kanata-check hypr-nested-check swe-rebench-check
+        doom-check doom-baseline bbh-runs skill-diet-check keybindings-check kanata-check hypr-nested-check swe-rebench-check
 
 help:
 	@echo 'lint          fast checks for every change: Scheme compiles, scripts parse, docs agree'
@@ -41,6 +41,7 @@ help:
 	@echo 'stow          build SCI and install live config links using GNU Stow'
 	@echo 'pi-sci        compile the pinned SCI codemode runtime'
 	@echo 'pi-sci-test   build and verify SCI codemode with the installed Pi'
+	@echo 'bbh-runs      write the newest $(BBH_RUNS) bbh conversations, prompts, tool calls and workflows to $(BBH_RUNS_OUT)'
 	@echo 'skill-diet-check check the skill-diet links and the bbh eval adapter'
 	@echo 'swe-rebench-check offline check of the bbh Harbor agent and the SWE-rebench workflow'
 	@echo 'pierre-diff-ansi install the highlighter behind jjui diff previews'
@@ -150,6 +151,11 @@ swe-rebench-check:
 	cd desktop/build/bbh && bb eval:harbor-check
 	uvx --from actionlint-py actionlint .github/workflows/swe-rebench.yml
 	shellcheck desktop/build/bbh/harbor/bbh-acp
+
+BBH_RUNS ?= 10
+BBH_RUNS_OUT ?= $(HOME)/.cache/bbh/runs.html
+bbh-runs:
+	cd desktop/build/bbh && bb runs:html $(BBH_RUNS) "$(abspath $(BBH_RUNS_OUT))"
 
 SKILL_DIET := desktop/pi/agent/skills/skill-diet
 skill-diet-check:
