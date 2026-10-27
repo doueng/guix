@@ -94,6 +94,8 @@
     :enter   (-> st
                  (assoc :phase (:phase e))
                  (assoc-in [:visits (:phase e)] (:visit e)))
+    :set     (merge st (select-keys e [:repro :check :bench]))
+    :abandon (assoc st :status :abandoned :abandon-reason (:reason e))
     :done    (assoc st :status :done)
     :block   (assoc st :status :blocked :block-reason (:reason e))))
 
@@ -159,7 +161,7 @@
     (if (:optional gate)
       {:index i :kind :command :skipped? true :pass? true}
       {:index i :kind :command :pass? false
-       :detail (str "no " (name (:cmd gate)) " command was given at start")})))
+       :detail (str "no " (name (:cmd gate)) " command was given; add one with wf set --" (name (:cmd gate)) " CMD")})))
 
 (defn- run-artifact [id i gate]
   (let [f (fs/path (evidence-dir id) (:path gate))]
@@ -230,6 +232,31 @@
                    :task task :repro repro :check check :bench bench :phase (:start wf)})
       (when-let [file (session-run-file)] (spit file id))
       id)))
+
+(defn set-commands!
+  "Gives active run ID new run commands, a map with any of :repro :check :bench. The next attest uses them."
+  [id cmds]
+  (let [st (current id)
+        cmds (into {} (filter (comp some? val)) (select-keys cmds [:repro :check :bench]))]
+    (when-not (= :active (:status st))
+      (throw (ex-info (str "run is " (name (:status st))) {:id id})))
+    (when (empty? cmds)
+      (throw (ex-info "set needs --repro, --check or --bench" {:id id})))
+    (append! id (merge {:type :set} cmds))))
+
+(defn abandon!
+  "Retires run ID so it no longer counts as the default run. Done runs stay done."
+  [id reason]
+  (let [st (current id)]
+    (when-not (#{:active :blocked} (:status st))
+      (throw (ex-info (str "run is " (name (:status st)) ", nothing to abandon") {:id id})))
+    (append! id {:type :abandon :reason reason})))
+
+(defn- abandoned? [id]
+  (try (= :abandoned (:status (current id))) (catch Exception _ false)))
+
+(defn- live? [id]
+  (and (fs/exists? (journal-file id)) (not (abandoned? id))))
 
 (defn status [id]
   (let [st (current id)]
@@ -329,13 +356,17 @@
            mine? (fn [id] (or (nil? here)
                               (when-let [cwd (run-cwd id)]
                                 (or (= here cwd) (str/starts-with? here (str cwd "/"))))))]
-       (->> (fs/list-dir (state-root)) (map (comp str fs/file-name)) sort reverse (filter mine?) first)))))
+       (->> (fs/list-dir (state-root)) (map (comp str fs/file-name)) sort reverse
+            (filter mine?) (remove abandoned?) first)))))
 
 (defn default-id
   "The run a command means when it names none: $WF_RUN, else the run this bbh conversation started, else the
-  newest run for the current directory. Other agents' runs in other repositories never qualify."
+  newest run for the current directory. Other agents' runs in other repositories never qualify. Abandoned runs
+  only qualify through $WF_RUN, and a session run missing from this state root is skipped."
   []
-  (or (System/getenv "WF_RUN") (session-run-id) (latest-id (fs/cwd))))
+  (or (System/getenv "WF_RUN")
+      (some-> (session-run-id) (as-> id (when (live? id) id)))
+      (latest-id (fs/cwd))))
 
 (defn- configured-session-dir [files]
   (reduce (fn [acc file]
@@ -428,6 +459,7 @@
   (println (str "workflow " (name (:workflow st)) "  phase " (name (:phase st))
                 "  visit " (get-in st [:visits (:phase st)]) "  status " (name (:status st))))
   (when (:block-reason st) (println (str "blocked: " (:block-reason st))))
+  (when (= :abandoned (:status st)) (println (str "abandoned: " (or (:abandon-reason st) "no reason given"))))
   (println (str "brief: " (:brief st)))
   (println (str "evidence: " (:evidence st))))
 
@@ -436,6 +468,8 @@
   wf start <workflow> [--task T] [--repro CMD] [--check CMD] [--bench CMD] [--cwd DIR]
   wf status [RUN] [--json]
   wf attest [RUN] --claim TEXT
+  wf set [RUN] [--repro CMD] [--check CMD] [--bench CMD]   replace run commands; the next attest uses them
+  wf abandon [RUN] [--reason T]         retire a run so it is no longer the default
   wf review [RUN]                       fresh reviewer judges the current verdict gate
   wf verdict [RUN] --human NAME --verdict pass|fail [--note TEXT]
   wf session-dir [WORKSPACE] [DIR]
@@ -466,6 +500,12 @@ RUN defaults to $WF_RUN, else the newest run started for this directory or one c
                    (print-attest (attest! id (or (:claim flags)
                                                  (throw (ex-info "attest needs --claim" {})))))
                    (print-status (status id)))
+        "set" (let [id (run-id)]
+                (set-commands! id (select-keys flags [:repro :check :bench]))
+                (print-status (status id)))
+        "abandon" (let [id (run-id)]
+                    (abandon! id (:reason flags))
+                    (print-status (status id)))
         "session-dir" (println (session-dir (first pos) (second pos)))
         "review" (let [id (run-id)
                        {:keys [verdict reviewer reply]} (review! id)]

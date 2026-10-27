@@ -283,3 +283,33 @@
                          :block (contains? (:phases wf) phase)))
                      events))))]
     (is (:pass? result) (pr-str (:shrunk result)))))
+
+(deftest set-gives-a-run-the-repro-it-started-without
+  (let [repo (buggy-repo)
+        id (wf/start! :bug-fix {:cwd repo})]
+    (is (= :fail (:outcome (wf/attest! id "no repro yet"))))
+    (is (= [:reproduce 2] (at id)))
+    (wf/set-commands! id {:repro repro})
+    (is (= repro (:repro (wf/status id))))
+    (is (= :pass (:outcome (wf/attest! id "repro fails"))))
+    (is (= [:diagnose 1] (at id)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"needs --repro" (wf/set-commands! id {})))))
+
+(deftest an-abandoned-run-stops-and-is-no-longer-the-default
+  (let [repo (buggy-repo)
+        older (wf/start! :bug-fix {:cwd repo :repro repro})
+        _ (Thread/sleep 5)
+        newer (wf/start! :bug-fix {:cwd repo :repro repro})]
+    (is (= newer (wf/latest-id repo)))
+    (wf/abandon! newer "started without the right repro")
+    (is (= :abandoned (:status (wf/status newer))))
+    (is (= "started without the right repro" (:abandon-reason (wf/status newer))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"run is abandoned" (wf/attest! newer "late")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"run is abandoned" (wf/set-commands! newer {:repro "true"})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"nothing to abandon" (wf/abandon! newer nil)))
+    (is (= older (wf/latest-id repo)))
+    (with-redefs [wf/session-run-id (constantly newer) fs/cwd (constantly repo)]
+      (is (= older (wf/default-id)) "an abandoned session run falls back to the newest live run"))
+    (with-redefs [wf/session-run-id (constantly "20000101-000000-000-bug-fix") fs/cwd (constantly repo)]
+      (is (= older (wf/default-id)) "a session run from another state root falls back too"))
+    (is (= "abandoned" (:status (wf/status-json (wf/status newer)))))))

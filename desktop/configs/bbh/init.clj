@@ -365,6 +365,22 @@ Only the final expression's value is returned. Print intermediate results with p
      (print-gates results)
      (wf-status id))))
 
+(defn wf-set
+  "Give run ID (default: latest) new run commands, a map with any of :repro :check :bench."
+  ([cmds] (wf-set nil cmds))
+  ([id cmds]
+   (let [id (or id (wf/default-id) (throw (ex-info "no runs for this directory" {})))]
+     (wf/set-commands! id cmds)
+     (wf-status id))))
+
+(defn wf-abandon
+  "Retire run ID (default: latest) with REASON, so it is no longer the default run."
+  ([reason] (wf-abandon nil reason))
+  ([id reason]
+   (let [id (or id (wf/default-id) (throw (ex-info "no runs for this directory" {})))]
+     (wf/abandon! id reason)
+     (select-keys (wf/status id) [:id :workflow :phase :status :abandon-reason]))))
+
 (defn wf-review
   "Run a fresh reviewer on the current verdict gate of run ID (default: latest). Agents never record a human verdict."
   ([] (wf-review nil))
