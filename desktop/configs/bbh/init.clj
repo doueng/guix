@@ -255,9 +255,9 @@ Only the final expression's value is returned. Print intermediate results with p
             [clojure.string :as str]))
 
 (defn sh
-  "Run CMD with bash. Returns {:exit :out :err}."
+  "Run CMD with bash and an empty stdin. Returns {:exit :out :err}."
   [cmd]
-  (select-keys (p/shell {:continue true :out :string :err :string} "bash" "-c" cmd)
+  (select-keys (p/shell {:continue true :in "" :out :string :err :string} "bash" "-c" cmd)
                [:exit :out :err]))
 
 (defn read-lines

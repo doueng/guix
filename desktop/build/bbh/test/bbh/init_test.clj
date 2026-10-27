@@ -18,5 +18,9 @@
       (is (nil? (session/start-repl! s)) "init.clj should load in the child REPL")
       (let [conn (:repl @s)]
         (is (= "true" (:value (repl/eval! conn "(boolean (resolve 'wf-attest))" 30000))))
-        (is (= "true" (:value (repl/eval! conn "(boolean (resolve 'jev-classify-task))" 30000)))))
+        (is (= "true" (:value (repl/eval! conn "(boolean (resolve 'jev-classify-task))" 30000))))
+        (is (= "\"0\\n\"" (:value (repl/eval! conn "(:out (sh \"timeout 5 cat; echo $?\"))" 30000)))
+            "a command that reads stdin should see EOF, not hang")
+        (is (= "\"0\\n\"" (:value (repl/eval! conn "(:out @(p/process {:in :inherit :out :string} \"bash\" \"-c\" \"timeout 5 cat; echo $?\"))" 30000)))
+            "the REPL's own stdin should be at EOF for children that inherit it"))
       (finally (session/close! s)))))

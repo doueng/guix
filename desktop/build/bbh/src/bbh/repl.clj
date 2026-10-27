@@ -68,7 +68,9 @@
         log (fs/file dir "repl.log")
         _ (fs/delete-if-exists port-file)
         config (System/getProperty "babashka.config")
+        ;; Nothing writes the REPL's stdin, and an open pipe there would hang any child that reads it.
         proc (apply p/process {:dir cwd :extra-env {"BBH_PORT_FILE" port-file}
+                               :in (fs/file "/dev/null")
                                :out :append :out-file log :err :append :err-file log}
                     (concat ["bb"] (when config ["--config" config]) ["-e" bootstrap]))
         port (wait-for-port port-file proc)
