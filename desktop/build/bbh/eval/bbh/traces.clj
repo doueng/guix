@@ -16,10 +16,15 @@
           (fs/exists? (fs/path d file)) (str d)
           :else (recur (fs/parent d)))))
 
+(def restart-result
+  "How session.clj opens a result whose evaluation restarted the REPL. Anchored, so a result that merely quotes
+  the message, such as grep output over session.clj, does not count."
+  #"\A(?:The user interrupted the evaluation\.|Timed out after \d+ ms\.|The REPL process exited\.) The REPL process was killed and restarted")
+
 (defn- error-of
   "The exception class in a rendered tool result, or :restart or :skipped."
   [text]
-  (cond (str/includes? text "The REPL process was killed and restarted") :restart
+  (cond (re-find restart-result text) :restart
         (str/starts-with? text "Skipped because the user interrupted") :skipped
         :else (some->> (re-find #"(?s)(?:^|\n)err:\n(.*?)(?:\n=> |\z)" text)
                        second

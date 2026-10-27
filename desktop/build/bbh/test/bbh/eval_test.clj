@@ -2,6 +2,8 @@
   (:require [babashka.fs :as fs]
             [bbh.compare :as compare]
             [bbh.labels :as labels]
+            [bbh.stats :as stats]
+            [bbh.workflow :as wf]
             [bbh.traces :as traces]
             [cheshire.core :as json]
             [clojure.string :as str]
@@ -81,3 +83,26 @@
     (is (= {:n 4 :tp 1 :fp 1 :fn 1 :tn 1 :precision 0.5 :recall 0.5 :true-negative-rate 0.5}
            (dissoc result :disagreements)))
     (is (= ["t2" "t3"] (sort (map :trace (:disagreements result)))))))
+
+(deftest stats-count-timeouts-errors-and-live-runs
+  (let [dir (conversation!)
+        timeout-dir (str (fs/create-temp-dir {:prefix "bbh-stats-test"}))
+        state (str (fs/create-temp-dir {:prefix "bbh-stats-state"}))]
+    (spit (str (fs/path timeout-dir "messages.jsonl"))
+          (str/join (for [m [{:role "user" :content "run the slow check"}
+                             {:role "assistant" :content "" :tool_calls [(call "t1" "(sh \"make slow\")")]}
+                             {:role "tool" :tool_call_id "t1" :content "Timed out after 120000 ms. The REPL process was killed and restarted, so live definitions are gone."}
+                             {:role "assistant" :content "" :tool_calls [(call "t2" "(sh \"grep -n Timed src/bbh/session.clj\")")]}
+                             {:role "tool" :tool_call_id "t2" :content "161: (str \"Timed out after \" ms) The REPL process was killed and restarted"}
+                             {:role "assistant" :content "It timed out."}]]
+                      (str (json/generate-string m) "\n"))))
+    (with-redefs [wf/state-root (constantly state) wf/session-run-file (constantly nil)]
+      (let [live (wf/start! :investigation {:cwd dir :task "t"})
+            r (stats/report {:roots [dir timeout-dir] :state-root state})]
+        (is (= {:conversations 2 :prompts 3 :calls 4 :timeouts 1 :restarts 1 :errors 1} (:totals r))
+            "a result quoting the timeout message is neither a timeout nor a restart")
+        (is (= {:active 1} (:run-statuses r)))
+        (is (= [live] (map :id (:runs r))))
+        (is (= 1 (count (:conversations (stats/report {:roots [dir timeout-dir] :state-root state
+                                                         :since (str (fs/file-name timeout-dir))
+                                                         :until (str (fs/file-name timeout-dir))})))))))))

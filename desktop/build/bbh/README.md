@@ -80,6 +80,7 @@ bb test:emacs            # composer, history, cancellation and nREPL endpoint
 bb test:doom             # installed Doom startup and Ctrl-N, in a separate terminal
 bb test:doom launcher    # installed emacs-bbh launcher, including automatic session startup
 bb try MODEL PROMPT...   # real prompts through agent-shell, printing the buffer
+bb stats                 # timeouts, restarts and errors per conversation, live workflow runs, review times
 bb eval:lint             # assertion hits per cohort over real and eval conversations
 bb eval:review           # label conversations good or bad with a critique
 ```

@@ -23,6 +23,9 @@
          eval:graders {:doc "Reject untouched fixtures and accept reference solutions."
                        :requires ([bbh.tasks])
                        :task (bbh.tasks/verify-graders!)}
+         stats {:doc "Harness health: timeouts, restarts and errors per conversation, plus workflow runs. Args: [--since ID] [--until ID] [ROOT...]."
+                :requires ([bbh.stats])
+                :task (apply bbh.stats/-main *command-line-args*)}
          test:workflow {:doc "Run the workflow engine tests, including the route check against the Jev extension."
                         :requires ([clojure.test :as t] [bbh.workflow-test])
                         :task (let [{:keys [fail error]} (t/run-tests 'bbh.workflow-test)]
