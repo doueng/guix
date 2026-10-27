@@ -16,7 +16,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi dusk dusk-test dusk-verify pi-sci pi-sci-test \
-        doom-check doom-baseline keybindings-check kanata-check hypr-nested-check
+        doom-check doom-baseline skill-diet-check keybindings-check kanata-check hypr-nested-check
 
 help:
 	@echo 'lint          fast checks for every change: Scheme compiles, scripts parse, docs agree'
@@ -41,6 +41,7 @@ help:
 	@echo 'stow          build SCI and install live config links using GNU Stow'
 	@echo 'pi-sci        compile the pinned SCI codemode runtime'
 	@echo 'pi-sci-test   build and verify SCI codemode with the installed Pi'
+	@echo 'skill-diet-check check the skill-diet links and the bbh eval adapter'
 	@echo 'pierre-diff-ansi install the highlighter behind jjui diff previews'
 	@echo 'dusk          build the dusk shell (desktop/build/dusk)'
 	@echo 'dusk-test     run isolated runtime and headless GPUI tests'
@@ -143,6 +144,11 @@ pi-sci: $(PI_SCI_OUTPUTS)
 
 pi-sci-test:
 	desktop/build/pi-sci/verify.sh
+
+SKILL_DIET := desktop/pi/agent/skills/skill-diet
+skill-diet-check:
+	node $(SKILL_DIET)/scripts/eval.mjs check $(SKILL_DIET)
+	bb desktop/build/skill-diet/adapter-test.bb
 
 PIERRE_DIFF := desktop/build/pierre-diff-ansi
 

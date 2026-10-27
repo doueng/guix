@@ -33,6 +33,9 @@
   {:name "pi-sci"
    :paths ["desktop/build/pi-sci/**" "desktop/pi/agent/extensions/**"]
    :checks ["make pi-sci-test"]}
+  {:name "skill-diet"
+   :paths ["desktop/pi/agent/skills/skill-diet/**" "desktop/build/skill-diet/**"]
+   :checks ["make skill-diet-check"]}
   {:name "dusk"
    :paths ["desktop/build/dusk/**" "desktop/configs/dusk/**" "desktop/bin/dusk" "desktop/lib/dusk/**"]
    :checks ["make dusk-test"]

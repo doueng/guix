@@ -1,0 +1,105 @@
+#!/usr/bin/env bb
+;; skill-diet eval adapter for bbh. Copy it to <eval-dir>/adapter.
+;;   adapter <skill-dir> <prompt> <out-dir> <work-dir>
+;; Runs one `bbh acp` session in <work-dir> that sees only <skill-dir> (or no
+;; skill when it is ""), no AGENTS.md and no poteto-mode, and writes
+;; <out-dir>/result.json as references/adapter.md describes. EVAL_MODEL picks
+;; the bbh model (PROVIDER/MODEL); BBH_BIN and BBH_INIT override the bbh
+;; launcher and the init file it starts from.
+(require '[babashka.fs :as fs]
+         '[babashka.process :as p]
+         '[cheshire.core :as json]
+         '[clojure.java.io :as io]
+         '[clojure.string :as str])
+
+(let [[skill-dir prompt out-dir work-dir] *command-line-args*]
+  (when (some nil? [skill-dir prompt out-dir work-dir])
+    (binding [*out* *err*] (println "usage: adapter <skill-dir> <prompt> <out-dir> <work-dir>"))
+    (System/exit 2))
+  (def skill-dir skill-dir) (def prompt prompt) (def out-dir out-dir) (def work-dir work-dir))
+
+(fs/create-dirs out-dir)
+(def skill? (not (str/blank? skill-dir)))
+(def base-init (or (System/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj"))))
+(def init (str (fs/path out-dir "init.clj")))
+
+;; The override loads after the user's init, so only the skill under test is
+;; listed, no instruction file reaches the prompt, and the prompt is not
+;; rewritten into poteto-mode.
+(spit init (str (slurp base-init)
+                "\n(ns bbh.env)\n"
+                "(def skill-roots " (pr-str (if skill? [(str (fs/parent (fs/absolutize skill-dir)))] [])) ")\n"
+                "(defn- instruction-files [] [])\n"
+                "(reset! poteto? false)\n(ns user)\n"))
+
+(def proc
+  (p/process {:dir work-dir :err :append :err-file (fs/file out-dir "stderr.log")
+              :extra-env (cond-> {"BBH_INIT" init
+                                  "XDG_DATA_HOME" (str (fs/absolutize (fs/path out-dir "data")))
+                                  "HERDR_ENV" ""}
+                           (not (str/blank? (System/getenv "EVAL_MODEL")))
+                           (assoc "BBH_MODEL" (System/getenv "EVAL_MODEL")))}
+             (or (System/getenv "BBH_BIN") "bbh") "acp"))
+
+(.addShutdownHook (Runtime/getRuntime) (Thread. #(p/destroy-tree proc)))
+
+(def writer (io/writer (:in proc)))
+(def reader (io/reader (:out proc)))
+(def events (atom []))
+
+(defn send! [id method params]
+  (.write writer (str (json/generate-string {:jsonrpc "2.0" :id id :method method :params params}) "\n"))
+  (.flush writer))
+
+(defn await! [id]
+  (loop []
+    (let [line (.readLine reader)]
+      (when-not line (throw (ex-info "bbh exited before replying" {:id id})))
+      (spit (str (fs/path out-dir "events.jsonl")) (str line "\n") :append true)
+      (let [ev (try (json/parse-string line true) (catch Exception _ nil))]
+        (when ev (swap! events conj ev))
+        (if (= id (:id ev)) ev (recur))))))
+
+(def response
+  (try
+    (send! 1 "initialize" {:protocolVersion 1})
+    (await! 1)
+    (send! 2 "session/new" {:cwd (str (fs/absolutize work-dir)) :mcpServers []})
+    (let [sid (get-in (await! 2) [:result :sessionId])]
+      (send! 3 "session/prompt" {:sessionId sid :prompt [{:type "text" :text prompt}]})
+      (await! 3))
+    (catch Exception e
+      (binding [*out* *err*] (println (ex-message e)))
+      nil)
+    (finally
+      (try (.close writer) (catch Exception _))
+      (when (= ::timeout (deref proc 5000 ::timeout)) (p/destroy-tree proc)))))
+
+;; bbh reports skill paths canonicalised; write them under <skill-dir> as given.
+(def unalias
+  (if skill?
+    (let [given (str (fs/absolutize skill-dir)) real (str (fs/canonicalize skill-dir))]
+      #(str/replace % real given))
+    identity))
+
+(def updates (keep #(get-in % [:params :update]) @events))
+(def usage (get-in response [:result :usage]))
+
+(spit (str (fs/path out-dir "result.json"))
+      (json/generate-string
+       {:answer (str/join (for [u updates :when (= "agent_message_chunk" (:sessionUpdate u))]
+                            (get-in u [:content :text])))
+        :tokens (when usage
+                  ;; bbh's input counts cache reads and writes; its output already holds thinking.
+                  {:input (- (:inputTokens usage) (:cachedReadTokens usage 0) (:cachedWriteTokens usage 0))
+                   :output (:outputTokens usage)
+                   :cacheRead (:cachedReadTokens usage 0)
+                   :cacheWrite (:cachedWriteTokens usage 0)})
+        :turns (count (filter #(and (= "usage_update" (:sessionUpdate %)) (get-in % [:_meta :bbh :request])) updates))
+        :stopReason (get-in response [:result :stopReason])
+        :calls (vec (for [u updates :when (= "tool_call" (:sessionUpdate u))]
+                      ;; The clojure tool is bbh's only tool; reads and shell commands are in its code.
+                      {:name "clojure" :command (unalias (str (get-in u [:rawInput :code])))}))}
+       {:pretty true}))
+
+(System/exit (if usage 0 1))
