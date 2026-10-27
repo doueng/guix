@@ -286,3 +286,18 @@
     (let [results (tool-results h)]
       (is (= (str "=> 4\n\n" session/quiet-reminder) (nth results 4)))
       (is (= ["=> 0" "=> 1" "=> 2" "=> 3" "=> 5"] (map results [0 1 2 3 5]))))))
+
+(deftest closing-an-unused-session-removes-its-folder
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-conversations"}))
+        session-in (fn [id] (session/new-session {:dir (str (fs/path root id)) :model "faux"
+                                                  :make-engine (constantly {:kind :loop :sample (fn [_ _] {:message {:role "assistant" :content "hi"}})})}))
+        unused (session-in "unused")
+        used (session-in "used")]
+    (session/start-repl! unused)
+    (is (fs/exists? (fs/path root "unused" "repl.port")))
+    (session/close! unused)
+    (is (not (fs/exists? (fs/path root "unused"))))
+    (session/start-repl! used)
+    (session/prompt! used "hello")
+    (session/close! used)
+    (is (fs/exists? (fs/path root "used" "messages.jsonl")))))

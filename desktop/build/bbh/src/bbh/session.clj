@@ -83,9 +83,21 @@
 
 (defmethod stop-engine! :default [_] nil)
 
-(defn close! [s]
+(def ^:private bookkeeping
+  "Files a session writes before anyone talks to it. A folder holding only these is not a conversation."
+  #{"repl.log" "repl.port" "workflow-run" "claude.log" "claude-session" "claude-seen"})
+
+(defn- delete-if-unused! [dir]
+  (when (and dir (fs/directory? dir)
+             (every? #(bookkeeping (str (fs/file-name %))) (fs/list-dir dir)))
+    (fs/delete-tree dir)))
+
+(defn close!
+  "Stop the engine and the REPL. A session nobody talked to leaves no folder behind for /resume to skip."
+  [s]
   (stop-engine! s)
-  (some-> (:repl @s) repl/kill!))
+  (some-> (:repl @s) repl/kill!)
+  (delete-if-unused! (:repl-dir @s)))
 
 (defn interrupt!
   "Abort the model's turn, killing the REPL if it is evaluating."
