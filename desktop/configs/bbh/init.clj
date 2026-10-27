@@ -10,10 +10,10 @@
   "You are a coding agent working inside a persistent babashka REPL through the `clojure` tool.
 
 - Each call evaluates Clojure in the user namespace and returns printed output and the last value. Prefer one call that does several steps over many small calls.
-- Definitions persist for the whole conversation until the REPL process restarts. A restart happens when an evaluation exceeds its deadline, when the user interrupts an evaluation, or on /restart. The tool result tells you when it happened.
+- Definitions persist for the whole conversation until the REPL process restarts. A restart happens when an evaluation exceeds its deadline (120 s unless :deadline-ms says otherwise), when the user interrupts an evaluation, or on /restart. The tool result tells you when it happened.
 - You own this environment. Require any namespace bb ships, define helpers, and change how you are prompted by redefining `bbh.env/manifest`: a map, or a function returning one, with optional keys :system, :tool-description, :effort (none, minimal, low, medium, high, xhigh or max; default medium), :max-tokens, :deadline-ms, :max-output-chars, :compact-at-tokens, :keep-recent-tokens and :trim-tool-chars. It is read before every model request. Changing :system, :tool-description or :effort makes the next request miss the prompt cache, and on Claude Code it restarts the process, so change them rarely. `bbh.env/expand-prompt` rewrites user input before you see it.
 - To keep a change across restarts and conversations, edit ~/.config/bbh/init.clj, which every new REPL loads.
-- Run host programs with `sh`, or babashka.process directly. Read files with `read-lines` and edit them with `edit!`.
+- Run host programs with `sh`, or babashka.process directly. Run anything that may take near the deadline with `job` and poll it with `job-wait`; never sleep through the deadline. Read files with `read-lines` and edit them with `edit!`.
 - The user may be connected to this same REPL from their editor over nREPL.")
 
 (def helper-reference
@@ -28,6 +28,7 @@ These are Babashka APIs, not Pi's fs helpers. The aliases fs, p and str are alre
 - (slurp path) returns the complete file as a string. (spit path text) writes it and returns nil. Create parent directories first with (fs/create-dirs directory).
 - (read-lines path) or (read-lines path start-line line-count) prints numbered lines and returns nil. start-line is 1-based. Use slurp, not read-lines, when your code needs the file contents.
 - (edit! path old-text new-text) replaces exactly one occurrence and returns :ok. It throws if old-text is absent or repeated. Example: (edit! \"src/app.clj\" \"old-name\" \"new-name\").
+- (job command-string) starts a detached command and returns an id. (job-wait id) waits up to 60 s, or :ms, and returns {:done? :exit :tail :log}. Call it again while :done? is false. (job-status id) checks without waiting, and (jobs) lists them all. Jobs survive REPL restarts.
 - For JSON, (require '[cheshire.core :as json]) then (json/parse-string (slurp path) true) returns keyword-keyed data.
 
 Only the final expression's value is returned. Print intermediate results with println or prn, or return a vector/map containing all results. Batch independent reads and an edit plus its verification when the dependencies allow it.")
@@ -278,6 +279,58 @@ Only the final expression's value is returned. Print intermediate results with p
       (throw (ex-info (str "Expected one match in " path ", found " hits) {})))
     (spit path (str/replace-first text old new))
     :ok))
+
+;; Background jobs. State lives in files under the conversation's jobs directory, so a job and its result
+;; survive the REPL restart that a deadline causes.
+(defn- jobs-dir []
+  (str (if-let [port (System/getenv "BBH_PORT_FILE")]
+         (fs/path (fs/parent port) "jobs")
+         (fs/path (fs/temp-dir) "bbh-jobs"))))
+
+(defn job
+  "Start CMD with bash, detached from the REPL, in DIR (default the current directory). Returns the job id."
+  [cmd & {:keys [dir]}]
+  (let [d (jobs-dir)
+        id (str (System/currentTimeMillis) "-" (rand-int 1000))
+        file #(str (fs/path d (str id %)))]
+    (fs/create-dirs d)
+    (spit (file ".cmd") cmd)
+    ;; setsid -f forks and returns, so the job is no longer the REPL's descendant and a restart's kill misses it.
+    (p/shell {:dir (or dir (str (fs/cwd))) :in "" :out :discard :err :discard
+              :extra-env {"BBH_JOB" (str "(" cmd ") >" (pr-str (file ".log")) " 2>&1 </dev/null; echo $? >"
+                                         (pr-str (file ".exit")))}}
+             "setsid" "-f" "bash" "-c" "eval \"$BBH_JOB\"")
+    id))
+
+(defn job-status
+  "Job ID as {:id :cmd :done? :exit :log :tail}, with the last LINES (default 20) of output in :tail."
+  [id & {:keys [lines] :or {lines 20}}]
+  (let [file #(str (fs/path (jobs-dir) (str id %)))
+        _ (when-not (fs/exists? (file ".cmd")) (throw (ex-info (str "no job " id) {:id id})))
+        exit (when (fs/exists? (file ".exit")) (some-> (slurp (file ".exit")) str/trim not-empty parse-long))]
+    {:id id :cmd (slurp (file ".cmd")) :done? (some? exit) :exit exit :log (file ".log")
+     :tail (when (fs/exists? (file ".log"))
+             (str/join "\n" (take-last lines (str/split-lines (slurp (file ".log"))))))}))
+
+(defn job-wait
+  "Wait up to MS (default 60000) for job ID to finish, then return its job-status."
+  [id & {:keys [ms lines] :or {ms 60000 lines 20}}]
+  (let [end (+ (System/currentTimeMillis) ms)]
+    (loop []
+      (let [st (job-status id :lines lines)]
+        (if (or (:done? st) (>= (System/currentTimeMillis) end))
+          st
+          (do (Thread/sleep 250) (recur)))))))
+
+(defn jobs
+  "Every job of this conversation, newest first, without output."
+  []
+  (let [d (jobs-dir)]
+    (if-not (fs/exists? d)
+      []
+      (->> (fs/glob d "*.cmd") (map #(str/replace (str (fs/file-name %)) #"\.cmd$" ""))
+           (sort-by #(parse-long (first (str/split % #"-")))) reverse
+           (mapv #(dissoc (job-status % :lines 0) :tail))))))
 
 ;; Pstack workflow runs. A run is a journal under ~/.local/state/bbh/workflows; the gates run in this REPL,
 ;; so a claim alone never advances a phase. Start a run before editing any file.
