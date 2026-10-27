@@ -30,7 +30,13 @@
     (let [{:keys [type message]} (json/parse-string line true)]
       (case type
         "user"
-        (if (= "fail" (:content message))
+        (case (:content message)
+          "crash"
+          (do (println "panic: stray stdout before dying") (flush)
+              (binding [*out* *err*] (println "fatal: synthetic crash") (flush))
+              (p/destroy-tree child)
+              (System/exit 3))
+          "fail"
           (emit {:type "result" :is_error true :subtype "error_during_execution" :errors ["synthetic provider failure"]})
           (reset! pending
                   (future

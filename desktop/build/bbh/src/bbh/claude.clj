@@ -80,11 +80,15 @@
                             (when resume ["--resume" resume])))
         queue (LinkedBlockingQueue.)]
     (future
-      (try
-        (doseq [line (line-seq (io/reader (:out proc)))]
-          (.put queue (try (json/parse-string line true) (catch Exception _ {:type "unparsed" :line line}))))
-        (catch Exception _ nil)
-        (finally (.put queue {:type ::exit}))))
+      (let [unparsed (atom [])]
+        (try
+          (doseq [line (line-seq (io/reader (:out proc)))]
+            (.put queue (try (json/parse-string line true)
+                             (catch Exception _
+                               (swap! unparsed #(vec (take-last 20 (conj % line))))
+                               {:type "unparsed" :line line}))))
+          (catch Exception _ nil)
+          (finally (.put queue {:type ::exit :unparsed @unparsed})))))
     (swap! s assoc :claude {:proc proc :queue queue :in (io/writer (:in proc)) :system system :effort effort
                             :fresh (nil? resume) :cost 0.0})))
 
@@ -129,6 +133,23 @@
     (session/record! s {:role "tool" :tool_call_id tool_use_id
                         :content (let [c (:content block)]
                                    (if (string? c) c (str/join (keep :text c))))})))
+
+(defn- exited!
+  "Record why Claude Code's process ended in claude.log, stop the engine, and return the error for the user.
+  Claude Code often says nothing on stderr, so its exit code and stray stdout are the only trace."
+  [s unparsed]
+  (let [log (fs/file (:dir @s) "claude.log")
+        code (:exit (deref (get-in @s [:claude :proc]) 5000 nil))
+        stderr (when (fs/exists? log) (->> (fs/read-all-lines log) (remove str/blank?)
+                                             (remove #(str/starts-with? % "claude exited with code ")) last))]
+    (spit log (str (str/join (map #(str % "\n") unparsed))
+                   "claude exited with code " (if (some? code) code "unknown") " at " (java.time.Instant/now) "\n")
+          :append true)
+    (session/stop-engine! s)
+    (ex-info (str "Claude Code exited with code " (if (some? code) code "unknown")
+                  (when-let [why (or stderr (last unparsed))] (str ": " why))
+                  "; see " log)
+             {:exit code})))
 
 (defmethod session/turn! :claude [s]
   (let [system (session/system-prompt! s)
@@ -183,8 +204,7 @@
                                               (or (not-empty (str/join "\n" (:errors ev)))
                                                   (:result ev) (:subtype ev)))
                                          {:subtype (:subtype ev)}))))
-            ::exit (do (session/stop-engine! s)
-                       (throw (ex-info (str "Claude Code exited; see " (fs/path (:dir @s) "claude.log")) {})))
+            ::exit (throw (exited! s (:unparsed ev)))
             (recur texts))))
       (finally
         (swap! s assoc :cancel nil)

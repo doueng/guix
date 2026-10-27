@@ -54,6 +54,20 @@
                                (session/prompt! s "fail")))
           (finally (session/close! s)))))))
 
+(deftest a-crash-leaves-its-exit-code-and-output-in-claude-log
+  (with-cli
+    (fn []
+      (let [{:keys [s]} (harness)]
+        (try
+          (let [e (try (session/prompt! s "crash") nil (catch clojure.lang.ExceptionInfo e e))
+                log (slurp (str (fs/path (:dir @s) "claude.log")))]
+            (is (some? e))
+            (is (re-find #"exited with code 3: fatal: synthetic crash; see " (ex-message e)))
+            (is (re-find #"panic: stray stdout before dying" log))
+            (is (re-find #"fatal: synthetic crash" log))
+            (is (re-find #"claude exited with code 3 at " log)))
+          (finally (session/close! s)))))))
+
 (deftest usage-is-per-request-and-cost-is-per-turn
   (with-cli
     (fn []
