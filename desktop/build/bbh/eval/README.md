@@ -94,3 +94,21 @@ Reported tool calls count top-level tool execution starts. They are not model re
 Provider errors and protocol failures prevent a passing trial even when a file happens to look correct. Reported provider costs are retained as diagnostics, but the evaluator does not normalize their pricing semantics or compare latency.
 
 See [the baseline report](RESULTS.md) for results and limitations.
+
+## SWE-rebench
+
+The GitHub workflow `.github/workflows/swe-rebench.yml` runs bbh on SWE-rebench through [Harbor](https://github.com/harbor-framework/harbor), so a result can be compared with a published row on [swe-rebench.com](https://swe-rebench.com) without paying for reference runs. It only starts by hand, because every run spends OpenRouter credits.
+
+The dataset `ibragim-badertdinov/swe-rebench-07-2026` holds the 111 problems in the leaderboard's default window, 15 May to 1 July 2026, across Go, Java, Python, Rust and TypeScript. Each task runs in a prebuilt image with 1 CPU, 4 GB and a 50-minute agent timeout. A leaderboard row averages several runs of SWE-rebench's own scaffold, while one bbh run has a binomial interval of roughly ±9 points. Compare a run only with a row for the same model and reasoning effort.
+
+`harbor/bbh_agent.py` subclasses Harbor's generic ACP agent. It installs a static bb, bbh's sources and an eval init into the task container, and Harbor's ACP runner then drives `harbor/bbh-acp`. The eval init is the production init with skills and poteto-mode off, plus `BBH_EFFORT` as the manifest's `:effort`. bbh reports its cost through ACP usage updates, and its transcripts come back under each trial's `agent/bbh-data`, where `bb eval:lint` can read them.
+
+### Run it
+
+1. Add an OpenRouter key as the repository secret `OPENROUTER_API_KEY`. Use a key of its own with a credit limit, because a model in a task container can read its environment. The workflow scrubs the key from the results before it uploads them, and the repository is public.
+2. In GitHub, open Actions, then SWE-rebench (bbh), then Run workflow. The defaults run all 111 tasks with `openrouter/openai/gpt-5.6-luna` at medium effort, matching the leaderboard's GPT-5.6 Luna [medium] row at 43.6% and $0.11 a problem. Set tasks to 2 and shards to 1 for a smoke run first.
+3. The report job writes a summary to the run page. Each shard's Harbor job directory is an artifact for 30 days. To summarize downloaded artifacts locally, run `bb eval:swe-report --expected 111 DIR`.
+
+Other rows with OpenRouter models are DeepSeek-V4 Pro [high] (`openrouter/deepseek/deepseek-v4-pro`, effort high, 40.2%, $0.15) and MiMo V2.5 Pro (`openrouter/xiaomi/mimo-v2.5-pro`, 46.5%, $0.10). `eval/bbh/swe_report.clj` keeps these rows for its comparison column.
+
+`make swe-rebench-check` checks the integration offline. It loads the agent through Harbor's factory with the pinned Harbor, runs Harbor's ACP runner against `bbh-acp` with a scripted model, and lints the workflow. It does not build a task container, so the container install is only exercised by a real run.

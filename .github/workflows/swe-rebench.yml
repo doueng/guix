@@ -1,0 +1,136 @@
+# Run bbh on SWE-rebench through Harbor. Manual only, because every run spends
+# OpenRouter credits. See desktop/build/bbh/eval/README.md, "SWE-rebench".
+name: SWE-rebench (bbh)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Harbor model id; bbh runs openrouter/... models with its own loop
+        default: openrouter/openai/gpt-5.6-luna
+      effort:
+        description: Reasoning effort; match the leaderboard row (Luna is medium, DeepSeek-V4 Pro is high)
+        type: choice
+        options: [medium, high, low, xhigh, max, none]
+        default: medium
+      tasks:
+        description: How many tasks to run, in name order; 0 runs all 111
+        default: '0'
+      shards:
+        description: Parallel runner jobs
+        default: '12'
+      concurrency:
+        description: Trials at once per runner (each task asks for 1 CPU and 4 GB)
+        default: '3'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swe-rebench
+  cancel-in-progress: false
+
+env:
+  HARBOR_VERSION: 0.25.0
+  BB_VERSION: 1.13.226
+  DATASET: ibragim-badertdinov/swe-rebench-07-2026
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.split.outputs.matrix }}
+      total: ${{ steps.split.outputs.total }}
+    steps:
+      - uses: astral-sh/setup-uv@v6
+      - name: Split the dataset's tasks into shards
+        id: split
+        env:
+          TASKS: ${{ inputs.tasks }}
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          uvx --python 3.12 "harbor==$HARBOR_VERSION" datasets download "$DATASET" -o tasks
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, os, pathlib
+          names = sorted(p.name for p in pathlib.Path("tasks").glob("*/*") if p.is_dir())
+          n = int(os.environ["TASKS"] or 0)
+          names = names[:n] if n > 0 else names
+          shards = max(1, min(int(os.environ["SHARDS"]), len(names)))
+          include = [{"shard": i + 1, "tasks": " ".join(names[i::shards])} for i in range(shards)]
+          print("matrix=" + json.dumps({"include": include}))
+          print(f"total={len(names)}")
+          EOF
+
+  run:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk for task images
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af >/dev/null
+          df -h /
+      - uses: astral-sh/setup-uv@v6
+      - name: Run Harbor
+        timeout-minutes: 330
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MODEL: ${{ inputs.model }}
+          EFFORT: ${{ inputs.effort }}
+          N: ${{ inputs.concurrency }}
+          SHARD: ${{ matrix.shard }}
+          TASKS: ${{ matrix.tasks }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then echo "Set the OPENROUTER_API_KEY repository secret" >&2; exit 1; fi
+          args=()
+          for t in $TASKS; do args+=(-t "$t"); done
+          # shellcheck disable=SC2016
+          # Harbor resolves the \${...} template from this environment, so the key
+          # never appears in argv or in the saved job config.
+          PYTHONPATH="$GITHUB_WORKSPACE/desktop/build/bbh/harbor" \
+            uvx --python 3.12 "harbor==$HARBOR_VERSION" run \
+              -d "$DATASET" --agent bbh_agent:BbhAgent -m "$MODEL" \
+              --ae 'OPENROUTER_API_KEY=${OPENROUTER_API_KEY}' --ae "BBH_EFFORT=$EFFORT" \
+              -n "$N" -o "$GITHUB_WORKSPACE/jobs" --job-name "shard-$SHARD" "${args[@]}"
+      - name: Scrub the API key from the results
+        if: always()
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          [ -d jobs ] || exit 0
+          grep -rlF -- "$OPENROUTER_API_KEY" jobs | while read -r f; do
+            KEY="$OPENROUTER_API_KEY" perl -pi -e 's/\Q$ENV{KEY}\E/[REDACTED]/g' "$f"
+          done
+          ! grep -rqF -- "$OPENROUTER_API_KEY" jobs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swe-rebench-shard-${{ matrix.shard }}
+          path: jobs
+          retention-days: 30
+          if-no-files-found: warn
+
+  report:
+    needs: [plan, run]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: swe-rebench-shard-*
+          path: results
+      - name: Install babashka
+        run: |
+          curl -fsSL "https://github.com/babashka/babashka/releases/download/v$BB_VERSION/babashka-$BB_VERSION-linux-amd64-static.tar.gz" | tar -xz -C /usr/local/bin bb
+      - name: Summarize
+        working-directory: desktop/build/bbh
+        env:
+          TOTAL: ${{ needs.plan.outputs.total }}
+        run: |
+          bb eval:swe-report --expected "$TOTAL" "$GITHUB_WORKSPACE/results" | tee -a "$GITHUB_STEP_SUMMARY"

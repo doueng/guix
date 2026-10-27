@@ -129,3 +129,14 @@
           (is (= ["recovered"] (keep #(get-in % [:params :update :content :text]) events)))
           (is (= "end_turn" (get-in (last events) [:result :stopReason])))))
       (finally (stop! c)))))
+
+(deftest new-session-lists-its-current-model-as-available
+  (let [c (client ["unused"])]
+    (try
+      (send! c 1 "initialize" {:protocolVersion 1})
+      (response! c 1)
+      (send! c 2 "session/new" {:cwd (:dir c)})
+      (let [{:keys [currentModelId availableModels]} (get-in (response! c 2) [:result :models])]
+        (is (clojure.string/starts-with? currentModelId "script/"))
+        (is (some #{currentModelId} (map :modelId availableModels))))
+      (finally (stop! c)))))

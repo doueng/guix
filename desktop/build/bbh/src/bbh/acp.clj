@@ -112,10 +112,13 @@
                               :authMethods []}})
 
       "session/new"
-      (let [[sid problem] (new-session params)]
+      (let [[sid problem] (new-session params)
+            current (:model @(get @sessions sid))]
+        ;; The current model is listed even when it is not one of bbh's suggestions,
+        ;; because clients such as Harbor only select models from this list.
         (send! {:id id :result {:sessionId sid
-                                :models {:currentModelId (:model @(get @sessions sid))
-                                         :availableModels (for [m models/available] {:modelId m :name m})}
+                                :models {:currentModelId current
+                                         :availableModels (for [m (distinct (cons current models/available))] {:modelId m :name m})}
                                 :configOptions (config-options (get @sessions sid))}})
         (commands-update sid (get @sessions sid))
         (when problem (update! sid (event->update {:type :text :text (str "[bbh] " problem)}))))
