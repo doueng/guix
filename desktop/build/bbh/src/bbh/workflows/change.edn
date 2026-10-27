@@ -5,18 +5,22 @@
  :phases
  {:shape
   {:brief "Name the data shape and the boundary it crosses before editing. For a change across a function boundary, settle the design first with the architect skill. Write shape.md in the evidence directory."
+   :principles ["model-the-domain" "foundational-thinking" "subtract-before-you-add"]
    :gates [{:kind :artifact :path "shape.md"}]
    :next :implement}
   :implement
   {:brief "Change the code to the shape. A refactor keeps behavior, so existing checks must stay green. Then run `wf attest`."
+   :principles ["laziness-protocol" "sequence-verifiable-units" "test-behavior-not-implementation"]
    :gates [{:kind :command :cmd :check :expect :zero}]
    :next :verify}
   :verify
   {:brief "Exercise the changed behavior on the real surface. Write verify.md in the evidence directory with what you observed."
+   :principles ["prove-it-works"]
    :gates [{:kind :artifact :path "verify.md"}]
    :next :review}
   :review
   {:brief "Review the diff for unrelated changes, comments that narrate phases, and drift from the shape. Run `wf review` for an independent verdict."
+   :principles ["minimize-reader-load" "laziness-protocol"]
    :gates [{:kind :verdict :criteria "The diff matches the shape, touches nothing unrelated, and has no phase-narrating comments."}]
    :next :finish
    :on-fail :implement}

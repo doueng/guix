@@ -4,5 +4,6 @@
  :phases
  {:answer
   {:brief "Answer from evidence. Read the code, run it when that helps, and write answer.md in the evidence directory. Label each claim measured, inferred, or guess, and cite paths or command output. For a review, judge the existing code against the criteria the user gave. Do not change the repo."
+   :principles ["guard-the-context-window" "explain-the-number"]
    :gates [{:kind :artifact :path "answer.md"}]
    :next nil}}}

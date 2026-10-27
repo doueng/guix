@@ -33,6 +33,28 @@
 (defn- evidence-dir [id] (str (fs/path (run-dir id) "evidence")))
 
 (def gate-kinds #{:command :artifact :verdict})
+
+(def principles-dir
+  "The pstack principle skills, found from this source file so the wf binary and the tests read the same copy."
+  (str (fs/normalize (fs/path (fs/parent (str (fs/file (io/resource "bbh/workflow.clj"))))
+                              ".." ".." ".." ".." "pi" "agent" "skills" "pstack"))))
+
+(defn principle-file [principle]
+  (str (fs/path principles-dir (str "principle-" principle) "SKILL.md")))
+
+(defn principles-text
+  "The full text of each named principle skill, without its YAML header and with absolute links,
+  so a phase brief carries the rules it names wherever the agent runs."
+  [principles]
+  (str/join "\n\n"
+            (for [p principles]
+              (str "<principle name=\"" p "\">\n"
+                   (-> (slurp (principle-file p))
+                       (str/replace #"(?s)\A---\n.*?\n---\n" "")
+                       (str/replace "](../" (str "](" principles-dir "/"))
+                       str/trim)
+                   "\n</principle>"))))
+
 (def run-commands #{:repro :check :bench})
 
 (defn workflow-problems
@@ -53,6 +75,12 @@
             problem (concat
                      [(when (some? (:next spec)) (ref-problem (str p " :next") (:next spec)))
                       (when (some? (:on-fail spec)) (ref-problem (str p " :on-fail") (:on-fail spec)))]
+                     (let [ps (:principles spec)]
+                       (cond (nil? ps) nil
+                             (not (and (vector? ps) (every? string? ps)))
+                             [(str p " :principles is not a vector of strings")]
+                             :else (for [pr ps :when (not (fs/exists? (principle-file pr)))]
+                                     (str p " names missing principle " (pr-str pr)))))
                      (map-indexed
                       (fn [i {:keys [kind cmd path] :as g}]
                         (let [at (str p " gate " i)]
@@ -261,6 +289,7 @@
 (defn status [id]
   (let [st (current id)]
     (assoc st :brief (get-in (run-workflow st) [:phases (:phase st) :brief])
+              :principles (get-in (run-workflow st) [:phases (:phase st) :principles])
               :evidence (evidence-dir id))))
 
 (defn attest! [id claim]
@@ -323,6 +352,8 @@
                    "Task: " (:task st) "\n"
                    "Repo: " (:cwd st) "\n"
                    "Evidence directory: " (evidence-dir id) "\n\n"
+                   (when-let [ps (seq (get-in wf [:phases phase :principles]))]
+                     (str "Judge against these principles too:\n\n" (principles-text ps) "\n\n"))
                    "Read the evidence and the repo as needed. Finish with one line, VERDICT: pass or VERDICT: fail, then a short reason.")
         s (session/new-session {:dir dir :init nil :cwd (:cwd st)
                                 :model (or model (System/getenv "WF_REVIEW_MODEL") default-review-model)
@@ -450,6 +481,7 @@
                      (let [spec (get-in wf [:phases p])]
                        {:name (name p)
                         :brief (:brief spec)
+                        :principles (vec (:principles spec))
                         :visits (get-in st [:visits p] 0)
                         :gates (mapv #(spec-gate-text st %) (:gates spec))}))
                    (phase-order wf))}))
@@ -461,6 +493,9 @@
   (when (:block-reason st) (println (str "blocked: " (:block-reason st))))
   (when (= :abandoned (:status st)) (println (str "abandoned: " (or (:abandon-reason st) "no reason given"))))
   (println (str "brief: " (:brief st)))
+  (when-let [ps (seq (:principles st))]
+    (println (str "principles: " (str/join ", " ps) ". Apply each where it bears on this phase."))
+    (println (principles-text ps)))
   (println (str "evidence: " (:evidence st))))
 
 (def ^:private usage

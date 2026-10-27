@@ -4,19 +4,23 @@
  :phases
  {:reproduce
   {:brief "Run the repro on the real surface and confirm it fails. The gate rejects a repro that already passes. Keep the output as evidence."
+   :principles ["fix-root-causes"]
    :gates [{:kind :command :cmd :repro :expect :nonzero}]
    :next :diagnose}
   :diagnose
   {:brief "Form hypotheses and rule them out with runtime evidence. Write mechanism.md in the evidence directory naming the surviving mechanism and its evidence. Then run `wf review` for an independent verdict."
+   :principles ["fix-root-causes" "attack-the-premise"]
    :gates [{:kind :artifact :path "mechanism.md"}
            {:kind :verdict :criteria "The evidence causally supports the mechanism, not just correlates with the bug."}]
    :next :implement}
   :implement
   {:brief "Make the smallest change the mechanism justifies. Revert changes that a refuted hypothesis motivated. Then run `wf attest`."
+   :principles ["laziness-protocol" "test-behavior-not-implementation"]
    :gates []
    :next :verify}
   :verify
   {:brief "Run the same repro on the same surface. It must pass now. An inconclusive or wrong-surface run does not count."
+   :principles ["prove-it-works"]
    :gates [{:kind :command :cmd :repro :expect :zero}
            {:kind :command :cmd :check :expect :zero :optional true}]
    :next :finish

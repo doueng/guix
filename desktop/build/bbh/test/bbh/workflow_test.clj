@@ -139,7 +139,21 @@
       (is (= :pass (:verdict review)))
       (is (str/starts-with? (:reviewer review) "bbh-review/"))
       (is (= :pass (:outcome attested)))
-      (is (str/starts-with? (:reviewer verdict-gate) "bbh-review/")))))
+      (is (str/starts-with? (:reviewer verdict-gate) "bbh-review/"))
+      (is (some #(str/includes? (slurp (str %)) "<principle name=\\\"attack-the-premise\\\">")
+                (fs/glob (fs/parent (:evidence (wf/status id))) "reviews/*/messages.jsonl"))
+          "the reviewer is briefed with the phase's principles"))))
+
+(deftest a-phase-brief-carries-its-principles-in-full
+  (let [id (wf/start! :bug-fix {:cwd (buggy-repo) :repro repro})
+        _ (wf/attest! id "bug reproduces")
+        out (with-out-str (#'wf/print-status (wf/status id)))]
+    (is (= ["fix-root-causes" "attack-the-premise"] (:principles (wf/status id))))
+    (is (str/includes? out "principles: fix-root-causes, attack-the-premise."))
+    (is (str/includes? out "<principle name=\"fix-root-causes\">"))
+    (is (str/includes? out "- **Write the premise down.** The premise is the one sentence that every failed fix assumed."))
+    (is (not (str/includes? out "disable-model-invocation")) "the YAML header is stripped")
+    (is (not (str/includes? out "](../")) "links resolve from any directory")))
 
 (deftest reviewer-without-a-verdict-line-is-an-error
   (let [repo (buggy-repo)
@@ -235,6 +249,10 @@
     (is (= [":diagnose gate 0 has no string :path"]
            (problems #(update-in % [:phases :diagnose :gates 0] dissoc :path))))
     (is (= [":requires names unknown flag :repo"] (problems #(assoc % :requires [:repo]))))
+    (is (= [":diagnose names missing principle \"fix-root-cause\""]
+           (problems #(assoc-in % [:phases :diagnose :principles] ["fix-root-cause"]))))
+    (is (= [":diagnose :principles is not a vector of strings"]
+           (problems #(assoc-in % [:phases :diagnose :principles] "fix-root-causes"))))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid workflow bug-fix: :implement :next"
                           (wf/validate-workflow (assoc-in good [:phases :implement :next] :verfy))))))
 

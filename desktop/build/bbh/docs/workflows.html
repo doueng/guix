@@ -115,6 +115,7 @@
   <tr><td><code>large-project</code></td><td>decompose, review</td><td>large_project</td><td>nothing</td></tr>
 </table>
 <p>Each phase carries a short brief. <code>wf status</code> prints the brief for the current phase. The briefs live in the workflow EDN files in <code>desktop/build/bbh/src/bbh/workflows/</code>. There is no separate playbook text.</p>
+<p>A phase can also list <code>:principles</code>, such as <code>["fix-root-causes" "attack-the-premise"]</code> on <code>bug-fix</code>'s diagnose phase. Each name is a pstack principle skill, <code>desktop/pi/agent/skills/pstack/principle-&lt;name&gt;/SKILL.md</code>. Those skills are hidden from the skill list, so this is how a run reaches them. <code>wf status</code> prints each one in full after the brief, without its YAML header and with its links made absolute. <code>wf review</code> gives the reviewer the same text. A name with no skill file fails validation when the workflow loads. A run journals the names with its definition, but the text is read fresh each time.</p>
 
 <h2 id='commands'>Commands</h2>
 <table>
