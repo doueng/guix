@@ -516,6 +516,16 @@ ultimately to plain `find-file' when the current directory is not a project."
 ;; the Guix home profile. Localleader keys mirror the Neovim molten setup.
 (add-hook 'inferior-python-mode-hook #'visual-line-mode)
 
+;; Keep REPL windows pinned to the newest output and prompt.
+(after! comint
+  (setq comint-scroll-to-bottom-on-output t
+        comint-scroll-to-bottom-on-input t))
+
+;; Notebooks enable `code-cells-mode' after `python-mode', and evil has already
+;; computed the buffer's keymaps by then. Recompute them so the `SPC m' cell keys
+;; work at once instead of after the first state change.
+(add-hook 'code-cells-mode-hook #'evil-normalize-keymaps)
+
 (use-package! code-cells
   :defer t
   :config
