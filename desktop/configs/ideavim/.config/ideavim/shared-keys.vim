@@ -2,7 +2,7 @@
 nmap <leader>, <Action>(Switcher)
 let g:WhichKeyDesc_shared_comma = '<leader>, Switch buffer, tab or window'
 nmap <leader>. <Action>(GotoFile)
-let g:WhichKeyDesc_shared_period = '<leader>. Find file or launch app'
+let g:WhichKeyDesc_shared_period = '<leader>. Find file, launch app or switch workspace'
 nmap <leader>wh <C-w>h
 let g:WhichKeyDesc_shared_w_h = '<leader>wh Focus left'
 nmap <leader>wj <C-w>j

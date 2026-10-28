@@ -53,7 +53,7 @@ end
 -- desktop/bin/herdr-terminal starts Herdr's Ghostty with this class.
 M.herdr_class = "com.mitchellh.ghostty.herdr"
 
--- Cmd+Space: open Herdr's leader menu (Ctrl+b Space). From another window,
+-- Alt+Space: open Herdr's leader menu (Ctrl+b Space). From another window,
 -- focus the Herdr terminal first, or start one.
 function M.herdr_menu()
   local active = hl.get_active_window()
@@ -71,7 +71,7 @@ function M.herdr_menu()
       hl.dispatch(hl.dsp.send_key_state({ mods = k.mods, key = k.key, state = state }))
     end
   end
-  M.log("Cmd+Space", "Forwarded to herdr", "forward")
+  M.log("Alt+Space", "Forwarded to herdr", "forward")
 end
 
 return M

@@ -47,6 +47,17 @@ These entries supersede the o a launcher, c R, IdeaVim b b and terminal Cmd chor
 - 2026-10-21. Cmd+T for a new Herdr tab was dropped for now. It needs a Herdr-only kanata layer, and `hyprkan` reads `apps.edn` live while kanata learns new layers only at `make switch`. Measured: kanata ignores an unknown layer and stays on base, which would break Cmd+Backspace in Herdr until the switch. Ctrl+b c still opens a tab.
 - 2026-10-21. The reference shows `:doom-match` from `leader.edn` instead of matching label words. Word matching reported s l, o b and c R as Doom's meaning and c x as different. Status: `review-test.clj` fails on a sequence Doom binds without a recorded match.
 
+## Leaders swapped and keylog-driven changes
+
+These entries supersede the Alt+Space and Cmd+Space entries above.
+
+- 2026-10-28. Cmd+Space enters the desktop leader and Alt+Space opens the Herdr leader from any window, at the user's request. Kanata maps no Cmd+Space, so it reaches Hyprland as Super+Space. Holding Cmd inside the leader works only for keys kanata does not rewrite, so the README says to release Cmd. wtype cannot press Super, so `make hypr-nested-check` enters the desktop leader through its handler and types Alt+Space for Herdr. Status: unit tests; live after Hyprland reloads.
+- 2026-10-28. One-key `d` closes the window on the desktop and the pane in Herdr. The log showed Alt+Space w d 29 times at four presses. Editors keep w d, because upstream Doom's SPC d is the debugger group and `:tools debugger` is enabled. Status: tests.
+- 2026-10-28. Herdr's `.` chooses a workspace. The log showed Ctrl+b Space `.` cancelled as unbound while TAB . was used 13 times. Status: tests.
+- 2026-10-28. Ctrl+j/k move focus in the bbh transcript (normal state) and in insert state everywhere. evil-org's C-j/C-k in the transcript and evil's insert C-k digraph shadowed focus, which explains 144 uses of Space w j/k. Corfu's insert-state C-j/C-k still win while its popup is open, because its auxiliary map outranks the global insert map. The transcript's insert state keeps evil-org's keys, since the buffer is read-only. Status: key-binding queried in two live Emacs servers.
+- 2026-10-28. One-key `s` for copy-by-hint was not adopted. `s` is the Search group (s b, s l) and the shared grammar forbids a key that is both. Status: open, awaiting the user's choice.
+- 2026-10-28. `keylog report` prices a Herdr leader binding by the Hyprland chord that forwarded it. Every logged Herdr leader opening came through Cmd+Space, so Ctrl+b Space overstated each binding by one press. Status: tests and the live report.
+
 ## Update from this implementation
 
 The entries below retain the earlier investigation record. These decisions supersede the corresponding open items.

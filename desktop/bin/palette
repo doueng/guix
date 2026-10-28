@@ -1,5 +1,5 @@
 #!/usr/bin/env bb
-;; The global command palette. Alt+Space Space runs it from any window.
+;; The global command palette. Cmd+Space Space runs it from any window.
 ;;   palette          open the palette for the focused window
 ;;   palette fish     choose a fish command and print it, for fish's own binding
 ;; Editors that can open the palette themselves are asked to: Emacs over its
@@ -207,11 +207,11 @@
         (if-let [value (dusk/pick! (str/capitalize (name (or (:id (:program ctx)) (:kind ctx))))
                                    (dusk/by-history k es))]
           (do (dusk/remember! k value)
-              (keylog/log! "action" "palette" "Alt+Space Space"
+              (keylog/log! "action" "palette" "Cmd+Space Space"
                            (or (some #(when (= value (:value %)) (:label %)) es) value))
               (binding [keylog/*silent* true]
                 (run-entry! grammar ctx value)))
-          (keylog/log! "cancel" "palette" "Alt+Space Space" "Closed the palette"))))))
+          (keylog/log! "cancel" "palette" "Cmd+Space Space" "Closed the palette"))))))
 
 (defn fish! []
   (when-let [value (dusk/pick! "Fish" (dusk/by-history :fish (fish-entries)))]

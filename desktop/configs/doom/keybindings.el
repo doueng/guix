@@ -78,10 +78,10 @@
 (load! "key-navigate")
 (load! "palette")
 (map! :map general-override-mode-map
-      :desc "Focus left"  "C-h" (eng/keylog-command "Ctrl+h" "Focus left" (cmd! (eng/navigate "left")))
-      :desc "Focus down"  "C-j" (eng/keylog-command "Ctrl+j" "Focus down" (cmd! (eng/navigate "down")))
-      :desc "Focus up"    "C-k" (eng/keylog-command "Ctrl+k" "Focus up" (cmd! (eng/navigate "up")))
-      :desc "Focus right" "C-l" (eng/keylog-command "Ctrl+l" "Focus right" (cmd! (eng/navigate "right"))))
+      :desc "Focus left"  "C-h" #'eng/focus-left
+      :desc "Focus down"  "C-j" #'eng/focus-down
+      :desc "Focus up"    "C-k" #'eng/focus-up
+      :desc "Focus right" "C-l" #'eng/focus-right)
 
 (map! :leader
       :desc "Find file"             "f f" #'find-file
@@ -177,8 +177,12 @@
       :desc "Reload config"         "h r r" #'eng/reload-config
       :desc "Eval expression"       ";"   #'eval-expression)
 
+;; Insert state keeps C-h and C-l for editing, but C-j and C-k still move
+;; focus. Evil's own insert C-k (digraph) would shadow the override map.
 (map! :i "C-h" #'backward-delete-char
       :i "C-l" #'delete-char
+      :i "C-j" #'eng/focus-down
+      :i "C-k" #'eng/focus-up
       :i "C-a" #'beginning-of-line
       :i "C-e" #'end-of-line)
 

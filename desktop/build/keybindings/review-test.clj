@@ -25,7 +25,7 @@
   (is (= [["window.close"]] (palette-run ["Close window"]))))
 
 (deftest palette-runs-leader-entries-and-skips-focus-moves
-  (is (= [["~/.local/bin/custom-launcher"]] (palette-run ["Find file or launch app"])))
+  (is (= [["~/.local/bin/custom-launcher"]] (palette-run ["Find file, launch app or switch workspace"])))
   (is (not-any? #(= "leader:w h" (:value %)) (keyleader/desktop-entries leader-grammar))
       "the leader's focus moves are left out; the guide's Ctrl+Alt chords teach them"))
 
@@ -35,7 +35,7 @@
                                          :catch_all (= "catchall" key)})
         loaded (map bind expected)
         unrelated {:submap "" :modmask 64 :key "Q"}]
-    (is (contains? expected ["leader-w" 8 "h"]) "keys also bind with Alt still held")
+    (is (contains? expected ["leader-w" 64 "h"]) "keys also bind with Cmd still held")
     (is (nil? (keyleader/hypr-drift expected (keyleader/live-binds (cons unrelated loaded)))))
     (is (= {:missing [["leader-w" 0 "h"]] :unexpected [["leader-w" 0 "z"]]}
            (keyleader/hypr-drift expected

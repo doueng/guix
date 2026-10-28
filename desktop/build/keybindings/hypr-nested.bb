@@ -60,6 +60,11 @@
   (apply sh env "guix" "shell" "wtype" "--" "wtype" args)
   (Thread/sleep 400))
 (defn logged [] (if (fs/exists? keylog) (map #(vec (rest (str/split % #"\t"))) (fs/read-all-lines keylog)) []))
+(defn enter-leader!
+  "Run the Cmd+Space handler, which wtype cannot press."
+  []
+  (hypr "eval" "require('keys').enter('leader', 'Cmd+Space')()")
+  (Thread/sleep 200))
 (defn row [kind keys effect] ["hyprland" keys effect kind "2"])
 (defn client! [class & cmd]
   (p/process (concat ["ghostty" "--gtk-single-instance=false"]
@@ -76,49 +81,62 @@
   (client! "kt.right" "sleep" "300")
   (check (= "kt.right" (active)) "the second window has focus")
 
-  (type! "-M" "alt" "-k" "space" "-m" "alt")
-  (check (= "leader" (submap)) "Alt+Space enters the desktop leader")
+  ;; wtype's keymap does not map its logo modifier to Super, so check the
+  ;; Cmd+Space bind and run the desktop leader's handler directly.
+  (check (some #(and (= "" (:submap %)) (= 64 (:modmask %)) (= "SPACE" (:key %)))
+               (json/parse-string (hypr "-j" "binds") true))
+         "Cmd+Space (SUPER + SPACE) is bound at the top level")
+  (enter-leader!)
+  (check (= "leader" (submap)) "Cmd+Space enters the desktop leader")
   (type! "-k" "Escape")
   (check (= "default" (submap)) "Escape leaves the leader")
-  (type! "-M" "alt" "-k" "space" "-m" "alt" "-s" "150" "-k" "w" "-s" "150" "-k" "h")
-  (check (and (= "kt.left" (active)) (= "default" (submap))) "Alt+Space w h focuses left and leaves the leader")
-  (type! "-M" "alt" "-k" "space" "-k" "w" "-k" "l" "-m" "alt")
-  (check (= "kt.right" (active)) "Alt+Space w l works with Alt still held")
-  (type! "-M" "alt" "-k" "space" "-m" "alt" "-s" "150" "-k" "w" "-s" "150" "-k" "z")
+  (enter-leader!)
+  (type! "-k" "w" "-s" "150" "-k" "h")
+  (check (and (= "kt.left" (active)) (= "default" (submap))) "Cmd+Space w h focuses left and leaves the leader")
+  (enter-leader!)
+  (type! "-k" "w" "-s" "150" "-k" "l")
+  (check (= "kt.right" (active)) "Cmd+Space w l focuses right")
+  (enter-leader!)
+  (type! "-k" "w" "-s" "150" "-k" "z")
   (check (and (= "kt.right" (active)) (= "default" (submap))) "an unbound key cancels without acting")
   (type! "-M" "ctrl" "-M" "alt" "-k" "h" "-m" "alt" "-m" "ctrl")
   (check (= "kt.left" (active)) "Ctrl+Alt+h focuses left")
   (type! "-M" "ctrl" "-M" "alt" "-k" "l" "-m" "alt" "-m" "ctrl")
-  ;; wtype's keymap does not map its logo modifier to Super, so check the bind
-  ;; and run its handler directly.
-  (check (some #(and (= "" (:submap %)) (= 64 (:modmask %)) (= "SPACE" (:key %)))
-               (json/parse-string (hypr "-j" "binds") true))
-         "Cmd+Space (SUPER + SPACE) is bound at the top level")
   (client! "com.mitchellh.ghostty.herdr" "sh" "-c" (str "stty raw -echo; head -c 2 > " work "/received"))
   (client! nil "sh" "-c" (str "stty raw -echo; head -c 2 > " work "/plain"))
-  (check (= "com.mitchellh.ghostty" (active)) (str "a Ghostty window without Herdr has focus before Cmd+Space, got " (active)))
-  (check (= "ok" (hypr "eval" "require('keys').herdr_menu()")) "the Cmd+Space handler runs")
-  (check (= "com.mitchellh.ghostty.herdr" (active)) "Cmd+Space focuses the Herdr terminal")
+  (check (= "com.mitchellh.ghostty" (active)) (str "a Ghostty window without Herdr has focus before Alt+Space, got " (active)))
+  (check (= "ok" (hypr "eval" "require('keys').herdr_menu()")) "the Alt+Space handler runs")
+  (check (= "com.mitchellh.ghostty.herdr" (active)) "the Alt+Space handler focuses the Herdr terminal")
   (let [f (str work "/received")
-        got (when (wait-for #(and (fs/exists? f) (pos? (fs/size f)))) (slurp f))]
-    (check (= "\u0002 " got) (str "Cmd+Space sends Ctrl+b Space to the Herdr terminal, got " (pr-str got))))
+        got (when (wait-for #(and (fs/exists? f) (= 2 (fs/size f)))) (slurp f))]
+    (check (= "\u0002 " got) (str "Alt+Space sends Ctrl+b Space to the Herdr terminal, got " (pr-str got))))
   (let [f (str work "/plain")]
     (check (not (and (fs/exists? f) (pos? (fs/size f))))
            (str "the other Ghostty window receives nothing, got " (pr-str (when (fs/exists? f) (slurp f))))))
+  ;; Now press the chord itself. Keys Hyprland sends while wtype still holds
+  ;; Alt arrive garbled, though they arrive intact through kanata, so this
+  ;; checks the bind and the focus only.
+  (client! "com.mitchellh.ghostty.herdr" "sleep" "30")
+  (hypr "dispatch" "hl.dsp.focus({ window = \"class:^com\\\\.mitchellh\\\\.ghostty$\" })")
+  (wait-for #(= "com.mitchellh.ghostty" (active)))
+  (type! "-M" "alt" "-k" "space" "-m" "alt")
+  (wait-for #(= "com.mitchellh.ghostty.herdr" (active)))
+  (check (= "com.mitchellh.ghostty.herdr" (active)) "Alt+Space focuses the Herdr terminal")
   ;; Each row is its own keylog process, so rows within one wtype call may land
   ;; in either order.
-  (wait-for #(= 11 (count (logged))))
-  (check (= (frequencies [(row "leader" "Alt+Space" "Desktop leader menu")
-                          (row "cancel" "Alt+Space" "Cancelled with Escape")
-                          (row "leader" "Alt+Space" "Desktop leader menu")
-                          (row "action" "Alt+Space w h" "Focus left")
-                          (row "leader" "Alt+Space" "Desktop leader menu")
-                          (row "action" "Alt+Space w l" "Focus right")
-                          (row "leader" "Alt+Space" "Desktop leader menu")
-                          (row "cancel" "Alt+Space w" "Cancelled by an unbound key")
+  (wait-for #(= 12 (count (logged))))
+  (check (= (frequencies [(row "leader" "Cmd+Space" "Desktop leader menu")
+                          (row "cancel" "Cmd+Space" "Cancelled with Escape")
+                          (row "leader" "Cmd+Space" "Desktop leader menu")
+                          (row "action" "Cmd+Space w h" "Focus left")
+                          (row "leader" "Cmd+Space" "Desktop leader menu")
+                          (row "action" "Cmd+Space w l" "Focus right")
+                          (row "leader" "Cmd+Space" "Desktop leader menu")
+                          (row "cancel" "Cmd+Space w" "Cancelled by an unbound key")
                           (row "action" "CTRL+ALT+H" "Focus left")
                           (row "action" "CTRL+ALT+L" "Focus right")
-                          (row "forward" "Cmd+Space" "Forwarded to herdr")])
+                          (row "forward" "Alt+Space" "Forwarded to herdr")
+                          (row "forward" "Alt+Space" "Forwarded to herdr")])
             (frequencies (logged)))
          (str "the keybinding log has one row per leader, action, cancel and forward, got " (pr-str (logged))))
   (check (= "ok" (hypr "dispatch" "hl.dsp.focus({ workspace = 3 })")) "hyprctl accepts Lua dispatchers")

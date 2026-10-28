@@ -3,7 +3,7 @@
 (map! :leader
       :desc "Switch buffer, tab or window" "," (eng/keylog-command "Space ," "Switch buffer, tab or window" #'+vertico/switch-workspace-buffer)
       :desc "Last buffer or window" "`" (eng/keylog-command "Space `" "Last buffer or window" #'evil-switch-to-windows-last-buffer)
-      :desc "Find file or launch app" "." (eng/keylog-command "Space ." "Find file or launch app" #'eng/project-find-file)
+      :desc "Find file, launch app or switch workspace" "." (eng/keylog-command "Space ." "Find file, launch app or switch workspace" #'eng/project-find-file)
       :desc "Focus left" "w h" (eng/keylog-command "Space w h" "Focus left" (lambda () (interactive) (eng/navigate "left")))
       :desc "Focus down" "w j" (eng/keylog-command "Space w j" "Focus down" (lambda () (interactive) (eng/navigate "down")))
       :desc "Focus up" "w k" (eng/keylog-command "Space w k" "Focus up" (lambda () (interactive) (eng/navigate "up")))

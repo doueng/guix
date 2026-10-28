@@ -53,7 +53,7 @@
       (palette/open!))
     (is (= "Emacs" (first @shown)))
     (is (pos? (second @shown)))
-    (is (= [["cancel" "palette" "Alt+Space Space" "Closed the palette"]] @rows)
+    (is (= [["cancel" "palette" "Cmd+Space Space" "Closed the palette"]] @rows)
         "closing the list logs a cancel")))
 
 (deftest an-editor-that-answers-opens-its-own-palette

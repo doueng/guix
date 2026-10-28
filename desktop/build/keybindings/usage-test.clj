@@ -78,6 +78,25 @@
          (usage/binding-uses rows grammar))
       "a Herdr palette choice counts for its binding"))
 
+(deftest herdr-leader-rows-are-priced-by-the-chord-that-opened-them
+  (let [forwarded [(row "2026-10-28T09:00:00" "hyprland" "Alt+Space" "Forwarded to herdr" "forward")
+                   (row "2026-10-28T09:00:00" "herdr" "Ctrl+b Space" "Herdr leader menu" "leader")
+                   (row "2026-10-28T09:01:00" "herdr" "Ctrl+b Space TAB ." "Switch workspace" "action")
+                   (row "2026-10-28T09:02:00" "herdr" "Ctrl+b Space" "Herdr leader menu" "leader")
+                   (row "2026-10-28T09:02:01" "herdr" "Ctrl+b Space e" "Edit scrollback" "action")]
+        priced (usage/priced forwarded)]
+    (is (= "Alt+Space TAB ." (:priced-keys (nth priced 2)))
+        "a forward confirmed by the leader row prices the whole leader session")
+    (is (= "Ctrl+b Space e" (:priced-keys (nth priced 4)))
+        "a leader opened inside Herdr keeps Ctrl+b Space")
+    (is (= {:actions 2 :presses-per-action 4.0}
+           (select-keys (:cost (usage/report forwarded grammar {})) [:actions :presses-per-action]))))
+  (let [v1 [(row "2026-10-22T09:00:00" "hyprland" "Cmd+Space" "Forwarded to herdr" "forward")
+            (row "2026-10-22T09:00:03" "herdr" "Ctrl+b Space s l" "Copy visible text by hint" "action")
+            (row "2026-10-22T09:05:00" "herdr" "Ctrl+b Space e" "Edit scrollback" "action")]]
+    (is (= ["Cmd+Space" "Cmd+Space s l" "Ctrl+b Space e"] (map :priced-keys (usage/priced v1)))
+        "without a leader row, only a forward within 30 s counts, and only once")))
+
 (deftest the-report-weights-cost-by-use
   (let [r (usage/report rows grammar {})]
     (is (= {:actions 5 :presses-per-action 3.8} (select-keys (:cost r) [:actions :presses-per-action])))

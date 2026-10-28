@@ -60,9 +60,24 @@
   (is (not-any? #(= "o" (first %)) (keyleader/menu grammar :herdr nil))
       "Herdr has no application entries, so its menu must not offer the o group"))
 
+(deftest dot-picks-and-d-closes-in-one-key
+  (is (some #{["d" "Close window or pane"]} (keyleader/menu grammar :desktop nil)))
+  (is (not-any? #(= "d" (first %)) (keyleader/menu grammar :doom nil))
+      "Doom's SPC d stays its debugger group")
+  (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
+    (is (lines "hl.bind(mods .. \"D\", keys.leave(hl.dsp.window.close(), \"Cmd+Space d\", \"Close window or pane\"))")))
+  (let [ran (atom [])]
+    (with-redefs [keylog/log! (fn [& _] nil)
+                  keyleader/choose-workspace! (fn [] (swap! ran conj :choose-workspace))
+                  keyleader/run! (fn [argv] (swap! ran conj argv))]
+      (keyleader/run-herdr! grammar ["."] {:pane "w1:p2" :tab "w1:t1" :workspace "w1"})
+      (keyleader/run-herdr! grammar ["d"] {:pane "w1:p2" :tab "w1:t1" :workspace "w1"}))
+    (is (= [:choose-workspace ["herdr" "pane" "close" "w1:p2"]] @ran))))
+
 (deftest herdr-runs-single-keys-and-plugin-actions
-  (is (= [["SPC" "Command palette"] ["," "Switch buffer, tab or window"] ["e" "Edit scrollback"]
-          ["w" "Windows and panes ..."] ["b" "Buffers, tabs and windows ..."] ["s" "Search ..."]
+  (is (= [["SPC" "Command palette"] ["," "Switch buffer, tab or window"]
+          ["." "Find file, launch app or switch workspace"] ["d" "Close window or pane"]
+          ["e" "Edit scrollback"] ["w" "Windows and panes ..."] ["b" "Buffers, tabs and windows ..."] ["s" "Search ..."]
           ["p" "Projects ..."] ["TAB" "Workspaces ..."]]
          (keyleader/menu grammar :herdr nil)))
   (is (= [["." "Switch workspace"] ["`" "Last workspace"]] (keyleader/menu grammar :herdr "TAB")))
@@ -85,9 +100,9 @@
 (deftest frequent-actions-take-one-key-on-the-desktop
   (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
     (is (lines "hl.bind(mods .. \"period\", keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/keyleader run '.'\")))")
-        "Alt+Space . launches an application")
-    (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ last = true }), \"Alt+Space `\", \"Last buffer or window\"))"))
-    (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ workspace = \"previous\" }), \"Alt+Space TAB `\", \"Last workspace\"))")))
+        "Cmd+Space . launches an application")
+    (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ last = true }), \"Cmd+Space `\", \"Last buffer or window\"))"))
+    (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ workspace = \"previous\" }), \"Cmd+Space TAB `\", \"Last workspace\"))")))
   (let [ran (atom [])]
     (with-redefs [keylog/log! (fn [& _] nil)
                   keyleader/spawn! (fn [argv] (swap! ran conj argv))]
@@ -96,15 +111,15 @@
 
 (deftest hyprland-leader-runs-dispatchers-or-the-script
   (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
-    (is (lines "hl.bind(\"ALT + SPACE\", keys.enter(\"leader\", \"Alt+Space\"))")
+    (is (lines "hl.bind(\"SUPER + SPACE\", keys.enter(\"leader\", \"Cmd+Space\"))")
         "Entering the leader logs a leader row")
-    (is (lines "hl.bind(mods .. \"H\", keys.leave(hl.dsp.focus({ direction = \"left\" }), \"Alt+Space w h\", \"Focus left\"))"))
-    (is (lines "hl.bind(mods .. \"D\", keys.leave(hl.dsp.window.close(), \"Alt+Space w d\", \"Close window or pane\"))")
+    (is (lines "hl.bind(mods .. \"H\", keys.leave(hl.dsp.focus({ direction = \"left\" }), \"Cmd+Space w h\", \"Focus left\"))"))
+    (is (lines "hl.bind(mods .. \"D\", keys.leave(hl.dsp.window.close(), \"Cmd+Space w d\", \"Close window or pane\"))")
         "Closing runs in Hyprland without asking")
     (is (lines "hl.bind(mods .. \"B\", keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/keyleader run b b\")))")
         "Menus go through the script")
-    (is (lines "hl.bind(\"catchall\", keys.cancel(\"leader-w\", \"Alt+Space w\"))"))
-    (is (lines "hl.bind(\"escape\", keys.cancel(\"leader\", \"Alt+Space\", \"Escape\"))")
+    (is (lines "hl.bind(\"catchall\", keys.cancel(\"leader-w\", \"Cmd+Space w\"))"))
+    (is (lines "hl.bind(\"escape\", keys.cancel(\"leader\", \"Cmd+Space\", \"Escape\"))")
         "Cancels log the keys pressed before them")))
 
 (defn herdr-leader-with

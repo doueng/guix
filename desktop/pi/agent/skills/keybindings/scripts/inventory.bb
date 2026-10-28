@@ -159,7 +159,7 @@
    (re-find #"\"/quit\"" l)
    (emit! "bbh terminal" "/quit" "quit" "main.clj" ln))))
 (def leader-contexts
-  {:desktop ["Alt+Space" "generated hypr/leader.lua"]
+  {:desktop ["Cmd+Space" "generated hypr/leader.lua"]
    :herdr ["Ctrl+b Space" "bin/keyleader reads leader.edn at run time"]
    :nvim ["Space" "generated nvim/fnl/config/shared-keys.fnl"]
    :doom ["SPC" "generated doom/shared-keys.el"]

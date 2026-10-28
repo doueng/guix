@@ -7,7 +7,7 @@
 | Physical keyboard | Caps held for Ctrl, Caps tapped for Esc, Shift tapped for parentheses, Cmd rewrites | `desktop/kanata.kbd` |
 | Per-application Cmd chords | Kanata layer for the focused window class | `kanata/apps.edn`, `desktop/bin/hyprkan` |
 | Desktop discovery | Cmd+/ | `desktop/bin/keyguide` and `bindings.edn` |
-| Leader sequences | Space, Alt+Space, Ctrl+b Space or Cmd+Space | `leader.edn`, `desktop/bin/keyleader`, generated files |
+| Leader sequences | Space, Cmd+Space, Ctrl+b Space or Alt+Space | `leader.edn`, `desktop/bin/keyleader`, generated files |
 | Window focus | Ctrl+Alt+h/j/k/l | Generated `hypr/keybindings.lua` |
 | Window hints | Cmd+F | `desktop/bin/winhint`, the Dusk `:window-hints` overlay |
 | Move windows | Ctrl+Alt+Shift+h/j/k/l | Generated `hypr/keybindings.lua` |
@@ -21,7 +21,7 @@
 | Line editing | Native Ctrl and Alt keys | fish and the focused application |
 
 Caps+Alt provides Ctrl+Alt without reaching for the bottom-left Ctrl key.
-Plain Alt letters and digits belong to applications, not Hyprland. Alt+Space is the one exception, so Emacs M-SPC is not available.
+Plain Alt letters and digits belong to applications, not Hyprland. Alt+Space, the Herdr leader, is the one exception, so Emacs M-SPC is not available.
 Cmd+hjkl remains the existing arrow layer. Cmd+L is not Chrome's address-bar shortcut. Use Ctrl+L or Vimium `o`.
 Cmd chords can differ per application. See [Application layers](#application-layers).
 
@@ -37,7 +37,7 @@ An application whose native chord differs gets its own layer. That layer lists o
 | `com.mitchellh.ghostty`, `com.mitchellh.ghostty.herdr` | `terminal` | Cmd+Backspace sends Ctrl+U. Elsewhere it sends Shift+Home then Backspace, and fish ignores Shift+Home. Cmd+Z, Cmd+Shift+Z, Cmd+W and Cmd+T send nothing, so they never suspend Neovim or a job, delete a path component or transpose characters. |
 
 Emacs runs inside Ghostty and Herdr, so Hyprland sees only the terminal's class. A layer cannot single out Emacs or any other terminal program.
-`herdr-terminal` starts Herdr in a Ghostty window with its own class. Cmd+Space, Cmd+Return and Cmd+B find Herdr by that class, so they never type into another Ghostty window.
+`herdr-terminal` starts Herdr in a Ghostty window with its own class. Alt+Space, Cmd+Return and Cmd+B find Herdr by that class, so they never type into another Ghostty window.
 `hyprkan layer` prints kanata's active layer. After a system switch, `hyprkan reload` makes kanata reread `/etc/kanata/kanata.kbd` without root.
 Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typing.
 `make kanata-check` replays chords through kanata's simulator and checks that every layer in `apps.edn` exists.
@@ -49,14 +49,14 @@ Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typi
 | Context | Enter the leader | Space after the leader |
 | --- | --- | --- |
 | Neovim, Doom, IntelliJ | Space in normal mode | Command palette or Goto Action |
-| Herdr | Ctrl+b Space, or Cmd+Space from any window | Searchable list of the Herdr leader actions |
-| Desktop | Alt+Space | Dusk palette with the desktop leader actions and the guide entries |
+| Herdr | Ctrl+b Space, or Alt+Space from any window | Searchable list of the Herdr leader actions |
+| Desktop | Cmd+Space | Dusk palette with the desktop leader actions and the guide entries |
 
 Herdr and the desktop never treat a bare Space as the leader, so typing a space always types a space.
-Cmd+Space sends Ctrl+b Space to the Herdr terminal. From another window it first focuses the Herdr terminal, or starts one when none is open.
+Alt+Space sends Ctrl+b Space to the Herdr terminal. From another window it first focuses the Herdr terminal, or starts one when none is open.
 The desktop leader is a Hyprland submap. It captures the following keys before any application sees them. A panel at the bottom of the screen lists the next keys. Escape or any unbound key cancels.
 `keyleader listen` draws the panel. It follows Hyprland's submap events and asks Dusk to show the menu for the active submap. Hyprland starts it at login.
-You can keep Alt held after Alt+Space. Each key also works with Alt.
+Release Cmd after Cmd+Space. A key also works with Cmd still held unless kanata rewrites that Cmd chord first, as it does Cmd+W, Cmd+S and Cmd+h/j/k/l.
 
 Single keys after the leader carry the most frequent actions, as in Doom. Groups hold the rest, one object per letter.
 
@@ -64,7 +64,8 @@ Single keys after the leader carry the most frequent actions, as in Doom. Groups
 | --- | --- | --- |
 | , | Switch buffer, Herdr tab, or desktop window | All |
 | ` | Last buffer or window | Neovim, Doom, desktop |
-| . | Find a file, or launch an application on the desktop | Doom, IntelliJ, desktop. Neovim's own Space . finds a file |
+| . | Find a file, launch an application on the desktop, or choose a Herdr workspace | Doom, IntelliJ, desktop, Herdr. Neovim's own Space . finds a file |
+| d | Close the window or pane | Desktop, Herdr. Doom's SPC d is its debugger group, so editors use w d |
 | e | Edit scrollback in `$EDITOR` | Herdr |
 | w h, w j, w k, w l | Focus left, down, up, or right | All |
 | w s, w v | Split below, split right | Editors, Herdr |
@@ -115,11 +116,11 @@ One Dusk palette at the bottom of the screen chooses commands in every applicati
 
 | Where | Key | What it lists | How the choice runs |
 | --- | --- | --- | --- |
-| Any window | Alt+Space Space | The focused program's commands, then Herdr's and the desktop's | Where it came from |
+| Any window | Cmd+Space Space | The focused program's commands, then Herdr's and the desktop's | Where it came from |
 | Doom | M-x, SPC SPC | M-x's commands for the buffer | `execute-extended-command`, so prefix arguments and prompts work |
 | Neovim | SPC SPC | Described mappings and every Ex command | A mapping runs as if typed. An Ex command opens the command line with its name filled in |
 | fish | Ctrl+Space | History, functions and abbreviations | Inserted at the cursor, never run |
-| Herdr | Ctrl+b Space Space, Cmd+Space Space | Herdr's leader actions | `keyleader` |
+| Herdr | Ctrl+b Space Space, Alt+Space Space | Herdr's leader actions | `keyleader` |
 
 `desktop/bin/palette` decides from the focused window. In the Herdr terminal it reads the focused pane's foreground program. Emacs and Neovim are asked to open their own palette, Emacs over the server `eng-PID` that `palette.el` starts and Neovim over a socket owned by its PID, including a custom `--listen` path. A fish pane gets its history and functions, inserted with `herdr pane send-text`. Chrome gets Vimium and Chrome shortcuts and IntelliJ gets IdeaVim `:action` calls, typed once Dusk releases the keyboard. Those two lists live in `palette.edn`. Plain Ghostty windows share one process, so they get the desktop palette.
 Emacs caches command entries and escaped text per buffer, rebuilding after files load or the active keymaps change. Applicability and history are still checked on every opening. A new buffer's first opening can still pay the catalogue-building cost.
@@ -147,9 +148,9 @@ The global guide remains available on pages where Chrome forbids extensions.
 These write to it: every leader sequence in Neovim, Doom and Herdr, Ctrl+h/j/k/l in Neovim, Doom and Herdr, the desktop leader, the Ctrl+Alt desktop bindings, Cmd+F, and choices in Cmd+/ or the palette.
 It records bindings and their effects only, never typed text or file names. Native application shortcuts that these configs do not wrap, such as Vimium or IntelliJ keys, are not recorded.
 
-Rows are `TIME PROGRAM KEYS EFFECT KIND 2`, where 2 is the schema version and `desktop/lib/keylog.clj` defines the rest. PROGRAM is a stable lower-case id such as `hyprland`, `herdr`, `emacs` or `neovim`. KIND is `action` when a binding ran, `leader` when Alt+Space or Ctrl+b Space starts waiting for keys, `cancel` when a leader or menu closes without acting, and `forward` when a key is passed on, such as Ctrl+l from Herdr to fish or Cmd+Space from Hyprland to Herdr's leader. A palette choice is one action under the keys that opened the palette. Rows from before 2026-10-26 have four fields; readers treat them as schema 1 and normalise them. Editors log completed bindings only, not Space opening their leader or their palettes.
+Rows are `TIME PROGRAM KEYS EFFECT KIND 2`, where 2 is the schema version and `desktop/lib/keylog.clj` defines the rest. PROGRAM is a stable lower-case id such as `hyprland`, `herdr`, `emacs` or `neovim`. KIND is `action` when a binding ran, `leader` when Cmd+Space or Ctrl+b Space starts waiting for keys, `cancel` when a leader or menu closes without acting, and `forward` when a key is passed on, such as Ctrl+l from Herdr to fish or Alt+Space from Hyprland to Herdr's leader. A palette choice is one action under the keys that opened the palette. Rows from before 2026-10-26 have four fields; readers treat them as schema 1 and normalise them. Editors log completed bindings only, not Space opening their leader or their palettes.
 
-`keylog report` weights each binding's cost by how often you used it. Cost is physical key presses, modifiers included, and a Keystroke-Level Model estimate in seconds. It also lists the costliest bindings, longer leader bindings used more than a one-key binding, leader bindings never used, and how often each leader was cancelled. `--since` and `--until` take dates, so you can compare a period before a redesign with a period after it.
+`keylog report` weights each binding's cost by how often you used it. Cost is physical key presses, modifiers included, and a Keystroke-Level Model estimate in seconds. It also lists the costliest bindings, longer leader bindings used more than a one-key binding, leader bindings never used, and how often each leader was cancelled. A Herdr leader binding is priced by the chord that opened the leader, so Alt+Space TAB . costs four presses, not Ctrl+b Space's five. `--since` and `--until` take dates, so you can compare a period before a redesign with a period after it.
 
 ## Coaching
 
@@ -178,6 +179,10 @@ No global keyboard listener or browser content script has been added.
 | Herdr edit-scrollback default collides with workspace picker | Ctrl+b Shift+E | Keep Ctrl+b e for workspaces |
 | Cmd+Space opens the application launcher | Alt+Space a a, or Alt+Space Space | Alt+Space is the desktop leader |
 | Cmd+Space opens the desktop leader | Alt+Space | Cmd+Space opens the Herdr leader from any window |
+| Alt+Space opens the desktop leader, Cmd+Space the Herdr leader | Cmd+Space opens the desktop leader, Alt+Space the Herdr leader | Requested. The desktop leader holds the launcher, which is Cmd+Space on macOS |
+| Alt+Space w d closes a window | Cmd+Space d, Alt+Space d closes a Herdr pane | Most used desktop leader action. w d still works |
+| Ctrl+b Space . was unbound | It chooses a Herdr workspace, like TAB . | `.` opens the main picker in every context |
+| Ctrl+j/k in the bbh transcript move by org heading, Ctrl+k in insert state types a digraph | They move focus | Ctrl+h/j/k/l is focus everywhere. n, p, M-n and M-p still move by heading |
 | Herdr Ctrl+b h/j/k/l stop at the last pane | They continue to Hyprland windows | Same behavior as the editors |
 | Neovim and Doom Ctrl+h/j/k/l stop at the last window | They continue to Herdr panes and Hyprland | Same behavior as Space w h/j/k/l |
 | Neovim Space c d shows line diagnostics | Space c d finds the definition, Space c x lists diagnostics | Match Doom and IntelliJ |

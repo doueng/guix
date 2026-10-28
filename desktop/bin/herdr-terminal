@@ -1,4 +1,4 @@
 #!/bin/sh
-# Herdr in a Ghostty window class of its own. Cmd+Space, Cmd+Return and kanata
+# Herdr in a Ghostty window class of its own. Alt+Space, Cmd+Return and kanata
 # tell it from other Ghostty windows by this class.
 exec ghostty --class=com.mitchellh.ghostty.herdr -e herdr "$@"

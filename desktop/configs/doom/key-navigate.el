@@ -38,4 +38,12 @@ At the frame edge, ask keyleader to move to the next Herdr pane or Hyprland wind
        (call-process (expand-file-name "~/.local/bin/keyleader") nil 0 nil
                      "nav" direction "from Emacs edge")))))
 
+(dolist (spec '(("left" . "h") ("down" . "j") ("up" . "k") ("right" . "l")))
+  (let ((direction (car spec)))
+    (defalias (intern (concat "eng/focus-" direction))
+      (eng/keylog-command (concat "Ctrl+" (cdr spec)) (concat "Focus " direction)
+                          (lambda () (interactive) (eng/navigate direction)))
+      (format "Focus the window %s, falling through to Herdr and Hyprland.
+Bare Ctrl+%s runs it in every buffer and state." direction (cdr spec)))))
+
 (provide 'key-navigate)

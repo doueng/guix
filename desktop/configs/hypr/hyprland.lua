@@ -57,9 +57,9 @@ hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
 -- Label every visible window, Herdr pane and editor window, then focus the typed one.
 hl.bind("SUPER + F", hl.dsp.exec_cmd("~/.local/bin/winhint"))
 
--- Top-level menus: Space Space in editors, Alt+Space for Hyprland (leader.lua),
--- Cmd+Space for Herdr.
-hl.bind("SUPER + SPACE", keys.herdr_menu)
+-- Top-level menus: Space Space in editors, Cmd+Space for Hyprland (leader.lua),
+-- Alt+Space for Herdr.
+hl.bind("ALT + SPACE", keys.herdr_menu)
 
 require("keybindings")
 require("leader")

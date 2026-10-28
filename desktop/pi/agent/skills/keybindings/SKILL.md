@@ -33,12 +33,12 @@ Hard constraints override the score.
 ## Hard constraints
 
 - Ctrl+Alt is desktop control. Add Shift for the corresponding move action.
-- Plain Alt belongs to applications. Do not globally consume Emacs M-f, M-w, or IdeaVim Alt+digits. Alt+Space, the desktop leader, is the only exception.
+- Plain Alt belongs to applications. Do not globally consume Emacs M-f, M-w, or IdeaVim Alt+digits. Alt+Space, the Herdr leader, is the only exception.
 - Cmd is partly rewritten by kanata. Cmd+S becomes Ctrl+S and Cmd+L becomes Right. Do not assume physical Cmd means Super. In Ghostty and Herdr the `terminal` layer sends nothing for Cmd+Z, Cmd+Shift+Z, Cmd+W and Cmd+T, because their Ctrl chords suspend or edit there. `hyprkan` reads `apps.edn` live, but kanata reads `kanata.kbd` only after `make switch`, so do not point `apps.edn` at a layer before the switch installs it.
 - Herdr runs in the Ghostty class `com.mitchellh.ghostty.herdr`, started by `desktop/bin/herdr-terminal`. Target Herdr by that class, never by `com.mitchellh.ghostty`, which every other Ghostty window shares.
 - Check upstream defaults on the real surface. `ghostty +list-keybinds` lists what Ghostty consumes before a program sees it.
 - Caps held is Ctrl. Caps tapped is Escape. Keep that escape path available.
-- Never make a bare Space the leader where Space can type text. The editors use Space in normal mode, Herdr uses Ctrl+b Space or Cmd+Space, and the desktop uses Alt+Space. Space after any leader opens that context's command palette, so no leader group may use Space.
+- Never make a bare Space the leader where Space can type text. The editors use Space in normal mode, Herdr uses Ctrl+b Space or Alt+Space, and the desktop uses Cmd+Space. Space after any leader opens that context's command palette, so no leader group may use Space.
 - Bare Ctrl+h/j/k/l is window focus in every layer. Herdr forwards a key to the foreground program when `leader.edn`'s `:terminal :keeps` gives that program the key, and moves focus otherwise. Do not give Ctrl+h/j/k/l another meaning in a shell, editor or TUI without adding a `:keeps` rule for it.
 - Window focus falls through from the editor to Herdr to Hyprland through `keyleader nav`. Keep editor Ctrl+h/j/k/l and Herdr Ctrl+b h/j/k/l on that path.
 - Hyprland reads `hypr/hyprland.lua`. In a Lua session `hyprctl dispatch` takes Lua such as `hl.dsp.focus({ direction = "left" })`, not the old dispatcher names. Write dispatchers as data and run them with `desktop/lib/hypr/dispatch.clj`.
@@ -53,7 +53,7 @@ Hard constraints override the score.
 
 ## Discovery and coaching
 
-Alt+Space Space, SPC SPC in the editors and Ctrl+Space in fish open the Dusk command palette. The README's Command palette section explains it. Add an application's commands to its own adapter, or to `keybindings/palette.edn` for Chrome and IntelliJ. When testing it with ydotool, type only after `hyprctl layers` lists `dusk-launcher`, or the keys reach the focused window.
+Cmd+Space Space, SPC SPC in the editors and Ctrl+Space in fish open the Dusk command palette. The README's Command palette section explains it. Add an application's commands to its own adapter, or to `keybindings/palette.edn` for Chrome and IntelliJ. When testing it with ydotool, type only after `hyprctl layers` lists `dusk-launcher`, or the keys reach the focused window.
 
 Cmd+/ opens `desktop/bin/keyguide`. Entries marked `guide` explain native shortcuts without injecting input.
 Doom and Neovim use which-key. Herdr uses Ctrl+b ?. Vimium uses ? on supported pages.

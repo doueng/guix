@@ -197,7 +197,7 @@ document.getElementById('filter').addEventListener('input', e => {
                  [(inc i) title evidence proposal (badge status)]))
 
         [:h2 "Shared leader against Doom"]
-        [:p "Editors enter the leader with Space, Herdr with Ctrl+b Space or Cmd+Space, the desktop with Alt+Space. "
+        [:p "Editors enter the leader with Space, Herdr with Ctrl+b Space or Alt+Space, the desktop with Cmd+Space. "
          (str (get counts :exact 0) " sequences share Doom's meaning, " (get counts :analogous 0) " apply it to another object, "
               (get counts :differs 0) " differ, " (get counts :unverified 0) " are unverified and " (get counts :doom-free 0)
               " use keys that Doom leaves free. leader.edn's :doom-match records each comparison by hand, and the Alignment column shows it.")]

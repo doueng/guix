@@ -43,3 +43,15 @@
           (should (string-match-p "\\`[0-9T:-]+\temacs\tSpace w s\tSplit below\taction\t2\n\\'"
                                   (with-temp-buffer (insert-file-contents file) (buffer-string)))))
       (delete-file file))))
+
+(ert-deftest focus-commands-log-their-ctrl-key-and-navigate ()
+  (let* ((file (make-temp-file "keylog"))
+         (process-environment (cons (concat "KEYLOG_FILE=" file) process-environment))
+         (went nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'eng/navigate) (lambda (direction) (setq went direction))))
+          (call-interactively #'eng/focus-up)
+          (should (equal "up" went))
+          (should (string-match-p "\temacs\tCtrl\\+k\tFocus up\taction\t2\n\\'"
+                                  (with-temp-buffer (insert-file-contents file) (buffer-string)))))
+      (delete-file file))))

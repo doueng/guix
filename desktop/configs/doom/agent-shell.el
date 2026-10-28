@@ -609,7 +609,12 @@ Org leaves result blocks, a special block, without the code background."
     (kbd "M-p") #'org-backward-heading-same-level
     (kbd "^") #'outline-up-heading
     (kbd "<backtab>") #'eng/bbh-toggle-tools
-    (kbd "q") #'bury-buffer))
+    (kbd "q") #'bury-buffer)
+  ;; evil-org's C-j and C-k shadow focus, which moves between transcript and
+  ;; composer. The transcript is read-only, so normal state is enough.
+  (evil-define-key 'normal eng/bbh-transcript-mode-map
+    (kbd "C-j") #'eng/focus-down
+    (kbd "C-k") #'eng/focus-up))
 
 (defvar-local eng/bbh-composer nil)
 (put 'eng/bbh-composer 'permanent-local t)

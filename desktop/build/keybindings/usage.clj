@@ -30,9 +30,52 @@
 ;; Each leader and its leader.edn context. Herdr's and the desktop's leaders
 ;; are logged by whichever layer finally acts, such as Hyprland when Ctrl+b
 ;; Space w h leaves the terminal. Editors share Space, so their program decides.
-(def leaders [["Ctrl+b Space" (constantly :herdr)]
+;; The desktop leader was Alt+Space until 2026-10-28 and is Cmd+Space since.
+;; Alt+Space now only forwards to Herdr, a row with no keys after it.
+(def herdr-leader "Ctrl+b Space")
+(def leaders [[herdr-leader (constantly :herdr)]
+              ["Cmd+Space" (constantly :desktop)]
               ["Alt+Space" (constantly :desktop)]
               ["Space" {"emacs" :doom "neovim" :nvim}]])
+
+(defn- seconds-between [a b]
+  (try (.getSeconds (java.time.Duration/between (java.time.LocalDateTime/parse a) (java.time.LocalDateTime/parse b)))
+       (catch Exception _ nil)))
+
+(defn- within? [via time limit]
+  (some-> (seconds-between (:time via) time) (<= limit)))
+
+(defn priced
+  "ROWS, each with :priced-keys, the keys physically pressed. Herdr logs its
+  leader as Ctrl+b Space even when a Hyprland chord forwarded it from another
+  window, so a Herdr leader binding that follows such a forward is priced with
+  the forwarding chord instead. A Herdr leader row within 5 s of the forward
+  confirms it. Rows from before Herdr logged its leader take a forward within
+  30 s."
+  [rows]
+  (let [herdr-row? #(and (#{"action" "cancel"} (:kind %))
+                         (or (= herdr-leader (:keys %)) (str/starts-with? (:keys %) (str herdr-leader " "))))]
+    (first
+     (reduce
+      (fn [[out via] row]
+        (cond
+          (and (= "forward" (:kind row)) (= "Forwarded to herdr" (:effect row)))
+          [(conj out (assoc row :priced-keys (:keys row))) (select-keys row [:keys :time])]
+
+          (and (= "leader" (:kind row)) (= herdr-leader (:keys row)))
+          [(conj out (assoc row :priced-keys (:keys row)))
+           (when (and via (within? via (:time row) 5)) (assoc via :confirmed true))]
+
+          (herdr-row? row)
+          (let [via (when (and via (or (:confirmed via) (within? via (:time row) 30))) via)]
+            [(conj out (assoc row :priced-keys (if via
+                                                 (str (:keys via) (subs (:keys row) (count herdr-leader)))
+                                                 (:keys row))))
+             nil])
+
+          :else [(conj out (assoc row :priced-keys (:keys row))) via]))
+      [[] nil]
+      rows))))
 
 (defn leader-binding
   "[context keys] when ROW ran a leader binding by its keys, such as
@@ -58,7 +101,7 @@
 (defn- mean [xs] (when (seq xs) (/ (reduce + xs) (double (count xs)))))
 
 (defn- cost [actions]
-  (let [ps (map (comp presses :keys) actions)]
+  (let [ps (map (comp presses #(:priced-keys % (:keys %))) actions)]
     {:actions (count actions) :presses-per-action (mean ps) :klm-seconds (some-> (mean ps) klm-seconds)}))
 
 (defn binding-uses
@@ -77,7 +120,7 @@
 (defn report
   "The usage report for ROWS against GRAMMAR, as data. TOP limits lists."
   [rows grammar {:keys [top] :or {top 15}}]
-  (let [actions (filter #(= "action" (:kind %)) rows)
+  (let [actions (filter #(= "action" (:kind %)) (priced rows))
         uses (binding-uses rows grammar)
         bindings (:bindings grammar)
         total #(reduce + 0 (for [[[_ ks] n] uses :when (= ks (:keys %))] n))
@@ -93,7 +136,7 @@
      :by-program (sort-by (comp - :actions)
                           (for [[p as] (group-by :program actions)] (assoc (cost as) :program p)))
      :costliest (take top (sort-by (comp - :total)
-                                   (for [[[p k e] as] (group-by (juxt :program :keys :effect) actions)
+                                   (for [[[p k e] as] (group-by (juxt :program :priced-keys :effect) actions)
                                          :let [n (count as)]]
                                      {:program p :keys k :effect e :count n :presses (presses k)
                                       :total (* n (presses k))})))
@@ -109,11 +152,12 @@
                      [ctx (vec (for [b (keyleader/in-context grammar ctx)
                                      :when (zero? (get uses [ctx (:keys b)] 0))]
                                  (:keys b)))]))
-     :leaders (for [[program prefix] [["hyprland" "Alt+Space"] ["herdr" "Ctrl+b Space"]]
+     :leaders (for [[program prefix] [["hyprland" "Cmd+Space"] ["hyprland" "Alt+Space"] ["herdr" herdr-leader]]
                     :let [mine #(and (= program (:program %)) (= prefix (:keys %)))
                           under #(str/starts-with? (:keys %) prefix)
                           opens (count (filter #(and (= "leader" (:kind %)) (mine %)) v2))
-                          cancels (count (filter #(and (= "cancel" (:kind %)) (under %)) v2))]]
+                          cancels (count (filter #(and (= "cancel" (:kind %)) (under %)) v2))]
+                    :when (pos? opens)]
                 {:program program :keys prefix :opens opens
                  :actions (count (filter #(and (= "action" (:kind %)) (under %) (str/starts-with? (:keys %) (str prefix " "))) v2))
                  :cancels cancels

@@ -1,5 +1,5 @@
 ;; The shared leader grammar. Editors enter it with Space in normal mode,
-;; Herdr with Ctrl+b Space or Cmd+Space, and the desktop with Alt+Space.
+;; Herdr with Ctrl+b Space or Alt+Space, and the desktop with Cmd+Space.
 ;; Space after the leader opens each context's command palette.
 ;; Contexts per entry: :nav (all, falls through editor > Herdr > Hyprland),
 ;; :nvim, :doom and :idea (editor commands; IdeaVim stops at its own splits),
@@ -33,8 +33,10 @@
    :doom "+vertico/switch-workspace-buffer" :desktop :choose-window :herdr :choose-tab}
   {:keys ["`"] :label "Last buffer or window" :doom-match :exact :nvim "<cmd>e #<cr>"
    :doom "evil-switch-to-windows-last-buffer" :desktop ["focus" {:last true}]}
-  {:keys ["."] :label "Find file or launch app" :doom-match :analogous :idea "<Action>(GotoFile)"
-   :doom "eng/project-find-file" :desktop-command ["~/.local/bin/custom-launcher"]}
+  {:keys ["."] :label "Find file, launch app or switch workspace" :doom-match :analogous :idea "<Action>(GotoFile)"
+   :doom "eng/project-find-file" :desktop-command ["~/.local/bin/custom-launcher"] :herdr :choose-workspace}
+  ;; Upstream Doom's SPC d is the debugger group, so the editors keep w d.
+  {:keys ["d"] :label "Close window or pane" :doom-match :differs :desktop ["window.close"] :herdr :close-pane}
   {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
   {:keys ["w" "h"] :label "Focus left" :doom-match :exact :nav "left"}
   {:keys ["w" "j"] :label "Focus down" :doom-match :exact :nav "down"}
