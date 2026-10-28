@@ -1,4 +1,5 @@
-#!/bin/sh
-# Syntax-highlighted git diffs for jjui previews; source in desktop/build.
-here=$(dirname "$(readlink -f "$0")")
-exec bun "$here/../build/pierre-diff-ansi/main.ts" "$@"
+#!/usr/bin/env bb
+;; Syntax-highlighted git diffs for jjui previews; source in desktop/build.
+(require '[babashka.fs :as fs] '[babashka.process :as p])
+(let [here (fs/parent (fs/real-path *file*))]
+  (apply p/exec "bun" (str here "/../build/pierre-diff-ansi/main.ts") *command-line-args*))

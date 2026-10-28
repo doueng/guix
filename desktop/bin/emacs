@@ -1,15 +1,15 @@
-#!/bin/sh
-set -eu
-
-# Add the profile only when missing, so a venv that direnv put first in the
-# launching shell still wins inside Emacs.
-case ":$PATH:" in
-  *":$HOME/.guix-home/profile/bin:"*) ;;
-  *) PATH="$HOME/.guix-home/profile/bin:$PATH" ;;
-esac
-export PATH
-# Ignore inherited editor hints; GNU Emacs uses EMACS when resolving its
-# executable directory, and a generic `emacs` value can point at this wrapper.
-unset EMACS
-exec "$HOME/.guix-home/profile/bin/emacs" \
-  --init-directory="$HOME/.config/emacs" "$@"
+#!/usr/bin/env bb
+(require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
+(let [profile-bin (str (fs/home) "/.guix-home/profile/bin")
+      path (or (System/getenv "PATH") "")]
+  ;; Add the profile only when missing, so a venv that direnv put first in the
+  ;; launching shell still wins inside Emacs.
+  ;; Drop inherited editor hints; GNU Emacs uses EMACS when resolving its
+  ;; executable directory, and a generic `emacs` value can point at this wrapper.
+  (apply p/exec {:env (-> (into {} (System/getenv))
+                          (dissoc "EMACS")
+                          (assoc "PATH" (if (some #{profile-bin} (str/split path #":"))
+                                          path
+                                          (str profile-bin ":" path))))}
+         (str profile-bin "/emacs") (str "--init-directory=" (fs/home) "/.config/emacs")
+         *command-line-args*))

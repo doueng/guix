@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "./build.sh",
+    "build": "./build.bb",
     "test": "node --test test/*.test.ts",
     "check": "tsc --noEmit",
     "lint": "node scripts/biome.mjs check src/*.ts test/*.ts scripts/*.mjs eval/*.mjs",

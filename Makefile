@@ -135,22 +135,21 @@ nixpkgs-verify:
 
 PI_SCI := desktop/build/pi-sci
 PI_SCI_OUTPUTS := $(PI_SCI)/dist/sci.js $(addprefix $(PI_SCI)/dist/pi-,grep.mjs find.mjs read.mjs)
-PI_SCI_SOURCES := $(addprefix $(PI_SCI)/,build.sh compiler.edn deps.edn externs.js \
+PI_SCI_SOURCES := $(addprefix $(PI_SCI)/,build.bb compiler.edn deps.edn externs.js \
                     package-lock.json scripts/prepare-search.mjs) \
                   $(wildcard $(PI_SCI)/src/pi/*)
 
 $(PI_SCI_OUTPUTS) &: $(PI_SCI_SOURCES)
-	$(PI_SCI)/build.sh
+	$(PI_SCI)/build.bb
 
 pi-sci: $(PI_SCI_OUTPUTS)
 
 pi-sci-test:
-	desktop/build/pi-sci/verify.sh
+	desktop/build/pi-sci/verify.bb
 
 swe-rebench-check:
 	cd desktop/build/bbh && bb eval:harbor-check
 	uvx --from actionlint-py actionlint .github/workflows/swe-rebench.yml
-	shellcheck desktop/build/bbh/harbor/bbh-acp
 
 BBH_RUNS ?= 10
 BBH_RUNS_OUT ?= $(HOME)/.cache/bbh/runs.html
@@ -178,10 +177,10 @@ home-apply: channels-current nixpkgs-import
 	$(MAKE) stow
 
 dusk:
-	desktop/build/dusk/build.sh
+	desktop/build/dusk/build.bb
 
 dusk-test:
-	desktop/build/dusk/test.sh
+	desktop/build/dusk/test.bb
 
 dusk-verify:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/dusk/verify.bb

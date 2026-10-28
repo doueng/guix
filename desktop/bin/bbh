@@ -1,4 +1,5 @@
-#!/bin/sh
-# bb agent harness; its source lives in desktop/build/bbh.
-here=$(dirname "$(readlink -f "$0")")
-exec bb --config "$here/../build/bbh/bb.edn" -m bbh.main "$@"
+#!/usr/bin/env bb
+;; bb agent harness; its source lives in desktop/build/bbh.
+(require '[babashka.fs :as fs] '[babashka.process :as p])
+(let [here (fs/parent (fs/real-path *file*))]
+  (apply p/exec "bb" "--config" (str here "/../build/bbh/bb.edn") "-m" "bbh.main" *command-line-args*))

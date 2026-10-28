@@ -1,5 +1,4 @@
-#!/bin/sh
-set -eu
-
-exec "$HOME/.local/bin/emacs" "$@" \
-  --eval "(add-hook 'window-setup-hook #'eng/bbh 100)"
+#!/usr/bin/env bb
+(require '[babashka.fs :as fs] '[babashka.process :as p])
+(apply p/exec (str (fs/home) "/.local/bin/emacs")
+       (concat *command-line-args* ["--eval" "(add-hook 'window-setup-hook #'eng/bbh 100)"]))

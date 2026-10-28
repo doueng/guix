@@ -1,11 +1,11 @@
-#!/bin/sh
-# jj external diff formatter: `jj diff` output goes through pierre-diff-ansi,
-# so jjui's fullscreen diff gets the same highlighting as its previews.
-# jj passes two directory trees; diff them the way git does, then highlight.
-set -eu
-left=$1
-right=$2
-cd "$left"
-git diff --no-index --no-color --relative -- . "../$right" \
-  | sed -E '/^(diff --git|--- |\+\+\+ )/ s#([ab])/(\./|\.\./[^/]+/)#\1/#g' \
-  | pierre-diff-ansi --width "${COLUMNS:-120}"
+#!/usr/bin/env bb
+;; jj external diff formatter: `jj diff` output goes through pierre-diff-ansi,
+;; so jjui's fullscreen diff gets the same highlighting as its previews.
+;; jj passes two directory trees; diff them the way git does, then highlight.
+(require '[babashka.process :as p] '[clojure.string :as str])
+(let [[left right] *command-line-args*
+      diff (:out (p/sh {:dir left} "git" "diff" "--no-index" "--no-color" "--relative" "--" "." (str "../" right)))
+      ;; Drop the tree prefixes from header paths: a/./x and b/../right/x become a/x and b/x.
+      fixed (str/replace diff #"(?m)^(diff --git|--- |\+\+\+ ).*$"
+                         #(str/replace (first %) #"([ab])/(\./|\.\./[^/]+/)" "$1/"))]
+  (p/shell {:in fixed} "pierre-diff-ansi" "--width" (or (System/getenv "COLUMNS") "120")))

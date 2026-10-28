@@ -1,3 +1,4 @@
-#!/bin/sh
-real=$(readlink -f "$0")
-exec "$(dirname "$real")/../build/dusk/target/release/dusk" "$@"
+#!/usr/bin/env bb
+(require '[babashka.fs :as fs] '[babashka.process :as p])
+(let [here (fs/parent (fs/real-path *file*))]
+  (apply p/exec (str here "/../build/dusk/target/release/dusk") *command-line-args*))

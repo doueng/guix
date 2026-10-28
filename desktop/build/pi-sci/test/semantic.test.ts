@@ -294,7 +294,7 @@ test("Make and repository actions normalize targets and reject use outside this 
 		);
 		assert.equal(r.ok, true);
 		assert.equal(r.target, "pi-sci-test");
-		assert.match(r.stdout, /verify.sh/);
+		assert.match(r.stdout, /verify\.bb/);
 	} finally {
 		runtime.close();
 	}

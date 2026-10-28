@@ -46,6 +46,7 @@ case "$(uname -m)" in
 esac
 mkdir -p {REMOTE}/bin
 curl -fsSL "https://github.com/babashka/babashka/releases/download/v{BB_VERSION}/babashka-{BB_VERSION}-linux-$arch-static.tar.gz" | tar -xz -C {REMOTE}/bin bb
+ln -sf {REMOTE}/bin/bb /usr/local/bin/bb  # for bbh-acp's #!/usr/bin/env bb
 {REMOTE}/bin/bb --version
 """.strip()
 

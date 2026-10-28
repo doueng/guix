@@ -1,13 +1,15 @@
-#!/bin/sh
-# Start bbh's ACP server in a Harbor task container. Harbor's ACP runner sets
-# HARBOR_ACP_REQUESTED_MODEL from `harbor run -m`; bbh starts on that model so
-# the runner's session/set_model finds it. BBH_HOME defaults to the install dir.
-set -eu
-home=${BBH_HOME:-/opt/bbh}
-PATH="$home/bin:$PATH"
-BBH_MODEL=${BBH_MODEL:-${HARBOR_ACP_REQUESTED_MODEL:-}}
-BBH_INIT=${BBH_INIT:-$home/init.clj}
-XDG_DATA_HOME=${XDG_DATA_HOME:-/logs/agent/bbh-data}
-export PATH BBH_MODEL BBH_INIT XDG_DATA_HOME
-mkdir -p "$XDG_DATA_HOME"
-exec bb --config "$home/app/bb.edn" -m bbh.main acp "$@"
+#!/usr/bin/env bb
+;; Start bbh's ACP server in a Harbor task container. Harbor's ACP runner sets
+;; HARBOR_ACP_REQUESTED_MODEL from `harbor run -m`; bbh starts on that model so
+;; the runner's session/set_model finds it. BBH_HOME defaults to the install dir.
+(require '[babashka.fs :as fs] '[babashka.process :as p])
+(let [env #(System/getenv %)
+      home (or (env "BBH_HOME") "/opt/bbh")
+      data (or (env "XDG_DATA_HOME") "/logs/agent/bbh-data")]
+  (fs/create-dirs data)
+  (apply p/exec {:extra-env {"PATH" (str home "/bin:" (env "PATH"))
+                             "BBH_MODEL" (or (env "BBH_MODEL") (env "HARBOR_ACP_REQUESTED_MODEL") "")
+                             "BBH_INIT" (or (env "BBH_INIT") (str home "/init.clj"))
+                             "XDG_DATA_HOME" data}}
+         (let [bb (str home "/bin/bb")] (if (fs/executable? bb) bb "bb"))
+         "--config" (str home "/app/bb.edn") "-m" "bbh.main" "acp" *command-line-args*))

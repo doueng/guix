@@ -1,4 +1,5 @@
-#!/bin/sh
-# Workflow runner for pstack; its source lives in desktop/build/bbh.
-here=$(dirname "$(readlink -f "$0")")
-exec bb --config "$here/../build/bbh/bb.edn" -m bbh.workflow "$@"
+#!/usr/bin/env bb
+;; Workflow runner for pstack; its source lives in desktop/build/bbh.
+(require '[babashka.fs :as fs] '[babashka.process :as p])
+(let [here (fs/parent (fs/real-path *file*))]
+  (apply p/exec "bb" "--config" (str here "/../build/bbh/bb.edn") "-m" "bbh.workflow" *command-line-args*))

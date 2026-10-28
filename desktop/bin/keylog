@@ -1,39 +1,57 @@
-#!/bin/sh
-# Records which keybinding ran, what it did, and which program handled it.
-# Rows are TIME PROGRAM KEYS EFFECT KIND 2, as desktop/lib/keylog.clj describes.
-# Writers call `keylog add`; editors and keyleader append the same format.
-set -eu
-file="${KEYLOG_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/keybindings/keys.tsv}"
-tab=$(printf '\t')
-clean() { printf '%s' "$1" | tr '\t\n' '  '; }
-usage='usage: keylog [COUNT] | keylog top [COUNT] | keylog path | keylog report [--since DATE] [--top N] | keylog add KIND PROGRAM KEYS EFFECT'
+#!/usr/bin/env bb
+;; Records which keybinding ran, what it did, and which program handled it.
+;; Rows are TIME PROGRAM KEYS EFFECT KIND 2, as desktop/lib/keylog.clj describes.
+;; Writers call `keylog add`; editors and keyleader append the same format.
+(require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 
-case "${1:-}" in
-  add)
-    [ $# -eq 5 ] || { echo 'usage: keylog add KIND PROGRAM KEYS EFFECT' >&2; exit 2; }
-    case "$2" in action|leader|cancel|forward) ;; *) echo "keylog: unknown kind $2" >&2; exit 2 ;; esac
-    case "$3" in ''|*[!a-z0-9-]*) echo "keylog: program ids are lower-case, such as hyprland: $3" >&2; exit 2 ;; esac
-    mkdir -p "$(dirname "$file")"
-    printf '%s\t%s\t%s\t%s\t%s\t2\n' "$(date +%FT%T)" "$3" "$(clean "$4")" "$(clean "$5")" "$2" >> "$file"
-    ;;
-  top)
-    [ -f "$file" ] || exit 0
-    cut -f2-4 "$file" | sort | uniq -c | sort -rn | head -n "${2:-20}"
-    ;;
-  path)
-    printf '%s\n' "$file"
-    ;;
-  report)
-    shift
-    # Stowed as a symlink; the report lives in the repository.
-    exec bb "$(dirname "$(readlink -f "$0")")/../build/keybindings/usage.clj" --log "$file" "$@"
-    ;;
-  ''|[0-9]*)
-    if [ ! -f "$file" ]; then echo "No keybindings logged yet: $file"; exit 0; fi
-    { printf 'TIME%sPROGRAM%sKEYS%sEFFECT%sKIND%sV\n' "$tab" "$tab" "$tab" "$tab" "$tab"; tail -n "${1:-30}" "$file"; } | column -t -s "$tab"
-    ;;
-  *)
-    echo "$usage" >&2
-    exit 2
-    ;;
-esac
+(def file (or (System/getenv "KEYLOG_FILE")
+              (str (or (System/getenv "XDG_STATE_HOME") (str (fs/home) "/.local/state"))
+                   "/keybindings/keys.tsv")))
+(def usage "usage: keylog [COUNT] | keylog top [COUNT] | keylog path | keylog report [--since DATE] [--top N] | keylog add KIND PROGRAM KEYS EFFECT")
+
+(defn fail [msg] (binding [*out* *err*] (println msg)) (System/exit 2))
+(defn clean [s] (str/replace s #"[\t\n]" " "))
+(defn rows [] (when (fs/exists? file) (str/split-lines (slurp file))))
+(defn count-arg [s default] (if s (parse-long s) default))
+
+(let [[cmd & args] *command-line-args*]
+  (case cmd
+    "add"
+    (let [[kind program keys effect] args]
+      (when-not (= 4 (count args)) (fail "usage: keylog add KIND PROGRAM KEYS EFFECT"))
+      (when-not (#{"action" "leader" "cancel" "forward"} kind) (fail (str "keylog: unknown kind " kind)))
+      (when-not (re-matches #"[a-z0-9-]+" program)
+        (fail (str "keylog: program ids are lower-case, such as hyprland: " program)))
+      (fs/create-dirs (fs/parent file))
+      (spit file (str (str/join "\t" [(.format (java.time.LocalDateTime/now)
+                                                  (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss"))
+                                         program (clean keys) (clean effect) kind "2"])
+                      "\n")
+            :append true))
+
+    "top"
+    (doseq [[n row] (->> (rows)
+                         (map #(str/join "\t" (take 3 (rest (str/split % #"\t" -1)))))
+                         frequencies
+                         (sort-by (fn [[row n]] [(- n) row]))
+                         (take (count-arg (first args) 20))
+                         (map (fn [[row n]] [n row])))]
+      (println (format "%7d %s" n row)))
+
+    "path" (println file)
+
+    ;; Stowed as a symlink; the report lives in the repository.
+    "report" (apply p/exec "bb" (str (fs/parent (fs/real-path *file*)) "/../build/keybindings/usage.clj")
+                      "--log" file args)
+
+    (if (or (nil? cmd) (re-matches #"[0-9]+" cmd))
+      (if-let [rs (rows)]
+        (let [table (map #(str/split % #"\t" -1)
+                         (cons "TIME\tPROGRAM\tKEYS\tEFFECT\tKIND\tV" (take-last (count-arg cmd 30) rs)))
+              widths (apply map (fn [& cells] (apply max (map count cells)))
+                            (map #(take 6 (concat % (repeat ""))) table))]
+          (doseq [cells table]
+            (println (str/trimr (str/join "  " (map #(format (str "%-" %1 "s") %2) widths
+                                                     (take 6 (concat cells (repeat "")))))))))
+        (println (str "No keybindings logged yet: " file)))
+      (fail usage))))

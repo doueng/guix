@@ -1,5 +1,6 @@
-#!/bin/sh
-# Claude Code, from the binary pi-claude-bridge already bundles. Its
-# autoupdater would replace that binary under pi, and Home provides ripgrep.
-export DISABLE_AUTOUPDATER=1 USE_BUILTIN_RIPGREP=0
-exec "$(dirname "$0")/claude-bridge-cli" "$@"
+#!/usr/bin/env bb
+;; Claude Code, from the binary pi-claude-bridge already bundles. Its
+;; autoupdater would replace that binary under pi, and Home provides ripgrep.
+(require '[babashka.fs :as fs] '[babashka.process :as p])
+(apply p/exec {:extra-env {"DISABLE_AUTOUPDATER" "1" "USE_BUILTIN_RIPGREP" "0"}}
+       (str (fs/parent *file*) "/claude-bridge-cli") *command-line-args*)

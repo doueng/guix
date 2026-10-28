@@ -1,4 +1,5 @@
-#!/bin/sh
-# Herdr in a Ghostty window class of its own. Alt+Space, Cmd+Return and kanata
-# tell it from other Ghostty windows by this class.
-exec ghostty --class=com.mitchellh.ghostty.herdr -e herdr "$@"
+#!/usr/bin/env bb
+;; Herdr in a Ghostty window class of its own. Alt+Space, Cmd+Return and kanata
+;; tell it from other Ghostty windows by this class.
+(require '[babashka.process :as p])
+(apply p/exec "ghostty" "--class=com.mitchellh.ghostty.herdr" "-e" "herdr" *command-line-args*)

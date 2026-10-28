@@ -1,10 +1,10 @@
 #!/usr/bin/env bb
 ;; Fast checks that run on every change: Scheme compiles without warnings,
-;; scripts and data files parse, shellcheck is clean, and the Makefile,
+;; scripts and data files parse, no shell scripts are tracked, and the Makefile,
 ;; AGENTS.md and checks.edn agree with each other.
 (load-file (str (babashka.fs/parent *file*) "/common.clj"))
 (require '[checks.common :as c] '[babashka.fs :as fs] '[cheshire.core :as json]
-         '[clojure.edn :as edn] '[clojure.string :as str])
+         '[clojure.edn :as edn] '[clojure.string :as str] 'edamame.core)
 
 (def guix (or (System/getenv "GUIX") (str (fs/home) "/.config/guix/current/bin/guix")))
 (def files (filter #(fs/regular-file? (str c/root "/" %)) (c/tracked-files)))
@@ -13,7 +13,7 @@
   (with-open [r (clojure.java.io/reader (str c/root "/" f))] (or (.readLine r) "")))
 
 (def shell-scripts
-  (filter #(or (str/ends-with? % ".sh") (re-find #"^#!.*\b(sh|bash)\b" (first-line %))) files))
+  (filter #(or (re-find #"\.(sh|bash)$" %) (re-find #"^#!.*\b(sh|bash|dash|zsh|ksh)\b" (first-line %))) files))
 
 (defn run-each
   "Problems from running (cmd file) over files: [file output] where it exits non-zero."
@@ -61,10 +61,10 @@
                            (filter (fn [f] (str/ends-with? f ".scm")) files))]
                  (when-not (zero? exit) [(str/trim (str err out))]))]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
-   ["shell" #(concat (run-each (fn [f] [(if (re-find #"bash" (first-line f)) "bash" "sh") "-n" f]) shell-scripts)
-                      (when (seq shell-scripts)
-                        (let [{:keys [exit out]} (apply c/sh "shellcheck" "-f" "gcc" "-e" "SC1091" shell-scripts)]
-                          (when-not (zero? exit) [(str/trim out)]))))]
+   ;; Scripts are babashka: `#!/usr/bin/env bb`, with babashka.process/exec for wrappers.
+   ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))
+                            (filter (fn [f] (or (str/ends-with? f ".bb") (re-find #"^#!.*\bbb\b" (first-line f)))) files))]
+   ["no-shell" #(for [f shell-scripts] (str f ": shell script; write it in babashka (#!/usr/bin/env bb)"))]
    ["json" #(parse-each (fn [s] ; parse-string ignores text after the first value
                          (let [vs (doall (json/parsed-seq (java.io.StringReader. s)))]
                            (when (not= 1 (count vs)) (throw (Exception. (str (count vs) " top-level values"))))))
