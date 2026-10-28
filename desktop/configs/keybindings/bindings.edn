@@ -48,6 +48,6 @@
              {:id "a" :label "Find agent" :chord "Ctrl+b a" :tip "Find an agent by name instead of scanning panes."}
              {:id "b" :label "Find workspace" :chord "Ctrl+b b" :tip "Ctrl+b b searches open workspaces. Ctrl+b Shift+O searches projects."}
              {:id "p" :label "Annotate selection" :chord "Ctrl+b p" :tip "Ctrl+b p captures a selection. Ctrl+b o reviews documents. Ctrl+b m manages annotations."}
-             {:id "f" :label "Copy visible text by hint" :chord "Ctrl+b f" :tip "Ctrl+b f or Ctrl+b Space s l opens tiny-fingers. Ctrl+S and Cmd+S now reach terminal editors for save. Ctrl+b Shift+E edits scrollback."}]}
+             {:id "f" :label "Copy visible text by hint" :chord "Cmd+Y / Ctrl+b f" :tip "Cmd+Y from any window, Ctrl+b f or Ctrl+b Space s l opens tiny-fingers. Ctrl+S and Cmd+S now reach terminal editors for save. Ctrl+b Shift+E edits scrollback."}]}
   {:id "n" :label "Notifications"
    :entries [{:id "e" :label "Dismiss Hyprland error" :command ["hyprctl" "seterror" "disable"]}]}]}

@@ -60,6 +60,8 @@ hl.bind("SUPER + F", hl.dsp.exec_cmd("~/.local/bin/winhint"))
 -- Top-level menus: Space Space in editors, Cmd+Space for Hyprland (leader.lua),
 -- Alt+Space for Herdr.
 hl.bind("ALT + SPACE", keys.herdr_menu)
+-- Yank: copy visible Herdr text by hint, from any window.
+hl.bind("SUPER + Y", keys.herdr_yank)
 
 require("keybindings")
 require("leader")

@@ -53,25 +53,40 @@ end
 -- desktop/bin/herdr-terminal starts Herdr's Ghostty with this class.
 M.herdr_class = "com.mitchellh.ghostty.herdr"
 
--- Alt+Space: open Herdr's leader menu (Ctrl+b Space). From another window,
--- focus the Herdr terminal first, or start one.
-function M.herdr_menu()
+-- Send CHORDS, such as { { mods = "CTRL", key = "b" } }, to the Herdr
+-- terminal. From another window, focus the Herdr terminal first, or start one
+-- and send nothing. Returns whether the chords were sent.
+local function send_to_herdr(chords)
   local active = hl.get_active_window()
   if not (active and active.class == M.herdr_class) then
     local terminal = hl.get_windows({ class = M.herdr_class })[1]
     if not terminal then
       hl.exec_cmd("~/.local/bin/herdr-terminal")
-      return
+      return false
     end
     hl.dispatch(hl.dsp.focus({ window = "address:" .. terminal.address }))
   end
-  -- send_shortcut would make Hyprland run this handler again on release.
-  for _, k in ipairs({ { mods = "CTRL", key = "b" }, { mods = "", key = "space" } }) do
+  -- send_shortcut would make Hyprland run the handler again on release.
+  for _, k in ipairs(chords) do
     for _, state in ipairs({ "down", "up" }) do
       hl.dispatch(hl.dsp.send_key_state({ mods = k.mods, key = k.key, state = state }))
     end
   end
-  M.log("Alt+Space", "Forwarded to herdr", "forward")
+  return true
+end
+
+-- Alt+Space: open Herdr's leader menu (Ctrl+b Space).
+function M.herdr_menu()
+  if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "space" } }) then
+    M.log("Alt+Space", "Forwarded to herdr", "forward")
+  end
+end
+
+-- Cmd+Y: copy visible text by hint with tiny-fingers (Herdr's Ctrl+b f).
+function M.herdr_yank()
+  if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "f" } }) then
+    M.log("Cmd+Y", "Copy visible text by hint")
+  end
 end
 
 return M

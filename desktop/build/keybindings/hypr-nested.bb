@@ -60,6 +60,12 @@
   (apply sh env "guix" "shell" "wtype" "--" "wtype" args)
   (Thread/sleep 400))
 (defn logged [] (if (fs/exists? keylog) (map #(vec (rest (str/split % #"\t"))) (fs/read-all-lines keylog)) []))
+(defn no-herdr-window!
+  "Wait until no Herdr-class window is left, so the next one client! starts is
+  the only target. Herdr handlers would otherwise start a real Herdr terminal."
+  []
+  (wait-for #(not-any? (fn [c] (= "com.mitchellh.ghostty.herdr" (:class c)))
+                       (json/parse-string (hypr "-j" "clients") true))))
 (defn enter-leader!
   "Run the Cmd+Space handler, which wtype cannot press."
   []
@@ -116,15 +122,27 @@
   ;; Now press the chord itself. Keys Hyprland sends while wtype still holds
   ;; Alt arrive garbled, though they arrive intact through kanata, so this
   ;; checks the bind and the focus only.
+  (no-herdr-window!)
   (client! "com.mitchellh.ghostty.herdr" "sleep" "30")
   (hypr "dispatch" "hl.dsp.focus({ window = \"class:^com\\\\.mitchellh\\\\.ghostty$\" })")
   (wait-for #(= "com.mitchellh.ghostty" (active)))
   (type! "-M" "alt" "-k" "space" "-m" "alt")
   (wait-for #(= "com.mitchellh.ghostty.herdr" (active)))
   (check (= "com.mitchellh.ghostty.herdr" (active)) "Alt+Space focuses the Herdr terminal")
+  (hypr "dispatch" "hl.dsp.window.close()")
+  (no-herdr-window!)
+  (client! "com.mitchellh.ghostty.herdr" "sh" "-c" (str "stty raw -echo; head -c 2 > " work "/yank"))
+  (wait-for #(= "com.mitchellh.ghostty.herdr" (active)))
+  (check (= "ok" (hypr "eval" "require('keys').herdr_yank()")) "the Cmd+Y handler runs")
+  (let [f (str work "/yank")
+        got (when (wait-for #(and (fs/exists? f) (= 2 (fs/size f)))) (slurp f))]
+    (check (= "\u0002f" got) (str "Cmd+Y sends Ctrl+b f, tiny-fingers, to the Herdr terminal, got " (pr-str got))))
+  (check (some #(and (= "" (:submap %)) (= 64 (:modmask %)) (= "Y" (:key %)))
+               (json/parse-string (hypr "-j" "binds") true))
+         "Cmd+Y (SUPER + Y) is bound at the top level")
   ;; Each row is its own keylog process, so rows within one wtype call may land
   ;; in either order.
-  (wait-for #(= 12 (count (logged))))
+  (wait-for #(= 13 (count (logged))))
   (check (= (frequencies [(row "leader" "Cmd+Space" "Desktop leader menu")
                           (row "cancel" "Cmd+Space" "Cancelled with Escape")
                           (row "leader" "Cmd+Space" "Desktop leader menu")
@@ -136,7 +154,8 @@
                           (row "action" "CTRL+ALT+H" "Focus left")
                           (row "action" "CTRL+ALT+L" "Focus right")
                           (row "forward" "Alt+Space" "Forwarded to herdr")
-                          (row "forward" "Alt+Space" "Forwarded to herdr")])
+                          (row "forward" "Alt+Space" "Forwarded to herdr")
+                          (row "action" "Cmd+Y" "Copy visible text by hint")])
             (frequencies (logged)))
          (str "the keybinding log has one row per leader, action, cancel and forward, got " (pr-str (logged))))
   (check (= "ok" (hypr "dispatch" "hl.dsp.focus({ workspace = 3 })")) "hyprctl accepts Lua dispatchers")

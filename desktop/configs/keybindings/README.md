@@ -15,6 +15,7 @@
 | Fullscreen, floating, close | Ctrl+Alt+f, Ctrl+Alt+v, Ctrl+Alt+w | Generated `hypr/keybindings.lua` |
 | Application launch and focus | Unrewritten Cmd chords | `hypr/hyprland.lua` |
 | Terminal multiplexer | Ctrl+b prefix, Cmd+digits | `herdr/config.toml` |
+| Copy visible Herdr text by hint (tiny-fingers) | Cmd+Y from any window | `hypr/keys.lua`, Herdr's Ctrl+b f |
 | Herdr terminal window | Ghostty class `com.mitchellh.ghostty.herdr` | `desktop/bin/herdr-terminal` |
 | Editor commands | Space leader from `leader.edn`, then native leader keys | Doom, Neovim, IdeaVim |
 | Web pages | Vimium normal mode and ? help | Vimium extension |
@@ -37,7 +38,7 @@ An application whose native chord differs gets its own layer. That layer lists o
 | `com.mitchellh.ghostty`, `com.mitchellh.ghostty.herdr` | `terminal` | Cmd+Backspace sends Ctrl+U. Elsewhere it sends Shift+Home then Backspace, and fish ignores Shift+Home. Cmd+Z, Cmd+Shift+Z, Cmd+W and Cmd+T send nothing, so they never suspend Neovim or a job, delete a path component or transpose characters. |
 
 Emacs runs inside Ghostty and Herdr, so Hyprland sees only the terminal's class. A layer cannot single out Emacs or any other terminal program.
-`herdr-terminal` starts Herdr in a Ghostty window with its own class. Alt+Space, Cmd+Return and Cmd+B find Herdr by that class, so they never type into another Ghostty window.
+`herdr-terminal` starts Herdr in a Ghostty window with its own class. Alt+Space, Cmd+Y, Cmd+Return and Cmd+B find Herdr by that class, so they never type into another Ghostty window.
 `hyprkan layer` prints kanata's active layer. After a system switch, `hyprkan reload` makes kanata reread `/etc/kanata/kanata.kbd` without root.
 Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typing.
 `make kanata-check` replays chords through kanata's simulator and checks that every layer in `apps.edn` exists.
@@ -181,6 +182,7 @@ No global keyboard listener or browser content script has been added.
 | Cmd+Space opens the desktop leader | Alt+Space | Cmd+Space opens the Herdr leader from any window |
 | Alt+Space opens the desktop leader, Cmd+Space the Herdr leader | Cmd+Space opens the desktop leader, Alt+Space the Herdr leader | Requested. The desktop leader holds the launcher, which is Cmd+Space on macOS |
 | Alt+Space w d closes a window | Cmd+Space d, Alt+Space d closes a Herdr pane | Most used desktop leader action. w d still works |
+| Ctrl+b Space s l copies visible text by hint | Cmd+Y, from any window. s l and Ctrl+b f still work | Yank in two keys. One-key s would clash with the Search group |
 | Ctrl+b Space . was unbound | It chooses a Herdr workspace, like TAB . | `.` opens the main picker in every context |
 | Ctrl+j/k in the bbh transcript move by org heading, Ctrl+k in insert state types a digraph | They move focus | Ctrl+h/j/k/l is focus everywhere. n, p, M-n and M-p still move by heading |
 | Herdr Ctrl+b h/j/k/l stop at the last pane | They continue to Hyprland windows | Same behavior as the editors |
