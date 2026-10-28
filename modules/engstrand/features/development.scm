@@ -17,6 +17,11 @@
                  "shellcheck" "shfmt" "tree-sitter" "typst" "uv"))
           (map specification->package
               '("python"
+                ;; Doom :lang python: LSP server, formatter, test runner, REPL.
+                "python-lsp-server"
+                "python-black"
+                "python-pytest"
+                "python-ipython"
                 "node"
                 "make"
                 "gcc-toolchain"
