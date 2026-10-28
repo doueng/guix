@@ -1,7 +1,12 @@
 #!/bin/sh
 set -eu
 
-PATH="$HOME/.guix-home/profile/bin:$PATH"
+# Add the profile only when missing, so a venv that direnv put first in the
+# launching shell still wins inside Emacs.
+case ":$PATH:" in
+  *":$HOME/.guix-home/profile/bin:"*) ;;
+  *) PATH="$HOME/.guix-home/profile/bin:$PATH" ;;
+esac
 export PATH
 # Ignore inherited editor hints; GNU Emacs uses EMACS when resolving its
 # executable directory, and a generic `emacs` value can point at this wrapper.

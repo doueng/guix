@@ -536,6 +536,19 @@ ultimately to plain `find-file' when the current directory is not a project."
         (set-buffer-modified-p nil)
         (set-visited-file-modtime))
       'job-done))
+  (defun eng/code-cells-python-send-region (start end)
+    "Send START..END to the buffer's Python REPL, starting it if needed."
+    (let ((proc (or (python-shell-get-process)
+                    (run-python nil nil nil))))
+      ;; A new REPL defines python.el's eval helpers on its first prompt.
+      (with-current-buffer (process-buffer proc)
+        (with-timeout (15 (user-error "Python REPL did not start"))
+          (while (not python-shell--first-prompt-received)
+            (accept-process-output proc 0.1))))
+      (python-shell-send-region start end)))
+  (dolist (mode '(python-mode python-ts-mode))
+    (setf (alist-get mode code-cells-eval-region-commands)
+          #'eng/code-cells-python-send-region))
   (map! :localleader
         :map code-cells-mode-map
         :desc "Start Python REPL"   "i" #'run-python
