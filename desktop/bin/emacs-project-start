@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+# Herdr's sesh layout starts this in the project directory; see
+# desktop/configs/herdr/sesh.toml and eng/project-session-resume.
+exec "$HOME/.local/bin/emacs" "$@" \
+  --eval "(add-hook 'window-setup-hook #'eng/project-session-resume 100)"

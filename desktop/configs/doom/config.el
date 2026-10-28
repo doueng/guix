@@ -570,3 +570,15 @@ ultimately to plain `find-file' when the current directory is not a project."
         :desc "Eval cells above"    "A" #'code-cells-eval-above
         :desc "Next cell"           "j" #'code-cells-forward-cell
         :desc "Previous cell"       "k" #'code-cells-backward-cell))
+
+(defun eng/project-session-resume ()
+  "Resume the last session saved for `default-directory'.
+Point persp-mode's kill-time auto-save at a file for this directory, so each
+project's Emacs saves and restores its own workspaces.  Run by
+desktop/bin/emacs-project-start."
+  (require 'persp-mode)
+  (setq persp-auto-save-fname
+        (concat "project-" (string-replace "/" "!" (directory-file-name
+                                                     (expand-file-name default-directory)))))
+  (when (file-readable-p (doom-session-file))
+    (doom-load-session)))
