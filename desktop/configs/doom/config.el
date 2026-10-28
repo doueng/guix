@@ -514,6 +514,8 @@ ultimately to plain `find-file' when the current directory is not a project."
 ;; Notebooks: code-cells opens .ipynb through `jupytext --to auto:percent` as a
 ;; `# %%` script and sends cells to the major mode's REPL. Jupytext comes from
 ;; the Guix home profile. Localleader keys mirror the Neovim molten setup.
+(add-hook 'inferior-python-mode-hook #'visual-line-mode)
+
 (use-package! code-cells
   :defer t
   :config
