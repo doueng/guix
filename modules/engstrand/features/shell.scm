@@ -15,7 +15,12 @@
         '("direnv"
           "jq"
           "bat"
-          "btop"))))
+          "btop"
+          ;; Neovim's Python host for molten-nvim and jupytext.nvim.
+          "python"
+          "python-pynvim"
+          "python-jupyter-client"
+          "python-jupytext"))))
 
 (define (feature-familiar-shell)
   (feature-package-set

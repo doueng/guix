@@ -11,6 +11,7 @@
                        :plugins.flash
                        :plugins.guess-indent
                        :plugins.markdown
+                       :plugins.molten
                        :plugins.mini-pairs
                        :plugins.blink
                        :plugins.conjure
