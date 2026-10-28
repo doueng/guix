@@ -510,3 +510,38 @@ ultimately to plain `find-file' when the current directory is not a project."
                   (envrc-global-mode-enable-in-buffer))
               (when envrc-mode
                 (envrc-mode -1)))))))))
+
+;; Notebooks: code-cells opens .ipynb through `jupytext --to auto:percent` as a
+;; `# %%` script and sends cells to the major mode's REPL. Jupytext comes from
+;; the Guix home profile. Localleader keys mirror the Neovim molten setup.
+(use-package! code-cells
+  :defer t
+  :config
+  ;; Upstream saves with plain `jupytext --to ipynb`, which drops every output.
+  ;; `--update` merges the script into the notebook on disk and keeps them.
+  (defadvice! eng/code-cells-write-ipynb-a (&optional file)
+    "Write the buffer to FILE as a notebook, keeping outputs already there."
+    :override #'code-cells-write-ipynb
+    (let ((file (expand-file-name (or file buffer-file-name)))
+          (log (get-buffer-create " *jupytext*")))
+      (with-current-buffer log (erase-buffer))
+      (save-restriction
+        (widen)
+        (unless (eq 0 (call-process-region nil nil "jupytext" nil log nil
+                                           "--to" "ipynb" "--update" "--quiet"
+                                           "--output" file "-"))
+          (error "jupytext failed: %s"
+                 (with-current-buffer log (string-trim (buffer-string))))))
+      (when (equal file buffer-file-name)
+        (set-buffer-modified-p nil)
+        (set-visited-file-modtime))
+      'job-done))
+  (map! :localleader
+        :map code-cells-mode-map
+        :desc "Start Python REPL"   "i" #'run-python
+        :desc "Eval cell/region"    "c" #'code-cells-eval
+        :desc "Eval cell and next"  "n" #'code-cells-eval-and-step
+        :desc "Eval all cells"      "a" #'code-cells-eval-whole-buffer
+        :desc "Eval cells above"    "A" #'code-cells-eval-above
+        :desc "Next cell"           "j" #'code-cells-forward-cell
+        :desc "Previous cell"       "k" #'code-cells-backward-cell))
