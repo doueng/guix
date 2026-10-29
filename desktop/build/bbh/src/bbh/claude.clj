@@ -171,28 +171,45 @@
                                             :request {:subtype "interrupt"}}))
     (send-line! in {:type "user" :message {:role "user" :content text}})
     (try
-      (loop [texts 0]
+      ;; A request starts when its prompt or tool results go out, not at its
+      ;; first stream event, so the run includes the time to first token.
+      (loop [texts 0 request-start (System/currentTimeMillis) calls 0]
         (let [{:keys [type event message] :as ev} (.take ^LinkedBlockingQueue queue)]
           (case type
             "stream_event"
             (let [{etype :type :keys [delta content_block]} event]
               (cond (and (= "content_block_delta" etype) (= "text_delta" (:type delta)) (seq (:text delta)))
-                    (do (session/emit! s {:type :text :text (:text delta)}) (recur texts))
+                    (do (session/emit! s {:type :text :text (:text delta)}) (recur texts request-start calls))
                     (and (= "content_block_delta" etype) (= "thinking_delta" (:type delta)) (seq (:thinking delta)))
-                    (do (session/emit! s {:type :thought :text (:thinking delta)}) (recur texts))
+                    (do (session/emit! s {:type :thought :text (:thinking delta)}) (recur texts request-start calls))
                     (and (= "content_block_start" etype) (= "text" (:type content_block)))
-                    (do (when (pos? texts) (session/emit! s {:type :text :text "\n\n"})) (recur (inc texts)))
+                    (do (when (pos? texts) (session/emit! s {:type :text :text "\n\n"}))
+                        (recur (inc texts) request-start calls))
+                    (and (= "content_block_start" etype) (= "tool_use" (:type content_block)))
+                    (recur texts request-start (inc calls))
                     ;; One per model request, with that request's final token counts.
                     (and (= "message_delta" etype) (:usage event))
-                    (do (session/add-usage! s (request-usage (:usage event))) (recur texts))
-                    :else (recur texts)))
-            "assistant" (do (record-assistant! s (:content message)) (recur texts))
-            "user" (do (record-tool-results! s (:content message)) (recur texts))
+                    (let [usage (request-usage (:usage event))]
+                      (session/add-usage! s usage)
+                      (session/trace-run! s "llm" request-start
+                                          (cond-> {:usage usage :tool-calls calls}
+                                            (:interrupted @s) (assoc :status "interrupted")
+                                            (= "max_tokens" (:stop_reason delta)) (assoc :truncated true)))
+                      (recur texts request-start 0))
+                    :else (recur texts request-start calls)))
+            "assistant" (do (record-assistant! s (:content message)) (recur texts request-start calls))
+            "user" (do (record-tool-results! s (:content message))
+                       ;; An interrupt also arrives as a user event, with no tool result.
+                       (recur texts
+                              (if (some #(= "tool_result" (:type %)) (:content message))
+                                (System/currentTimeMillis)
+                                request-start)
+                              calls))
             "system" (do (when (and (= "init" (:subtype ev)) (:session_id ev))
                            (spit (session-file s) (:session_id ev)))
-                         (recur texts))
+                         (recur texts request-start calls))
             "rate_limit_event" (do (swap! s assoc :limits (get-in ev [:rate_limit_info :unifiedWindows]))
-                                   (recur texts))
+                                   (recur texts request-start calls))
             "result" (let [total (or (:total_cost_usd ev) 0)
                            ;; Claude Code's total covers its whole process, not this turn.
                            cost (- total (get-in @s [:claude :cost] 0))]
@@ -205,7 +222,7 @@
                                                   (:result ev) (:subtype ev)))
                                          {:subtype (:subtype ev)}))))
             ::exit (throw (exited! s (:unparsed ev)))
-            (recur texts))))
+            (recur texts request-start calls))))
       (finally
         (swap! s assoc :cancel nil)
         (spit (seen-file s) (str (count (:messages @s))))))))

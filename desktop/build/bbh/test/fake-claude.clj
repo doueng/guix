@@ -10,6 +10,7 @@
 (def output (io/reader (:out child)))
 (def pending (atom nil))
 (def turns (atom 0))
+(def streaming (atom false))
 
 (defn emit [event]
   (locking *out*
@@ -36,6 +37,9 @@
               (binding [*out* *err*] (println "fatal: synthetic crash") (flush))
               (p/destroy-tree child)
               (System/exit 3))
+          "stream"
+          (do (reset! streaming true)
+              (emit {:type "stream_event" :event {:type "content_block_delta" :delta {:type "text_delta" :text "partial"}}}))
           "fail"
           (emit {:type "result" :is_error true :subtype "error_during_execution" :errors ["synthetic provider failure"]})
           (reset! pending
@@ -55,7 +59,13 @@
                       ;; Like Claude Code, the cost covers the whole process so far.
                       (emit {:type "result" :total_cost_usd (* 0.001 (swap! turns inc))
                              :modelUsage {:fake {:contextWindow 200000}}})))))
-        "control_request" nil
+        "control_request"
+        ;; Like Claude Code, an interrupted stream reports a user event without a
+        ;; tool result, then its usage so far.
+        (when (compare-and-set! streaming true false)
+          (emit {:type "user" :message {:content [{:type "text" :text "[Request interrupted by user]"}]}})
+          (emit {:type "stream_event" :event {:type "message_delta" :usage {:input_tokens 5 :output_tokens 3}}})
+          (emit {:type "result" :total_cost_usd 0}))
         nil)))
   (finally
     (when @pending (deref @pending 5000 nil))

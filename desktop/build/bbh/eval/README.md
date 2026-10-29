@@ -38,6 +38,14 @@ The judge runs Claude Code without tools on your subscription. It uses `opus` un
 
 `eval:agreement` treats bad as the positive class. Precision is the share of the judge's bad verdicts that you also marked bad. Recall is the share of your bad labels that the judge caught. The true negative rate is the share of your good labels the judge kept good. Raw agreement misleads when most traces are good, so the command does not report it. The command prints every disagreement with both critiques. Use those critiques to edit `judge.md`, then rerun `eval:judge` and `eval:agreement`. Trust the judge on unlabeled traces only after its precision and recall hold on 25 to 50 of your labels, and keep labeling a sample after that.
 
+## Runs and metrics
+
+Every conversation also writes `runs.jsonl`, a local run tree in the style of LangSmith. A trace is one user turn. The `turn` run's id is the trace id, and that turn's `llm`, `tool` and `compaction` runs name it as `parent`. A `/compact` outside a turn is a trace of its own. Each run has `:start`, `:ms`, `:status` (`ok`, `error` or `interrupted`), `:model` and `:effort`. `llm` and `compaction` runs add `:usage`, `:tool-calls` and `:truncated`. `tool` runs add `:tool-call-id`, `:chars` and `:restart`, and a failed evaluation has status `error`. A `turn` run adds `:usage`, its summed tokens and cost, and `:messages`, the `[from to)` range it wrote in `messages.jsonl`. Runs reference content instead of copying it, so join on the message range or `:tool-call-id` to get prompts and outputs.
+
+`bb runs:metrics [ROOT...]` prints one line per day and model with turn, llm and tool latency (p50/p95), tool failures, REPL restarts, tokens, cache share and cost. To use runs in an eval, read them with `bbh.runs/load-runs` and join on the conversation directory, which is also what labels key on.
+
+Claude Code reports cost per turn only, so a Claude `llm` run has tokens and no `:cost`, while its `turn` run has the cost. A Claude request interrupted mid-stream can report its partial tokens, giving an `llm` run with status `interrupted`, while the turn's cost can be 0. A `tool` run's `:ms` leaves out the REPL restart that follows a timeout or interrupt.
+
 ## Compare Pi and bbh
 
 This evaluator compares three configurations on the same generated projects and model.

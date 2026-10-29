@@ -7,6 +7,7 @@
             [bbh.context :as context]
             [bbh.delimiters :as delimiters]
             [bbh.repl :as repl]
+            [bbh.runs :as runs]
             [bbh.transcript :as transcript]
             [bbh.usage :as usage]
             [cheshire.core :as json]
@@ -57,6 +58,38 @@
 (defn record! [s msg]
   (transcript/append! (:dir @s) msg)
   (swap! s update :messages conj msg))
+
+(defn trace-run!
+  "Append a run of KIND that started at START-MS to the current turn's trace.
+  Outside a turn, as for /compact, the run is a trace of its own. FIELDS can
+  override the default \"ok\" :status."
+  [s kind start-ms fields]
+  (let [{:keys [dir trace model manifest]} @s
+        turn? (= "turn" kind)
+        id (if turn? trace (str (random-uuid)))]
+    (runs/append! dir start-ms
+                  (merge {:id id :trace (or trace id) :parent (when-not turn? trace)
+                          :kind kind :model model :effort (some-> (:effort manifest) name) :status "ok"}
+                         fields))))
+
+(defn- sample-fields
+  "The run fields of one model reply."
+  [{:keys [message usage truncated interrupted]}]
+  (cond-> {:usage (select-keys usage [:input :cached :written :output :thinking :cost])
+           :tool-calls (count (:tool_calls message))}
+    truncated (assoc :truncated true)
+    interrupted (assoc :status "interrupted")))
+
+(defn- traced-sample!
+  "Call the engine's sample function and record the request as a run of KIND."
+  [s kind req opts]
+  (let [start (System/currentTimeMillis)]
+    (try (let [r ((:sample (:engine @s)) req opts)]
+           (trace-run! s kind start (sample-fields r))
+           r)
+         (catch Exception e
+           (trace-run! s kind start {:status "error" :error (ex-message e)})
+           (throw e)))))
 
 (defn start-repl!
   "Start the REPL and load init. Returns a problem description or nil."
@@ -179,12 +212,20 @@
   [s id code]
   (locking (:code-lock @s)
     (emit! s {:type :tool-call :id id :code code})
-    (let [{:keys [repl manifest interrupted]} @s
+    (let [start (System/currentTimeMillis)
+          {:keys [repl manifest interrupted]} @s
           {:keys [content note]} (delimiters/repair code)
           r (when-not interrupted
               (swap! s assoc :evaluating true)
               (try (repl/eval! repl (or content code) (:deadline-ms manifest))
                    (finally (swap! s assoc :evaluating false))))
+          ;; Before the restart below, so the run survives a close and leaves out the reload.
+          _ (trace-run! s "tool" start
+                        (cond-> {:tool-call-id id :chars (count (render r Long/MAX_VALUE))
+                                 :status (cond (:interrupted @s) "interrupted"
+                                               (or (:timeout r) (:died r) (:error? r)) "error"
+                                               :else "ok")}
+                          (or (:timeout r) (:died r)) (assoc :restart true)))
           [text status]
           (cond interrupted
                 ["Skipped because the user interrupted." :failed]
@@ -233,7 +274,8 @@
           (nil? cut) "Nothing to compact yet."
           :else
           (let [{:keys [message usage]}
-                (try ((:sample engine)
+                (try (traced-sample!
+                      s "compaction"
                       {:messages (context/summary-request (:summary compaction) (subvec messages from cut) focus)
                        :effort (:effort manifest)}
                       {:on-text (fn [_]) :on-open #(swap! s assoc :cancel %)})
@@ -254,9 +296,10 @@
   (emit! s {:type :text :text (str "[bbh] " text "\n\n")}))
 
 (defn- sample! [s system messages]
-  (let [{:keys [engine manifest dir]} @s]
+  (let [{:keys [manifest dir]} @s]
     (try
-      ((:sample engine)
+      (traced-sample!
+       s "llm"
        {:messages (into [{:role "system" :content system}] messages)
         :tools [{:type "function"
                  :function {:name "clojure" :description (:tool-description manifest)
@@ -451,7 +494,7 @@
   "Handle one user input: a bbh command, an env reply, or a model turn.
   Returns :end-turn or :cancelled, and throws for a /command nothing handles."
   [s text]
-  (swap! s assoc :interrupted false :turn-usage nil)
+  (swap! s assoc :interrupted false :turn-usage nil :trace nil)
   (let [[_ cmd args] (re-matches #"(?s)/(\S+)\s*(.*)" text)]
     (if-let [{:keys [run]} (get commands cmd)]
       (do (emit! s {:type :text :text (run s args)}) :end-turn)
@@ -464,8 +507,17 @@
           (throw (ex-info (str "Unknown command " (first (str/split text #"\s")) ". /help lists commands.") {}))
 
           :else
-          (let [notes (take-notes! s)]
+          (let [notes (take-notes! s)
+                start (System/currentTimeMillis)
+                from (count (:messages @s))
+                _ (swap! s assoc :trace (str (random-uuid)))
+                finish! #(trace-run! s "turn" start
+                                     (merge {:messages [from (count (:messages @s))] :usage (:turn-usage @s)} %))]
             (record! s {:role "user"
                         :content (if (seq notes) (str "[bbh] " (str/join " " notes) "\n\n" prompt) prompt)})
-            (turn! s)
+            (try (turn! s)
+                 (catch Exception e
+                   (finish! {:status "error" :error (ex-message e)})
+                   (throw e)))
+            (finish! (when (:interrupted @s) {:status "interrupted"}))
             (if (:interrupted @s) :cancelled :end-turn)))))))

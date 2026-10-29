@@ -62,9 +62,10 @@ Skills come from Pi's directories, so the pstack pack and project skills load as
 - `src/bbh/acp.clj` translates events into ACP updates. `src/bbh/main.clj` is the terminal front end and the entry point.
 - `src/bbh/delimiters.clj` heals the model's code before it runs, as pi-sci's `src/delimiters.ts` does. It appends the closers of a form truncated within its last 10 lines, or drops extra closers at the very end, and adds an `[auto-repair]` line to the result. Anything else runs unchanged.
 - `src/bbh/repl.clj` starts the REPL process and evaluates over nREPL. `src/bbh/llm.clj` streams OpenRouter.
+- `src/bbh/runs.clj` owns `runs.jsonl`, the LangSmith-style run tree. `session.clj` and `claude.clj` write it.
 - `src/bbh/usage.clj` reports Claude, Codex and OpenRouter limits, after Pi's `pi-usage` extension.
 
-Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.jsonl`, `compactions.jsonl`, `prompts.jsonl` (each distinct system prompt, tool description, model and effort, with the message count where it took effect), `outputs/`, `repl.log`, `repl.port` and, for Claude, `claude-session` and `claude.log`.
+Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.jsonl`, `runs.jsonl` (the [run tree](eval/README.md#runs-and-metrics) of timings, tokens and failures), `compactions.jsonl`, `prompts.jsonl` (each distinct system prompt, tool description, model and effort, with the message count where it took effect), `outputs/`, `repl.log`, `repl.port` and, for Claude, `claude-session` and `claude.log`.
 
 ## Lifetimes
 
@@ -81,6 +82,7 @@ bb test:doom             # installed Doom startup and Ctrl-N, in a separate term
 bb test:doom launcher    # installed emacs-bbh launcher, including automatic session startup
 bb try MODEL PROMPT...   # real prompts through agent-shell, printing the buffer
 bb runs:html [N] [OUT]   # HTML page of the newest N conversations with prompts, tool calls, workflow journals, evidence and reviews; `make bbh-runs` from the repo root
+bb runs:metrics [ROOT...]  # latency, tokens, cache share, cost and failures per day and model
 bb stats                 # timeouts, restarts and errors per conversation, live workflow runs, review times
 bb eval:lint             # assertion hits per cohort over real and eval conversations
 bb eval:review           # label conversations good or bad with a critique

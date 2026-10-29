@@ -3,6 +3,7 @@
             [babashka.process :as p]
             [bbh.claude]
             [bbh.models :as models]
+            [bbh.runs :as runs]
             [bbh.session :as session]
             [clojure.test :refer [deftest is]]))
 
@@ -81,6 +82,40 @@
                    requests)))
           (is (= 200000 (:size (last @events))))
           (is (< (abs (- 0.002 (:spent @s))) 1e-9))
+          (finally (session/close! s)))))))
+
+(deftest a-claude-turn-writes-tool-llm-and-turn-runs
+  (with-cli
+    (fn []
+      (let [{:keys [s]} (harness)]
+        (try
+          (session/prompt! s "one")
+          (let [rs (runs/load-runs (:dir @s))
+                [tool llm turn] rs]
+            (is (= ["tool" "llm" "turn"] (mapv :kind rs)))
+            (is (= #{(:id turn)} (set (map :parent [tool llm]))))
+            (is (= {:input 1000 :cached 900 :written 98 :output 7 :thinking 0} (:usage llm)))
+            (is (= ["ok" "claude/fake"] [(:status tool) (:model turn)]))
+            (is (< (abs (- 0.001 (get-in turn [:usage :cost]))) 1e-9)))
+          (finally (session/close! s)))))))
+
+(deftest an-interrupted-claude-request-keeps-its-time-and-says-it-was-interrupted
+  (with-cli
+    (fn []
+      (let [{:keys [s events]} (harness)]
+        (try
+          (let [turn (future (session/prompt! s "stream"))]
+            (loop [n 200]
+              (when (and (pos? n) (not-any? #(= :text (:type %)) @events))
+                (Thread/sleep 25)
+                (recur (dec n))))
+            (Thread/sleep 200)
+            (session/interrupt! s)
+            (is (= :cancelled (deref turn 10000 :timed-out))))
+          (let [[llm turn] (runs/load-runs (:dir @s))]
+            (is (= ["llm" "interrupted"] [(:kind llm) (:status llm)]))
+            (is (>= (:ms llm) 200))
+            (is (= ["turn" "interrupted"] [(:kind turn) (:status turn)])))
           (finally (session/close! s)))))))
 
 (deftest a-resumed-claude-session-hears-what-another-model-said
