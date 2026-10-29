@@ -109,7 +109,31 @@ export VK_DRIVER_FILES=${VK_DRIVER_FILES:-/run/opengl-driver/share/vulkan/icd.d/
 export PATH=~a/bin${PATH:+:$PATH}
 exec ~a/bin/python3.14 ~a/mlx-omarchy-parakeet \"$@\"~%"
                           #$bash-minimal site #$glslang #$python mlx-bin)))
-              (chmod (string-append #$output "/bin/mlx-omarchy-parakeet") #o555)))))
+              (chmod (string-append #$output "/bin/mlx-omarchy-parakeet") #o555)
+              ;; The resident daemon gets the same bundles and seal pins as the
+              ;; CLI's private worker, read from the shipped runtime pin.
+              (let* ((share (string-append site "/mlx/share/mlx-omarchy/parakeet-1"))
+                     (port (open-pipe* OPEN_READ (string-append #$python "/bin/python3.14") "-c" "
+import json, sys
+share = sys.argv[1]
+assets = json.load(open(share + '/parakeet-runtime-pin.json'))['assets']
+args = ['--libane', share + '/libane/libane-strict.so']
+args += [a for n in sorted(assets['bundles']) for a in ('--bundle', f'{n}={share}/bundles/{n}')]
+args += [a for n, files in sorted(assets['bundles'].items())
+         for f, sha in sorted(files.items()) for a in ('--seal-expect', f'{n}:{f}={sha}')]
+args += [a for f, sha in assets['libane'].items() for a in ('--seal-expect-libane', f'{f}={sha}')]
+print(' '.join(args))" share))
+                     (args (string-trim-both (get-string-all port)))
+                     (daemon (string-append #$output "/bin/mlx-omarchy-parakeet-daemon")))
+                (unless (zero? (status:exit-val (close-pipe port)))
+                  (error "could not read the runtime pin"))
+                (call-with-output-file daemon
+                  (lambda (port)
+                    (format port "#!~a/bin/bash
+# usage: mlx-omarchy-parakeet-daemon SOCKET IDLE_MS
+exec ~a/mlx-omarchy-ane-worker --daemon --socket \"$1\" --idle-time-ms \"$2\" ~a~%"
+                            #$bash-minimal mlx-bin args)))
+                (chmod daemon #o555))))))
       (supported-systems '("aarch64-linux"))
       (home-page "https://github.com/joshuaswarren/omarchy-mlx")
       (synopsis "Parakeet speech-to-text on the Apple Neural Engine")

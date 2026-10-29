@@ -12,6 +12,9 @@
 (def pid-file (str state-dir "/recorder.pid"))
 (def busy-file (str state-dir "/busy"))
 (def wav (str state-dir "/speech.wav"))
+(def socket (str state-dir "/ane.sock"))
+;; The daemon keeps the encoder loaded on the Neural Engine between presses.
+(def idle-ms "600000")
 
 (defn notify [& lines]
   (when-let [notify (or (fs/which "notify-replace")
@@ -25,10 +28,22 @@
     (let [pid (str/trim (slurp pid-file))]
       (if (alive? pid) pid (do (fs/delete-if-exists pid-file) nil)))))
 
+(defn ensure-daemon!
+  "Start the resident ANE daemon unless its pid file names a live process.
+  It loads while the user speaks; until it is up the CLI uses a private worker."
+  []
+  (fs/create-dirs state-dir)
+  (let [pid-file (str socket ".pid")]
+    (when-not (and (fs/exists? pid-file) (alive? (str/trim (slurp pid-file))))
+      (p/process {:out :write :out-file (fs/file state-dir "daemon.log") :err :out}
+                 "mlx-omarchy-parakeet-daemon" socket idle-ms))))
+
 (defn transcribe [audio]
   (let [out (str (fs/create-temp-dir {:prefix "dictate-"}))]
     (try
-      (p/shell {:out :string :err :string} "mlx-omarchy-parakeet" "transcribe" "-o" out (str audio))
+      (p/shell {:out :string :err :string
+                :extra-env {"MLX_OMARCHY_PK_KEEP_WORKER" "1" "MLX_OMARCHY_ANE_SOCK" socket}}
+               "mlx-omarchy-parakeet" "transcribe" "-o" out (str audio))
       ;; Parakeet pads to 30 s and can end in a run of dots, sometimes
       ;; followed by stray characters.
       (-> (slurp (str out "/transcript.txt"))
@@ -43,9 +58,9 @@
     :else (p/shell "wtype" "--" text)))
 
 (defn start-recording! []
-  (fs/create-dirs state-dir)
+  (ensure-daemon!)
   (fs/delete-if-exists wav)
-  (let [proc (p/process {:out :write :out-file (fs/file "/dev/null") :err :inherit}
+  (let [proc (p/process {:out :write :out-file (fs/file state-dir "recorder.log") :err :out}
                         "pw-record" "--rate" "16000" "--channels" "1" "--format" "s16" wav)]
     (Thread/sleep 200)
     (if (p/alive? proc)
@@ -69,7 +84,7 @@
 (defn -main [& args]
   (let [[flag file & more] args]
     (cond
-      (= flag "--file") (deliver! (transcribe file) (= more ["--print"]))
+      (= flag "--file") (do (ensure-daemon!) (deliver! (transcribe file) (= more ["--print"])))
       (fs/exists? busy-file) nil
       :else (if-let [pid (recorder-pid)] (stop-and-type! pid) (start-recording!)))))
 
