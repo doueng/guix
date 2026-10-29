@@ -84,6 +84,11 @@
    (version "1.5.0")
    (outputs ("out" "/nix/store/my9rdrng4fn2haw4cmf90apg1cyapihb-nixfmt-1.5.0")))
   (package
+   (attr "python314")
+   (version "3.14.8")
+   (outputs
+    ("out" "/nix/store/lq2fsnmg0q3y0vlxn91w8s8wvj1m6fld-python3-3.14.8")))
+  (package
    (attr "ripgrep")
    (version "15.2.0")
    (outputs

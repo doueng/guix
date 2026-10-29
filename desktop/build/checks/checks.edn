@@ -22,6 +22,10 @@
    :paths ["modules/engstrand/packages/omarchy-ane.scm" "modules/engstrand/system/bootloader.scm"
            "modules/engstrand/system/asahi.scm" "desktop/build/ane/**"]
    :slow ["bb desktop/build/ane/check-packages.bb" "bb desktop/build/ane/check-system.bb"]}
+  {:name "parakeet on the neural engine"
+   :paths ["modules/engstrand/packages/omarchy-mlx.scm" "desktop/build/ane/check-transcribe.bb"
+           "desktop/build/ane/fixtures/**"]
+   :slow ["bb desktop/build/ane/check-transcribe.bb"]}
   {:name "doom"
    :paths ["desktop/configs/doom/**" "desktop/build/doom/**"]
    :checks ["make doom-check"]}

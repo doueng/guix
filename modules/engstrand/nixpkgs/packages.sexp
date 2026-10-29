@@ -17,6 +17,7 @@
  "jujutsu"
  "neovim"
  "nixfmt"
+ "python314"
  "ripgrep"
  "shellcheck"
  "shfmt"
