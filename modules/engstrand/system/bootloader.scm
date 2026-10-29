@@ -2,6 +2,7 @@
   #:use-module (asahi guix build modules)
   #:use-module (asahi guix packages bootloader)
   #:use-module (asahi guix packages linux)
+  #:use-module (engstrand packages omarchy-ane)
   #:use-module (gnu bootloader)
   #:use-module (gnu bootloader grub)
   #:use-module (gnu bootloader m1n1)
@@ -21,6 +22,10 @@
    #:linux asahi-linux
    #:configs '("CONFIG_INPUT_UINPUT=m")
    #:extra-version "keyd"))
+
+(define-public asahi-linux-keyd-ane (omarchy-ane-module asahi-linux-keyd))
+
+(define-public asahi-dtbs-ane (dtbs-with-ane asahi-linux-keyd))
 
 (define %bootloader-module-dir
   (dirname (canonicalize-path

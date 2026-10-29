@@ -18,6 +18,10 @@
   {:name "nixpkgs bridge"
    :paths ["modules/engstrand/nixpkgs/**" "modules/engstrand/nixpkgs.scm" "desktop/build/nixpkgs/**"]
    :slow ["make nixpkgs-verify"]}
+  {:name "apple neural engine"
+   :paths ["modules/engstrand/packages/omarchy-ane.scm" "modules/engstrand/system/bootloader.scm"
+           "desktop/build/ane/**"]
+   :slow ["bb desktop/build/ane/check-packages.bb"]}
   {:name "doom"
    :paths ["desktop/configs/doom/**" "desktop/build/doom/**"]
    :checks ["make doom-check"]}
