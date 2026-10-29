@@ -440,15 +440,31 @@
     (should (< (length report) 4096))))
 
 (ert-deftest bbh-status-reports-to-herdr ()
-  (let ((calls nil)
-        (process-environment (append '("HERDR_ENV=1" "HERDR_PANE_ID=w1:p1" "HERDR_BIN_PATH=/bin/herdr")
-                                     process-environment)))
-    (cl-letf (((symbol-function 'make-process)
-               (lambda (&rest args) (push (plist-get args :command) calls) nil)))
-      (dolist (event '(input-submitted turn-complete error))
-        (eng/bbh-status--on-event (list (cons :event event))))
-      (eng/bbh-status--clear))
+  (let* ((calls nil)
+         (data (make-temp-file "bbh-herdr-test" t))
+         (process-environment (append (list "HERDR_ENV=1" "HERDR_PANE_ID=w1:p1" "HERDR_BIN_PATH=/bin/herdr"
+                                            (concat "XDG_DATA_HOME=" data))
+                                      process-environment))
+         (shell (generate-new-buffer " bbh-test-shell")))
+    (with-current-buffer shell
+      (setq-local agent-shell--state (list (cons :session (list (cons :id "20200101-000000-000"))))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'make-process)
+                   (lambda (&rest args) (push (plist-get args :command) calls) nil)))
+          ;; The first turn has not saved the conversation yet, so there is nothing to resume.
+          (eng/bbh-status--on-event shell (list (cons :event 'input-submitted)))
+          (make-directory (file-name-directory (eng/bbh--conversation-file "20200101-000000-000" "x")) t)
+          (write-region "{}\n" nil (eng/bbh--conversation-file "20200101-000000-000" "messages.jsonl"))
+          (dolist (event '(turn-complete error))
+            (eng/bbh-status--on-event shell (list (cons :event event))))
+          (eng/bbh-status--clear))
+      (kill-buffer shell)
+      (delete-directory data t))
     (setq calls (nreverse calls))
+    (should (equal (mapcar (lambda (c) (cdr (member "--" c))) calls)
+                   '(nil ("emacs-bbh" "--resume" "20200101-000000-000")
+                         ("emacs-bbh" "--resume" "20200101-000000-000") nil)))
+    (should (equal (cadr (member "--agent-session-id" (nth 1 calls))) "20200101-000000-000"))
     (should (equal (mapcar (lambda (c) (nth 2 c)) calls)
                    '("report-agent" "report-agent" "report-agent" "release-agent")))
     (should (equal (mapcar (lambda (c) (cadr (member "--state" c))) calls)
@@ -457,3 +473,13 @@
     (let ((seqs (mapcar (lambda (c) (string-to-number (cadr (member "--seq" c)))) calls)))
       (should (equal seqs (sort (copy-sequence seqs) #'<)))
       (should (= (length seqs) (length (delete-dups (copy-sequence seqs))))))))
+
+(ert-deftest bbh-conversation-follows-resume ()
+  (let ((shell (generate-new-buffer " bbh-test-shell")))
+    (unwind-protect
+        (with-current-buffer shell
+          (setq-local agent-shell--state (list (cons :session (list (cons :id "20200101-000000-000")))))
+          (should (equal (eng/bbh--conversation shell) "20200101-000000-000"))
+          (setq eng/bbh-conversation "20210101-000000-000")
+          (should (equal (eng/bbh--conversation shell) "20210101-000000-000")))
+      (kill-buffer shell))))

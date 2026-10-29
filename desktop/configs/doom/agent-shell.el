@@ -1,7 +1,8 @@
 ;;; agent-shell.el --- bbh in agent-shell -*- lexical-binding: t; -*-
 
-(defun eng/bbh-agent-config ()
-  "agent-shell configuration for bbh, the babashka agent harness."
+(defun eng/bbh-agent-config (&optional resume)
+  "agent-shell configuration for bbh, the babashka agent harness.
+RESUME is a saved conversation id the session continues under that id."
   (agent-shell-make-agent-config
    :identifier 'bbh
    :mode-line-name "bbh"
@@ -11,15 +12,26 @@
    :client-maker (lambda (buffer)
                    (agent-shell--make-acp-client
                     :command (or (executable-find "bbh") (expand-file-name "~/.local/bin/bbh"))
-                    :command-params '("acp")
+                    :command-params (append '("acp") (when resume (list "--resume" resume)))
                     :context-buffer buffer))))
 
-(defun eng/bbh ()
-  "Start a bbh session in agent-shell."
+(defvar-local eng/bbh-conversation nil
+  "The conversation a /resume in this shell moved to.  The session id stays the same.")
+
+(defun eng/bbh (&optional resume)
+  "Start a bbh session in agent-shell.
+RESUME is a saved conversation id to continue, as `emacs-bbh --resume' passes
+when herdr reopens a pane.  A conversation that was never saved starts fresh."
   (interactive)
   (require 'agent-shell)
-  (eng/bbh-layout (agent-shell--start :config (eng/bbh-agent-config)
-                                       :new-session t :no-focus t)))
+  (let* ((resume (and resume (file-exists-p (eng/bbh--conversation-file resume "messages.jsonl")) resume))
+         (layout (eng/bbh-layout (agent-shell--start :config (eng/bbh-agent-config resume)
+                                                      :new-session t :no-focus t))))
+    (when resume
+      (with-current-buffer (eng/bbh--transcript (eng/bbh--shell))
+        (eng/bbh-transcript--edit
+         (lambda () (insert "Resumed " resume ": " (eng/bbh--first-prompt resume) "\n\n")))))
+    layout))
 
 (defun eng/bbh-send ()
   "Send the draft and keep the bottom composer ready for another prompt.
@@ -33,8 +45,10 @@ saved conversation clears the transcript the same way.  A bare /model or
       (insert draft))
     (if (equal draft "/new")
         (progn (erase-buffer) (eng/bbh-new))
-      (when (eng/bbh--resumes-p draft)
-        (eng/bbh-clear-transcript))
+      (when-let* ((id (eng/bbh--resumes-p draft)))
+        (eng/bbh-clear-transcript)
+        (with-current-buffer (eng/bbh--shell)
+          (setq eng/bbh-conversation id)))
       (agent-shell-viewport-compose-send t))))
 
 (defun eng/bbh--conversation-file (id file)
@@ -78,13 +92,7 @@ saved conversation clears the transcript the same way.  A bare /model or
 
 (defun eng/bbh--read-conversation ()
   "Choose a saved conversation other than this one, newest first."
-  (let* ((root (file-name-directory (directory-file-name (eng/bbh--conversation-file "x" ""))))
-         (current (eng/bbh--session-id (eng/bbh--shell)))
-         (ids (seq-filter (lambda (id)
-                            (and (not (equal id current))
-                                 (file-exists-p (eng/bbh--conversation-file id "messages.jsonl"))))
-                          (and (file-directory-p root)
-                               (reverse (directory-files root nil "\\`[^.]")))))
+  (let* ((ids (eng/bbh--other-conversations))
          (choices (or (mapcar (lambda (id) (cons (concat id "  " (eng/bbh--first-prompt id)) id)) ids)
                       (user-error "No other conversations"))))
     (cdr (assoc (completing-read "Resume: "
@@ -96,12 +104,23 @@ saved conversation clears the transcript the same way.  A bare /model or
                                  nil t)
                 choices))))
 
+(defun eng/bbh--other-conversations ()
+  "Saved conversations other than this session's, newest first.  /resume last takes the first."
+  (let ((root (file-name-directory (directory-file-name (eng/bbh--conversation-file "x" ""))))
+        (current (eng/bbh--conversation (eng/bbh--shell))))
+    (seq-filter (lambda (id)
+                  (and (not (equal id current))
+                       (file-exists-p (eng/bbh--conversation-file id "messages.jsonl"))))
+                (and (file-directory-p root)
+                     (reverse (directory-files root nil "\\`[^.]"))))))
+
 (defun eng/bbh--resumes-p (draft)
-  "Whether DRAFT names a conversation /resume can switch to."
-  (and (string-match "\\`/resume[ \t]+\\(\\S-+\\)\\'" draft)
-       (let ((id (match-string 1 draft)))
-         (or (equal id "last")
-             (file-exists-p (eng/bbh--conversation-file id "messages.jsonl"))))))
+  "The conversation id DRAFT's /resume switches to, or nil."
+  (when (string-match "\\`/resume[ \t]+\\(\\S-+\\)\\'" draft)
+    (let ((id (match-string 1 draft)))
+      (if (equal id "last")
+          (car (eng/bbh--other-conversations))
+        (and (file-exists-p (eng/bbh--conversation-file id "messages.jsonl")) id)))))
 
 (defun eng/bbh-clear-transcript ()
   "Empty the transcript of the bbh session in the current buffer."
@@ -137,6 +156,8 @@ saved conversation clears the transcript the same way.  A bare /model or
 ;; <https://www.superlogical.com/rex/docs/build/program-status>.  Herdr does
 ;; not read OSC 7501 yet, so inside herdr the same state also goes to
 ;; `herdr pane report-agent', which shows it and notifies on a finished turn.
+;; Once the conversation is saved, each report carries `emacs-bbh --resume ID',
+;; so a herdr restart reopens the pane on the same conversation.
 
 (defvar eng/bbh-status--seq 0
   "The last sequence number sent to herdr.  Herdr drops reports that do not increase it.")
@@ -155,8 +176,9 @@ saved conversation clears the transcript the same way.  A bare /model or
                      t)))
           "\e\\"))
 
-(defun eng/bbh-status--herdr (state &optional msg)
-  "Report STATE to herdr in the background, when Emacs runs in a herdr pane."
+(defun eng/bbh-status--herdr (state &optional msg conversation)
+  "Report STATE to herdr in the background, when Emacs runs in a herdr pane.
+A saved CONVERSATION goes along as the session herdr reopens after a restart."
   (let ((bin (getenv "HERDR_BIN_PATH"))
         (pane (getenv "HERDR_PANE_ID")))
     (when (and (equal (getenv "HERDR_ENV") "1") bin pane)
@@ -171,19 +193,26 @@ saved conversation clears the transcript the same way.  A bare /model or
                           (unless (eq state 'clear)
                             (list "--state" (if (eq state 'working) "working" "idle")))
                           (when (and msg (not (eq state 'clear)))
-                            (list "--message" msg))))))))
+                            (list "--message" msg))
+                          (when (and conversation (not (eq state 'clear)))
+                            (list "--agent-session-id" conversation
+                                  "--" "emacs-bbh" "--resume" conversation))))))))
 
-(defun eng/bbh-status (state &optional msg)
-  "Report STATE, one of working, done, error or clear, with an optional MSG."
+(defun eng/bbh-status (state &optional msg conversation)
+  "Report STATE, one of working, done, error or clear, with an optional MSG.
+CONVERSATION is the saved conversation herdr should resume."
   (unless (or noninteractive (display-graphic-p))
     (send-string-to-terminal (eng/bbh-status--osc state msg)))
-  (eng/bbh-status--herdr state msg))
+  (eng/bbh-status--herdr state msg conversation))
 
-(defun eng/bbh-status--on-event (event)
-  (pcase (map-elt event :event)
-    ('input-submitted (eng/bbh-status 'working "Working"))
-    ('turn-complete (eng/bbh-status 'done "bbh is waiting for input"))
-    ('error (eng/bbh-status 'error (or (map-nested-elt event '(:data :message)) "The request failed")))))
+(defun eng/bbh-status--on-event (shell event)
+  (let ((conversation (when-let* ((id (eng/bbh--conversation shell)))
+                        (and (file-exists-p (eng/bbh--conversation-file id "messages.jsonl")) id))))
+    (pcase (map-elt event :event)
+      ('input-submitted (eng/bbh-status 'working "Working" conversation))
+      ('turn-complete (eng/bbh-status 'done "bbh is waiting for input" conversation))
+      ('error (eng/bbh-status 'error (or (map-nested-elt event '(:data :message)) "The request failed")
+                              conversation)))))
 
 (defun eng/bbh-status--clear ()
   (eng/bbh-status 'clear))
@@ -597,7 +626,8 @@ Org leaves result blocks, a special block, without the code background."
                 eng/bbh-transcript--tools (make-hash-table :test #'equal)))
         (agent-shell-subscribe-to :shell-buffer shell
                                   :on-event (lambda (event) (eng/bbh-transcript--on-event transcript event)))
-        (agent-shell-subscribe-to :shell-buffer shell :on-event #'eng/bbh-status--on-event)
+        (agent-shell-subscribe-to :shell-buffer shell
+                                  :on-event (lambda (event) (eng/bbh-status--on-event shell event)))
         (with-current-buffer shell
           (add-hook 'kill-buffer-hook #'eng/bbh-status--clear nil t)
           (setq eng/bbh-transcript transcript))))))
@@ -634,9 +664,14 @@ Org leaves result blocks, a special block, without the code background."
 (put 'eng/bbh-composer 'permanent-local t)
 
 (defun eng/bbh--session-id (shell)
-  "The bbh conversation id of SHELL, which /resume takes, or nil."
+  "The ACP session id of SHELL, or nil.  It names the conversation SHELL started with."
   (when (buffer-live-p shell)
     (map-nested-elt (buffer-local-value 'agent-shell--state shell) '(:session :id))))
+
+(defun eng/bbh--conversation (shell)
+  "The conversation id SHELL is on now, which /resume and `emacs-bbh --resume' take, or nil."
+  (when (buffer-live-p shell)
+    (or (buffer-local-value 'eng/bbh-conversation shell) (eng/bbh--session-id shell))))
 
 (defun eng/bbh--model-name (shell)
   "The model SHELL's agent-shell reports as its current model, or nil.
@@ -699,7 +734,7 @@ The key hints and conversation id are in `eng/bbh-keys'.  % is escaped because t
   "Show the composer keys in the echo area."
   (interactive)
   (message "%s%s" "C-n send or queue · RET newline · M-p/M-n history · M-k/M-j scroll · C-c C-t tools · C-c C-k stop"
-           (if-let* ((id (eng/bbh--session-id (eng/bbh--shell)))) (concat " · /resume " id) "")))
+           (if-let* ((id (eng/bbh--conversation (eng/bbh--shell)))) (concat " · /resume " id) "")))
 
 (defun eng/bbh-composer-header (&rest _)
   "Keep the composer status line current when agent-shell refreshes its header."

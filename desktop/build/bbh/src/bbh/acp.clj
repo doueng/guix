@@ -60,6 +60,10 @@
 
 (def ^:private sessions (atom {}))
 
+(def ^:private resume-dir
+  "The saved conversation `bbh acp --resume` names. The first session/new takes it."
+  (atom nil))
+
 (defn- config-options
   "The model selector in the configOptions form that newer ACP clients read
   instead of the models field."
@@ -73,8 +77,12 @@
                 :availableCommands (session/all-commands s)}))
 
 (defn- new-session [{:keys [cwd]}]
-  (let [sid (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS"))
-        s (session/new-session {:dir (str (fs/path (data-dir) sid))
+  (let [[resume] (reset-vals! resume-dir nil)
+        sid (if resume
+              (str (fs/file-name resume))
+              (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS")))
+        s (session/new-session {:dir (or resume (str (fs/path (data-dir) sid)))
+                                :notes (when resume ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
                                 :init (or (System/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
                                 :cwd (or cwd (str (fs/cwd)))
                                 :model (models/default-model)
@@ -152,7 +160,11 @@
       (when id
         (send! {:id id :error {:code -32601 :message (str "bbh does not implement " method)}})))))
 
-(defn -main [& _]
+(defn -main
+  "Serve ACP on stdin and stdout. RESUME is a saved conversation directory the
+  first session continues, under its own id."
+  [& [resume]]
+  (reset! resume-dir resume)
   (try
     (doseq [line (line-seq (io/reader System/in))
             :when (not (str/blank? line))]

@@ -4,7 +4,7 @@ A coding agent harness in babashka. Each conversation gets its own bb REPL proce
 
 ## Front ends
 
-From a project directory, `emacs-bbh` opens your normal Doom Emacs with a bbh session ready. It accepts normal Emacs arguments, including `emacs-bbh -nw` for terminal mode. The installed Emacs build is currently terminal-only.
+From a project directory, `emacs-bbh` opens your normal Doom Emacs with a bbh session ready. It accepts normal Emacs arguments, including `emacs-bbh -nw` for terminal mode. The installed Emacs build is currently terminal-only. `emacs-bbh --resume ID` continues saved conversation ID. Inside herdr, bbh reports that command with its state, so a herdr restart reopens each pane's conversation.
 
 In Emacs, `M-x eng/bbh` starts a session in [agent-shell](https://github.com/xenodium/agent-shell), which runs `bbh acp` and speaks the Agent Client Protocol over stdio. `M-x eng/bbh-cider-connect` attaches CIDER to that session's REPL. The Doom side lives in `desktop/configs/doom/agent-shell.el`.
 

@@ -6,16 +6,17 @@
             [clojure.test :refer [deftest is]])
   (:import [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
-(defn- client [steps]
+(defn- client [steps & {:keys [args setup]}]
   (let [dir (fs/create-temp-dir {:prefix "bbh-acp-test"})
+        _ (when setup (setup dir))
         script (str (fs/path dir "script.edn"))
         init (str (fs/path dir "init.clj"))
         _ (spit script (pr-str steps))
         _ (spit init "")
-        proc (p/process {:extra-env {"XDG_DATA_HOME" (str dir) "BBH_INIT" init
+        proc (apply p/process {:extra-env {"XDG_DATA_HOME" (str dir) "BBH_INIT" init
                                      "BBH_MODEL" (str "script/" script)}
                          :err :string}
-                        "bb" "-m" "bbh.main" "acp")
+                        "bb" "-m" "bbh.main" "acp" args)
         queue (LinkedBlockingQueue.)]
     (future
       (try
@@ -76,6 +77,24 @@
         (is (= ["continued"] (keep #(get-in % [:params :update :content :text]) (until! c #(= 4 (:id %))))))
         (is (= 4 (count (fs/read-all-lines (str (fs/path old "messages.jsonl"))))))
         (is (fs/exists? (fs/path root sid "repl.port"))))
+      (finally (stop! c)))))
+
+(deftest resume-flag-continues-a-conversation-as-the-first-session
+  (let [id "20200101-000000-000"
+        c (client ["continued"]
+                  :args ["--resume" id]
+                  :setup (fn [dir]
+                           (let [old (fs/create-dirs (fs/path dir "bbh" "conversations" id))]
+                             (spit (str (fs/path old "messages.jsonl"))
+                                   (str (json/generate-string {:role "user" :content "hello"}) "\n")))))]
+    (try
+      (let [sid (start! c)]
+        (is (= id sid))
+        (send! c 3 "session/prompt" {:sessionId sid :prompt [{:type "text" :text "and?"}]})
+        (is (= ["continued"] (keep #(get-in % [:params :update :content :text]) (until! c #(= 3 (:id %))))))
+        (is (= 3 (count (fs/read-all-lines (str (fs/path (:dir c) "bbh" "conversations" id "messages.jsonl"))))))
+        (send! c 4 "session/new" {:cwd (:dir c)})
+        (is (not= id (get-in (response! c 4) [:result :sessionId]))))
       (finally (stop! c)))))
 
 (deftest bad-requests-do-not-kill-the-agent

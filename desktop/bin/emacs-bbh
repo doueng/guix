@@ -1,4 +1,10 @@
 #!/usr/bin/env bb
+;; emacs-bbh [--resume ID] [EMACS-ARGS...] opens Doom with a bbh session.
+;; Herdr runs it with --resume to reopen a pane's conversation after a restart;
+;; see eng/bbh-status--herdr in desktop/configs/doom/agent-shell.el.
 (require '[babashka.fs :as fs] '[babashka.process :as p])
-(apply p/exec (str (fs/home) "/.local/bin/emacs")
-       (concat *command-line-args* ["--eval" "(add-hook 'window-setup-hook #'eng/bbh 100)"]))
+(let [[flag id & more] *command-line-args*
+      [resume args] (if (= "--resume" flag) [id more] [nil *command-line-args*])]
+  (apply p/exec (str (fs/home) "/.local/bin/emacs")
+         (concat args ["--eval" (format "(add-hook 'window-setup-hook (lambda () (eng/bbh %s)) 100)"
+                                         (if resume (pr-str resume) ""))])))

@@ -83,5 +83,5 @@
 
 (defn -main [& args]
   (if (= "acp" (first args))
-    (acp/-main)
+    (acp/-main (some-> (:resume (parse-args (rest args))) conversation-dir))
     (terminal args)))
