@@ -389,3 +389,29 @@ Only the final expression's value is returned. Print intermediate results with p
          {:keys [verdict reviewer]} (wf/review! id)]
      (println (str "review: " (name verdict) " by " reviewer))
      (wf-status id))))
+
+;; Headless browser screenshots via the flatpak Chrome (Guix has no aarch64 chromium substitute), and a
+;; Claude delegate that views them, since bbh tool results carry text only.
+(def shot-dir "/tmp/bbh-shots")
+
+(defn shot
+  "Headless screenshot of URL (default localhost:8787) with flatpak Chrome. Waits WAIT ms of virtual time for JS.
+  Returns the png path."
+  ([] (shot "http://localhost:8787/"))
+  ([url & {:keys [w h name wait] :or {w 1280 h 900 wait 8000}}]
+   (fs/create-dirs shot-dir)
+   (let [out (str shot-dir "/" (or name (str "shot-" w "x" h "-" (System/currentTimeMillis))) ".png")
+         _ (fs/delete-if-exists out)
+         r (p/shell {:out :string :err :string :continue true :timeout 60000}
+                    "flatpak" "run" (str "--filesystem=" shot-dir) "com.google.Chrome"
+                    "--headless=new" "--disable-gpu" "--no-first-run" "--hide-scrollbars"
+                    "--user-data-dir=/tmp/bbh-chrome" (str "--virtual-time-budget=" wait)
+                    (str "--screenshot=" out) (str "--window-size=" w "," h) url)]
+     (if (fs/exists? out) out (throw (ex-info "screenshot failed" {:err (:err r)}))))))
+
+(defn look
+  "Have a Claude delegate view the png PATHS and answer QUESTION in text."
+  [question & paths]
+  (:reply (delegate (str "Use the Read tool to view these screenshots of a web app: " (str/join ", " paths)
+                         "\n\n" question
+                         "\nBe concrete: layout, spacing, alignment, typography, colors, overflow. Under 250 words."))))
