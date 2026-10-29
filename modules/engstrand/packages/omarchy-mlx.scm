@@ -2,6 +2,7 @@
 ;; for the mel frontend and decoder, and the ANE worker for the encoder.
 (define-module (engstrand packages omarchy-mlx)
   #:use-module (engstrand nixpkgs)
+  #:use-module (engstrand packages assets)
   #:use-module (gnu packages base)
   #:use-module (gnu packages bash)
   #:use-module (gnu packages compression)
@@ -133,7 +134,20 @@ print(' '.join(args))" share))
 # usage: mlx-omarchy-parakeet-daemon SOCKET IDLE_MS
 exec ~a/mlx-omarchy-ane-worker --daemon --socket \"$1\" --idle-time-ms \"$2\" ~a~%"
                             #$bash-minimal mlx-bin args)))
-                (chmod daemon #o555))))))
+                (chmod daemon #o555))
+              ;; One process serving repeated transcriptions, for streaming.
+              (let ((server (string-append #$output "/bin/mlx-omarchy-parakeet-server")))
+                (call-with-output-file server
+                  (lambda (port)
+                    (format port "#!~a/bin/bash
+export PYTHONPATH=~a${PYTHONPATH:+:$PYTHONPATH}
+export VK_DRIVER_FILES=${VK_DRIVER_FILES:-/run/opengl-driver/share/vulkan/icd.d/asahi_icd.aarch64.json}
+export PATH=~a/bin${PATH:+:$PATH}
+exec ~a/bin/python3.14 -P ~a ~a/mlx-omarchy-parakeet~%"
+                            #$bash-minimal site #$glslang #$python
+                            #$(package-asset "desktop/build/ane/parakeet_server.py")
+                            mlx-bin)))
+                (chmod server #o555))))))
       (supported-systems '("aarch64-linux"))
       (home-page "https://github.com/joshuaswarren/omarchy-mlx")
       (synopsis "Parakeet speech-to-text on the Apple Neural Engine")

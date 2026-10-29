@@ -24,7 +24,7 @@
    :slow ["bb desktop/build/ane/check-packages.bb" "bb desktop/build/ane/check-system.bb"]}
   {:name "parakeet on the neural engine"
    :paths ["modules/engstrand/packages/omarchy-mlx.scm" "desktop/build/ane/check-transcribe.bb"
-           "desktop/build/ane/wer.clj" "desktop/build/ane/fixtures/**"]
+           "desktop/build/ane/parakeet_server.py" "desktop/build/ane/wer.clj" "desktop/build/ane/fixtures/**"]
    :slow ["bb desktop/build/ane/check-transcribe.bb"]}
   {:name "dictate"
    :paths ["desktop/bin/dictate" "desktop/build/ane/check-dictate.bb" "desktop/build/ane/wer.clj"]

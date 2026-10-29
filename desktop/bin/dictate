@@ -1,91 +1,215 @@
 #!/usr/bin/env bb
-;; Toggle dictation: the first press records the microphone, the second
-;; transcribes the recording with Parakeet on the Neural Engine and types it.
-;;   dictate                  toggle
-;;   dictate --file F [--print]  transcribe F, then type it (or print it)
+;; Dictation with Parakeet on the Neural Engine.  Hold Cmd+M to talk:
+;; Hyprland runs `dictate start` on press and `dictate stop` on release.
+;; Words are typed as soon as two consecutive transcriptions agree on them.
+;;   dictate start | stop        begin or finish a session; start also stops a running one
+;;   dictate                     toggle
+;;   dictate --file F [--print]  transcribe F once, then type (or print) it
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
+         '[cheshire.core :as json]
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io]
          '[clojure.string :as str])
+(import '[java.io ByteArrayOutputStream RandomAccessFile]
+        '[java.nio ByteBuffer ByteOrder])
 
 (def state-dir (or (System/getenv "DICTATE_STATE_DIR")
                    (str (or (System/getenv "XDG_RUNTIME_DIR") (fs/temp-dir)) "/dictate")))
-(def pid-file (str state-dir "/recorder.pid"))
-(def busy-file (str state-dir "/busy"))
-(def wav (str state-dir "/speech.wav"))
+(def session-pid-file (str state-dir "/session.pid"))
+(def stop-file (str state-dir "/stop"))
 (def socket (str state-dir "/ane.sock"))
-;; The daemon keeps the encoder loaded on the Neural Engine between presses.
+;; The daemon keeps the encoder loaded on the Neural Engine between sessions.
 (def idle-ms "600000")
+(def recorder
+  (or (some-> (System/getenv "DICTATE_RECORDER") edn/read-string)
+      ["pw-record" "--raw" "--rate" "16000" "--channels" "1" "--format" "s16" "-"]))
+
+(def bytes-per-second 32000) ; 16 kHz mono s16
+(defn seconds [n] (long (* n bytes-per-second)))
+(def min-pass (seconds 1.5))    ; shorter windows are often misheard
+(def pass-step (seconds 0.4))   ; and each later one this much new audio
+(def soft-window (seconds 20))  ; after this, start a new window at a pause
+(def max-window (seconds 28))   ; Parakeet sees 30 s at a time
+(def frame 640)                 ; 20 ms
+(def tail-ms 300)               ; keep listening after release for the last syllable
 
 (defn notify [& lines]
   (when-let [notify (or (fs/which "notify-replace")
                         (fs/which (str (System/getProperty "user.home") "/.local/bin/notify-replace")))]
     (p/shell {:continue true} (str notify) "dictate" "-t" "3000" "Dictation" (str/join "\n" lines))))
 
+(defn log! [& parts]
+  (spit (str state-dir "/session.log") (str (System/currentTimeMillis) " " (str/join " " parts) "\n")
+        :append true))
+
 (defn alive? [pid] (fs/exists? (str "/proc/" pid)))
 
-(defn recorder-pid []
-  (when (fs/exists? pid-file)
-    (let [pid (str/trim (slurp pid-file))]
-      (if (alive? pid) pid (do (fs/delete-if-exists pid-file) nil)))))
+(defn live-pid [file]
+  (when (fs/exists? file)
+    (let [pid (str/trim (slurp file))]
+      (if (alive? pid) pid (do (fs/delete-if-exists file) nil)))))
 
-(defn ensure-daemon!
-  "Start the resident ANE daemon unless its pid file names a live process.
-  It loads while the user speaks; until it is up the CLI uses a private worker."
-  []
+(defn ensure-daemon! []
   (fs/create-dirs state-dir)
-  (let [pid-file (str socket ".pid")]
-    (when-not (and (fs/exists? pid-file) (alive? (str/trim (slurp pid-file))))
-      (p/process {:out :write :out-file (fs/file state-dir "daemon.log") :err :out}
-                 "mlx-omarchy-parakeet-daemon" socket idle-ms))))
+  (when-not (live-pid (str socket ".pid"))
+    (p/process {:out :write :out-file (fs/file state-dir "daemon.log") :err :out}
+               "mlx-omarchy-parakeet-daemon" socket idle-ms)))
 
-(defn transcribe [audio]
-  (let [out (str (fs/create-temp-dir {:prefix "dictate-"}))]
-    (try
-      (p/shell {:out :string :err :string
-                :extra-env {"MLX_OMARCHY_PK_KEEP_WORKER" "1" "MLX_OMARCHY_ANE_SOCK" socket}}
-               "mlx-omarchy-parakeet" "transcribe" "-o" out (str audio))
-      ;; Parakeet pads to 30 s and can end in a run of dots, sometimes
-      ;; followed by stray characters.
-      (-> (slurp (str out "/transcript.txt"))
-          (str/replace #"\.{4,}.*$" ".")
-          str/trim)
-      (finally (fs/delete-tree out)))))
+;; mlx-omarchy-parakeet-server: one WAV path per line in, one JSON line out.
+(defn start-server []
+  (let [proc (p/process {:err :write :err-file (fs/file state-dir "server.log")
+                         :extra-env {"MLX_OMARCHY_PK_KEEP_WORKER" "1" "MLX_OMARCHY_ANE_SOCK" socket}}
+                        "mlx-omarchy-parakeet-server")]
+    (let [out (io/reader (:out proc))]
+      {:proc proc :in (io/writer (:in proc)) :out out :ready (delay (.readLine out))})))
 
-(defn deliver! [text print?]
-  (cond
-    print? (println text)
-    (str/blank? text) (notify "No speech")
-    :else (p/shell "wtype" "--" text)))
+(defn transcribe! [{:keys [in out ready]} path]
+  @ready
+  (.write in (str path "\n"))
+  (.flush in)
+  (let [line (.readLine out)
+        reply (some-> line (json/parse-string true))]
+    (when-not (:ok reply)
+      (throw (ex-info (str "transcription failed; see " state-dir "/server.log") {:reply line})))
+    (:text reply)))
 
-(defn start-recording! []
+(defn stop-server! [{:keys [proc in]}]
+  (.close in)
+  (when (= ::timeout (deref proc 5000 ::timeout)) (p/destroy proc)))
+
+;; Parakeet can end a padded window in a run of dots, sometimes followed by
+;; stray characters.
+(defn clean [text] (str/trim (str/replace text #"\.{2,}.*$" ".")))
+(defn words [text] (remove str/blank? (str/split (clean text) #"\s+")))
+(defn norm [word] (str/replace (str/lower-case word) #"[^\p{L}\p{N}']" ""))
+
+(defn agreed
+  "How many leading words PREV and CUR share, never counting CUR's last two
+  words, which may still change as more audio arrives."
+  [prev cur]
+  (let [limit (min (count prev) (- (count cur) 2))]
+    (count (take-while true? (map #(= (norm %1) (norm %2)) (take limit prev) (take limit cur))))))
+
+(defn type-words! [session ws]
+  (when (seq ws)
+    (p/shell "wtype" "--" (str (when (:typed-any? @session) " ") (str/join " " ws)))
+    (swap! session assoc :typed-any? true)))
+
+(defn write-wav! [path ^bytes data start end]
+  (let [n (- end start)
+        header (doto (ByteBuffer/allocate 44) (.order ByteOrder/LITTLE_ENDIAN))]
+    (.put header (.getBytes "RIFF")) (.putInt header (+ 36 n)) (.put header (.getBytes "WAVEfmt "))
+    (.putInt header 16) (.putShort header 1) (.putShort header 1) (.putInt header 16000)
+    (.putInt header bytes-per-second) (.putShort header 2) (.putShort header 16)
+    (.put header (.getBytes "data")) (.putInt header n)
+    (with-open [f (RandomAccessFile. (str path) "rw")]
+      (.setLength f 0) (.write f (.array header)) (.write f data (int start) (int n)))))
+
+(defn quiet-now?
+  "Whether the last 200 ms are among the quietest fifth of the window [START, END)."
+  [^bytes data start end]
+  (let [buf (doto (ByteBuffer/wrap data) (.order ByteOrder/LITTLE_ENDIAN))
+        energy (fn [at] (reduce (fn [sum i] (let [s (.getShort buf (int (+ at i)))] (+ sum (* s s))))
+                                0 (range 0 frame 2)))
+        frames (sort (map energy (range start (- end frame) frame)))
+        recent (map energy (range (- end (* 10 frame)) end frame))]
+    (<= (/ (reduce + recent) 10) (nth frames (quot (count frames) 5)))))
+
+(defn pass!
+  "Transcribe the window [start, end) and type newly agreed words; with FINAL?
+  type every remaining word."
+  [server session data start end final?]
+  (let [wav (str state-dir "/window.wav")]
+    (write-wav! wav data start end)
+    (let [{:keys [prev typed]} @session
+          cur (vec (words (transcribe! server wav)))
+          upto (if final? (count cur) (agreed prev cur))]
+      (log! (if final? "final" "pass") (pr-str (str/join " " cur)))
+      (when (> upto typed)
+        (log! "type" (pr-str (str/join " " (subvec cur typed upto))))
+        (type-words! session (subvec cur typed upto)))
+      (swap! session assoc :prev cur :typed (max typed upto)))))
+
+(defn stop-requested? [] (fs/exists? stop-file))
+
+(defn run-session! []
   (ensure-daemon!)
-  (fs/delete-if-exists wav)
-  (let [proc (p/process {:out :write :out-file (fs/file state-dir "recorder.log") :err :out}
-                        "pw-record" "--rate" "16000" "--channels" "1" "--format" "s16" wav)]
-    (Thread/sleep 200)
-    (if (p/alive? proc)
-      (do (spit pid-file (str (.pid (:proc proc))))
-          (notify "Listening; press again to type"))
-      (notify "Recording failed" (str "pw-record exited with " (:exit @proc))))))
+  (let [audio (ByteArrayOutputStream.)
+        rec (apply p/process {:err :write :err-file (fs/file state-dir "recorder.log")} recorder)
+        reader (future (let [in (:out rec) b (byte-array 4096)]
+                         ;; Stopping the recorder closes its pipe: end of audio.
+                         (try (loop [] (let [n (.read in b)]
+                                         (when (pos? n) (locking audio (.write audio b 0 n)) (recur))))
+                              (catch java.io.IOException _ nil))))
+        snapshot #(locking audio (.toByteArray audio))
+        server (start-server)
+        session (atom {:prev [] :typed 0 :typed-any? false :start 0})]
+    (try
+      (loop [last-end 0]
+        (when-not (stop-requested?)
+          (let [data (snapshot) end (bit-and (alength data) -2) start (:start @session)]
+            (cond
+              (not (p/alive? rec)) (throw (ex-info "the recorder stopped" {:exit (:exit @rec)}))
+              (or (< (- end start) min-pass) (< (- end last-end) pass-step)) (do (Thread/sleep 50) (recur last-end))
+              ;; Finish the window at a pause, so no word straddles two windows.
+              (and (> (- end start) soft-window)
+                   (or (> (- end start) max-window) (quiet-now? data start end)))
+              (do (pass! server session data start end true)
+                  (swap! session assoc :start end :prev [] :typed 0)
+                  (recur end))
+              :else (do (pass! server session data start end false) (recur end))))))
+      (log! "stop")
+      (Thread/sleep tail-ms)
+      (p/destroy rec)
+      (deref reader 2000 nil)
+      (let [data (snapshot) start (:start @session) end (bit-and (alength data) -2)]
+        (when (>= (- end start) (seconds 0.3))
+          (pass! server session data start end true)))
+      (catch Exception e
+        (log! "error" (pr-str (ex-message e)))
+        (notify "Dictation failed" (ex-message e))
+        (throw e))
+      (finally
+        (p/destroy rec)
+        (stop-server! server)))))
 
-(defn stop-and-type! [pid]
-  (fs/create-file busy-file)
-  (try
-    (p/shell "kill" "-INT" pid)
-    (loop [tries 50]
-      (when (and (alive? pid) (pos? tries)) (Thread/sleep 50) (recur (dec tries))))
-    (fs/delete-if-exists pid-file)
-    (deliver! (transcribe wav) false)
-    (catch Exception e
-      (notify "Transcription failed" (ex-message e))
-      (throw e))
-    (finally (fs/delete-if-exists busy-file))))
+(defn start! []
+  (fs/create-dirs state-dir)
+  (if (live-pid session-pid-file)
+    (spit stop-file "")
+    (do
+      ;; A release can beat its own press here; a fresh stop file is that one.
+      (when (and (fs/exists? stop-file)
+                 (> (- (System/currentTimeMillis) (.toMillis (fs/last-modified-time stop-file))) 500))
+        (fs/delete stop-file))
+      (spit session-pid-file (str (.pid (java.lang.ProcessHandle/current))))
+      (spit (str state-dir "/session.log") "")
+      (try (run-session!)
+           (finally (fs/delete-if-exists session-pid-file) (fs/delete-if-exists stop-file))))))
+
+(defn stop! []
+  (fs/create-dirs state-dir)
+  (spit stop-file ""))
+
+(defn transcribe-file! [file print?]
+  (ensure-daemon!)
+  (let [server (start-server)]
+    (try
+      (let [text (clean (transcribe! server (str (fs/absolutize file))))]
+        (cond print? (println text)
+              (str/blank? text) (notify "No speech")
+              :else (p/shell "wtype" "--" text)))
+      (finally (stop-server! server)))))
 
 (defn -main [& args]
-  (let [[flag file & more] args]
-    (cond
-      (= flag "--file") (do (ensure-daemon!) (deliver! (transcribe file) (= more ["--print"])))
-      (fs/exists? busy-file) nil
-      :else (if-let [pid (recorder-pid)] (stop-and-type! pid) (start-recording!)))))
+  (let [[cmd file & more] args]
+    (case cmd
+      "start" (start!)
+      "stop" (stop!)
+      "--file" (transcribe-file! file (= more ["--print"]))
+      nil (if (live-pid session-pid-file) (stop!) (start!))
+      (do (binding [*out* *err*] (println "usage: dictate [start|stop|--file F [--print]]"))
+          (System/exit 2)))))
 
 (apply -main *command-line-args*)

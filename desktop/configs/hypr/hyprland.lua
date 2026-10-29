@@ -54,8 +54,24 @@ hl.bind("SUPER + G", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 4"))
 hl.bind("SUPER + B", hl.dsp.exec_cmd("~/.local/bin/herdr-terminal"))
 hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("ghostty nvim ~/.config/hypr/hyprland.lua"))
 hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
--- Dictation: press to record, press again to type the transcript.
-hl.bind("SUPER + M", hl.dsp.exec_cmd("~/.local/bin/dictate"))
+-- Dictation: hold Cmd+M to talk; words are typed while you speak.  Releasing M
+-- or Cmd finishes it.  Hyprland reports a release of M only while Cmd is still
+-- held, so Cmd's own release (code:133/134) also stops; the flag keeps every
+-- other Cmd release from starting a process.
+local dictating = false
+hl.bind("SUPER + M", function()
+  dictating = true
+  hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/dictate start"))
+end)
+local function stop_dictation()
+  if dictating then
+    dictating = false
+    hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/dictate stop"))
+  end
+end
+hl.bind("SUPER + M", stop_dictation, { release = true })
+hl.bind("SUPER + code:133", stop_dictation, { release = true, non_consuming = true })
+hl.bind("SUPER + code:134", stop_dictation, { release = true, non_consuming = true })
 -- Label every visible window, Herdr pane and editor window, then focus the typed one.
 hl.bind("SUPER + F", hl.dsp.exec_cmd("~/.local/bin/winhint"))
 

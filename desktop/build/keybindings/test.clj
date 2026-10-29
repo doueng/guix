@@ -37,7 +37,8 @@
   (let [chords (for [line (str/split-lines (str (slurp "desktop/configs/hypr/hyprland.lua")
                                                 (slurp "desktop/configs/hypr/keybindings.lua")))
                      :let [[_ chord] (re-find #"^(?:hl|keys)\.bind\(\"([^\"]+)\"" line)]
-                     :when chord]
+                     ;; A release bind ends a held chord rather than being one.
+                     :when (and chord (not (str/includes? line "release = true")))]
                  (set (map str/upper-case (str/split chord #" \+ "))))]
     (is (= (count chords) (count (distinct chords))))
     (is (not-any? #(and (contains? % "ALT") (= 2 (count %)) (not (contains? % "SPACE"))) chords)
@@ -53,7 +54,7 @@
 (deftest the-guide-lists-every-cmd-chord
   (let [bound (for [line (str/split-lines (slurp "desktop/configs/hypr/hyprland.lua"))
                     :let [[_ chord] (re-find #"^hl\.bind\(\"(SUPER[^\"]+)\"" line)]
-                    :when chord]
+                    :when (and chord (not (str/includes? line "release = true")))]
                 (chord-keys chord))
         listed (set (for [entry (mapcat :entries registry)
                           chord (some-> (:chord entry) (str/split #" / "))
