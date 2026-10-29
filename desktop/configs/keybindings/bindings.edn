@@ -24,6 +24,7 @@
              {:id "i" :label "IntelliJ workspace" :chord "Cmd+I" :dispatch ["focus" {:workspace 4}]}
              {:id "h" :label "Herdr" :chord "Cmd+B" :command ["~/.local/bin/herdr-terminal"]}
              {:id "," :label "Edit hyprland.lua" :chord "Cmd+," :command ["ghostty" "nvim" "~/.config/hypr/hyprland.lua"]}
+             {:id "m" :label "Dictate: record, then type the transcript" :chord "Cmd+M" :command ["~/.local/bin/dictate"]}
              {:id "/" :label "This guide" :chord "Cmd+/" :tip "Cmd+/ opens this menu from any window. Type a group name, then an action."}]}
   {:id "b" :label "Chrome and Vimium"
    :entries [{:id "?" :label "Vimium help" :chord "?" :tip "On a web page, press Esc then ?. Vimium does not run on chrome:// pages or the Chrome Web Store."}

@@ -1,0 +1,76 @@
+#!/usr/bin/env bb
+;; Toggle dictation: the first press records the microphone, the second
+;; transcribes the recording with Parakeet on the Neural Engine and types it.
+;;   dictate                  toggle
+;;   dictate --file F [--print]  transcribe F, then type it (or print it)
+(require '[babashka.fs :as fs]
+         '[babashka.process :as p]
+         '[clojure.string :as str])
+
+(def state-dir (or (System/getenv "DICTATE_STATE_DIR")
+                   (str (or (System/getenv "XDG_RUNTIME_DIR") (fs/temp-dir)) "/dictate")))
+(def pid-file (str state-dir "/recorder.pid"))
+(def busy-file (str state-dir "/busy"))
+(def wav (str state-dir "/speech.wav"))
+
+(defn notify [& lines]
+  (when-let [notify (or (fs/which "notify-replace")
+                        (fs/which (str (System/getProperty "user.home") "/.local/bin/notify-replace")))]
+    (p/shell {:continue true} (str notify) "dictate" "-t" "3000" "Dictation" (str/join "\n" lines))))
+
+(defn alive? [pid] (fs/exists? (str "/proc/" pid)))
+
+(defn recorder-pid []
+  (when (fs/exists? pid-file)
+    (let [pid (str/trim (slurp pid-file))]
+      (if (alive? pid) pid (do (fs/delete-if-exists pid-file) nil)))))
+
+(defn transcribe [audio]
+  (let [out (str (fs/create-temp-dir {:prefix "dictate-"}))]
+    (try
+      (p/shell {:out :string :err :string} "mlx-omarchy-parakeet" "transcribe" "-o" out (str audio))
+      ;; Parakeet pads to 30 s and can end in a run of dots, sometimes
+      ;; followed by stray characters.
+      (-> (slurp (str out "/transcript.txt"))
+          (str/replace #"\.{4,}.*$" ".")
+          str/trim)
+      (finally (fs/delete-tree out)))))
+
+(defn deliver! [text print?]
+  (cond
+    print? (println text)
+    (str/blank? text) (notify "No speech")
+    :else (p/shell "wtype" "--" text)))
+
+(defn start-recording! []
+  (fs/create-dirs state-dir)
+  (fs/delete-if-exists wav)
+  (let [proc (p/process {:out :write :out-file (fs/file "/dev/null") :err :inherit}
+                        "pw-record" "--rate" "16000" "--channels" "1" "--format" "s16" wav)]
+    (Thread/sleep 200)
+    (if (p/alive? proc)
+      (do (spit pid-file (str (.pid (:proc proc))))
+          (notify "Listening; press again to type"))
+      (notify "Recording failed" (str "pw-record exited with " (:exit @proc))))))
+
+(defn stop-and-type! [pid]
+  (fs/create-file busy-file)
+  (try
+    (p/shell "kill" "-INT" pid)
+    (loop [tries 50]
+      (when (and (alive? pid) (pos? tries)) (Thread/sleep 50) (recur (dec tries))))
+    (fs/delete-if-exists pid-file)
+    (deliver! (transcribe wav) false)
+    (catch Exception e
+      (notify "Transcription failed" (ex-message e))
+      (throw e))
+    (finally (fs/delete-if-exists busy-file))))
+
+(defn -main [& args]
+  (let [[flag file & more] args]
+    (cond
+      (= flag "--file") (deliver! (transcribe file) (= more ["--print"]))
+      (fs/exists? busy-file) nil
+      :else (if-let [pid (recorder-pid)] (stop-and-type! pid) (start-recording!)))))
+
+(apply -main *command-line-args*)

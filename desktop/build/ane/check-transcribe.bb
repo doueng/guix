@@ -5,6 +5,7 @@
 (require '[babashka.fs :as fs]
          '[babashka.process :refer [shell]]
          '[clojure.string :as str])
+(load-file (str (fs/parent *file*) "/wer.clj"))
 
 (def max-wer 0.10)
 
@@ -15,25 +16,6 @@
 (defn check! [ok? msg]
   (println (if ok? "ok  " "FAIL") msg)
   (when-not ok? (swap! failures conj msg)))
-
-(defn words [text]
-  (-> (str/lower-case text)
-      (str/replace #"[-\u2010-\u2014]" " ")
-      (str/replace #"[^\p{L}\p{N}' ]" "")
-      str/trim
-      (str/split #"\s+")))
-
-(defn edit-distance [a b]
-  (let [b (vec b)]
-    (peek (reduce (fn [prev x]
-                    (reduce (fn [row j]
-                              (conj row (min (inc (peek row))
-                                             (inc (prev (inc j)))
-                                             (+ (prev j) (if (= x (b j)) 0 1)))))
-                            [(inc (first prev))]
-                            (range (count b))))
-                  (vec (range (inc (count b))))
-                  a))))
 
 (def runtime
   (str (last (str/split-lines
@@ -47,10 +29,9 @@
 (doseq [audio (sort (map str (fs/glob "desktop/build/ane/fixtures" "*.flac")))]
   (let [dir (str (fs/create-temp-dir))
         _ (out runtime "transcribe" "-o" dir audio)
-        hyp (words (slurp (str dir "/transcript.txt")))
-        ref (words (slurp (str/replace audio #"\.flac$" ".txt")))
-        wer (/ (double (edit-distance ref hyp)) (count ref))]
-    (println "    " (str/join " " hyp))
+        hyp (slurp (str dir "/transcript.txt"))
+        wer (wer/word-error-rate (slurp (str/replace audio #"\.flac$" ".txt")) hyp)]
+    (println "    " (str/trim hyp))
     (check! (<= wer max-wer) (format "%s word error rate %.3f" (fs/file-name audio) wer))))
 
 (when (seq @failures)
