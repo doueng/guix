@@ -258,9 +258,120 @@
         (insert (concat "/resume " old-id))
         (eng/bbh-send)
         (should (bbh-test--wait (lambda () (string-match-p "Last reply: The answer is 42" (bbh-test--text transcript))) 30))
-        (should (string-prefix-p (concat "* /resume " old-id) (bbh-test--text transcript)))
+        (should (string-prefix-p "* add forty\n" (bbh-test--text transcript)))
+        (should (string-match-p (concat "^\\* /resume " old-id "$") (bbh-test--text transcript)))
         (should (string-match-p (concat "Resumed " old-id " with 4 messages") (bbh-test--text transcript)))
         (should-not (string-match-p "No such conversation" (bbh-test--text transcript)))))))
+
+(ert-deftest bbh-replay-renders-saved-messages ()
+  (let* ((data (make-temp-file "bbh-replay-test" t))
+         (process-environment (cons (concat "XDG_DATA_HOME=" data) process-environment))
+         (file (eng/bbh--conversation-file "20200101-000000-000" "messages.jsonl")))
+    (make-directory (file-name-directory file) t)
+    (write-region
+     (concat
+      "{\"role\":\"user\",\"content\":\"<skill>long</skill>\\n\\nfirst\\nsecond\"}\n"
+      "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"a\",\"type\":\"function\",\"function\":{\"name\":\"clojure\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1 2)\\\"}\"}}]}\n"
+      "{\"role\":\"tool\",\"tool_call_id\":\"a\",\"content\":\"=> 3\"}\n"
+      "{\"role\":\"assistant\",\"content\":\"Done.\"}\n"
+      "{\"role\":\"user\",\"content\":\"[bbh] A note.\\n\\nagain\"}\n"
+      "{\"role\":\"assistant\",\"content\":\"Fine.\"}\n")
+     nil file)
+    (unwind-protect
+        (with-temp-buffer
+          (eng/bbh-transcript-mode)
+          (setq eng/bbh-transcript--tools (make-hash-table :test #'equal))
+          (eng/bbh-transcript--replay "20200101-000000-000")
+          (should (equal (buffer-string)
+                         (concat "* first\n#+begin_quote\nsecond\n#+end_quote\n\n"
+                                 "#+begin_src clojure\n(+ 1 2)\n#+end_src\n"
+                                 "#+begin_result done 1\n=> 3\n#+end_result\n\n"
+                                 "Done.\n\n* again\n\nFine.\n"))))
+      (delete-directory data t))))
+
+(ert-deftest bbh-resuming-this-conversation-keeps-the-transcript ()
+  (save-window-excursion
+    (delete-other-windows)
+    (let* ((shell (bbh-test--start))
+           (id (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id))))
+           (_ (eng/bbh-layout shell))
+           (transcript (buffer-local-value 'eng/bbh-transcript shell)))
+      (insert "add forty")
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 60))
+      (insert (concat "/resume " id))
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (string-match-p "No such conversation" (bbh-test--text transcript))) 30))
+      (should (string-match-p "The answer is 42\\." (bbh-test--text transcript))))))
+
+(ert-deftest bbh-resume-waits-for-the-running-turn ()
+  (save-window-excursion
+    (delete-other-windows)
+    (let* ((script (make-temp-file "bbh-sleep" nil ".edn" "[{:code \"(Thread/sleep 60000)\"} \"not reached\"]"))
+           (shell (bbh-test--start))
+           (composer (eng/bbh-layout shell))
+           (transcript (buffer-local-value 'eng/bbh-transcript shell)))
+      (insert (concat "/model script/" script))
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+      (insert "sleep")
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (string-match-p "Thread/sleep" (bbh-test--text transcript))) 30))
+      (dolist (draft '("/resume" "/resume last"))
+        (with-current-buffer composer
+          (insert draft)
+          (should-error (eng/bbh-send) :type 'user-error)
+          (should (equal (string-trim (buffer-string)) draft))
+          (erase-buffer)))
+      (should (string-match-p "Thread/sleep" (bbh-test--text transcript)))
+      (should-not (buffer-local-value 'eng/bbh-conversation shell))
+      (with-current-buffer shell (agent-shell-interrupt t))
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 15)))))
+
+(ert-deftest bbh-resume-drops-the-old-conversations-usage ()
+  (save-window-excursion
+    (delete-other-windows)
+    (let* ((script (make-temp-file "bbh-usage" nil ".edn" "[{:text \"Hello.\" :usage {:input 1000 :cached 0 :output 10 :size 200000}}]"))
+           (old (bbh-test--start))
+           (old-id (with-current-buffer old (map-nested-elt agent-shell--state '(:session :id))))
+           (_ (eng/bbh-layout old)))
+      (insert "add forty")
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p old)) 60))
+      (insert "/new")
+      (eng/bbh-send)
+      (let* ((shell (eng/bbh--shell))
+             (transcript (buffer-local-value 'eng/bbh-transcript shell)))
+        (should (bbh-test--wait (lambda () (with-current-buffer shell
+                                             (and (map-nested-elt agent-shell--state '(:session :id))
+                                                  (string-match-p "Ready" (buffer-string)))))
+                                30))
+        (insert (concat "/model script/" script))
+        (eng/bbh-send)
+        (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+        (insert "hi")
+        (eng/bbh-send)
+        (should (bbh-test--wait (lambda () (eng/bbh-usage-header shell)) 30))
+        (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+        (insert (concat "/resume " old-id))
+        (eng/bbh-send)
+        (should (bbh-test--wait (lambda () (string-match-p "Resumed " (bbh-test--text transcript))) 30))
+        (should-not (eng/bbh-usage-header shell))))))
+
+(ert-deftest bbh-startup-resume-shows-the-conversation ()
+  (save-window-excursion
+    (delete-other-windows)
+    (let* ((old (bbh-test--start))
+           (id (with-current-buffer old (map-nested-elt agent-shell--state '(:session :id))))
+           (_ (eng/bbh-layout old)))
+      (insert "add forty")
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p old)) 60))
+      (eng/bbh id)
+      (let ((text (bbh-test--text (eng/bbh--transcript (eng/bbh--shell)))))
+        (should-not (eq (eng/bbh--shell) old))
+        (should (string-prefix-p "* add forty\n" text))
+        (should (string-suffix-p (concat "The answer is 42.\n\nResumed " id "\n") text))))))
 
 (ert-deftest bbh-bare-model-and-resume-open-a-popup ()
   (save-window-excursion
@@ -303,7 +414,8 @@
           (should (seq-find (lambda (c) (string-match-p (concat "\\`" old-id "  add forty\\'") c)) offered))
           (should-not (seq-find (lambda (c) (string-prefix-p new-id c)) offered))
           (should (bbh-test--wait (lambda () (string-match-p (concat "Resumed " old-id " with 4 messages") (bbh-test--text transcript))) 30))
-          (should (string-prefix-p (concat "* /resume " old-id) (bbh-test--text transcript))))))))
+          (should (string-prefix-p "* add forty\n" (bbh-test--text transcript)))
+          (should (string-match-p (concat "^\\* /resume " old-id "$") (bbh-test--text transcript))))))))
 
 (ert-deftest bbh-cider-connect-works-from-the-composer ()
   (save-window-excursion

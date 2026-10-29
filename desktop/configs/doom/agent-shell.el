@@ -29,16 +29,22 @@ when herdr reopens a pane.  A conversation that was never saved starts fresh."
                                                       :new-session t :no-focus t))))
     (when resume
       (with-current-buffer (eng/bbh--transcript (eng/bbh--shell))
+        (eng/bbh-transcript--replay resume)
         (eng/bbh-transcript--edit
-         (lambda () (insert "Resumed " resume ": " (eng/bbh--first-prompt resume) "\n\n")))))
+         (lambda () (insert (eng/bbh-transcript--separator) "Resumed " resume "\n")))))
     layout))
 
 (defun eng/bbh-send ()
   "Send the draft and keep the bottom composer ready for another prompt.
 /new starts a fresh conversation instead, as it does in Pi, and resuming a
-saved conversation clears the transcript the same way.  A bare /model or
-/resume opens a popup to choose the model or conversation first."
+saved conversation replaces the transcript with that conversation.  A bare
+/model or /resume opens a popup to choose the model or conversation first.
+/resume waits for the running turn, since that turn still writes to this
+conversation."
   (interactive)
+  (when (and (string-match-p "\\`/resume\\(?:[ \t]\\|\\'\\)" (string-trim (buffer-string)))
+             (agent-shell-viewport--busy-p))
+    (user-error "Let the turn finish or interrupt it before /resume"))
   (let ((draft (eng/bbh--choose (string-trim (buffer-string)))))
     (unless (equal draft (string-trim (buffer-string)))
       (erase-buffer)
@@ -47,8 +53,11 @@ saved conversation clears the transcript the same way.  A bare /model or
         (progn (erase-buffer) (eng/bbh-new))
       (when-let* ((id (eng/bbh--resumes-p draft)))
         (eng/bbh-clear-transcript)
+        (with-current-buffer (eng/bbh--transcript (eng/bbh--shell))
+          (eng/bbh-transcript--replay id))
         (with-current-buffer (eng/bbh--shell)
-          (setq eng/bbh-conversation id)))
+          (setq eng/bbh-conversation id
+                eng/bbh-usage-last nil)))
       (agent-shell-viewport-compose-send t))))
 
 (defun eng/bbh--conversation-file (id file)
@@ -72,6 +81,13 @@ saved conversation clears the transcript the same way.  A bare /model or
          (current (agent-shell--current-model-id state)))
     (completing-read (format "Model (%s): " current) ids nil t nil nil current)))
 
+(defun eng/bbh--prompt-text (content)
+  "The user's words in CONTENT, a saved user message, without skill text or bbh notes."
+  (let ((start 0))
+    (while-let ((end (string-search "</skill>" content start)))
+      (setq start (+ end (length "</skill>"))))
+    (string-trim (replace-regexp-in-string "\\`\\[bbh\\] .*\n+" "" (string-trim (substring content start))))))
+
 (defun eng/bbh--first-prompt (id)
   "The first user prompt of conversation ID on one line, without skill text."
   (with-temp-buffer
@@ -85,10 +101,8 @@ saved conversation clears the transcript the same way.  A bare /model or
           (when (equal "user" (alist-get 'role message))
             (setq prompt (alist-get 'content message))))
         (forward-line 1))
-      (let ((text (string-trim (replace-regexp-in-string
-                                "[ \t\n]+" " "
-                                (replace-regexp-in-string "\\`\\(?:.\\|\n\\)*</skill>" "" (or prompt ""))))))
-        (truncate-string-to-width text 80 nil nil "…")))))
+      (truncate-string-to-width (replace-regexp-in-string "[ \t\n]+" " " (eng/bbh--prompt-text (or prompt "")))
+                                80 nil nil "…"))))
 
 (defun eng/bbh--read-conversation ()
   "Choose a saved conversation other than this one, newest first."
@@ -117,10 +131,9 @@ saved conversation clears the transcript the same way.  A bare /model or
 (defun eng/bbh--resumes-p (draft)
   "The conversation id DRAFT's /resume switches to, or nil."
   (when (string-match "\\`/resume[ \t]+\\(\\S-+\\)\\'" draft)
-    (let ((id (match-string 1 draft)))
-      (if (equal id "last")
-          (car (eng/bbh--other-conversations))
-        (and (file-exists-p (eng/bbh--conversation-file id "messages.jsonl")) id)))))
+    (let ((id (match-string 1 draft))
+          (others (eng/bbh--other-conversations)))
+      (car (if (equal id "last") others (member id others))))))
 
 (defun eng/bbh-clear-transcript ()
   "Empty the transcript of the bbh session in the current buffer."
@@ -413,6 +426,43 @@ The heading wraps instead of truncating, so no line of the prompt shows twice."
          (insert (eng/bbh--tool-block tool))
          (puthash id start eng/bbh-transcript--tools)
          (eng/bbh-transcript--fold-tool start (not eng/bbh-transcript-tools-shown)))))))
+
+(defun eng/bbh--saved-messages (id)
+  "The messages of conversation ID, skipping a line a crash left unreadable."
+  (with-temp-buffer
+    (insert-file-contents (eng/bbh--conversation-file id "messages.jsonl"))
+    (let (messages)
+      (while (not (eobp))
+        (when-let* ((message (ignore-errors
+                               (json-parse-string (buffer-substring (point) (line-end-position))
+                                                  :object-type 'alist :array-type 'list
+                                                  :null-object nil))))
+          (push message messages))
+        (forward-line 1))
+      (nreverse messages))))
+
+(defun eng/bbh-transcript--replay (id)
+  "Render saved conversation ID at the end of this transcript.
+Messages do not record whether a tool call failed, so every result shows as done."
+  (let ((codes (make-hash-table :test #'equal)))
+    (dolist (message (eng/bbh--saved-messages id))
+      (let ((content (or (alist-get 'content message) "")))
+        (pcase (alist-get 'role message)
+          ("user" (eng/bbh-transcript--prompt (eng/bbh--prompt-text content)))
+          ("assistant"
+           (eng/bbh-transcript--reply-chunk content)
+           (setq eng/bbh-transcript--reply nil)
+           (dolist (call (alist-get 'tool_calls message))
+             (puthash (alist-get 'id call)
+                      (ignore-errors
+                        (alist-get 'code (json-parse-string (map-nested-elt call '(function arguments))
+                                                            :object-type 'alist)))
+                      codes)))
+          ("tool"
+           (let ((id (alist-get 'tool_call_id message)))
+             (eng/bbh-transcript--tool id `((:raw-input . ((code . ,(gethash id codes))))
+                                            (:status . "completed")
+                                            (:content . (((content . ((text . ,content)))))))))))))))
 
 (defun eng/bbh-transcript--error (message)
   (setq eng/bbh-transcript--reply nil)

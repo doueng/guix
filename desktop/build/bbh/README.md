@@ -22,7 +22,7 @@ The Emacs layout has a transcript above a persistent composer. The composer keep
 
 The composer header shows the context in use, how much of the latest model request came from the prompt cache, and the session's cost, for example `ctx 45k/1m · cache 98% · $0.04`. A request reads `cache miss` when less than half of the previous request's input was read back from the cache, and `cache cold` when there was no previous request to reuse. After each turn the transcript adds one line with the turn's requests, input, cached share, any misses, output and cost.
 
-`M-x eng/bbh-layout` restores the split. The composer header shows whether `C-n` sends immediately or queues a prompt. Sending `/new` works as it does in Pi. It ends the session, starts a fresh one in the same windows, and clears the transcript. `/resume ID` and `/resume last` clear the transcript too, unless no saved conversation has that id.
+`M-x eng/bbh-layout` restores the split. The composer header shows whether `C-n` sends immediately or queues a prompt. Sending `/new` works as it does in Pi. It ends the session, starts a fresh one in the same windows, and clears the transcript. `/resume ID` and `/resume last` replace the transcript with the saved conversation, and `emacs-bbh --resume ID` shows it the same way. A replayed tool result always shows as done, because the conversation does not record failures. An id bbh cannot resume, such as the current conversation, leaves the transcript alone, and `/resume` waits for a running turn.
 
 In a terminal:
 
