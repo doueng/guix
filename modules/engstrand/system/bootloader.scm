@@ -64,4 +64,5 @@
   (efi-bootloader-chain
    grub-efi-removable-bootloader
    #:installer m1n1-u-boot-grub-installer
-   #:packages (list asahi-linux-keyd asahi-m1n1 asahi-u-boot-os-prepare)))
+   ;; m1n1's installer reads only lib/dtbs from the kernel's slot.
+   #:packages (list asahi-dtbs-ane asahi-m1n1 asahi-u-boot-os-prepare)))

@@ -32,6 +32,8 @@
   (operating-system
     (inherit asahi-base-os)
     (kernel asahi-linux-keyd)
+    ;; udev loads it by modalias once the boot tree has the ANE node.
+    (kernel-loadable-modules (list asahi-linux-keyd-ane))
     (host-name "asahi-guix")
     (timezone "Europe/London")
     (locale "en_US.utf8")
@@ -72,6 +74,10 @@
     (services
      (append
       (list %udev-backlight-service
+            ;; The Neural Engine; Arch leaves this to systemd's 0666 default.
+            (udev-rules-service 'ane-accel
+                                (udev-rule "70-ane-accel.rules"
+                                           "SUBSYSTEM==\"accel\", GROUP=\"video\", MODE=\"0660\"\n"))
             ;; Keep the Asahi display-manager Xorg configuration without the
             ;; Sway example packages, guest Home, or generic %desktop-services.
             %asahi-sddm-service

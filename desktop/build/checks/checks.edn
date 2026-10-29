@@ -20,8 +20,8 @@
    :slow ["make nixpkgs-verify"]}
   {:name "apple neural engine"
    :paths ["modules/engstrand/packages/omarchy-ane.scm" "modules/engstrand/system/bootloader.scm"
-           "desktop/build/ane/**"]
-   :slow ["bb desktop/build/ane/check-packages.bb"]}
+           "modules/engstrand/system/asahi.scm" "desktop/build/ane/**"]
+   :slow ["bb desktop/build/ane/check-packages.bb" "bb desktop/build/ane/check-system.bb"]}
   {:name "doom"
    :paths ["desktop/configs/doom/**" "desktop/build/doom/**"]
    :checks ["make doom-check"]}
