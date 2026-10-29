@@ -86,4 +86,22 @@
                                                                        (str home "/.config/emacs/.local/straight/build-31.1"))
                                                  "BBH_DOOM_AGENT_SHELL" (str (babashka.fs/absolutize "../../configs/doom/agent-shell.el"))
                                                  "HERDR_ENV" ""}}
-                                    "emacs" "-Q" "--batch" "-l" "test/agent-shell-test.el" "-f" "ert-run-tests-batch-and-exit"))}}}
+                                    "emacs" "-Q" "--batch" "-l" "test/agent-shell-test.el" "-f" "ert-run-tests-batch-and-exit"))}
+         test:transcript-scroll {:doc "Check in a terminal frame that the transcript does not scroll past its end."
+                                 ;; stdin is not a terminal, so script leaves the caller's tty alone, and
+                                 ;; Emacs's screen output is discarded. The verdict comes back in a file.
+                                 :task (let [home (System/getProperty "user.home")
+                                             result (babashka.fs/create-temp-file {:prefix "bbh-tty"})]
+                                         (try
+                                           (shell {:extra-env {"BBH_TTY_RESULT" (str result)
+                                                               "TERM" "xterm-256color"
+                                                               "BBH_ELISP_BUILD" (or (System/getenv "BBH_ELISP_BUILD")
+                                                                                     (str home "/.config/emacs/.local/straight/build-31.1"))
+                                                               "BBH_DOOM_AGENT_SHELL" (str (babashka.fs/absolutize "../../configs/doom/agent-shell.el"))}
+                                                   :in nil :out :discard}
+                                                  "timeout" "60" "script" "-qec"
+                                                  "stty rows 30 cols 100; emacs -Q -nw -l test/tty-scroll-test.el" "/dev/null")
+                                           (let [verdict (clojure.string/trim (slurp (str result)))]
+                                             (println verdict)
+                                             (when-not (= verdict "ok") (System/exit 1)))
+                                           (finally (babashka.fs/delete-if-exists result))))}}}

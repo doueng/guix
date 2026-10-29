@@ -30,6 +30,10 @@
   {:name "bbh"
    :paths ["desktop/build/bbh/**" "desktop/configs/bbh/**" "desktop/bin/{bbh,wf,emacs-bbh}"]
    :checks ["cd desktop/build/bbh && bb test"]}
+  {:name "bbh-transcript-scroll"
+   :paths ["desktop/configs/doom/agent-shell.el" "desktop/build/bbh/test/tty-scroll-test.el"
+           "desktop/build/bbh/bb.edn"]
+   :checks ["cd desktop/build/bbh && bb test:transcript-scroll"]}
   {:name "swe-rebench"
    :paths [".github/workflows/swe-rebench.yml" "desktop/build/bbh/harbor/**"
            "desktop/build/bbh/eval/bbh/{harbor_check,swe_report}.clj" "desktop/build/bbh/src/bbh/acp.clj"]

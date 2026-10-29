@@ -311,6 +311,19 @@ strips `display' text properties from whole blocks on partial redisplays."
     (when at-end (goto-char (point-max)))
     (dolist (w followers) (set-window-point w (point-max)))))
 
+(defun eng/bbh-transcript--clamp-scroll ()
+  "Pull back any window that scrolled past the end of the transcript.
+The last line then stays on the window's bottom row instead of leaving
+empty rows below it. This runs from `post-command-hook' because Emacs
+does not support repositioning a window from `window-scroll-functions'."
+  (dolist (window (get-buffer-window-list nil nil t))
+    (let ((latest (save-excursion
+                    (goto-char (point-max))
+                    (vertical-motion (- 1 (window-body-height window)) window)
+                    (point))))
+      (when (> (window-start window) latest)
+        (set-window-start window latest)))))
+
 (defun eng/bbh-transcript--separator ()
   (if (bobp) "" "\n"))
 
@@ -562,6 +575,7 @@ Org leaves result blocks, a special block, without the code background."
   ;; size, position and mode name here say nothing useful.
   (setq-local mode-line-format nil)
   (add-hook 'after-change-functions #'eng/bbh-transcript--note-change nil t)
+  (add-hook 'post-command-hook #'eng/bbh-transcript--clamp-scroll nil t)
   (font-lock-add-keywords nil eng/bbh-transcript--markup 'append)
   ;; Doom-one paints org-block with an opaque background. In a terminal that
   ;; band hides the transparent default, so drop it in this buffer only.
