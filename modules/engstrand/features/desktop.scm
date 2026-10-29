@@ -49,6 +49,19 @@
                  ("image/png" . "imv.desktop")
                  ("image/webp" . "imv.desktop"))))))
 
+;; Flatpak resolves Chrome's xdg-download grant from user-dirs.dirs; without
+;; it the sandbox writes ~/Downloads to a tmpfs that vanishes on exit.
+;; Directories pointed at $HOME are disabled, so activation skips them.
+(define %home-user-dirs-service
+  (service home-xdg-user-directories-service-type
+    (home-xdg-user-directories-configuration
+      (documents "$HOME")
+      (music "$HOME")
+      (projects "$HOME")
+      (publicshare "$HOME")
+      (templates "$HOME")
+      (videos "$HOME"))))
+
 (define (feature-familiar-desktop)
   (feature-package-set
    'familiar-desktop
@@ -58,4 +71,5 @@
                                     (bluetooth-configuration (auto-enable? #t)))
                            (nixpkgs-system-services))
    #:home-services (append %asahi-desktop-home-services
-                           (list %home-mime-service))))
+                           (list %home-mime-service
+                                 %home-user-dirs-service))))
