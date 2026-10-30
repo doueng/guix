@@ -147,13 +147,38 @@
 (deftest a-phase-brief-carries-its-principles-in-full
   (let [id (wf/start! :bug-fix {:cwd (buggy-repo) :repro repro})
         _ (wf/attest! id "bug reproduces")
-        out (with-out-str (#'wf/print-status (wf/status id)))]
+        out (with-out-str (#'wf/print-status (wf/status id) :full? true))]
     (is (= ["fix-root-causes" "attack-the-premise"] (:principles (wf/status id))))
     (is (str/includes? out "principles: fix-root-causes, attack-the-premise."))
     (is (str/includes? out "<principle name=\"fix-root-causes\">"))
     (is (str/includes? out "- **Write the premise down.** The premise is the one sentence that every failed fix assumed."))
     (is (not (str/includes? out "disable-model-invocation")) "the YAML header is stripped")
     (is (not (str/includes? out "](../")) "links resolve from any directory")))
+
+(deftest principles-print-in-full-on-entering-a-phase
+  (let [cli (fn [& args] (with-out-str (with-redefs [wf/default-id (constantly nil)] (apply wf/-main args))))
+        repo (buggy-repo)
+        full "<principle name="
+        started (cli "start" "bug-fix" "--task" "t" "--cwd" repo "--repro" repro)
+        id (second (str/split (first (str/split-lines started)) #" "))]
+    (is (str/includes? started full) "start prints the first phase's text")
+    (is (not (str/includes? (cli "status" id) full)) "status names the principles only")
+    (is (str/includes? (cli "status" id) (wf/principle-file "fix-root-causes")) "names come with paths")
+    (let [entered (cli "attest" id "--claim" "reproduces")]
+      (is (= [:diagnose 1] (at id)))
+      (is (str/includes? entered full) "entering a phase prints its text"))
+    (is (not (str/includes? (cli "attest" id "--claim" "retry") full))
+        "a failed gate re-enters the phase without reprinting it")))
+
+(deftest a-done-run-prints-no-brief
+  (let [dir (buggy-repo)
+        id (wf/start! :investigation {:cwd dir :task "t"})
+        evidence (:evidence (wf/status id))]
+    (spit (str evidence "/answer.md") "done")
+    (wf/attest! id "answered")
+    (let [out (with-out-str (#'wf/print-status (wf/status id) :full? true))]
+      (is (not (str/includes? out "brief:")))
+      (is (not (str/includes? out "<principle"))))))
 
 (deftest reviewer-without-a-verdict-line-is-an-error
   (let [repo (buggy-repo)

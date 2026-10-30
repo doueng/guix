@@ -486,16 +486,22 @@
                         :gates (mapv #(spec-gate-text st %) (:gates spec))}))
                    (phase-order wf))}))
 
-(defn- print-status [st]
+(defn- print-status
+  "Prints run ST. FULL? adds the text of the phase's principles, which an agent needs on entering a phase. A retry
+  and a status check get their names and paths, because repeating the text costs context on every call."
+  [st & {:keys [full?]}]
   (println (str "run " (:id st)))
   (println (str "workflow " (name (:workflow st)) "  phase " (name (:phase st))
                 "  visit " (get-in st [:visits (:phase st)]) "  status " (name (:status st))))
   (when (:block-reason st) (println (str "blocked: " (:block-reason st))))
   (when (= :abandoned (:status st)) (println (str "abandoned: " (or (:abandon-reason st) "no reason given"))))
-  (println (str "brief: " (:brief st)))
-  (when-let [ps (seq (:principles st))]
-    (println (str "principles: " (str/join ", " ps) ". Apply each where it bears on this phase."))
-    (println (principles-text ps)))
+  (when-not (= :done (:status st))
+    (println (str "brief: " (:brief st)))
+    (when-let [ps (seq (:principles st))]
+      (if full?
+        (do (println (str "principles: " (str/join ", " ps) ". Apply each where it bears on this phase."))
+            (println (principles-text ps)))
+        (println (str "principles: " (str/join ", " (map #(str % " (" (principle-file %) ")") ps)))))))
   (println (str "evidence: " (:evidence st))))
 
 (def ^:private usage
@@ -527,14 +533,17 @@ RUN defaults to $WF_RUN, else the newest run started for this directory or one c
     (try
       (case cmd
         "start" (print-status (status (start! (keyword (first pos))
-                                              (select-keys flags [:cwd :task :repro :check :bench]))))
+                                              (select-keys flags [:cwd :task :repro :check :bench])))
+                              :full? true)
         "status" (if json?
                     (println (json/generate-string (status-json (status (run-id)))))
                     (print-status (status (run-id))))
-        "attest" (let [id (run-id)]
-                   (print-attest (attest! id (or (:claim flags)
-                                                 (throw (ex-info "attest needs --claim" {})))))
-                   (print-status (status id)))
+        "attest" (let [id (run-id)
+                         before (:phase (status id))]
+                     (print-attest (attest! id (or (:claim flags)
+                                                   (throw (ex-info "attest needs --claim" {})))))
+                     (let [st (status id)]
+                       (print-status st :full? (not= before (:phase st)))))
         "set" (let [id (run-id)]
                 (set-commands! id (select-keys flags [:repro :check :bench]))
                 (print-status (status id)))
