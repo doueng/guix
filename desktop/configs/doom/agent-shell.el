@@ -36,8 +36,9 @@ when herdr reopens a pane.  A conversation that was never saved starts fresh."
 
 (defun eng/bbh-send ()
   "Send the draft and keep the bottom composer ready for another prompt.
-/new starts a fresh conversation instead, as it does in Pi, and resuming a
-saved conversation replaces the transcript with that conversation.  A bare
+/new starts a fresh conversation instead, as it does in Pi, /quit exits Emacs
+as `C-x C-c' does, and resuming a saved conversation replaces the transcript
+with that conversation.  A bare
 /model or /resume opens a popup to choose the model or conversation first.
 /resume waits for the running turn, since that turn still writes to this
 conversation."
@@ -49,16 +50,18 @@ conversation."
     (unless (equal draft (string-trim (buffer-string)))
       (erase-buffer)
       (insert draft))
-    (if (equal draft "/new")
-        (progn (erase-buffer) (eng/bbh-new))
-      (when-let* ((id (eng/bbh--resumes-p draft)))
-        (eng/bbh-clear-transcript)
-        (with-current-buffer (eng/bbh--transcript (eng/bbh--shell))
-          (eng/bbh-transcript--replay id))
-        (with-current-buffer (eng/bbh--shell)
-          (setq eng/bbh-conversation id
-                eng/bbh-usage-last nil)))
-      (agent-shell-viewport-compose-send t))))
+    (pcase draft
+      ("/new" (erase-buffer) (eng/bbh-new))
+      ("/quit" (erase-buffer) (save-buffers-kill-terminal))
+      (_
+       (when-let* ((id (eng/bbh--resumes-p draft)))
+         (eng/bbh-clear-transcript)
+         (with-current-buffer (eng/bbh--transcript (eng/bbh--shell))
+           (eng/bbh-transcript--replay id))
+         (with-current-buffer (eng/bbh--shell)
+           (setq eng/bbh-conversation id
+                 eng/bbh-usage-last nil)))
+       (agent-shell-viewport-compose-send t)))))
 
 (defun eng/bbh--conversation-file (id file)
   (expand-file-name (format "bbh/conversations/%s/%s" id file)

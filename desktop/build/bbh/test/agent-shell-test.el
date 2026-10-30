@@ -222,6 +222,31 @@
         (should (string-prefix-p "* add forty again\n\n#+begin_src clojure\n(+ 40 2)\n#+end_src\n#+begin_result done 1" (bbh-test--text transcript)))
         (should-not (string-match-p "^\\* add forty$" (bbh-test--text transcript)))))))
 
+(ert-deftest bbh-quit-exits-emacs-without-reaching-the-session ()
+  (save-window-excursion
+    (delete-other-windows)
+    (let* ((script (make-temp-file "bbh-sleep" nil ".edn" "[{:code \"(Thread/sleep 60000)\"} \"not reached\"]"))
+           (shell (bbh-test--start))
+           (composer (eng/bbh-layout shell))
+           (transcript (buffer-local-value 'eng/bbh-transcript shell))
+           (quits 0))
+      (insert (concat "/model script/" script))
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+      (insert "sleep")
+      (eng/bbh-send)
+      (should (bbh-test--wait (lambda () (string-match-p "Thread/sleep" (bbh-test--text transcript))) 30))
+      (cl-letf (((symbol-function 'save-buffers-kill-terminal)
+                 (lambda (&rest _) (setq quits (1+ quits)))))
+        (with-current-buffer composer
+          (insert "  /quit\n")
+          (eng/bbh-send)))
+      (should (= quits 1))
+      (should (equal (bbh-test--text composer) ""))
+      (should-not (string-match-p "/quit" (bbh-test--text transcript)))
+      (with-current-buffer shell (agent-shell-interrupt t))
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 15)))))
+
 (ert-deftest bbh-resume-clears-the-transcript-unless-the-id-is-unknown ()
   (save-window-excursion
     (delete-other-windows)
