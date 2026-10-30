@@ -70,7 +70,7 @@ Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.json
 
 ## Website
 
-`bbh web` serves a page for the phone, with a tab for each live Emacs session, its whole conversation and a composer. `modules/engstrand/features/bbh-web.scm` runs it as the `bbh-web` Home service on `127.0.0.1:8766`, and it publishes itself with `tailscale serve` at `https://<node>.<tailnet>.ts.net:8443`. The page is ClojureScript run in the browser by [Scittle](https://github.com/babashka/scittle) with Replicant for rendering, so there is no build step. `src/bbh/web/` holds it, including Scittle 0.8.33's `scittle.js` and `scittle.replicant.js`, copied unchanged from its npm package.
+`bbh web` serves a page for the phone, with a tab for each live Emacs session, its whole conversation and a composer. Swiping sideways on the conversation moves between tabs. `modules/engstrand/features/bbh-web.scm` runs it as the `bbh-web` Home service on `127.0.0.1:8766`, and it publishes itself with `tailscale serve` at `https://<node>.<tailnet>.ts.net:8443`. The page is ClojureScript run in the browser by [Scittle](https://github.com/babashka/scittle) with Replicant for rendering, so there is no build step. `src/bbh/web/` holds it, including Scittle 0.8.33's `scittle.js` and `scittle.replicant.js`, copied unchanged from its npm package.
 
 The server shares nothing with a session but files in the conversation's rollover root, so a rollover keeps the tab:
 

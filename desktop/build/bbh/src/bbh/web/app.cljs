@@ -81,10 +81,14 @@
         (.catch (fn [e] (swap! state assoc :error (.-message e))))
         (.finally (fn [] (reset! syncing false))))))
 
-(defn- select! [id]
-  (set! (.-hash js/location) id)
+(defn- select!
+  "Show session ID. Replacing the hash keeps tabs out of the browser's history."
+  [id]
+  (.replaceState js/history nil "" (str "#" id))
   (swap! state assoc :current id)
   (to-bottom!)
+  (.scrollIntoView (.querySelector js/document ".tab.current")
+                   #js {:inline "center" :block "nearest" :behavior "smooth"})
   (sync-conversation! id))
 
 (defn- load-earlier! [id]
@@ -187,6 +191,64 @@
      (when current (status-view live (:busy conversation) error))
      (when live (composer-view current))]))
 
+;; Dragging must not repaint the page, so the touch lives outside `state`.
+(defonce touch (atom nil))
+
+(def edge-px 24)
+(def lock-px 10)
+(def swipe-px 70)
+
+(defn- scrolls-sideways? [node]
+  (when-let [el (.closest node "pre, .table")]
+    (> (.-scrollWidth el) (.-clientWidth el))))
+
+(defn- swipeable? [event x]
+  (let [node (.-target event)]
+    (and (= 1 (.. event -touches -length))
+         (.closest node "#thread")
+         (< edge-px x (- js/innerWidth edge-px))
+         (not (scrolls-sideways? node)))))
+
+(defn- neighbour
+  "The session STEP tabs from the current one, or nil at either end."
+  [{:keys [agents current]} step]
+  (when-let [i (first (keep-indexed (fn [i a] (when (= current (:id a)) i)) agents))]
+    (:id (get (vec agents) (+ i step)))))
+
+(defn- drag! [dx]
+  (let [end? (nil? (neighbour @state (if (neg? dx) 1 -1)))]
+    (set! (.. (thread) -style -transform)
+          (str "translateX(" (if end? (* 0.25 dx) dx) "px)"))))
+
+(defn- touch-start [event]
+  (let [finger (aget (.-touches event) 0)
+        x (.-clientX finger)]
+    (reset! touch (when (swipeable? event x)
+                    {:x x :y (.-clientY finger) :dx 0 :axis nil}))))
+
+(defn- touch-move [event]
+  (when-let [{:keys [x y axis]} @touch]
+    (let [finger (aget (.-touches event) 0)
+          dx (- (.-clientX finger) x)
+          dy (- (.-clientY finger) y)
+          axis (or axis
+                   (when (< lock-px (max (js/Math.abs dx) (js/Math.abs dy)))
+                     (if (> (js/Math.abs dx) (js/Math.abs dy)) :x :y)))]
+      (swap! touch assoc :dx dx :axis axis)
+      (when (= :x axis) (drag! dx)))))
+
+(defn- touch-cancel [_]
+  (reset! touch nil)
+  (when-let [el (thread)]
+    (set! (.. el -style -transform) "")))
+
+(defn- touch-end [event]
+  (let [{:keys [dx axis]} @touch]
+    (touch-cancel event)
+    (when (and (= :x axis) (< swipe-px (js/Math.abs dx)))
+      (when-let [id (neighbour @state (if (neg? dx) 1 -1))]
+        (select! id)))))
+
 (defn- near-bottom? []
   (when-let [el (thread)]
     (< (- (.-scrollHeight el) (.-scrollTop el) (.-clientHeight el)) 120)))
@@ -201,6 +263,9 @@
     (add-watch state :paint paint)
     (paint nil nil nil @state)
     (.addEventListener js/document "visibilitychange" sync!)
+    (doseq [[event handler] {"touchstart" touch-start "touchmove" touch-move
+                             "touchend" touch-end "touchcancel" touch-cancel}]
+      (.addEventListener js/document event handler #js {:passive true}))
     (js/setInterval sync! poll-ms)
     (sync!)
     true))
