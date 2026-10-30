@@ -141,7 +141,10 @@
   (let [{:keys [cancel evaluating repl]} @s]
     (swap! s assoc :interrupted true)
     (some-> cancel (apply []))
-    (when evaluating (some-> repl repl/kill!))))
+    (when evaluating
+      ;; sh commands run detached to survive a deadline, so killing the REPL alone would leave them running.
+      (some-> repl (repl/call "(when-let [f (resolve 'bbh.env/kill-running!)] (f))" 2000))
+      (some-> repl repl/kill!))))
 
 (defn- add-request [turn {:keys [input cached written output thinking cache] :as request}]
   (-> (or turn {})
@@ -220,6 +223,7 @@
           {:keys [content note]} (delimiters/repair code)
           r (when-not interrupted
               (swap! s assoc :evaluating true)
+              (repl/announce-deadline! repl (:deadline-ms manifest))
               (try (repl/eval! repl (or content code) (:deadline-ms manifest))
                    (finally (swap! s assoc :evaluating false))))
           ;; Before the restart below, so the run survives a close and leaves out the reload.

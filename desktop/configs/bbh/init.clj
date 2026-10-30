@@ -19,15 +19,49 @@
 
 `fs`, `p` and `str` are aliased.
 
-- (sh \"cmd string\") returns {:exit :out :err}. A nonzero exit is data. For separate arguments use (p/shell {:out :string :err :string :continue true} \"cmd\" \"arg\").
+- (sh \"cmd string\") returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. For separate arguments use (p/shell {:out :string :err :string :continue true} \"cmd\" \"arg\").
 - (read-lines path) or (read-lines path start count) prints 1-based numbered lines and returns nil. Use slurp when code needs the text.
 - (edit! path old new) replaces exactly one occurrence, else throws.
 - (inbox tool args) calls the Plannotator Inbox, where you leave the person a decision or finished work and keep going. Replies arrive as your next turn. Tools are \"send_message\" with :body and optionally :subject, :reply_to, :thread and :attachments, \"read_thread\", \"search\" and \"resolve_message\". `plannotator inbox --help` has the question syntax.
-- (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits up to 60 s, or :ms, and returns {:done? :exit :tail :log}. Use it for anything that may approach the deadline. Also job-status and jobs.
+- (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits up to 60 s, or :ms, and returns {:done? :exit :tail :log}. It stops at the evaluation's budget, so check :done? and wait again in a later call. p/shell, http and Thread/sleep have no budget, so use a job for anything that may approach the deadline. Also job-status and jobs.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
 
 (def pi-helpers
   "Skills written for Pi name Pi helpers. Drop `await` and map `tools/jev_classify_task {:task t}` to (jev-classify-task t), `fs/read` to read-lines, `tools/read` to slurp, `fs/list` to fs/glob, `tools/edit` to edit!, and `tools/bash`, `jj/...` and `make/...` to sh. Parallelize with future or pmap.")
+
+;; The evaluation budget. The session sets eval-deadline before each evaluation, so helpers can return before
+;; the deadline kills the REPL.
+
+(def eval-deadline (atom nil))
+
+(def ^:private deadline-margin-ms 10000)
+
+(def ^:private idle-budget-ms
+  "The budget when no evaluation deadline is live, as for a form sent from CIDER."
+  90000)
+
+(defn budget-ms
+  "Milliseconds a helper may block in this evaluation."
+  []
+  (let [left (some-> @eval-deadline (- (System/currentTimeMillis)))]
+    (if (and left (pos? left))
+      (max 0 (- left deadline-margin-ms))
+      idle-budget-ms)))
+
+(def live-sh
+  "Pid files of sh commands in flight. They run detached, so an interrupt has to stop them by hand."
+  (atom #{}))
+
+(defn kill-running!
+  "Stop every sh command in flight, each with its process group."
+  []
+  (doseq [f @live-sh :when (fs/exists? f)
+          :let [pid (str/trim (slurp f))] :when (seq pid)]
+    (p/shell {:continue true :out :discard :err :discard} "kill" "-TERM" "--" (str "-" pid))
+    (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid"]]
+      (fs/delete-if-exists (str/replace f #"\.pid$" suffix))))
+  (reset! live-sh #{})
+  nil)
 
 ;; Skills
 
@@ -248,12 +282,6 @@
             [bbh.env :refer [jev-classify-task delegate]]
             [clojure.string :as str]))
 
-(defn sh
-  "Run CMD with bash and an empty stdin. Returns {:exit :out :err}."
-  [cmd]
-  (select-keys (p/shell {:continue true :in "" :out :string :err :string} "bash" "-c" cmd)
-               [:exit :out :err]))
-
 (defn read-lines
   "Print PATH with line numbers, N lines from line START."
   ([path] (read-lines path 1 200))
@@ -281,39 +309,72 @@
          (fs/path (fs/temp-dir) "bbh-jobs"))))
 
 (defn job
-  "Start CMD with bash, detached from the REPL, in DIR (default the current directory). Returns the job id."
-  [cmd & {:keys [dir]}]
+  "Start CMD with bash, detached from the REPL, in DIR (default the current directory). Returns the job id.
+  SPLIT-ERR? keeps stderr in its own file."
+  [cmd & {:keys [dir split-err?]}]
   (let [d (jobs-dir)
         id (str (System/currentTimeMillis) "-" (rand-int 1000))
         file #(str (fs/path d (str id %)))]
     (fs/create-dirs d)
     (spit (file ".cmd") cmd)
     ;; setsid -f forks and returns, so the job is no longer the REPL's descendant and a restart's kill misses it.
+    ;; The command runs from its file because a syntax error in this eval string would lose the exit code.
     (p/shell {:dir (or dir (str (fs/cwd))) :in "" :out :discard :err :discard
-              :extra-env {"BBH_JOB" (str "(" cmd ") >" (pr-str (file ".log")) " 2>&1 </dev/null; echo $? >"
-                                         (pr-str (file ".exit")))}}
+              :extra-env {"BBH_JOB" (str "echo $$ >" (pr-str (file ".pid")) "; bash " (pr-str (file ".cmd")) " >" (pr-str (file ".log")) " "
+                                           (if split-err? (str "2>" (pr-str (file ".err"))) "2>&1")
+                                           " </dev/null; echo $? >" (pr-str (file ".exit")))}}
              "setsid" "-f" "bash" "-c" "eval \"$BBH_JOB\"")
     id))
 
+(defn- job-file [id suffix] (str (fs/path (jobs-dir) (str id suffix))))
+
+(defn- job-exit [id]
+  (let [f (job-file id ".exit")]
+    (when (fs/exists? f) (some-> (slurp f) str/trim not-empty parse-long))))
+
+(defn- slurp-if [f] (if (fs/exists? f) (slurp f) ""))
+
 (defn job-status
-  "Job ID as {:id :cmd :done? :exit :log :tail}, with the last LINES (default 20) of output in :tail."
+  "Job ID as {:id :cmd :done? :exit :log :tail}, with the last LINES (default 20) of output in :tail. A sh command
+  that outlived its budget also has :err, the end of its stderr."
   [id & {:keys [lines] :or {lines 20}}]
-  (let [file #(str (fs/path (jobs-dir) (str id %)))
-        _ (when-not (fs/exists? (file ".cmd")) (throw (ex-info (str "no job " id) {:id id})))
-        exit (when (fs/exists? (file ".exit")) (some-> (slurp (file ".exit")) str/trim not-empty parse-long))]
-    {:id id :cmd (slurp (file ".cmd")) :done? (some? exit) :exit exit :log (file ".log")
-     :tail (when (fs/exists? (file ".log"))
-             (str/join "\n" (take-last lines (str/split-lines (slurp (file ".log"))))))}))
+  (when-not (fs/exists? (job-file id ".cmd")) (throw (ex-info (str "no job " id) {:id id})))
+  (let [end #(str/join "\n" (take-last lines (str/split-lines %)))
+        exit (job-exit id)]
+    (cond-> {:id id :cmd (slurp (job-file id ".cmd")) :done? (some? exit) :exit exit :log (job-file id ".log")
+             :tail (when (fs/exists? (job-file id ".log")) (end (slurp (job-file id ".log"))))}
+      (fs/exists? (job-file id ".err")) (assoc :err (end (slurp (job-file id ".err")))))))
 
 (defn job-wait
-  "Wait up to MS (default 60000) for job ID to finish, then return its job-status."
+  "Wait up to MS (default 60000) for job ID to finish, then return its job-status. The evaluation's budget caps the
+  wait, so check :done? and wait again in a later call."
   [id & {:keys [ms lines] :or {ms 60000 lines 20}}]
-  (let [end (+ (System/currentTimeMillis) ms)]
+  (let [end (+ (System/currentTimeMillis) (min ms (bbh.env/budget-ms)))]
     (loop []
       (let [st (job-status id :lines lines)]
         (if (or (:done? st) (>= (System/currentTimeMillis) end))
           st
           (do (Thread/sleep 250) (recur)))))))
+
+(defn sh
+  "Run CMD with bash and an empty stdin. Returns {:exit :out :err}. A command that outlasts the evaluation's budget
+  keeps running as a job, and the result is {:exit nil :timeout true :job id :out :err} with the output so far."
+  [cmd]
+  (let [end (+ (System/currentTimeMillis) (bbh.env/budget-ms))
+        id (job cmd :split-err? true)
+        pid (job-file id ".pid")
+        output (fn [] {:out (slurp-if (job-file id ".log")) :err (slurp-if (job-file id ".err"))})]
+    (swap! bbh.env/live-sh conj pid)
+    (try
+      (loop [pause 2]
+        (if-let [exit (job-exit id)]
+          (let [result (assoc (output) :exit exit)]
+            (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid"]] (fs/delete-if-exists (job-file id suffix)))
+            result)
+          (if (>= (System/currentTimeMillis) end)
+            (assoc (output) :exit nil :timeout true :job id)
+            (do (Thread/sleep pause) (recur (min 100 (* 2 pause)))))))
+      (finally (swap! bbh.env/live-sh disj pid)))))
 
 (defn jobs
   "Every job of this conversation, newest first, without output."

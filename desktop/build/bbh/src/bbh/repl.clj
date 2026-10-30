@@ -139,6 +139,14 @@
           :else (try {:value (edn/read-string (:value r))}
                      (catch Exception _ {:error (str "returned unreadable data: " (:value r))})))))
 
+(defn announce-deadline!
+  "Tell the REPL when the evaluation about to start dies, so its helpers can return first. Best effort: an env
+  without bbh.env/eval-deadline just runs without the budget."
+  [conn deadline-ms]
+  (call conn (str "(some-> (resolve 'bbh.env/eval-deadline) deref (reset! "
+                  (+ (System/currentTimeMillis) deadline-ms) "))")
+        5000))
+
 (defn manifest
   "Read bbh.env/manifest, a map or a function returning one, merged onto defaults."
   [conn]
