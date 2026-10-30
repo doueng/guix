@@ -41,13 +41,6 @@
        first
        :id))
 
-(defn- replies [home text]
-  (->> (fs/glob home "bbh/conversations/*/messages.jsonl")
-       (mapcat #(str/split-lines (slurp (str %))))
-       (map #(json/parse-string % true))
-       (filter #(and (= "assistant" (:role %)) (str/includes? (str (:content %)) text)))
-       count))
-
 (defn- wakes [home text]
   (->> (fs/glob home "bbh/conversations/*/messages.jsonl")
        (mapcat #(str/split-lines (slurp (str %))))
@@ -79,12 +72,6 @@
       (Thread/sleep 4000)
       (send! "/poteto-mode-off")
       (Thread/sleep 1500)
-      (send! "Reply with only the word READY.")
-      (wait-for "the status reply" #(pos? (replies home "READY")) 120000)
-      (Thread/sleep 5000)
-      (when (bbh-thread)
-        (fail! "A status reply reached the Inbox"))
-      (println "A status reply stayed in the chat")
       (send! "Ask me which colour I want for the banner, then stop and wait for my answer. Do not use any tools.")
       (let [{:keys [thread_id]} (wait-for "the agent's question in the Inbox" bbh-thread 120000)
             messages #(get-in (window :get (str "/api/inbox/threads/" thread_id)) [:thread :messages])

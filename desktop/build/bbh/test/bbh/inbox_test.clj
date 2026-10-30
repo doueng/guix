@@ -153,20 +153,14 @@
                                                           :tool_calls [(call "(inbox \"send_message\" {:body \"x\"})")]})))))
     (is (nil? (:wake (inbox/last-turn [{:role "user" :content "plain"}]))))))
 
-(deftest what-reaches-the-inbox-depends-on-the-ask-and-the-wake
-  (with-redefs [inbox/needs-input? #(str/includes? % "ASK")]
-    (is (nil? (inbox/turn-message {:text "Done."})) "a status report stays in the chat")
-    (is (nil? (inbox/turn-message {})) "a turn with no text has nothing to post")
-    (is (nil? (inbox/turn-message {:text "ASK" :posted? true})) "the agent already posted")
-    (let [m (inbox/turn-message {:text "**Plan** ready.\n\n- Should I ASK them?\n\nDetails."})]
-      (is (= "Should I ASK them?" (:subject m)))
-      (is (str/ends-with? (:body m) ":::question-text\nYour answer\n:::"))
-      (is (nil? (:reply_to m))))
-    (let [m (inbox/turn-message {:text "Done." :wake "m1"})]
-      (is (= {:body "Done." :subject "Done." :reply_to "m1"} m) "a wake's answer goes back as plain text"))
-    (is (= "m1" (:reply_to (inbox/turn-message {:text "ASK" :wake "m1"}))))))
-
-(deftest without-jev-a-trailing-question-mark-decides
-  (with-redefs [babashka.http-client/post (fn [& _] (throw (ex-info "offline" {})))]
-    (is (inbox/needs-input? "Should I go ahead?\n"))
-    (is (not (inbox/needs-input? "Done.")))))
+(deftest every-finished-turn-reaches-the-inbox-unless-it-has-nothing-new
+  (is (nil? (inbox/turn-message {})) "a turn with no text has nothing to post")
+  (is (nil? (inbox/turn-message {:text "Done." :posted? true})) "the agent already posted")
+  (let [m (inbox/turn-message {:text "**Plan** ready.\n\n- Should I ask them?\n\nDetails."})]
+    (is (= "Should I ask them?" (:subject m)))
+    (is (str/ends-with? (:body m) ":::question-text\nYour answer\n:::"))
+    (is (nil? (:reply_to m))))
+  (let [m (inbox/turn-message {:text "Done." :wake "m1"})]
+    (is (= "Done." (:subject m)))
+    (is (str/starts-with? (:body m) "Done."))
+    (is (= "m1" (:reply_to m)))))

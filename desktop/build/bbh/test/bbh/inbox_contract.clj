@@ -117,31 +117,29 @@
     (doseq [m messages] (transcript/append! dir m))
     dir))
 
-(deftest a-turn-waiting-on-the-person-opens-a-thread-they-can-answer
-  (with-redefs [inbox/needs-input? (constantly true)]
-    (let [poller {:session "root-4" :project project :state (atom {})}
-          dir (conversation "root-4" {:role "user" :content "go"}
-                            {:role "assistant" :content "I found two options.\n\nShould I use the queue?"})]
-      (inbox/turn-ended! poller dir)
-      (let [id (:asked @(:state poller))
-            [message] (thread id)]
-        (is (= "waiting" (section-of id)))
-        (is (= 1 (count (:questions message))))
-        (is (= "root-4" (get-in message [:author :session])))
-        (inbox/prompted! poller)
-        (is (nil? (:asked @(:state poller))))
-        (is (nil? (section-of id)) "answering in the chat closes the thread")))))
+(deftest a-finished-turn-opens-a-thread-they-can-answer
+  (let [poller {:session "root-4" :project project :state (atom {})}
+        dir (conversation "root-4" {:role "user" :content "go"}
+                          {:role "assistant" :content "I found two options.\n\nThe queue is faster."})]
+    (inbox/turn-ended! poller dir)
+    (let [id (:asked @(:state poller))
+          [message] (thread id)]
+      (is (= "waiting" (section-of id)))
+      (is (= 1 (count (:questions message))))
+      (is (= "root-4" (get-in message [:author :session])))
+      (inbox/prompted! poller)
+      (is (nil? (:asked @(:state poller))))
+      (is (nil? (section-of id)) "answering in the chat closes the thread"))))
 
 (deftest a-wake-is-answered-in-its-thread
-  (with-redefs [inbox/needs-input? (constantly false)]
-    (let [{:keys [message_id thread_id]} (inbox/tool! (session-map "root-5") "send_message" {:body "Which?"})
-          _ (reply! message_id "The first")
-          reply (:id (last (thread thread_id)))
-          dir (conversation "root-5"
-                            {:role "user" :content (inbox/wake-text {:id reply :subject "s" :body "The first" :thread_id thread_id})}
-                            {:role "assistant" :content "Using the first."})]
-      (inbox/turn-ended! {:session "root-5" :project project :state (atom {})} dir)
-      (is (= "Using the first." (:body (last (thread thread_id))))))))
+  (let [{:keys [message_id thread_id]} (inbox/tool! (session-map "root-5") "send_message" {:body "Which?"})
+        _ (reply! message_id "The first")
+        reply (:id (last (thread thread_id)))
+        dir (conversation "root-5"
+                          {:role "user" :content (inbox/wake-text {:id reply :subject "s" :body "The first" :thread_id thread_id})}
+                          {:role "assistant" :content "Using the first."})]
+    (inbox/turn-ended! {:session "root-5" :project project :state (atom {})} dir)
+    (is (str/starts-with? (:body (last (thread thread_id))) "Using the first."))))
 
 (deftest every-tool-an-agent-uses-accepts-what-the-helper-sends
   (let [s (session-map "root-6")

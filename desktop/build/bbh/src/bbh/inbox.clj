@@ -9,7 +9,6 @@
   the turn that held the wake."
   (:require [babashka.fs :as fs]
             [babashka.http-client :as http]
-            [bbh.auth :as auth]
             [bbh.transcript :as transcript]
             [cheshire.core :as json]
             [clojure.java.io :as io]
@@ -81,35 +80,6 @@
        "[thread " thread_id " · the person reads the Inbox, not this chat, so send your answer there with "
        "(inbox \"send_message\" {:reply_to \"" id "\" :body \"...\"})]"))
 
-(def ^:private needs-input-at
-  "Below this, real turn ends were status reports and optional offers."
-  0.75)
-
-(defn- input-score
-  "Jev's probability that TEXT, an agent's last message, waits on the person."
-  [text]
-  (let [{:keys [status body]}
-        (http/post "https://api.typesafe.ai/v1/systemone"
-                   {:throw false :timeout 20000
-                    :headers {"Authorization" (str "Bearer " (auth/api-key "TYPESAFE_API_KEY" "typesafe"))
-                              "Content-Type" "application/json"}
-                    :body (json/generate-string
-                           {:model "jev-latest"
-                            :state {:agent_final_message text}
-                            :questions {:needs_input
-                                        {:type "noul"
-                                         :instructions (str "Has the agent stopped and is it now waiting for the person "
-                                                            "to answer a question, make a decision, or do something "
-                                                            "before the work can continue?")}}})})]
-    (when (not= 200 status) (throw (ex-info (str "TypeSafe " status) {})))
-    (get-in (json/parse-string body true) [:answers :needs_input :noul])))
-
-(defn needs-input?
-  "Whether TEXT waits on the person. Without Jev, whether it ends in a question."
-  [text]
-  (try (>= (input-score text) needs-input-at)
-       (catch Exception _ (str/ends-with? (str/trim text) "?"))))
-
 (defn last-turn
   "What the messages after the last user message show: {:text :wake :posted?}."
   [messages]
@@ -130,16 +100,13 @@
     (subs line 0 (min 120 (count line)))))
 
 (defn turn-message
-  "The send_message arguments that put TURN in the Inbox, or nil when it stays in
-  the chat. A wake's answer always goes back, because the person is reading there."
+  "The send_message arguments that put TURN in the Inbox, or nil when it has
+  nothing new. A finished turn waits on the person, as it does in Herdr, and a
+  wake's answer goes back to its thread."
   [{:keys [text wake posted?]}]
   (when (and text (not posted?))
-    (let [ask? (needs-input? text)]
-      (when (or ask? wake)
-        (cond-> {:body text :subject (subject text)}
-          ask? (update :body str "\n\n:::question-text\nYour answer\n:::")
-          ask? (assoc ::ask true)
-          wake (assoc :reply_to wake))))))
+    (cond-> {:body (str text "\n\n:::question-text\nYour answer\n:::") :subject (subject text)}
+      wake (assoc :reply_to wake))))
 
 (defn- bridge! [{:keys [session]} path body timeout-ms]
   (when-let [conn (connection)]
@@ -203,12 +170,10 @@
     (report! p {:type "state" :busy busy :idle_since idle-since})))
 
 (defn turn-ended!
-  "Post the turn that just ended in conversation DIR, when it belongs in the Inbox."
+  "Post the turn that just ended in conversation DIR to the Inbox."
   [{:keys [state] :as p} dir]
   (when-let [message (turn-message (last-turn (transcript/load-messages (transcript/continuation dir))))]
-    (let [{:keys [message_id]} (tool! p "send_message" (dissoc message ::ask))]
-      (when (::ask message)
-        (swap! state assoc :asked message_id)))))
+    (swap! state assoc :asked (:message_id (tool! p "send_message" message)))))
 
 (defn prompted!
   "The person answered in the chat, so the thread asking them is finished."

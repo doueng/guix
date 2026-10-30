@@ -174,8 +174,8 @@ conversation."
 ;; once the turn holding it completed, so a failed prompt stays pending, and
 ;; the next completed turn asks for it again.  A crash can repeat a wake, which
 ;; is why the agent gets the same reply at least once rather than exactly once.
-;; Each finished turn is reported too, so the poller can open a thread when the
-;; agent is waiting on the person, and `prompted' closes it when they answer here.
+;; Each finished turn is reported too, so the poller opens a thread for it, and
+;; `prompted' closes that thread when the person answers here.
 
 (defvar eng/bbh-inbox-command nil
   "The poller's command as a list, or nil for `bbh inbox-poll'.
