@@ -106,9 +106,7 @@
    :effort "medium"
    :deadline-ms 120000
    :max-output-chars 30000
-   :compact-at-tokens 200000
-   :keep-recent-tokens 20000
-   :trim-tool-chars 4000})
+   :rollover-at-tokens 350000})
 
 (def ^:private checks
   {:system [string? "a string"]
@@ -117,9 +115,7 @@
    :max-tokens [pos-int? "a positive integer"]
    :deadline-ms [pos-int? "a positive integer"]
    :max-output-chars [pos-int? "a positive integer"]
-   :compact-at-tokens [pos-int? "a positive integer"]
-   :keep-recent-tokens [pos-int? "a positive integer"]
-   :trim-tool-chars [pos-int? "a positive integer"]})
+   :rollover-at-tokens [pos-int? "a positive integer"]})
 
 (defn- validate [m]
   (if-not (map? m)

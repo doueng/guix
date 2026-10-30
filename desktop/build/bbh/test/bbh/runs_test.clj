@@ -84,23 +84,6 @@
     (session/close! s)
     (is (= [["llm" "ok" nil] ["tool" "interrupted" true]] @at-restart))))
 
-(deftest a-compact-command-is-its-own-trace-and-counts-toward-cost
-  (let [long-text (apply str (repeat 400 "word "))
-        s (session-with [{:content long-text :usage {:input 10 :output 1 :cost 0.5}}
-                         {:content "summary" :usage {:input 10 :output 1 :cost 0.25}}])]
-    (swap! s update :manifest assoc :keep-recent-tokens 1)
-    (session/prompt! s "talk")
-    (session/prompt! s "more")
-    (session/prompt! s "/compact")
-    (let [dir (:dir @s)
-          _ (session/close! s)
-          rs (runs/load-runs dir)
-          [compaction] (filter #(= "compaction" (:kind %)) rs)]
-      (is (some? compaction))
-      (is (nil? (:parent compaction)))
-      (is (= (:id compaction) (:trace compaction)))
-      (is (= (+ 0.5 0.25) (:cost (first (vals (metrics/report rs)))))))))
-
 (deftest metrics-group-runs-by-day-and-model
   (let [day "2026-10-30T09:00:00Z"
         rs [{:kind "turn" :model "m" :start day :ms 100 :status "ok" :usage {:cost 0.5}}

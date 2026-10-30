@@ -49,7 +49,7 @@
     <li><a href='#env'>6. The environment and the manifest</a></li>
     <li><a href='#openrouter'>7. Engine one: OpenRouter</a></li>
     <li><a href='#claude'>8. Engine two: Claude Code</a></li>
-    <li><a href='#context'>9. Context, trimming and compaction</a></li>
+    <li><a href='#context'>9. Context and rollover</a></li>
     <li><a href='#frontends'>10. Front ends: terminal and ACP</a></li>
     <li><a href='#models'>11. Models and credentials</a></li>
     <li><a href='#testing'>12. Testing</a></li>
@@ -92,8 +92,7 @@
 <tr><td><code>src/bbh/llm.clj</code></td><td>106</td><td>OpenRouter streaming, retries and cancellation.</td></tr>
 <tr><td><code>src/bbh/claude.clj</code></td><td>153</td><td>Runs a turn through Claude Code and its stream-json protocol.</td></tr>
 <tr><td><code>src/bbh/mcp.clj</code></td><td>44</td><td>A small MCP server that Claude Code starts. It forwards tool calls back to the session.</td></tr>
-<tr><td><code>src/bbh/context.clj</code></td><td>78</td><td>The view of the transcript the model sees: summaries, trimming, cut points.</td></tr>
-<tr><td><code>src/bbh/transcript.clj</code></td><td>34</td><td>Append-only files for messages and compactions.</td></tr>
+<tr><td><code>src/bbh/transcript.clj</code></td><td>34</td><td>Append-only files for messages and prompts, and the links between continued conversations.</td></tr>
 <tr><td><code>src/bbh/main.clj</code></td><td>76</td><td>The terminal front end and the command-line entry point.</td></tr>
 <tr><td><code>src/bbh/acp.clj</code></td><td>144</td><td>The Agent Client Protocol front end for Emacs agent-shell.</td></tr>
 <tr><td><code>src/bbh/models.clj</code></td><td>34</td><td>Model ids, the default model, and the engine each provider uses.</td></tr>
@@ -114,7 +113,7 @@
           |                              |
    engine :loop                   engine :claude
    llm.clj (OpenRouter)           claude.clj  &lt;--stream-json--&gt;  claude CLI
-   context.clj                              |  MCP over stdio
+                                            |  MCP over stdio
                                             v
                                         mcp.clj  --loopback socket--&gt;  session
           |
@@ -130,7 +129,7 @@ grep -c 'deftest' test/bbh/*.clj</code></pre>
 </div>
 
 <details><summary>Check yourself</summary>
-<p>Which file would you open first to change what the model sees before each request? <em>Answer:</em> the manifest is read in <code>repl.clj</code> (<code>manifest</code>) and used in <code>session.clj</code> (<code>system-prompt!</code>). What the model sees from the transcript is shaped by <code>context.clj</code>.</p>
+<p>Which file would you open first to change what the model sees before each request? <em>Answer:</em> the manifest is read in <code>repl.clj</code> (<code>manifest</code>) and used in <code>session.clj</code> (<code>system-prompt!</code>). What the model sees from the transcript is the transcript itself, read in <code>sample!</code>.</p>
 </details>
 
 <h2 id='repl-owned' class='lesson'>1. The model owns a REPL</h2>
@@ -175,7 +174,7 @@ grep -c 'deftest' test/bbh/*.clj</code></pre>
 <table>
 <tr><th>File</th><th>Written by</th><th>Purpose</th></tr>
 <tr><td><code>messages.jsonl</code></td><td><code>transcript/append!</code></td><td>The append-only transcript, one chat message per line.</td></tr>
-<tr><td><code>compactions.jsonl</code></td><td><code>transcript/append-compaction!</code></td><td>Each compaction: where the kept suffix starts, and the summary.</td></tr>
+<tr><td><code>continued-in</code></td><td><code>transcript/continue!</code></td><td>The id of the conversation this one rolled over into.</td></tr>
 <tr><td><code>repl.port</code></td><td><code>repl/start!</code></td><td>The nREPL port of the live REPL, for CIDER.</td></tr>
 <tr><td><code>repl.log</code></td><td><code>repl/start!</code></td><td>Stdout and stderr of the REPL process.</td></tr>
 <tr><td><code>claude-session</code></td><td><code>claude.clj</code></td><td>The Claude Code session id, so a later process can resume it.</td></tr>
@@ -183,7 +182,7 @@ grep -c 'deftest' test/bbh/*.clj</code></pre>
 </table>
 
 <h3>Why the transcript is plain chat messages</h3>
-<p>Each line of <code>messages.jsonl</code> is an OpenAI-style message: <code>role</code>, <code>content</code>, and optionally <code>tool_calls</code> or a <code>tool_call_id</code>. The design log says the transcript should stay plain chat messages so the eval tools and the Claude adapter can read it. The summary and trimming are a view computed on top of the transcript, not a change to it. <span class='pill'>decisions.tsv, 2026-10-18 context</span></p>
+<p>Each line of <code>messages.jsonl</code> is an OpenAI-style message: <code>role</code>, <code>content</code>, and optionally <code>tool_calls</code> or a <code>tool_call_id</code>. The design log says the transcript should stay plain chat messages so the eval tools and the Claude adapter can read it. It is also exactly what the model sees, so nothing is computed on top of it. <span class='pill'>decisions.tsv, 2026-10-18 context</span></p>
 
 <h3>Resume</h3>
 <p><code>bbh --resume last</code> picks the lexically largest directory under <code>conversations/</code>. Timestamp ids make that the newest one. It starts a fresh REPL, and the notes list tells the model that earlier definitions are gone.</p>
@@ -196,7 +195,7 @@ jq -c '{role, content: ((.content // &quot;&quot;) | tostring | .[0:80])}' &quot
 </div>
 
 <details><summary>Check yourself</summary>
-<p>Why does <code>append-compaction!</code> not rewrite <code>messages.jsonl</code>? <em>Answer:</em> the transcript is the durable record. A compaction only records where the model's view starts and what the summary says, so the original messages stay available for eval tools and for display.</p>
+<p>Why does a full context start a new conversation instead of rewriting <code>messages.jsonl</code>? <em>Answer:</em> the transcript is the durable record. Leaving it whole keeps the original messages available to the model on demand, to eval tools and for display.</p>
 </details>
 
 <h2 id='session' class='lesson'>3. The session and the turn loop</h2>
@@ -210,7 +209,7 @@ jq -c '{role, content: ((.content // &quot;&quot;) | tostring | .[0:80])}' &quot
 <tr><th>Key</th><th>Meaning</th></tr>
 <tr><td><code>:dir</code>, <code>:cwd</code>, <code>:init</code></td><td>Where the transcript lives, where the REPL runs, and the init file it loads.</td></tr>
 <tr><td><code>:model</code>, <code>:engine</code>, <code>:make-engine</code></td><td>The model id, the engine built from it, and the factory used to rebuild it on <code>/model</code>.</td></tr>
-<tr><td><code>:messages</code>, <code>:compaction</code></td><td>The transcript loaded from disk, and the latest compaction.</td></tr>
+<tr><td><code>:messages</code></td><td>The transcript loaded from disk.</td></tr>
 <tr><td><code>:repl</code>, <code>:manifest</code></td><td>The live REPL connection, and the last manifest that passed validation.</td></tr>
 <tr><td><code>:cancel</code>, <code>:interrupted</code>, <code>:evaluating</code></td><td>What to call to abort the current model request, and flags that tell the loop why it stopped.</td></tr>
 <tr><td><code>:spent</code>, <code>:limits</code>, <code>:notes</code></td><td>Session cost, the latest Claude rate-limit windows, and messages the model should see on its next turn.</td></tr>
@@ -220,7 +219,7 @@ jq -c '{role, content: ((.content // &quot;&quot;) | tostring | .[0:80])}' &quot
 <h3>From input to model</h3>
 <p>The terminal and ACP both call <code>session/prompt!</code>. It does four things in order:</p>
 <ol>
-  <li><strong>Commands.</strong> If the input starts with <code>/</code> and names a built-in command (<code>/help</code>, <code>/model</code>, <code>/compact</code>, <code>/usage</code>, <code>/restart</code>, <code>/port</code>), bbh runs it without the model.</li>
+  <li><strong>Commands.</strong> If the input starts with <code>/</code> and names a built-in command (<code>/help</code>, <code>/model</code>, <code>/usage</code>, <code>/restart</code>, <code>/port</code>), bbh runs it without the model.</li>
   <li><strong>Env expansion.</strong> Otherwise <code>expand</code> asks <code>bbh.env/expand-prompt</code> in the REPL. The env may return a rewritten prompt, or a <code>{:reply ...}</code> that answers without the model. This is how <code>/skill:NAME</code> and <code>/poteto-mode-off</code> work.</li>
   <li><strong>Record.</strong> The user's message is appended to the transcript. Any pending notes, such as &ldquo;the REPL restarted&rdquo;, are prefixed as a <code>[bbh]</code> line.</li>
   <li><strong>Turn.</strong> <code>turn!</code> dispatches on the engine's <code>:kind</code>. It is a multimethod with two methods: <code>:loop</code> (in <code>session.clj</code>) and <code>:claude</code> (in <code>claude.clj</code>).</li>
@@ -231,9 +230,9 @@ jq -c '{role, content: ((.content // &quot;&quot;) | tostring | .[0:80])}' &quot
 <pre>
 round n
   system     = system-prompt!          ; re-reads bbh.env/manifest, validates it
-  if tokens(context) &gt; :compact-at-tokens  -&gt; compact!
+  if rollover-due?  -&gt; continue-mid-turn!  ; new conversation, same REPL
   result     = sample!                 ; one streamed request; on-text emits events
-  if overflow -&gt; compact! once, then retry the round
+  if overflow -&gt; continue-mid-turn! once, then retry the round
   record assistant message             ; only if it has text or tool calls
   add-usage!                           ; tokens and cost, as an event
   for each tool call:
@@ -350,9 +349,7 @@ bb -cp src -e &quot;(require '[bbh.repl :as r])
 :system, :tool-description     must be strings
 :deadline-ms                   positive integer  (default 120000)
 :max-output-chars              positive integer  (default 30000)
-:compact-at-tokens             positive integer  (default 200000)
-:keep-recent-tokens            positive integer  (default 20000)
-:trim-tool-chars               positive integer  (default 4000)
+:rollover-at-tokens            positive integer  (default 350000)
 </pre>
 <p>A key that fails its check falls back to its default, and the failure is recorded as a problem. If the whole manifest is not a map, every default applies. <code>system-prompt!</code> then appends a <code>[bbh]</code> paragraph to the system prompt that lists the problems, so the model knows its own edit did not take effect.</p>
 
@@ -390,7 +387,7 @@ grep -n 'expand-prompt' ~/.config/bbh/init.clj test/bbh/session_test.clj</code><
 
 <h3>Retries</h3>
 <p><code>post!</code> retries three kinds of failure: a thrown I/O exception, HTTP 429, and HTTP 5xx. The waits are 1, 2, 4, 8 and 16 seconds. A <code>Retry-After</code> header, in seconds, replaces the wait and is capped at 60 seconds. Each retry reports a note through <code>on-retry</code>, which the session turns into a <code>[bbh]</code> line. The wait polls the cancellation flag every 50 ms, so Ctrl-C stops a retry at once. <span class='pill'>decisions.tsv, 2026-10-18 retry</span></p>
-<p>Other errors are not retried. A 400 whose body mentions a context limit gets <code>:overflow true</code> in its ex-data, and the session uses that to compact and try once more.</p>
+<p>Other errors are not retried. A 400 whose body mentions a context limit gets <code>:overflow true</code> in its ex-data, and the session uses that to roll over and try once more.</p>
 
 <h3>Cancellation</h3>
 <p>The sample function creates a <code>cancelled</code> atom and gives the session a function that sets it and closes the response body. If the stream breaks after cancellation, <code>llm/openrouter</code> returns the partial text with <code>:interrupted true</code> and no tool calls. A break without cancellation throws, so a network failure is an error, not a silent success. <span class='pill'>decisions.tsv, 2026-10-18 streaming</span></p>
@@ -467,42 +464,37 @@ bb -cp src:test -e &quot;(require 'bbh.claude-test) (clojure.test/run-tests 'bbh
 <p>Why does changing the manifest's system prompt restart the Claude process, while changing the tool description does not? <em>Answer:</em> <code>--system-prompt</code> is passed when the process starts, so a new system prompt needs a new process. The tool description is fetched through <code>describe</code> each time the MCP server lists tools, so it can change without a restart.</p>
 </details>
 
-<h2 id='context' class='lesson'>9. Context, trimming and compaction</h2>
+<h2 id='context' class='lesson'>9. Context and rollover</h2>
 <div class='goals'>
-<p><strong>Learning goals.</strong> Explain the difference between the transcript and the context. Explain why bbh trims tool output only from earlier turns, and how a compaction cut point is chosen.</p>
+<p><strong>Learning goals.</strong> Explain why the context equals the transcript, what happens when the context fills up, and how the old and new conversations link to each other.</p>
 </div>
 
-<h3>Two views of one conversation</h3>
-<p>The transcript keeps every message forever. The context is what the model sees. <code>context/view</code> builds it from the transcript and the latest compaction:</p>
-<ol>
-  <li>If there is a compaction, a user message with the summary comes first, under a header that says earlier messages were compacted.</li>
-  <li>Messages from the first kept index up to the start of the current turn come next. Tool output in them is cut to <code>:trim-tool-chars</code>, 4000 by default. The cut keeps the head and the tail and says how many characters it removed.</li>
-  <li>The current turn is included in full, so the model always sees its own latest tool results at full size.</li>
-</ol>
+<h3>One record, never rewritten</h3>
+<p>The transcript keeps every message forever, and it is also exactly what the model sees. Each request is the previous request plus new messages at the end, so the provider's prompt cache keeps hitting. bbh does not summarize or trim, and it also runs Claude Code with <code>DISABLE_AUTO_COMPACT=1</code>.</p>
 
-<h3>Why only earlier turns</h3>
-<p>The design log says why. Trimming old output once per turn keeps the prompt-cache prefix stable within a turn. A provider caches the start of a request, so if bbh changed earlier messages on every round, the cache would miss on every round. Trimming only at the turn boundary means each turn costs at most one rewrite of the prefix. <span class='pill'>decisions.tsv, 2026-10-18 context</span></p>
+<h3>When rollover runs</h3>
+<p><code>rollover-due?</code> compares the input tokens the provider reported for the last request with <code>:rollover-at-tokens</code>, 350000 by default, or 80% of the model's window when that is known and smaller. A provider overflow also rolls over and retries once, which covers a window bbh has not learned yet.</p>
 
-<h3>When compaction runs</h3>
-<p>Before each round, <code>turn!</code> checks whether the context has passed <code>:compact-at-tokens</code>, 200000 by default. A provider overflow error also triggers one compaction and one retry. The user can ask for one with <code>/compact</code>, and the text after the command becomes the focus of the summary. Tokens are estimated as one quarter of the JSON character count. That is a rough figure, and the design says so.</p>
-
-<h3>Where the cut goes</h3>
-<p><code>cut-point</code> picks the message index where the kept suffix begins. It considers only indices after the previous cut and never a tool message, because a tool result must stay with the call that asked for it. It takes the earliest candidate whose suffix fits within <code>:keep-recent-tokens</code>, 20000 by default. If none fits, it takes the latest candidate. If nothing lies before the cut, there is nothing to compact.</p>
-<p>The summary request asks a model for a fixed set of Markdown sections: goal, constraints, progress, decisions, next steps and critical context. It tells the model to keep the user's words, to name every file and value, and to record the REPL helpers that still exist. The new summary replaces the previous one, which is included in the request.</p>
-<p>The compaction is recorded in <code>compactions.jsonl</code> as <code>{first-kept, summary}</code>. The transcript is not changed, so an earlier compaction can always be reconstructed.</p>
+<h3>What rollover does</h3>
+<p><code>roll-over!</code> stops the engine, writes the new conversation's id to <code>continued-in</code> in the old directory, and moves the session to the new directory. The REPL keeps running, so live definitions survive. The first user message of the new conversation says this is a continuation and gives the path of the old <code>messages.jsonl</code>. The model reads what it needs from there, when it needs it.</p>
+<p>Between turns, that notice heads the user's prompt. During a turn, <code>continue-mid-turn!</code> records it as a user message that also says to carry on with the work. The loop engine does this before a request. Claude Code owns its own loop, so <code>turn!</code> kills it once every tool call in the last reply has its result and starts a fresh one. The request then in flight is dropped, and its cost goes unreported.</p>
+<p>The two links point in opposite directions for different readers. The back link is for the model. The forward link is for tools: <code>--resume</code> and <code>/resume</code> follow <code>continued-in</code>, so an id stored earlier, as herdr stores one, lands on the newest conversation.</p>
 
 <div class='try'>
-<p><strong>Try it.</strong> Compute a cut point on a small transcript without a model. The first argument is the list of messages, the second is the index to start from, and the third is the token budget for the kept suffix:</p>
+<p><strong>Try it.</strong> Follow a link without a model:</p>
 <pre><code>cd desktop/build/bbh
-bb -cp src -e &quot;(require '[bbh.context :as c])
-(def msgs (vec (for [i (range 10)] {:role (if (even? i) &quot;user&quot; &quot;assistant&quot;) :content (apply str (repeat 400 &quot;x&quot;))})))
-(prn (c/cut-point msgs 0 300))
-(prn (c/cut-point msgs 0 100000))&quot;</code></pre>
-<p>The first call prints 8: with a 300-token budget only the last two messages fit, so eight messages are summarized. The second prints 1: with a generous budget the earliest candidate fits, so only the first message would be summarized. Both outputs match what the function's rule says.</p>
+bb -cp src -e &quot;(require '[bbh.transcript :as t] '[babashka.fs :as fs])
+(def root (str (fs/create-temp-dir)))
+(def old (str (fs/path root &quot;old&quot;)))
+(fs/create-dirs old)
+(prn (t/continuation old))
+(t/continue! old &quot;new&quot;)
+(prn (t/continuation old))&quot;</code></pre>
+<p>The first line prints the <code>old</code> directory, because it has not continued anywhere. The second prints the <code>new</code> directory beside it.</p>
 </div>
 
 <details><summary>Check yourself</summary>
-<p>A transcript ends with an assistant message that has a tool call, then a tool result, and the suffix budget would cut right before the tool result. What does <code>cut-point</code> do? <em>Answer:</em> tool messages are never candidates, so it moves the cut to an earlier user or assistant message, keeping the call and its result together.</p>
+<p>Why does the between-turns check in <code>prompt!</code> run after <code>expand</code>? <em>Answer:</em> <code>expand</code> asks whether this is the conversation's first user message, and a new conversation has none. Running it first would start poteto-mode again on a conversation that is already under way.</p>
 </details>
 
 <h2 id='frontends' class='lesson'>10. Front ends: terminal and ACP</h2>
@@ -594,9 +586,8 @@ bb -cp src -e &quot;(require '[bbh.auth :as a]) (prn (boolean (a/api-key &quot;O
 <h3>Test files and what they cover</h3>
 <table>
 <tr><th>File</th><th>Covers</th></tr>
-<tr><td><code>session_test.clj</code></td><td>Definitions across turns, failing evaluations, deadlines that restart the REPL, manifest redefinition and fallback, interrupts, prompt expansion, commands without a model, compaction on large contexts, overflow retry, the focused <code>/compact</code>, and output elision.</td></tr>
+<tr><td><code>session_test.clj</code></td><td>Definitions across turns, failing evaluations, deadlines that restart the REPL, manifest redefinition and fallback, interrupts, prompt expansion, commands without a model, rollover between turns and mid turn, overflow retry, resuming through a continuation, and output elision.</td></tr>
 <tr><td><code>llm_test.clj</code></td><td>Stream accumulation, broken streams, cancellation, retries with stubbed responses, overflow messages, and releasing the response body.</td></tr>
-<tr><td><code>context_test.clj</code></td><td>Trimming before the current turn, replacing compacted messages with the summary, and cut points that never orphan a tool result.</td></tr>
 <tr><td><code>acp_test.clj</code></td><td>Whitespace chunks, rejected invalid or overlapping requests, and an agent process that stays up after bad input.</td></tr>
 <tr><td><code>claude_test.clj</code></td><td>Cancellation, closing the MCP listener on stop, and provider errors reported as errors. Uses <code>fake-claude.clj</code>.</td></tr>
 <tr><td><code>env_test.clj</code></td><td>The documented examples in the prompt run in a real REPL.</td></tr>
@@ -676,9 +667,8 @@ bb eval:lint</code></pre>
 <tr><td>Claude Code runs the loop for <code>claude/...</code></td><td>Keeps the subscription path. The CLI owns sampling, retries and caching.</td><td>Two engines with two code paths. The tool must cross an MCP bridge.</td></tr>
 <tr><td>One event stream, not UI callbacks</td><td>ACP and the terminal consume the same events, and the tests can check them.</td><td>Front ends must translate events. The ACP title fix came from that translation.</td></tr>
 <tr><td>The env owns <code>expand-prompt</code> and skills</td><td>The model can change how its own input is expanded.</td><td>The env can break input handling, so expansion errors are reported in the transcript.</td></tr>
-<tr><td>Transcript is plain chat messages; the context is a view</td><td>The eval tools and the Claude adapter read the same files, and compaction never rewrites history.</td><td>Every turn recomputes the view. Trimming and summaries must be pure functions.</td></tr>
-<tr><td>Trim tool output only from earlier turns</td><td>The provider's prompt cache stays valid within a turn.</td><td>Old tool output is shortened once per turn, not on every round.</td></tr>
-<tr><td>Compact at a token threshold and on overflow</td><td>The budget controls cost and focus, and overflow recovery covers smaller context windows.</td><td>Token counts are estimates. The live check compacted twice and still answered correctly.</td></tr>
+<tr><td>Transcript is plain chat messages, and it is the context</td><td>The eval tools and the Claude adapter read the same files, and nothing rewrites history.</td><td>A long task spans several conversations, and the model must read back what it needs.</td></tr>
+<tr><td>Roll over at a token threshold and on overflow</td><td>A summary loses detail and costs a request, while the durable transcript loses nothing. Overflow recovery covers smaller context windows.</td><td>The new conversation starts with an empty prompt cache and spends tokens reading back. Claude Code is killed mid turn, so a dropped request's cost goes unreported.</td></tr>
 <tr><td>Retry transient failures with capped backoff; interrupts cancel waits</td><td>One transient error used to end the whole turn.</td><td>Verified with stubbed responses. Not yet seen against a live 429.</td></tr>
 <tr><td>Kill and restart the REPL on timeout or interrupt</td><td>Babashka cannot interrupt a busy thread.</td><td>Definitions are lost. The model is told in the same result.</td></tr>
 <tr><td>Read limits from Claude Code's rate-limit events</td><td>The CLI already streams the utilization, so no polling during turns.</td><td>Only the windows the CLI reports are available.</td></tr>
@@ -708,10 +698,9 @@ bb eval:lint</code></pre>
 
 <h3>Limits you will meet in use</h3>
 <ul>
-  <li><strong>No rollback and no branching.</strong> The transcript only grows. You can compact or restart, but you cannot undo a turn.</li>
+  <li><strong>No rollback and no branching.</strong> The transcript only grows. You can restart, but you cannot undo a turn.</li>
   <li><strong>The REPL is not a sandbox.</strong> Model code runs with your permissions. Everything the REPL can reach, bbh can reach.</li>
   <li><strong>Restarts lose definitions.</strong> A deadline, an interrupt or <code>/restart</code> resets the REPL. The transcript and the init file survive, and nothing else does.</li>
-  <li><strong>Estimated tokens.</strong> One quarter of the JSON character count is a rough guide. Compaction thresholds inherit that error.</li>
   <li><strong>Round limit.</strong> A turn stops after 100 tool rounds, and the model is told so in a note. It is a fixed constant, not a manifest key.</li>
 </ul>
 
@@ -731,8 +720,8 @@ bb eval:lint</code></pre>
 <ol>
   <li><strong>Trace one turn.</strong> Write a scripted reply file with one text step and one code step, then run the terminal with <code>BBH_MODEL=script/PATH</code>. Name each event you see, and which function emitted it.</li>
   <li><strong>Reject unknown manifest keys.</strong> Extend <code>repl/validate</code> so an unknown key produces a problem line. Write a test in <code>env_test.clj</code> that fails before your change and passes after it. Consider whether the fallback text should name the valid keys.</li>
-  <li><strong>Add a built-in command.</strong> Add <code>/tokens</code> to <code>session/commands</code>, which reports the current <code>context/tokens</code> estimate. Make sure it runs without the model, and add a test in <code>session_test.clj</code> modelled on <code>commands-run-without-the-model</code>.</li>
-  <li><strong>Find the cut.</strong> Using <code>cut-point</code>, construct a transcript where the earliest fitting cut would land on a tool message. Show that the function moves the cut and explain why in one paragraph.</li>
+  <li><strong>Add a built-in command.</strong> Add <code>/tokens</code> to <code>session/commands</code>, which reports the input tokens of the last request from <code>:last-input</code>. Test it the way <code>session_test.clj</code> tests the other commands.</li>
+  <li><strong>Walk the chain.</strong> Using <code>transcript/continuation</code>, build three linked conversations in a temp directory and confirm that resuming the first lands on the third. Then explain what happens if a <code>continued-in</code> file names a directory with no messages.</li>
   <li><strong>Add an assertion.</strong> Follow the README's instructions to add an assertion to <code>traces.clj</code> for a failure you have seen in a trace. Add a test in <code>eval_test.clj</code> that builds a conversation with the failure, then run <code>bb eval:lint</code> over it.</li>
   <li><strong>Settle a question.</strong> Verify or refute the observation about joined text blocks. Write the test that shows the difference between display and storage, and propose the change that makes them agree.</li>
 </ol>
@@ -741,9 +730,8 @@ bb eval:lint</code></pre>
 <dl>
   <dt>ACP</dt><dd>Agent Client Protocol. JSON-RPC over stdio, used by Emacs agent-shell to talk to bbh.</dd>
   <dt>Cohort</dt><dd>A set of eval traces grouped by comparison run and profile, or by day for real conversations.</dd>
-  <dt>Compaction</dt><dd>Replacing older messages in the model's view with a summary. The transcript itself is not changed.</dd>
   <dt>Control session</dt><dd>The nREPL session bbh uses for its own questions, which leaves the model's namespace alone.</dd>
-  <dt>Cut point</dt><dd>The message index where the kept suffix begins during compaction. Never a tool message.</dd>
+  <dt>Continuation</dt><dd>A conversation that rollover started. Its first user message links back to the previous transcript, and the previous directory's <code>continued-in</code> links forward to it.</dd>
   <dt>Engine</dt><dd>The thing that runs a turn: <code>:loop</code> for OpenRouter and scripts, or <code>:claude</code> for Claude Code.</dd>
   <dt>Env</dt><dd>The init file and the vars it defines, which bbh reads by name: manifest, expand-prompt and commands.</dd>
   <dt>Event</dt><dd>A map with a <code>:type</code> that the session emits and a front end renders.</dd>
@@ -756,7 +744,6 @@ bb eval:lint</code></pre>
   <dt>Skill</dt><dd>A <code>SKILL.md</code> file that the env can inline into a prompt with <code>/skill:NAME</code>.</dd>
   <dt>Trace</dt><dd>One conversation directory, read by the eval tools.</dd>
   <dt>Transcript</dt><dd><code>messages.jsonl</code>: the durable, append-only record of a conversation.</dd>
-  <dt>Trimming</dt><dd>Shortening tool output from earlier turns in the context view, with head and tail kept.</dd>
   <dt>Turn</dt><dd>One user prompt and the model's full response, including any tool rounds.</dd>
   <dt>User session</dt><dd>The nREPL session that runs the model's code and keeps its definitions.</dd>
 </dl>

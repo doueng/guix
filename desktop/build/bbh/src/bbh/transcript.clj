@@ -1,5 +1,5 @@
 (ns bbh.transcript
-  "A conversation's append-only message log, and its compactions."
+  "A conversation's append-only message log, and its links to its continuations."
   (:require [babashka.fs :as fs]
             [cheshire.core :as json]
             [clojure.string :as str]))
@@ -18,20 +18,26 @@
   (spit (messages-file dir) (str (json/generate-string msg) "\n") :append true)
   msg)
 
-(defn- compactions-file [dir]
-  (str (fs/path dir "compactions.jsonl")))
+(defn new-id
+  "A new conversation's id, its start time."
+  []
+  (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS")))
 
-(defn load-compaction
-  "The latest {:first-kept :summary}, where :first-kept indexes the messages, or nil."
+(defn continue!
+  "Point conversation DIR at the conversation ID beside it. Returns ID's directory."
+  [dir id]
+  (let [next-dir (str (fs/path (fs/parent dir) id))]
+    (fs/create-dirs next-dir)
+    (spit (str (fs/path dir "continued-in")) id)
+    next-dir))
+
+(defn continuation
+  "The newest conversation DIR continued into, or DIR itself."
   [dir]
-  (let [f (compactions-file dir)]
-    (when (fs/exists? f)
-      (some-> (->> (fs/read-all-lines f) (remove str/blank?) last) (json/parse-string true)))))
-
-(defn append-compaction! [dir compaction]
-  (fs/create-dirs dir)
-  (spit (compactions-file dir) (str (json/generate-string compaction) "\n") :append true)
-  compaction)
+  (let [f (fs/path dir "continued-in")]
+    (if (fs/exists? f)
+      (recur (str (fs/path (fs/parent dir) (str/trim (slurp (str f))))))
+      dir)))
 
 (defn- prompts-file [dir]
   (str (fs/path dir "prompts.jsonl")))

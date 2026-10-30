@@ -69,7 +69,7 @@
                                       "BBH_BRIDGE_TOKEN" (:token bridge)}}}}
         proc (apply p/process
                     {:dir cwd :err :append :err-file (fs/file dir "claude.log")
-                     :extra-env {"DISABLE_AUTOUPDATER" "1"}}
+                     :extra-env {"DISABLE_AUTOUPDATER" "1" "DISABLE_AUTO_COMPACT" "1"}}
                     (or (System/getenv "BBH_CLAUDE") "claude")
                     "-p" "--input-format" "stream-json" "--output-format" "stream-json"
                     "--verbose" "--include-partial-messages"
@@ -151,6 +151,12 @@
                   "; see " log)
              {:exit code})))
 
+(defn- calls-answered?
+  "Whether every tool call of the latest assistant message has its result."
+  [messages]
+  (let [results (take-while #(= "tool" (:role %)) (rseq messages))]
+    (= (count results) (count (:tool_calls (nth (rseq messages) (count results) nil))))))
+
 (defmethod session/turn! :claude [s]
   (let [system (session/system-prompt! s)
         prior (pop (:messages @s))
@@ -161,7 +167,7 @@
         text (:content (peek (:messages @s)))
         text (cond (and fresh (some #(= "assistant" (:role %)) prior))
                    (str "[bbh] Earlier in this conversation, before you joined it:\n\n"
-                        (history (pop (session/context s))) "\n\n" text)
+                        (history prior) "\n\n" text)
                    (seq missed)
                    (str "[bbh] Messages in this conversation since you last took part:\n\n"
                         (history missed) "\n\n" text)
@@ -199,12 +205,16 @@
                     :else (recur texts request-start calls)))
             "assistant" (do (record-assistant! s (:content message)) (recur texts request-start calls))
             "user" (do (record-tool-results! s (:content message))
-                       ;; An interrupt also arrives as a user event, with no tool result.
-                       (recur texts
-                              (if (some #(= "tool_result" (:type %)) (:content message))
-                                (System/currentTimeMillis)
-                                request-start)
-                              calls))
+                       ;; Claude Code owns the loop and has no hook between requests, so
+                       ;; it is replaced once it holds no unanswered call.
+                       (if (and (session/rollover-due? s) (calls-answered? (:messages @s)))
+                         (do (session/continue-mid-turn! s) (session/turn! s))
+                         ;; An interrupt also arrives as a user event, with no tool result.
+                         (recur texts
+                                (if (some #(= "tool_result" (:type %)) (:content message))
+                                  (System/currentTimeMillis)
+                                  request-start)
+                                calls)))
             "system" (do (when (and (= "init" (:subtype ev)) (:session_id ev))
                            (spit (session-file s) (:session_id ev)))
                          (recur texts request-start calls))
@@ -217,10 +227,10 @@
                        (session/add-usage! s {:cost (max 0 cost)
                                               :size (some :contextWindow (vals (:modelUsage ev)))})
                        (when (and (:is_error ev) (not (:interrupted @s)))
-                         (throw (ex-info (str "Claude Code: "
-                                              (or (not-empty (str/join "\n" (:errors ev)))
-                                                  (:result ev) (:subtype ev)))
-                                         {:subtype (:subtype ev)}))))
+                         (let [why (or (not-empty (str/join "\n" (:errors ev))) (:result ev) (:subtype ev))]
+                           (if (re-find #"(?i)prompt is too long" (str why))
+                             (do (session/continue-mid-turn! s) (session/turn! s))
+                             (throw (ex-info (str "Claude Code: " why) {:subtype (:subtype ev)}))))))
             ::exit (throw (exited! s (:unparsed ev)))
             (recur texts request-start calls))))
       (finally

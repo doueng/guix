@@ -4,10 +4,9 @@
             [bbh.acp :as acp]
             [bbh.models :as models]
             [bbh.session :as session]
+            [bbh.transcript :as transcript]
             [clojure.string :as str])
-  (:import [java.time LocalDateTime]
-           [java.time.format DateTimeFormatter]
-           [org.jline.reader EndOfFileException LineReader LineReaderBuilder UserInterruptException]
+  (:import [org.jline.reader EndOfFileException LineReader LineReaderBuilder UserInterruptException]
            [org.jline.terminal TerminalBuilder]))
 
 (defn- data-dir []
@@ -17,10 +16,10 @@
   (let [root (fs/path (data-dir) "conversations")
         saved (when (fs/exists? root)
                 (->> (fs/list-dir root) (filter #(fs/exists? (fs/path % "messages.jsonl"))) (map str) sort))]
-    (str (cond (nil? resume) (fs/path root (.format (LocalDateTime/now) (DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS")))
-               (= "last" resume) (or (last saved) (throw (ex-info "No conversation to resume" {})))
-               (some #{(str (fs/path root resume))} saved) (fs/path root resume)
-               :else (throw (ex-info (str "No conversation " resume " under " root) {}))))))
+    (cond (nil? resume) (str (fs/path root (transcript/new-id)))
+          (= "last" resume) (transcript/continuation (or (last saved) (throw (ex-info "No conversation to resume" {}))))
+          (some #{(str (fs/path root resume))} saved) (transcript/continuation (str (fs/path root resume)))
+          :else (throw (ex-info (str "No conversation " resume " under " root) {})))))
 
 (defn- dim [s] (str "\u001b[2m" s "\u001b[0m"))
 

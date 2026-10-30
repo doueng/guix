@@ -1,6 +1,7 @@
 (ns bbh.session-test
   (:require [babashka.fs :as fs]
             [bbh.session :as session]
+            [bbh.transcript :as transcript]
             [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
@@ -23,13 +24,14 @@
                           (swap! requests conj req)
                           (let [s (first @script)
                                 cut (and (map? s) (contains? s :cut))
-                                s (if cut (:cut s) s)]
+                                usage (when (map? s) (:usage s))
+                                s (cond cut (:cut s) (and (map? s) (:say s)) (:say s) :else s)]
                             (swap! script rest)
                             (when (= :overflow s)
                               (throw (ex-info "OpenRouter 400: maximum context length" {:overflow true})))
                             (when (string? s) (on-text s))
                             (cond-> {:message (reply (cond-> s (map? s) (dissoc :usage)))
-                                     :usage (when (map? s) (:usage s))}
+                                     :usage usage}
                               cut (assoc :truncated true))))}
         s (session/new-session {:dir dir :init init :model "faux" :make-engine (constantly engine)
                                 :emit #(swap! events conj %)})]
@@ -182,39 +184,100 @@
 
 (def ^:private long-answer (apply str (repeat 400 "x")))
 
-(deftest a-large-context-is-compacted-before-the-next-request
-  (let [h (harness "(ns bbh.env) (def manifest {:compact-at-tokens 50 :keep-recent-tokens 10})"
-                   [long-answer "SUMMARY" "second"])
-        _ (session/prompt! (:s h) "hello")
-        _ (session/prompt! (:s h) "next")
-        resumed (session/new-session {:dir (:dir h) :model "faux" :make-engine (constantly {:kind :loop})})]
-    (stop! h)
-    (is (nil? (:tools (get @(:requests h) 1))))
-    (is (= [{:role "system" :content (system-prompt h 2)}
-            {:role "user" :content "[bbh] Earlier messages in this conversation were compacted into this summary:\n\nSUMMARY"}
-            {:role "user" :content "next"}]
-           (:messages (get @(:requests h) 2))))
-    (is (= ["hello" long-answer "next" "second"] (mapv :content (:messages @(:s h)))))
-    (is (= "[bbh] Compacted 2 messages into a summary of about 2 tokens.\n\n" (get (texts h) 1)))
-    (is (= {:first-kept 2 :summary "SUMMARY" :trim-before 2} (:compaction @resumed)))))
+(defn- continuation-notice [old-dir n]
+  (str "[bbh] This is a continuation session. The previous session ended because its context filled up. "
+       "Its transcript has " n " messages, one JSON object per line with role, content and tool_calls, in "
+       old-dir "/messages.jsonl. "
+       "Get context from it only as you need it, during the session, rather than reading it all up front. "
+       "It can start with a link to an earlier session. "
+       "The REPL kept running, so live definitions remain."))
 
-(deftest an-overflowing-request-compacts-and-retries-once
-  (let [h (harness "" [long-answer :overflow "SUMMARY" "after"])]
+(def ^:private mid-turn-note
+  " It ended in the middle of a turn, so read its last user request and its latest messages, then carry on with that work.")
+
+(defn- recorded [dir]
+  (mapv :content (transcript/load-messages dir)))
+
+(deftest a-full-context-continues-in-a-new-conversation-at-the-next-prompt
+  (let [h (harness "(ns bbh.env) (def manifest {:rollover-at-tokens 1000})
+                    (defn expand-prompt [{:keys [text first?]}] (when first? (str \"FIRST \" text)))"
+                   [{:code "(def x 41)"} {:say "full" :usage {:input 1000}} {:code "(inc x)"} "second"])
+        old (:dir h)]
+    (session/prompt! (:s h) "hello")
+    (session/prompt! (:s h) "next")
+    (stop! h)
+    (let [new-dir (:dir @(:s h))
+          notice (str (continuation-notice old 4) "\n\nnext")]
+      (is (not= old new-dir))
+      (is (= ["FIRST hello" "" "=> #'user/x" "full"] (recorded old)))
+      (is (= notice (first (recorded new-dir))))
+      (is (= notice (get-in @(:requests h) [2 :messages 1 :content])))
+      (is (= 2 (count (get-in @(:requests h) [2 :messages]))))
+      (is (= "=> 42" (peek (tool-results h))))
+      (is (= new-dir (transcript/continuation old))))))
+
+(deftest a-full-context-mid-turn-continues-the-work-in-a-new-conversation
+  (let [h (harness "(ns bbh.env) (def manifest {:rollover-at-tokens 1000})"
+                   [{:code "(+ 1 2)" :usage {:input 1000}} "finished"])
+        old (:dir h)]
+    (is (= :end-turn (session/prompt! (:s h) "go")))
+    (stop! h)
+    (is (= ["go" "" "=> 3"] (recorded old)))
+    (is (= [(str (continuation-notice old 3) mid-turn-note) "finished"] (recorded (:dir @(:s h)))))
+    (is (= 1 (count (filter #(str/includes? % "continues in conversation") (texts h)))))))
+
+(deftest context-below-the-limit-stays-in-the-conversation
+  (let [h (harness "(ns bbh.env) (def manifest {:rollover-at-tokens 1000})"
+                   [{:say "one" :usage {:input 999}} "two"])]
+    (session/prompt! (:s h) "a")
+    (session/prompt! (:s h) "b")
+    (stop! h)
+    (is (= (:dir h) (:dir @(:s h))))
+    (is (= ["a" "one" "b" "two"] (recorded (:dir h))))))
+
+(deftest a-model-window-below-the-limit-rolls-over-before-it-fills
+  (let [h (harness "" [{:say "one" :usage {:input 800 :size 1000}} "two"])]
+    (session/prompt! (:s h) "a")
+    (session/prompt! (:s h) "b")
+    (stop! h)
+    (is (= ["a" "one"] (recorded (:dir h))))
+    (is (= "two" (peek (recorded (:dir @(:s h))))))))
+
+(deftest an-overflowing-request-continues-in-a-new-conversation-and-retries-once
+  (let [h (harness "" ["answer" :overflow "after"])]
     (session/prompt! (:s h) "hello")
     (is (= :end-turn (session/prompt! (:s h) "next")))
     (stop! h)
-    (is (= "after" (:content (peek (:messages @(:s h))))))
-    (is (= "[bbh] The request exceeded the model's context. Compacted 1 messages into a summary of about 2 tokens.\n\n"
-           (get (texts h) 1)))))
+    (is (= ["hello" "answer" "next"] (recorded (:dir h))))
+    (is (= [(str (continuation-notice (:dir h) 3) mid-turn-note) "after"] (recorded (:dir @(:s h)))))))
 
-(deftest compact-command-passes-the-users-focus
-  (let [h (harness "" ["answer" "SUMMARY"])]
-    (session/prompt! (:s h) "hello")
-    (session/prompt! (:s h) "/compact keep the numbers")
+(deftest resuming-an-old-conversation-lands-on-its-continuation
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-root"}))
+        old (str (fs/path root "old"))
+        current (str (fs/create-dirs (fs/path root "current")))
+        h (harness "" ["hi" "back"] current)
+        _ (transcript/append! old {:role "user" :content "before"})
+        new-dir (transcript/continue! old "new")]
+    (transcript/append! new-dir {:role "user" :content "after"})
+    (session/prompt! (:s h) "/resume old")
     (stop! h)
-    (is (str/ends-with? (get-in @(:requests h) [1 :messages 1 :content])
-                        "The user asks the summary to focus on: keep the numbers"))
-    (is (= "Compacted 1 messages into a summary of about 2 tokens." (peek (texts h))))))
+    (is (= new-dir (:dir @(:s h))))
+    (is (= ["after"] (mapv :content (:messages @(:s h)))))))
+
+(deftest resume-last-skips-conversations-that-continued-elsewhere
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-root"}))
+        current (str (fs/create-dirs (fs/path root "3-current")))
+        predecessor (str (fs/path root "2-predecessor"))
+        other (str (fs/path root "1-other"))
+        h (harness "" [] current)]
+    (transcript/append! other {:role "user" :content "other"})
+    (transcript/append! predecessor {:role "user" :content "before"})
+    (transcript/continue! predecessor "3-current")
+    (transcript/append! current {:role "user" :content "after"})
+    (is (str/starts-with? (do (session/prompt! (:s h) "/resume") (peek (texts h))) "1-other  1 messages"))
+    (session/prompt! (:s h) "/resume last")
+    (stop! h)
+    (is (= other (:dir @(:s h))))))
 
 (deftest render-elides-the-middle-of-long-output
   (is (= "out\n[... 9 chars elided ...]\nhij" (session/render {:out "abcdefghij"} 6))))
@@ -259,7 +322,7 @@
   (mapv #(vec (rest (:messages %))) @requests))
 
 (deftest every-request-extends-the-previous-one-so-the-cache-hits
-  (let [h (harness "(ns bbh.env) (def manifest {:trim-tool-chars 10})"
+  (let [h (harness ""
                    [{:code "(apply str (repeat 50 \"x\"))"} "ok" {:code "(apply str (repeat 50 \"y\"))"} "ok"])]
     (session/prompt! (:s h) "one")
     (session/prompt! (:s h) "two")

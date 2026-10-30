@@ -1,7 +1,7 @@
 (ns bbh.runs
   "A conversation's run tree in runs.jsonl, after LangSmith. A trace is one
-  user turn. Its turn run's id is the trace id, and the turn's llm, tool and
-  compaction runs are its children. Runs point into messages.jsonl by index
+  user turn. Its turn run's id is the trace id, and the turn's llm and tool
+  runs are its children. Runs point into messages.jsonl by index
   and tool_call_id instead of copying content."
   (:require [babashka.fs :as fs]
             [cheshire.core :as json]

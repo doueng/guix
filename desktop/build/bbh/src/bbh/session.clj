@@ -4,7 +4,6 @@
   Events are maps with a :type of :text, :thought, :tool-call, :tool-result or
   :usage."
   (:require [babashka.fs :as fs]
-            [bbh.context :as context]
             [bbh.delimiters :as delimiters]
             [bbh.repl :as repl]
             [bbh.runs :as runs]
@@ -15,8 +14,14 @@
 
 (def ^:private max-rounds 100)
 
+(defn- cap [s n]
+  (if (<= (count s) n)
+    s
+    (let [half (quot n 2)]
+      (str (subs s 0 half) "\n[... " (- (count s) n) " chars elided ...]\n" (subs s (- (count s) half))))))
+
 (defn render [{:keys [out err value]} max-chars]
-  (context/cap (->> [(when (seq out) (str "out:\n" (str/trimr out)))
+  (cap (->> [(when (seq out) (str "out:\n" (str/trimr out)))
              (when (seq err) (str "err:\n" (str/trimr err)))
              (when value (str "=> " value))]
             (remove nil?)
@@ -26,7 +31,7 @@
 (defn spill!
   "TEXT for the model. When it is longer than MAX-CHARS, the full text is saved
   under the conversation's outputs/ directory and the capped text starts with
-  its path, which compaction trimming keeps because it keeps the head."
+  its path."
   [s id text max-chars]
   (if (<= (count text) max-chars)
     text
@@ -34,7 +39,7 @@
       (fs/create-dirs (fs/parent f))
       (spit (str f) text)
       (str "[bbh] Full output (" (count text) " chars) saved to " f ". Read parts with read-lines.\n"
-           (context/cap text max-chars)))))
+           (cap text max-chars)))))
 
 (defn new-session
   "DIR holds the transcript and logs, INIT is loaded into every new REPL, CWD is
@@ -46,7 +51,6 @@
          :model model :make-engine make-engine :engine (make-engine model)
          :emit (or emit (fn [_])) :notes (vec notes)
          :messages (transcript/load-messages dir)
-         :compaction (transcript/load-compaction dir)
          :interrupted false :evaluating false :cancel nil
          :manifest repl/defaults :repl nil :spent 0.0 :limits nil
          :context-size nil :last-input nil :turn-usage nil
@@ -61,14 +65,12 @@
 
 (defn trace-run!
   "Append a run of KIND that started at START-MS to the current turn's trace.
-  Outside a turn, as for /compact, the run is a trace of its own. FIELDS can
-  override the default \"ok\" :status."
+  FIELDS can override the default \"ok\" :status."
   [s kind start-ms fields]
   (let [{:keys [dir trace model manifest]} @s
-        turn? (= "turn" kind)
-        id (if turn? trace (str (random-uuid)))]
+        turn? (= "turn" kind)]
     (runs/append! dir start-ms
-                  (merge {:id id :trace (or trace id) :parent (when-not turn? trace)
+                  (merge {:id (if turn? trace (str (random-uuid))) :trace trace :parent (when-not turn? trace)
                           :kind kind :model model :effort (some-> (:effort manifest) name) :status "ok"}
                          fields))))
 
@@ -81,14 +83,14 @@
     interrupted (assoc :status "interrupted")))
 
 (defn- traced-sample!
-  "Call the engine's sample function and record the request as a run of KIND."
-  [s kind req opts]
+  "Call the engine's sample function and record the request as an llm run."
+  [s req opts]
   (let [start (System/currentTimeMillis)]
     (try (let [r ((:sample (:engine @s)) req opts)]
-           (trace-run! s kind start (sample-fields r))
+           (trace-run! s "llm" start (sample-fields r))
            r)
          (catch Exception e
-           (trace-run! s kind start {:status "error" :error (ex-message e)})
+           (trace-run! s "llm" start {:status "error" :error (ex-message e)})
            (throw e)))))
 
 (defn start-repl!
@@ -256,50 +258,47 @@
           (not (string? code)) "Arguments must be JSON of the form {\"code\": \"...\"}."
           :else (run-code! s id code))))
 
-(defn context
-  "The messages the model sees after the latest compaction."
-  [s]
-  (let [{:keys [messages compaction manifest]} @s]
-    (context/view messages compaction manifest)))
-
-(defn compact!
-  "Fold the transcript before its recent messages into a summary, which can
-  FOCUS on what the user names. Returns a description for the user."
-  [s focus]
-  (system-prompt! s)
-  (let [{:keys [dir messages compaction manifest engine]} @s
-        from (or (:first-kept compaction) 0)
-        cut (context/cut-point messages from (:keep-recent-tokens manifest))]
-    (cond (not (:sample engine)) "Claude Code compacts its own context, so compaction only applies to OpenRouter models."
-          (nil? cut) "Nothing to compact yet."
-          :else
-          (let [{:keys [message usage]}
-                (try (traced-sample!
-                      s "compaction"
-                      {:messages (context/summary-request (:summary compaction) (subvec messages from cut) focus)
-                       :effort (:effort manifest)}
-                      {:on-text (fn [_]) :on-open #(swap! s assoc :cancel %)})
-                     (finally (swap! s assoc :cancel nil)))
-                summary (str/trim (str (:content message)))]
-            (add-usage! s {:cost (:cost usage)})
-            (cond (:interrupted @s) "Compaction was interrupted."
-                  (str/blank? summary) "Compaction failed because the model returned an empty summary."
-                  :else (let [c (transcript/append-compaction!
-                                 dir {:first-kept cut :summary summary
-                                      :trim-before (context/turn-start messages)})]
-                          ;; The next request has a new prefix, so it starts the cache over.
-                          (swap! s assoc :compaction c :last-input nil)
-                          (str "Compacted " (- cut from) " messages into a summary of about "
-                               (context/tokens summary) " tokens.")))))))
-
 (defn- note! [s text]
   (emit! s {:type :text :text (str "[bbh] " text "\n\n")}))
+
+(defn rollover-due?
+  "Whether the last request's input reached :rollover-at-tokens, or most of the
+  model's window when that is smaller."
+  [s]
+  (let [{:keys [last-input context-size manifest interrupted]} @s]
+    (and last-input (not interrupted)
+         (>= last-input (cond-> (:rollover-at-tokens manifest)
+                          context-size (min (long (* 0.8 context-size))))))))
+
+(defn- roll-over!
+  "Move S to a new conversation that links back to this one, keeping the REPL.
+  Returns the notice for the model."
+  [s]
+  (let [{:keys [dir messages last-input]} @s
+        id (transcript/new-id)]
+    (stop-engine! s)
+    (let [new-dir (transcript/continue! dir id)]
+      (swap! s assoc :dir new-dir :messages [] :last-input nil :turn-from 0))
+    (note! s (str "Context reached " (or last-input "the model's limit of") " tokens, so this continues in conversation " id "."))
+    (str "This is a continuation session. The previous session ended because its context filled up. "
+         "Its transcript has " (count messages) " messages, one JSON object per line with role, content and tool_calls, in "
+         (fs/path dir "messages.jsonl") ". "
+         "Get context from it only as you need it, during the session, rather than reading it all up front. "
+         "It can start with a link to an earlier session. "
+         "The REPL kept running, so live definitions remain.")))
+
+(defn continue-mid-turn!
+  "Roll over during a turn, leaving a user message that resumes the work."
+  [s]
+  (record! s {:role "user"
+              :content (str "[bbh] " (roll-over! s)
+                            " It ended in the middle of a turn, so read its last user request and its latest messages, then carry on with that work.")}))
 
 (defn- sample! [s system messages]
   (let [{:keys [manifest dir]} @s]
     (try
       (traced-sample!
-       s "llm"
+       s
        {:messages (into [{:role "system" :content system}] messages)
         :tools [{:type "function"
                  :function {:name "clojure" :description (:tool-description manifest)
@@ -335,23 +334,16 @@
 (def quiet-reminder
   "[bbh] The user hasn't heard from you in a while. Say in a few words what you're doing, then continue.")
 
-(defn- request-context
-  "The context for the next request, compacting first when it is too large."
-  [s]
-  (let [ctx (context s)]
-    (if (> (context/tokens ctx) (:compact-at-tokens (:manifest @s)))
-      (do (note! s (compact! s nil)) (context s))
-      ctx)))
-
 (defmethod turn! :loop [s]
   (loop [round 1 overflowed false quiet 0 reminders 0]
     (let [system (system-prompt! s)
+          _ (when (rollover-due? s) (continue-mid-turn! s))
           result (when-not (:interrupted @s)
-                   (try (sample! s system (request-context s))
+                   (try (sample! s system (:messages @s))
                         (catch clojure.lang.ExceptionInfo e
                           (if (and (:overflow (ex-data e)) (not overflowed)) ::overflow (throw e)))))]
       (if (= ::overflow result)
-        (do (note! s (str "The request exceeded the model's context. " (compact! s nil)))
+        (do (continue-mid-turn! s)
             (when-not (:interrupted @s) (recur round true quiet reminders)))
         (let [{:keys [message usage truncated]} result
               message (cond-> message
@@ -402,9 +394,16 @@
   (let [line (str/trim (str/replace (str text) #"\s+" " "))]
     (if (> (count line) n) (str (subs line 0 (dec n)) "…") line)))
 
+(defn- latest-ids
+  "The conversations beside this one that never continued into another,
+  newest first."
+  [s]
+  (let [root (fs/parent (fs/path (:dir @s)))]
+    (remove #(fs/exists? (fs/path root % "continued-in")) (conversation-ids s))))
+
 (defn- list-conversations [s]
   (let [root (fs/parent (fs/path (:dir @s)))
-        ids (take 10 (conversation-ids s))]
+        ids (take 10 (latest-ids s))]
     (if (empty? ids)
       "No other conversations."
       (str/join "\n"
@@ -421,19 +420,18 @@
   in a fresh REPL. Returns a description for the user."
   [s id]
   (let [ids (conversation-ids s)
-        id (if (= "last" id) (first ids) id)]
+        id (if (= "last" id) (first (latest-ids s)) id)]
     (if-not (some #{id} ids)
       "No such conversation. /resume lists them."
-      (let [dir (str (fs/path (fs/parent (fs/path (:dir @s))) id))
+      (let [dir (transcript/continuation (str (fs/path (fs/parent (fs/path (:dir @s))) id)))
             messages (transcript/load-messages dir)
             _ (stop-engine! s)
-            _ (swap! s assoc :dir dir :messages messages :compaction (transcript/load-compaction dir)
-                     :last-input nil
+            _ (swap! s assoc :dir dir :messages messages :last-input nil
                      :notes ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
             problem (restart-repl! s)
             reply (some #(when (and (= "assistant" (:role %)) (not (str/blank? (:content %)))) (:content %))
                         (rseq messages))]
-        (str "Resumed " id " with " (count messages) " messages."
+        (str "Resumed " (fs/file-name dir) " with " (count messages) " messages."
              (when reply (str "\nLast reply: " (one-line reply 300)))
              (when problem (str "\n" problem)))))))
 
@@ -463,8 +461,6 @@
                    (if (str/blank? args)
                      (str "Model: " (:model @s))
                      (str "Model: " (set-model! s (str/trim args)))))}
-   "compact" {:doc "Summarize older messages now. /compact TEXT says what the summary should keep."
-              :run (fn [s args] (compact! s args))}
    "resume" {:doc "List other conversations, or continue one with /resume ID or /resume last."
              :run (fn [s args] (if (str/blank? args) (list-conversations s) (resume! s (str/trim args))))}
    "usage" {:doc "Show subscription limits and spend."
@@ -507,12 +503,12 @@
           (throw (ex-info (str "Unknown command " (first (str/split text #"\s")) ". /help lists commands.") {}))
 
           :else
-          (let [notes (take-notes! s)
+          (let [_ (when (rollover-due? s) (swap! s update :notes conj (roll-over! s)))
+                notes (take-notes! s)
                 start (System/currentTimeMillis)
-                from (count (:messages @s))
-                _ (swap! s assoc :trace (str (random-uuid)))
+                _ (swap! s assoc :trace (str (random-uuid)) :turn-from (count (:messages @s)))
                 finish! #(trace-run! s "turn" start
-                                     (merge {:messages [from (count (:messages @s))] :usage (:turn-usage @s)} %))]
+                                     (merge {:messages [(:turn-from @s) (count (:messages @s))] :usage (:turn-usage @s)} %))]
             (record! s {:role "user"
                         :content (if (seq notes) (str "[bbh] " (str/join " " notes) "\n\n" prompt) prompt)})
             (try (turn! s)

@@ -5,6 +5,8 @@
             [bbh.models :as models]
             [bbh.runs :as runs]
             [bbh.session :as session]
+            [bbh.transcript :as transcript]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
 (defn- harness []
@@ -44,6 +46,45 @@
           (let [server (get-in @s [:bridge :server])]
             (session/close! s)
             (is (.isClosed server)))
+          (finally (session/close! s)))))))
+
+(defn- with-recorded-cli [f]
+  (let [process p/process
+        fixture (str (fs/absolutize "test/fake-claude.clj"))
+        started (atom [])]
+    (with-redefs [p/process (fn [opts cmd & args]
+                              (when (= "claude" cmd) (swap! started conj {:env (:extra-env opts) :args (vec args)}))
+                              (apply process opts (if (= "claude" cmd) fixture cmd) args))]
+      (f started))))
+
+(deftest a-full-claude-context-mid-turn-restarts-claude-code-in-a-new-conversation
+  (with-recorded-cli
+    (fn [started]
+      (let [{:keys [s]} (harness)
+            old (:dir @s)]
+        (try
+          (is (= :end-turn (session/prompt! s "full")))
+          (let [new-dir (:dir @s)
+                messages (transcript/load-messages new-dir)]
+            (is (not= old new-dir))
+            (is (= ["user" "assistant" "tool"] (mapv :role (take-last 3 (transcript/load-messages old)))))
+            (is (= ["user" "assistant" "tool" "assistant"] (mapv :role messages)))
+            (is (str/starts-with? (:content (first messages)) "[bbh] This is a continuation session."))
+            (is (str/includes? (:content (first messages)) (str old "/messages.jsonl")))
+            (is (= [["1" false] ["1" false]]
+                   (for [{:keys [env args]} @started]
+                     [(get env "DISABLE_AUTO_COMPACT") (boolean (some #{"--resume"} args))]))))
+          (finally (session/close! s)))))))
+
+(deftest a-claude-overflow-continues-in-a-new-conversation
+  (with-cli
+    (fn []
+      (let [{:keys [s]} (harness)
+            old (:dir @s)]
+        (try
+          (is (= :end-turn (session/prompt! s "overflow")))
+          (is (= ["overflow"] (mapv :content (transcript/load-messages old))))
+          (is (= ["user" "assistant" "tool" "assistant"] (mapv :role (:messages @s))))
           (finally (session/close! s)))))))
 
 (deftest claude-errors-are-not-successful-empty-replies

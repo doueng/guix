@@ -42,10 +42,14 @@
               (emit {:type "stream_event" :event {:type "content_block_delta" :delta {:type "text_delta" :text "partial"}}}))
           "fail"
           (emit {:type "result" :is_error true :subtype "error_during_execution" :errors ["synthetic provider failure"]})
+          "overflow"
+          (emit {:type "result" :is_error true :subtype "success" :result "Prompt is too long"})
           (reset! pending
                   (future
                     (let [id (str (random-uuid))
                           code (if (= "sleep" (:content message)) "(Thread/sleep 60000)" "(+ 40 2)")]
+                      (when (= "full" (:content message))
+                        (emit {:type "stream_event" :event {:type "message_delta" :usage {:input_tokens 350000 :output_tokens 7}}}))
                       (emit {:type "assistant" :message {:content [{:type "tool_use" :id id :name "mcp__bbh__clojure" :input {:code code}}]}})
                       (let [result (rpc 3 "tools/call" {:name "clojure" :arguments {:code code}
                                                        :_meta {:claudecode/toolUseId id}})]

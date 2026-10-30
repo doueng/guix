@@ -4,6 +4,7 @@
             [bbh.models :as models]
             [bbh.repl :as repl]
             [bbh.session :as session]
+            [bbh.transcript :as transcript]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -80,7 +81,7 @@
   (let [[resume] (reset-vals! resume-dir nil)
         sid (if resume
               (str (fs/file-name resume))
-              (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS")))
+              (transcript/new-id))
         s (session/new-session {:dir (or resume (str (fs/path (data-dir) sid)))
                                 :notes (when resume ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
                                 :init (or (System/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
