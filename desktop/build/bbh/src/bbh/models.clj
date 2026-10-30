@@ -7,8 +7,8 @@
             [clojure.string :as str]))
 
 (def available
-  ["claude/opus" "claude/sonnet" "claude/haiku"
-   "openrouter/anthropic/claude-opus-5.5" "openrouter/deepseek/deepseek-v4.1-flash"])
+  ["claude/claude-opus-5-5" "claude/claude-fable-5-1" "claude/haiku-5-5" "claude/sonnet-5-5"
+   "openrouter/deepseek/deepseek-v4.1-flash"])
 
 (defn default-model []
   (or (System/getenv "BBH_MODEL") "claude/claude-opus-5-5"))
