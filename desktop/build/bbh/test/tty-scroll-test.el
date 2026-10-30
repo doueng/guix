@@ -9,8 +9,14 @@
   (add-to-list 'load-path (expand-file-name pkg (getenv "BBH_ELISP_BUILD"))))
 (defmacro after! (feature &rest body)
   `(with-eval-after-load ',feature ,@body))
+(require 'cl-lib)
 (require 'evil)
 (load (getenv "BBH_DOOM_AGENT_SHELL") nil t)
+
+;; The settings Doom runs with. A nonzero margin makes redisplay undo the clamp.
+(setq scroll-margin 2
+      scroll-conservatively 10
+      scroll-preserve-screen-position 'always)
 
 (global-set-key (kbd "<f5>") #'scroll-up-command)
 (global-set-key (kbd "<f6>") #'evil-scroll-page-down)
@@ -26,8 +32,9 @@
 (defun bbh-tty--blank-rows (window)
   "Rows of WINDOW below the end of its buffer."
   (redisplay t)
-  (- (window-body-height window)
-     (count-screen-lines (window-start window) (point-max) t window)))
+  (with-current-buffer (window-buffer window)
+    (- (window-body-height window)
+       (count-screen-lines (window-start window) (point-max) t window))))
 
 (defun bbh-tty--assert-no-overscroll (window label)
   (let ((blank (bbh-tty--blank-rows window)))
@@ -51,7 +58,33 @@
       (error "%s is shadowed by %S" key (key-binding (kbd key)))))
   (selected-window))
 
+(defun bbh-tty--composer (window)
+  "Select a composer below transcript WINDOW and return its shell buffer."
+  (let ((shell (get-buffer-create "bbh shell"))
+        (transcript (window-buffer window)))
+    (with-current-buffer shell (setq eng/bbh-transcript transcript))
+    (select-window (split-window window -5))
+    (switch-to-buffer (get-buffer-create "bbh composer"))
+    (local-set-key (kbd "M-k") #'eng/bbh-output-page-up)
+    (local-set-key (kbd "M-j") #'eng/bbh-output-page-down)
+    shell))
+
+(defun bbh-tty--check-composer ()
+  (let* ((window (bbh-tty--transcript 200))
+         (shell (bbh-tty--composer window))
+         (composer (selected-window)))
+    (cl-letf (((symbol-function 'agent-shell-viewport--shell-buffer) (lambda () shell)))
+      (bbh-tty--press "M-j" 40)
+      (bbh-tty--assert-no-overscroll window "M-j from the composer")
+      (unless (eq (selected-window) composer)
+        (error "M-j moved focus out of the composer"))
+      (let ((bottom (window-start window)))
+        (bbh-tty--press "M-k" 1)
+        (unless (< (window-start window) bottom)
+          (error "M-k no longer scrolls back"))))))
+
 (defun bbh-tty--check ()
+  (bbh-tty--check-composer)
   (let ((window (bbh-tty--transcript 200)))
     (bbh-tty--press "<f5>" 1)
     (unless (> (window-start window) (point-min))

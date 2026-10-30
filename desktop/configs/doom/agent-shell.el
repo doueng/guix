@@ -486,17 +486,25 @@ strips `display' text properties from whole blocks on partial redisplays."
     (dolist (w followers) (set-window-point w (point-max)))))
 
 (defun eng/bbh-transcript--clamp-scroll ()
-  "Pull back any window that scrolled past the end of the transcript.
+  "Pull back any window that scrolled past the end of a transcript.
 The last line then stays on the window's bottom row instead of leaving
-empty rows below it. This runs from `post-command-hook' because Emacs
-does not support repositioning a window from `window-scroll-functions'."
-  (dolist (window (get-buffer-window-list nil nil t))
-    (let ((latest (save-excursion
-                    (goto-char (point-max))
-                    (vertical-motion (- 1 (window-body-height window)) window)
-                    (point))))
-      (when (> (window-start window) latest)
-        (set-window-start window latest)))))
+empty rows below it. This runs from the global `post-command-hook'
+because Emacs does not support repositioning a window from
+`window-scroll-functions', and the composer scrolls the transcript while
+another buffer is current."
+  (walk-windows
+   (lambda (window)
+     (with-current-buffer (window-buffer window)
+       (when (derived-mode-p 'eng/bbh-transcript-mode)
+         (let ((latest (save-excursion
+                         (goto-char (point-max))
+                         (vertical-motion (- 1 (window-body-height window)) window)
+                         (point))))
+           (when (> (window-start window) latest)
+             (set-window-start window latest))))))
+   'nomini 'visible))
+
+(add-hook 'post-command-hook #'eng/bbh-transcript--clamp-scroll)
 
 (defun eng/bbh-transcript--separator ()
   (if (bobp) "" "\n"))
@@ -782,11 +790,12 @@ Org leaves result blocks, a special block, without the code background."
 (define-derived-mode eng/bbh-transcript-mode org-mode "bbh"
   "A read-only org rendering of a bbh conversation."
   (setq buffer-read-only t)
+  ;; Point rests on the last row, so a margin makes redisplay undo the clamp.
+  (setq-local scroll-margin 0)
   ;; The composer's status line below separates the windows; the buffer
   ;; size, position and mode name here say nothing useful.
   (setq-local mode-line-format nil)
   (add-hook 'after-change-functions #'eng/bbh-transcript--note-change nil t)
-  (add-hook 'post-command-hook #'eng/bbh-transcript--clamp-scroll nil t)
   (font-lock-add-keywords nil eng/bbh-transcript--markup 'append)
   ;; Doom-one paints org-block with an opaque background. In a terminal that
   ;; band hides the transparent default, so drop it in this buffer only.
