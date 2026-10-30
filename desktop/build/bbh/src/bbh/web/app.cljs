@@ -177,6 +177,7 @@
   (let [conversation (get conversations current)
         live (live? s current)]
     [:div.shell
+     [:header.masthead [:h1 "Agents"]]
      (when (seq agents)
        (into [:nav.tabs] (map #(tab-view current %)) agents))
      (cond current (thread-view current conversation)
