@@ -7,6 +7,7 @@
   #:use-module (engstrand features herdr)
   #:use-module (engstrand features kanata)
   #:use-module (engstrand features moshi)
+  #:use-module (engstrand features plannotator)
   #:use-module (engstrand features remote-access)
   #:use-module (engstrand features shell)
   #:use-module (engstrand features tailscale)
@@ -48,6 +49,7 @@
            ;; This precedes dotfiles because Herdr activation consumes its live config.
            (feature-familiar-herdr)
            (feature-familiar-moshi)
+           (feature-familiar-plannotator)
            (feature-familiar-dotfiles)
            (feature-familiar-kanata)
            (feature-familiar-agent-control)
