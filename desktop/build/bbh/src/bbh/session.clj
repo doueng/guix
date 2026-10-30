@@ -43,11 +43,11 @@
 
 (defn new-session
   "DIR holds the transcript and logs, INIT is loaded into every new REPL, CWD is
-  where the REPL runs, MODEL names the engine MAKE-ENGINE builds, and EMIT
-  receives every event. The REPL keeps its port file in DIR even after /resume
+  where the REPL runs with ENV added to its environment, MODEL names the engine
+  MAKE-ENGINE builds, and EMIT receives every event. The REPL keeps its port file in DIR even after /resume
   moves the transcript, so a front end finds it under the id it started with."
-  [{:keys [dir init cwd model make-engine emit notes]}]
-  (atom {:dir dir :repl-dir dir :init init :cwd (or cwd (str (fs/cwd)))
+  [{:keys [dir init cwd model make-engine emit notes env]}]
+  (atom {:dir dir :repl-dir dir :init init :cwd (or cwd (str (fs/cwd))) :env env
          :model model :make-engine make-engine :engine (make-engine model)
          :emit (or emit (fn [_])) :notes (vec notes)
          :messages (transcript/load-messages dir)
@@ -96,9 +96,9 @@
 (defn start-repl!
   "Start the REPL and load init. Returns a problem description or nil."
   [s]
-  (let [{:keys [dir repl-dir init cwd]} @s
+  (let [{:keys [dir repl-dir init cwd env]} @s
         conn (repl/start! {:dir repl-dir :cwd cwd
-                           :env {"BBH_INBOX_SESSION" (transcript/inbox-id dir)}})
+                           :env (assoc env "BBH_INBOX_SESSION" (transcript/inbox-id dir))})
         r (when (and init (fs/exists? init))
             (repl/eval! conn (str "(load-file " (pr-str (str init)) ")") 30000))]
     (swap! s assoc :repl conn)

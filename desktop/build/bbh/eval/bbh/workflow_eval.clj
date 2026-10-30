@@ -38,7 +38,15 @@
            :done [:done]
            :block [:blocked (:reason e)]))))
 
-(defn -main [& args]
+(defn with-temp-state
+  "Calls F with the env a child REPL needs, while wf/state-root points this process at the same temporary root,
+  so an eval's runs stay out of the user's. wf reads XDG_STATE_HOME on each side, and both have to agree."
+  [f]
+  (let [home (str (fs/create-temp-dir {:prefix "wf-eval-state"}))]
+    (with-redefs [wf/state-root (constantly (str (fs/path home "bbh" "workflows")))]
+      (f {"XDG_STATE_HOME" home}))))
+
+(defn- run-eval [env args]
   (let [model (or (first args) (models/default-model))
         out (str (fs/absolutize (or (second args) (str (fs/create-temp-dir {:prefix "wf-eval"})))))
         _ (fs/create-dirs out)
@@ -49,7 +57,7 @@
         before (wf/latest-id)
         s (session/new-session {:dir (str out "/conversation")
                                 :init (str (fs/expand-home "~/.config/bbh/init.clj"))
-                                :cwd proj :model model :make-engine models/engine :emit emit})
+                                :cwd proj :model model :make-engine models/engine :emit emit :env env})
         _ (session/start-repl! s)
         outcome (deref (future (try (session/prompt! s user-prompt) (catch Exception e (str "error: " (ex-message e)))))
                        (* 25 60 1000) :timeout)
@@ -81,3 +89,6 @@
     (spit (str out "/report.edn") (with-out-str (clojure.pprint/pprint report)))
     (prn report)
     report))
+
+(defn -main [& args]
+  (with-temp-state #(run-eval % args)))

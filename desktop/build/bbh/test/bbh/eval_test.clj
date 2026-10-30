@@ -2,12 +2,36 @@
   (:require [babashka.fs :as fs]
             [bbh.compare :as compare]
             [bbh.labels :as labels]
+            [bbh.models :as models]
+            [bbh.session :as session]
             [bbh.stats :as stats]
             [bbh.workflow :as wf]
             [bbh.traces :as traces]
+            [bbh.workflow-eval :as workflow-eval]
             [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
+
+(deftest a-workflow-eval-run-stays-out-of-the-real-state-root
+  (let [real-root (wf/state-root)
+        wf-bin (str (fs/absolutize "../../bin/wf"))
+        repo (str (fs/create-temp-dir {:prefix "wf-eval-iso"}))]
+    (workflow-eval/with-temp-state
+      (fn [env]
+        (let [s (session/new-session {:dir (str (fs/create-temp-dir {:prefix "wf-eval-conv"}))
+                                      :init nil :cwd repo :env env
+                                      :model (models/default-model) :make-engine models/engine})]
+          (try
+            (session/start-repl! s)
+            (let [code (str "(:out (babashka.process/shell {:out :string} " (pr-str wf-bin) " \"start\" \"investigation\" \"--task\" \"t\" \"--cwd\" "
+                            (pr-str repo) "))")
+                  result (session/run-code! s "a" code)
+                  id (second (re-find #"run (\S+?-investigation)" result))]
+              (is (some? id) result)
+              (is (fs/exists? (fs/path (wf/state-root) id)) "the child wrote to the root the parent reads")
+              (is (not= real-root (wf/state-root)))
+              (is (not (fs/exists? (fs/path real-root id))) "the run never reached the real root"))
+            (finally (session/close! s))))))))
 
 (deftest fingerprints-cover-root-level-and-nested-sci-sources
   (let [desktop (str (fs/create-temp-dir {:prefix "bbh-fingerprint-test"}))
