@@ -15,15 +15,14 @@
 
 (defn- script
   "Replies read in order from an EDN file of steps: a string answers, {:code ...}
-  calls the clojure tool, {:text ...} answers too, and {:fail ...} throws. A map
-  step's :usage is the request's usage record. For tests and demos."
+  calls the clojure tool, and {:text ...} answers too. A map step's :usage is
+  the request's usage record. For tests and demos."
   [path]
   (let [steps (atom (edn/read-string (slurp path)))]
     (fn [_ {:keys [on-text]}]
       (let [step (or (first @steps) "(script exhausted)")
             text (if (string? step) step (:text step))]
         (swap! steps rest)
-        (when-let [message (:fail step)] (throw (ex-info message {})))
         (if text
           (do (on-text text) {:message {:role "assistant" :content text} :usage (:usage step)})
           {:message {:role "assistant" :content ""

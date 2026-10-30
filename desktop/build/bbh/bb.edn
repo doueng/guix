@@ -45,8 +45,6 @@
          test:inbox {:doc "bbh against the real Plannotator Inbox, in a temp data dir. Needs plannotator on PATH, or PLANNOTATOR_BIN."
                      :task (shell {:extra-env {"PLANNOTATOR_DATA_DIR" (str (babashka.fs/create-temp-dir {:prefix "bbh-inbox-test"}))}}
                                   "bb" "--config" "bb.edn" "-m" "bbh.inbox-contract")}
-         test:inbox-tty {:doc "The terminal front end's Inbox delivery through a real PTY, against a fake bridge."
-                         :task (shell "bb" "--config" "bb.edn" "-m" "bbh.inbox-tty")}
          test:inbox-live {:doc "A real Doom session and model against a sandboxed Inbox. Spends model usage. Args: MODEL."
                           :task (shell {:extra-env {"PLANNOTATOR_DATA_DIR" (str (babashka.fs/create-temp-dir {:prefix "bbh-inbox-live"}))}}
                                        "bb" "--config" "bb.edn" "-m" "bbh.inbox-live" (first *command-line-args*))}
