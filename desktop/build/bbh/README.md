@@ -63,17 +63,22 @@ Skills come from Pi's directories, so the pstack pack and project skills load as
 - `src/bbh/delimiters.clj` heals the model's code before it runs, as pi-sci's `src/delimiters.ts` does. It appends the closers of a form truncated within its last 10 lines, or drops extra closers at the very end, and adds an `[auto-repair]` line to the result. Anything else runs unchanged.
 - `src/bbh/repl.clj` starts the REPL process and evaluates over nREPL. `src/bbh/llm.clj` streams OpenRouter.
 - `src/bbh/runs.clj` owns `runs.jsonl`, the LangSmith-style run tree. `session.clj` and `claude.clj` write it.
+- `src/bbh/inbox.clj` is the mailbox and presence a session shares with the website. `src/bbh/web.clj` is the website's server, and `src/bbh/web/` is the page.
 - `src/bbh/usage.clj` reports Claude, Codex and OpenRouter limits, after Pi's `pi-usage` extension.
 
 Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.jsonl`, `runs.jsonl` (the [run tree](eval/README.md#runs-and-metrics) of timings, tokens and failures), `prompts.jsonl` (each distinct system prompt, tool description, model and effort, with the message count where it took effect), `outputs/`, `repl.log`, `repl.port`, `continued-in` once the conversation has rolled over and, for Claude, `claude-session` and `claude.log`.
 
-## Plannotator Inbox
+## Website
 
-The [Plannotator Inbox](https://github.com/backnotprop/plannotator#plannotator-inbox) is one local window for every session. `modules/engstrand/features/plannotator.scm` runs it as the `plannotator-inbox` Home service, and `plannotator inbox --open` opens it. An agent posts with `(inbox "send_message" {:body "..."})`, and the person's reply runs as the session's next turn.
+`bbh web` serves a page for the phone, with a tab for each live Emacs session, its whole conversation and a composer. `modules/engstrand/features/bbh-web.scm` runs it as the `bbh-web` Home service on `127.0.0.1:8766`, and it publishes itself with `tailscale serve` at `https://<node>.<tailnet>.ts.net:8443`. The page is ClojureScript run in the browser by [Scittle](https://github.com/babashka/scittle) with Replicant for rendering, so there is no build step. `src/bbh/web/` holds it, including Scittle 0.8.33's `scittle.js` and `scittle.replicant.js`, copied unchanged from its npm package.
 
-A session's name in the Inbox is its conversation's rollover root, saved in `inbox-session`, so a rollover keeps its threads. `/resume` moves the session to that conversation's threads, and replies to a closed conversation wait until it is resumed. `src/bbh/inbox.clj` long-polls the Inbox's bridge for the session and prints each new reply. Emacs runs `bbh inbox-poll` for each shell and feeds agent-shell's queue, which waits out a running turn and leaves the composer draft alone. Only Emacs takes replies. A terminal `bbh` can post but never receives one.
+The server shares nothing with a session but files in the conversation's rollover root, so a rollover keeps the tab:
 
-The Inbox shows a reply as delivered when the turn holding it completes, including a cancelled one, since the prompt is in the transcript by then. A failed turn is not acked and is sent again after the next completed turn, so a broken model cannot loop. Delivery is at least once. A crash or a failure partway through a turn can repeat a wake. The bridge is internal to Plannotator, so `bb test:inbox` proves it against the pinned version. Run it when bumping the pin. `bb test:inbox-live MODEL` drives real Doom on a real model.
+- `agent.json` is written by the session's `bbh inbox-poll` and names its pid, project and busy state. A live pid is a live tab. A terminal `bbh` has no poller, so it has no tab.
+- `mailbox/ID.json` is one message from the page. The poller hands it to Emacs, which runs it through agent-shell's queue, which waits out a running turn and leaves the composer draft alone. The prompt then shows in the transcript like one typed in the composer. Emacs acks when the turn holding it completes, including a cancelled one, and the poller deletes the file. A failed turn is not acked and is sent again after the next completed turn, so a broken model cannot loop. Delivery is at least once. A crash partway through a turn can repeat a message. `/resume` moves the poller, and a message to the old conversation waits in its mailbox until it is resumed.
+- `messages.jsonl` is read as it is, so the page shows what Emacs typed too. The page polls every 2 s while visible, so a reply appears when its message is complete rather than token by token.
+
+A message reaches an agent with a shell, so the server listens only on loopback, requires `Tailscale-User-Login` to match the node's owner, and takes a POST only with JSON from its own origin. The page renders Markdown to hiccup and never inserts raw HTML, and it sends a Content Security Policy.
 
 ## Lifetimes
 

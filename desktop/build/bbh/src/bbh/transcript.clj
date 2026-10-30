@@ -24,8 +24,8 @@
   (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS")))
 
 (defn inbox-id
-  "The name conversation DIR goes by in the Plannotator Inbox, the root of its
-  rollovers, so a reply still finds the session after a rollover."
+  "The root of conversation DIR's rollovers, so a message from the website still
+  finds the session after a rollover."
   [dir]
   (let [f (fs/path dir "inbox-session")]
     (if (fs/exists? f) (str/trim (slurp (str f))) (str (fs/file-name dir)))))

@@ -1,0 +1,136 @@
+(ns bbh.web-test
+  (:require [babashka.fs :as fs]
+            [bbh.inbox :as inbox]
+            [bbh.transcript :as transcript]
+            [bbh.web :as web]
+            [bbh.web.markdown :as md]
+            [cheshire.core :as json]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(def ^:private owner-headers
+  {"tailscale-user-login" "owner@example.com"
+   "host" "box.example.ts.net:8443"})
+
+(defn- site []
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-web"}))]
+    {:root root
+     :app (web/handler root (constantly "owner@example.com"))
+     :dir #(str (fs/path root %))}))
+
+(defn- live! [{:keys [dir]} id project]
+  (let [d (dir id)]
+    (fs/create-dirs d)
+    (spit (str (fs/path d "agent.json"))
+          (json/generate-string {:pid (.pid (java.lang.ProcessHandle/current)) :project project :busy false}))
+    d))
+
+(defn- get-json [{:keys [app]} uri & [query]]
+  (let [{:keys [status body]} (app {:uri uri :request-method :get :headers owner-headers :query-string query})]
+    [status (json/parse-string body true)]))
+
+(defn- post-message [{:keys [app]} id text headers]
+  (app {:uri (str "/api/agents/" id "/messages") :request-method :post
+        :headers (merge owner-headers headers)
+        :body (java.io.ByteArrayInputStream. (.getBytes (json/generate-string {:text text})))}))
+
+(def ^:private from-page
+  {"origin" "https://box.example.ts.net:8443" "content-type" "application/json"})
+
+(deftest only-the-owner-through-tailscale-gets-in
+  (let [{:keys [app] :as s} (site)]
+    (live! s "a" "/work/site")
+    (is (= 403 (:status (app {:uri "/api/agents" :request-method :get :headers {}}))))
+    (is (= 403 (:status (app {:uri "/" :request-method :get
+                              :headers {"tailscale-user-login" "guest@example.com"}}))))
+    (is (= 200 (first (get-json s "/api/agents"))))))
+
+(deftest sessions-are-listed-with-a-readable-title
+  (let [s (site)
+        d (live! s "a" "/work/site")]
+    (transcript/append! d {:role "user" :content "<skill name=\"x\">rules</skill>\n\nfix   the\nlogin"})
+    (fs/create-dirs ((:dir s) "saved"))
+    (is (= [{:id "a" :project "site" :busy false :title "fix the login"}]
+           (second (get-json s "/api/agents"))))))
+
+(deftest a-conversation-shows-prompts-replies-and-tool-calls
+  (let [s (site)
+        d (live! s "a" "/p")]
+    (transcript/append! d {:role "user" :content "hello"})
+    (transcript/append! d {:role "assistant" :content ""
+                           :tool_calls [{:id "t1" :function {:name "clojure" :arguments "{\"code\":\"(+ 1 2)\"}"}}]})
+    (transcript/append! d {:role "tool" :tool_call_id "t1" :content "=> 3"})
+    (is (= [{:i 0 :role "user" :text "hello"}
+            {:i 1 :role "assistant" :text "" :calls [{:id "t1" :name "clojure" :code "(+ 1 2)"}]}
+            {:i 2 :role "tool" :text "=> 3" :call "t1"}]
+           (:messages (second (get-json s "/api/agents/a/messages")))))))
+
+(deftest a-rollover-joins-the-whole-conversation-and-pages-work
+  (let [s (site)
+        d (live! s "a" "/p")
+        _ (dotimes [n 100] (transcript/append! d {:role "user" :content (str "m" n)}))
+        rolled (transcript/continue! d "b")
+        _ (transcript/append! rolled {:role "user" :content "m100"})
+        texts (fn [query] (map :text (:messages (second (get-json s "/api/agents/a/messages" query)))))]
+    (is (= 101 (:total (second (get-json s "/api/agents/a/messages")))))
+    (is (= "m21" (first (texts nil))))
+    (is (= "m100" (last (texts nil))))
+    (is (= ["m99" "m100"] (texts "after=99")))
+    (is (= ["m1" "m2" "m3"] (take 3 (texts "before=81"))))
+    (is (= [] (texts "after=101")))))
+
+(deftest a-sent-message-lands-in-the-mailbox-and-shows-as-pending-until-the-transcript-has-it
+  (let [s (site)
+        d (live! s "a" "/p")
+        response (post-message s "a" "  hello from the phone " from-page)]
+    (is (= 202 (:status response)))
+    (is (= ["hello from the phone"] (map :text (inbox/pending d))))
+    (is (= ["hello from the phone"] (map :text (:pending (second (get-json s "/api/agents/a/messages"))))))
+    (transcript/append! d {:role "user" :content "hello from the phone"})
+    (is (= [] (:pending (second (get-json s "/api/agents/a/messages")))))))
+
+(deftest a-post-from-another-site-is-refused
+  (let [s (site)
+        d (live! s "a" "/p")]
+    (is (= 403 (:status (post-message s "a" "rm -rf" {"origin" "https://evil.example" "content-type" "application/json"}))))
+    (is (= 403 (:status (post-message s "a" "rm -rf" {"content-type" "application/json"}))))
+    (is (= 403 (:status (post-message s "a" "rm -rf" (assoc from-page "content-type" "text/plain")))))
+    (is (empty? (inbox/pending d)))))
+
+(deftest an-id-that-is-not-a-live-session-is-refused
+  (let [s (site)]
+    (live! s "a" "/p")
+    (fs/create-dirs ((:dir s) "saved"))
+    (is (= 404 (:status (post-message s "saved" "hi" from-page))))
+    (is (= 404 (:status (post-message s ".." "hi" from-page))))
+    (is (= 404 (first (get-json s "/api/agents/saved/messages"))))))
+
+(deftest a-blank-message-is-refused
+  (let [s (site)
+        d (live! s "a" "/p")]
+    (is (= 400 (:status (post-message s "a" "   " from-page))))
+    (is (empty? (inbox/pending d)))))
+
+(deftest the-page-loads-with-a-content-security-policy
+  (let [{:keys [app]} (site)
+        {:keys [status headers body]} (app {:uri "/" :request-method :get :headers owner-headers})]
+    (is (= 200 status))
+    (is (str/includes? body "app.cljs"))
+    (is (str/includes? (headers "Content-Security-Policy") "default-src 'none'"))))
+
+(deftest markdown-renders-the-shapes-agents-write
+  (is (= [[:h3 "Title"]] (md/render "## Title")))
+  (is (= [[:p "a " [:code "b"] " " [:strong "c"]]] (md/render "a `b` **c**")))
+  (is (= [[:ul [:li "one"] [:li "two more"]]] (md/render "- one\n- two\n  more")))
+  (is (= [[:ol [:li "one"]]] (md/render "1. one")))
+  (is (= [[:pre [:code "x\n\ny"]]] (md/render "```clj\nx\n\ny\n```")))
+  (is (= [[:div.table [:table [:thead [:tr [:th "a"] [:th "b"]]]
+                       [:tbody [:tr [:td "1"] [:td [:code "2"]]]]]]]
+         (md/render "| a | b |\n|---|---|\n| 1 | `2` |")))
+  (is (= [[:p "one"] [:p "two"]] (md/render "one\n\ntwo"))))
+
+(deftest markdown-never-makes-a-script-link-or-raw-html
+  (is (= [[:p "[x](javascript:alert(1))"]] (md/render "[x](javascript:alert(1))")))
+  (is (= [[:p "<img src=x onerror=alert(1)>"]] (md/render "<img src=x onerror=alert(1)>")))
+  (is (= [[:p [:a {:href "https://a.example/b" :target "_blank" :rel "noopener noreferrer"} "b"]]]
+         (md/render "[b](https://a.example/b)"))))

@@ -98,7 +98,7 @@
   [s]
   (let [{:keys [dir repl-dir init cwd env]} @s
         conn (repl/start! {:dir repl-dir :cwd cwd
-                           :env (assoc env "BBH_INBOX_SESSION" (transcript/inbox-id dir))})
+                           :env env})
         r (when (and init (fs/exists? init))
             (repl/eval! conn (str "(load-file " (pr-str (str init)) ")") 30000))]
     (swap! s assoc :repl conn)

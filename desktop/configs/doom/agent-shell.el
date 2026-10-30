@@ -166,16 +166,15 @@ conversation."
         (when (buffer-live-p old-composer) (kill-buffer old-composer))
         (kill-buffer old)))))
 
-;;; Plannotator Inbox
+;;; Website
 
-;; `bbh inbox-poll' hands this shell what the person wrote, and it runs as a
-;; normal prompt through agent-shell's queue, which waits out a running turn
-;; and leaves a composer draft alone.  The Inbox shows a wake as delivered only
-;; once the turn holding it completed, so a failed prompt stays pending, and
-;; the next completed turn asks for it again.  A crash can repeat a wake, which
-;; is why the agent gets the same reply at least once rather than exactly once.
-;; Each finished turn is reported too, so the poller opens a thread for it, and
-;; `prompted' closes that thread when the person answers here.
+;; `bbh inbox-poll' hands this shell what the person wrote on the website, and
+;; it runs as a normal prompt through agent-shell's queue, which waits out a
+;; running turn and leaves a composer draft alone.  A message leaves the mailbox
+;; only once the turn holding it completed, so a failed prompt stays pending,
+;; and the next completed turn asks for it again.  A crash can repeat a message,
+;; which is why the agent gets the same text at least once rather than exactly
+;; once.
 
 (defvar eng/bbh-inbox-command nil
   "The poller's command as a list, or nil for `bbh inbox-poll'.
@@ -221,8 +220,6 @@ It is called with the conversation id and the project directory.")
            (when (string-search (cdr entry) prompt)
              (setq eng/bbh-inbox--waiting (delq entry eng/bbh-inbox--waiting))
              (push (car entry) eng/bbh-inbox--inflight)))
-         (unless eng/bbh-inbox--inflight
-           (eng/bbh-inbox--tell "prompted"))
          (eng/bbh-inbox--tell "busy true")))
       ('turn-complete
        (dolist (id eng/bbh-inbox--inflight)
@@ -232,10 +229,7 @@ It is called with the conversation id and the project directory.")
          (eng/bbh-inbox--tell (concat "retry " id)))
        (setq eng/bbh-inbox--inflight nil
              eng/bbh-inbox--failed nil)
-       (eng/bbh-inbox--tell "busy false")
-       (when (and (equal "end_turn" (map-nested-elt event '(:data :stop-reason)))
-                  (not (map-elt agent-shell--state :pending-prompts)))
-         (eng/bbh-inbox--tell "turn-ended")))
+       (eng/bbh-inbox--tell "busy false"))
       ('error
        (setq eng/bbh-inbox--failed (append eng/bbh-inbox--inflight eng/bbh-inbox--failed)
              eng/bbh-inbox--inflight nil)
@@ -280,7 +274,7 @@ It is called with the conversation id and the project directory.")
                              (eng/bbh-inbox--on-line shell line))))))))))
 
 (defun eng/bbh-inbox-connect (shell)
-  "Connect SHELL to the Plannotator Inbox."
+  "Connect SHELL to its mailbox."
   (with-current-buffer shell
     (setq eng/bbh-inbox--seen (make-hash-table :test #'equal)))
   (agent-shell-subscribe-to :shell-buffer shell
@@ -289,7 +283,7 @@ It is called with the conversation id and the project directory.")
 
 (defun eng/bbh-inbox-switch (shell)
   "Move SHELL's poller to the conversation it is on now.
-Wakes of the old conversation stay pending in the Inbox until it is resumed."
+Messages to the old conversation stay in its mailbox until it is resumed."
   (with-current-buffer shell
     (when eng/bbh-inbox--process
       (let ((process eng/bbh-inbox--process))

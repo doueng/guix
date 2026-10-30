@@ -7,8 +7,6 @@
   #:use-module (guix packages)
   #:use-module ((guix licenses) #:prefix license:))
 
-;; bbh's Inbox bridge is an internal Plannotator contract, so bump this pin
-;; together with a `bb test:inbox' run in desktop/build/bbh.
 (define-public plannotator
   (package
     (name "plannotator")

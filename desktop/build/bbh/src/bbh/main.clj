@@ -6,6 +6,7 @@
             [bbh.models :as models]
             [bbh.session :as session]
             [bbh.transcript :as transcript]
+            [bbh.web :as web]
             [clojure.string :as str])
   (:import [org.jline.reader EndOfFileException LineReader LineReaderBuilder UserInterruptException]
            [org.jline.terminal TerminalBuilder]))
@@ -86,4 +87,5 @@
     "acp" (acp/-main (some-> (:resume (parse-args (rest args))) conversation-dir))
     "inbox-poll" (let [[_ id project] args]
                    (inbox/-poll (str (fs/path (data-dir) "conversations" id)) project))
+    "web" (web/-main (data-dir))
     (terminal args)))

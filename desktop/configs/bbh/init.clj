@@ -22,7 +22,6 @@
 - (sh \"cmd string\") returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. For separate arguments use (p/shell {:out :string :err :string :continue true} \"cmd\" \"arg\").
 - (read-lines path) or (read-lines path start count) prints 1-based numbered lines and returns nil. Use slurp when code needs the text.
 - (edit! path old new) replaces exactly one occurrence, else throws.
-- (inbox tool args) calls the Plannotator Inbox, where you leave the person a decision or finished work and keep going. Replies arrive as your next turn. Tools are \"send_message\" with :body and optionally :subject, :reply_to, :thread and :attachments, \"read_thread\", \"search\" and \"resolve_message\". `plannotator inbox --help` has the question syntax. Every finished turn reaches the Inbox by itself, so call this only for choices, attachments or work you keep doing meanwhile.
 - (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits up to 60 s, or :ms, and returns {:done? :exit :tail :log}. It stops at the evaluation's budget, so check :done? and wait again in a later call. p/shell, http and Thread/sleep have no budget, so use a job for anything that may approach the deadline. Also job-status and jobs.
 - (shot url) saves a headless Chrome screenshot and returns its path. (look question & paths) has a Claude delegate describe images, since tool results carry text only. (delegate brief) runs a fresh agent, for an independent check.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
@@ -386,16 +385,6 @@
       (->> (fs/glob d "*.cmd") (map #(str/replace (str (fs/file-name %)) #"\.cmd$" ""))
            (sort-by #(parse-long (first (str/split % #"-")))) reverse
            (mapv #(dissoc (job-status % :lines 0) :tail))))))
-
-;; The Plannotator Inbox, under the id the session started this REPL with.
-(require '[bbh.inbox :as plannotator-inbox])
-
-(defn inbox
-  "Call the Plannotator Inbox tool TOOL, a string such as \"send_message\"."
-  ([tool] (inbox tool {}))
-  ([tool args]
-   (plannotator-inbox/tool! {:session (System/getenv "BBH_INBOX_SESSION") :project (str (fs/cwd))}
-                            tool args)))
 
 ;; Headless browser screenshots via the flatpak Chrome (Guix has no aarch64 chromium substitute), and a
 ;; Claude delegate that views them, since bbh tool results carry text only.

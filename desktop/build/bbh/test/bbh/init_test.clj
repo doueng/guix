@@ -22,7 +22,6 @@
         (is (= "true" (:value (repl/eval! conn "(every? resolve '[shot look delegate])" 30000))))
         (is (= "true" (:value (repl/eval! conn "(let [t (:system (bbh.env/manifest))] (every? #(str/includes? t %) [\"(shot url)\" \"(look question\" \"(delegate brief)\"]))" 30000))))
         (is (= "true" (:value (repl/eval! conn "(boolean (resolve 'jev-classify-task))" 30000))))
-        (is (= "true" (:value (repl/eval! conn "(boolean (resolve 'inbox))" 30000))))
         (is (= "\"0\\n\"" (:value (repl/eval! conn "(:out (sh \"timeout 5 cat; echo $?\"))" 30000)))
             "a command that reads stdin should see EOF, not hang")
         (is (= "\"0\\n\"" (:value (repl/eval! conn "(:out @(p/process {:in :inherit :out :string} \"bash\" \"-c\" \"timeout 5 cat; echo $?\"))" 30000)))
