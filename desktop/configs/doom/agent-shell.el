@@ -174,6 +174,8 @@ conversation."
 ;; once the turn holding it completed, so a failed prompt stays pending, and
 ;; the next completed turn asks for it again.  A crash can repeat a wake, which
 ;; is why the agent gets the same reply at least once rather than exactly once.
+;; Each finished turn is reported too, so the poller can open a thread when the
+;; agent is waiting on the person, and `prompted' closes it when they answer here.
 
 (defvar eng/bbh-inbox-command nil
   "The poller's command as a list, or nil for `bbh inbox-poll'.
@@ -219,6 +221,8 @@ It is called with the conversation id and the project directory.")
            (when (string-search (cdr entry) prompt)
              (setq eng/bbh-inbox--waiting (delq entry eng/bbh-inbox--waiting))
              (push (car entry) eng/bbh-inbox--inflight)))
+         (unless eng/bbh-inbox--inflight
+           (eng/bbh-inbox--tell "prompted"))
          (eng/bbh-inbox--tell "busy true")))
       ('turn-complete
        (dolist (id eng/bbh-inbox--inflight)
@@ -228,7 +232,10 @@ It is called with the conversation id and the project directory.")
          (eng/bbh-inbox--tell (concat "retry " id)))
        (setq eng/bbh-inbox--inflight nil
              eng/bbh-inbox--failed nil)
-       (eng/bbh-inbox--tell "busy false"))
+       (eng/bbh-inbox--tell "busy false")
+       (when (and (equal "end_turn" (map-nested-elt event '(:data :stop-reason)))
+                  (not (map-elt agent-shell--state :pending-prompts)))
+         (eng/bbh-inbox--tell "turn-ended")))
       ('error
        (setq eng/bbh-inbox--failed (append eng/bbh-inbox--inflight eng/bbh-inbox--failed)
              eng/bbh-inbox--inflight nil)

@@ -9,6 +9,7 @@
             [bbh.models :as models]
             [bbh.repl :as repl]
             [bbh.session :as session]
+            [bbh.transcript :as transcript]
             [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures run-tests]]))
@@ -104,6 +105,51 @@
                   {:session "root-3" :body "Also this" :idempotency_key "new-message"})
           (is (wait-for #(seq @delivered) 5000))
           (is (str/includes? (:text (first @delivered)) "Also this")))))))
+
+(defn- section-of [thread-id]
+  (->> (:sections (window :get "/api/inbox/threads?archived=exclude"))
+       (filter #(some (fn [t] (= thread-id (:thread_id t))) (:threads %)))
+       first
+       :id))
+
+(defn- conversation [id & messages]
+  (let [dir (str (fs/path (fs/create-temp-dir {:prefix "bbh-inbox-turn"}) id))]
+    (doseq [m messages] (transcript/append! dir m))
+    dir))
+
+(deftest a-turn-waiting-on-the-person-opens-a-thread-they-can-answer
+  (with-redefs [inbox/needs-input? (constantly true)]
+    (let [poller {:session "root-4" :project project :state (atom {})}
+          dir (conversation "root-4" {:role "user" :content "go"}
+                            {:role "assistant" :content "I found two options.\n\nShould I use the queue?"})]
+      (inbox/turn-ended! poller dir)
+      (let [id (:asked @(:state poller))
+            [message] (thread id)]
+        (is (= "waiting" (section-of id)))
+        (is (= 1 (count (:questions message))))
+        (is (= "root-4" (get-in message [:author :session])))
+        (inbox/prompted! poller)
+        (is (nil? (:asked @(:state poller))))
+        (is (nil? (section-of id)) "answering in the chat closes the thread")))))
+
+(deftest a-wake-is-answered-in-its-thread
+  (with-redefs [inbox/needs-input? (constantly false)]
+    (let [{:keys [message_id thread_id]} (inbox/tool! (session-map "root-5") "send_message" {:body "Which?"})
+          _ (reply! message_id "The first")
+          reply (:id (last (thread thread_id)))
+          dir (conversation "root-5"
+                            {:role "user" :content (inbox/wake-text {:id reply :subject "s" :body "The first" :thread_id thread_id})}
+                            {:role "assistant" :content "Using the first."})]
+      (inbox/turn-ended! {:session "root-5" :project project :state (atom {})} dir)
+      (is (= "Using the first." (:body (last (thread thread_id))))))))
+
+(deftest every-tool-an-agent-uses-accepts-what-the-helper-sends
+  (let [s (session-map "root-6")
+        {:keys [thread_id message_id]} (inbox/tool! s "send_message" {:body "Needle in the haystack"})]
+    (is (some? (inbox/tool! s "read_thread" {:thread_id thread_id})))
+    (is (some? (inbox/tool! s "read_thread" {})))
+    (is (some? (inbox/tool! s "search" {:query "Needle"})))
+    (is (some? (inbox/tool! s "resolve_message" {:message_id message_id})))))
 
 (deftest the-repl-helper-posts-as-the-session
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-inbox-repl"}))

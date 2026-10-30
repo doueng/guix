@@ -62,6 +62,7 @@
   (with-bridge
     (fn [_ calls]
       (let [p (poller (atom []))]
+        (is (wait-for #(some (fn [c] (str/ends-with? (:uri c) "/poll")) @calls)))
         (inbox/ack! p "m1")
         (inbox/busy! p true)
         (inbox/busy! p false)
@@ -102,12 +103,19 @@
 
 (deftest a-tool-call-fills-in-who-is-asking
   (let [seen (atom nil)
+        schema {:properties {:body {} :project_path {} :agent_session {} :agent_host {} :agent_name {}}}
         stop (server/run-server (fn [{:keys [body]}]
-                                  (reset! seen (json/parse-string (slurp body) true))
-                                  {:status 200 :headers {"Content-Type" "text/event-stream"}
-                                   :body (str "event: message\ndata: "
-                                              (json/generate-string {:result {:structuredContent {:message_id "m9"}}})
-                                              "\n\n")})
+                                  (let [{:keys [method] :as req} (json/parse-string (slurp body) true)]
+                                    (when (= "tools/call" method) (reset! seen req))
+                                    {:status 200 :headers {"Content-Type" "text/event-stream"}
+                                     :body (str "event: message\ndata: "
+                                                (json/generate-string
+                                                 (if (= "tools/list" method)
+                                                   {:result {:tools [{:name "send_message" :inputSchema schema}
+                                                                     {:name "resolve_message"
+                                                                      :inputSchema {:properties {:message_id {}}}}]}}
+                                                   {:result {:structuredContent {:message_id "m9"}}}))
+                                                "\n\n")}))
                                 {:port 0 :ip "127.0.0.1" :legacy-return-value? false})]
     (try
       (with-redefs [inbox/connection (constantly {:port (server/server-port stop) :token "t"})]
@@ -116,9 +124,49 @@
                             {:body "hi" :agent_session "forged"}))))
       (is (= {:body "hi" :project_path "/p" :agent_session "root" :agent_host "bbh" :agent_name "bbh"}
              (get-in @seen [:params :arguments])))
+      (with-redefs [inbox/connection (constantly {:port (server/server-port stop) :token "t"})]
+        (inbox/tool! {:session "root" :project "/p"} "resolve_message" {:message_id "m9"}))
+      (is (= {:message_id "m9"} (get-in @seen [:params :arguments]))
+          "a tool that takes no identity gets none")
       (finally (server/server-stop! stop)))))
 
 (deftest a-missing-inbox-is-a-clear-error
   (with-redefs [inbox/connection (constantly nil)]
     (is (thrown-with-msg? Exception #"not running"
                           (inbox/tool! {:session "root" :project "/p"} "read_thread" {})))))
+
+(defn- call [code]
+  {:id "c" :type "function" :function {:name "clojure" :arguments (json/generate-string {:code code})}})
+
+(deftest a-turn-is-read-from-the-messages-after-the-last-user-message
+  (let [wake (inbox/wake-text (assoc command :id "msg_01ABC"))
+        messages [{:role "user" :content "older"}
+                  {:role "assistant" :content "older answer"}
+                  {:role "user" :content (str "[bbh] A note.\n\n" wake)}
+                  {:role "assistant" :content "" :tool_calls [(call "(+ 1 2)")]}
+                  {:role "tool" :content "=> 3"}
+                  {:role "assistant" :content " Which queue? "}]]
+    (is (= {:text "Which queue?" :wake "msg_01ABC" :posted? false} (inbox/last-turn messages)))
+    (is (false? (:posted? (inbox/last-turn (conj messages {:role "assistant" :content ""
+                                                           :tool_calls [(call "(grep \"send_message\")")]})))))
+    (is (true? (:posted? (inbox/last-turn (conj messages {:role "assistant" :content ""
+                                                          :tool_calls [(call "(inbox \"send_message\" {:body \"x\"})")]})))))
+    (is (nil? (:wake (inbox/last-turn [{:role "user" :content "plain"}]))))))
+
+(deftest what-reaches-the-inbox-depends-on-the-ask-and-the-wake
+  (with-redefs [inbox/needs-input? #(str/includes? % "ASK")]
+    (is (nil? (inbox/turn-message {:text "Done."})) "a status report stays in the chat")
+    (is (nil? (inbox/turn-message {})) "a turn with no text has nothing to post")
+    (is (nil? (inbox/turn-message {:text "ASK" :posted? true})) "the agent already posted")
+    (let [m (inbox/turn-message {:text "**Plan** ready.\n\n- Should I ASK them?\n\nDetails."})]
+      (is (= "Should I ASK them?" (:subject m)))
+      (is (str/ends-with? (:body m) ":::question-text\nYour answer\n:::"))
+      (is (nil? (:reply_to m))))
+    (let [m (inbox/turn-message {:text "Done." :wake "m1"})]
+      (is (= {:body "Done." :subject "Done." :reply_to "m1"} m) "a wake's answer goes back as plain text"))
+    (is (= "m1" (:reply_to (inbox/turn-message {:text "ASK" :wake "m1"}))))))
+
+(deftest without-jev-a-trailing-question-mark-decides
+  (with-redefs [babashka.http-client/post (fn [& _] (throw (ex-info "offline" {})))]
+    (is (inbox/needs-input? "Should I go ahead?\n"))
+    (is (not (inbox/needs-input? "Done.")))))

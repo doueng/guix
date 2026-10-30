@@ -85,5 +85,5 @@
   (case (first args)
     "acp" (acp/-main (some-> (:resume (parse-args (rest args))) conversation-dir))
     "inbox-poll" (let [[_ id project] args]
-                   (inbox/-poll (transcript/inbox-id (str (fs/path (data-dir) "conversations" id))) project))
+                   (inbox/-poll (str (fs/path (data-dir) "conversations" id)) project))
     (terminal args)))
