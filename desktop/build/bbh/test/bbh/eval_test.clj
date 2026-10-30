@@ -96,10 +96,25 @@
                              {:role "tool" :tool_call_id "t2" :content "161: (str \"Timed out after \" ms) The REPL process was killed and restarted"}
                              {:role "assistant" :content "It timed out."}]]
                       (str (json/generate-string m) "\n"))))
+    (spit (str (fs/path timeout-dir "runs.jsonl"))
+          (str/join (for [m [{:kind "turn" :ms 60000 :usage {:cost 1.5}}
+                             {:kind "turn" :ms 30000 :usage {:cost 0.25}}
+                             {:kind "llm" :parent "x" :ms 5000 :usage {:cost 9.0}}]]
+                      (str (json/generate-string m) "\n"))))
     (with-redefs [wf/state-root (constantly state) wf/session-run-file (constantly nil)]
       (let [live (wf/start! :investigation {:cwd dir :task "t"})
-            r (stats/report {:roots [dir timeout-dir] :state-root state})]
-        (is (= {:conversations 2 :prompts 3 :calls 4 :timeouts 1 :restarts 1 :errors 1} (:totals r))
+            r (stats/report {:roots [dir timeout-dir] :state-root state})
+            by-id (into {} (map (juxt :id identity) (:conversations r)))]
+        (is (= {:cost 1.75 :wall-ms 90000} (select-keys (by-id (str (fs/file-name timeout-dir))) [:cost :wall-ms]))
+            "cost and wall time sum the turn roots and skip their children")
+        (is (nil? (:cost (stats/conversation-stats
+                          {:dir (doto (str (fs/create-temp-dir {:prefix "bbh-stats-nocost"}))
+                                  (#(spit (str % "/runs.jsonl") "{\"kind\":\"turn\",\"ms\":5,\"usage\":{}}\n")))
+                           :steps [] :turns []})))
+            "turns that report no cost do not read as free")
+        (is (= {:cost nil :wall-ms nil} (select-keys (by-id (str (fs/file-name dir))) [:cost :wall-ms]))
+            "a conversation without runs.jsonl has no cost rather than zero")
+        (is (= {:conversations 2 :prompts 3 :calls 4 :timeouts 1 :restarts 1 :errors 1 :cost 1.75 :wall-ms 90000} (:totals r))
             "a result quoting the timeout message is neither a timeout nor a restart")
         (is (= {:active 1} (:run-statuses r)))
         (is (= [live] (map :id (:runs r))))

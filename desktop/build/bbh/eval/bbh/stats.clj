@@ -2,14 +2,23 @@
   "Harness health from real conversations and workflow runs: how often evaluations time out, restart the REPL or
   throw, which runs still need attention, and how long reviews take."
   (:require [babashka.fs :as fs]
+            [bbh.runs :as runs]
             [bbh.traces :as traces]
             [bbh.workflow :as wf]
             [clojure.string :as str]))
 
 (def default-root (str (fs/expand-home "~/.local/share/bbh/conversations")))
 
-(defn conversation-stats [{:keys [dir steps turns]}]
+(defn- turn-roots [dir]
+  (seq (filter #(and (= "turn" (:kind %)) (nil? (:parent %))) (runs/load-runs dir))))
+
+(defn conversation-stats
+  "One conversation's health. :cost and :wall-ms come from its turn runs, and stay nil for a conversation
+  without any, so missing data does not read as free."
+  [{:keys [dir steps turns]}]
   {:id (str (fs/file-name dir))
+   :cost (some->> (turn-roots dir) (keep #(get-in % [:usage :cost])) seq (reduce +))
+   :wall-ms (some->> (turn-roots dir) (keep :ms) seq (reduce +))
    :prompts (count turns)
    :calls (count steps)
    :timeouts (count (filter #(re-find #"\ATimed out after \d+ ms\. " (str (:result %))) steps))
@@ -44,20 +53,28 @@
         runs (run-stats state-root)
         reviews (sort (mapcat :reviews runs))]
     {:conversations convs
-     :totals (reduce (fn [acc c] (merge-with + acc (select-keys c [:prompts :calls :timeouts :restarts :errors])))
-                     {:conversations (count convs) :prompts 0 :calls 0 :timeouts 0 :restarts 0 :errors 0}
-                     (map #(assoc % :conversations 0) convs))
+     :totals (assoc (reduce (fn [acc c] (merge-with + acc (select-keys c [:prompts :calls :timeouts :restarts :errors])))
+                            {:conversations (count convs) :prompts 0 :calls 0 :timeouts 0 :restarts 0 :errors 0}
+                            (map #(assoc % :conversations 0) convs))
+                     :cost (some->> (seq (keep :cost convs)) (reduce +))
+                     :wall-ms (some->> (seq (keep :wall-ms convs)) (reduce +)))
      :runs runs
      :run-statuses (frequencies (map :status runs))
      :review-seconds (when (seq reviews)
                        {:n (count reviews) :median (nth reviews (quot (count reviews) 2)) :max (last reviews)})}))
 
+(defn- money [cost] (if cost (format "$%.2f" (double cost)) "-"))
+
+(defn- minutes [ms] (if ms (format "%.1fm" (/ ms 60000.0)) "-"))
+
 (defn print-report [{:keys [conversations totals runs run-statuses review-seconds]}]
-  (println (format "%-20s %7s %5s %8s %8s %6s" "conversation" "prompts" "calls" "timeouts" "restarts" "errors"))
-  (doseq [{:keys [id prompts calls timeouts restarts errors]} conversations]
-    (println (format "%-20s %7d %5d %8d %8d %6d" id prompts calls timeouts restarts errors)))
-  (let [{:keys [prompts calls timeouts restarts errors] n :conversations} totals]
-    (println (format "%-20s %7d %5d %8d %8d %6d" (str "total (" n ")") prompts calls timeouts restarts errors)))
+  (println (format "%-20s %7s %5s %8s %8s %6s %8s %8s" "conversation" "prompts" "calls" "timeouts" "restarts" "errors" "cost" "wall"))
+  (doseq [{:keys [id prompts calls timeouts restarts errors] :as c} conversations]
+    (println (format "%-20s %7d %5d %8d %8d %6d %8s %8s" id prompts calls timeouts restarts errors
+                     (money (:cost c)) (minutes (:wall-ms c)))))
+  (let [{:keys [prompts calls timeouts restarts errors cost wall-ms] n :conversations} totals]
+    (println (format "%-20s %7d %5d %8d %8d %6d %8s %8s" (str "total (" n ")") prompts calls timeouts restarts errors
+                     (money cost) (minutes wall-ms))))
   (println)
   (println (str "workflow runs: " (str/join ", " (for [[k v] (sort-by key run-statuses)] (str (name k) " " v)))))
   (doseq [{:keys [id status phase]} runs :when (#{:active :blocked} status)]
