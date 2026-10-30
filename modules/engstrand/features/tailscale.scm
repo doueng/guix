@@ -19,7 +19,12 @@
                       (mkdir-p "/var/run/tailscale")
                       (make-forkexec-constructor
                        (list #$(file-append tailscale "/bin/tailscaled")
-                             "--state=/var/lib/tailscale.state")
+                             "--state=/var/lib/tailscale.state"
+                             ;; HTTPS certificates live here.  Without it serve
+                             ;; fails every TLS handshake, because tailscaled
+                             ;; derives this only from a state file inside a
+                             ;; directory named tailscale.
+                             "--statedir=/var/lib/tailscale")
                        ;; The Asahi kernel has nf_tables without its inet
                        ;; families, so use legacy iptables for the firewall.
                        ;; Without resolvconf on PATH, tailscaled overwrites
