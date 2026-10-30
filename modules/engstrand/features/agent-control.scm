@@ -33,12 +33,25 @@
                        #:log-file "/var/log/ydotoold.log")))
            (stop #~(make-kill-destructor))))))
 
+(define %herd "/run/current-system/profile/bin/herd")
+
+;; A restart only applies what a human already switched to.  Services that end
+;; the session, stop builds, guard the speakers or carry ssh stay out;
+;; NetworkManager and iwd count, because restarting them restarts ssh-daemon.
+(define %restartable-services
+  '("bluetooth" "kanata" "ntpd" "tailscaled" "upower-daemon" "ydotoold"))
+
 (define %agent-sudoers
   (simple-service 'familiar-agent-sudoers sudoers-service-type
     (list (string-append
            "engstrand ALL=(root) NOPASSWD: "
-           "/run/current-system/profile/bin/herd status, "
-           "/run/current-system/profile/bin/herd status *"))))
+           (string-join
+            (append (list (string-append %herd " status")
+                          (string-append %herd " status *"))
+                    (map (lambda (service)
+                           (string-append %herd " restart " service))
+                         %restartable-services))
+            ", ")))))
 
 (define (feature-familiar-agent-control)
   (feature-package-set
