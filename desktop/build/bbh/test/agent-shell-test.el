@@ -55,6 +55,11 @@
 (defun bbh-test--idle-p (buf)
   (with-current-buffer buf (not (shell-maker-busy))))
 
+(defun bbh-test--resumed-p (shell transcript id)
+  "Whether the /resume of ID has shown in TRANSCRIPT and SHELL's turn ended."
+  (and (string-match-p (concat "^\\* /resume " id "$") (bbh-test--text transcript))
+       (bbh-test--idle-p shell)))
+
 (defun bbh-test--text (buf)
   (with-current-buffer buf (buffer-substring-no-properties (point-min) (point-max))))
 
@@ -282,10 +287,10 @@
         (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
         (insert (concat "/resume " old-id))
         (eng/bbh-send)
-        (should (bbh-test--wait (lambda () (string-match-p "Last reply: The answer is 42" (bbh-test--text transcript))) 30))
+        (should (bbh-test--wait (lambda () (bbh-test--resumed-p shell transcript old-id)) 30))
         (should (string-prefix-p "* add forty\n" (bbh-test--text transcript)))
-        (should (string-match-p (concat "^\\* /resume " old-id "$") (bbh-test--text transcript)))
-        (should (string-match-p (concat "Resumed " old-id " with 4 messages") (bbh-test--text transcript)))
+        (should (bbh-test--wait (lambda () (string-match-p "The answer is 42" (bbh-test--text transcript))) 30))
+        (should-not (string-match-p "Last reply\\|Resumed " (bbh-test--text transcript)))
         (should-not (string-match-p "No such conversation" (bbh-test--text transcript)))))))
 
 (ert-deftest bbh-replay-renders-saved-messages ()
@@ -380,7 +385,7 @@
         (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
         (insert (concat "/resume " old-id))
         (eng/bbh-send)
-        (should (bbh-test--wait (lambda () (string-match-p "Resumed " (bbh-test--text transcript))) 30))
+        (should (bbh-test--wait (lambda () (bbh-test--resumed-p shell transcript old-id)) 30))
         (should-not (eng/bbh-usage-header shell))))))
 
 (ert-deftest bbh-startup-resume-shows-the-conversation ()
@@ -438,9 +443,9 @@
             (eng/bbh-send))
           (should (seq-find (lambda (c) (string-match-p (concat "\\`" old-id "  add forty\\'") c)) offered))
           (should-not (seq-find (lambda (c) (string-prefix-p new-id c)) offered))
-          (should (bbh-test--wait (lambda () (string-match-p (concat "Resumed " old-id " with 4 messages") (bbh-test--text transcript))) 30))
+          (should (bbh-test--wait (lambda () (bbh-test--resumed-p shell transcript old-id)) 30))
           (should (string-prefix-p "* add forty\n" (bbh-test--text transcript)))
-          (should (string-match-p (concat "^\\* /resume " old-id "$") (bbh-test--text transcript))))))))
+          (should-not (string-match-p "Last reply\\|Resumed " (bbh-test--text transcript))))))))
 
 (ert-deftest bbh-cider-connect-works-from-the-composer ()
   (save-window-excursion

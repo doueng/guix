@@ -417,7 +417,7 @@
 
 (defn resume!
   "Move S to the saved conversation ID, or to the newest other one for last,
-  in a fresh REPL. Returns a description for the user."
+  in a fresh REPL. Returns what the user needs to know, blank when it went well."
   [s id]
   (let [ids (conversation-ids s)
         id (if (= "last" id) (first (latest-ids s)) id)]
@@ -428,12 +428,8 @@
             _ (stop-engine! s)
             _ (swap! s assoc :dir dir :messages messages :last-input nil
                      :notes ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
-            problem (restart-repl! s)
-            reply (some #(when (and (= "assistant" (:role %)) (not (str/blank? (:content %)))) (:content %))
-                        (rseq messages))]
-        (str "Resumed " (fs/file-name dir) " with " (count messages) " messages."
-             (when reply (str "\nLast reply: " (one-line reply 300)))
-             (when problem (str "\n" problem)))))))
+            problem (restart-repl! s)]
+        (str problem)))))
 
 (declare commands)
 

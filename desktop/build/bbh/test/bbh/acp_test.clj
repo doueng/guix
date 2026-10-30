@@ -71,7 +71,7 @@
             commands (until! c #(= "available_commands_update" (get-in % [:params :update :sessionUpdate])))]
         (is (some #{"resume"} (map :name (get-in (last commands) [:params :update :availableCommands]))))
         (send! c 3 "session/prompt" {:sessionId sid :prompt [{:type "text" :text "/resume last"}]})
-        (is (= ["Resumed 20200101-000000-000 with 2 messages.\nLast reply: Hi."]
+        (is (= []
                (keep #(get-in % [:params :update :content :text]) (until! c #(= 3 (:id %))))))
         (send! c 4 "session/prompt" {:sessionId sid :prompt [{:type "text" :text "and?"}]})
         (is (= ["continued"] (keep #(get-in % [:params :update :content :text]) (until! c #(= 4 (:id %))))))

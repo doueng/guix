@@ -169,7 +169,7 @@
     (stop! h)
     (is (= ["20260101-000000-000  2 messages  fix the bug\n/resume ID or /resume last continues one."
             "No such conversation. /resume lists them."
-            "Resumed 20260101-000000-000 with 2 messages.\nLast reply: Fixed it."
+            ""
             "continuing"]
            (texts h)))
     (is (= ["Fixed it."
