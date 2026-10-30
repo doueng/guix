@@ -18,7 +18,9 @@
     (try
       (is (nil? (session/start-repl! s)) "init.clj should load in the child REPL")
       (let [conn (:repl @s)]
-        (is (= "true" (:value (repl/eval! conn "(boolean (resolve 'wf-attest))" 30000))))
+        (is (= "false" (:value (repl/eval! conn "(boolean (resolve 'wf-attest))" 30000))) "runs go through the wf command, under sh's budget")
+        (is (= "true" (:value (repl/eval! conn "(every? resolve '[shot look delegate])" 30000))))
+        (is (= "true" (:value (repl/eval! conn "(let [t (:system (bbh.env/manifest))] (every? #(str/includes? t %) [\"(shot url)\" \"(look question\" \"(delegate brief)\"]))" 30000))))
         (is (= "true" (:value (repl/eval! conn "(boolean (resolve 'jev-classify-task))" 30000))))
         (is (= "true" (:value (repl/eval! conn "(boolean (resolve 'inbox))" 30000))))
         (is (= "\"0\\n\"" (:value (repl/eval! conn "(:out (sh \"timeout 5 cat; echo $?\"))" 30000)))

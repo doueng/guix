@@ -24,6 +24,7 @@
 - (edit! path old new) replaces exactly one occurrence, else throws.
 - (inbox tool args) calls the Plannotator Inbox, where you leave the person a decision or finished work and keep going. Replies arrive as your next turn. Tools are \"send_message\" with :body and optionally :subject, :reply_to, :thread and :attachments, \"read_thread\", \"search\" and \"resolve_message\". `plannotator inbox --help` has the question syntax.
 - (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits up to 60 s, or :ms, and returns {:done? :exit :tail :log}. It stops at the evaluation's budget, so check :done? and wait again in a later call. p/shell, http and Thread/sleep have no budget, so use a job for anything that may approach the deadline. Also job-status and jobs.
+- (shot url) saves a headless Chrome screenshot and returns its path. (look question & paths) has a Claude delegate describe images, since tool results carry text only. (delegate brief) runs a fresh agent, for an independent check.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
 
 (def pi-helpers
@@ -395,64 +396,6 @@
   ([tool args]
    (plannotator-inbox/tool! {:session (System/getenv "BBH_INBOX_SESSION") :project (str (fs/cwd))}
                             tool args)))
-
-;; Pstack workflow runs. A run is a journal under ~/.local/state/bbh/workflows; the gates run in this REPL,
-;; so a claim alone never advances a phase. Start a run before editing any file.
-(require '[bbh.workflow :as wf])
-
-(defn- print-gates [results]
-  (doseq [g results]
-    (println (str "  [" (cond (:pending? g) "wait" (:pass? g) "ok" :else "FAIL") "] " (wf/describe-gate g)))))
-
-(defn wf-start
-  "Start a workflow run before editing. WORKFLOW is a keyword such as :change or :bug-fix. OPTS takes :task :cwd
-  :repro :check :bench. Returns the run id."
-  [workflow opts]
-  (let [id (wf/start! workflow opts)]
-    (println (str "run " id " in phase " (name (:phase (wf/status id)))))
-    id))
-
-(defn wf-status
-  "Status of run ID, or of the latest run."
-  ([] (wf-status nil))
-  ([id]
-   (let [st (wf/status (or id (wf/default-id) (throw (ex-info "no runs for this directory" {}))))]
-     (select-keys st [:id :workflow :phase :status :block-reason :brief :evidence]))))
-
-(defn wf-attest
-  "Attest the current phase of run ID (default: latest) with CLAIM. The gates run now and print each result."
-  ([claim] (wf-attest nil claim))
-  ([id claim]
-   (let [id (or id (wf/default-id) (throw (ex-info "no runs for this directory" {})))
-         {:keys [outcome results]} (wf/attest! id claim)]
-     (println (str "attest: " (name outcome)))
-     (print-gates results)
-     (wf-status id))))
-
-(defn wf-set
-  "Give run ID (default: latest) new run commands, a map with any of :repro :check :bench."
-  ([cmds] (wf-set nil cmds))
-  ([id cmds]
-   (let [id (or id (wf/default-id) (throw (ex-info "no runs for this directory" {})))]
-     (wf/set-commands! id cmds)
-     (wf-status id))))
-
-(defn wf-abandon
-  "Retire run ID (default: latest) with REASON, so it is no longer the default run."
-  ([reason] (wf-abandon nil reason))
-  ([id reason]
-   (let [id (or id (wf/default-id) (throw (ex-info "no runs for this directory" {})))]
-     (wf/abandon! id reason)
-     (select-keys (wf/status id) [:id :workflow :phase :status :abandon-reason]))))
-
-(defn wf-review
-  "Run a fresh reviewer on the current verdict gate of run ID (default: latest). Agents never record a human verdict."
-  ([] (wf-review nil))
-  ([id]
-   (let [id (or id (wf/default-id) (throw (ex-info "no runs for this directory" {})))
-         {:keys [verdict reviewer]} (wf/review! id)]
-     (println (str "review: " (name verdict) " by " reviewer))
-     (wf-status id))))
 
 ;; Headless browser screenshots via the flatpak Chrome (Guix has no aarch64 chromium substitute), and a
 ;; Claude delegate that views them, since bbh tool results carry text only.
