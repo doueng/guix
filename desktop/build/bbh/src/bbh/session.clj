@@ -96,8 +96,9 @@
 (defn start-repl!
   "Start the REPL and load init. Returns a problem description or nil."
   [s]
-  (let [{:keys [repl-dir init cwd]} @s
-        conn (repl/start! {:dir repl-dir :cwd cwd})
+  (let [{:keys [dir repl-dir init cwd]} @s
+        conn (repl/start! {:dir repl-dir :cwd cwd
+                           :env {"BBH_INBOX_SESSION" (transcript/inbox-id dir)}})
         r (when (and init (fs/exists? init))
             (repl/eval! conn (str "(load-file " (pr-str (str init)) ")") 30000))]
     (swap! s assoc :repl conn)
@@ -120,7 +121,7 @@
 
 (def ^:private bookkeeping
   "Files a session writes before anyone talks to it. A folder holding only these is not a conversation."
-  #{"repl.log" "repl.port" "workflow-run" "claude.log" "claude-session" "claude-seen"})
+  #{"repl.log" "repl.port" "workflow-run" "claude.log" "claude-session" "claude-seen" "inbox-session"})
 
 (defn- delete-if-unused! [dir]
   (when (and dir (fs/directory? dir)

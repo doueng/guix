@@ -60,7 +60,8 @@ conversation."
            (eng/bbh-transcript--replay id))
          (with-current-buffer (eng/bbh--shell)
            (setq eng/bbh-conversation id
-                 eng/bbh-usage-last nil)))
+                 eng/bbh-usage-last nil))
+         (eng/bbh-inbox-switch (eng/bbh--shell)))
        (agent-shell-viewport-compose-send t)))))
 
 (defun eng/bbh--conversation-file (id file)
@@ -164,6 +165,134 @@ conversation."
       (let ((kill-buffer-query-functions nil))
         (when (buffer-live-p old-composer) (kill-buffer old-composer))
         (kill-buffer old)))))
+
+;;; Plannotator Inbox
+
+;; `bbh inbox-poll' hands this shell what the person wrote, and it runs as a
+;; normal prompt through agent-shell's queue, which waits out a running turn
+;; and leaves a composer draft alone.  The Inbox shows a wake as delivered only
+;; once the turn holding it completed, so a failed prompt stays pending, and
+;; the next completed turn asks for it again.  A crash can repeat a wake, which
+;; is why the agent gets the same reply at least once rather than exactly once.
+
+(defvar eng/bbh-inbox-command nil
+  "The poller's command as a list, or nil for `bbh inbox-poll'.
+It is called with the conversation id and the project directory.")
+
+(defvar-local eng/bbh-inbox--process nil
+  "The poller serving this shell.")
+(defvar-local eng/bbh-inbox--seen nil
+  "Ids this shell took, so that a restarted poller cannot repeat one.")
+(defvar-local eng/bbh-inbox--waiting nil
+  "Alist of id and text for wakes not yet in a prompt.")
+(defvar-local eng/bbh-inbox--inflight nil
+  "Ids of wakes in the running turn.")
+(defvar-local eng/bbh-inbox--failed nil
+  "Ids of wakes whose turn failed.")
+
+(defun eng/bbh-inbox--tell (line)
+  "Send LINE to this shell's poller."
+  (when (process-live-p eng/bbh-inbox--process)
+    (process-send-string eng/bbh-inbox--process (concat line "\n"))))
+
+(defun eng/bbh-inbox--on-line (shell line)
+  "Run the delivery in LINE, a JSON object, as a prompt in SHELL."
+  (with-current-buffer shell
+    (let* ((delivery (json-parse-string line :object-type 'alist))
+           (id (alist-get 'id delivery))
+           (text (alist-get 'text delivery)))
+      (unless (gethash id eng/bbh-inbox--seen)
+        (puthash id t eng/bbh-inbox--seen)
+        (push (cons id text) eng/bbh-inbox--waiting)
+        (agent-shell--prompt-queue-enqueue :prompt text)
+        (unless (shell-maker-busy)
+          (agent-shell--prompt-queue-process-next))))))
+
+(defun eng/bbh-inbox--on-event (shell event)
+  "Track SHELL's wakes through EVENT, and start the poller once the session exists."
+  (with-current-buffer shell
+    (pcase (map-elt event :event)
+      ((or 'prompt-ready 'init-finished) (eng/bbh-inbox-start shell))
+      ('input-submitted
+       (let ((prompt (map-nested-elt event '(:data :prompt))))
+         (dolist (entry eng/bbh-inbox--waiting)
+           (when (string-search (cdr entry) prompt)
+             (setq eng/bbh-inbox--waiting (delq entry eng/bbh-inbox--waiting))
+             (push (car entry) eng/bbh-inbox--inflight)))
+         (eng/bbh-inbox--tell "busy true")))
+      ('turn-complete
+       (dolist (id eng/bbh-inbox--inflight)
+         (eng/bbh-inbox--tell (concat "ack " id)))
+       (dolist (id eng/bbh-inbox--failed)
+         (remhash id eng/bbh-inbox--seen)
+         (eng/bbh-inbox--tell (concat "retry " id)))
+       (setq eng/bbh-inbox--inflight nil
+             eng/bbh-inbox--failed nil)
+       (eng/bbh-inbox--tell "busy false"))
+      ('error
+       (setq eng/bbh-inbox--failed (append eng/bbh-inbox--inflight eng/bbh-inbox--failed)
+             eng/bbh-inbox--inflight nil)
+       (eng/bbh-inbox--tell "busy false"))
+      ('clean-up
+       (when (process-live-p eng/bbh-inbox--process)
+         (delete-process eng/bbh-inbox--process))))))
+
+(defun eng/bbh-inbox--sentinel (shell process)
+  "Restart SHELL's poller when PROCESS, its current one, dies on its own."
+  (when (and (buffer-live-p shell)
+             (eq process (buffer-local-value 'eng/bbh-inbox--process shell))
+             (memq (process-status process) '(exit signal)))
+    (run-at-time 5 nil (lambda ()
+                         (when (buffer-live-p shell)
+                           (with-current-buffer shell
+                             (unless (process-live-p eng/bbh-inbox--process)
+                               (eng/bbh-inbox-start shell))))))))
+
+(defun eng/bbh-inbox-start (shell)
+  "Serve SHELL's conversation from a poller, unless one is running."
+  (with-current-buffer shell
+    (when-let* (((not (process-live-p eng/bbh-inbox--process)))
+                (conversation (eng/bbh--conversation shell))
+                (project (directory-file-name (expand-file-name default-directory)))
+                (partial ""))
+      (setq eng/bbh-inbox--process
+            (make-process
+             :name "bbh-inbox" :noquery t :connection-type 'pipe
+             :stderr (get-buffer-create " *bbh-inbox*")
+             :command (append (or eng/bbh-inbox-command
+                                  (list (or (executable-find "bbh") (expand-file-name "~/.local/bin/bbh"))
+                                        "inbox-poll"))
+                              (list conversation project))
+             :sentinel (lambda (process _) (eng/bbh-inbox--sentinel shell process))
+             :filter (lambda (_ output)
+                       (setq partial (concat partial output))
+                       (while-let ((end (string-search "\n" partial)))
+                         (let ((line (substring partial 0 end)))
+                           (setq partial (substring partial (1+ end)))
+                           (when (buffer-live-p shell)
+                             (eng/bbh-inbox--on-line shell line))))))))))
+
+(defun eng/bbh-inbox-connect (shell)
+  "Connect SHELL to the Plannotator Inbox."
+  (with-current-buffer shell
+    (setq eng/bbh-inbox--seen (make-hash-table :test #'equal)))
+  (agent-shell-subscribe-to :shell-buffer shell
+                            :on-event (lambda (event) (eng/bbh-inbox--on-event shell event)))
+  (eng/bbh-inbox-start shell))
+
+(defun eng/bbh-inbox-switch (shell)
+  "Move SHELL's poller to the conversation it is on now.
+Wakes of the old conversation stay pending in the Inbox until it is resumed."
+  (with-current-buffer shell
+    (when eng/bbh-inbox--process
+      (let ((process eng/bbh-inbox--process))
+        (setq eng/bbh-inbox--process nil
+              eng/bbh-inbox--waiting nil
+              eng/bbh-inbox--inflight nil
+              eng/bbh-inbox--failed nil)
+        (clrhash eng/bbh-inbox--seen)
+        (delete-process process))
+      (eng/bbh-inbox-start shell))))
 
 ;;; Program status
 
@@ -681,6 +810,7 @@ Org leaves result blocks, a special block, without the code background."
                                   :on-event (lambda (event) (eng/bbh-transcript--on-event transcript event)))
         (agent-shell-subscribe-to :shell-buffer shell
                                   :on-event (lambda (event) (eng/bbh-status--on-event shell event)))
+        (eng/bbh-inbox-connect shell)
         (with-current-buffer shell
           (add-hook 'kill-buffer-hook #'eng/bbh-status--clear nil t)
           (setq eng/bbh-transcript transcript))))))

@@ -216,6 +216,29 @@
       (is (= "=> 42" (peek (tool-results h))))
       (is (= new-dir (transcript/continuation old))))))
 
+(deftest the-inbox-id-survives-a-rollover-and-follows-resume
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-root"}))
+        current (str (fs/create-dirs (fs/path root "first")))
+        other (str (fs/path root "other"))
+        env-code {:code "(System/getenv \"BBH_INBOX_SESSION\")"}
+        _ (transcript/append! other {:role "user" :content "before"})
+        h (harness "(ns bbh.env) (def manifest {:rollover-at-tokens 1000})"
+                   [env-code {:say "full" :usage {:input 1000}} env-code "rolled" env-code "resumed"]
+                   current)]
+    (session/prompt! (:s h) "hello")
+    (session/prompt! (:s h) "next")
+    (let [rolled (:dir @(:s h))
+          grandchild (transcript/continue! rolled "third")]
+      (is (not= current rolled))
+      (is (= "first" (transcript/inbox-id current) (transcript/inbox-id rolled) (transcript/inbox-id grandchild)))
+      (fs/delete-tree grandchild)
+      (fs/delete (fs/path rolled "continued-in")))
+    (session/prompt! (:s h) "/resume other")
+    (session/prompt! (:s h) "go on")
+    (stop! h)
+    (is (= ["=> \"first\"" "=> \"first\"" "=> \"other\""]
+           (->> @(:events h) (filter #(= :tool-result (:type %))) (map :text))))))
+
 (deftest a-full-context-mid-turn-continues-the-work-in-a-new-conversation
   (let [h (harness "(ns bbh.env) (def manifest {:rollover-at-tokens 1000})"
                    [{:code "(+ 1 2)" :usage {:input 1000}} "finished"])

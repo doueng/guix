@@ -45,6 +45,13 @@
    :paths ["desktop/configs/doom/agent-shell.el" "desktop/build/bbh/test/tty-scroll-test.el"
            "desktop/build/bbh/bb.edn"]
    :checks ["cd desktop/build/bbh && bb test:transcript-scroll"]}
+  {:name "bbh inbox"
+   :paths ["desktop/build/bbh/src/bbh/{inbox,main,models,repl,session,transcript}.clj"
+           "desktop/build/bbh/test/bbh/inbox_*.clj" "desktop/build/bbh/test/agent-shell-test.el"
+           "desktop/build/bbh/bb.edn" "desktop/configs/bbh/init.clj" "desktop/configs/doom/agent-shell.el"
+           "modules/engstrand/packages/plannotator.scm" "modules/engstrand/features/plannotator.scm"]
+   :checks ["cd desktop/build/bbh && bb test:emacs" "cd desktop/build/bbh && bb test:inbox-tty"]
+   :slow ["cd desktop/build/bbh && bb test:inbox"]}
   {:name "swe-rebench"
    :paths [".github/workflows/swe-rebench.yml" "desktop/build/bbh/harbor/**"
            "desktop/build/bbh/eval/bbh/{harbor_check,swe_report}.clj" "desktop/build/bbh/src/bbh/acp.clj"]

@@ -23,11 +23,19 @@
   []
   (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS")))
 
+(defn inbox-id
+  "The name conversation DIR goes by in the Plannotator Inbox, the root of its
+  rollovers, so a reply still finds the session after a rollover."
+  [dir]
+  (let [f (fs/path dir "inbox-session")]
+    (if (fs/exists? f) (str/trim (slurp (str f))) (str (fs/file-name dir)))))
+
 (defn continue!
   "Point conversation DIR at the conversation ID beside it. Returns ID's directory."
   [dir id]
   (let [next-dir (str (fs/path (fs/parent dir) id))]
     (fs/create-dirs next-dir)
+    (spit (str (fs/path next-dir "inbox-session")) (inbox-id dir))
     (spit (str (fs/path dir "continued-in")) id)
     next-dir))
 

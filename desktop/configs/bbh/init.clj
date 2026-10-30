@@ -22,6 +22,7 @@
 - (sh \"cmd string\") returns {:exit :out :err}. A nonzero exit is data. For separate arguments use (p/shell {:out :string :err :string :continue true} \"cmd\" \"arg\").
 - (read-lines path) or (read-lines path start count) prints 1-based numbered lines and returns nil. Use slurp when code needs the text.
 - (edit! path old new) replaces exactly one occurrence, else throws.
+- (inbox tool args) calls the Plannotator Inbox, where you leave the person a decision or finished work and keep going. Replies arrive as your next turn. Tools are \"send_message\" with :body and optionally :subject, :reply_to, :thread and :attachments, \"read_thread\", \"search\" and \"resolve_message\". `plannotator inbox --help` has the question syntax.
 - (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits up to 60 s, or :ms, and returns {:done? :exit :tail :log}. Use it for anything that may approach the deadline. Also job-status and jobs.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
 
@@ -323,6 +324,16 @@
       (->> (fs/glob d "*.cmd") (map #(str/replace (str (fs/file-name %)) #"\.cmd$" ""))
            (sort-by #(parse-long (first (str/split % #"-")))) reverse
            (mapv #(dissoc (job-status % :lines 0) :tail))))))
+
+;; The Plannotator Inbox, under the id the session started this REPL with.
+(require '[bbh.inbox :as plannotator-inbox])
+
+(defn inbox
+  "Call the Plannotator Inbox tool TOOL, a string such as \"send_message\"."
+  ([tool] (inbox tool {}))
+  ([tool args]
+   (plannotator-inbox/tool! {:session (System/getenv "BBH_INBOX_SESSION") :project (str (fs/cwd))}
+                            tool args)))
 
 ;; Pstack workflow runs. A run is a journal under ~/.local/state/bbh/workflows; the gates run in this REPL,
 ;; so a claim alone never advances a phase. Start a run before editing any file.

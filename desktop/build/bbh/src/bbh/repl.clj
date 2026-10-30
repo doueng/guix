@@ -62,14 +62,14 @@
 
 (defn start!
   "Start a REPL process in CWD that logs to DIR/repl.log."
-  [{:keys [dir cwd]}]
+  [{:keys [dir cwd env]}]
   (fs/create-dirs dir)
   (let [port-file (str (fs/path dir "repl.port"))
         log (fs/file dir "repl.log")
         _ (fs/delete-if-exists port-file)
         config (System/getProperty "babashka.config")
         ;; Nothing writes the REPL's stdin, and an open pipe there would hang any child that reads it.
-        proc (apply p/process {:dir cwd :extra-env {"BBH_PORT_FILE" port-file}
+        proc (apply p/process {:dir cwd :extra-env (assoc env "BBH_PORT_FILE" port-file)
                                :in (fs/file "/dev/null")
                                :out :append :out-file log :err :append :err-file log}
                     (concat ["bb"] (when config ["--config" config]) ["-e" bootstrap]))

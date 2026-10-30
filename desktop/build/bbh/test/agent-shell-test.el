@@ -625,3 +625,126 @@
           (setq eng/bbh-conversation "20210101-000000-000")
           (should (equal (eng/bbh--conversation shell) "20210101-000000-000")))
       (kill-buffer shell))))
+
+;;; Plannotator Inbox
+
+(defun bbh-test--inbox-dir ()
+  "A directory for the fake poller, which logs its ids and saves what it is told."
+  (let ((dir (make-temp-file "bbh-inbox" t)))
+    (setq eng/bbh-inbox-command
+          (list "sh" "-c" (format "echo \"$1\" >> %s/ids; exec cat >> %s/said" dir dir) "sh"))
+    dir))
+
+(defun bbh-test--inbox-lines (dir file)
+  (let ((path (expand-file-name file dir)))
+    (when (file-exists-p path)
+      (with-temp-buffer
+        (insert-file-contents path)
+        (split-string (buffer-string) "\n" t)))))
+
+(defun bbh-test--told-p (dir line)
+  (bbh-test--wait (lambda () (member line (bbh-test--inbox-lines dir "said"))) 10))
+
+(defun bbh-test--wake (shell id text)
+  (eng/bbh-inbox--on-line shell (json-serialize (list :id id :text text))))
+
+(defun bbh-test--script (steps)
+  "Move the current composer's session to the script STEPS, an EDN string."
+  (insert "/model script/" (make-temp-file "bbh-inbox" nil ".edn" steps))
+  (eng/bbh-send)
+  (should (bbh-test--wait (lambda () (bbh-test--idle-p (eng/bbh--shell))) 30)))
+
+(defmacro bbh-test--with-inbox (spec &rest body)
+  "Bind SPEC, (SHELL COMPOSER TRANSCRIPT DIR), around BODY in a fresh layout."
+  (declare (indent 1))
+  (pcase-let ((`(,shell ,composer ,transcript ,dir) spec))
+    `(save-window-excursion
+       (delete-other-windows)
+       (let* ((,dir (bbh-test--inbox-dir))
+              (,shell (bbh-test--start))
+              (,composer (eng/bbh-layout ,shell))
+              (,transcript (buffer-local-value 'eng/bbh-transcript ,shell)))
+         (ignore ,composer ,transcript)
+         (unwind-protect (progn ,@body)
+           (setq eng/bbh-inbox-command nil))))))
+
+(ert-deftest bbh-inbox-wake-runs-as-a-turn-and-keeps-the-draft ()
+  (bbh-test--with-inbox (shell composer transcript dir)
+    (with-current-buffer composer (insert "half typed"))
+    (should (bbh-test--wait (lambda () (bbh-test--inbox-lines dir "ids")) 10))
+    (should (equal (bbh-test--inbox-lines dir "ids") (list (eng/bbh--conversation shell))))
+    (bbh-test--wake shell "m1" "Plannotator Inbox: first")
+    (should (bbh-test--wait (lambda () (string-match-p "The answer is 42" (bbh-test--text transcript))) 30))
+    (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+    (should (string-match-p "^\\* Plannotator Inbox: first$" (bbh-test--text transcript)))
+    (should (equal "half typed" (with-current-buffer composer (string-trim (buffer-string)))))
+    (should (bbh-test--told-p dir "ack m1"))
+    (should (equal (bbh-test--inbox-lines dir "said") '("busy true" "ack m1" "busy false")))))
+
+(ert-deftest bbh-inbox-wake-waits-out-a-running-turn-once ()
+  (bbh-test--with-inbox (shell composer transcript dir)
+    (with-current-buffer composer
+      (bbh-test--script "[{:code \"(Thread/sleep 2500)\"} \"slept\" \"woken\"]")
+      (insert "sleep")
+      (eng/bbh-send))
+    (should (bbh-test--wait (lambda () (string-match-p "Thread/sleep" (bbh-test--text transcript))) 30))
+    (bbh-test--wake shell "m2" "Plannotator Inbox: second")
+    (bbh-test--wake shell "m2" "Plannotator Inbox: second")
+    (should (= 1 (length (map-elt (buffer-local-value 'agent-shell--state shell) :pending-prompts))))
+    (should-not (member "ack m2" (bbh-test--inbox-lines dir "said")))
+    (should (bbh-test--wait (lambda () (string-match-p "woken" (bbh-test--text transcript))) 30))
+    (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+    (should (= 1 (with-current-buffer transcript (how-many "^\\* Plannotator Inbox: second$" (point-min) (point-max)))))
+    (should (bbh-test--told-p dir "ack m2"))
+    (should (= 1 (seq-count (lambda (line) (equal line "ack m2")) (bbh-test--inbox-lines dir "said"))))))
+
+(ert-deftest bbh-inbox-failed-wake-is-not-acked-and-retries-after-the-next-turn ()
+  (bbh-test--with-inbox (shell composer transcript dir)
+    (with-current-buffer composer (bbh-test--script "[\"worked\" \"retried\"]"))
+    (bbh-test--wake shell "m3" "/not-a-command wake")
+    (should (bbh-test--wait (lambda () (and (bbh-test--idle-p shell)
+                                            (buffer-local-value 'eng/bbh-inbox--failed shell)))
+                            30))
+    (should-not (member "ack m3" (bbh-test--inbox-lines dir "said")))
+    (with-current-buffer composer
+      (insert "something that works")
+      (eng/bbh-send))
+    (should (bbh-test--told-p dir "retry m3"))
+    (should-not (member "ack m3" (bbh-test--inbox-lines dir "said")))
+    (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+    (bbh-test--wake shell "m3" "Plannotator Inbox: retried")
+    (should (bbh-test--told-p dir "ack m3"))))
+
+(ert-deftest bbh-inbox-cancelled-turn-acks-because-the-wake-reached-the-transcript ()
+  (bbh-test--with-inbox (shell composer transcript dir)
+    (with-current-buffer composer
+      (bbh-test--script "[{:code \"(Thread/sleep 60000)\"} \"not reached\"]"))
+    (bbh-test--wake shell "m4" "Plannotator Inbox: cancelled")
+    (should (bbh-test--wait (lambda () (string-match-p "Thread/sleep" (bbh-test--text transcript))) 30))
+    (with-current-buffer shell (agent-shell-interrupt t))
+    (should (bbh-test--told-p dir "ack m4"))))
+
+(ert-deftest bbh-inbox-poller-follows-new-and-resume ()
+  (bbh-test--with-inbox (shell composer transcript dir)
+    (should (bbh-test--wait (lambda () (bbh-test--inbox-lines dir "ids")) 10))
+    (let ((first-id (eng/bbh--conversation shell))
+          (first-process (buffer-local-value 'eng/bbh-inbox--process shell)))
+      (with-current-buffer composer
+        (insert "add forty")
+        (eng/bbh-send))
+      (should (bbh-test--wait (lambda () (string-match-p "The answer is 42" (bbh-test--text transcript))) 30))
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+      (with-current-buffer composer
+        (insert "/new")
+        (eng/bbh-send))
+      (should-not (process-live-p first-process))
+      (let ((next (eng/bbh--shell)))
+        (should-not (eq next shell))
+        (should (bbh-test--wait (lambda () (= 2 (length (bbh-test--inbox-lines dir "ids")))) 30))
+        (should (bbh-test--wait (lambda () (bbh-test--idle-p next)) 30))
+        (let ((second-process (buffer-local-value 'eng/bbh-inbox--process next)))
+          (insert "/resume " first-id)
+          (eng/bbh-send)
+          (should (bbh-test--wait (lambda () (equal first-id (car (last (bbh-test--inbox-lines dir "ids"))))) 30))
+          (should-not (process-live-p second-process))
+          (should (process-live-p (buffer-local-value 'eng/bbh-inbox--process next))))))))
