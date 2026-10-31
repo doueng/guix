@@ -1,5 +1,6 @@
 (ns app
-  (:require [bbh.web.markdown :as md]
+  (:require [bbh.web.conversation :as conversation]
+            [bbh.web.markdown :as md]
             [clojure.string :as str]
             [replicant.dom :as r]))
 
@@ -24,20 +25,8 @@
 (defn- conversation-path [id]
   (str "/api/agents/" id "/messages"))
 
-(defn- merge-page
-  "CONVERSATION with PAGE's messages in order. A page holds older or newer ones,
-  and two polls can race, so a message already held is dropped."
-  [conversation {:keys [messages] :as page}]
-  (let [held (:messages conversation [])
-        first-held (:i (first held) ##Inf)
-        last-held (:i (peek held) ##-Inf)]
-    (assoc (dissoc page :messages)
-           :messages (vec (concat (filter #(< (:i %) first-held) messages)
-                                  held
-                                  (filter #(> (:i %) last-held) messages))))))
-
 (defn- store-page! [id page]
-  (swap! state update-in [:conversations id] merge-page page))
+  (swap! state update-in [:conversations id] conversation/merge-page page))
 
 (defn- thread []
   (.getElementById js/document "thread"))

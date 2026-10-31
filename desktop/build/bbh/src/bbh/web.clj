@@ -123,6 +123,7 @@
 (def ^:private assets
   {"/" ["index.html" "text/html"]
    "/app.cljs" ["app.cljs" "text/plain"]
+   "/conversation.cljc" ["conversation.cljc" "text/plain"]
    "/markdown.cljc" ["markdown.cljc" "text/plain"]
    "/style.css" ["style.css" "text/css"]
    "/scittle.js" ["scittle.js" "text/javascript"]

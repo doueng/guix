@@ -3,10 +3,11 @@
             [bbh.inbox :as inbox]
             [bbh.transcript :as transcript]
             [bbh.web :as web]
+            [bbh.web.conversation :as conversation]
             [bbh.web.markdown :as md]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is testing]]))
 
 (def ^:private owner-headers
   {"tailscale-user-login" "owner@example.com"
@@ -117,6 +118,15 @@
     (is (= 200 status))
     (is (str/includes? body "app.cljs"))
     (is (str/includes? (headers "Content-Security-Policy") "default-src 'none'"))))
+
+(deftest pages-merge-into-one-ordered-conversation
+  (let [m (fn [& is] (mapv (fn [i] {:i i}) is))
+        merged (fn [held page] (map :i (:messages (conversation/merge-page {:messages held} {:messages page}))))]
+    (testing "the first page" (is (= [5 6] (merged nil (m 5 6)))))
+    (testing "newer" (is (= [5 6 7] (merged (m 5 6) (m 7)))))
+    (testing "older" (is (= [3 4 5 6] (merged (m 5 6) (m 3 4)))))
+    (testing "a racing poll" (is (= [5 6 7] (merged (m 5 6) (m 6 7)))))
+    (testing "nothing new" (is (= [5 6] (merged (m 5 6) []))))))
 
 (deftest markdown-renders-the-shapes-agents-write
   (is (= [[:h3 "Title"]] (md/render "## Title")))
