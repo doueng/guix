@@ -87,14 +87,23 @@
         (.catch (fn [e] (swap! state assoc :error (.-message e))))
         (.finally (fn [] (reset! syncing false))))))
 
+(defn- center-tab!
+  "Scroll the strip to the current tab. scrollIntoView would also scroll the page."
+  []
+  (let [strip (.querySelector js/document ".tabs")
+        tab (.querySelector js/document ".tab.current")
+        left (- (+ (.-scrollLeft strip)
+                   (- (.-left (.getBoundingClientRect tab)) (.-left (.getBoundingClientRect strip))))
+                (/ (- (.-clientWidth strip) (.-offsetWidth tab)) 2))]
+    (.scrollTo strip #js {:left left :behavior "smooth"})))
+
 (defn- select!
   "Show session ID. Replacing the hash keeps tabs out of the browser's history."
   [id]
   (.replaceState js/history nil "" (str "#" id))
   (swap! state assoc :current id)
   (to-bottom!)
-  (.scrollIntoView (.querySelector js/document ".tab.current")
-                   #js {:inline "center" :block "nearest" :behavior "smooth"})
+  (center-tab!)
   (sync-conversation! id))
 
 (defn- load-earlier! [id]

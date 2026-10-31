@@ -233,6 +233,6 @@ th {
 .composer button { color: #fff; background: var(--teal); border: 0; }
 .composer button:active { background: var(--teal-dark); }
 .composer button:disabled { opacity: 0.5; }
-.attach { color: var(--teal); border: 1px solid var(--teal); cursor: pointer; }
+.attach { position: relative; overflow: hidden; color: var(--teal); border: 1px solid var(--teal); cursor: pointer; }
 .attach input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .attach:focus-within { outline: 2px solid var(--teal); outline-offset: 2px; }
