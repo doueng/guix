@@ -16,6 +16,8 @@
 (def ^:private https-port 8443)
 (def ^:private page-size 80)
 (def ^:private max-text 100000)
+(def ^:private max-images 8)
+(def ^:private max-body (* 64 1024 1024))
 
 (defn prompt-text
   "The person's words in a saved user message, without skill text or bbh notes."
@@ -28,7 +30,7 @@
   [i {:keys [role content tool_calls tool_call_id]}]
   (let [text (str content)]
     (case role
-      "user" {:i i :role role :text (prompt-text text)}
+      "user" (assoc (inbox/parts (prompt-text text)) :i i :role role)
       "tool" {:i i :role role :text text :call tool_call_id}
       {:i i :role role :text text
        :calls (mapv (fn [{:keys [id function]}]
@@ -71,7 +73,7 @@
 (defn- title [messages]
   (let [text (some #(when (= "user" (:role %))
                        (let [prompt (prompt-text (str (:content %)))]
-                         (when-not (str/starts-with? prompt "[bbh]") prompt)))
+                         (when-not (str/starts-with? prompt "[bbh]") (:text (inbox/parts prompt)))))
                     messages)
         line (str/replace (str text) #"\s+" " ")]
     (subs line 0 (min 80 (count line)))))
@@ -86,13 +88,18 @@
          {:id (str (fs/file-name dir)) :project (str (fs/file-name project)) :busy (boolean busy)
           :title (title (messages-of dir))})))
 
+(defn- mail-view
+  "Mailbox message M as the page shows it."
+  [{:keys [id text]}]
+  (assoc (inbox/parts text) :id id))
+
 (defn- unseen
   "The mailbox messages not yet in MESSAGES. A message stays in the mailbox until
   its turn ends, by which time the transcript already shows it."
   [messages pending]
   (let [shown (set (for [m (take-last 50 messages) :when (= "user" (:role m))]
                      (prompt-text (str (:content m)))))]
-    (vec (remove #(shown (str/trim (:text %))) pending))))
+    (mapv mail-view (remove #(shown (str/trim (:text %))) pending))))
 
 (defn page
   "Conversation ROOT from index AFTER on, or else the page before index BEFORE,
@@ -130,7 +137,7 @@
    "/scittle.replicant.js" ["scittle.replicant.js" "text/javascript"]})
 
 (def ^:private csp
-  (str "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+  (str "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
 
 (defn- asset [uri]
@@ -148,19 +155,40 @@
   (into {} (for [[_ k v] (re-seq #"(after|before)=(\d+)" (str query-string))]
              [(keyword k) (parse-long v)])))
 
+(defn- jpeg
+  "The bytes of the base64 JPEG ENCODED, or nil when it is not one."
+  [encoded]
+  (let [image (try (.decode (java.util.Base64/getDecoder) (str encoded))
+                   (catch IllegalArgumentException _ nil))]
+    (when (and image (< 3 (alength image))
+               (= [-1 -40 -1] [(aget image 0) (aget image 1) (aget image 2)]))
+      image)))
+
 (defn- send-message [root request]
-  (let [text (str (:text (json/parse-string (slurp (:body request)) true)))]
+  (let [{:keys [text images]} (json/parse-string (slurp (:body request)) true)
+        text (str/trim (str text))
+        photos (mapv jpeg images)]
     (cond (not (same-origin? request)) (json-response 403 {:error "Cross-origin request"})
-          (str/blank? text) (json-response 400 {:error "Empty message"})
+          (and (str/blank? text) (empty? photos)) (json-response 400 {:error "Empty message"})
           (> (count text) max-text) (json-response 413 {:error "Message too long"})
-          :else (json-response 202 (inbox/send! root (str/trim text))))))
+          (> (count photos) max-images) (json-response 413 {:error "Too many images"})
+          (some nil? photos) (json-response 400 {:error "Not a JPEG image"})
+          :else (json-response 202 (mail-view (inbox/send! root text photos))))))
+
+(defn- image [root file]
+  (let [f (fs/file root "images" file)]
+    (if (and (re-matches #"[0-9a-f-]+\.jpg" file) (fs/exists? f))
+      {:status 200 :body f
+       :headers {"Content-Type" "image/jpeg" "Cache-Control" "private, max-age=604800"}}
+      (json-response 404 {:error "No such image"}))))
 
 (defn- api [conversations {:keys [uri request-method] :as request}]
-  (let [[_ id] (re-matches #"/api/agents/([^/]+)/messages" uri)
+  (let [[_ id file] (re-matches #"/api/agents/([^/]+)/(?:messages|images/([^/]+))" uri)
         live (agents conversations)
         root (when (some #(= id (:id %)) live) (str (fs/path conversations id)))]
     (cond (and (= uri "/api/agents") (= :get request-method)) (json-response 200 live)
           (nil? root) (json-response 404 {:error "No such session"})
+          file (if (= :get request-method) (image root file) (json-response 405 {:error "Method not allowed"}))
           (= :get request-method) (json-response 200 (page root (query request)))
           (= :post request-method) (send-message root request)
           :else (json-response 405 {:error "Method not allowed"}))))
@@ -185,7 +213,7 @@
   "Serve the site for the conversations under DATA-DIR and publish it to the tailnet."
   [data-dir]
   (server/run-server (handler (str (fs/path data-dir "conversations")) (remembered owner))
-                     {:ip "127.0.0.1" :port port})
+                     {:ip "127.0.0.1" :port port :max-body max-body})
   (let [{:keys [exit err]} (p/shell {:out :string :err :string :continue true}
                                     "tailscale" "serve" "--bg" (str "--https=" https-port)
                                     (str "http://127.0.0.1:" port))]

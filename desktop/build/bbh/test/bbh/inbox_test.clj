@@ -66,6 +66,24 @@
     (spit (str (fs/path root "agent.json")) "{\"pid\": 2147483646, \"project\": \"/p\", \"busy\": false}")
     (is (nil? (inbox/agent root)))))
 
+(deftest an-image-is-saved-and-named-in-the-prompt
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-inbox"}))
+        {:keys [id text]} (inbox/send! root "what is this?" [(byte-array [1 2 3])])
+        path (str (fs/path root "images" (str id "-0.jpg")))]
+    (is (= [1 2 3] (vec (fs/read-all-bytes path))))
+    (is (= (str "what is this?\n\n[Image from the phone: " path
+                ". See it with (look \"your question\" \"" path "\").]")
+           text))
+    (is (= {:text "what is this?" :images [(str id "-0.jpg")]} (inbox/parts text)))))
+
+(deftest a-message-of-only-images-has-no-words
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-inbox"}))
+        {:keys [id text]} (inbox/send! root "" [(byte-array [1]) (byte-array [2])])]
+    (is (= {:text "" :images [(str id "-0.jpg") (str id "-1.jpg")]} (inbox/parts text)))))
+
+(deftest a-plain-prompt-has-no-images
+  (is (= {:text "just words"} (inbox/parts "just words"))))
+
 (deftest a-rolled-over-conversation-keeps-its-mailbox
   (let [base (str (fs/create-temp-dir {:prefix "bbh-inbox"}))
         root (str (fs/create-dirs (fs/path base "first")))

@@ -26,15 +26,42 @@
 (defn- agent-file [root]
   (str (fs/path root "agent.json")))
 
+(defn- image-line
+  "The line that puts the picture at PATH in a prompt. Prompts are text, so it
+  says how the agent can look at it."
+  [path]
+  (format "[Image from the phone: %s. See it with (look \"your question\" \"%s\").]" path path))
+
+(defn parts
+  "Prompt TEXT as {:text} with its words, and :images with its pictures' file names."
+  [text]
+  (let [lines (re-seq #"(?m)^\[Image from the phone: .*/([^/]+\.jpg)\. See it with .*\]$" text)]
+    (cond-> {:text (str/trim (reduce #(str/replace %1 (first %2) "") text lines))}
+      (seq lines) (assoc :images (mapv second lines)))))
+
+(defn- save-images!
+  "Write the JPEG byte arrays IMAGES for message ID. Returns their paths."
+  [root id images]
+  (let [dir (fs/create-dirs (fs/path root "images"))]
+    (vec (map-indexed (fn [n image]
+                        (let [path (fs/path dir (format "%s-%d.jpg" id n))]
+                          (fs/write-bytes path image)
+                          (str path)))
+                      images))))
+
 (defn send!
-  "Leave TEXT for the session of conversation ROOT. Returns the message."
-  [root text]
-  (let [message {:id (format "%d-%04x" (System/currentTimeMillis) (rand-int 0x10000)) :text text}
-        dir (fs/create-dirs (mailbox root))
-        tmp (fs/create-temp-file {:dir dir :prefix "."})]
-    (spit (str tmp) (json/generate-string message))
-    (fs/move tmp (fs/path dir (str (:id message) ".json")) {:atomic-move true})
-    message))
+  "Leave TEXT and the JPEG byte arrays IMAGES for the session of conversation
+  ROOT. Returns the message."
+  ([root text] (send! root text nil))
+  ([root text images]
+   (let [id (format "%d-%04x" (System/currentTimeMillis) (rand-int 0x10000))
+         lines (map image-line (save-images! root id images))
+         message {:id id :text (str/join "\n\n" (remove str/blank? [text (str/join "\n" lines)]))}
+         dir (fs/create-dirs (mailbox root))
+         tmp (fs/create-temp-file {:dir dir :prefix "."})]
+     (spit (str tmp) (json/generate-string message))
+     (fs/move tmp (fs/path dir (str id ".json")) {:atomic-move true})
+     message)))
 
 (defn pending
   "The messages in ROOT's mailbox, oldest first."

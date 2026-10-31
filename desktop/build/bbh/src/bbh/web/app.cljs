@@ -5,6 +5,8 @@
             [replicant.dom :as r]))
 
 (def poll-ms 2000)
+(def image-px 2048)
+(def image-quality 0.85)
 
 (defonce state (atom {:agents nil :current nil :conversations {} :error nil}))
 
@@ -89,20 +91,68 @@
                  (store-page! id page)
                  (set! (.-scrollTop el) (+ (.-scrollTop el) (- (.-scrollHeight el) height))))))))
 
+(defn- jpeg-of
+  "The loaded IMAGE as a JPEG data URL, its longest side at most image-px."
+  [image]
+  (let [width (.-naturalWidth image)
+        height (.-naturalHeight image)
+        scale (min 1 (/ image-px (max width height)))
+        canvas (.createElement js/document "canvas")
+        context (.getContext canvas "2d")]
+    (set! (.-width canvas) (js/Math.round (* scale width)))
+    (set! (.-height canvas) (js/Math.round (* scale height)))
+    (set! (.-fillStyle context) "#fff")
+    (.fillRect context 0 0 (.-width canvas) (.-height canvas))
+    (.drawImage context image 0 0 (.-width canvas) (.-height canvas))
+    (.toDataURL canvas "image/jpeg" image-quality)))
+
+(defn- shrink
+  "A promise of FILE as a JPEG data URL. This also turns HEIC and PNG into JPEG."
+  [file]
+  (js/Promise.
+   (fn [resolve reject]
+     (let [reader (js/FileReader.)
+           image (js/Image.)]
+       (set! (.-onerror image) #(reject (js/Error. "Could not read that image")))
+       (set! (.-onload image) #(resolve (jpeg-of image)))
+       (set! (.-onerror reader) #(reject (js/Error. "Could not read that image")))
+       (set! (.-onload reader) #(set! (.-src image) (.-result reader)))
+       (.readAsDataURL reader file)))))
+
+(defn- attach! [id input]
+  (let [files (js/Array.from (.-files input))]
+    (-> (js/Promise.all (.map files shrink))
+        (.then (fn [urls]
+                 (swap! state update-in [:attachments id] (fnil into []) urls)
+                 (set! (.-value input) "")))
+        (.catch (fn [e] (swap! state assoc :error (.-message e)))))))
+
+(defn- detach! [id n]
+  (swap! state update-in [:attachments id]
+         (fn [urls] (into (subvec urls 0 n) (subvec urls (inc n))))))
+
+(defn- base64-of [data-url]
+  (subs data-url (inc (str/index-of data-url ","))))
+
 (defn- send! [id]
-  (let [text (str/trim (get @drafts id ""))]
-    (when (seq text)
+  (let [text (str/trim (get @drafts id ""))
+        urls (get-in @state [:attachments id])]
+    (when (and (or (seq text) (seq urls)) (not (:sending @state)))
+      (swap! state assoc :sending true :error nil)
       (-> (request (conversation-path id)
                    {:method "POST"
                     :headers {"Content-Type" "application/json"}
-                    :body (js/JSON.stringify (clj->js {:text text}))})
+                    :body (js/JSON.stringify (clj->js {:text text :images (map base64-of urls)}))})
           (.then (fn [message]
                    (swap! drafts dissoc id)
                    (when-let [input (.querySelector js/document ".composer textarea")]
                      (set! (.-value input) ""))
-                   (swap! state update-in [:conversations id :pending] (fnil conj []) message)
+                   (swap! state (fn [s] (-> s
+                                            (update :attachments dissoc id)
+                                            (update-in [:conversations id :pending] (fnil conj []) message))))
                    (to-bottom!)))
-          (.catch (fn [e] (swap! state assoc :error (.-message e))))))))
+          (.catch (fn [e] (swap! state assoc :error (.-message e))))
+          (.finally (fn [] (swap! state assoc :sending false)))))))
 
 (defn- first-line [code]
   (first (str/split-lines (str code " "))))
@@ -118,17 +168,25 @@
         (concat (markdown text)
                 (map (fn [call] (tool-view call (get results (:id call)))) calls))))
 
-(defn- message-view [called results {:keys [i role text call] :as message}]
+(defn- images-view [id images]
+  (when (seq images)
+    (into [:div.photos]
+          (map (fn [file]
+                 [:img {:src (str "/api/agents/" id "/images/" file)
+                        :alt "Attached image" :loading "lazy"}]))
+          images)))
+
+(defn- message-view [id called results {:keys [i role text call images] :as message}]
   (case role
-    "user" [:div.message.user {:replicant/key i} text]
+    "user" [:div.message.user {:replicant/key i} text (images-view id images)]
     "tool" (when-not (called call)
              [:div.message {:replicant/key i}
               [:details.tool [:summary "Tool result"] [:pre text]]])
     (assistant-view message results)))
 
-(defn- pending-view [{:keys [id text]}]
+(defn- pending-view [session {:keys [id text images]}]
   [:div {:replicant/key id}
-   [:div.message.user.queued text]
+   [:div.message.user.queued text (images-view session images)]
    [:p.note "Waiting for the agent"]])
 
 (defn- thread-view [id {:keys [messages pending]}]
@@ -137,8 +195,8 @@
     [:main#thread.thread
      (when (pos? (:i (first messages) 0))
        [:button.earlier {:on {:click #(load-earlier! id)}} "Load earlier"])
-     (map #(message-view called results %) messages)
-     (map pending-view pending)]))
+     (map #(message-view id called results %) messages)
+     (map #(pending-view id %) pending)]))
 
 (defn- tab-view [current {:keys [id project title busy]}]
   [:button.tab {:replicant/key id
@@ -147,7 +205,17 @@
    [:span.tab-project [:span.dot {:class (when busy "busy")}] project]
    [:span.tab-title title]])
 
-(defn- composer-view [id]
+(defn- attachments-view [id urls]
+  (when (seq urls)
+    (into [:div.attachments]
+          (map-indexed (fn [n url]
+                         [:div.attachment {:replicant/key url}
+                          [:img {:src url :alt "Image to send"}]
+                          [:button {:type "button" :aria-label "Remove image"
+                                    :on {:click #(detach! id n)}} "×"]]))
+          urls)))
+
+(defn- composer-view [id sending]
   [:form.composer {:replicant/key id
                    :on {:submit (fn [e] (.preventDefault e) (send! id))}}
    [:textarea {:placeholder "Message"
@@ -159,14 +227,19 @@
                                (when (and (= "Enter" (.-key e)) (or (.-metaKey e) (.-ctrlKey e)))
                                  (.preventDefault e)
                                  (send! id)))}}]
-   [:button {:type "submit"} "Send"]])
+   [:div.composer-actions
+    [:button {:type "submit" :disabled sending} (if sending "Sending" "Send")]
+    [:label.attach
+     [:input {:type "file" :accept "image/*" :multiple true
+              :on {:change (fn [e] (attach! id (.-target e)))}}]
+     "Photo"]]])
 
 (defn- status-view [live busy error]
   (cond error [:div.status.error error]
         (not live) [:div.status "This session ended"]
         busy [:div.status "Working"]))
 
-(defn- app-view [{:keys [agents current conversations error] :as s}]
+(defn- app-view [{:keys [agents current conversations error attachments sending] :as s}]
   (let [conversation (get conversations current)
         live (live? s current)]
     [:div.shell
@@ -178,7 +251,8 @@
            :else [:main#thread.thread
                   [:p.empty "No live sessions. Start emacs-bbh and it appears here."]])
      (when current (status-view live (:busy conversation) error))
-     (when live (composer-view current))]))
+     (when live (attachments-view current (get attachments current)))
+     (when live (composer-view current sending))]))
 
 ;; Dragging must not repaint the page, so the touch lives outside `state`.
 (defonce touch (atom nil))

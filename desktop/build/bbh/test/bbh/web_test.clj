@@ -112,6 +112,54 @@
     (is (= 400 (:status (post-message s "a" "   " from-page))))
     (is (empty? (inbox/pending d)))))
 
+(def ^:private jpeg-base64
+  (.encodeToString (java.util.Base64/getEncoder) (byte-array [-1 -40 -1 -32 1 2 3])))
+
+(defn- post-json [{:keys [app]} id body]
+  (app {:uri (str "/api/agents/" id "/messages") :request-method :post
+        :headers (merge owner-headers from-page)
+        :body (java.io.ByteArrayInputStream. (.getBytes (json/generate-string body)))}))
+
+(deftest a-sent-image-shows-as-a-picture-and-is-served-to-the-owner
+  (let [{:keys [app] :as s} (site)
+        d (live! s "a" "/p")
+        response (post-json s "a" {:text "look" :images [jpeg-base64]})
+        {:keys [text images id]} (json/parse-string (:body response) true)
+        file (first images)
+        fetch (fn [uri headers] (app {:uri uri :request-method :get :headers headers}))]
+    (is (= 202 (:status response)))
+    (is (= "look" text))
+    (is (= (str id "-0.jpg") file))
+    (is (= [["look" [file]]] (map (juxt :text :images) (:pending (second (get-json s "/api/agents/a/messages"))))))
+    (transcript/append! d {:role "user" :content (:text (first (inbox/pending d)))})
+    (is (= {:i 0 :role "user" :text "look" :images [file]}
+           (first (:messages (second (get-json s "/api/agents/a/messages"))))))
+    (let [{:keys [status headers body]} (fetch (str "/api/agents/a/images/" file) owner-headers)]
+      (is (= 200 status))
+      (is (= "image/jpeg" (headers "Content-Type")))
+      (is (= [-1 -40 -1 -32 1 2 3] (vec (fs/read-all-bytes body)))))
+    (is (= 403 (:status (fetch (str "/api/agents/a/images/" file) {}))))))
+
+(deftest an-image-alone-is-a-message
+  (let [s (site)
+        d (live! s "a" "/p")]
+    (is (= 202 (:status (post-json s "a" {:text "" :images [jpeg-base64]}))))
+    (is (= 1 (count (inbox/pending d))))))
+
+(deftest what-is-not-a-jpeg-is-refused
+  (let [s (site)
+        d (live! s "a" "/p")]
+    (is (= 400 (:status (post-json s "a" {:images ["PGh0bWw+PC9odG1sPg=="]}))))
+    (is (= 400 (:status (post-json s "a" {:images ["not base64!"]}))))
+    (is (= 413 (:status (post-json s "a" {:images (repeat 9 jpeg-base64)}))))
+    (is (empty? (inbox/pending d)))))
+
+(deftest an-image-name-cannot-leave-the-conversation
+  (let [{:keys [app] :as s} (site)]
+    (live! s "a" "/p")
+    (is (= 404 (:status (app {:uri "/api/agents/a/images/..%2Fagent.json" :request-method :get :headers owner-headers}))))
+    (is (= 404 (:status (app {:uri "/api/agents/a/images/missing.jpg" :request-method :get :headers owner-headers}))))))
+
 (deftest the-page-loads-with-a-content-security-policy
   (let [{:keys [app]} (site)
         {:keys [status headers body]} (app {:uri "/" :request-method :get :headers owner-headers})]
