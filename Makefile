@@ -15,7 +15,7 @@ GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
-        nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi dusk dusk-test dusk-verify pi-sci pi-sci-test \
+        nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify pi-sci pi-sci-test \
         doom-check doom-baseline bbh-runs skill-diet-check keybindings-check kanata-check hypr-nested-check swe-rebench-check
 
 help:
@@ -45,6 +45,7 @@ help:
 	@echo 'skill-diet-check check the skill-diet links and the bbh eval adapter'
 	@echo 'swe-rebench-check offline check of the bbh Harbor agent and the SWE-rebench workflow'
 	@echo 'pierre-diff-ansi install the highlighter behind jjui diff previews'
+	@echo 'bbh-web-highlights bundle that highlighter for the bbh website'
 	@echo 'dusk          build the dusk shell (desktop/build/dusk)'
 	@echo 'dusk-test     run isolated runtime and headless GPUI tests'
 	@echo 'dusk-verify   run dusk end-to-end checks on the live session'
@@ -168,6 +169,9 @@ $(PIERRE_DIFF)/node_modules: $(PIERRE_DIFF)/package.json $(PIERRE_DIFF)/bun.lock
 	touch $@
 
 pierre-diff-ansi: $(PIERRE_DIFF)/node_modules
+
+bbh-web-highlights: $(PIERRE_DIFF)/node_modules
+	cd $(PIERRE_DIFF) && bun build browser.ts --target=browser --format=iife --minify --outfile=../bbh/src/bbh/web/highlights.js
 
 stow: pi-sci pierre-diff-ansi
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/stow-home

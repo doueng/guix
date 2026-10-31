@@ -187,6 +187,12 @@
          (md/render "| a | b |\n|---|---|\n| 1 | `2` |")))
   (is (= [[:p "one"] [:p "two"]] (md/render "one\n\ntwo"))))
 
+(deftest a-fence-goes-to-the-highlighter-with-its-language
+  (is (= [[:pre [:code [:b "clj"] [:i "(+ 1 2)"]]]]
+         (md/render "```clj\n(+ 1 2)\n```" (fn [lang code] [[:b lang] [:i code]]))))
+  (is (= [[:pre [:code [:b ""] [:i "plain"]]]]
+         (md/render "```\nplain\n```" (fn [lang code] [[:b lang] [:i code]])))))
+
 (deftest markdown-never-makes-a-script-link-or-raw-html
   (is (= [[:p "[x](javascript:alert(1))"]] (md/render "[x](javascript:alert(1))")))
   (is (= [[:p "<img src=x onerror=alert(1)>"]] (md/render "<img src=x onerror=alert(1)>")))

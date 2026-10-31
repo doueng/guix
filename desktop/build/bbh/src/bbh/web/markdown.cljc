@@ -49,9 +49,11 @@
   (let [n (count (take-while pred lines))]
     [(subvec lines 0 n) (subvec lines n)]))
 
-(defn- fence [lines]
-  (let [[body more] (take-block #(not (str/starts-with? % "```")) (subvec lines 1))]
-    [[:pre [:code (str/join "\n" body)]] (if (seq more) (subvec more 1) more)]))
+(defn- fence [highlight lines]
+  (let [lang (str/trim (subs (first lines) 3))
+        [body more] (take-block #(not (str/starts-with? % "```")) (subvec lines 1))]
+    [[:pre (into [:code] (highlight lang (str/join "\n" body)))]
+     (if (seq more) (subvec more 1) more)]))
 
 (defn- table [lines]
   (let [[rows more] (take-block #(str/includes? % "|") (subvec lines 2))
@@ -82,8 +84,8 @@
         n (inc (count (take-while #(not (ends? (subvec lines %))) (range 1 (count lines)))))]
     [(into [:p] (inline (str/join "\n" (subvec lines 0 n)))) (subvec lines n)]))
 
-(defn- block [[line following :as lines]]
-  (cond (str/starts-with? line "```") (fence lines)
+(defn- block [highlight [line following :as lines]]
+  (cond (str/starts-with? line "```") (fence highlight lines)
         (re-matches #"#{1,6}\s.*" line) [(into [:h3] (inline (str/replace line #"^#+\s+" ""))) (subvec lines 1)]
         (str/starts-with? line ">") (quoted lines)
         (list-item line) (items lines)
@@ -91,10 +93,12 @@
         :else (paragraph lines)))
 
 (defn render
-  "TEXT's Markdown as a vector of hiccup blocks."
-  [text]
-  (loop [lines (vec (str/split-lines (str text))) out []]
-    (cond (empty? lines) out
-          (str/blank? (first lines)) (recur (subvec lines 1) out)
-          :else (let [[hiccup more] (block lines)]
-                  (recur more (conj out hiccup))))))
+  "TEXT's Markdown as a vector of hiccup blocks. HIGHLIGHT turns a fence's language
+  and code into the children of its code element."
+  ([text] (render text (fn [_ code] [code])))
+  ([text highlight]
+   (loop [lines (vec (str/split-lines (str text))) out []]
+     (cond (empty? lines) out
+           (str/blank? (first lines)) (recur (subvec lines 1) out)
+           :else (let [[hiccup more] (block highlight lines)]
+                   (recur more (conj out hiccup)))))))

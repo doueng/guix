@@ -133,11 +133,12 @@
    "/conversation.cljc" ["conversation.cljc" "text/plain"]
    "/markdown.cljc" ["markdown.cljc" "text/plain"]
    "/style.css" ["style.css" "text/css"]
+   "/highlights.js" ["highlights.js" "text/javascript"]
    "/scittle.js" ["scittle.js" "text/javascript"]
    "/scittle.replicant.js" ["scittle.replicant.js" "text/javascript"]})
 
 (def ^:private csp
-  (str "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
+  (str "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
 
 (defn- asset [uri]

@@ -13,7 +13,22 @@
 ;; Typing must not repaint the page, so drafts live outside `state`.
 (defonce drafts (atom {}))
 
-(def markdown (memoize md/render))
+(defn- token-view [{:keys [content color italic]}]
+  [:span {:style (cond-> {:color color} italic (assoc :font-style "italic"))} content])
+
+(defn- highlight
+  "CODE in LANG as children of a code element, plain when it cannot be highlighted."
+  [lang code]
+  (let [tokens (when-let [tokenize (.-highlightCode js/window)]
+                 (tokenize code lang))]
+    (if tokens
+      (vec (interpose "\n" (map (fn [line] (into [:span] (map token-view) line))
+                                 (js->clj tokens :keywordize-keys true))))
+      [code])))
+
+(def highlighted (memoize highlight))
+
+(def markdown (memoize #(md/render % highlighted)))
 
 (defn- request [path options]
   (-> (js/fetch path (clj->js options))
@@ -160,7 +175,7 @@
 (defn- tool-view [{:keys [id code]} result]
   [:details.tool {:replicant/key id}
    [:summary (first-line code)]
-   [:pre code]
+   [:pre (into [:code] (highlighted "clojure" code))]
    (when result [:pre result])])
 
 (defn- assistant-view [{:keys [i text calls]} results]
