@@ -84,6 +84,7 @@ Four tasks are adapted from `desktop/build/pi-sci/eval/tasks.mjs`. `monthly-repo
 | `fix-module` | Repair numeric version comparison. Node's tests pass and the original test file remains unchanged. |
 | `rename-function` | Rename the exported function, callers, tests, and documentation. Node's tests pass. |
 | `failure-recovery` | Recover from an incorrect file path and select the service value rather than a default. |
+| `slow-command` | Run a script that takes 150 s, longer than bbh's evaluation budget, and record its one line of output. Its `:deadline` is 480 s. |
 
 `eval/bbh/tasks.clj` owns fixtures and graders. The grader check proves that untouched fixtures fail and reference solutions pass. The rename grader permits only the requested rename in the test file. It does not accept deletion of assertions.
 

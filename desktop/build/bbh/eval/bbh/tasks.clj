@@ -52,6 +52,11 @@
             "src/cli.js" "import { parseConfig as parse } from \"./config.js\";\n\nexport const read = (text) => parse(text);\n"
             "test/config.test.js" "import assert from \"node:assert/strict\";\nimport test from \"node:test\";\nimport { parseConfig } from \"../src/config.js\";\nimport { start } from \"../src/app.js\";\n\ntest(\"parseConfig reads pairs\", () => {\n\tassert.deepEqual(parseConfig(\"a=1\\nb=2\"), { a: \"1\", b: \"2\" });\n\tassert.equal(start(\"name=pi\"), \"pi\");\n});\n"
             "README.md" "# Config\n\nCall `parseConfig(text)` to read a config file.\n"}}
+   {:id "slow-command"
+    :prompt "Run `sh check.sh` from the repository root. It takes a few minutes. Write the single line it prints to answer.txt."
+    :files {"check.sh" "#!/bin/sh\nsleep 150\necho ok-4711\n"}
+    :expected "ok-4711"
+    :deadline 480}
    {:id "failure-recovery"
     :prompt "Read config/settings.json and write the value of its `timeout` field to answer.txt."
     :files {"conf/settings.json" "{\"name\":\"svc\",\"timeout\":37,\"retries\":2}\n"

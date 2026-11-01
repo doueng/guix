@@ -186,7 +186,7 @@
           outcome (try
                     (let [sid (initialize! c)]
                       (doseq [text (or (:prompts task) [(:prompt task)])]
-                        (prompt! c sid text 120))
+                        (prompt! c sid text (or (:deadline task) 120)))
                       {:protocol :completed})
                     (catch Exception e {:protocol :error :error (ex-message e) :detail (ex-data e)})
                     (finally (stop! c)))
