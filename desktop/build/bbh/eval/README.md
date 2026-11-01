@@ -48,9 +48,10 @@ Claude Code reports cost per turn only, so a Claude `llm` run has tokens and no 
 
 ## Compare Pi and bbh
 
-This evaluator compares three configurations on the same generated projects and model.
+This evaluator compares four configurations on the same generated projects and model. `eval/bbh/compare.clj` defines them in `profiles`.
 
 - `pi` uses Pi's built-in read, bash, edit, and write tools.
+- `pi-codemode` adds Pi's built-in JavaScript codemode with `codemode.mode` set to `only`, as the production settings do.
 - `pi-sci` uses the production SCI extension and `desktop/pi/agent/AGENTS.md` guidance.
 - `bbh` uses its persistent REPL and production init file, with skill discovery and poteto-mode disabled for the comparison.
 
@@ -68,7 +69,7 @@ bb eval:contracts /tmp/bbh-contracts-new 3
 bb eval:compare /tmp/bbh-live-new 3
 ```
 
-The contract checks use a local scripted provider. They do not make model API calls. The live comparison spends OpenRouter credits using `deepseek/deepseek-v4.1-flash`. Three repetitions of the five tasks produce 45 live trials. `BBH_EVAL_TASKS=monthly-reports` runs only the named tasks. Each prompt has a deadline, and each trial gets a fresh workspace. The order of profiles rotates across tasks and repetitions.
+The contract checks use a local scripted provider. They do not make model API calls. The live comparison spends OpenRouter credits using `deepseek/deepseek-v4.1-flash`, or the model named by `BBH_EVAL_MODEL`. Three repetitions of the five tasks over the default three profiles produce 45 live trials. `BBH_EVAL_TASKS=monthly-reports` runs only the named tasks. Each prompt has a deadline, and each trial gets a fresh workspace. The order of profiles rotates across tasks and repetitions.
 
 Use a new output directory for each run. The runners refuse to overwrite completed results.
 
