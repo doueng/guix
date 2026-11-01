@@ -63,6 +63,18 @@
                       (str (json/generate-string m) "\n"))))
     (str (fs/canonicalize dir))))
 
+(deftest pi-codemode-profile-loads-the-builtin-extension-and-declares-the-tool
+  (let [args (compare/pi-args (compare/profiles :pi-codemode) "deepseek/deepseek-v4.1-flash" nil)]
+    (is (= ["--extension" "builtin:codemode"] (subvec args (.indexOf args "--extension") (+ 2 (.indexOf args "--extension")))))
+    (is (= "read,bash,edit,write,codemode" (last args)))
+    (is (= ["--provider" "openrouter" "--model" "deepseek/deepseek-v4.1-flash"]
+           (subvec args (.indexOf args "--provider") (+ 4 (.indexOf args "--provider")))))
+    (is (= ["--no-extensions"] (filter #{"--no-extensions"} args))))
+  (let [args (compare/pi-args (compare/profiles :pi) "m" {:script true})]
+    (is (= ["--provider" "bbh-eval" "--model" "script"]
+           (subvec args (.indexOf args "--provider") (+ 4 (.indexOf args "--provider")))))
+    (is (str/ends-with? (second (drop-while #(not= "--extension" %) args)) "eval/fixture-provider.ts"))))
+
 (deftest assertions-locate-failures-in-a-real-transcript-shape
   (let [dir (conversation!)
         [trace] (traces/find-traces [dir])]

@@ -9,10 +9,41 @@
 
 (def root (str (fs/parent (fs/parent (fs/parent (fs/absolutize *file*))))))
 (def desktop (str (fs/parent (fs/parent root))))
-(def profiles [:pi :pi-sci :bbh])
-(def model "deepseek/deepseek-v4.1-flash")
+(def default-model "deepseek/deepseek-v4.1-flash")
+(def model (or (System/getenv "BBH_EVAL_MODEL") default-model))
 
-(defn bbh? [profile] (contains? #{:bbh :bbh-baseline} profile))
+(def codemode-settings {:defaultTools ["+codemode"] :codemode {:mode "only"}})
+
+(def profiles
+  "Each profile speaks one protocol, :pi (RPC) or :bbh (ACP). Pi profiles list their tools,
+  extensions, appended system prompts and settings. bbh profiles name their init file or the
+  environment variable that points at one."
+  {:pi {:engine :pi :tools "read,bash,edit,write"}
+   :pi-codemode {:engine :pi :tools "read,bash,edit,write,codemode"
+                 :extensions ["builtin:codemode"] :settings codemode-settings}
+   :pi-sci {:engine :pi
+            :extensions [(str (fs/path desktop "pi/agent/extensions/sci-codemode/index.ts"))]
+            :append-system-prompt [(str (fs/path desktop "pi/agent/AGENTS.md"))]
+            :settings (assoc codemode-settings :extensions ["-builtin:codemode"])}
+   :bbh {:engine :bbh :init (str (fs/path desktop "configs/bbh/init.clj"))}
+   :bbh-baseline {:engine :bbh :init-env "BBH_EVAL_BASELINE_INIT"}})
+
+(def default-profiles [:pi :pi-sci :bbh])
+
+(defn bbh? [profile] (= :bbh (get-in profiles [profile :engine])))
+
+(defn pi-args
+  "Pi RPC command line for a profile. A script selects the fixture provider."
+  [{:keys [tools extensions append-system-prompt]} model-id script]
+  (-> ["pi" "--mode" "rpc" "--offline" "--no-session"
+       "--no-extensions" "--no-mcp" "--no-skills" "--no-context-files"
+       "--no-prompt-templates" "--no-themes" "--no-approve"
+       "--provider" (if script "bbh-eval" "openrouter")
+       "--model" (if script "script" model-id) "--thinking" "off"]
+      (into (when script ["--extension" (str (fs/path root "eval/fixture-provider.ts"))]))
+      (into (mapcat #(vector "--extension" %) extensions))
+      (into (mapcat #(vector "--append-system-prompt" %) append-system-prompt))
+      (into (when tools ["--tools" tools]))))
 
 (defn fingerprint []
   (into (sorted-map)
@@ -42,31 +73,21 @@
                   :let [source (fs/expand-home (str "~/.pi/agent/" file))]
                   :when (fs/exists? source)]
             (fs/create-sym-link (fs/path agent file) source))
-        _ (json! (fs/path agent "settings.json")
-                 (cond-> {:quietStartup true}
-                   (= profile :pi-sci)
-                   (assoc :defaultTools ["+codemode"] :extensions ["-builtin:codemode"] :codemode {:mode "only"})))
-        init-source (if (= :bbh-baseline profile)
-                      (or (System/getenv "BBH_EVAL_BASELINE_INIT")
-                          (throw (ex-info "bbh-baseline requires BBH_EVAL_BASELINE_INIT" {})))
-                      (str (fs/path desktop "configs/bbh/init.clj")))
-        _ (spit init (str (slurp init-source)
-                         "\n(ns bbh.env) (defn skills [] []) (reset! poteto? false) (ns user)\n"))
+        spec (profiles profile)
+        _ (json! (fs/path agent "settings.json") (merge {:quietStartup true} (:settings spec)))
+        init-source (or (:init spec)
+                        (some-> (:init-env spec) System/getenv)
+                        (when (bbh? profile)
+                          (throw (ex-info (str profile " requires " (:init-env spec)) {}))))
+        _ (when init-source
+            (spit init (str (slurp init-source)
+                            "\n(ns bbh.env) (defn skills [] []) (reset! poteto? false) (ns user)\n")))
         _ (when script
             (spit (str (fs/path dir "script.edn")) (pr-str script))
             (json! (fs/path dir "script.json") script))
         args (if (bbh? profile)
                ["bb" "--config" (str (fs/path root "bb.edn")) "-m" "bbh.main" "acp"]
-               (into ["pi" "--mode" "rpc" "--offline" "--no-session"
-                      "--no-extensions" "--no-mcp" "--no-skills" "--no-context-files"
-                      "--no-prompt-templates" "--no-themes" "--no-approve"
-                      "--provider" (if script "bbh-eval" "openrouter")
-                      "--model" (if script "script" model-id) "--thinking" "off"]
-                     (concat (when script ["--extension" (str (fs/path root "eval/fixture-provider.ts"))])
-                      (if (= profile :pi-sci)
-                       ["--extension" (str (fs/path desktop "pi/agent/extensions/sci-codemode/index.ts"))
-                        "--append-system-prompt" (str (fs/path desktop "pi/agent/AGENTS.md"))]
-                       ["--tools" "read,bash,edit,write"]))))
+               (pi-args spec model-id script))
         proc (apply p/process {:dir ws :err :append :err-file (fs/file dir "stderr.log")
                                :extra-env {"PI_CODING_AGENT_DIR" agent "PI_TELEMETRY" "0"
                                            "XDG_DATA_HOME" (str (fs/path dir "data"))
@@ -185,23 +206,23 @@
 (defn -main [& [out attempts selected]]
   (let [out (str (fs/absolutize (or out (str (fs/create-temp-dir {:prefix "bbh-compare"})))))
         attempts (parse-long (or attempts "3"))
-        profiles (if selected (mapv keyword (str/split selected #",")) profiles)
+        selected (if selected (mapv keyword (str/split selected #",")) default-profiles)
         sources (fingerprint)]
     (when-not (pos-int? attempts)
       (throw (ex-info "Repetitions must be a positive integer" {:attempts attempts})))
-    (when-not (and (seq profiles) (= (count profiles) (count (distinct profiles)))
-                   (every? #{:pi :pi-sci :bbh :bbh-baseline} profiles))
-      (throw (ex-info "Unknown or duplicated evaluation profiles" {:profiles profiles})))
-    (when (some #{:bbh-baseline} profiles)
-      (when-not (some-> (System/getenv "BBH_EVAL_BASELINE_INIT") fs/regular-file?)
-        (throw (ex-info "bbh-baseline needs a readable BBH_EVAL_BASELINE_INIT file" {}))))
+    (when-not (and (seq selected) (= (count selected) (count (distinct selected)))
+                   (every? profiles selected))
+      (throw (ex-info "Unknown or duplicated evaluation profiles" {:profiles selected})))
+    (doseq [p selected :let [env (get-in profiles [p :init-env])] :when env]
+      (when-not (some-> (System/getenv env) fs/regular-file?)
+        (throw (ex-info (str p " needs a readable " env " file") {}))))
     (tasks/verify-graders!)
     (fs/create-dirs out)
     (when (fs/exists? (fs/path out "results.jsonl"))
       (throw (ex-info "Refusing to append a new evaluation to existing results" {:out out})))
     (json! (fs/path out "manifest.json")
            {:pi-version (str/trim (:out @(p/process {:out :string} "pi" "--version")))
-            :model model :profiles profiles :attempts attempts :task-ids (mapv :id tasks/tasks)
+            :model model :profiles selected :attempts attempts :task-ids (mapv :id tasks/tasks)
             :fixture-source "desktop/build/pi-sci/eval/tasks.mjs"
             :sources sources
             :bbh-init "production init with skills and poteto disabled"
@@ -211,8 +232,8 @@
     (let [records (doall
                    (for [repetition (range 1 (inc attempts))
                          [i task] (map-indexed vector tasks/tasks)
-                         :let [shift (mod (+ repetition i) (count profiles))]
-                         profile (concat (drop shift profiles) (take shift profiles))]
+                         :let [shift (mod (+ repetition i) (count selected))]
+                         profile (concat (drop shift selected) (take shift selected))]
                      (trial! out profile task repetition model)))]
       (json! (fs/path out "summary.json")
              (into {} (for [[profile trials] (group-by :profile records)]
