@@ -68,16 +68,17 @@ bb eval:contracts /tmp/bbh-contracts-new 3
 bb eval:compare /tmp/bbh-live-new 3
 ```
 
-The contract checks use a local scripted provider. They do not make model API calls. The live comparison spends OpenRouter credits using `deepseek/deepseek-v4.1-flash`. Three repetitions produce 36 live trials. Each prompt has a deadline, and each trial gets a fresh workspace. The order of profiles rotates across tasks and repetitions.
+The contract checks use a local scripted provider. They do not make model API calls. The live comparison spends OpenRouter credits using `deepseek/deepseek-v4.1-flash`. Three repetitions of the five tasks produce 45 live trials. `BBH_EVAL_TASKS=monthly-reports` runs only the named tasks. Each prompt has a deadline, and each trial gets a fresh workspace. The order of profiles rotates across tasks and repetitions.
 
 Use a new output directory for each run. The runners refuse to overwrite completed results.
 
 ### Live tasks
 
-The four tasks are adapted from `desktop/build/pi-sci/eval/tasks.mjs`.
+Four tasks are adapted from `desktop/build/pi-sci/eval/tasks.mjs`. `monthly-reports` sends four prompts on one session, so a harness that keeps helpers between turns can show it.
 
 | Task | Acceptance criterion |
 | --- | --- |
+| `monthly-reports` | Four CSV exports, one prompt each, with net revenue per region written to `reports/MM.txt`. All four must match. |
 | `navigate-service` | Identify the actual OpenSSH configuration and port, despite obsolete README information. |
 | `fix-module` | Repair numeric version comparison. Node's tests pass and the original test file remains unchanged. |
 | `rename-function` | Rename the exported function, callers, tests, and documentation. Node's tests pass. |

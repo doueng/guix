@@ -185,7 +185,8 @@
     (let [c (start! profile dir ws model-id)
           outcome (try
                     (let [sid (initialize! c)]
-                      (prompt! c sid (:prompt task) 120)
+                      (doseq [text (or (:prompts task) [(:prompt task)])]
+                        (prompt! c sid text 120))
                       {:protocol :completed})
                     (catch Exception e {:protocol :error :error (ex-message e) :detail (ex-data e)})
                     (finally (stop! c)))
@@ -207,6 +208,7 @@
   (let [out (str (fs/absolutize (or out (str (fs/create-temp-dir {:prefix "bbh-compare"})))))
         attempts (parse-long (or attempts "3"))
         selected (if selected (mapv keyword (str/split selected #",")) default-profiles)
+        tasks (tasks/selected-tasks)
         sources (fingerprint)]
     (when-not (pos-int? attempts)
       (throw (ex-info "Repetitions must be a positive integer" {:attempts attempts})))
@@ -222,8 +224,8 @@
       (throw (ex-info "Refusing to append a new evaluation to existing results" {:out out})))
     (json! (fs/path out "manifest.json")
            {:pi-version (str/trim (:out @(p/process {:out :string} "pi" "--version")))
-            :model model :profiles selected :attempts attempts :task-ids (mapv :id tasks/tasks)
-            :fixture-source "desktop/build/pi-sci/eval/tasks.mjs"
+            :model model :profiles selected :attempts attempts :task-ids (mapv :id tasks)
+            :fixture-source "eval/bbh/tasks.clj, four tasks adapted from desktop/build/pi-sci/eval/tasks.mjs"
             :sources sources
             :bbh-init "production init with skills and poteto disabled"
             :baseline-init (System/getenv "BBH_EVAL_BASELINE_INIT")
@@ -231,7 +233,7 @@
             :timing "not a performance benchmark"})
     (let [records (doall
                    (for [repetition (range 1 (inc attempts))
-                         [i task] (map-indexed vector tasks/tasks)
+                         [i task] (map-indexed vector tasks)
                          :let [shift (mod (+ repetition i) (count selected))]
                          profile (concat (drop shift selected) (take shift selected))]
                      (trial! out profile task repetition model)))]
