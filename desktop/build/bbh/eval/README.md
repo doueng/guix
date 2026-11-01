@@ -104,7 +104,7 @@ Reported tool calls count top-level tool execution starts. They are not model re
 
 Provider errors and protocol failures prevent a passing trial even when a file happens to look correct. Reported provider costs are retained as diagnostics, but the evaluator does not normalize their pricing semantics or compare latency.
 
-See [the baseline report](RESULTS.md) for results and limitations.
+See [the baseline report](RESULTS.md) for results and limitations, and [the 2026-11-01 review](REVIEW-2026-11-01.md) for the four-arm comparison, the multi-turn and slow-command tasks, and the production trace analysis.
 
 ## SWE-rebench
 
