@@ -130,15 +130,18 @@
                                (str nixpkgs-dir "/packages.sexp")))
         latest (into {} (for [row rows :let [[attr version changelog] (str/split row #"\t")]]
                           [attr {:latest version :changelog (first (str/split (str changelog) #" "))}]))]
-    (for [{:keys [name current] :as item} items]
+    ;; A selection may omit the revision row, and apply needs it cached.
+    (for [{:keys [name current] :as item} (distinct (cons (assoc (first (nixpkgs-items)) :source "nixpkgs")
+                                                          items))]
       (merge item
              (if (= name "nixpkgs")
                {:latest revision
                 :changelog (compare-url "https://github.com/NixOS/nixpkgs" current revision)}
                (latest name))))))
 
-(defn nixpkgs-apply! [items]
-  (run! "make" "nixpkgs-lock" (str "NIXPKGS_REV=" (:latest (first items)))))
+(defn nixpkgs-apply! [_]
+  (run! "make" "nixpkgs-lock"
+        (str "NIXPKGS_REV=" (get-in (read-cache) [:latest ["nixpkgs" "nixpkgs"] :latest]))))
 
 ;; Packages built from upstream GitHub releases or commits, one per file.
 ;; Tailscale publishes its binaries elsewhere but tags the same versions here.

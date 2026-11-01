@@ -15,6 +15,9 @@
   {:name "guix home"
    :paths ["modules/engstrand/features/**" "desktop/home.scm"]
    :slow ["make home-build"]}
+  {:name "updates"
+   :paths ["desktop/bin/updates" "desktop/build/updates/**"]
+   :checks ["make updates-check"]}
   {:name "nixpkgs bridge"
    :paths ["modules/engstrand/nixpkgs/**" "modules/engstrand/nixpkgs.scm" "desktop/build/nixpkgs/**"]
    :slow ["make nixpkgs-verify"]}
