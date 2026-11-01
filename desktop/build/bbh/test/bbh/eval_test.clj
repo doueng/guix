@@ -82,6 +82,20 @@
            (traces/check trace)))
     (is (= :real (:source trace)))))
 
+(deftest errors-without-a-java-class-prefix-still-count-as-failed-steps
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-eval-sci-errors"}))]
+    (spit (str (fs/path dir "messages.jsonl"))
+          (str/join (for [m [{:role "user" :content "edit it"}
+                             {:role "assistant" :content "" :tool_calls [(call "e1" "(edit! \"a.clj\" \"x\" \"y\")")]}
+                             {:role "tool" :tool_call_id "e1" :content "err:\nclojure.lang.ExceptionInfo: Expected one match in a.clj, found 0 [at init.clj:1:1]\n=> nil"}
+                             {:role "assistant" :content "" :tool_calls [(call "e2" "(pwd)")]}
+                             {:role "tool" :tool_call_id "e2" :content "err:\nUnable to resolve symbol: pwd [at NO_SOURCE_PATH:1:1]\n=> nil"}
+                             {:role "assistant" :content "Fixed."}]]
+                      (str (json/generate-string m) "\n"))))
+    (let [[trace] (traces/find-traces [dir])]
+      (is (= ["clojure.lang.ExceptionInfo" "sci.UnresolvedSymbol"] (mapv :error (:steps trace))))
+      (is (= {:unresolved-symbol ["step 2"]} (traces/check trace))))))
+
 (deftest rendering-elides-skills-and-flags-steps
   (let [text (traces/render (traces/load-trace (conversation!)))]
     (is (str/includes? text "> [skill poteto-mode expanded here]"))

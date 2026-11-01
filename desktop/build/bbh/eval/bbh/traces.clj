@@ -21,15 +21,18 @@
   the message, such as grep output over session.clj, does not count."
   #"\A(?:The user interrupted the evaluation\.|Timed out after \d+ ms\.|The REPL process exited\.) The REPL process was killed and restarted")
 
+(def unresolved #"Unable to resolve symbol|Could not resolve symbol|Could not find namespace|No such namespace")
+
 (defn- error-of
-  "The exception class in a rendered tool result, or :restart or :skipped."
+  "The exception class in a rendered tool result, or :restart or :skipped. An err: section
+  without a Java class, as SCI reports unresolved symbols and reader errors, still counts."
   [text]
   (cond (re-find restart-result text) :restart
         (str/starts-with? text "Skipped because the user interrupted") :skipped
-        :else (some->> (re-find #"(?s)(?:^|\n)err:\n(.*?)(?:\n=> |\z)" text)
-                       second
-                       (re-find #"(?m)^((?:[a-z]\w*\.)+[A-Z]\w*(?:Exception|Error)\w*)")
-                       second)))
+        :else (when-let [err (second (re-find #"(?s)(?:^|\n)err:\n(.*?)(?:\n=> |\z)" text))]
+                (or (second (re-find #"(?m)^((?:[a-z]\w*\.)+[A-Z]\w*)" err))
+                    (when (re-find unresolved err) "sci.UnresolvedSymbol")
+                    "sci.Error"))))
 
 (defn- steps
   "Each tool call paired with its result, numbered from 1."
@@ -96,7 +99,7 @@
     :check (step-check #(some-> (:error %) str (str/ends-with? "ArityException")))}
    {:id :unresolved-symbol
     :doc "The code named a function or namespace that does not exist in the REPL."
-    :check (step-check #(re-find #"Could not resolve symbol|Could not find namespace|No such namespace" (:result %)))}
+    :check (step-check #(re-find unresolved (:result %)))}
    {:id :pi-idiom
     :doc "The code used Pi codemode conventions such as await, tools/..., fs/read or fs/list."
     :check (step-check #(re-find #"\(await\b|\(tools/|\(fs/(?:read|list|read-json|read-jsonl)[\s)]" (:code %)))}
