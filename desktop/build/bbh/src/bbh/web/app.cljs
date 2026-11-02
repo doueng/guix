@@ -309,10 +309,10 @@
 
 (defn- first-line [s] (first (str/split-lines (str s))))
 
-(defn- row-view [{:keys [id title ask summary came-back updated-at]}]
+(defn- row-view [{:keys [id title line came-back updated-at]}]
   [:button.row {:replicant/key id :on {:click #(show! [:thread id])}}
    [:span.row-head [:span.handle id] [:span.row-title title] [:span.age (age-text updated-at)]]
-   (when-let [line (or (:text ask) summary)]
+   (when line
      [:span.row-line (first-line line) (when came-back " · came back")])])
 
 (defn- say!

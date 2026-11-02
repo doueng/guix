@@ -22,8 +22,10 @@
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, the locks a Worker
-  may hold, and the ones never granted (a system switch is always an ask)."
-  {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"]})
+  may hold, the ones never granted (a system switch is always an ask), and how
+  long a live Worker may leave a delivery in its mailbox before it needs you.
+  A reply waits for the current turn, which can include a 10 minute job-wait."
+  {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30})
 
 (defn authorize
   "Throw unless PRINCIPAL may run COMMAND on STATE. A Worker acts on its own
@@ -538,8 +540,12 @@
   client last saw."
   [state cursors]
   (let [rows (for [t (sort-by :id (vals (:threads state)))
-                   :let [s (section state t (get cursors (:id t)))]]
-               (assoc t :section s :ask (ask-line state (:id t))
+                   :let [s (section state t (get cursors (:id t)))
+                         ask (ask-line state (:id t))]]
+               (assoc t :section s :ask ask
+                      :line (or (:text ask)
+                                (get-in state [:workers (:worker t) :health :problem])
+                                (:summary t))
                       :came-back (boolean (and (:resolved-at t) (> (:milestone-seq t) (:resolved-at t))))))
         by (group-by :section rows)]
     (vec (for [s section-order :when (seq (by s))]
@@ -578,8 +584,8 @@
 (defmethod fold* :milestone [state {{:keys [text]} :data :keys [thread seq]}]
   (-> state (assoc-in [:threads thread :summary] text) (assoc-in [:threads thread :milestone-seq] seq)))
 
-(defmethod fold* :outbox-sent [state {{:keys [id message]} :data}]
-  (update-in state [:outbox id] assoc :state :sent :message message))
+(defmethod fold* :outbox-sent [state {{:keys [id message]} :data :keys [at]}]
+  (update-in state [:outbox id] assoc :state :sent :message message :sent-at at))
 
 (defmethod fold* :outbox-acked [state {{:keys [id]} :data}]
   (let [reply (get-in state [:replies (get-in state [:outbox id :reply])])]

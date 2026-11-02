@@ -55,12 +55,13 @@
 ;; ---- Workers: a record first, then the workspace, the wf run and the pane --
 
 (defn- policy
-  "The controller's policy: its :policy when given, else ~/.config/bbh/policy.edn
-  over the defaults."
+  "The controller's policy over the defaults: its :policy when given, else
+  ~/.config/bbh/policy.edn."
   [c]
-  (or (:policy c)
-      (let [f (fs/path (or (System/getenv "XDG_CONFIG_HOME") (fs/expand-home "~/.config")) "bbh" "policy.edn")]
-        (merge model/default-policy (when (fs/exists? f) (edn/read-string (slurp (str f))))))))
+  (merge model/default-policy
+         (or (:policy c)
+             (let [f (fs/path (or (System/getenv "XDG_CONFIG_HOME") (fs/expand-home "~/.config")) "bbh" "policy.edn")]
+               (when (fs/exists? f) (edn/read-string (slurp (str f))))))))
 
 (defn- jj! [dir & args]
   (let [{:keys [exit err]} (apply p/shell {:dir dir :out :string :err :string :continue true} "jj" args)]
@@ -264,8 +265,18 @@
                     uncertain? (some #(#{:unknown :lost} (:state %)) jobs)
                     wf (when (:wf-run w) (try (select-keys (workflow/status (:wf-run w)) [:status :phase]) (catch Exception _ {:status :missing})))
                     repl-ok? (boolean (and agent (repl-answering? root)))
+                    limit-ms (* 60000 (:stale-delivery-minutes (policy c)))
+                    waited-ms #(- now (inst-ms (java.time.Instant/parse (:sent-at %))))
+                    stale (when repl-ok?
+                            (some->> (vals (:outbox @state))
+                                     (filter #(and (= :sent (:state %)) (= (:conversation w) (:conversation %)) (:sent-at %)
+                                                   (>= (waited-ms %) limit-ms)))
+                                     (sort-by :sent-at) first))
                     health {:at now :process (select-keys agent [:pid :start]) :repl repl-ok?
                             :workflow wf
+                            :problem (when stale
+                                       (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
+                                               (:id stale) (quot (waited-ms stale) 60000)))
                             :oldest-unacked (some->> (vals (:outbox @state))
                                                     (filter #(and (= (:thread w) (:thread %)) (#{:pending :sent} (:state %))))
                                                     (sort-by #(parse-long (subs (:id %) 1))) first :id)
@@ -275,6 +286,7 @@
                                                   uncertain? :needs-human
                                                   (and (:workflow w) (= :missing (:status wf))) :needs-human
                                                   (and agent (not repl-ok?)) :needs-human
+                                                  stale :needs-human
                                                   agent (if (= :waiting (:state w)) :waiting :running)
                                                   (:workflow w) :recoverable
                                                   :else :needs-human)}]]

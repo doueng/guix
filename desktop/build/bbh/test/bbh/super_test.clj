@@ -185,7 +185,7 @@
   (let [sections {:badge 1
                   :sections [{:section :stopped :title "Stopped on you"
                               :threads [{:id "T1" :title "Alt+W closes windows" :updated-at (str (java.time.Instant/now))
-                                         :ask {:text "Keep the alias?\nSecond line"}}]}
+                                         :line "Keep the alias?\nSecond line"}]}
                              {:section :archived :title "Archived" :threads [{:id "T3" :title "old" :came-back true}]}]}
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
     (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
@@ -627,3 +627,45 @@
     (is (= [:unauthorized "bbh super: no Router token"]
            (try (sandbox/eval-in (sandbox/context sandbox/bindings) "(super-threads)")
                 (catch clojure.lang.ExceptionInfo e [(:error (ex-data e)) (ex-message e)]))))))
+
+(defn- fake-nrepl!
+  "A loopback socket that answers each request with one bencode map, as
+  `describe` does, with its port in ROOT/repl.port. Returns the server."
+  [root]
+  (let [server (java.net.ServerSocket. 0 50 (java.net.InetAddress/getLoopbackAddress))]
+    (spit (str (fs/path root "repl.port")) (str (.getLocalPort server)))
+    (doto (Thread. #(try (loop []
+                           (with-open [s (.accept server)]
+                             (bencode.core/read-bencode (java.io.PushbackInputStream. (.getInputStream s)))
+                             (bencode.core/write-bencode (.getOutputStream s) {"status" ["done"]})
+                             (.flush (.getOutputStream s)))
+                           (recur))
+                         (catch java.net.SocketException _ nil)))
+      (.setDaemon true) (.start))
+    server))
+
+(deftest a-delivery-left-in-a-live-workers-mailbox-past-the-policy-age-needs-you
+  (with-controller
+    (fn [c dir conversations]
+      (call dir {:command :thread! :args {:title "stuck mailbox"}})
+      (call dir {:command :attach-worker! :args {:thread "T1" :conversation "conv-1"}})
+      (let [root (str (fs/path conversations "conv-1"))
+            poller (bbh.inbox/start! {:root root :project root :scan-ms 5 :deliver (fn [_])})
+            server (fake-nrepl! root)
+            health #(get-in @(:state c) [:workers "W1" :health])
+            row #(first (:threads (first (filter (fn [s] (= :needs-attention (:section s))) (model/sections @(:state c) {})))))]
+        (try
+          (call dir {:command :steer! :args {:worker "W1" :text "use plan B"}})
+          (is (wait-for #(= :sent (:state (first (vals (:outbox @(:state c))))))))
+          (super/reconcile! c)
+          (is (= [:running nil] [(:classification (health)) (:problem (health))]) "a fresh delivery is not an anomaly")
+          (super/reconcile! (assoc c :policy {:stale-delivery-minutes 0}))
+          (let [id (:id (first (vals (:outbox @(:state c)))))
+                problem (str "Delivery " id " has waited 0 min in its mailbox while the Worker runs; it is not taking messages.")]
+            (is (= [:needs-human problem] [(:classification (health)) (:problem (health))]))
+            (is (= ["T1" problem] [(:id (row)) (:line (row))]) "the row says why it needs you"))
+          (doseq [m (bbh.inbox/pending root)] (bbh.inbox/ack! {:root root} (:id m)))
+          (is (wait-for #(= :acked (:state (first (vals (:outbox @(:state c))))))))
+          (super/reconcile! (assoc c :policy {:stale-delivery-minutes 0}))
+          (is (= [:running nil] [(:classification (health)) (:problem (health))]) "it clears once the Worker takes it")
+          (finally (bbh.inbox/stop! poller) (.close server)))))))

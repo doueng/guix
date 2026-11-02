@@ -57,10 +57,10 @@
   [{:keys [sections]}]
   (str/join "\n"
             (for [{section :title :keys [threads]} sections
-                  {:keys [id title ask summary came-back updated-at]} threads]
+                  {:keys [id title line came-back updated-at]} threads]
               (str id "\t" (format "%-16s %-4s %s%s  %s  %s" (str/upper-case section) id title
                                      (if came-back " (came back)" "")
-                                     (or (some-> ask :text first-line) (some-> summary first-line) "")
+                                     (or (some-> line first-line) "")
                                      (or (age updated-at) ""))))))
 
 (defn header [{:keys [badge]}]

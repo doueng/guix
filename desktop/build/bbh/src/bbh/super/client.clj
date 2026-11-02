@@ -58,9 +58,9 @@
   (doseq [{:keys [title threads]} sections]
     (println)
     (println (str/upper-case title))
-    (doseq [{:keys [id title ask summary came-back]} threads]
+    (doseq [{:keys [id title line came-back]} threads]
       (println (format "  %-4s %s%s" id title (if came-back "  (came back)" "")))
-      (when-let [line (or (:text ask) summary)] (println (str "       " line))))))
+      (when line (println (str "       " line))))))
 
 (defn start-router!
   "The Inbox workspace in Herdr: `bbh inbox` in its first pane and the Router,

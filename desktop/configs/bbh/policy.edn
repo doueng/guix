@@ -1,5 +1,8 @@
 ;; What bbh super grants: the Worker cap, the resource locks a Worker may hold,
 ;; and the ones never granted (a system switch is always an action ask to you).
+;; A delivery a live Worker leaves in its mailbox longer than
+;; :stale-delivery-minutes puts its thread under Needs attention.
 {:workers 3
  :locks ["guix-build" "repo-push"]
- :never-granted ["guix-system"]}
+ :never-granted ["guix-system"]
+ :stale-delivery-minutes 30}
