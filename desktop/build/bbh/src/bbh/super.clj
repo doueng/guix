@@ -80,8 +80,8 @@
 
 (defn wf-start!
   "The wf run for WORKER in WORKSPACE, its brief as the task."
-  [workspace {:keys [workflow brief check]}]
-  (workflow/start! workflow {:cwd workspace :task brief :check check}))
+  [workspace {:keys [workflow brief check bench repro]}]
+  (workflow/start! workflow {:cwd workspace :task brief :check check :bench bench :repro repro}))
 
 (defn pane!
   "A Herdr pane for WORKER: split beside a pane of the workspace that holds
@@ -178,7 +178,9 @@
               {:ok (cond-> (:result r) (not (:repeat? r)) (assoc :token t))})
             :start-worker!
             (let [t (new-token)
-                  r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c)))
+                  requires (try (:requires (workflow/load-workflow (:workflow args)))
+                                (catch Exception _ (throw (ex-info (str "unknown workflow " (pr-str (:workflow args))) {:error :unknown-workflow}))))
+                  r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c) :requires requires))
                   w (get-in @(:state c) [:workers (:id (:result r))])]
               (when (and (not (:repeat? r)) (= :starting (:state w)))
                 (launch! c w t))

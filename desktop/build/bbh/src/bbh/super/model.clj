@@ -10,8 +10,8 @@
 
 (def entity-kinds [:counters :threads :workers :asks :replies :outbox :locks :tokens :router])
 
-(defn- refuse [error & {:as more}]
-  (throw (ex-info (name error) (assoc more :error error))))
+(defn- refuse [error & {:keys [message] :as more}]
+  (throw (ex-info (or message (name error)) (assoc (dissoc more :message) :error error))))
 
 ;; ---- authorization ------------------------------------------------------
 
@@ -117,7 +117,7 @@
   (->> (vals (:workers state)) (filter #(= :queued (:state %))) (sort-by :id)
        (remove #(blocked-by state policy %)) first))
 
-(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo locks check]} :args :keys [token-hash policy]}]
+(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo locks check bench repro] :as args} :args :keys [token-hash policy requires]}]
   (let [t (thread-of state thread)
         policy (or policy default-policy)
         locks (set locks)
@@ -126,11 +126,13 @@
     (when-not (keyword? workflow) (refuse :invalid :field :workflow))
     (when (str/blank? brief) (refuse :invalid :field :brief))
     (when (str/blank? repo) (refuse :invalid :field :repo))
+    (doseq [flag requires]
+      (when (str/blank? (get args flag)) (refuse :invalid :field flag :message (str (name workflow) " needs " flag))))
     (doseq [l locks]
       (when (some #{l} (:never-granted policy)) (refuse :never-granted :lock l))
       (when-not (some #{l} (:locks policy)) (refuse :unknown-lock :lock l)))
     (let [worker (cond-> {:id id :generation (inc (count (:history t))) :workflow workflow :brief brief :repo repo :locks locks}
-                   check (assoc :check check))
+                   check (assoc :check check) bench (assoc :bench bench) repro (assoc :repro repro))
           reason (blocked-by state policy (assoc worker :thread thread))]
       {:events [{:kind :worker-started :thread thread
                  :data (assoc worker :state (if reason :queued :starting) :queued-reason reason)}

@@ -227,7 +227,7 @@
          (finally (super/stop! c)))))
 
 (defn- start-worker [dir thread & {:as more}]
-  (call dir {:command :start-worker! :args (merge {:thread thread :workflow :change :brief (str "work on " thread) :repo (:repo more)} more)}))
+  (call dir {:command :start-worker! :args (merge {:thread thread :workflow :change :brief (str "work on " thread) :repo (:repo more) :check "true"} more)}))
 
 (deftest two-workers-get-their-own-jj-workspaces-and-the-main-checkout-is-untouched
   (with-workers
@@ -282,8 +282,8 @@
       (is (= {"guix-build" "W1"} (:locks @(:state c))))
       (let [w2 (:ok (start-worker dir "T2" :repo repo :locks ["guix-build"]))]
         (is (= [:queued "guix-build held by W1"] [(:state w2) (:reason w2)]))
-        (is (= :never-granted (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :change :brief "x" :repo repo :locks ["guix-system"]}}))))
-        (is (= :unknown-lock (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :change :brief "x" :repo repo :locks ["repo-push"]}}))))
+        (is (= :never-granted (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :change :brief "x" :repo repo :check "true" :locks ["guix-system"]}}))))
+        (is (= :unknown-lock (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :change :brief "x" :repo repo :check "true" :locks ["repo-push"]}}))))
         (call dir {:command :finish-worker! :args {:worker "W1" :state-after :failed :reason "REPL died"}})
         (is (= {"guix-build" "W2"} (:locks @(:state c))))
         (is (= :working (:state (get-in @(:state c) [:workers "W2"]))))
@@ -690,3 +690,13 @@
       (start-worker dir "T2" :repo "/nonexistent")
       (is (= :failed (get-in @(:state c) [:workers "W2" :state])) "W2 was not queued behind the dead W1")
       (finally (super/stop! c)))))
+
+(deftest start-worker-refuses-a-missing-required-flag-before-any-workspace
+  (with-workers
+    (fn [c dir repo launches]
+      (call dir {:command :thread! :args {:title "no check"}})
+      (is (= [:invalid :check] ((juxt :error (comp :field :data)) (start-worker dir "T1" :repo repo :check nil))))
+      (is (= :unknown-workflow (:error (start-worker dir "T1" :repo repo :workflow :nope))))
+      (is (empty? (:workers @(:state c))))
+      (is (not (fs/exists? (fs/path dir "workspaces"))))
+      (is (= :working (:state (:ok (start-worker dir "T1" :repo repo))))))))
