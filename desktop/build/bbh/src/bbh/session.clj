@@ -94,7 +94,10 @@
            (trace-run! s "llm" start {:status "error" :error (ex-message e)})
            (throw e)))))
 
-(defn- checkpoint-path [s] (str (fs/path (:repl-dir @s) "checkpoint.clj")))
+(defn- checkpoint-path
+  "The conversation's checkpoint. It lives with the transcript, so /resume brings the definitions back."
+  [s]
+  (str (fs/path (:dir @s) "checkpoint.clj")))
 
 (defn start-repl!
   "Start the REPL, load init and replay the checkpoint. Returns a problem description or nil."
@@ -116,8 +119,8 @@
           (str "init.clj was reloaded, but replaying the checkpoint failed (" error "), so it was moved to "
                quarantined " and live definitions are gone.")
           restored
-          (str "init.clj was reloaded and " restored " definition" (when (not= 1 restored) "s")
-               " were restored from the checkpoint."
+          (str "init.clj was reloaded and " restored (if (= 1 restored) " definition was" " definitions were")
+               " restored from the checkpoint."
                (when (seq failed)
                  (str " These failed on replay and were dropped: "
                       (str/join "; " (map (fn [[source err]] (str source " (" err ")")) failed)))))
@@ -325,7 +328,10 @@
   (let [{:keys [dir messages last-input]} @s
         id (transcript/new-id)]
     (stop-engine! s)
-    (let [new-dir (transcript/continue! dir id)]
+    (let [new-dir (transcript/continue! dir id)
+          checkpoint (checkpoint-path s)]
+      ;; The REPL keeps running, so its definitions belong to the continuation too.
+      (when (fs/exists? checkpoint) (fs/copy checkpoint (fs/path new-dir "checkpoint.clj")))
       (swap! s assoc :dir new-dir :messages [] :last-input nil :turn-from 0))
     (note! s (str "Context reached " (or last-input "the model's limit of") " tokens, so this continues in conversation " id "."))
     (str "This is a continuation session. The previous session ended because its context filled up. "
@@ -483,11 +489,9 @@
       (let [dir (transcript/continuation (str (fs/path (fs/parent (fs/path (:dir @s))) id)))
             messages (transcript/load-messages dir)
             _ (stop-engine! s)
-            _ (swap! s assoc :dir dir :messages messages :last-input nil
-                     :notes ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
-            ;; The checkpoint belongs to the conversation being left.
-            _ (fs/delete-if-exists (checkpoint-path s))
-            problem (restart-repl! s)]
+            _ (swap! s assoc :dir dir :messages messages :last-input nil)
+            problem (restart-repl! s)
+            _ (swap! s assoc :notes [(str "This conversation resumed in a new REPL, so " (after-restart s))])]
         (str problem)))))
 
 (declare commands)

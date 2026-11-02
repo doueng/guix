@@ -86,7 +86,7 @@
     (stop! h)
     (is (< (- (System/currentTimeMillis) start) 5000))
     (is (= ["=> #'user/y"
-            "Timed out after 500 ms. The REPL process was killed and restarted, so init.clj was reloaded and 1 definition were restored from the checkpoint."
+            "Timed out after 500 ms. The REPL process was killed and restarted, so init.clj was reloaded and 1 definition was restored from the checkpoint."
             "=> [#'user/y 7]"]
            (tool-results h)))))
 
@@ -246,7 +246,8 @@
         _ (spit (str (fs/path (fs/create-dirs old) "messages.jsonl"))
                 (str (json/generate-string {:role "user" :content "<skill name=\"poteto-mode\">\nrules\n</skill>\n\nfix the bug"}) "\n"
                      (json/generate-string {:role "assistant" :content "Fixed it."}) "\n"))
-        h (harness "" ["continuing"] current)]
+        _ (spit (str (fs/path old "checkpoint.clj")) "(def kept 7)")
+        h (harness "" [{:code "kept"} "continuing"] current)]
     (session/prompt! (:s h) "/resume")
     (session/prompt! (:s h) "/resume nope")
     (session/prompt! (:s h) "/resume last")
@@ -258,7 +259,9 @@
             "continuing"]
            (texts h)))
     (is (= ["Fixed it."
-            "[bbh] This conversation resumed in a new REPL, so earlier live definitions are gone.\n\ngo on"
+            "[bbh] This conversation resumed in a new REPL, so init.clj was reloaded and 1 definition was restored from the checkpoint.\n\ngo on"
+            ""
+            "=> 7"
             "continuing"]
            (->> (fs/read-all-lines (str (fs/path old "messages.jsonl")))
                 (drop 1)
@@ -294,6 +297,7 @@
     (let [new-dir (:dir @(:s h))
           notice (str (continuation-notice old 4) "\n\nnext")]
       (is (not= old new-dir))
+      (is (= "(def x 41)" (slurp (str (fs/path new-dir "checkpoint.clj")))) "the continuation keeps the checkpoint")
       (is (= ["FIRST hello" "" "=> #'user/x" "full"] (recorded old)))
       (is (= notice (first (recorded new-dir))))
       (is (= notice (get-in @(:requests h) [2 :messages 1 :content])))

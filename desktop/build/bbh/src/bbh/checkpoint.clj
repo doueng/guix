@@ -1,7 +1,7 @@
 (ns bbh.checkpoint
   "Keep the model's definitions across a REPL kill. After each successful
   evaluation the definition forms in it are journaled to checkpoint.clj in the
-  REPL's directory, one entry per defined name, and a restarted REPL replays
+  conversation's directory, one entry per defined name, and a restarted REPL replays
   them after init.clj. A def whose value prints readably is stored as that
   literal, so replaying it does not redo the work or side effects that made it.
   Only successful evaluations are journaled, so the form that got the REPL
