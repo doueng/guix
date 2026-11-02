@@ -287,7 +287,7 @@ Emacs is where you go from the inbox when a thread needs more than a pick.
 The `bbh web` page gains an Inbox view next to the session tabs. It stays loopback-only behind `tailscale serve` and the owner check.
 
 - **Inbox list.** Sections and badge as in section 5. A row shows handle, title, the open ask's first line and age. Nothing updates while the laptop sleeps; the page says when its data is older than a few minutes.
-- **Thread view.** Events as a chat. Asks show as cards with large option buttons and the recommended option marked. A tap saves the pick at once, and Send at the bottom sends every pick and note on the thread. Archive and "Mark read" (close the asks and tell the Worker not to wait) sit in the header.
+- **Thread view.** Events as a chat. Asks show as cards with large option buttons and the recommended option marked. A tap saves the pick at once, and Send at the bottom sends every pick and note on the thread. Archive and "Mark read" (close the asks and tell the Worker not to wait) sit in the bottom bar beside Send.
 - **Talk to the Router.** A composer at the bottom of the Inbox list sends to the Router. Typing a handle first ("T12 ...") goes to that thread.
 - **Notifications.** If you add the page to the home screen, iOS 16.4 and later can receive Web Push. Push is sent only for Stopped and Waiting asks, one per ask, and a newer push for the same thread replaces the older one. Lock-screen answer buttons are not assumed, because Safari's web push support for notification actions is unverified. A tap opens the ask.
 - **Review on the phone.** A review card shows the summary, the gates that passed and the diff stat. Approving is allowed and names the exact revision. Line comments are left for Emacs.
@@ -309,75 +309,75 @@ Dictation is a way of talking to the agent, not only a way of typing into a wind
 
 ### J1. Morning triage on the iPhone
 
-1. At breakfast a push says "T14 stopped: which Herdr key for the thread picker?".
-2. The tap opens the thread on the phone. The card offers "Alt+Space a (recommended)" and "Alt+Space t". You tap the first and press Send.
-3. The controller commits the reply and an outbox record together, and the dispatcher writes one message to the Worker's mailbox. The thread shows Sent until the Worker acks, then the Worker, idle since it asked, starts a new turn with your answer. If the laptop had been asleep, the Send waits on the phone as a queued command until the page reaches it.
-4. Back in the Inbox list, T9 shows under Waiting with a review. You read the summary (gates passed, 4 files), tap Approve, and T9 moves to Archived.
-5. You type "T11 also handle the phone layout" in the Router composer. The handle routes it without a model, as a `steer!` to T11's Worker. The Router sees it in its batch summary and does nothing.
+1. **iPhone.** At breakfast a push says "T14 stopped: which Herdr key for the thread picker?".
+2. **iPhone.** The tap opens the thread on the phone. The card offers "Alt+Space t (recommended)" and "Alt+Space a". You tap the first and press Send.
+3. **System.** The controller commits the reply and an outbox record together, and the dispatcher writes one message to the Worker's mailbox. The thread shows Sent until the Worker acks, then the Worker, idle since it asked, starts a new turn with your answer. If the laptop had been asleep, the Send waits on the phone as a queued command until the page reaches it.
+4. **iPhone.** Back in the Inbox list, T9 shows under Waiting with a review. You read the summary (gates passed, 4 files), tap Approve, and T9 moves to Archived.
+5. **iPhone.** You type "T11 also handle the phone layout" in the Router composer. The handle routes it without a model, as a `steer!` to T11's Worker. The Router sees it in its batch summary and does nothing.
 
 ### J2. Start a task at the desk
 
-1. You press Ctrl+1 to reach the Inbox workspace and type in the Router pane "Make the bbh web page show cost per session".
-2. The Router calls Jev, gets `feature`, creates T15 and calls `start-worker!` with the `change` workflow. A Herdr pane `T15 web cost` opens in the guix workspace and bbh starts there with `wf start change ...`.
-3. The Router replies in one line: "Started T15 (change workflow). I'll ask if it needs you."
-4. T15 appears in the inbox pane under Working. You keep typing other requests. Nothing waits on T15.
+1. **Herdr.** You press Ctrl+1 to reach the Inbox workspace and type in the Router pane "Make the bbh web page show cost per session".
+2. **System.** The Router calls Jev, gets `feature`, creates T15 and calls `start-worker!` with the `change` workflow. A Herdr pane `T15 web cost` opens in the guix workspace and bbh starts there with `wf start change ...`.
+3. **Herdr.** The Router replies in one line: "Started T15 (change workflow). I'll ask if it needs you."
+4. **Herdr.** T15 appears in the inbox pane under Working. You keep typing other requests. Nothing waits on T15.
 
 ### J3. A Worker needs a decision while you are busy
 
-1. T15's Worker finds two ways to get the cost and calls `ask!` with `:stopped true` and a recommendation, then ends its turn.
-2. T15 moves to the top of the inbox pane under Stopped on you. Herdr shows a toast, and the phone gets a push.
-3. At the desk you press Alt+Space t, which lands on T15 in the inbox pane. The preview shows the question with options 1 and 2. You press 1, then s.
-4. You could equally answer from the phone or Emacs. If both you and the phone answered, the second Send carries a stale `:asks-version` and shows "already answered: option 1" instead of sending. If both you and the phone answered, the second Send carries a stale `:asks-version` and shows "already answered: option 1" instead of sending. If you answered twice, on the phone and in Emacs, the second Send finds the ask closed and says so.
+1. **System.** T15's Worker finds two ways to get the cost and calls `ask!` with `:stopped true` and a recommendation, then ends its turn.
+2. **Herdr.** T15 moves to the top of the inbox pane under Stopped on you. Herdr shows a toast, and the phone gets a push.
+3. **Herdr.** At the desk you press Alt+Space t, which lands on T15 in the inbox pane. The preview shows the question with options 1 and 2. You press 1, then s.
+4. **iPhone.** You could equally answer from the phone or Emacs. If both you and the phone answered, the second Send carries a stale `:asks-version` and shows "already answered: option 1" instead of sending.
 
 ### J4. A review comment on a PR you pushed
 
-1. The `gh` poller sees a comment on `engstrand/guix#41` from an allowlisted author.
-2. The resource key `gh:engstrand/guix#41` is linked to T12, so the comment routes to T12 without the Router. T12's Worker finished earlier, so the controller starts a new Worker generation on T12 with the thread's history and the capabilities for a GitHub-originated task: read, edit its own workspace, run checks. No push.
-3. The Worker fixes the nit in its workspace, runs the check, and raises a `review` ask with the revision and evidence.
-4. You see T12 under Waiting in the evening, approve the exact revision, and the Worker pushes and posts a short PR comment. Later, once this has gone well for a while, `policy.edn` can grant push for trivial fixes on your own PRs.
+1. **GitHub.** The `gh` poller sees a comment on `engstrand/guix#41` from an allowlisted author.
+2. **System.** The resource key `gh:engstrand/guix#41` is linked to T12, so the comment routes to T12 without the Router. T12's Worker finished earlier, so the controller starts a new Worker generation on T12 with the thread's history and the capabilities for a GitHub-originated task: read, edit its own workspace, run checks. No push.
+3. **System.** The Worker fixes the nit in its workspace, runs the check, and raises a `review` ask with the revision and evidence.
+4. **Herdr.** You see T12 under Waiting in the evening, approve the exact revision, and the Worker pushes and posts a short PR comment. Later, once this has gone well for a while, `policy.edn` can grant push for trivial fixes on your own PRs.
 
 ### J5. Changing your mind in another channel
 
-1. On Monday you told the Router in Emacs "T16 migrate to plan A".
-2. On Tuesday, on the phone, you write "T16 actually plan B, A breaks the Asahi build".
-3. The message goes to T16's Worker as a new turn. The Worker reads its `wf` evidence, sees it is in `implement`, and either adjusts or calls `ask!` if plan B changes the shape. If so, its `wf` run goes back to `shape`, which `wf` already supports.
+1. **Emacs.** On Monday you told the Router in Emacs "T16 migrate to plan A".
+2. **iPhone.** On Tuesday, on the phone, you write "T16 actually plan B, A breaks the Asahi build".
+3. **System.** The message goes to T16's Worker as a new turn. The Worker reads its `wf` evidence, sees it is in `implement`, and either adjusts or calls `ask!` if plan B changes the shape. If so, its `wf` run goes back to `shape`, which `wf` already supports.
 
 ### J6. Taking over and handing back
 
-1. T15 is drifting. In the inbox pane you select T15 and press `t`, which runs `takeover!` and lands in its pane.
-2. You type directly to the Worker for a few turns. The lease is yours, so the Router queues anything for T15 instead of relaying it.
-3. You type `/handback` in the pane. The Router gets the queued items and resumes normal routing.
+1. **Herdr.** T15 is drifting. In the inbox pane you select T15 and press `t`, which runs `takeover!` and lands in its pane.
+2. **Herdr.** You type directly to the Worker for a few turns. The lease is yours, so the Router queues anything for T15 instead of relaying it.
+3. **Herdr.** You type `/handback` in the pane. The Router gets the queued items and resumes normal routing.
 
 ### J7. Silent fix in the background
 
-1. CI fails on main overnight. `policy.edn` marks CI failures on main as candidates with the "silently reproduce" rule.
-2. The Router starts a Worker on T17 with the `bug-fix` workflow and `--repro` set to the failing check, and marks the thread speculative. A speculative Worker gets the smallest capability set: its own jj workspace, checks, no push, no network beyond the model. A speculative Worker gets the smallest capability set: its own jj workspace, checks, no push, no network beyond the model.
-3. Speculative threads stay in Quiet. If the `wf` run reaches `done`, with the reproduction failing first and passing after and an independent review, T17 moves to Waiting with a review ask. If the run blocks or gives up, the Worker's output is discarded, the thread is archived, and you were never interrupted.
+1. **GitHub.** CI fails on main overnight. `policy.edn` marks CI failures on main as candidates with the "silently reproduce" rule.
+2. **System.** The Router starts a Worker on T17 with the `bug-fix` workflow and `--repro` set to the failing check, and marks the thread speculative. A speculative Worker gets the smallest capability set: its own jj workspace, checks, no push, no network beyond the model.
+3. **System.** Speculative threads stay in Quiet. If the `wf` run reaches `done`, with the reproduction failing first and passing after and an independent review, T17 moves to Waiting with a review ask. If the run blocks or gives up, the Worker's output is discarded, the thread is archived, and you were never interrupted.
 
 ### J8. The laptop sleeps
 
-1. You close the lid during a run. Every process stops, and nothing happens until you open it: no pollers, no page, no pushes.
-2. On wake the controller opens the database, SQLite recovers the WAL, and the dispatcher resumes unacked outbox rows. Herdr restores panes and their bbh conversations, as it does today.
-3. The health check reconciles each Worker record with reality. A Worker whose REPL survived is left alone. One whose REPL died but whose `wf` journal is intact is restarted once with its journal. A running job is rediscovered by pid, not launched again. A Worker that fails three restarts goes to Needs attention.
+1. **System.** You close the lid during a run. Every process stops, and nothing happens until you open it: no pollers, no page, no pushes.
+2. **System.** On wake the controller opens the database, SQLite recovers the WAL, and the dispatcher resumes unacked outbox rows. Herdr restores panes and their bbh conversations, as it does today.
+3. **System.** The health check reconciles each Worker record with reality. A Worker whose REPL survived is left alone. One whose REPL died but whose `wf` journal is intact is restarted once with its journal. A running job is rediscovered by pid, not launched again. A Worker that fails three restarts goes to Needs attention.
 
 ### J9. Sign-off at the desk
 
-1. T15 reaches `done`. Its `review` ask shows under Waiting.
-2. In the inbox pane you select T15 and press e, which opens the thread view in Emacs. The diff opens beside the thread with the `wf` evidence links. You comment on two lines and press `C-c C-s`.
-3. The Worker gets both comments in one turn, fixes them and asks for review again, with a new revision. The earlier approval is stale by construction. You approve the new revision, the Worker commits with jj, and the thread is archived.
+1. **Herdr.** T15 reaches `done`. Its `review` ask shows under Waiting.
+2. **Emacs.** In the inbox pane you select T15 and press e, which opens the thread view in Emacs. The diff opens beside the thread with the `wf` evidence links. You comment on two lines and press `C-c C-s`.
+3. **Emacs.** The Worker gets both comments in one turn, fixes them and asks for review again, with a new revision. The earlier approval is stale by construction. You approve the new revision, the Worker commits with jj, and the thread is archived.
 
 ### J10. Talking to the agent at the desk
 
-1. You are reading a PR in Chrome. Without switching windows you hold Cmd+Shift+M and say "start a task, make Alt Space a open the inbox pane, and check kanata for Cmd Shift M".
-2. On release Hex prints the transcript and `bbh say` sends a command to the controller, which stores a voice event. Nothing was pasted into Chrome.
-3. No handle was spoken and no thread was selected, so the Router gets it, starts T18 with the `change` workflow, and its one-line reply shows in the Router pane.
-4. Later T18 stops with a question. You select it in the inbox pane, hold Cmd+Shift+M and say "the recommended one, send". The pick and the Send show in the pane, and the Worker wakes.
+1. **Voice.** You are reading a PR in Chrome. Without switching windows you hold Cmd+Shift+M and say "start a task, make Alt Space a open the inbox pane, and check kanata for Cmd Shift M".
+2. **System.** On release Hex prints the transcript and `bbh say` sends a command to the controller, which stores a voice event. Nothing was pasted into Chrome.
+3. **Herdr.** No handle was spoken and no thread was selected, so the Router gets it, starts T18 with the `change` workflow, and its one-line reply shows in the Router pane.
+4. **Voice.** Later T18 stops with a question. You select it in the inbox pane, hold Cmd+Shift+M and say "the recommended one, send". The pick and the Send show in the pane, and the Worker wakes.
 
 ### J11. Talking to the agent away from the desk
 
-1. Walking home you remember T16. You open the bbh page on the iPhone, tap the composer and use the keyboard's microphone: "T16, also keep the old plan as a fallback branch."
-2. The handle sends it straight to T16's Worker. The event is marked as dictated, so the Worker treats an odd word as a likely recognition error rather than an instruction.
-3. If the Shortcut from section 7 works, the same message could go through Siri without unlocking the phone.
+1. **iPhone.** Walking home you remember T16. You open the bbh page on the iPhone, tap the composer and use the keyboard's microphone: "T16, also keep the old plan as a fallback branch."
+2. **System.** The handle sends it straight to T16's Worker. The event is marked as dictated, so the Worker treats an odd word as a likely recognition error rather than an instruction.
+3. **iPhone.** If the Shortcut from section 7 works, the same message could go through Siri without unlocking the phone.
 
 ## 9. pstack and poteto-mode
 
