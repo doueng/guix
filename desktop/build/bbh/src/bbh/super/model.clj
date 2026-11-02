@@ -18,7 +18,7 @@
 (def ^:private grants
   {:router #{:thread! :link! :attach-worker! :start-worker! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running!}})
+   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running! :job-exited!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, the locks a Worker
@@ -153,6 +153,18 @@
     (when (#{:done :failed} (:state w)) (refuse :already-finished :worker worker))
     {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state state-after :reason reason}}]
      :result worker}))
+
+(defmethod decide* :job-exited! [state {{:keys [worker job exit log]} :args}]
+  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+    (when-not (and (string? job) (not (str/blank? job)) (integer? exit) (string? log) (:conversation w))
+      (refuse :invalid :field :job))
+    (if (get-in w [:jobs job])
+      {:events [] :result job}
+      {:events [{:kind :job-exited :thread (:thread w)
+                 :data {:worker worker :job job :exit exit :log log
+                        :outbox (next-id state :outbox "o") :conversation (:conversation w)
+                        :text (str "[Job " job " exited with status " exit ". Log: " log "]")}}]
+       :result job})))
 
 (defmethod decide* :takeover! [state {{:keys [worker]} :args}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
@@ -368,6 +380,12 @@
               (update-in [:threads thread :history] conj id)
               (assoc-in [:threads thread :execution] outcome)
               (assoc-in [:threads thread :milestone-seq] seq))))))
+
+(defmethod fold* :job-exited [state {{:keys [worker job exit log outbox conversation text]} :data :keys [thread]}]
+  (-> state (bump :outbox)
+      (assoc-in [:workers worker :jobs job] {:id job :exit exit :log log})
+      (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
+                                 :text text :state :pending :message nil})))
 
 (defmethod fold* :lease-moved [state {{:keys [id lease]} :data}]
   (assoc-in state [:workers id :lease] lease))

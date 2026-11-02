@@ -207,6 +207,23 @@
   (let [dir (str (fs/path conversations id))]
     (if (fs/exists? dir) (inbox/root-dir dir) dir)))
 
+(defn observe-jobs!
+  "Rediscover completed detached jobs from their durable exit markers. Running
+  jobs are left alone. No execution is launched here, including after restart.
+  The event and its outbox row commit together with a stable worker/job id."
+  [{:keys [state] :as c}]
+  (doseq [w (vals (:workers @state))
+          :when (and (:conversation w) (#{:working :waiting} (:state w)))
+          f (fs/glob (fs/path (conversation-root c (:conversation w)) "jobs") "*.exit")
+          :let [job (str/replace (fs/file-name f) #"\.exit$" "")
+                base (fs/path (fs/parent f) job)]
+          :when (and (not (get-in w [:jobs job])) (fs/exists? (str base ".cmd")))
+          :let [exit (try (parse-long (str/trim (slurp (str f))))
+                          (catch java.io.IOException _ nil))]
+          :when (some? exit)]
+    (run! c :controller {:id (str "job-exited-" (pr-str [(:id w) job])) :command :job-exited!
+                         :args {:worker (:id w) :job job :exit exit :log (str base ".log")}})))
+
 (defn dispatch!
   "One pass: send each pending outbox row to its Worker's mailbox, and mark a
   sent row acked once its mailbox file is gone. Each step is a command with a
@@ -249,23 +266,26 @@
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
            :launch (merge {:workspace! workspace! :wf-start! wf-start! :pane! pane!} launch) :policy policy
-           :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false)}]
+           :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)}]
     (ensure-owner-token! c)
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
     (doto (Thread. #(while (not @(:stopped c))
                       (try (serve-client c (.accept server))
                            (catch Exception e (when-not @(:stopped c) (binding [*out* *err*] (println "bbh super:" (ex-message e))))))))
       (.setDaemon true) (.start))
-    (doto (Thread. #(while (not @(:stopped c))
-                      (try (dispatch! c)
+    (reset! (:dispatcher c)
+     (doto (Thread. #(while (not @(:stopped c))
+                      (try (observe-jobs! c) (dispatch! c)
                            (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))
-      (.setDaemon true) (.start))
+      (.setDaemon true) (.start)))
     c))
 
-(defn stop! [{:keys [stopped server db dir lock]}]
+(defn stop! [{:keys [stopped server db dir lock dispatcher]}]
   (reset! stopped true)
   (.close ^ServerSocket server)
+  ;; Wait for the current observation/delivery transaction before closing SQLite.
+  (when-let [t @dispatcher] (.join ^Thread t))
   (fs/delete-if-exists (fs/path dir "port"))
   (locking db (store/close! db))
   (.close ^java.nio.channels.FileChannel lock))

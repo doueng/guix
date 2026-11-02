@@ -379,3 +379,69 @@
           (call dir {:command :register-router! :args {:conversation "router"}})
           (is (= :unauthorized (:error (call dir {:token token :command :threads}))))))
       (finally (super/stop! c)))))
+
+(deftest job-exits-wake-the-worker-once-after-controller-restart
+  (let [root (fs/create-temp-dir {:prefix "super-job-recovery"})
+        dir (str (fs/path root "controller"))
+        conversations (str (fs/path root "conversations"))
+        opts {:dir dir :conversations conversations :scan-ms 10}
+        c (super/start! opts)
+        jobs (fs/create-dirs (fs/path conversations "conv-1" "jobs"))
+        base (str (fs/path jobs "build-1"))]
+    (try
+      (thread-with-ask dir)
+      (spit (str base ".cmd") "build command")
+      ;; A real detached process outlives the first controller. A file gate
+      ;; avoids racing the restart against a short sleep.
+      (babashka.process/shell
+        {:out :discard :err :discard}
+        "setsid" "-f" "bash" "-c"
+        (str "echo $$ > " (pr-str (str base ".pid"))
+             "; while [ ! -f " (pr-str (str base ".release")) " ]; do sleep 0.02; done; "
+             "echo compiler-failed >> " (pr-str (str base ".log"))
+             "; echo 17 > " (pr-str (str base ".exit"))))
+      (super/observe-jobs! c)
+      (is (= {} (:outbox @(:state c))) "a running job does not wake the Worker")
+      (super/stop! c)
+      (let [c2 (super/start! opts)]
+        (try
+          (super/observe-jobs! c2)
+          (is (= {} (:outbox @(:state c2))) "restart does not manufacture an exit")
+          (spit (str base ".release") "go")
+          (is (wait-for #(seq (fs/glob conversations "conv-1/mailbox/*.json"))))
+          (dotimes [_ 3] (super/observe-jobs! c2))
+          (is (= [{:id "build-1" :exit 17 :log (str base ".log")}]
+                 (vec (vals (get-in @(:state c2) [:workers "W1" :jobs])))))
+          (is (= 1 (count (filter #(= :job-exited (:kind %)) (store/events (:db c2))))))
+          (is (= 1 (count (:outbox @(:state c2)))))
+          (is (re-find #"Job build-1 exited with status 17"
+                       (:text (cheshire.core/parse-string
+                                (slurp (str (first (fs/glob conversations "conv-1/mailbox/*.json")))) true))))
+          (locking (:db c2) (is (= (store/replay (:db c2)) (store/load (:db c2)) @(:state c2))))
+          (finally (super/stop! c2))))
+      (let [c3 (super/start! opts)]
+        (try
+          (super/observe-jobs! c3)
+          (is (= 1 (count (:outbox @(:state c3)))))
+          (is (= 1 (count (fs/glob conversations "conv-1/mailbox/*.json"))))
+          (is (= "compiler-failed\n" (slurp (str base ".log"))) "the command executed once")
+          (finally (super/stop! c3))))
+      (finally
+        (spit (str base ".release") "go")
+        (when-not @(:stopped c) (super/stop! c))
+        (fs/delete-tree root)))))
+
+(deftest incomplete-exit-markers-and-unowned-jobs-do-not-wake-workers
+  (with-controller
+    (fn [c dir conversations]
+      (let [{:keys [token]} (thread-with-ask dir)
+            jobs (fs/create-dirs (fs/path conversations "conv-1" "jobs"))]
+        (spit (str (fs/path jobs "partial.cmd")) "test")
+        (spit (str (fs/path jobs "partial.exit")) "")
+        (spit (str (fs/path jobs "orphan.exit")) "0")
+        (super/observe-jobs! c)
+        (is (= {} (:outbox @(:state c))))
+        (is (= :forbidden (:error (call dir {:token token :command :job-exited!
+                                            :args {:job "fake" :exit 0 :log "fake.log"}}))))
+        (spit (str (fs/path jobs "partial.exit")) "0")
+        (is (wait-for #(= 0 (get-in @(:state c) [:workers "W1" :jobs "partial" :exit]))))))))
