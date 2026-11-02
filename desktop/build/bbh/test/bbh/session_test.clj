@@ -106,6 +106,17 @@
       (is (str/starts-with? spin "Timed out after 2000 ms.") "an evaluation that does not wait keeps its deadline"))
     (is (< (- (System/currentTimeMillis) start) 20000))))
 
+(deftest an-unresolved-symbol-gets-similar-names-from-the-env
+  (let [init (str (fs/absolutize "../../configs/bbh/init.clj"))
+        h (harness (str "(load-file " (pr-str init) ")")
+                   [{:code "(read-lines-str \"x\")"} {:code "(str/joinn [1])"} {:code "(qqqqqq)"} "ok"])]
+    (session/prompt! (:s h) "go")
+    (stop! h)
+    (let [[guess aliased none] (tool-results h)]
+      (is (str/includes? guess "\n[bbh] Similar names: read-lines, "))
+      (is (str/ends-with? aliased "[bbh] Similar names: str/join"))
+      (is (not (str/includes? none "Similar names"))))))
+
 (deftest redefined-manifest-changes-the-next-system-prompt
   (let [h (harness "" [{:code "(intern (create-ns 'bbh.env) 'manifest (fn [] {:system \"Speak like a pirate.\"}))"} "arr"])]
     (session/prompt! (:s h) "go")

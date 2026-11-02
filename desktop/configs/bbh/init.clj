@@ -19,7 +19,7 @@
 
 `fs`, `p` and `str` are aliased.
 
-- (sh \"cmd string\") returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. For separate arguments use (p/shell {:out :string :err :string :continue true} \"cmd\" \"arg\").
+- (sh \"cmd string\") returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. (sh \"cmd\" \"arg\" ...) runs one argv, each word quoted.
 - (read-lines path) or (read-lines path start count) prints 1-based numbered lines and returns nil. Use slurp when code needs the text.
 - (edit! path old new) replaces exactly one occurrence, else throws.
 - (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits for it to finish, up to 10 min or :ms, and returns {:done? :exit :tail :log}. Waiting does not count against the evaluation's budget, so one call covers a long command. p/shell, http and Thread/sleep do count, so use a job for anything that may approach the deadline. Also job-status and jobs.
@@ -92,6 +92,30 @@
                    {:name name :description description :path (str (fs/canonicalize path))
                     :hidden (= "true" (get fm :disable-model-invocation))}))))
        (reduce (fn [acc s] (if (some #(= (:name s) (:name %)) acc) acc (conj acc s))) [])))
+
+(defn- distance
+  "Levenshtein distance between strings A and B."
+  [a b]
+  (peek (reduce (fn [prev ca]
+                  (reduce (fn [row [j cb]]
+                            (conj row (min (inc (peek row)) (inc (prev (inc j))) (+ (prev j) (if (= ca cb) 0 1)))))
+                          [(inc (first prev))] (map-indexed vector b)))
+                (vec (range (inc (count b)))) a)))
+
+(defn similar-names
+  "Up to three names close to the unresolved symbol named SYM: from user's namespace map, or from the publics of the
+  namespace an alias names for a/b."
+  [sym]
+  (let [[alias nm] (if-let [[_ a n] (re-matches #"(.+)/(.+)" sym)] [a n] [nil sym])
+        target (when alias (or (get (ns-aliases 'user) (symbol alias)) (find-ns (symbol alias))))
+        names (map str (keys (if alias (some-> target ns-publics) (ns-map 'user))))
+        close? #(or (str/includes? % nm) (and (>= (count %) 4) (str/includes? nm %)))]
+    (->> names
+         (remove #{nm})
+         (map (juxt #(distance nm %) identity))
+         (filter (fn [[d n]] (or (close? n) (<= d (max 1 (quot (count nm) 3))))))
+         sort (take 3) (map second)
+         (map #(if alias (str alias "/" %) %)))))
 
 (defn- skill-index []
   (let [visible (remove :hidden (skills))]
@@ -378,11 +402,18 @@
       (finally
         (when move? (move-deadline! (max before (+ (System/currentTimeMillis) margin))))))))
 
+(defn- shell-quote [s]
+  (if (re-matches #"[\w@%+=:,./-]+" s) s (str "'" (str/replace s "'" "'\\''") "'")))
+
+(defn pwd "The working directory." [] (str (fs/cwd)))
+
 (defn sh
-  "Run CMD with bash and an empty stdin. Returns {:exit :out :err}. A command that outlasts the evaluation's budget
-  keeps running as a job, and the result is {:exit nil :timeout true :job id :out :err} with the output so far."
-  [cmd]
-  (let [end (+ (System/currentTimeMillis) (bbh.env/budget-ms))
+  "Run CMD with bash and an empty stdin. Returns {:exit :out :err}. With ARGS, CMD and ARGS are one argv, each word
+  quoted for bash. A command that outlasts the evaluation's budget keeps running as a job, and the result is
+  {:exit nil :timeout true :job id :out :err} with the output so far."
+  [cmd & args]
+  (let [cmd (if (seq args) (str/join " " (map (comp shell-quote str) (cons cmd args))) cmd)
+        end (+ (System/currentTimeMillis) (bbh.env/budget-ms))
         id (job cmd :split-err? true)
         pid (job-file id ".pid")
         output (fn [] {:out (slurp-if (job-file id ".log")) :err (slurp-if (job-file id ".err"))})]

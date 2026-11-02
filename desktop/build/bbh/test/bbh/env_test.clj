@@ -14,12 +14,13 @@
     (try
       (let [loaded (repl/eval! conn (str "(load-file " (pr-str init) ")") 10000)]
         (is (= false (:error? loaded))))
-      (is (= {:value [{:exit 0 :out "ready" :err ""} 7 "ready" ["sample.txt"] ["sample.txt"]]}
+      (is (= {:value [{:exit 0 :out "ready" :err ""} 7 "it's ready" ["sample.txt"] ["sample.txt"] (str (fs/canonicalize ws))]}
              (repl/call conn
                         "[(sh \"printf ready\") (:exit (sh \"exit 7\"))
-                          (:out (p/shell {:out :string :err :string :continue true} \"printf\" \"%s\" \"ready\"))
+                          (:out (sh \"printf\" \"%s\" \"it's ready\"))
                           (mapv fs/file-name (fs/list-dir \".\"))
-                          (mapv fs/file-name (fs/glob \".\" \"*.txt\"))]"
+                          (mapv fs/file-name (fs/glob \".\" \"*.txt\"))
+                          (str (fs/canonicalize (pwd)))]"
                         10000)))
       (is (= {:value [["nested/child.txt" "sample.txt"] ["nested/child.txt"]]}
              (repl/call conn

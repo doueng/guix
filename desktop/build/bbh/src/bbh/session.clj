@@ -222,6 +222,14 @@
   [s cap]
   (fn [] (some-> (try (slurp (deadline-file s)) (catch Exception _ nil)) str/trim parse-long (min cap))))
 
+(defn- name-hint
+  "For an evaluation that failed on an unresolved symbol, the names bbh.env/similar-names offers, as a line for the
+  model, or nil."
+  [s r]
+  (when-let [[_ sym] (and (:error? r) (re-find #"Unable to resolve symbol: ([^\s\[\]]+)" (str (:err r))))]
+    (let [{:keys [value]} (repl/call (:repl @s) (str "(when-let [f (resolve 'bbh.env/similar-names)] (vec (f " (pr-str sym) ")))") 5000)]
+      (when (seq value) (str "\n[bbh] Similar names: " (str/join ", " value))))))
+
 (defn run-code!
   "Evaluate CODE for tool call ID, healing a truncated form or extra trailing
   closers first. Emits the call and its result and returns the text the model
@@ -260,7 +268,8 @@
                         (when (seq partial) (str "\nOutput before that:\n" partial)))
                    :failed])
                 :else
-                [(spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (if (:error? r) :failed :completed)])
+                [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (name-hint s r))
+                 (if (:error? r) :failed :completed)])
           text (cond->> text note (str note "\n"))]
       (emit! s {:type :tool-result :id id :code code :text text :status status})
       text)))
