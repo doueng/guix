@@ -30,8 +30,7 @@
                                 :required ["code"]}
                    :type "function"}]
           :reasoning {:effort "medium"}
-          :max_output_tokens 4000
-          :prompt_cache_key "20261102-1"}
+          :max_output_tokens 4000}
          (codex/request "gpt-6.1-sol" {:messages transcript :tools [tool] :effort "medium"
                                          :max-tokens 4000 :session-id "20261102-1"})))
   (is (= {:model "m" :instructions "" :input [] :stream true :store false}
@@ -82,12 +81,14 @@
                                 (is (= ["Codex" "https://chatgpt.com/backend-api/codex/responses"] [label url]))
                                 (is (= "Bearer test-token" (get headers "Authorization")))
                                 (is (= "acct" (get headers "chatgpt-account-id")))
+                                (is (= "20261102-cache" (get headers "session_id")))
                                 (stream reply))]
       (with-redefs [auth/pi-entry (fn [_] {:access "test-token" :accountId "acct"
                                            :expires (+ (System/currentTimeMillis) 60000)})]
         (is (= {:message {:role "assistant" :content "Hi"}
                 :usage {:input 7 :cached 0 :written 0 :output 1 :thinking 0 :cost nil}}
-               ((codex/sample "gpt-6.1-sol") {:messages [{:role "user" :content "hi"}]}
+               ((codex/sample "gpt-6.1-sol") {:messages [{:role "user" :content "hi"}]
+                                                :session-id "20261102-cache"}
                 {:on-text #(swap! text conj %) :on-open identity})))))
     (is (= ["Hi"] @text))))
 

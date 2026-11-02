@@ -36,8 +36,9 @@
 (defn request
   "The Responses API request for MODEL. bbh's chat-completions request becomes
   INSTRUCTIONS from the system message plus flat INPUT items, and its function
-  tools lose the nested :function map."
-  [model {:keys [messages tools effort max-tokens session-id]}]
+  tools lose the nested :function map. The conversation id does not go in the
+  body: the backend keys its prompt cache on the session_id header."
+  [model {:keys [messages tools effort max-tokens]}]
   (cond-> {:model model
            :instructions (str/join "\n\n" (keep #(when (= "system" (:role %)) (:content %)) messages))
            :input (vec (mapcat item messages))
@@ -46,8 +47,7 @@
     (seq tools) (assoc :tools (vec (for [{:keys [function]} tools]
                                      (assoc function :type "function"))))
     effort (assoc :reasoning {:effort effort})
-    max-tokens (assoc :max_output_tokens max-tokens)
-    session-id (assoc :prompt_cache_key session-id)))
+    max-tokens (assoc :max_output_tokens max-tokens)))
 
 (defn- usage-record [{:keys [input_tokens output_tokens input_tokens_details output_tokens_details]}]
   (when input_tokens
@@ -94,12 +94,13 @@
           cancelled (atom false)
           _ (on-open #(reset! cancelled true))
           resp (llm/stream! "Codex" url
-                            {"Authorization" (str "Bearer " token)
-                             "chatgpt-account-id" account
-                             "Content-Type" "application/json"
-                             "Accept" "text/event-stream"
-                             "originator" "codex_cli_rs"
-                             "User-Agent" "codex_cli_rs"}
+                            (cond-> {"Authorization" (str "Bearer " token)
+                                     "chatgpt-account-id" account
+                                     "Content-Type" "application/json"
+                                     "Accept" "text/event-stream"
+                                     "originator" "codex_cli_rs"
+                                     "User-Agent" "codex_cli_rs"}
+                              (:session-id req) (assoc "session_id" (str (:session-id req))))
                             (json/generate-string (request model req))
                             cancelled (or on-retry (fn [_])))
           acc (volatile! {:content "" :calls []})]
