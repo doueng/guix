@@ -369,7 +369,7 @@
         (is (wait-for #(seq (fs/glob root "mailbox/*.json"))))
         (Thread/sleep 100)
         (is (= 1 (count (fs/glob root "mailbox/*.json"))) "one prompt for both")
-        (is (= "[herdr] Make the page show cost per session\n\n[voice] (spoken) and what is T3 doing"
+        (is (= "o1 [herdr] Make the page show cost per session\n\no2 [voice] (spoken) and what is T3 doing"
                (:text (cheshire.core/parse-string (slurp (str (first (fs/glob root "mailbox/*.json")))) true))))
         (is (= #{:sent} (set (map :state (vals (:outbox @(:state c)))))))
         (testing "the Router's token starts work but does not answer asks"
@@ -748,7 +748,7 @@
         (is (= [] (prompts)) "a routed message alone wakes no Router")
         (call dir {:command :say! :args {:text "what is running" :origin :phone}})
         (is (wait-for #(seq (prompts))))
-        (is (= ["[routed to T1 W1 from herdr] keep the alias\n\n[phone] what is running"] (prompts)))))))
+        (is (= ["[routed to T1 W1 from herdr] keep the alias\n\no3 [phone] what is running"] (prompts)))))))
 
 (deftest jev-triage-drops-noise-before-a-router-turn-and-tags-the-rest
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-tri"}))
@@ -770,10 +770,36 @@
       (is (= [] (prompts)) "sure noise costs no Router turn")
       (call dir {:command :say! :args {:text "hmm" :origin :herdr}})
       (is (wait-for #(seq (prompts))))
-      (is (= ["(Jev: noise 0.50) [herdr] hmm"] (prompts)) "unsure noise still reaches the Router, tagged")
+      (is (= ["o2 (Jev: noise 0.50) [herdr] hmm"] (prompts)) "unsure noise still reaches the Router, tagged")
       (doseq [f (fs/glob router "mailbox/*.json")] (fs/delete f))
       (call dir {:command :say! :args {:text "boom" :origin :phone}})
       (is (wait-for #(seq (prompts))))
-      (is (= ["[phone] boom"] (prompts)) "a triage failure fails open, untagged")
+      (is (= ["o3 [phone] boom"] (prompts)) "a triage failure fails open, untagged")
       (is (= ["thanks" "hmm" "boom"] @judged) "each message judged once")
+      (finally (super/stop! c)))))
+
+(deftest a-workers-capabilities-come-from-the-authenticated-origin-not-the-router
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-cap"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-capconv"}))
+        repo (jj-repo)
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10
+                         :policy {:origins {:herdr #{:read :edit-workspace :run-checks :publish} :phone #{:read :run-checks}}}
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :pane! (fn [_] "wC:p1")}})]
+    (try
+      (let [router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
+            start (fn [thread for & {:as more}]
+                    (call dir {:token router :command :start-worker!
+                               :args (merge {:thread thread :for for :workflow :investigation :brief "look" :repo repo} more)}))]
+        (call dir {:command :say! :args {:text "push the fix" :origin :phone}})
+        (call dir {:command :say! :args {:text "push it for real" :origin :herdr}})
+        (doseq [t ["a" "b" "c"]] (call dir {:command :thread! :args {:title t}}))
+        (is (= [:capability "repo-push needs :publish, which phone does not grant"]
+               ((juxt :error :message) (start "T1" "o1" :locks ["repo-push"]))))
+        (is (= :invalid (:error (start "T1" nil))) "the Router must name the message")
+        (is (= :invalid (:error (start "T1" "o9"))) "and a real one")
+        (let [r (start "T1" "o1" :capabilities [:read :publish])]
+          (is (= [:phone #{:read}] ((juxt :origin :capabilities) (get-in @(:state c) [:workers (:id (:ok r))])))))
+        (is (= "W2" (:id (:ok (start "T2" "o2" :locks ["repo-push"])))) "the owner's Herdr message grants :publish")
+        (let [r (start-worker dir "T3" :repo repo :workflow :investigation)]
+          (is (= :owner (:origin (get-in @(:state c) [:workers (:id (:ok r))]))) (pr-str r))))
       (finally (super/stop! c)))))

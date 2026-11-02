@@ -358,8 +358,10 @@
               (run! c :controller {:id (str "triaged-" (:id o)) :command :router-triaged!
                                    :args (assoc verdict :outbox (:id o) :threshold (:noise-probability (policy c)))})))
         batch (filter for-router? (sort-by #(parse-long (subs (:id %) 1)) (vals (:outbox @state))))
-        line (fn [{:keys [text] {:keys [choice probability]} :triage}]
-               (if choice (format "(Jev: %s %.2f) %s" (name choice) probability text) text))]
+        line (fn [{:keys [id text delivery] {:keys [choice probability]} :triage}]
+               (str (when-not (= :summary delivery) (str id " "))
+                    (when choice (format "(Jev: %s %.2f) " (name choice) probability))
+                    text))]
     ;; The Router reads its pending rows as one prompt, oldest first, each with
     ;; Jev's triage. Summaries of messages already routed to a Worker ride along
     ;; but never wake it alone, and noise never reaches it.

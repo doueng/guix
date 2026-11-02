@@ -3,7 +3,8 @@
   or refuses it, `fold` applies one event, and `changed` names the records a
   fold touched so the store can materialize them. Nothing here knows SQL,
   sockets or mailboxes."
-  (:require [clojure.string :as str]))
+  (:require [clojure.set :as set]
+            [clojure.string :as str]))
 
 (def empty-state
   {:counters {} :threads {} :workers {} :asks {} :replies {} :outbox {} :locks {} :tokens {} :router {}})
@@ -25,9 +26,12 @@
   may hold, the ones never granted (a system switch is always an ask), and how
   long a live Worker may leave a delivery in its mailbox before it needs you
   (a reply waits for the current turn, which can include a 10 minute job-wait),
-  and how sure Jev must be that a message is noise before the Router never
-  sees it."
-  {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30 :noise-probability 0.7})
+  how sure Jev must be that a message is noise before the Router never sees
+  it, what each origin's Workers may do (an origin not named gets :read), and
+  the capability each lock needs."
+  {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30 :noise-probability 0.7
+   :origins (zipmap [:owner :herdr :phone :voice] (repeat #{:read :edit-workspace :run-checks :publish}))
+   :lock-capabilities {"repo-push" :publish "guix-build" :run-checks}})
 
 (defn authorize
   "Throw unless PRINCIPAL may run COMMAND on STATE. A Worker acts on its own
@@ -119,11 +123,27 @@
   (->> (vals (:workers state)) (filter #(= :queued (:state %))) (sort-by :id)
        (remove #(blocked-by state policy %)) first))
 
-(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo locks check bench repro] :as args} :args :keys [token-hash policy requires]}]
+(defn- request-origin
+  "Where a start-worker! request came from: the owner's own, or for the Router
+  the origin of the message it names with FOR, which the controller recorded
+  when that message arrived. The Router cannot claim an origin."
+  [state principal for]
+  (case principal
+    :owner :owner
+    :router (let [o (get-in state [:outbox for])]
+              (when-not (and o (some? (:origin o)) (= (:conversation o) (get-in state [:router :router :conversation])))
+                (refuse :invalid :field :for :message "name the Router message this Worker is for, such as :for \"o12\""))
+              (:origin o))
+    (refuse :forbidden :command :start-worker!)))
+
+(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo locks check bench repro for capabilities] :as args} :args :keys [token-hash policy requires principal]}]
   (let [t (thread-of state thread)
-        policy (or policy default-policy)
+        policy (merge default-policy policy)
         locks (set locks)
-        id (next-id state :workers "W")]
+        id (next-id state :workers "W")
+        origin (request-origin state principal for)
+        granted (get-in policy [:origins origin] #{:read})
+        caps (if capabilities (set/intersection (set capabilities) granted) granted)]
     (when (:worker t) (refuse :thread-has-worker :thread thread :worker (:worker t)))
     (when-not (keyword? workflow) (refuse :invalid :field :workflow))
     (when (str/blank? brief) (refuse :invalid :field :brief))
@@ -132,8 +152,11 @@
       (when (str/blank? (get args flag)) (refuse :invalid :field flag :message (str (name workflow) " needs " flag))))
     (doseq [l locks]
       (when (some #{l} (:never-granted policy)) (refuse :never-granted :lock l))
-      (when-not (some #{l} (:locks policy)) (refuse :unknown-lock :lock l)))
-    (let [worker (cond-> {:id id :generation (inc (count (:history t))) :workflow workflow :brief brief :repo repo :locks locks}
+      (when-not (some #{l} (:locks policy)) (refuse :unknown-lock :lock l))
+      (when-let [need (get-in policy [:lock-capabilities l])]
+        (when-not (caps need) (refuse :capability :lock l :needs need :message (str l " needs " need ", which " (name origin) " does not grant")))))
+    (let [worker (cond-> {:id id :generation (inc (count (:history t))) :workflow workflow :brief brief :repo repo :locks locks
+                          :origin origin :capabilities caps}
                    check (assoc :check check) bench (assoc :bench bench) repro (assoc :repro repro))
           reason (blocked-by state policy (assoc worker :thread thread))]
       {:events [{:kind :worker-started :thread thread
@@ -143,9 +166,10 @@
 
 (defn- brief-text
   "The first mailbox message of Worker W: its brief and how it reports."
-  [{:keys [id thread brief workflow]} wf-run]
+  [{:keys [id thread brief workflow origin capabilities]} wf-run]
   (str/join "\n\n" [(format "[%s brief for %s]" thread id)
                        brief
+                       (format "Requested from %s. Capabilities: %s." (some-> origin name) (str/join ", " (map name (sort capabilities))))
                        (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
                                id thread wf-run (name workflow))]))
 
@@ -409,7 +433,7 @@
   without :seq or :at on the events; the store assigns them. Throws ex-info
   with :error on refusal."
   [state principal cmd]
-  (decide* state (authorize state principal cmd)))
+  (decide* state (assoc (authorize state principal cmd) :principal principal)))
 
 ;; ---- fold ---------------------------------------------------------------
 
@@ -621,10 +645,10 @@
                   (assoc-in [:outbox (:outbox summary)] {:id (:outbox summary) :thread thread :reply nil :conversation (:conversation summary)
                                                          :text (:text summary) :state :pending :message nil :delivery :summary})))))
 
-(defmethod fold* :router-queued [state {{:keys [outbox conversation text]} :data :keys [thread]}]
+(defmethod fold* :router-queued [state {{:keys [outbox conversation text origin]} :data :keys [thread]}]
   (-> state (bump :outbox)
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
-                                  :state :pending :message nil})))
+                                  :state :pending :message nil :origin origin})))
 
 (defmethod fold* :router-triaged [state {{:keys [outbox choice probability failed drop]} :data}]
   (if drop

@@ -2,7 +2,14 @@
 ;; and the ones never granted (a system switch is always an action ask to you).
 ;; A delivery a live Worker leaves in its mailbox longer than
 ;; :stale-delivery-minutes puts its thread under Needs attention.
+;; A Worker gets the capabilities of the origin its request came from (an origin
+;; not named gets :read), and a lock needs the capability named for it.
 {:workers 3
  :locks ["guix-build" "repo-push"]
  :never-granted ["guix-system"]
- :stale-delivery-minutes 30}
+ :stale-delivery-minutes 30
+ :origins {:owner #{:read :edit-workspace :run-checks :publish}
+           :herdr #{:read :edit-workspace :run-checks :publish}
+           :phone #{:read :edit-workspace :run-checks :publish}
+           :voice #{:read :edit-workspace :run-checks :publish}}
+ :lock-capabilities {"repo-push" :publish "guix-build" :run-checks}}
