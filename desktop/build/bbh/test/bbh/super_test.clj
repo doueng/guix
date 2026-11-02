@@ -714,3 +714,22 @@
         (is (= ["T1" "W1" reply] ((juxt :thread :worker :reply) ask)))
         (is (= ["a1"] (:asks r)))
         (is (= reply (-> (call dir {:command :thread :args {:id "T1"}}) :ok :asks first :reply)))))))
+
+(deftest a-message-naming-a-linked-resource-reaches-that-threads-worker
+  (with-controller
+    (fn [c dir _]
+      (call dir {:command :register-router! :args {:conversation "router"}})
+      (doseq [[title conv res] [["Alt+W" "conv-1" "pr:engstrand/guix#12"] ["Fish" "conv-2" "repo:engstrand/dotfish"] ["Also fish" "conv-3" "repo:engstrand/dotfish"]]]
+        (let [t (:ok (call dir {:command :thread! :args {:title title}}))]
+          (call dir {:command :attach-worker! :args {:thread t :conversation conv}})
+          (call dir {:command :link! :args {:thread t :resource res}})))
+      (is (= {:thread "T1" :to "W1" :via :resource}
+             (:ok (call dir {:command :say! :args {:origin :herdr :text "the review on engstrand/guix#12 wants tests"}}))))
+      (is (= {:to :router} (:ok (call dir {:command :say! :args {:origin :herdr :text "bump engstrand/dotfish"}}))) "two threads match")
+      (is (= {:to :router} (:ok (call dir {:command :say! :args {:origin :herdr :text "see engstrand/guix#123"}}))) "a longer name is not this one")
+      (call dir {:command :thread! :args {:title "No worker yet"}})
+      (call dir {:command :link! :args {:thread "T4" :resource "repo:engstrand/hex"}})
+      (is (= {:to :router :thread "T4"} (:ok (call dir {:command :say! :args {:origin :herdr :text "engstrand/hex is slow"}})))
+          "a matched thread without a session goes to the Router, tagged")
+      (call dir {:command :archive! :args {:thread "T1"}})
+      (is (= {:to :router} (:ok (call dir {:command :say! :args {:origin :herdr :text "engstrand/guix#12 again"}}))) "archived threads do not match"))))

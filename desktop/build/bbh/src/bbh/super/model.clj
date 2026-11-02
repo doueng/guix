@@ -196,9 +196,13 @@
                :data {:id worker :pane pane :outbox (next-id state :outbox "o") :conversation (:conversation w)
                       :text (str "[Recovery] Resume the existing wf run " (:wf-run w) " and conversation. Inspect existing jobs before acting; do not relaunch surviving jobs.")}}] :result worker}))
 
+(defn- deliverable?
+  "Whether Worker W has a session that takes mailbox messages now."
+  [w]
+  (and (#{:working :waiting} (:state w)) (not (str/blank? (:conversation w)))))
+
 (defn- deliverable-worker! [w]
-  (when-not (and (#{:working :waiting} (:state w)) (not (str/blank? (:conversation w))))
-    (refuse :not-running :worker (:id w)))
+  (when-not (deliverable? w) (refuse :not-running :worker (:id w)))
   w)
 
 (defmethod decide* :steer! [state {{:keys [worker text]} :args}]
@@ -323,23 +327,39 @@
   (let [conversation (or (get-in state [:router :router :conversation]) (refuse :no-router))]
     {:outbox (next-id state :outbox "o") :conversation conversation :text text}))
 
+(defn resource-thread
+  "The one unresolved thread of STATE whose linked resource TEXT names, by its
+  key (`repo:engstrand/guix`) or the part after its kind (`engstrand/guix`), or
+  nil when none or more than one does."
+  [state text]
+  (let [text (str/lower-case text)
+        names? (fn [r] (some #(re-find (re-pattern (str "(?<![\\w/.-])" (java.util.regex.Pattern/quote (str/lower-case %)) "(?![\\w/-])")) text)
+                             (distinct [r (str/replace r #"^[a-z]+:" "")])))
+        hits (filter #(and (not (:resolved-at %)) (some names? (:resources %))) (vals (:threads state)))]
+    (when (= 1 (count hits)) (:id (first hits)))))
+
 (defmethod decide* :say! [state {{:keys [text origin]} :args :keys [id]}]
   (when (str/blank? text) (refuse :invalid :field :text))
   (when-not (#{:phone :herdr :voice} origin) (refuse :invalid :field :origin))
-  (let [[handle rest] (parse-handle text)
-        t (when handle (get-in state [:threads handle]))
+  (let [;; A typed or spoken handle names the thread and is stripped from the
+        ;; message; a linked resource names it and the message stays whole.
+        {:keys [thread message via]} (if-let [[handle rest] (parse-handle text)]
+                                       {:thread handle :message rest :via :handle}
+                                       {:thread (resource-thread state text) :message text :via :resource})
+        t (when thread (or (get-in state [:threads thread]) (refuse :no-such-thread :thread thread)))
         w (when t (get-in state [:workers (:worker t)]))
-        said (str (when (= :voice origin) "(spoken) ") (if handle (str handle ": " rest) text))]
-    (when w (deliverable-worker! w))
-    (cond (and handle (nil? t)) (refuse :no-such-thread :thread handle)
-          w {:events [{:kind :worker-steered :thread handle
-                       :data {:id id :origin origin :text rest :worker (:id w) :outbox (next-id state :outbox "o")
-                              :conversation (:conversation w)
-                              :mailbox-text (format "[%s from %s%s] %s" handle (name origin) (if (= :voice origin) ", dictated" "") rest)}}]
-              :result {:thread handle :to (:id w)}}
-          :else {:events [{:kind :router-queued :thread handle
-                           :data (assoc (router-row state (format "[%s] %s" (name origin) said)) :id id :origin origin :said text)}]
-                 :result (cond-> {:to :router} handle (assoc :thread handle))})))
+        _ (when (and w (= :handle via)) (deliverable-worker! w))
+        w (when (and w (deliverable? w)) w)]
+    (if w
+      {:events [{:kind :worker-steered :thread thread
+                 :data {:id id :origin origin :text message :worker (:id w) :outbox (next-id state :outbox "o")
+                        :conversation (:conversation w)
+                        :mailbox-text (format "[%s from %s%s] %s" thread (name origin) (if (= :voice origin) ", dictated" "") message)}}]
+       :result (cond-> {:thread thread :to (:id w)} (= :resource via) (assoc :via :resource))}
+      (let [said (str (when (= :voice origin) "(spoken) ") (if (= :handle via) (str thread ": " message) text))]
+        {:events [{:kind :router-queued :thread thread
+                   :data (assoc (router-row state (format "[%s] %s" (name origin) said)) :id id :origin origin :said text)}]
+         :result (cond-> {:to :router} thread (assoc :thread thread))}))))
 
 (defmethod decide* :register-router! [state {{:keys [conversation]} :args :keys [token-hash]}]
   (when (str/blank? conversation) (refuse :invalid :field :conversation))
