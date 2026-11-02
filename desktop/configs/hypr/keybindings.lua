@@ -10,7 +10,7 @@ keys.bind("CTRL + ALT + SHIFT + K", hl.dsp.window.move({ direction = "up" }), "C
 keys.bind("CTRL + ALT + SHIFT + L", hl.dsp.window.move({ direction = "right" }), "CTRL+ALT+SHIFT+L", "Move right")
 keys.bind("CTRL + ALT + F", hl.dsp.window.fullscreen(), "CTRL+ALT+F", "Fullscreen")
 keys.bind("CTRL + ALT + V", hl.dsp.window.float({ action = "toggle" }), "CTRL+ALT+V", "Toggle floating")
-keys.bind("CTRL + ALT + W", hl.dsp.window.close(), "CTRL+ALT+W", "Close window")
+keys.bind("ALT + W", hl.dsp.window.close(), "ALT+W", "Close window")
 keys.bind("CTRL + ALT + 0", hl.dsp.focus({ workspace = 10 }), "CTRL+ALT+0", "Workspace 10")
 keys.bind("CTRL + ALT + 1", hl.dsp.focus({ workspace = 1 }), "CTRL+ALT+1", "Workspace 1")
 keys.bind("CTRL + ALT + 2", hl.dsp.focus({ workspace = 2 }), "CTRL+ALT+2", "Workspace 2")

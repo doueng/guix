@@ -36,7 +36,9 @@
   {:keys ["."] :label "Find file, launch app or switch workspace" :doom-match :analogous :idea "<Action>(GotoFile)"
    :doom "eng/project-find-file" :desktop-command ["~/.local/bin/custom-launcher"] :herdr :choose-workspace}
   ;; Upstream Doom's SPC d is the debugger group, so the editors keep w d.
-  {:keys ["d"] :label "Close window or pane" :doom-match :differs :desktop ["window.close"] :herdr :close-pane}
+  ;; Alt+W alone closes a desktop window (bindings.edn), so the desktop leader has no close.
+  {:keys ["d"] :label "Close pane" :doom-match :differs :herdr :close-pane}
+  {:keys ["a"] :label "Agents" :doom-match :differs :herdr :choose-agent}
   {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
   {:keys ["w" "h"] :label "Focus left" :doom-match :exact :nav "left"}
   {:keys ["w" "j"] :label "Focus down" :doom-match :exact :nav "down"}
@@ -47,7 +49,7 @@
   {:keys ["w" "v"] :label "Split right" :doom-match :exact :idea "<C-w>v" :nvim "<cmd>vsplit<cr>" :doom "split-window-right"
    :herdr ["pane" "split" "--direction" "right" "--focus"]}
   {:keys ["w" "d"] :label "Close window or pane" :doom-match :exact :idea "<C-w>c" :nvim "<cmd>close<cr>" :doom "delete-window"
-   :desktop ["window.close"] :herdr :close-pane}
+   :herdr :close-pane}
   {:keys ["w" "m"] :label "Maximize or zoom" :doom-match :exact :idea "<Action>(HideAllWindows)" :nvim "<cmd>lua Snacks.zoom()<cr>"
    :doom "doom/window-maximize-buffer" :desktop ["window.fullscreen" {:mode "maximized"}]
    :herdr ["pane" "zoom" "--toggle"]}

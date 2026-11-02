@@ -10,7 +10,7 @@
              {:id "L" :label "Move right" :hypr ["CTRL ALT SHIFT" "L" ["window.move" {:direction "right"}]]}
              {:id "f" :label "Fullscreen" :hypr ["CTRL ALT" "F" ["window.fullscreen"]]}
              {:id "v" :label "Toggle floating" :hypr ["CTRL ALT" "V" ["window.float" {:action "toggle"}]]}
-             {:id "w" :label "Close window" :hypr ["CTRL ALT" "W" ["window.close"]]}
+             {:id "w" :label "Close window" :hypr ["ALT" "W" ["window.close"]]}
              {:id "p" :label "Pick a window, pane or editor window by hint" :chord "Cmd+F" :command ["~/.local/bin/winhint"]}]}
   {:id "s" :label "Workspaces" :workspace-digits true}
   {:id "a" :label "Applications"

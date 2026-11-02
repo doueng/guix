@@ -41,8 +41,8 @@
                      :when (and chord (not (str/includes? line "release = true")))]
                  (set (map str/upper-case (str/split chord #" \+ "))))]
     (is (= (count chords) (count (distinct chords))))
-    (is (not-any? #(and (contains? % "ALT") (= 2 (count %)) (not (contains? % "SPACE"))) chords)
-        "Alt plus a single key belongs to applications, except Alt+Space")))
+    (is (not-any? #(and (contains? % "ALT") (= 2 (count %)) (not (some #{"SPACE" "W"} %))) chords)
+        "Alt plus a single key belongs to applications, except Alt+Space and Alt+W (close window)")))
 
 (defn chord-keys
   "The set of upper-cased keys in a Hyprland chord such as \"SUPER + COMMA\" or a

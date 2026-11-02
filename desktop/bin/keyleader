@@ -32,7 +32,7 @@
 (def directions #{"left" "down" "up" "right"})
 (def action-keywords {:desktop #{:choose-window}
                       :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane :edit-scrollback
-                               :choose-workspace}})
+                               :choose-workspace :choose-agent}})
 (def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :herdr :doom-match})
 ;; How a binding's meaning compares with upstream Doom's at the same keys.
 (def doom-matches #{:exact :analogous :differs})
@@ -415,6 +415,8 @@
         (= :close-pane action) (run! ["herdr" "pane" "close" pane])
         (= :edit-scrollback action) (herdr-api! "pane.edit_scrollback" {:pane_id pane})
         (= :choose-workspace action) (choose-workspace!)
+        ;; The agent picker is an fzf script, so it runs in the leader's popup terminal.
+        (= :choose-agent action) @(spawn! ["~/.local/bin/herdr-agent-pick"])
         (map? action) (herdr-api! "plugin.action.invoke" {:plugin_id (:plugin action) :action_id (:action action)
                                                             :context {:focused_pane_id pane}})
         (= :close-tab action) (run! ["herdr" "tab" "close" tab])

@@ -12,7 +12,7 @@
 | Window hints | Cmd+F | `desktop/bin/winhint`, the Dusk `:window-hints` overlay |
 | Move windows | Ctrl+Alt+Shift+h/j/k/l | Generated `hypr/keybindings.lua` |
 | Workspaces | Ctrl+Alt+1..0, add Shift to move a window | Generated `hypr/keybindings.lua` |
-| Fullscreen, floating, close | Ctrl+Alt+f, Ctrl+Alt+v, Ctrl+Alt+w | Generated `hypr/keybindings.lua` |
+| Fullscreen, floating, close | Ctrl+Alt+f, Ctrl+Alt+v, Alt+w | Generated `hypr/keybindings.lua` |
 | Application launch and focus | Unrewritten Cmd chords | `hypr/hyprland.lua` |
 | Terminal multiplexer | Ctrl+b prefix, Cmd+digits | `herdr/config.toml` |
 | Copy visible Herdr text by hint (tiny-fingers) | Cmd+Y from any window | `hypr/keys.lua`, Herdr's Ctrl+b f |
@@ -182,6 +182,8 @@ No global keyboard listener or browser content script has been added.
 | Cmd+Space opens the desktop leader | Alt+Space | Cmd+Space opens the Herdr leader from any window |
 | Alt+Space opens the desktop leader, Cmd+Space the Herdr leader | Cmd+Space opens the desktop leader, Alt+Space the Herdr leader | Requested. The desktop leader holds the launcher, which is Cmd+Space on macOS |
 | Alt+Space w d closes a window | Cmd+Space d, Alt+Space d closes a Herdr pane | Most used desktop leader action. w d still works |
+| Ctrl+Alt+w, Cmd+Space d and Cmd+Space w d close a window | Alt+w only | Requested. One chord closes an app everywhere. Emacs M-w copy is shadowed again |
+| Ctrl+b a opens the agent picker | Also Alt+Space a | Requested |
 | Ctrl+b Space s l copies visible text by hint | Cmd+Y, from any window. s l and Ctrl+b f still work | Yank in two keys. One-key s would clash with the Search group |
 | Ctrl+b Space . was unbound | It chooses a Herdr workspace, like TAB . | `.` opens the main picker in every context |
 | Ctrl+j/k in the bbh transcript move by org heading, Ctrl+k in insert state types a digraph | They move focus | Ctrl+h/j/k/l is focus everywhere. n, p, M-n and M-p still move by heading |

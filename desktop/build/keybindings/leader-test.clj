@@ -61,23 +61,26 @@
       "Herdr has no application entries, so its menu must not offer the o group"))
 
 (deftest dot-picks-and-d-closes-in-one-key
-  (is (some #{["d" "Close window or pane"]} (keyleader/menu grammar :desktop nil)))
+  (is (not-any? #(= "d" (first %)) (keyleader/menu grammar :desktop nil))
+      "Alt+W alone closes a desktop window")
   (is (not-any? #(= "d" (first %)) (keyleader/menu grammar :doom nil))
       "Doom's SPC d stays its debugger group")
-  (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
-    (is (lines "hl.bind(mods .. \"D\", keys.leave(hl.dsp.window.close(), \"Cmd+Space d\", \"Close window or pane\"))")))
+  (is (not-any? #(str/includes? % "window.close") (str/split-lines (keyleader/hypr-config grammar)))
+      "The desktop leader does not duplicate Alt+W")
   (let [ran (atom [])]
     (with-redefs [keylog/log! (fn [& _] nil)
                   keyleader/choose-workspace! (fn [] (swap! ran conj :choose-workspace))
-                  keyleader/run! (fn [argv] (swap! ran conj argv))]
+                  keyleader/run! (fn [argv] (swap! ran conj argv))
+                  keyleader/spawn! (fn [argv] (swap! ran conj argv) (delay nil))]
       (keyleader/run-herdr! grammar ["."] {:pane "w1:p2" :tab "w1:t1" :workspace "w1"})
-      (keyleader/run-herdr! grammar ["d"] {:pane "w1:p2" :tab "w1:t1" :workspace "w1"}))
-    (is (= [:choose-workspace ["herdr" "pane" "close" "w1:p2"]] @ran))))
+      (keyleader/run-herdr! grammar ["d"] {:pane "w1:p2" :tab "w1:t1" :workspace "w1"})
+      (keyleader/run-herdr! grammar ["a"] {:pane "w1:p2" :tab "w1:t1" :workspace "w1"}))
+    (is (= [:choose-workspace ["herdr" "pane" "close" "w1:p2"] ["~/.local/bin/herdr-agent-pick"]] @ran))))
 
 (deftest herdr-runs-single-keys-and-plugin-actions
   (is (= [["SPC" "Command palette"] ["," "Switch buffer, tab or window"]
-          ["." "Find file, launch app or switch workspace"] ["d" "Close window or pane"]
-          ["e" "Edit scrollback"] ["w" "Windows and panes ..."] ["b" "Buffers, tabs and windows ..."] ["s" "Search ..."]
+          ["." "Find file, launch app or switch workspace"] ["d" "Close pane"]
+          ["a" "Agents"] ["e" "Edit scrollback"] ["w" "Windows and panes ..."] ["b" "Buffers, tabs and windows ..."] ["s" "Search ..."]
           ["p" "Projects ..."] ["TAB" "Workspaces ..."]]
          (keyleader/menu grammar :herdr nil)))
   (is (= [["." "Switch workspace"] ["`" "Last workspace"]] (keyleader/menu grammar :herdr "TAB")))
@@ -114,8 +117,6 @@
     (is (lines "hl.bind(\"SUPER + SPACE\", keys.enter(\"leader\", \"Cmd+Space\"))")
         "Entering the leader logs a leader row")
     (is (lines "hl.bind(mods .. \"H\", keys.leave(hl.dsp.focus({ direction = \"left\" }), \"Cmd+Space w h\", \"Focus left\"))"))
-    (is (lines "hl.bind(mods .. \"D\", keys.leave(hl.dsp.window.close(), \"Cmd+Space w d\", \"Close window or pane\"))")
-        "Closing runs in Hyprland without asking")
     (is (lines "hl.bind(mods .. \"B\", keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/keyleader run b b\")))")
         "Menus go through the script")
     (is (lines "hl.bind(\"catchall\", keys.cancel(\"leader-w\", \"Cmd+Space w\"))"))
