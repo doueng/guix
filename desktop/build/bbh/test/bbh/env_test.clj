@@ -32,6 +32,12 @@
       (let [printed (repl/eval! conn "(read-lines \"sample.txt\" 2 1)" 10000)]
         (is (= "nil" (:value printed)))
         (is (= "    2  second\n[1 of 2 lines]\n" (:out printed))))
+      (is (= ["Expected one match in sample.txt, found 0. Line 2 matches OLD's first line except for whitespace: \"second\""
+              "Expected one match in sample.txt, found 0. Closest line 1: \"first\""
+              "Expected one match in sample.txt, found 2 at lines 1, 2. Include more context in OLD."]
+             (:value (repl/call conn "(do (spit \"sample.txt\" \"first\\nsecond\\n\")
+                                          (vec (for [[old] [[\"  second\"] [\"first word\"] [\"s\"]]]
+                                                 (try (edit! \"sample.txt\" old \"x\") (catch Exception e (ex-message e))))))" 10000))))
       (is (= {:value [:ok "first\nchanged\n"]}
              (repl/call conn "[(edit! \"sample.txt\" \"second\" \"changed\") (slurp \"sample.txt\")]" 10000)))
       (finally (repl/kill! conn)))))

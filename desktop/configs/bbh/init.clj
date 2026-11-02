@@ -315,13 +315,39 @@
        (println (format "%5d  %s" (inc i) line)))
      (println (format "[%d of %d lines]" (min n (max 0 (- (count lines) (dec start)))) (count lines))))))
 
+(defn- closest-line
+  "Where TEXT has the line most like OLD's first non-blank line, as a hint for a failed edit!, or nil."
+  [text old]
+  (let [first-line (or (first (remove str/blank? (str/split-lines old))) "")
+        probe (str/trim first-line)
+        words #(set (re-seq #"[\w.-]+" %))
+        want (words probe)
+        lines (map-indexed vector (str/split-lines text))]
+    (when (seq want)
+      (if-let [[i line] (first (filter #(= probe (str/trim (second %))) lines))]
+        (if (str/includes? line first-line)
+          (str "OLD's first line is line " (inc i) ", so a later line of OLD differs from the file.")
+          (str "Line " (inc i) " matches OLD's first line except for whitespace: " (pr-str line)))
+        (let [[score i line] (->> lines
+                                  (map (fn [[i l]] [(/ (count (filter want (words l))) (count want)) i l]))
+                                  (apply max-key first))]
+          (when (>= score 1/2)
+            (str "Closest line " (inc i) ": " (pr-str (str/trim line)))))))))
+
 (defn edit!
   "Replace the single occurrence of OLD with NEW in PATH."
   [path old new]
   (let [text (slurp path)
-        hits (count (re-seq (re-pattern (java.util.regex.Pattern/quote old)) text))]
-    (when (not= 1 hits)
-      (throw (ex-info (str "Expected one match in " path ", found " hits) {})))
+        starts (loop [from 0 acc []]
+                 (let [i (str/index-of text old from)]
+                   (if (and i (seq old)) (recur (+ i (count old)) (conj acc i)) acc)))
+        line-of #(inc (count (filter #{\newline} (subs text 0 %))))]
+    (when (not= 1 (count starts))
+      (throw (ex-info (str "Expected one match in " path ", found " (count starts)
+                           (if (seq starts)
+                             (str " at lines " (str/join ", " (map line-of starts)) ". Include more context in OLD.")
+                             (some->> (closest-line text old) (str ". "))))
+                      {})))
     (spit path (str/replace-first text old new))
     :ok))
 
