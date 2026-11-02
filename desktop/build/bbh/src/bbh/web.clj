@@ -6,6 +6,7 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
             [bbh.inbox :as inbox]
+            [bbh.super.client :as super]
             [bbh.transcript :as transcript]
             [cheshire.core :as json]
             [clojure.java.io :as io]
@@ -194,15 +195,65 @@
           (= :post request-method) (send-message root request)
           :else (json-response 405 {:error "Method not allowed"}))))
 
+(defn- super-call
+  "REQUEST to the controller under DIR as a JSON response: 200 or 202 with the
+  result, 409 with the current asks when a Send is stale, 503 when the
+  controller is down."
+  [dir request ok-status]
+  (try (let [{:keys [ok error message data]} (super/call! dir request)]
+         (cond (nil? error) (json-response ok-status ok)
+               (= :stale error) (json-response 409 {:error "stale" :current (:current data) :asks (:asks data)})
+               :else (json-response 400 {:error (str (name error) (when message (str ": " message)))})))
+       (catch java.io.IOException _ (json-response 503 {:error "bbh super is not running"}))
+       (catch clojure.lang.ExceptionInfo e
+         (if (= :down (:error (ex-data e)))
+           (json-response 503 {:error "bbh super is not running"})
+           (json-response 400 {:error (ex-message e)})))))
+
+(defn- cursors [{:keys [query-string]}]
+  (into {} (for [[_ k v] (re-seq #"(T\d+):(\d+)" (str query-string))] [k (parse-long v)])))
+
+(defn- super-api
+  "/api/super: the inbox for the phone, over the controller under DIR."
+  [dir {:keys [uri request-method] :as request}]
+  (let [[_ id verb] (re-matches #"/api/super/threads/(T\d+)(?:/(reply|dismiss|archive))?" uri)
+        body (when (= :post request-method)
+               (try (json/parse-string (slurp (:body request)) true) (catch Exception _ ::bad)))]
+    (cond (and (= uri "/api/super/threads") (= :get request-method))
+          (super-call dir {:command :sections :args {:cursors (cursors request)}} 200)
+          (nil? id) (json-response 404 {:error "Not found"})
+          (and (= :get request-method) (nil? verb))
+          (let [thread (super/call! dir {:command :thread :args {:id id}})
+                events (super/call! dir {:command :events :args {:thread id}})]
+            (if-let [t (:ok thread)]
+              (json-response 200 (assoc t :events (:ok events)))
+              (json-response 404 {:error "No such thread"})))
+          (not= :post request-method) (json-response 405 {:error "Method not allowed"})
+          (not (same-origin? request)) (json-response 403 {:error "Cross-origin request"})
+          (= ::bad body) (json-response 400 {:error "Bad JSON"})
+          (= "reply" verb)
+          (let [{:keys [picks note asks-version]} body]
+            (cond (> (count (str note)) max-text) (json-response 413 {:error "Note too long"})
+                  (not (string? (:id body))) (json-response 400 {:error "A reply needs an id"})
+                  :else (super-call dir {:command :reply! :id (:id body)
+                                         :args {:thread id :asks-version asks-version
+                                                :picks (into {} (map (fn [[k v]] [(name k) (str v)])) picks)
+                                                :note (str/trim (str note))}}
+                                    202)))
+          :else (super-call dir {:command (keyword (str verb "!")) :id (:id body) :args {:thread id}} 202))))
+
 (defn handler
   "The app for the conversations under CONVERSATIONS, open to tailnet user OWNER,
-  a function so that a slow Tailscale start does not stick."
-  [conversations owner]
+  a function so that a slow Tailscale start does not stick. SUPER-DIR is the
+  controller's directory for the inbox."
+  ([conversations owner] (handler conversations owner (super/super-dir)))
+  ([conversations owner super-dir]
   (fn [{:keys [uri headers] :as request}]
     (let [login (headers "tailscale-user-login")]
       (cond (or (nil? login) (not= login (owner))) (json-response 403 {:error "Tailnet owner only"})
+            (str/starts-with? uri "/api/super/") (super-api super-dir request)
             (str/starts-with? uri "/api/") (api conversations request)
-            :else (or (asset uri) (json-response 404 {:error "Not found"}))))))
+            :else (or (asset uri) (json-response 404 {:error "Not found"})))))))
 
 (defn- remembered
   "F's first non-nil answer, kept."

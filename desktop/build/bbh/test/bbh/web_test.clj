@@ -1,6 +1,8 @@
 (ns bbh.web-test
   (:require [babashka.fs :as fs]
             [bbh.inbox :as inbox]
+            [bbh.super]
+            [bbh.super.client]
             [bbh.transcript :as transcript]
             [bbh.web :as web]
             [bbh.web.conversation :as conversation]
@@ -8,6 +10,12 @@
             [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
+
+(defn- wait-for [pred]
+  (loop [n 0]
+    (cond (pred) true
+          (> n 300) false
+          :else (do (Thread/sleep 10) (recur (inc n))))))
 
 (def ^:private owner-headers
   {"tailscale-user-login" "owner@example.com"
@@ -198,3 +206,60 @@
   (is (= [[:p "<img src=x onerror=alert(1)>"]] (md/render "<img src=x onerror=alert(1)>")))
   (is (= [[:p [:a {:href "https://a.example/b" :target "_blank" :rel "noopener noreferrer"} "b"]]]
          (md/render "[b](https://a.example/b)"))))
+
+;; ---- the inbox over /api/super -------------------------------------------
+
+(defn- with-super
+  "A site whose inbox is a controller in a temporary directory, with one thread,
+  a Worker and an open ask. Calls F with the site, the controller and the
+  Worker's conversation root."
+  [f]
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-web-super"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-web-super-conv"}))
+        c (bbh.super/start! {:dir dir :conversations conversations :scan-ms 10})
+        s (assoc (site) :app (web/handler conversations (constantly "owner@example.com") dir))
+        call (fn [req] (bbh.super.client/call! dir req))]
+    (try (call {:command :thread! :args {:title "Herdr key for the thread picker"}})
+         (let [token (:token (:ok (call {:command :attach-worker! :args {:thread "T1" :conversation "w1"}})))]
+           (call {:token token :command :ask! :args {:kind :question :text "Which key should open the inbox pane?"
+                                                     :options [{:id "t" :label "Alt+Space t"} {:id "a" :label "Alt+Space a"}]
+                                                     :recommended "t" :stopped true}}))
+         (f s c (str (fs/path conversations "w1")))
+         (finally (bbh.super/stop! c)))))
+
+(defn- post-super [{:keys [app]} uri body headers]
+  (let [{:keys [status] :as r} (app {:uri uri :request-method :post :headers (merge owner-headers headers)
+                                     :body (java.io.ByteArrayInputStream. (.getBytes (json/generate-string body)))})]
+    [status (json/parse-string (:body r) true)]))
+
+(deftest the-inbox-lists-sections-with-the-badge-and-a-thread-with-its-asks
+  (with-super
+    (fn [s _ _]
+      (let [[status {:keys [badge sections]}] (get-json s "/api/super/threads")]
+        (is (= 200 status))
+        (is (= 1 badge))
+        (is (= ["stopped"] (map :section sections)))
+        (is (= "Which key should open the inbox pane?" (get-in sections [0 :threads 0 :ask :text]))))
+      (let [[status t] (get-json s "/api/super/threads/T1")]
+        (is (= 200 status))
+        (is (= ["open"] (map :state (:asks t))))
+        (is (= ["thread-created" "worker-attached" "token-issued" "ask-opened"] (map :kind (:events t)))))
+      (is (= 404 (first (get-json s "/api/super/threads/T9")))))))
+
+(deftest a-send-from-the-page-lands-in-the-workers-mailbox-once-and-a-stale-one-is-a-conflict
+  (with-super
+    (fn [s c root]
+      (let [[_ t] (get-json s "/api/super/threads/T1")
+            reply {:id "p-1" :asks-version (:asks-version t) :picks {:a1 "t"} :note ""}]
+        (is (= 403 (first (post-super s "/api/super/threads/T1/reply" reply {}))) "a cross-origin POST is refused")
+        (is (= [202 "p-1"] (post-super s "/api/super/threads/T1/reply" reply from-page)))
+        (is (= [202 "p-1"] (post-super s "/api/super/threads/T1/reply" reply from-page)) "the retry is the same reply")
+        (is (wait-for #(seq (fs/glob root "mailbox/*.json"))))
+        (Thread/sleep 50)
+        (is (= 1 (count (fs/glob root "mailbox/*.json"))))
+        (let [[status body] (post-super s "/api/super/threads/T1/reply" (assoc reply :id "p-2") from-page)]
+          (is (= 409 status))
+          (is (= "stale" (:error body)))
+          (is (= [] (:asks body)) "nothing is open any more"))
+        (is (= [202 "T1"] (post-super s "/api/super/threads/T1/archive" {:id "a-1"} from-page)))
+        (is (= ["archived"] (map :section (:sections (second (get-json s "/api/super/threads"))))))))))

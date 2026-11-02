@@ -105,6 +105,15 @@ description = "focus an agent"
 width = "85%"
 height = "80%"
 
+# The bbh inbox: threads that need you, with their asks. 1-4 pick, s send.
+[[keys.command]]
+key = "prefix+t"
+type = "popup"
+command = "$HOME/.local/bin/bbh inbox"
+description = "bbh inbox: threads that need you"
+width = "85%"
+height = "80%"
+
 # Pick an open Herdr workspace with a workspace-only fzf selector.
 [[keys.command]]
 key = "prefix+b"

@@ -5,7 +5,8 @@
             [bbh.inbox :as inbox]
             [bbh.models :as models]
             [bbh.session :as session]
-            [bbh.super :as super]
+            [bbh.super.client :as super]
+            [bbh.super.pane :as pane]
             [bbh.transcript :as transcript]
             [bbh.web :as web]
             [clojure.string :as str])
@@ -88,4 +89,5 @@
                    (inbox/-poll (str (fs/path (super/data-dir) "conversations" id)) project))
     "web" (web/-main (super/data-dir))
     "super" (apply super/-main (rest args))
+    "inbox" (apply pane/-main (rest args))
     (terminal args)))

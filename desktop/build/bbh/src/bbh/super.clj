@@ -5,6 +5,7 @@
   is the client every surface and Worker uses."
   (:require [babashka.fs :as fs]
             [bbh.inbox :as inbox]
+            [bbh.super.client :as client :refer [call! data-dir new-id super-dir]]
             [bbh.super.model :as model]
             [bbh.super.store :as store]
             [clojure.edn :as edn]
@@ -13,11 +14,6 @@
   (:import [java.net ServerSocket Socket InetAddress]
            [java.security MessageDigest SecureRandom]))
 
-(defn data-dir []
-  (fs/path (or (System/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh"))
-
-(defn super-dir [] (str (fs/path (data-dir) "super")))
-
 (defn- sha256 [^String s]
   (let [d (.digest (MessageDigest/getInstance "SHA-256") (.getBytes s "UTF-8"))]
     (apply str (map #(format "%02x" %) d))))
@@ -25,21 +21,31 @@
 (defn- new-token []
   (let [b (byte-array 24)] (.nextBytes (SecureRandom.) b) (apply str (map #(format "%02x" %) b))))
 
-(defn new-id
-  "A command id for a caller that has none: unique and never repeated."
-  []
-  (format "c-%d-%04x" (System/currentTimeMillis) (rand-int 0x10000)))
-
 ;; ---- controller ---------------------------------------------------------
+
+(defn notify-panes!
+  "Tell every fzf pane registered under DIR to reload its rows. A port that
+  refuses the connection is forgotten."
+  [dir]
+  (doseq [f (when (fs/exists? (client/listeners-dir dir)) (fs/list-dir (client/listeners-dir dir)))
+          :let [port (parse-long (str/trim (slurp (str f))))]]
+    (try (with-open [sock (Socket. "127.0.0.1" (int port))
+                     out (io/writer (.getOutputStream sock))]
+           (let [body "reload(bbh inbox rows)+refresh-preview"]
+             (.write out (str "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: " (count body) "\r\n\r\n" body))
+             (.flush out)))
+         (catch java.io.IOException _ (fs/delete-if-exists f)))))
 
 (defn- run!
   "Commit COMMAND for PRINCIPAL on controller C. Serialized: the controller is
-  the single writer."
-  [{:keys [db state]} principal command]
-  (locking db
-    (let [r (store/commit! db @state principal command)]
-      (reset! state (:state r))
-      r)))
+  the single writer. A commit that changed something reloads the panes."
+  [{:keys [db state dir]} principal command]
+  (let [r (locking db
+            (let [r (store/commit! db @state principal command)]
+              (reset! state (:state r))
+              r))]
+    (when-not (:repeat? r) (notify-panes! dir))
+    r))
 
 (defn- principal-of [state token]
   (when (string? token)
@@ -57,6 +63,8 @@
                     of (fn [kind] (vec (sort-by :seq (filter #(= id (:thread %)) (vals (kind st))))))]
                 (when t (assoc t :asks (of :asks) :replies (of :replies) :workers (vec (sort-by :generation (filter #(= id (:thread %)) (vals (:workers st))))))))
       :events (store/events db (or (:after args) 0) (:thread args))
+      :sections (let [sections (model/sections st (or (:cursors args) {}))]
+                  {:sections sections :badge (model/badge sections)})
       ::unknown)))
 
 (defn handle
@@ -162,40 +170,9 @@
   (locking db (store/close! db))
   (.close ^java.nio.channels.FileChannel lock))
 
-;; ---- client -------------------------------------------------------------
-
-(defn call!
-  "Send REQUEST {:command :args :id :token} to the controller under DIR and
-  return its response map, {:ok ...} or {:error ...}. The token defaults to the
-  owner's in <dir>/token, the id to a fresh one."
-  ([request] (call! (super-dir) request))
-  ([dir {:keys [token id] :as request}]
-   (let [port-file (fs/path dir "port")
-         _ (when-not (fs/exists? port-file) (throw (ex-info "bbh super is not running" {:dir dir})))
-         port (parse-long (str/trim (slurp (str port-file))))
-         token (or token (System/getenv "BBH_SUPER_TOKEN") (str/trim (slurp (str (fs/path dir "token")))))]
-     (with-open [sock (Socket. "127.0.0.1" (int port))
-                 out (io/writer (.getOutputStream sock))
-                 in (io/reader (.getInputStream sock))]
-       (.write out (pr-str (assoc request :token token :id (or id (new-id)))))
-       (.write out "\n")
-       (.flush out)
-       (edn/read-string (.readLine in))))))
-
 (defn -main
-  "bbh super serve, or bbh super COMMAND [EDN-ARGS] [--id ID]."
-  [& [command & args]]
-  (case command
-    "serve" (do (start! {:dir (super-dir)})
-                (println "bbh super on" (super-dir))
-                @(promise))
-    (nil "help" "--help")
-    (println (str/join "\n" ["usage: bbh super serve"
-                               "       bbh super COMMAND [EDN-ARGS] [--id ID]"
-                               "commands: thread! link! attach-worker! ask! reply! note! milestone! answered! threads thread events"
-                               "example: bbh super thread! '{:title \"Alt+W closes windows\"}'"]))
-    (let [[edn-args & more] args
-          id (second (drop-while #(not= "--id" %) more))
-          response (call! {:command (keyword command) :args (when edn-args (edn/read-string edn-args)) :id id})]
-      (prn response)
-      (System/exit (if (:error response) 1 0)))))
+  "bbh super serve: run the controller until killed."
+  []
+  (start! {:dir (super-dir)})
+  (println "bbh super on" (super-dir))
+  @(promise))

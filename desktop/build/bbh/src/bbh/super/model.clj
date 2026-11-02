@@ -82,23 +82,28 @@
               {:kind :token-issued :thread thread :data {:hash token-hash :principal [:worker id]}}]
      :result {:id id}}))
 
-(defmethod decide* :ask! [state {{:keys [thread worker kind text options recommended stopped holds-up]} :args}]
+(defn- open-asks [state thread]
+  (into {} (filter (fn [[_ a]] (and (= thread (:thread a)) (= :open (:state a)))) (:asks state))))
+
+(defmethod decide* :ask! [state {{:keys [thread worker kind text options recommended stopped holds-up supersedes]} :args}]
   (let [t (thread-of state thread)
-        worker (or worker (:worker t))]
+        worker (or worker (:worker t))
+        open (open-asks state thread)]
     (when-not (#{:question :action :review} kind) (refuse :invalid :field :kind))
     (when (str/blank? text) (refuse :invalid :field :text))
     (when-not (= worker (:worker t)) (refuse :no-active-worker :thread thread))
+    (doseq [a supersedes] (when-not (open a) (refuse :no-such-ask :ask a)))
     (let [id (next-id state :asks "a")]
       {:events [{:kind :ask-opened :thread thread
                  :data (cond-> {:id id :worker worker :kind kind :text text :options (vec options)
-                                :stopped (boolean stopped)}
+                                :stopped (boolean stopped) :supersedes (vec supersedes)}
                          recommended (assoc :recommended recommended)
                          holds-up (assoc :holds-up holds-up))}]
        :result id})))
 
 (defmethod decide* :reply! [state {{:keys [thread asks-version picks note dismiss]} :args :keys [id]}]
   (let [t (thread-of state thread)
-        open (into {} (filter (fn [[_ a]] (and (= thread (:thread a)) (= :open (:state a)))) (:asks state)))]
+        open (open-asks state thread)]
     (when (not= asks-version (:asks-version t))
       (refuse :stale :current (:asks-version t) :asks (vec (sort-by :seq (vals open)))))
     (doseq [[ask option] picks]
@@ -115,6 +120,26 @@
                               :conversation (get-in state [:workers (:worker t) :conversation])
                               :text (reply-text state reply))}]
        :result id})))
+
+(defn- dismissal
+  "The reply-sent event that closes every open ask of THREAD without answering,
+  or nil when nothing is open or no Worker listens."
+  [state thread id]
+  (let [t (thread-of state thread)
+        open (open-asks state thread)]
+    (when (and (seq open) (:worker t))
+      (let [reply {:id id :thread thread :worker (:worker t) :picks {} :note "" :dismiss (set (keys open))}]
+        {:kind :reply-sent :thread thread
+         :data (assoc reply :outbox (next-id state :outbox "o")
+                      :conversation (get-in state [:workers (:worker t) :conversation])
+                      :text (reply-text state reply))}))))
+
+(defmethod decide* :dismiss! [state {{:keys [thread]} :args :keys [id]}]
+  {:events (filterv some? [(dismissal state thread id)]) :result thread})
+
+(defmethod decide* :archive! [state {{:keys [thread]} :args :keys [id]}]
+  {:events (filterv some? [(dismissal state thread id) {:kind :thread-resolved :thread thread :data {}}])
+   :result thread})
 
 (defmethod decide* :note! [state {{:keys [thread text]} :args}]
   (thread-of state thread)
@@ -154,71 +179,140 @@
 (defn- set-states [state kind ids st]
   (reduce #(assoc-in %1 [kind %2 :state] st) state ids))
 
-(defmulti fold
+(defmulti fold*
   "STATE after EVENT, which has :seq, :at, :kind, :thread and :data."
   (fn [_state event] (:kind event)))
 
-(defmethod fold :thread-created [state {{:keys [id title]} :data :keys [seq]}]
+(defn fold
+  "STATE after EVENT, with the thread it concerns stamped :updated-at."
+  [state {:keys [thread at] :as event}]
+  (let [state (fold* state event)]
+    (cond-> state
+      (get-in state [:threads thread]) (assoc-in [:threads thread :updated-at] at))))
+
+(defmethod fold* :thread-created [state {{:keys [id title]} :data :keys [seq]}]
   (-> state (bump :threads)
       (assoc-in [:threads id] {:id id :title title :resources #{} :worker nil :history []
                                :execution :none :asks-version seq :resolved-at nil :summary nil
                                :milestone-seq seq})))
 
-(defmethod fold :thread-linked [state {{:keys [resource]} :data :keys [thread]}]
+(defmethod fold* :thread-linked [state {{:keys [resource]} :data :keys [thread]}]
   (update-in state [:threads thread :resources] conj resource))
 
-(defmethod fold :worker-attached [state {{:keys [id conversation generation]} :data :keys [thread]}]
+(defmethod fold* :worker-attached [state {{:keys [id conversation generation]} :data :keys [thread]}]
   (-> state (bump :workers)
       (assoc-in [:workers id] {:id id :thread thread :generation generation :conversation conversation
                                :state :working :lease :router})
       (assoc-in [:threads thread :worker] id)
       (assoc-in [:threads thread :execution] :working)))
 
-(defmethod fold :token-issued [state {{:keys [hash principal]} :data}]
+(defmethod fold* :token-issued [state {{:keys [hash principal]} :data}]
   (assoc-in state [:tokens hash] {:id hash :principal principal :revoked false}))
 
-(defmethod fold :ask-opened [state {{:keys [id stopped] :as ask} :data :keys [thread seq]}]
+(defmethod fold* :ask-opened [state {{:keys [id stopped supersedes] :as ask} :data :keys [thread seq]}]
   (-> state (bump :asks)
+      (set-states :asks supersedes :superseded)
       (assoc-in [:asks id] (assoc ask :thread thread :seq seq :state :open))
       (assoc-in [:threads thread :asks-version] seq)
       (assoc-in [:threads thread :milestone-seq] seq)
       (cond-> stopped (-> (assoc-in [:threads thread :execution] :waiting)
                           (assoc-in [:workers (:worker ask) :state] :waiting)))))
 
-(defmethod fold :reply-sent [state {{:keys [id picks dismiss outbox conversation text] :as reply} :data :keys [thread seq]}]
+(defn- resume
+  "STATE with THREAD and its Worker working again when no stopped ask is open."
+  [state thread]
+  (let [t (get-in state [:threads thread])
+        stopped? (some #(and (= thread (:thread %)) (= :open (:state %)) (:stopped %)) (vals (:asks state)))]
+    (cond-> state
+      (and (:worker t) (not stopped?) (not (:resolved-at t)))
+      (-> (assoc-in [:threads thread :execution] :working)
+          (assoc-in [:workers (:worker t) :state] :working)))))
+
+(defmethod fold* :reply-sent [state {{:keys [id picks dismiss outbox conversation text] :as reply} :data :keys [thread seq]}]
   (-> state (bump :outbox)
       (assoc-in [:replies id] (-> reply (dissoc :outbox :conversation :text) (assoc :state :sent :outbox outbox :seq seq)))
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply id :conversation conversation :text text
                                   :state :pending :message nil})
       (set-states :asks (keys picks) :sent)
       (set-states :asks dismiss :dismissed)
-      (assoc-in [:threads thread :asks-version] seq)))
+      (assoc-in [:threads thread :asks-version] seq)
+      (resume thread)))
 
-(defmethod fold :note [state {{:keys [text]} :data :keys [thread]}]
+;; ---- sections -----------------------------------------------------------
+
+(def section-order [:stopped :holding-up :waiting :needs-attention :sent :new :working :quiet :archived])
+
+(def section-titles
+  {:stopped "Stopped on you" :holding-up "Holding up work" :waiting "Waiting on you"
+   :needs-attention "Needs attention" :sent "Sent" :new "New" :working "Working"
+   :quiet "Quiet" :archived "Archived"})
+
+(defn section
+  "THREAD's section in STATE, by the doc's rule, first match wins. CURSOR is
+  the last seq this client has seen on the thread."
+  [state {:keys [id execution resolved-at milestone-seq]} cursor]
+  (let [asks (filter #(= id (:thread %)) (vals (:asks state)))
+        open (filter #(= :open (:state %)) asks)
+        replies (filter #(= id (:thread %)) (vals (:replies state)))]
+    (cond resolved-at :archived
+          (some :stopped open) :stopped
+          (some :holds-up open) :holding-up
+          (seq open) :waiting
+          (and (= :failed execution) (empty? open)) :needs-attention
+          (some #(#{:sent :delivered} (:state %)) replies) :sent
+          (> (or milestone-seq 0) (or cursor 0)) :new
+          (#{:working :queued} execution) :working
+          :else :quiet)))
+
+(defn ask-line
+  "The open ask of THREAD to show on its row, or nil."
+  [state thread-id]
+  (->> (vals (:asks state))
+       (filter #(and (= thread-id (:thread %)) (= :open (:state %))))
+       (sort-by :seq) last))
+
+(defn sections
+  "Threads of STATE grouped in the doc's order, each with its open ask and
+  whether an archived one came back. CURSORS maps thread id to the seq the
+  client last saw."
+  [state cursors]
+  (let [rows (for [t (sort-by :id (vals (:threads state)))
+                   :let [s (section state t (get cursors (:id t)))]]
+               (assoc t :section s :ask (ask-line state (:id t))
+                      :came-back (boolean (and (:resolved-at t) (> (:milestone-seq t) (:resolved-at t))))))
+        by (group-by :section rows)]
+    (vec (for [s section-order :when (seq (by s))]
+           {:section s :title (section-titles s) :threads (vec (by s))}))))
+
+(defn badge
+  "How many threads need you: the first three sections."
+  [sections]
+  (reduce + (map #(count (:threads %)) (filter #(#{:stopped :holding-up :waiting} (:section %)) sections))))
+
+(defmethod fold* :thread-resolved [state {:keys [thread seq]}]
+  (update-in state [:threads thread] assoc :resolved-at seq :execution :none))
+
+(defmethod fold* :note [state {{:keys [text]} :data :keys [thread]}]
   (assoc-in state [:threads thread :summary] text))
 
-(defmethod fold :milestone [state {{:keys [text]} :data :keys [thread seq]}]
+(defmethod fold* :milestone [state {{:keys [text]} :data :keys [thread seq]}]
   (-> state (assoc-in [:threads thread :summary] text) (assoc-in [:threads thread :milestone-seq] seq)))
 
-(defmethod fold :outbox-sent [state {{:keys [id message]} :data}]
+(defmethod fold* :outbox-sent [state {{:keys [id message]} :data}]
   (update-in state [:outbox id] assoc :state :sent :message message))
 
-(defmethod fold :outbox-acked [state {{:keys [id]} :data}]
+(defmethod fold* :outbox-acked [state {{:keys [id]} :data}]
   (let [reply (get-in state [:replies (get-in state [:outbox id :reply])])]
     (-> state (assoc-in [:outbox id :state] :acked)
         (assoc-in [:replies (:id reply) :state] :delivered)
         (set-states :asks (keys (:picks reply)) :delivered))))
 
-(defmethod fold :reply-answered [state {{:keys [id]} :data :keys [thread]}]
-  (let [reply (get-in state [:replies id])
-        t (get-in state [:threads thread])
-        still-open? (some #(and (= thread (:thread %)) (= :open (:state %)) (:stopped %)) (vals (:asks state)))]
+(defmethod fold* :reply-answered [state {{:keys [id]} :data :keys [thread]}]
+  (let [reply (get-in state [:replies id])]
     (-> state (assoc-in [:replies id :state] :answered)
         (assoc-in [:outbox (:outbox reply) :state] :processed)
         (set-states :asks (keys (:picks reply)) :answered)
-        (cond-> (and (:worker t) (not still-open?))
-          (-> (assoc-in [:threads thread :execution] :working)
-              (assoc-in [:workers (:worker t) :state] :working))))))
+        (resume thread))))
 
 (defn changed
   "[kind id record] for every record that differs between BEFORE and AFTER."
