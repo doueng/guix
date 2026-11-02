@@ -86,8 +86,33 @@
     (stop! h)
     (is (< (- (System/currentTimeMillis) start) 5000))
     (is (= ["=> #'user/y"
-            "Timed out after 500 ms. The REPL process was killed and restarted, so live definitions are gone and init.clj was reloaded."
-            "=> [nil 7]"]
+            "Timed out after 500 ms. The REPL process was killed and restarted, so init.clj was reloaded and 1 definition were restored from the checkpoint."
+            "=> [#'user/y 7]"]
+           (tool-results h)))))
+
+(deftest a-restarted-repl-replays-the-checkpoint-without-redoing-work
+  (let [h (harness "(ns bbh.env) (def manifest {:deadline-ms 500})"
+                   [{:code "(def t (System/currentTimeMillis)) (defn twice [x] (* 2 x)) (def dep (twice 4)) (def a (atom 0)) (println :setup) t"}
+                    {:code "(intern 'user 'helper (fn [] 1)) (def uses-helper (partial helper))"}
+                    {:code "(loop [] (recur))"}
+                    {:code "[t (twice 5) dep @a (some-> (resolve 'uses-helper) bound?)]"}
+                    "ok"])]
+    (session/prompt! (:s h) "work")
+    (stop! h)
+    (let [[before _ restart after] (tool-results h)
+          t (second (re-find #"=> (\d+)$" before))]
+      (is (re-matches #"\d+" (str t)))
+      (is (= (str "=> [" t " 10 8 0 false]") after) "the def keeps its value and the fn works again")
+      (is (= (str "Timed out after 500 ms. The REPL process was killed and restarted, so init.clj was reloaded and 4 definitions were restored from the checkpoint."
+                  " These failed on replay and were dropped: (def uses-helper (partial helper)) (Unable to resolve symbol: helper)")
+             restart))
+      (is (str/includes? (slurp (str (fs/path (:repl-dir @(:s h)) "checkpoint.clj"))) "(def dep 8)") "a readable value is stored as its literal"))))
+
+(deftest a-restart-with-nothing-defined-says-definitions-are-gone
+  (let [h (harness "(ns bbh.env) (def manifest {:deadline-ms 500})" [{:code "(loop [] (recur))"} "ok"])]
+    (session/prompt! (:s h) "spin")
+    (stop! h)
+    (is (= ["Timed out after 500 ms. The REPL process was killed and restarted, so live definitions are gone and init.clj was reloaded."]
            (tool-results h)))))
 
 (deftest job-wait-moves-the-deadline-instead-of-timing-out

@@ -4,6 +4,7 @@
   Events are maps with a :type of :text, :thought, :tool-call, :tool-result or
   :usage."
   (:require [babashka.fs :as fs]
+            [bbh.checkpoint :as checkpoint]
             [bbh.delimiters :as delimiters]
             [bbh.repl :as repl]
             [bbh.runs :as runs]
@@ -93,17 +94,34 @@
            (trace-run! s "llm" start {:status "error" :error (ex-message e)})
            (throw e)))))
 
+(defn- checkpoint-path [s] (str (fs/path (:repl-dir @s) "checkpoint.clj")))
+
 (defn start-repl!
-  "Start the REPL and load init. Returns a problem description or nil."
+  "Start the REPL, load init and replay the checkpoint. Returns a problem description or nil."
   [s]
-  (let [{:keys [dir repl-dir init cwd env]} @s
+  (let [{:keys [repl-dir init cwd env]} @s
         conn (repl/start! {:dir repl-dir :cwd cwd
                            :env env})
         r (when (and init (fs/exists? init))
             (repl/eval! conn (str "(load-file " (pr-str (str init)) ")") 30000))]
-    (swap! s assoc :repl conn)
+    (swap! s assoc :repl conn :checkpoint (checkpoint/replay! (checkpoint-path s) conn))
     (when (or (:timeout r) (:died r) (:error? r))
       (str "Loading " init " failed:\n" (render r 4000)))))
+
+(defn- after-restart
+  "What the last restart did to the model's definitions, for its messages."
+  [s]
+  (let [{:keys [restored failed quarantined error]} (:checkpoint @s)]
+    (cond quarantined
+          (str "init.clj was reloaded, but replaying the checkpoint failed (" error "), so it was moved to "
+               quarantined " and live definitions are gone.")
+          restored
+          (str "init.clj was reloaded and " restored " definition" (when (not= 1 restored) "s")
+               " were restored from the checkpoint."
+               (when (seq failed)
+                 (str " These failed on replay and were dropped: "
+                      (str/join "; " (map (fn [[source err]] (str source " (" err ")")) failed)))))
+          :else "live definitions are gone and init.clj was reloaded.")))
 
 (defn restart-repl! [s]
   (some-> (:repl @s) repl/kill!)
@@ -263,13 +281,14 @@
                                 :else "The REPL process exited.")
                       init-problem (restart-repl! s)
                       partial (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest))]
-                  [(str why " The REPL process was killed and restarted, so live definitions are gone and init.clj was reloaded."
+                  [(str why " The REPL process was killed and restarted, so " (after-restart s)
                         (when init-problem (str "\n" init-problem))
                         (when (seq partial) (str "\nOutput before that:\n" partial)))
                    :failed])
                 :else
-                [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (name-hint s r))
-                 (if (:error? r) :failed :completed)])
+                (do (when-not (:error? r) (checkpoint/record! (checkpoint-path s) repl (or content code)))
+                    [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (name-hint s r))
+                     (if (:error? r) :failed :completed)]))
           text (cond->> text note (str note "\n"))]
       (emit! s {:type :tool-result :id id :code code :text text :status status})
       text)))
@@ -464,6 +483,8 @@
             _ (stop-engine! s)
             _ (swap! s assoc :dir dir :messages messages :last-input nil
                      :notes ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
+            ;; The checkpoint belongs to the conversation being left.
+            _ (fs/delete-if-exists (checkpoint-path s))
             problem (restart-repl! s)]
         (str problem)))))
 
@@ -486,7 +507,7 @@
    "restart" {:doc "Kill and restart the REPL. The transcript stays."
               :run (fn [s _]
                      (let [problem (restart-repl! s)]
-                       (swap! s update :notes conj "The user restarted the REPL, so live definitions are gone.")
+                       (swap! s update :notes conj (str "The user restarted the REPL, so " (after-restart s)))
                        (str "REPL restarted on port " (:port (:repl @s)) (when problem (str "\n" problem)))))}
    "model" {:doc "Show the model, or switch with /model ID."
             :run (fn [s args]
