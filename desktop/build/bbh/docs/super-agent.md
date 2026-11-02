@@ -399,7 +399,7 @@ The hard correctness properties come first, and the surfaces grow beside them. E
 
 | Phase | Deliverable | Acceptance |
 |---|---|---|
-| 0 | Plannotator spike | A bbh Worker asks a question through Plannotator, you answer from its phone page over the tailnet, the answer arrives as a bbh turn. Decide build or integrate on what the bridge looks like. |
+| 0 | Plannotator spike | Done 2026-11-02: a question went through its MCP endpoint and was read back; decision in section 14. |
 | 1 | Controller and store | `babashka.sqlite` opens Guix's `libsqlite3` on this machine. `bbh super` with `thread!`, `ask!`, `reply!`, the events, commands and outbox tables. Kill the controller at every step of a reply and restart: accepted events are kept, a retried command returns its original result, and replaying all events into an empty database reproduces the materialized state. |
 | 2 | Ask and reply protocol | Picks, Send with `:asks-version`, dismiss, supersede, delivery states, `bbh super list` and one view (the Herdr inbox pane). Sending the same reply twice yields one logical reply and one Worker turn. Answering from two devices leaves one winner and one clear conflict. |
 | 3 | Worker ownership and isolation | Worker records, generations, jj workspaces, resource locks, the concurrency cap, `takeover!` and `handback!`. Two Workers change the same repository without touching each other's working copy, evidence or revision. |
@@ -415,6 +415,6 @@ The first slice worth building is smaller than phase 1 and 2 together: the contr
 - Voice uses Cmd+Shift+M for now. Hyprland has nothing on it; kanata and the application layers are checked when the bind is added, with the keybindings skill.
 - Router replies are text only, also when the request was spoken.
 - No push notifications. The phone shows what needs you when you open it, and the badge in the page title does the rest. The laptop cannot notify while asleep in any case.
-- Plannotator: phase 0 decides. If its thread and reply API can be bridged without a second ask lifecycle, bbh owns execution and workflow state and Plannotator owns ask and reply interaction. If not, the inbox pane and phone view are built as described.
+- Plannotator: the phase 0 spike sent a question over its MCP HTTP endpoint and read it back, but replies reach an agent only by polling, the installed version lacks the documented `inbox call`, and a bridge would mirror its ask states into the controller. The ask lifecycle and both views are built in bbh. Plannotator can become a later surface through `send_message` and `wait_for_reply`.
 - Router model: deterministic routing and Jev first, a mid-priced model for the rest. Routing accuracy is measured on real requests before the model is chosen.
 - Memory: archived threads, their summaries, events and links to conversations and `wf` evidence are kept indefinitely and searchable. No memory subsystem until that is a problem.
