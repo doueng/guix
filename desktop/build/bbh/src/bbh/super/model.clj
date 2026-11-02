@@ -16,13 +16,18 @@
 ;; ---- authorization ------------------------------------------------------
 
 (def ^:private grants
-  {:router #{:thread! :link! :attach-worker!}
-   :worker #{:ask! :note! :milestone! :answered!}
-   :controller #{:issue-token! :outbox-sent! :outbox-acked!}})
+  {:router #{:thread! :link! :attach-worker! :start-worker!}
+   :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
+   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running!}})
+
+(def default-policy
+  "What policy.edn says when it is absent: the Worker cap, the locks a Worker
+  may hold, and the ones never granted (a system switch is always an ask)."
+  {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"]})
 
 (defn authorize
   "Throw unless PRINCIPAL may run COMMAND on STATE. A Worker acts on its own
-  thread only, and its :thread argument defaults to it."
+  thread and itself only; its :thread and :worker arguments default to them."
   [state principal {:keys [command args] :as cmd}]
   (let [[kind id] (if (vector? principal) principal [principal])]
     (cond (= :owner kind) cmd
@@ -31,6 +36,7 @@
           (let [thread (:thread (get-in state [:workers id]))
                 asked (or (:thread args) thread)]
             (when (not= asked thread) (refuse :forbidden :command command :thread asked))
+            (when (and (:worker args) (not= (:worker args) id)) (refuse :forbidden :command command :worker (:worker args)))
             (-> cmd (assoc-in [:args :thread] thread) (assoc-in [:args :worker] id)))
           :else cmd)))
 
@@ -54,7 +60,7 @@
                              (when (seq picks) (str/join "\n" (map ask-line picks)))
                              (when (seq dismiss) (str "Not answered, do not wait: " (str/join ", " dismiss)))
                              (when-not (str/blank? note) note)
-                             (format "When this reply is handled, run (super/answered! \"%s\")." id)]))))
+                             (format "When this reply is handled, run (super-answered! \"%s\")." id)]))))
 
 (defmulti decide*
   "Events and result for an authorized command, or a refusal."
@@ -84,6 +90,78 @@
 
 (defn- open-asks [state thread]
   (into {} (filter (fn [[_ a]] (and (= thread (:thread a)) (= :open (:state a)))) (:asks state))))
+
+(def active-states #{:starting :working :waiting})
+
+(defn- active-workers [state]
+  (filter #(active-states (:state %)) (vals (:workers state))))
+
+(defn- blocked-by
+  "Why WORKER cannot run now under POLICY, or nil: the cap, or a lock held by
+  another Worker."
+  [state policy {:keys [id locks]}]
+  (let [held (keep (fn [l] (when-let [w (get-in state [:locks l])] (when (not= w id) (str l " held by " w)))) locks)]
+    (cond (seq held) (str/join ", " held)
+          (>= (count (remove #(= id (:id %)) (active-workers state))) (:workers policy)) (str (:workers policy) " Workers already running")
+          :else nil)))
+
+(defn next-queued
+  "The oldest queued Worker that may start now under POLICY, or nil."
+  [state policy]
+  (->> (vals (:workers state)) (filter #(= :queued (:state %))) (sort-by :id)
+       (remove #(blocked-by state policy %)) first))
+
+(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo locks check]} :args :keys [token-hash policy]}]
+  (let [t (thread-of state thread)
+        policy (or policy default-policy)
+        locks (set locks)
+        id (next-id state :workers "W")]
+    (when (:worker t) (refuse :thread-has-worker :thread thread :worker (:worker t)))
+    (when-not (keyword? workflow) (refuse :invalid :field :workflow))
+    (when (str/blank? brief) (refuse :invalid :field :brief))
+    (when (str/blank? repo) (refuse :invalid :field :repo))
+    (doseq [l locks]
+      (when (some #{l} (:never-granted policy)) (refuse :never-granted :lock l))
+      (when-not (some #{l} (:locks policy)) (refuse :unknown-lock :lock l)))
+    (let [worker (cond-> {:id id :generation (inc (count (:history t))) :workflow workflow :brief brief :repo repo :locks locks}
+                   check (assoc :check check))
+          reason (blocked-by state policy (assoc worker :thread thread))]
+      {:events [{:kind :worker-started :thread thread
+                 :data (assoc worker :state (if reason :queued :starting) :queued-reason reason)}
+                {:kind :token-issued :thread thread :data {:hash token-hash :principal [:worker id]}}]
+       :result (cond-> {:id id :state (if reason :queued :starting)} reason (assoc :reason reason))})))
+
+(defn- brief-text
+  "The first mailbox message of Worker W: its brief and how it reports."
+  [{:keys [id thread brief workflow]} wf-run]
+  (str/join "\n\n" [(format "[%s brief for %s]" thread id)
+                       brief
+                       (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
+                               id thread wf-run (name workflow))]))
+
+(defmethod decide* :worker-running! [state {{:keys [worker conversation wf-run workspace pane]} :args}]
+  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+    (when-not (#{:starting :queued} (:state w)) (refuse :not-starting :worker worker :state (:state w)))
+    {:events [{:kind :worker-running :thread (:thread w)
+               :data {:id worker :conversation conversation :wf-run wf-run :workspace workspace :pane pane
+                      :outbox (next-id state :outbox "o") :text (brief-text w wf-run)}}]
+     :result worker}))
+
+(defmethod decide* :finish-worker! [state {{:keys [worker state-after reason]} :args}]
+  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+    (when-not (#{:done :failed} state-after) (refuse :invalid :field :state-after))
+    (when (#{:done :failed} (:state w)) (refuse :already-finished :worker worker))
+    {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state state-after :reason reason}}]
+     :result worker}))
+
+(defmethod decide* :takeover! [state {{:keys [worker]} :args}]
+  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+    (when-not (active-states (:state w)) (refuse :not-active :worker worker))
+    {:events [{:kind :lease-moved :thread (:thread w) :data {:id worker :lease :you}}] :result worker}))
+
+(defmethod decide* :handback! [state {{:keys [worker]} :args}]
+  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+    {:events [{:kind :lease-moved :thread (:thread w) :data {:id worker :lease :router}}] :result worker}))
 
 (defmethod decide* :ask! [state {{:keys [thread worker kind text options recommended stopped holds-up supersedes]} :args}]
   (let [t (thread-of state thread)
@@ -206,6 +284,35 @@
       (assoc-in [:threads thread :worker] id)
       (assoc-in [:threads thread :execution] :working)))
 
+(defmethod fold* :worker-started [state {{:keys [id] :as worker} :data :keys [thread]}]
+  (-> state (bump :workers)
+      (assoc-in [:workers id] (assoc worker :thread thread :lease :router :conversation nil :wf-run nil :workspace nil :pane nil))
+      (cond-> (= :queued (:state worker)) (assoc-in [:threads thread :execution] :queued))))
+
+(defmethod fold* :worker-running [state {{:keys [id outbox text conversation] :as running} :data :keys [thread]}]
+  (let [w (get-in state [:workers id])]
+    (-> state (bump :outbox)
+        (update-in [:workers id] merge (dissoc running :id :outbox :text) {:state :working :queued-reason nil})
+        (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
+                                    :state :pending :message nil})
+        (update :locks merge (zipmap (:locks w) (repeat id)))
+        (assoc-in [:threads thread :worker] id)
+        (assoc-in [:threads thread :execution] :working))))
+
+(defmethod fold* :worker-finished [state {{:keys [id reason] outcome :state} :data :keys [thread seq]}]
+  (let [t (get-in state [:threads thread])]
+    (-> state
+        (update-in [:workers id] assoc :state outcome :reason reason)
+        (update :locks #(into {} (remove (fn [[_ holder]] (= holder id)) %)))
+        (cond-> (= id (:worker t))
+          (-> (assoc-in [:threads thread :worker] nil)
+              (update-in [:threads thread :history] conj id)
+              (assoc-in [:threads thread :execution] outcome)
+              (assoc-in [:threads thread :milestone-seq] seq))))))
+
+(defmethod fold* :lease-moved [state {{:keys [id lease]} :data}]
+  (assoc-in state [:workers id :lease] lease))
+
 (defmethod fold* :token-issued [state {{:keys [hash principal]} :data}]
   (assoc-in state [:tokens hash] {:id hash :principal principal :revoked false}))
 
@@ -303,9 +410,9 @@
 
 (defmethod fold* :outbox-acked [state {{:keys [id]} :data}]
   (let [reply (get-in state [:replies (get-in state [:outbox id :reply])])]
-    (-> state (assoc-in [:outbox id :state] :acked)
-        (assoc-in [:replies (:id reply) :state] :delivered)
-        (set-states :asks (keys (:picks reply)) :delivered))))
+    (cond-> (assoc-in state [:outbox id :state] :acked)
+      reply (-> (assoc-in [:replies (:id reply) :state] :delivered)
+                (set-states :asks (keys (:picks reply)) :delivered)))))
 
 (defmethod fold* :reply-answered [state {{:keys [id]} :data :keys [thread]}]
   (let [reply (get-in state [:replies id])]

@@ -13,11 +13,17 @@
   (:import [org.jline.reader EndOfFileException LineReader LineReaderBuilder UserInterruptException]
            [org.jline.terminal TerminalBuilder]))
 
-(defn- conversation-dir [resume]
+(defn- conversation-dir
+  "The conversation to run: RESUME names a saved one, ID a new one under that
+  name (for a controller that must know the mailbox first), else a fresh one."
+  [resume id]
   (let [root (fs/path (super/data-dir) "conversations")
         saved (when (fs/exists? root)
                 (->> (fs/list-dir root) (filter #(fs/exists? (fs/path % "messages.jsonl"))) (map str) sort))]
-    (cond (nil? resume) (str (fs/path root (transcript/new-id)))
+    (cond (and (nil? resume) id) (if (fs/exists? (fs/path root id "messages.jsonl"))
+                                   (transcript/continuation (str (fs/path root id)))
+                                   (str (fs/path root id)))
+          (nil? resume) (str (fs/path root (transcript/new-id)))
           (= "last" resume) (transcript/continuation (or (last saved) (throw (ex-info "No conversation to resume" {}))))
           (some #{(str (fs/path root resume))} saved) (transcript/continuation (str (fs/path root resume)))
           :else (throw (ex-info (str "No conversation " resume " under " root) {})))))
@@ -48,11 +54,12 @@
       nil opts
       "--model" (recur more (assoc opts :model value))
       "--resume" (recur more (assoc opts :resume value))
-      (throw (ex-info (str "Usage: bbh [acp] [--model PROVIDER/MODEL] [--resume ID|last]; unknown " flag) {})))))
+      "--id" (recur more (assoc opts :id value))
+      (throw (ex-info (str "Usage: bbh [acp] [--model PROVIDER/MODEL] [--resume ID|last] [--id ID]; unknown " flag) {})))))
 
 (defn- terminal [args]
-  (let [{:keys [model resume]} (parse-args args)
-        dir (conversation-dir resume)
+  (let [{:keys [model resume id]} (parse-args args)
+        dir (conversation-dir resume id)
         s (session/new-session {:dir dir
                                 :init (or (System/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
                                 :model (or model (models/default-model))
@@ -63,7 +70,22 @@
         reader (-> (LineReaderBuilder/builder)
                    (.terminal (-> (TerminalBuilder/builder) (.system true) (.build)))
                    (.variable LineReader/HISTORY_FILE (fs/path (super/data-dir) "history"))
-                   (.build))]
+                   (.build))
+        turn (Object.)
+        prompt! (fn [text]
+                  (locking turn
+                    (try (session/prompt! s text)
+                         (catch Exception e (println (str "\n" (ex-message e)))))
+                    (println)))
+        ;; The mailbox is how the website and bbh super reach this session. A
+        ;; message waits for the turn in progress, then runs as a prompt of its own.
+        poller (promise)
+        _ (deliver poller (inbox/start! {:root (inbox/root-dir dir) :project (str (fs/cwd))
+                                         :deliver (fn [{:keys [id text]}]
+                                                    (future
+                                                      (.printAbove reader (str (dim "[mailbox] ") text))
+                                                      (prompt! text)
+                                                      (inbox/ack! @poller id)))}))]
     (sun.misc.Signal/handle (sun.misc.Signal. "INT")
                             (reify sun.misc.SignalHandler (handle [_ _] (session/interrupt! s))))
     (println (dim (str "bbh " (fs/file-name dir) " " (:model @s) " nREPL " (:port (:repl @s)) "  /help lists commands")))
@@ -74,17 +96,15 @@
                         (catch EndOfFileException _ nil))]
           (cond (or (nil? line) (= "/quit" line)) nil
                 (str/blank? line) (recur)
-                :else (do (try (session/prompt! s line)
-                               (catch Exception e (println (str "\n" (ex-message e)))))
-                          (println)
-                          (recur)))))
+                :else (do (prompt! line) (recur)))))
       (finally
+        (inbox/stop! @poller)
         (session/close! s)
         (shutdown-agents)))))
 
 (defn -main [& args]
   (case (first args)
-    "acp" (acp/-main (some-> (:resume (parse-args (rest args))) conversation-dir))
+    "acp" (acp/-main (some-> (:resume (parse-args (rest args))) (conversation-dir nil)))
     "inbox-poll" (let [[_ id project] args]
                    (inbox/-poll (str (fs/path (super/data-dir) "conversations" id)) project))
     "web" (web/-main (super/data-dir))

@@ -3,6 +3,7 @@
             [bbh.super :as super]
             [bbh.super.client :as client]
             [bbh.super.pane]
+            [babashka.process]
             [bbh.super.model :as model]
             [bbh.super.store :as store]
             [clojure.test :refer [deftest is testing]]))
@@ -193,3 +194,127 @@
                                      :asks [{:id "a1" :state :open :seq 3 :text "Keep?" :stopped true :recommended "no"
                                              :options [{:id "no" :label "No"} {:id "yes" :label "Yes"}]}]}
                                     {:picks {"T1" {"a1" "yes"}} :notes {"T1" "and why"}}))))))
+
+;; ---- Workers ---------------------------------------------------------------
+
+(defn- jj-repo
+  "A temporary jj repository with one committed file."
+  []
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-repo"}))]
+    (spit (str (fs/path dir "README")) "hello\n")
+    (doseq [args [["git" "init"] ["commit" "-m" "start"]]]
+      (let [{:keys [exit err]} (apply babashka.process/shell {:dir dir :out :string :err :string :continue true} "jj" args)]
+        (when-not (zero? exit) (throw (ex-info (str "jj " args ": " err) {})))))
+    dir))
+
+(defn- with-workers
+  "A controller whose pane and wf start are recorded instead of run, on a
+  temporary jj repo, with a policy of two Workers. Calls F with the controller,
+  its dir, the repo and the atom of launches."
+  [f]
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-w"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-wconv"}))
+        repo (jj-repo)
+        launches (atom [])
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10
+                         :policy {:workers 2 :locks ["guix-build"] :never-granted ["guix-system"]}
+                         :launch {:wf-start! (fn [workspace w] (str "run-" (:id w)))
+                                  :pane! (fn [spec] (swap! launches conj spec) (str "wC:p" (count @launches)))}})]
+    (try (f c dir repo launches)
+         (finally (super/stop! c)))))
+
+(defn- start-worker [dir thread & {:as more}]
+  (call dir {:command :start-worker! :args (merge {:thread thread :workflow :change :brief (str "work on " thread) :repo (:repo more)} more)}))
+
+(deftest two-workers-get-their-own-jj-workspaces-and-the-main-checkout-is-untouched
+  (with-workers
+    (fn [c dir repo launches]
+      (call dir {:command :thread! :args {:title "first"}})
+      (call dir {:command :thread! :args {:title "second"}})
+      (let [w1 (:ok (start-worker dir "T1" :repo repo))
+            w2 (:ok (start-worker dir "T2" :repo repo))]
+        (is (= [:working :working] (map :state [w1 w2])))
+        (is (= [(str (fs/path dir "workspaces" "T1-1")) (str (fs/path dir "workspaces" "T2-1"))] (map :workspace [w1 w2])))
+        (is (fs/exists? (fs/path (:workspace w1) "README")) "the workspace holds the repository's files")
+        ;; A missing workspace must not make the write land in the checkout.
+        (is (fs/starts-with? (str (:workspace w1)) dir))
+        (when (fs/starts-with? (str (:workspace w1)) dir)
+          (spit (str (fs/path (:workspace w1) "only-here")) "x"))
+        (is (not (fs/exists? (fs/path repo "only-here"))))
+        (is (not (fs/exists? (fs/path (:workspace w2) "only-here"))))
+        (is (= #{"default" "T1-1" "T2-1"}
+               (set (map #(first (clojure.string/split % #":")) (clojure.string/split-lines (:out (babashka.process/shell {:dir repo :out :string} "jj" "workspace" "list")))))))
+        (is (= ["T1 first" "T2 second"] (map #(str (:thread %) " " (:title %)) @launches)))
+        (is (every? #(re-matches #"[0-9a-f]{48}" (:token %)) @launches) "each pane gets its Worker's token")
+        (is (= "super-W1" (:conversation (first @launches))))
+        (is (fs/exists? (fs/path (:conversations c) "super-W1")))
+        (let [t (:ok (call dir {:command :thread :args {:id "T1"}}))]
+          (is (= "W1" (:worker t)))
+          (is (= :working (:execution t))))))))
+
+(deftest a-worker-past-the-cap-is-queued-and-starts-when-one-finishes
+  (with-workers
+    (fn [c dir repo launches]
+      (doseq [t ["a" "b" "c"]] (call dir {:command :thread! :args {:title t}}))
+      (start-worker dir "T1" :repo repo)
+      (start-worker dir "T2" :repo repo)
+      (let [w3 (:ok (start-worker dir "T3" :repo repo))]
+        (is (= :queued (:state w3)))
+        (is (= "2 Workers already running" (:reason w3)))
+        (is (= 2 (count @launches)))
+        (is (= :queued (:execution (:ok (call dir {:command :thread :args {:id "T3"}})))))
+        (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})))
+        (is (= 3 (count @launches)) "the queued Worker was launched")
+        (is (= :working (:state (get-in @(:state c) [:workers "W3"]))))
+        (let [t (:ok (call dir {:command :thread :args {:id "T1"}}))]
+          (is (nil? (:worker t)))
+          (is (= ["W1"] (:history t)))
+          (is (= :done (:execution t))))))))
+
+(deftest a-lock-holder-blocks-a-second-worker-until-it-finishes
+  (with-workers
+    (fn [c dir repo launches]
+      (doseq [t ["a" "b"]] (call dir {:command :thread! :args {:title t}}))
+      (is (= :working (:state (:ok (start-worker dir "T1" :repo repo :locks ["guix-build"])))))
+      (is (= {"guix-build" "W1"} (:locks @(:state c))))
+      (let [w2 (:ok (start-worker dir "T2" :repo repo :locks ["guix-build"]))]
+        (is (= [:queued "guix-build held by W1"] [(:state w2) (:reason w2)]))
+        (is (= :never-granted (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :change :brief "x" :repo repo :locks ["guix-system"]}}))))
+        (is (= :unknown-lock (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :change :brief "x" :repo repo :locks ["repo-push"]}}))))
+        (call dir {:command :finish-worker! :args {:worker "W1" :state-after :failed :reason "REPL died"}})
+        (is (= {"guix-build" "W2"} (:locks @(:state c))))
+        (is (= :working (:state (get-in @(:state c) [:workers "W2"]))))
+        (is (= :failed (:execution (:ok (call dir {:command :thread :args {:id "T1"}})))))))))
+
+(deftest takeover-moves-the-lease-to-you-and-handback-returns-it
+  (with-workers
+    (fn [c dir repo launches]
+      (call dir {:command :thread! :args {:title "a"}})
+      (start-worker dir "T1" :repo repo)
+      (let [token (:token (first @launches))
+            lease #(get-in @(:state c) [:workers "W1" :lease])]
+        (is (= :router (lease)))
+        (is (= {:ok "W1"} (call dir {:command :takeover! :args {:worker "W1"}})))
+        (is (= :you (lease)))
+        (is (= :forbidden (:error (call dir {:token token :command :handback! :args {:worker "W1"}}))) "a Worker cannot move its own lease")
+        (is (= {:ok "W1"} (call dir {:command :handback! :args {:worker "W1"}})))
+        (is (= :router (lease)))
+        (is (= {:ok "W1"} (call dir {:token token :command :finish-worker! :args {:state-after :done}})) "the Worker ends itself")
+        (is (= :working (:state (:ok (start-worker dir "T1" :repo repo)))))
+        (is (= (str (fs/path dir "workspaces" "T1-2")) (get-in @(:state c) [:workers "W2" :workspace])) "the next generation has its own workspace")))))
+
+(deftest the-brief-is-the-workers-first-mailbox-message
+  (with-workers
+    (fn [c dir repo _]
+      (call dir {:command :thread! :args {:title "a"}})
+      (start-worker dir "T1" :repo repo :brief "Make Alt+W close windows everywhere.")
+      (let [root (fs/path (:conversations c) "super-W1")]
+        (is (wait-for #(seq (fs/glob root "mailbox/*.json"))))
+        (let [text (slurp (str (first (fs/glob root "mailbox/*.json"))))]
+          (is (re-find #"\[T1 brief for W1\]" text))
+          (is (re-find #"Make Alt\+W close windows everywhere" text))
+          (is (re-find #"run-W1" text)))
+        (doseq [f (fs/glob root "mailbox/*.json")] (fs/delete f))
+        (is (wait-for #(= [:acked] (map :state (vals (:outbox @(:state c)))))))
+        (is (= {} (:replies @(:state c))) "a brief is not a reply")
+        (locking (:db c) (is (= (store/replay (:db c)) (store/load (:db c)) @(:state c))))))))

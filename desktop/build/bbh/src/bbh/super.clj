@@ -8,6 +8,9 @@
             [bbh.super.client :as client :refer [call! data-dir new-id super-dir]]
             [bbh.super.model :as model]
             [bbh.super.store :as store]
+            [bbh.workflow :as workflow]
+            [babashka.process :as p]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
@@ -47,6 +50,84 @@
     (when-not (:repeat? r) (notify-panes! dir))
     r))
 
+;; ---- Workers: a record first, then the workspace, the wf run and the pane --
+
+(defn- policy
+  "The controller's policy: its :policy when given, else ~/.config/bbh/policy.edn
+  over the defaults."
+  [c]
+  (or (:policy c)
+      (let [f (fs/path (or (System/getenv "XDG_CONFIG_HOME") (fs/expand-home "~/.config")) "bbh" "policy.edn")]
+        (merge model/default-policy (when (fs/exists? f) (edn/read-string (slurp (str f))))))))
+
+(defn- jj! [dir & args]
+  (let [{:keys [exit err]} (apply p/shell {:dir dir :out :string :err :string :continue true} "jj" args)]
+    (when-not (zero? exit) (throw (ex-info (str "jj " (str/join " " args) ": " (str/trim err)) {:error :jj})))))
+
+(defn workspace!
+  "A jj workspace of REPO for WORKER under DIR, named <thread>-<generation>.
+  Returns its path; an existing one is reused."
+  [dir {:keys [repo thread generation]}]
+  (let [name (str thread "-" generation)
+        path (str (fs/path dir "workspaces" name))]
+    (when-not (fs/exists? path)
+      (fs/create-dirs (fs/parent path))
+      (jj! repo "workspace" "add" "--name" name path))
+    path))
+
+(defn wf-start!
+  "The wf run for WORKER in WORKSPACE, its brief as the task."
+  [workspace {:keys [workflow brief check]}]
+  (workflow/start! workflow {:cwd workspace :task brief :check check}))
+
+(defn- herdr [& args]
+  (let [{:keys [exit out err]} (apply p/shell {:out :string :err :string :continue true} "herdr" args)]
+    (when-not (zero? exit) (throw (ex-info (str "herdr " (str/join " " args) ": " (str/trim err)) {:error :herdr})))
+    (:result (json/parse-string out true))))
+
+(defn pane!
+  "A Herdr pane for WORKER: split beside a pane of the workspace that holds
+  REPO (else a new workspace), in the jj workspace, with the Worker's token
+  and wf run in its environment, running bbh on the Worker's conversation,
+  named after the thread. Returns the pane id."
+  [{:keys [repo workspace thread title conversation token wf-run]}]
+  (let [panes (:panes (herdr "pane" "list"))
+        anchor (some #(when (= (str (fs/canonicalize repo)) (:cwd %)) %) panes)
+        env ["--env" (str "BBH_SUPER_TOKEN=" token) "--env" (str "WF_RUN=" wf-run)]
+        pane (if anchor
+               (get-in (apply herdr "pane" "split" (:pane_id anchor) "--direction" "right" "--cwd" workspace "--no-focus" env) [:pane :pane_id])
+               (let [ws (apply herdr "workspace" "create" "--cwd" workspace "--label" (str thread " " title) "--no-focus" env)]
+                 (:pane_id (first (:panes (herdr "pane" "list" "--workspace" (:workspace_id ws)))))))]
+    (herdr "pane" "run" pane "bbh" "--id" conversation)
+    (herdr "pane" "rename" pane (str thread " " title))
+    pane))
+
+(declare run!)
+
+(defn- launch!
+  "The side effects that make Worker W a process, then the commit that records
+  them. Each step is idempotent by the Worker's name, so a repeat after a crash
+  reuses what exists."
+  [{:keys [dir state launch] :as c} w token]
+  (let [{:keys [workspace! wf-start! pane!]} launch
+        t (get-in @state [:threads (:thread w)])
+        workspace (workspace! dir w)
+        conversation (str (fs/path (:conversations c) (str "super-" (:id w))))
+        _ (fs/create-dirs conversation)
+        wf-run (wf-start! workspace w)
+        pane (pane! {:repo (:repo w) :workspace workspace :thread (:thread w) :title (:title t)
+                     :conversation (fs/file-name conversation) :token token :wf-run wf-run})]
+    (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
+                         :args {:worker (:id w) :conversation (fs/file-name conversation) :wf-run wf-run :workspace workspace :pane pane}})))
+
+(defn- promote!
+  "Start the next queued Worker that may run now, if any."
+  [{:keys [state] :as c}]
+  (when-let [w (model/next-queued @state (policy c))]
+    (let [t (new-token)]
+      (run! c :controller {:id (str "token-" (sha256 t)) :command :issue-token! :token-hash (sha256 t) :args {:principal [:worker (:id w)]}})
+      (launch! c w t))))
+
 (defn- principal-of [state token]
   (when (string? token)
     (let [t (get-in state [:tokens (sha256 token)])]
@@ -77,10 +158,23 @@
       (if (not= ::unknown read)
         {:ok read}
         (let [cmd {:id (or id (new-id)) :command command :args (or args {})}]
-          (if (= :attach-worker! command)
+          (case command
+            :attach-worker!
             (let [t (new-token)
                   r (run! c principal (assoc cmd :token-hash (sha256 t)))]
               {:ok (cond-> (:result r) (not (:repeat? r)) (assoc :token t))})
+            :start-worker!
+            (let [t (new-token)
+                  r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c)))
+                  w (get-in @(:state c) [:workers (:id (:result r))])]
+              (when (and (not (:repeat? r)) (= :starting (:state w)))
+                (launch! c w t))
+              {:ok (let [w (get-in @(:state c) [:workers (:id (:result r))])]
+                     (merge (:result r) (select-keys w [:state :workspace :pane :conversation :wf-run])))})
+            :finish-worker!
+            (let [r (run! c principal cmd)]
+              (when-not (:repeat? r) (promote! c))
+              {:ok (:result r)})
             {:ok (:result (run! c principal cmd))}))))
     (catch clojure.lang.ExceptionInfo e
       {:error (or (:error (ex-data e)) :failed) :message (ex-message e) :data (dissoc (ex-data e) :error)})
@@ -137,7 +231,7 @@
   and run the dispatcher every SCAN-MS. Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms] :or {scan-ms 500}}]
+  [{:keys [dir conversations scan-ms launch policy] :or {scan-ms 500}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -149,6 +243,7 @@
         db (store/open (str (fs/path dir "super.db")))
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
+           :launch (merge {:workspace! workspace! :wf-start! wf-start! :pane! pane!} launch) :policy policy
            :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false)}]
     (ensure-owner-token! c)
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))

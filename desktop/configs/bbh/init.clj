@@ -26,6 +26,16 @@
 - (shot url) saves a headless Chrome screenshot and returns its path. (look question & paths) has a Claude delegate describe images, since tool results carry text only. (delegate brief) runs a fresh agent, for an independent check.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
 
+(def super-helpers
+  "# Super-agent
+
+This session is a Worker of bbh super: a thread's work, with a controller that relays your asks to the person and their replies back as mailbox messages. Call these instead of waiting in the conversation.
+
+- (super-ask! {:kind :question :text \"...\" :options [{:id \"no\" :label \"No\"} ...] :recommended \"no\" :stopped true}) files a question (or :action, :review) and returns its id. With :stopped true, end your turn after it; the reply arrives as a new prompt. Omit :stopped when you can go on meanwhile.
+- (super-answered! \"reply-id\") after you have acted on a reply, naming the id the mailbox message gave.
+- (super-note! \"text\") updates the thread's summary line; (super-milestone! \"text\") marks progress worth the person's notice.
+- (super-done!) when the wf run is done, (super-failed! \"why\") when it cannot finish. Both end the Worker.")
+
 (def pi-helpers
   "Skills written for Pi name Pi helpers. Drop `await` and map `tools/jev_classify_task {:task t}` to (jev-classify-task t), `fs/read` to read-lines, `tools/read` to slurp, `fs/list` to fs/glob, `tools/edit` to edit!, and `tools/bash`, `jj/...` and `make/...` to sh. Parallelize with future or pmap.")
 
@@ -212,6 +222,7 @@
   {:system (str base-prompt
                 "\n\n" helper-reference
                 "\n\n" pi-helpers
+                (when (System/getenv "BBH_SUPER_TOKEN") (str "\n\n" super-helpers))
                 "\n\nWorking directory: " (fs/cwd)
                 (some->> (skill-index) (str "\n\n"))
                 (when-let [p (project-instructions)]
@@ -430,6 +441,19 @@
 
 (defn- shell-quote [s]
   (if (re-matches #"[\w@%+=:,./-]+" s) s (str "'" (str/replace s "'" "'\\''") "'")))
+
+;; Super-agent Worker helpers, over the controller's socket with this Worker's token.
+
+(defn- super-call! [command args]
+  (let [{:keys [ok error message data]} ((requiring-resolve 'bbh.super.client/call!) {:command command :args args})]
+    (if error (throw (ex-info (str "bbh super: " (name error) (when message (str ", " message))) (or data {}))) ok)))
+
+(defn super-ask! "File ASK ({:kind :text :options :recommended :stopped :holds-up :supersedes}) and return its id." [ask] (super-call! :ask! ask))
+(defn super-answered! "Record that reply ID has been acted on." [id] (super-call! :answered! {:reply id}))
+(defn super-note! "Set the thread's summary line." [text] (super-call! :note! {:text text}))
+(defn super-milestone! "Mark progress worth the person's notice." [text] (super-call! :milestone! {:text text}))
+(defn super-done! "End this Worker as done." [] (super-call! :finish-worker! {:state-after :done}))
+(defn super-failed! "End this Worker as failed, saying WHY." [why] (super-call! :finish-worker! {:state-after :failed :reason why}))
 
 (defn pwd "The working directory." [] (str (fs/cwd)))
 
