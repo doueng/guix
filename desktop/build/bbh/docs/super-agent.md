@@ -2,7 +2,7 @@
 
 Status: proposal, nothing built. Written 2026-11-02.
 
-This document describes how bbh could grow from separate conversations into one agent that you talk to from Herdr, Emacs and the iPhone, that works on several tasks at once, and that reacts to events such as GitHub comments. It adapts the Super-agent architecture from DeepSeek Harness (a Router, isolated Workers, event triggers, asynchronous tools, a watchdog) and the attention model of [Plannotator Inbox](https://github.com/backnotprop/plannotator#plannotator-inbox) (threads grouped by what they need from you, replies that wake the session that asked).
+This document describes how bbh could grow from separate conversations into one agent that you talk to from Herdr, Emacs and the iPhone, by typing or by voice, that works on several tasks at once, and that reacts to events such as GitHub comments. It adapts the Super-agent architecture from DeepSeek Harness (a Router, isolated Workers, event triggers, asynchronous tools, a watchdog) and the attention model of [Plannotator Inbox](https://github.com/backnotprop/plannotator#plannotator-inbox) (threads grouped by what they need from you, replies that wake the session that asked).
 
 ## 1. Problem
 
@@ -44,14 +44,15 @@ Non-goals for the first version
 | Background work | `job`, `job-status` and `jobs`, file-backed and surviving REPL restarts. |
 | Recoverable state | Conversations, runs, jobs and workflow journals are files. `checkpoint.clj` (in progress) replays definitions after a REPL kill. |
 | Spill with a pointer | Large tool output goes to `outputs/` with a `read-lines` pointer. |
+| Voice | Hex, local dictation on the Apple GPU. Holding Cmd+M pastes the transcript at the cursor, and `hex dictation stop --print` prints it instead. Hex also keeps a vocabulary list. |
 
-The design mostly connects these. The new parts are the thread store, the asks protocol, a small daemon, the Router's restricted environment, and three views.
+The design mostly connects these. The new parts are the thread store, the asks protocol, a small daemon, the Router's restricted environment, a voice channel, and three views.
 
 ## 4. Concepts
 
 **Thread.** A unit of work you care about, such as "fix the keybinding check", PR `engstrand/guix#41`, or "plan the trip". Each thread has a short handle `T<n>` that every surface shows and that you can type anywhere ("T12 use plan B"). A thread can have several sources, such as a phone message that started it and the PR it produced.
 
-**Event.** Anything that happens, such as your message, a GitHub comment, a CI result, a job exit, a Worker's ask or a `wf` state change. Events get a global sequence number `seq` and are appended to one log.
+**Event.** Anything that happens, such as your message (typed or dictated), a GitHub comment, a CI result, a job exit, a Worker's ask or a `wf` state change. Events get a global sequence number `seq` and are appended to one log.
 
 **Worker.** A bbh conversation that owns one task. It runs in a Herdr pane, usually under a `wf` run, and subscribes to one or more threads. It never talks to you directly except through asks.
 
@@ -166,21 +167,42 @@ Its mailbox is drained in batches. Everything that arrived during a turn becomes
 
 ## 7. Surfaces
 
-All three surfaces show the same threads, sections and handles. They differ in what they are good at.
+All three surfaces show the same threads, sections and handles. They differ in what they are good at. Herdr is the main desk, because that is where the Workers already run and where you spend the day.
 
-### Emacs: the main desk
+### Herdr: the main desk
 
-- **Router composer.** The existing bbh layout, pinned to the Router conversation. You type instructions here, as now. The Router answers in a few lines and names thread handles.
-- **Inbox buffer** (`M-x eng/bbh-inbox`, SPC o i in Doom). An org buffer rendered from the thread store, one heading per thread under section headings, with the TODO keyword showing the state. RET opens the thread view.
-- **Thread view.** The thread's events, with asks as org checkbox lists. `C-c C-c` on an option picks it. Writing under the ask adds a note. `C-c C-s` sends all picks and notes for that thread, as one message per Worker. A `review` ask opens the diff with `jj diff` in a split, and comments on lines are added to the reply.
-- **Take a Worker's conversation.** From the thread view, one key opens the Worker's own transcript in agent-shell, for when you want to steer the details yourself.
+The first Herdr workspace is **Inbox**, pinned to position 1 so Ctrl+1 (Cmd+1) always reaches it. Its first tab has two panes.
 
-### Herdr: where Workers live
+- **Inbox pane (left, about 40%).** `bbh inbox`, a live list of threads grouped by section, with the badge count in the pane title. It is built like `herdr-agent-pick`, on fzf with `--listen`, so the daemon pushes a reload whenever an event changes a thread and the list stays current without polling. The order holds while you look, and new activity waits behind an "N new" line.
+- **Router pane (right).** The Router conversation in bbh's terminal front end. Typing here talks to the Router, as the Emacs composer does.
 
-- Each Worker runs in its own pane. The Router puts it in the workspace of the project it works on, and the pane name starts with the thread handle (`T12 keybindings`).
-- **Thread picker on Alt+Space a.** The agent picker becomes a thread picker. Rows are threads grouped by section, with handle, title, state and age, and the preview shows the open ask or the Worker's screen. Enter focuses the Worker's pane, and a second key opens the thread in Emacs. Ctrl+b a stays the plain agent picker.
+Keys in the inbox pane:
+
+| Key | Action |
+|---|---|
+| j, k | Move between threads. The preview shows the open ask with numbered options, or the Worker's screen when nothing is open. |
+| 1 to 4 | Pick an option on the selected thread's ask. The pick is saved at once. |
+| r | Write a note on the selected thread, in a small popup. |
+| s | Send every pick and note on the selected thread, as one message per Worker. |
+| Enter | Focus the Worker's pane in its project workspace. |
+| e | Open the thread in Emacs, for a diff review or a long reply. |
+| m | Mark read, which closes the asks and tells the Worker not to wait. |
+| a | Archive. |
+
+Workers run in panes in their project's workspace. The pane name starts with the thread handle (`T12 keybindings`). Herdr's agent panel still shows their states.
+
+- **Alt+Space a focuses the inbox pane** from anywhere in Herdr, and Cmd+Space a does the same from any window by focusing the Herdr terminal first. It replaces the agent popup from 2026-11-02. Ctrl+b a keeps the plain agent picker for jumping straight to a pane.
 - **Toasts.** Only Stopped and Waiting asks raise a Herdr system toast. Progress never does.
 - **Taking over.** Typing in a Worker's pane is allowed. The Worker sees your message as a normal prompt, and the daemon records a `took-over` event so the Router knows you are steering that thread.
+
+### Emacs: long-form review and writing
+
+Emacs is where you go from the inbox when a thread needs more than a pick.
+
+- **Thread view** (`e` in the inbox pane, or SPC o i). The thread's events in an org buffer, with asks as checkbox lists. `C-c C-c` on an option picks it, text under the ask adds a note, and `C-c C-s` sends. A `review` ask opens the diff with `jj diff` in a split, and comments on lines are added to the reply.
+- **Inbox buffer.** The same sections as org headings, for when you are already in Emacs.
+- **Router composer.** The existing bbh layout can be pinned to the Router conversation, so long instructions can be written with the Emacs editor.
+- **Worker transcript.** One key opens a Worker's own transcript in agent-shell, for when you want to steer the details yourself.
 
 ### iPhone: triage and answers away from the desk
 
@@ -192,6 +214,18 @@ The `bbh web` page gains an Inbox view next to the session tabs. It stays loopba
 - **Notifications.** If you add the page to the home screen, iOS 16.4 and later can receive Web Push. Push is sent only for Stopped and Waiting asks, one per ask, and a newer push for the same thread replaces the older one. Lock-screen answer buttons are not assumed, because Safari's web push support for notification actions is unverified. A tap opens the ask.
 - **Review on the phone.** A review card shows the summary, the gates that passed and the diff stat. Approving is allowed. Line comments are left for Emacs.
 
+### Voice: talking to the agent
+
+Dictation is a way of talking to the agent, not only a way of typing into a window. It works the same from every surface and arrives as an ordinary event with `:channel :voice` and the transcript, so the Router and Workers know the text was spoken and may contain recognition errors.
+
+- **At the desk, hold to talk to the agent.** Holding Cmd+Shift+M runs `hex dictation start`. Releasing it runs `hex dictation stop --print` and hands the transcript to `bbh say`, which appends a voice event. Nothing is pasted, so it works whatever window has focus. Cmd+Shift+M is free in Hyprland today, but kanata and the application layers still need checking with the keybindings skill.
+- **Where it goes.** If the inbox pane has a thread selected and you spoke within a minute of selecting it, the voice event goes to that thread. A spoken handle ("T twelve, use plan B") goes to that thread. Anything else goes to the Router. Thread handles and project names are added to Hex's vocabulary so they are recognized, and the daemon also accepts spoken forms such as "tee twelve".
+- **Answering asks by voice.** "Option two", "the recommended one" or "yes, for a week" become picks on the selected thread's ask, shown in the inbox pane. A dictated reply is a draft until you say "send" or press s. Voice never approves an `action` ask on its own, such as `make switch`.
+- **Plain Cmd+M stays as it is.** It pastes at the cursor, so you can still dictate a note in the inbox's `r` popup, the Router pane or a Worker's pane.
+- **Spoken replies.** The Router answers in text. Reading short replies aloud is an open question (section 14).
+- **On the iPhone.** The composer accepts iOS dictation from the keyboard's microphone key with no extra work. A Shortcut ("Tell bbh") that sends dictated text to the page over the tailnet would let you talk to the Router from the lock screen or Siri. Whether a Shortcut can pass the page's owner check is unverified.
+- **Screen and voice together.** `hex annotate` records the screen with drawing and narration. Attaching such a recording to a thread ("this pane looks wrong") gives a Worker both the picture and what you said about it.
+
 ## 8. User journeys
 
 ### J1. Morning triage on the iPhone
@@ -202,18 +236,19 @@ The `bbh web` page gains an Inbox view next to the session tabs. It stays loopba
 4. Back in the Inbox list, T9 shows under Waiting with a review. You read the summary (gates passed, 4 files), tap Approve, and T9 moves to Archived.
 5. You type "T11 also handle the phone layout" in the Router composer. It goes straight to T11's Worker. The Router sees it in its next batch and does nothing, because T11 owns it.
 
-### J2. Start a task from Emacs
+### J2. Start a task at the desk
 
-1. In the Router composer you write "Make the bbh web page show cost per session".
+1. You press Ctrl+1 to reach the Inbox workspace and type in the Router pane "Make the bbh web page show cost per session".
 2. The Router calls Jev, gets `feature`, creates T15 and calls `start-worker!` with the `change` workflow. A Herdr pane `T15 web cost` opens in the guix workspace and bbh starts there with `wf start change ...`.
 3. The Router replies in one line: "Started T15 (change workflow). I'll ask if it needs you."
-4. You keep typing other requests. Nothing waits on T15.
+4. T15 appears in the inbox pane under Working. You keep typing other requests. Nothing waits on T15.
 
 ### J3. A Worker needs a decision while you are busy
 
 1. T15's Worker finds two ways to get the cost and calls `ask!` with `:stopped true` and a recommendation, then ends its turn.
-2. T15 moves to Stopped on you. Herdr shows a toast, the phone gets a push, and the Emacs inbox heading turns red.
-3. You answer from wherever you are. If you answered twice, on the phone and in Emacs, the second Send finds the ask closed and says so.
+2. T15 moves to the top of the inbox pane under Stopped on you. Herdr shows a toast, and the phone gets a push.
+3. At the desk you press Alt+Space a, which lands on T15 in the inbox pane. The preview shows the question with options 1 and 2. You press 1, then s.
+4. You could equally answer from the phone or Emacs. If you answered twice, on the phone and in Emacs, the second Send finds the ask closed and says so.
 
 ### J4. A review comment on a PR you pushed
 
@@ -230,7 +265,7 @@ The `bbh web` page gains an Inbox view next to the session tabs. It stays loopba
 
 ### J6. Taking over and handing back
 
-1. T15 is drifting. You press Alt+Space a, pick T15 and land in its pane.
+1. T15 is drifting. In the inbox pane you select T15 and press Enter, which lands in its pane.
 2. You type directly to the Worker for a few turns. The daemon records `took-over`, and the Router stops relaying to T15 until you hand back.
 3. You type `/handback` in the pane, or archive the thread. The Router resumes normal routing.
 
@@ -249,8 +284,21 @@ The `bbh web` page gains an Inbox view next to the session tabs. It stays loopba
 ### J9. Sign-off at the desk
 
 1. T15 reaches `done`. Its `review` ask shows under Waiting.
-2. In Emacs you open the thread view. The diff opens beside the thread with the `wf` evidence links. You comment on two lines and press `C-c C-s`.
+2. In the inbox pane you select T15 and press e, which opens the thread view in Emacs. The diff opens beside the thread with the `wf` evidence links. You comment on two lines and press `C-c C-s`.
 3. The Worker gets both comments in one turn, fixes them and asks for review again. You approve, the Worker commits with jj, and the thread is archived.
+
+### J10. Talking to the agent at the desk
+
+1. You are reading a PR in Chrome. Without switching windows you hold Cmd+Shift+M and say "start a task, make Alt Space a open the inbox pane, and check kanata for Cmd Shift M".
+2. On release Hex prints the transcript and `bbh say` appends a voice event. Nothing was pasted into Chrome.
+3. No thread was selected, so the Router gets it, starts T18 with the `change` workflow, and its one-line reply shows in the Router pane.
+4. Later T18 stops with a question. You select it in the inbox pane, hold Cmd+Shift+M and say "the recommended one, send". The pick and the Send show in the pane, and the Worker wakes.
+
+### J11. Talking to the agent away from the desk
+
+1. Walking home you remember T16. You open the bbh page on the iPhone, tap the composer and use the keyboard's microphone: "T16, also keep the old plan as a fallback branch."
+2. The handle sends it straight to T16's Worker. The event is marked as dictated, so the Worker treats an odd word as a likely recognition error rather than an instruction.
+3. If the Shortcut from section 7 works, the same message could go through Siri without unlocking the phone.
 
 ## 9. pstack and poteto-mode
 
@@ -262,7 +310,7 @@ The `bbh web` page gains an Inbox view next to the session tabs. It stays loopba
 
 ## 10. Security
 
-Trigger sources make untrusted text reach an agent that has a shell on a laptop with private files in `local/`.
+Voice input is your own, but a transcription error is still an instruction, so dictated text never approves an `action` ask. Trigger sources make untrusted text reach an agent that has a shell on a laptop with private files in `local/`.
 
 - The fast path drops events from authors outside `policy.edn` before any model sees them. GitHub text from others is shown to you, never acted on.
 - Workers started from an external event get the same checks as any other run. `make switch` and other root-equivalent actions still need you, through an `action` ask.
@@ -282,18 +330,21 @@ The DeepSeek ablation measured about 23M cache-read tokens per run for the two-l
 
 Each step ends in a check you can run, and each is useful alone.
 
-1. **Thread store and picker.** `events.jsonl`, thread files and the Alt+Space a thread picker. Workers are still started by hand and `(thread! "title")` registers one. Check: a test that folds a fixed event log into the expected sections, and the picker opening live.
-2. **Asks and replies.** `ask!`, the Emacs inbox and thread view, delivery through the existing mailbox. Check: a Worker asks, a Send in Emacs wakes it with exactly one message.
+1. **Thread store and inbox pane.** `events.jsonl`, thread files, `bbh inbox` in a pinned Inbox workspace, and Alt+Space a focusing it. Workers are still started by hand and `(thread! "title")` registers one. Check: a test that folds a fixed event log into the expected sections, and the pane reloading live when an event is appended.
+2. **Asks and replies.** `ask!`, picks and Send in the inbox pane, the Emacs thread view, delivery through the existing mailbox. Check: a Worker asks, a Send from the inbox pane wakes it with exactly one message.
 3. **Phone Inbox.** The web view with option buttons and Send. Check: the same journey from the phone on the tailnet.
 4. **Full duplex.** Job-exit events and mailbox items appended to tool results. Check: a 2 minute job wakes an idle Worker, and a message sent mid-turn reaches the next tool result.
 5. **Router.** The restricted env, `start-worker!`, batching, pass-through. Check: J2 and J5 end to end.
-6. **Triggers.** `gh` poller and `policy.edn`. Check: J4 with an allowlisted and a non-allowlisted author.
-7. **Watchdog and Web Push.** Check: a deliberately stuck Worker gets flagged within one tick, and a push arrives on the iPhone.
-8. **Speculative runs.** Check: J7 on a seeded failing check, both the fixed and the discarded outcome.
+6. **Voice.** `bbh say`, the Cmd+Shift+M hold-to-talk bind, routing to the selected thread or a spoken handle, Hex vocabulary for handles. Check: J10 with Chrome focused, and a recorded clip of "tee twelve, option two" becoming a pick on T12.
+7. **Triggers.** `gh` poller and `policy.edn`. Check: J4 with an allowlisted and a non-allowlisted author.
+8. **Watchdog and Web Push.** Check: a deliberately stuck Worker gets flagged within one tick, and a push arrives on the iPhone.
+9. **Speculative runs.** Check: J7 on a seeded failing check, both the fixed and the discarded outcome.
 
 ## 14. Open questions
 
-- Should Alt+Space a become the thread picker, or should threads get their own key and the agent picker stay?
+- Is Cmd+Shift+M free through kanata and every application layer, or does voice need another chord?
+- Should short Router replies be spoken back, for example with a local text-to-speech model, when the request came by voice?
+- Can a Siri Shortcut reach the page through `tailscale serve` and pass the owner check?
 - Should the Router run on Claude or a cheaper OpenRouter model? DeepSeek found a lighter model suffices for routing.
 - Does iOS Web Push from a home-screen page support action buttons? If it does, single-choice asks can be answered from the lock screen.
 - Should Plannotator Inbox be used directly as the ask surface instead of building one? It already has questions, guided reviews, batching, tailnet access and a paired iPhone app. The cost is a second store beside the thread store and less control over the Herdr and Emacs views.
