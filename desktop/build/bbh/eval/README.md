@@ -54,6 +54,9 @@ This evaluator compares four configurations on the same generated projects and m
 - `pi-codemode` adds Pi's built-in JavaScript codemode with `codemode.mode` set to `only`, as the production settings do.
 - `pi-sci` uses the production SCI extension and `desktop/pi/agent/AGENTS.md` guidance.
 - `bbh` uses its persistent REPL and production init file, with skill discovery and poteto-mode disabled for the comparison.
+- `bbh-claude` is `bbh` on Claude Code, the engine production uses, with `claude/` plus `BBH_EVAL_CLAUDE_MODEL` (default `claude-opus-5-5`). Run it in a cohort whose `BBH_EVAL_MODEL` is the same model on OpenRouter, such as `anthropic/claude-opus-5.5`, so the other arms match it. It spends Claude quota.
+
+Pi runs with `--thinking off`, which reaches OpenRouter as reasoning effort `none`, so the OpenRouter bbh profiles set the manifest's `:effort` to `none` too. Claude Code has no off level, so `bbh-claude` keeps the production effort. `manifest.json` records each profile's setting under `thinking`.
 
 For a prompt treatment, the optional third argument selects profiles. `BBH_EVAL_BASELINE_INIT=/path/to/old-init.clj bb eval:compare /tmp/bbh-treatment 3 bbh-baseline,bbh,pi-sci` compares an old init snapshot with the current prompt and SCI. [The signatures experiment](SIGNATURES.md) records one such run.
 
@@ -102,7 +105,7 @@ Each live trial records its workspace, raw JSONL events, stderr, a grade, and te
 
 Reported tool calls count top-level tool execution starts. They are not model requests. Reported tool errors are top-level failed executions, including expected failures while investigating the deliberately incorrect path. Pi/SCI can also have nested tool errors that this count does not include.
 
-Provider errors and protocol failures prevent a passing trial even when a file happens to look correct. Reported provider costs are retained as diagnostics, but the evaluator does not normalize their pricing semantics or compare latency.
+Provider errors and protocol failures prevent a passing trial even when a file happens to look correct. Costs come from one price table: the run reads the model's per-million-token prices from Pi's OpenRouter catalog into `manifest.json` under `price`, and each trial's `list-cost` applies them to its `tokens` (uncached input, cache reads, cache writes and output). Pi's usage input excludes cached tokens and bbh's includes them, and `tokens` corrects for that. `summary.json` sums `list-cost` per profile. Reported provider costs are kept as diagnostics. A `bbh-claude` trial's `list-cost` uses the OpenRouter price of `BBH_EVAL_MODEL`. The evaluator does not compare latency.
 
 See [the baseline report](RESULTS.md) for results and limitations, and [the 2026-11-01 review](REVIEW-2026-11-01.md) for the four-arm comparison, the multi-turn and slow-command tasks, and the production trace analysis.
 

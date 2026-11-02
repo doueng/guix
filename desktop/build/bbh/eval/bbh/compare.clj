@@ -1,6 +1,7 @@
 (ns bbh.compare
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
+            [bbh.runs :as runs]
             [bbh.tasks :as tasks]
             [cheshire.core :as json]
             [clojure.java.io :as io]
@@ -25,8 +26,16 @@
             :extensions [(str (fs/path desktop "pi/agent/extensions/sci-codemode/index.ts"))]
             :append-system-prompt [(str (fs/path desktop "pi/agent/AGENTS.md"))]
             :settings (assoc codemode-settings :extensions ["-builtin:codemode"])}
-   :bbh {:engine :bbh :init (str (fs/path desktop "configs/bbh/init.clj"))}
-   :bbh-baseline {:engine :bbh :init-env "BBH_EVAL_BASELINE_INIT"}})
+   :bbh {:engine :bbh :init (str (fs/path desktop "configs/bbh/init.clj")) :effort "none"}
+   :bbh-baseline {:engine :bbh :init-env "BBH_EVAL_BASELINE_INIT" :effort "none"}
+   :bbh-claude {:engine :bbh :init (str (fs/path desktop "configs/bbh/init.clj")) :claude true}})
+
+(def claude-model (or (System/getenv "BBH_EVAL_CLAUDE_MODEL") "claude-opus-5-5"))
+
+(defn thinking
+  "What a profile's reasoning is set to: Pi runs --thinking off, which reaches OpenRouter as effort none."
+  [{:keys [engine effort claude]}]
+  (cond (= :pi engine) "none" claude "production effort through Claude Code" :else effort))
 
 (def default-profiles [:pi :pi-sci :bbh])
 
@@ -81,7 +90,10 @@
                           (throw (ex-info (str profile " requires " (:init-env spec)) {}))))
         _ (when init-source
             (spit init (str (slurp init-source)
-                            "\n(ns bbh.env) (defn skills [] []) (reset! poteto? false) (ns user)\n")))
+                            "\n(ns bbh.env) (defn skills [] []) (reset! poteto? false)"
+                            (when-let [e (:effort spec)]
+                              (str " (let [m manifest] (defn manifest [] (assoc (m) :effort " (pr-str e) ")))"))
+                            " (ns user)\n")))
         _ (when script
             (spit (str (fs/path dir "script.edn")) (pr-str script))
             (json! (fs/path dir "script.json") script))
@@ -89,12 +101,12 @@
                ["bb" "--config" (str (fs/path root "bb.edn")) "-m" "bbh.main" "acp"]
                (pi-args spec model-id script))
         proc (apply p/process {:dir ws :err :append :err-file (fs/file dir "stderr.log")
-                               :extra-env {"PI_CODING_AGENT_DIR" agent "PI_TELEMETRY" "0"
+                               :extra-env {"PI_CODING_AGENT_DIR" (if (:claude spec) (str (fs/path (fs/home) ".pi" "agent")) agent) "PI_TELEMETRY" "0"
                                            "XDG_DATA_HOME" (str (fs/path dir "data"))
                                            "BBH_EVAL_SCRIPT" (str (fs/path dir "script.json"))
-                                           "BBH_INIT" init "BBH_MODEL" (if script
-                                                                       (str "script/" (fs/path dir "script.edn"))
-                                                                       (str "openrouter/" model-id))}} args)
+                                           "BBH_INIT" init "BBH_MODEL" (cond script (str "script/" (fs/path dir "script.edn"))
+                                                                     (:claude spec) (str "claude/" claude-model)
+                                                                     :else (str "openrouter/" model-id))}} args)
         q (LinkedBlockingQueue.)
         events (atom [])
         writer (io/writer (:in proc))
@@ -164,6 +176,40 @@
     (p/destroy-tree (:proc c)))
   (deref (:proc c) 5000 nil))
 
+(defn price
+  "MODEL-ID's dollars per million tokens from Pi's OpenRouter catalog, as {:input :output :cacheRead :cacheWrite}."
+  [model-id]
+  (let [{:keys [out]} (p/shell {:in "{\"id\":\"1\",\"type\":\"get_state\"}\n" :out :string :err :string
+                                :continue true :timeout 60000 :extra-env {"PI_TELEMETRY" "0"}}
+                               "pi" "--mode" "rpc" "--offline" "--no-session" "--no-extensions" "--no-mcp"
+                               "--provider" "openrouter" "--model" model-id)]
+    (some #(get-in (try (json/parse-string % true) (catch Exception _ nil)) [:data :model :cost])
+          (str/split-lines out))))
+
+(defn list-cost
+  "Dollars for TOKENS {:uncached :cache-read :cache-write :output} at PRICE, per million tokens."
+  [price {:keys [uncached cache-read cache-write output]}]
+  (when price
+    (/ (+ (* uncached (:input price 0)) (* cache-read (:cacheRead price 0))
+          (* cache-write (:cacheWrite price 0)) (* output (:output price 0)))
+       1e6)))
+
+(defn pi-tokens
+  "Token totals from Pi's assistant message_end usages, whose input excludes cache reads and writes."
+  [events]
+  (let [us (keep #(when (and (= "message_end" (:type %)) (= "assistant" (get-in % [:message :role])))
+                    (get-in % [:message :usage])) events)
+        sum #(reduce + 0 (keep % us))]
+    {:uncached (sum :input) :cache-read (sum :cacheRead) :cache-write (sum :cacheWrite) :output (sum :output)}))
+
+(defn bbh-tokens
+  "Token totals from bbh's llm runs, whose input counts the whole prompt including cached and written tokens."
+  [runs]
+  (let [us (keep #(when (= "llm" (:kind %)) (:usage %)) runs)
+        sum #(reduce + 0 (keep % us))]
+    {:uncached (- (sum :input) (sum :cached) (sum :written)) :cache-read (sum :cached)
+     :cache-write (sum :written) :output (sum :output)}))
+
 (defn metrics [profile events]
   (if (bbh? profile)
     (let [updates (keep #(get-in % [:params :update]) events)]
@@ -177,7 +223,7 @@
        :reported-cost (reduce + 0 (keep #(get-in % [:usage :cost :total]) messages))
        :provider-errors (mapv :errorMessage (filter #(= "error" (:stopReason %)) messages))})))
 
-(defn trial! [out profile task repetition model-id]
+(defn trial! [out profile task repetition model-id price]
   (let [dir (str (fs/path out (str (:id task) "__" repetition "__" (name profile))))
         ws (str (fs/path dir "ws"))]
     (fs/create-dirs ws)
@@ -192,7 +238,10 @@
                     (finally (stop! c)))
           grade (try (tasks/grade task ws)
                      (catch Exception e {:passed false :grader-error (ex-message e)}))
-          telemetry (metrics profile @(:events c))
+          tokens (if (bbh? profile)
+                   (bbh-tokens (mapcat #(runs/load-runs (str %)) (fs/glob (fs/path dir "data" "bbh" "conversations") "*")))
+                   (pi-tokens @(:events c)))
+          telemetry (assoc (metrics profile @(:events c)) :tokens tokens :list-cost (list-cost price tokens))
           record (merge {:task (:id task) :profile profile :repetition repetition :model model-id :dir dir
                          :grade grade} outcome telemetry
                         {:passed (and (:passed grade) (= :completed (:protocol outcome))
@@ -209,6 +258,7 @@
         attempts (parse-long (or attempts "3"))
         selected (if selected (mapv keyword (str/split selected #",")) default-profiles)
         tasks (tasks/selected-tasks)
+        price (price model)
         sources (fingerprint)]
     (when-not (pos-int? attempts)
       (throw (ex-info "Repetitions must be a positive integer" {:attempts attempts})))
@@ -224,7 +274,10 @@
       (throw (ex-info "Refusing to append a new evaluation to existing results" {:out out})))
     (json! (fs/path out "manifest.json")
            {:pi-version (str/trim (:out @(p/process {:out :string} "pi" "--version")))
-            :model model :profiles selected :attempts attempts :task-ids (mapv :id tasks)
+            :model model :claude-model (when (some #(:claude (profiles %)) selected) claude-model)
+            :price price :price-source "Pi's OpenRouter catalog, dollars per million tokens; list-cost uses it for every profile"
+            :thinking (into {} (for [p selected] [p (thinking (profiles p))]))
+            :profiles selected :attempts attempts :task-ids (mapv :id tasks)
             :fixture-source "eval/bbh/tasks.clj, four tasks adapted from desktop/build/pi-sci/eval/tasks.mjs"
             :sources sources
             :bbh-init "production init with skills and poteto disabled"
@@ -236,12 +289,13 @@
                          [i task] (map-indexed vector tasks)
                          :let [shift (mod (+ repetition i) (count selected))]
                          profile (concat (drop shift selected) (take shift selected))]
-                     (trial! out profile task repetition model)))]
+                     (trial! out profile task repetition model price)))]
       (json! (fs/path out "summary.json")
              (into {} (for [[profile trials] (group-by :profile records)]
                         [profile {:passed (count (filter :passed trials)) :total (count trials)
                                   :calls (reduce + (map :calls trials))
-                                  :tool-errors (reduce + (map :tool-errors trials))}])))
+                                  :tool-errors (reduce + (map :tool-errors trials))
+                                  :list-cost (reduce + 0 (keep :list-cost trials))}])))
       (let [after (fingerprint)
             stable (= sources after)]
         (json! (fs/path out "source-stability.json") {:stable stable :before sources :after after})
