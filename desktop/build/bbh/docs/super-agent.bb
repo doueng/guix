@@ -114,27 +114,30 @@
   [:figure.mock.phones
    [:div.phone
     [:div.bar "9:41"]
-    [:div.head "Inbox " [:span.badge "2"]]
-    [:div.sec "Stopped on you"]
-    [:div.prow [:b "T14"] " Herdr key for the thread picker" [:small "Which key should open the inbox pane? · 3m"]]
-    [:div.sec "Waiting on you"]
-    [:div.prow [:b "T9"] " Cost per session" [:small "Review 7c1e2a0 · 4 files · gates ok · 1h"]]
-    [:div.sec "Working"]
-    [:div.prow.dim [:b "T15"] " web cost" [:small "change: implement · 12m"]]
-    [:div.prow.dim [:b "T16"] " Asahi build fix" [:small "queued, waits for guix-build · 40m"]]
-    [:div.compose [:span "Tell the Router…"] [:span.mic "🎤"]]]
+    [:div.masthead "bbh"]
+    [:div.ptabs [:span.ptab.current "Inbox " [:span.badge "2"]] [:span.ptab "guix"] [:span.ptab "research_lab"]]
+    [:div.label.claret "Stopped on you"]
+    [:div.prow [:div.ph "T14 · Herdr key for the thread picker"] [:div.pd "Which key should open the inbox pane?"] [:div.pm "W9 · wf change · 3m"]]
+    [:div.label "Waiting on you"]
+    [:div.prow [:div.ph "T9 · Cost per session"] [:div.pd "Review 7c1e2a0, 4 files, gates ok"] [:div.pm "1h"]]
+    [:div.label "Working"]
+    [:div.prow.dim [:div.ph "T15 · web cost"] [:div.pm "change: implement · 12m"]]
+    [:div.prow.dim [:div.ph "T16 · Asahi build fix"] [:div.pm "queued, waits for guix-build · 40m"]]
+    [:div.compose [:span "Tell the Router"] [:span.mic "mic"]]]
    [:div.phone
     [:div.bar "9:41"]
-    [:div.head "‹ T14 " [:small "Herdr key for the thread picker"]]
-    [:div.msg.sys "W9 started · wf change · 14m"]
-    [:div.msg "Alt+Space a already opens the agent picker. The inbox pane needs its own key."]
-    [:div.card
+    [:div.masthead "bbh"]
+    [:div.crumb "‹ Inbox"]
+    [:div.thead [:div.kicker.claret "Stopped on you"] [:div.ttitle "T14 · Herdr key for the thread picker"] [:div.pm "W9 · wf change: implement · 14m"]]
+    [:div.ev [:div.pm "W9"] "Alt+Space a already opens the agent picker. The inbox pane needs its own key."]
+    [:div.ask
+     [:div.kicker "Question"]
      [:div.q "Which key should open the inbox pane?"]
-     [:div.btn.rec "Alt+Space t  · recommended"]
-     [:div.btn "Alt+Space a"]
-     [:div.dim "Stopped: the Worker waits for this"]]
+     [:div.choice.rec "Alt+Space t" [:span.rectag "Recommended"]]
+     [:div.choice "Alt+Space a"]
+     [:div.pm "The Worker waits for this."]]
     [:div.actions [:span "Mark read"] [:span "Archive"] [:span.send "Send"]]]
-   [:figcaption "iPhone. The inbox with sections and badge, and a thread with an ask card. A tap saves the pick, Send delivers one message to the Worker. The composer at the bottom reaches the Router, with iOS dictation from the keyboard."]])
+   [:figcaption "iPhone, in the page's existing idiom: paper, serif masthead, small uppercase labels, hairline rules, claret for what needs you and teal for actions. The inbox with sections and badge, and a thread with an ask. A tap saves the pick, Send delivers one message to the Worker. The composer reaches the Router, with iOS dictation from the keyboard."]])
 
 (def voice-mockup
   [:figure.mock
@@ -178,16 +181,29 @@ figure.mock{margin:1.2rem 0 1.6rem;}figcaption{font-size:.9rem;color:#555;margin
 .emacs{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#282c34;border-radius:8px;padding:4px;font:12.5px/1.5 ui-monospace,Menlo,monospace;color:#abb2bf}
 .ebuf{background:#21252b;padding:.5rem .7rem;position:relative;min-height:230px;padding-bottom:1.8rem}.hl{color:#e5c07b}.del{color:#e06c75}.add{color:#98c379}.cmt{color:#56b6c2}
 .mode{position:absolute;left:0;right:0;bottom:0;background:#3e4451;color:#abb2bf;padding:.1rem .5rem}
-.phones{display:flex;gap:1.2rem;flex-wrap:wrap}.phone{width:270px;border:10px solid #111;border-radius:30px;background:#fff;font-size:13px;overflow:hidden;min-height:520px;position:relative}
-.bar{text-align:center;color:#555;padding:.25rem;font-size:11px}.head{font-weight:700;font-size:17px;padding:.3rem .8rem .5rem}.head small{display:block;font-weight:400;color:#555;font-size:12px}
-.badge{background:#d33;color:#fff;border-radius:999px;padding:0 .45rem;font-size:12px;margin-left:.3rem}
-.phone .sec{color:#777;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:.5rem .8rem .1rem}
-.prow{padding:.35rem .8rem;border-bottom:1px solid #eee}.prow small{display:block;color:#666}.prow.dim{color:#888}
-.compose{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;padding:.6rem .8rem;background:#f4f4f4;color:#888}
-.msg{margin:.4rem .8rem;padding:.4rem .6rem;background:#f1f1f1;border-radius:10px}.msg.sys{background:none;color:#888;text-align:center;font-size:11px}
-.card{margin:.5rem .8rem;border:1px solid #ddd;border-radius:10px;padding:.6rem}.card .q{color:#333;font-weight:600;margin-bottom:.4rem}
-.btn{border:1px solid #bbb;border-radius:8px;padding:.5rem;margin:.3rem 0;text-align:center}.btn.rec{background:#e8f0fe;border-color:#7aa2f7}
-.actions{position:absolute;bottom:0;left:0;right:0;display:flex;gap:.6rem;padding:.6rem .8rem;background:#f4f4f4;color:#555}.actions .send{margin-left:auto;background:#1a73e8;color:#fff;padding:.2rem .8rem;border-radius:8px}
+.phones{display:flex;gap:1.2rem;flex-wrap:wrap}
+.phone{--paper:#fff1e5;--ink:#33302e;--muted:#66605c;--rule:#ccc1b7;--claret:#990f3d;--teal:#0d7680;width:280px;border:10px solid #111;border-radius:30px;background:var(--paper);color:var(--ink);font:13px/1.4 'Helvetica Neue',Arial,system-ui,sans-serif;overflow:hidden;min-height:470px;position:relative}
+.phone .bar{text-align:center;color:var(--muted);padding:.25rem;font-size:11px}
+.phone .masthead{margin:0 12px;padding:4px 0 6px;text-align:center;border-bottom:4px solid #000;font:400 24px/1 Georgia,'Times New Roman',serif;color:#000}
+.ptabs{display:flex;gap:14px;margin:0 12px;border-bottom:1px solid var(--rule);font:600 11px/1 'Helvetica Neue',Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.ptab{padding:9px 0 7px;border-bottom:3px solid transparent}.ptab.current{color:#000;border-bottom-color:var(--claret)}
+.phone .badge{background:var(--claret);color:#fff;padding:1px 5px;font-size:10px;margin-left:4px;border-radius:0}
+.phone .label{margin:12px 12px 2px;font:600 11px/1 'Helvetica Neue',Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.phone .label.claret,.kicker.claret{color:var(--claret)}
+.prow{margin:0 12px;padding:8px 0;border-bottom:1px solid var(--rule)}.prow.dim .ph{color:var(--muted)}
+.ph{font:400 15px/1.3 Georgia,'Times New Roman',serif;color:#000}.pd{margin-top:2px}.pm{color:var(--muted);font-size:11px;margin-top:2px}
+.compose{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;margin:0 12px;padding:10px 0;border-top:1px solid var(--rule);color:var(--muted)}.compose span:first-child{flex:1;background:#f2dfce;padding:6px 8px;margin-right:8px}.compose .mic{color:var(--teal);font:600 11px/1.4 'Helvetica Neue',Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase}
+.crumb{margin:8px 12px 0;color:var(--teal);font-size:12px}
+.thead{margin:6px 12px 0;padding-bottom:8px;border-bottom:1px solid var(--rule)}
+.kicker{font:600 11px/1 'Helvetica Neue',Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.ttitle{font:400 19px/1.2 Georgia,'Times New Roman',serif;color:#000;margin:4px 0 2px}
+.ev{margin:10px 12px;padding-bottom:8px;border-bottom:1px solid var(--rule)}
+.ask{margin:10px 12px;padding:10px 0 6px;border-top:4px solid #000}
+.ask .q{font:400 16px/1.3 Georgia,'Times New Roman',serif;color:#000;margin:6px 0 10px}
+.choice{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--rule);padding:9px 10px;margin:6px 0;background:#f2dfce;color:#000}
+.choice.rec{border-color:var(--teal);box-shadow:inset 3px 0 0 var(--teal)}.rectag{font:600 10px/1 'Helvetica Neue',Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--teal)}
+.actions{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;gap:14px;margin:0 12px;padding:10px 0;border-top:1px solid var(--rule);color:var(--teal);font:600 11px/1.4 'Helvetica Neue',Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase}
+.actions .send{margin-left:auto;background:var(--teal);color:#fff;padding:4px 12px}
 .flow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.9rem}.box{border:1px solid #bbb;border-radius:6px;padding:.3rem .6rem;background:#fafafa}.box.ctl{background:#e8f0fe;border-color:#7aa2f7}.arrow{color:#888}.stack{display:flex;flex-direction:column;gap:.3rem}
 .journey{margin:1.4rem 0;padding:.2rem 1rem .6rem;border:1px solid #e3e3e3;border-radius:8px;background:#fcfcfb}.jid{color:#1a73e8}
 .steps{padding-left:1.4rem}.steps li{margin:.35rem 0;display:flex;align-items:baseline;gap:.5rem}.steps .tag{flex:none;margin-right:0}.tag{display:inline-block;font-size:.72rem;font-weight:600;letter-spacing:.03em;padding:.05rem .45rem;border-radius:999px;margin-right:.5rem;vertical-align:middle;color:#fff;background:#777}

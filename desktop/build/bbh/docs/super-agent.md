@@ -284,12 +284,11 @@ Emacs is where you go from the inbox when a thread needs more than a pick.
 
 ### iPhone: triage and answers away from the desk
 
-The `bbh web` page gains an Inbox view next to the session tabs. It stays loopback-only behind `tailscale serve` and the owner check.
+The `bbh web` page gains an Inbox view next to the session tabs. It stays loopback-only behind `tailscale serve` and the owner check, and it keeps the page's Financial Times idiom: paper background, a serif masthead, small uppercase sans labels, hairline rules, claret for what needs you and teal for actions, square corners. There are no notifications; you open the page when you want to know.
 
 - **Inbox list.** Sections and badge as in section 5. A row shows handle, title, the open ask's first line and age. Nothing updates while the laptop sleeps; the page says when its data is older than a few minutes.
 - **Thread view.** Events as a chat. Asks show as cards with large option buttons and the recommended option marked. A tap saves the pick at once, and Send at the bottom sends every pick and note on the thread. Archive and "Mark read" (close the asks and tell the Worker not to wait) sit in the bottom bar beside Send.
 - **Talk to the Router.** A composer at the bottom of the Inbox list sends to the Router. Typing a handle first ("T12 ...") goes to that thread.
-- **Notifications.** If you add the page to the home screen, iOS 16.4 and later can receive Web Push. Push is sent only for Stopped and Waiting asks, one per ask, and a newer push for the same thread replaces the older one. Lock-screen answer buttons are not assumed, because Safari's web push support for notification actions is unverified. A tap opens the ask.
 - **Review on the phone.** A review card shows the summary, the gates that passed and the diff stat. Approving is allowed and names the exact revision. Line comments are left for Emacs.
 - **Hardening.** External text (GitHub comments, CI logs) is rendered as text, never as HTML or Markdown links. Mutations carry the command id and the owner's Tailscale identity, requests are size-limited, and the page refuses cross-origin POSTs as `bbh web` does today.
 
@@ -301,16 +300,16 @@ Dictation is a way of talking to the agent, not only a way of typing into a wind
 - **Where it goes.** If the inbox pane has a thread selected and you spoke within a minute of selecting it, the voice event goes to that thread. A spoken handle ("T twelve, use plan B") goes to that thread. Anything else goes to the Router. Thread handles and project names are added to Hex's vocabulary so they are recognized, and the controller also accepts spoken forms such as "tee twelve".
 - **Answering asks by voice.** "Option two", "the recommended one" or "yes, for a week" become picks on the selected thread's ask, shown in the inbox pane. A dictated reply is a draft until you say "send" or press s. Voice never approves an `action` ask on its own, such as `make switch`.
 - **Plain Cmd+M stays as it is.** It pastes at the cursor, so you can still dictate a note in the inbox's `r` popup, the Router pane or a Worker's pane.
-- **Spoken replies.** The Router answers in text. Reading short replies aloud is an open question (section 14).
-- **On the iPhone.** The composer accepts iOS dictation from the keyboard's microphone key with no extra work. A Shortcut ("Tell bbh") that sends dictated text to the page over the tailnet would let you talk to the Router from the lock screen or Siri. Whether a Shortcut can pass the page's owner check is unverified.
+- **Spoken replies.** None. The Router answers in text.
+- **On the iPhone.** The composer accepts iOS dictation from the keyboard's microphone key with no extra work.
 - **Screen and voice together.** `hex annotate` records the screen with drawing and narration. Attaching such a recording to a thread ("this pane looks wrong") gives a Worker both the picture and what you said about it.
 
 ## 8. User journeys
 
 ### J1. Morning triage on the iPhone
 
-1. **iPhone.** At breakfast a push says "T14 stopped: which Herdr key for the thread picker?".
-2. **iPhone.** The tap opens the thread on the phone. The card offers "Alt+Space t (recommended)" and "Alt+Space a". You tap the first and press Send.
+1. **iPhone.** At breakfast you open the bbh page. The badge says 2, and T14 sits under Stopped on you: "which Herdr key for the thread picker?".
+2. **iPhone.** You open the thread. The card offers "Alt+Space t (recommended)" and "Alt+Space a". You tap the first and press Send.
 3. **System.** The controller commits the reply and an outbox record together, and the dispatcher writes one message to the Worker's mailbox. The thread shows Sent until the Worker acks, then the Worker, idle since it asked, starts a new turn with your answer. If the laptop had been asleep, the Send waits on the phone as a queued command until the page reaches it.
 4. **iPhone.** Back in the Inbox list, T9 shows under Waiting with a review. You read the summary (gates passed, 4 files), tap Approve, and T9 moves to Archived.
 5. **iPhone.** You type "T11 also handle the phone layout" in the Router composer. The handle routes it without a model, as a `steer!` to T11's Worker. The Router sees it in its batch summary and does nothing.
@@ -325,7 +324,7 @@ Dictation is a way of talking to the agent, not only a way of typing into a wind
 ### J3. A Worker needs a decision while you are busy
 
 1. **System.** T15's Worker finds two ways to get the cost and calls `ask!` with `:stopped true` and a recommendation, then ends its turn.
-2. **Herdr.** T15 moves to the top of the inbox pane under Stopped on you. Herdr shows a toast, and the phone gets a push.
+2. **Herdr.** T15 moves to the top of the inbox pane under Stopped on you. Herdr shows a toast.
 3. **Herdr.** At the desk you press Alt+Space t, which lands on T15 in the inbox pane. The preview shows the question with options 1 and 2. You press 1, then s.
 4. **iPhone.** You could equally answer from the phone or Emacs. If both you and the phone answered, the second Send carries a stale `:asks-version` and shows "already answered: option 1" instead of sending.
 
@@ -377,7 +376,6 @@ Dictation is a way of talking to the agent, not only a way of typing into a wind
 
 1. **iPhone.** Walking home you remember T16. You open the bbh page on the iPhone, tap the composer and use the keyboard's microphone: "T16, also keep the old plan as a fallback branch."
 2. **System.** The handle sends it straight to T16's Worker. The event is marked as dictated, so the Worker treats an odd word as a likely recognition error rather than an instruction.
-3. **iPhone.** If the Shortcut from section 7 works, the same message could go through Siri without unlocking the phone.
 
 ## 9. pstack and poteto-mode
 
@@ -404,7 +402,7 @@ Trigger sources make untrusted text reach an agent on a laptop with private file
 - Approval refers to an immutable artifact: a revision id and the hash of its `wf` evidence. A later change makes the approval stale, and `approve!` on a stale revision is rejected.
 - `wf` gates and the independent reviewer establish that code works. They are not a security boundary and do not stand in for your authorization of a side effect.
 - Voice input is yours, but a transcription error is still an instruction, so dictated text never completes an `action` ask.
-- The phone page keeps loopback binding, `tailscale serve` (never `funnel`) and the owner-login check, plus the hardening in section 7. Web Push uses VAPID keys stored outside the repo.
+- The phone page keeps loopback binding, `tailscale serve` (never `funnel`) and the owner-login check, plus the hardening in section 7.
 - Credentials stay out of events and asks. The controller refuses commands whose payload matches the secret patterns `make lint` already uses.
 - nREPL ports stay on loopback. A remote endpoint (section 11) needs tailnet ACLs first.
 
@@ -430,16 +428,15 @@ The hard correctness properties come first, and the surfaces grow beside them. E
 | 3 | Worker ownership and isolation | Worker records, generations, jj workspaces, resource locks, the concurrency cap, `takeover!` and `handback!`. Two Workers change the same repository without touching each other's working copy, evidence or revision. |
 | 4 | Router and dispatch | Restricted env, handle and resource routing, batching. Requests from Herdr, Emacs and the phone resolve to the right thread, and a GitHub-origin task cannot get push rights. |
 | 5 | Jobs and recovery | Job exit events, `steer!` and `cancel!`, health check, bounded restarts, sleep reconciliation. Kill the controller during a job and it is rediscovered, not relaunched. Steer a busy Worker, then cancel it, and the two behave differently and predictably. |
-| 6 | Triggers, notifications, speculation, voice | `gh` poller, `policy.edn` capabilities, process isolation for speculative Workers, Web Push, J7, `bbh say`. A malicious instruction inside an allowlisted comment gains no capability and bypasses no approval, and a speculative Worker cannot reach the network or files outside its workspace. |
+| 6 | Triggers, speculation, voice | `gh` poller, `policy.edn` capabilities, process isolation for speculative Workers, J7, `bbh say`. A malicious instruction inside an allowlisted comment gains no capability and bypasses no approval, and a speculative Worker cannot reach the network or files outside its workspace. |
 
 The first slice worth building is smaller than phase 1 and 2 together: the controller with one Worker per thread, `thread!`, `attach-worker!`, `ask!` and `reply!`, durable and testable without a model, plus `bbh super list` and the inbox pane. That alone gives the key experience: a Worker asks, stops spending turns, and resumes from an answer sent elsewhere. Automated triggers wait until phases 1, 3 and 4 are done.
 
-## 14. Open questions
+## 14. Decisions
 
-- Is Cmd+Shift+M free through kanata and every application layer, or does voice need another chord?
-- Should short Router replies be spoken back when the request came by voice?
-- Can a Siri Shortcut reach the page through `tailscale serve` and pass the owner check?
+- Voice uses Cmd+Shift+M for now. Hyprland has nothing on it; kanata and the application layers are checked when the bind is added, with the keybindings skill.
+- Router replies are text only, also when the request was spoken.
+- No push notifications. The phone shows what needs you when you open it, and the badge in the page title does the rest. The laptop cannot notify while asleep in any case.
 - Plannotator: phase 0 decides. If its thread and reply API can be bridged without a second ask lifecycle, bbh owns execution and workflow state and Plannotator owns ask and reply interaction, with a thin Emacs overview backed by bbh. If not, the inbox pane and phone view are built as described.
-- Router model: deterministic routing and Jev first, a mid-priced model for the rest. Measure routing accuracy on real requests before choosing.
-- iOS Web Push works from a home-screen page on iOS 16.4 and later with permission and a service worker. Lock-screen action buttons stay optional until tried on the phone.
-- Memory: keep archived threads, their summaries, events and links to conversations and `wf` evidence indefinitely and searchable. No memory subsystem until that is a problem.
+- Router model: deterministic routing and Jev first, a mid-priced model for the rest. Routing accuracy is measured on real requests before the model is chosen.
+- Memory: archived threads, their summaries, events and links to conversations and `wf` evidence are kept indefinitely and searchable. No memory subsystem until that is a problem.
