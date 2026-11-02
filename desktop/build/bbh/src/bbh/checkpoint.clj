@@ -60,12 +60,14 @@
   (keep entry (read-forms code)))
 
 (defn- snapshot-code
-  "Code that maps each of NAMES to its value's readable literal, or nil when it has none."
+  "Code that maps each of NAMES to its value's readable literal, or nil when it has none.
+  Printing is bounded, so an infinite seq or a huge value yields an elided string that fails the
+  read-back check instead of stalling the control session, and a value whose printing throws is skipped."
   [names]
   (str "(into {} (for [s '" (pr-str (vec names)) "] "
-       "[s (when-let [v (resolve s)] (let [x @v s (pr-str x)] "
+       "[s (when-let [v (resolve s)] (try (let [x @v s (binding [*print-length* 10000 *print-level* 50] (pr-str x))] "
        "(when (and (< (count s) " max-literal-chars ") (not (str/includes? s \"#object\")) "
-       "(= x (try (read-string s) (catch Exception _ ::no)))) s)))]))"))
+       "(= x (try (read-string s) (catch Exception _ ::no)))) s)) (catch Exception _ nil)))]))"))
 
 (defn- with-literals
   "ENTRIES with each def of a readable value replaced by a def of its literal."

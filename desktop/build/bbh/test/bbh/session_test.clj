@@ -108,6 +108,24 @@
              restart))
       (is (str/includes? (slurp (str (fs/path (:repl-dir @(:s h)) "checkpoint.clj"))) "(def dep 8)") "a readable value is stored as its literal"))))
 
+(deftest an-unbounded-value-is-checkpointed-as-its-source-not-its-print
+  (let [h (harness "(ns bbh.env) (def manifest {:deadline-ms 500})"
+                   [{:code "(def nats (range)) (def deep (reduce (fn [acc _] [acc]) :x (range 100))) (defn bad-print [] 1) (def huge (vec (range 20000))) :defined"}
+                    {:code "(loop [] (recur))"}
+                    {:code "[(take 3 nats) (count huge)]"}
+                    "ok"])]
+    (let [start (System/currentTimeMillis)]
+      (session/prompt! (:s h) "work")
+      (stop! h)
+      (is (< (- (System/currentTimeMillis) start) 6000) "the snapshot did not wait out its cap"))
+    (let [[defined restart after] (tool-results h)
+          file (slurp (str (fs/path (:repl-dir @(:s h)) "checkpoint.clj")))]
+      (is (= "=> :defined" defined))
+      (is (str/includes? restart "4 definitions were restored") restart)
+      (is (= "=> [(0 1 2) 20000]" after))
+      (is (str/includes? file "(def nats (range))") "an infinite seq keeps its source")
+      (is (str/includes? file "(def huge (vec (range 20000)))") "a value past the literal cap keeps its source"))))
+
 (deftest a-restart-with-nothing-defined-says-definitions-are-gone
   (let [h (harness "(ns bbh.env) (def manifest {:deadline-ms 500})" [{:code "(loop [] (recur))"} "ok"])]
     (session/prompt! (:s h) "spin")
