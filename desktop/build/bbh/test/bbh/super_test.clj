@@ -609,3 +609,14 @@
     (with-redefs [voice/hex! (fn [& args] (swap! calls conj args) {:exit 4 :out ""})]
       (is (= {:silence true} (voice/stop!)))
       (is (= [["dictation" "stop" "--print"]] (mapv vec @calls))))))
+
+(deftest handle-input-does-not-target-undeliverable-workers
+  (doseq [[worker-state conversation] [[:queued nil] [:starting nil] [:cancelling "conv-1"]]]
+    (let [state (-> model/empty-state
+                    (assoc-in [:threads "T1"] {:id "T1" :worker "W1"})
+                    (assoc-in [:workers "W1"] {:id "W1" :thread "T1" :state worker-state :conversation conversation}))]
+      (is (= :not-running
+             (try (model/decide state :owner {:id "voice-probe" :command :say!
+                                              :args {:text "tee one use plan B" :origin :voice}})
+                  :accepted
+                  (catch clojure.lang.ExceptionInfo e (:error (ex-data e)))))))))

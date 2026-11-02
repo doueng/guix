@@ -192,9 +192,14 @@
                :data {:id worker :pane pane :outbox (next-id state :outbox "o") :conversation (:conversation w)
                       :text (str "[Recovery] Resume the existing wf run " (:wf-run w) " and conversation. Inspect existing jobs before acting; do not relaunch surviving jobs.")}}] :result worker}))
 
+(defn- deliverable-worker! [w]
+  (when-not (and (#{:working :waiting} (:state w)) (not (str/blank? (:conversation w))))
+    (refuse :not-running :worker (:id w)))
+  w)
+
 (defmethod decide* :steer! [state {{:keys [worker text]} :args}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
-    (when-not (and (#{:working :waiting} (:state w)) (:conversation w)) (refuse :not-running :worker worker))
+    (deliverable-worker! w)
     (when (str/blank? text) (refuse :invalid :field :text))
     {:events [{:kind :worker-steered :thread (:thread w)
                :data {:worker worker :text text :outbox (next-id state :outbox "o")
@@ -321,6 +326,7 @@
         t (when handle (get-in state [:threads handle]))
         w (when t (get-in state [:workers (:worker t)]))
         said (str (when (= :voice origin) "(spoken) ") (if handle (str handle ": " rest) text))]
+    (when w (deliverable-worker! w))
     (cond (and handle (nil? t)) (refuse :no-such-thread :thread handle)
           w {:events [{:kind :worker-steered :thread handle
                        :data {:id id :origin origin :text rest :worker (:id w) :outbox (next-id state :outbox "o")
