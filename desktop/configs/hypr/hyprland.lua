@@ -59,19 +59,56 @@ hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
 -- held, so Cmd's own release (code:133/134) also stops; the flag keeps every
 -- other Cmd release from starting a process.
 local dictating = false
+local agent_dictating = false
+local suppress_plain_dictation = false
+hl.bind("SUPER + SHIFT + M", function()
+  if not dictating and not agent_dictating then
+    agent_dictating = true
+    suppress_plain_dictation = true
+    hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/bbh say start"))
+  end
+end)
+local function stop_agent_dictation()
+  if agent_dictating then
+    agent_dictating = false
+    hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/bbh say stop"))
+  end
+end
+hl.bind("SUPER + SHIFT + M", function()
+  stop_agent_dictation()
+  suppress_plain_dictation = false
+end, { release = true })
+local function release_agent_cmd()
+  stop_agent_dictation()
+  suppress_plain_dictation = false
+end
+hl.bind("SUPER + SHIFT + code:133", release_agent_cmd, { release = true, non_consuming = true })
+hl.bind("SUPER + SHIFT + code:134", release_agent_cmd, { release = true, non_consuming = true })
+hl.bind("SUPER + SHIFT + code:50", stop_agent_dictation, { release = true, non_consuming = true })
+hl.bind("SUPER + SHIFT + code:62", stop_agent_dictation, { release = true, non_consuming = true })
 hl.bind("SUPER + M", function()
-  dictating = true
-  hl.dispatch(hl.dsp.exec_cmd("hex dictation start"))
+  if not agent_dictating and not suppress_plain_dictation then
+    dictating = true
+    hl.dispatch(hl.dsp.exec_cmd("hex dictation start"))
+  end
 end)
 local function stop_dictation()
+  stop_agent_dictation()
   if dictating then
     dictating = false
     hl.dispatch(hl.dsp.exec_cmd("hex dictation stop"))
   end
 end
-hl.bind("SUPER + M", stop_dictation, { release = true })
-hl.bind("SUPER + code:133", stop_dictation, { release = true, non_consuming = true })
-hl.bind("SUPER + code:134", stop_dictation, { release = true, non_consuming = true })
+hl.bind("SUPER + M", function()
+  stop_dictation()
+  suppress_plain_dictation = false
+end, { release = true })
+local function release_cmd()
+  stop_dictation()
+  suppress_plain_dictation = false
+end
+hl.bind("SUPER + code:133", release_cmd, { release = true, non_consuming = true })
+hl.bind("SUPER + code:134", release_cmd, { release = true, non_consuming = true })
 -- Label every visible window, Herdr pane and editor window, then focus the typed one.
 hl.bind("SUPER + F", hl.dsp.exec_cmd("~/.local/bin/winhint"))
 

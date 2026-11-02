@@ -2,7 +2,8 @@
   (:require [babashka.fs :as fs]
             [bbh.super :as super]
             [bbh.super.client :as client]
-            [bbh.super.pane]
+            [bbh.super.pane :as pane]
+            [bbh.super.voice :as voice]
             [babashka.process]
             [cheshire.core]
             [bbh.super.model :as model]
@@ -566,3 +567,45 @@
         (spit (str base ".release") "go")
         (when (babashka.process/alive? proc) (.destroyForcibly (:proc proc)))
         (fs/delete-tree root)))))
+
+(deftest voice-drafts-need-send-and-action-asks-require-keyboard
+  (with-controller
+    (fn [c dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (let [{:keys [token]} (thread-with-ask dir)]
+              (pane/select! "T1")
+              (is (= {:thread "T1" :draft true :option 2} (voice/submit! "option two")))
+              (is (= {"T1" {"a1" "week"}} (:picks (pane/client-state))))
+              (is (= {} (:replies @(:state c))))
+              (is (= {:thread "T1" :sent true} (voice/submit! "send")))
+              (is (= [{"a1" "week"}] (mapv :picks (vals (:replies @(:state c))))))
+              (call dir {:token token :command :ask! :args {:kind :action :text "Switch system?" :options [{:id "yes" :label "Yes"}]}})
+              (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "option one")))
+              (pane/with-state-lock! #(pane/pick! "T1" 1))
+              (is (thrown-with-msg? Exception #"keyboard" (voice/submit! "send"))))))))))
+
+(deftest voice-expiry-handle-precedence-and-stale-drafts
+  (with-controller
+    (fn [c dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (let [{:keys [token]} (thread-with-ask dir)]
+              (call dir {:command :register-router! :args {:conversation "router"}})
+              (call dir {:command :thread! :args {:title "second"}})
+              (call dir {:command :attach-worker! :args {:thread "T2" :conversation "conv-2"}})
+              (pane/select! "T2")
+              (is (= {:thread "T1" :draft true :option 2} (voice/submit! "tee one, option two")))
+              (call dir {:token token :command :ask! :args {:kind :question :text "A new question" :options []}})
+              (is (thrown? Exception (voice/submit! "tee one send")))
+              (spit pane/*state-file* (pr-str {:selected {:thread "T2" :at 1}}))
+              (is (= {:to :router} (voice/submit! "investigate my build")))
+              (is (= :voice (:origin (:data (last (filter #(= :router-queued (:kind %)) (store/events (:db c)))))))))))))))
+
+(deftest hex-stop-does-not-paste-or-route-silence
+  (let [calls (atom [])]
+    (with-redefs [voice/hex! (fn [& args] (swap! calls conj args) {:exit 4 :out ""})]
+      (is (= {:silence true} (voice/stop!)))
+      (is (= [["dictation" "stop" "--print"]] (mapv vec @calls))))))

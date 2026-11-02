@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | Physical keyboard | Caps held for Ctrl, Caps tapped for Esc, Shift tapped for parentheses, Cmd rewrites | `desktop/kanata.kbd` |
 | Per-application Cmd chords | Kanata layer for the focused window class | `kanata/apps.edn`, `desktop/bin/hyprkan` |
+| Agent voice, no paste | Hold Cmd+Shift+M; release M, Cmd or Shift | `hypr/hyprland.lua`, `bbh say` |
 | Desktop discovery | Cmd+/ | `desktop/bin/keyguide` and `bindings.edn` |
 | Leader sequences | Space, Cmd+Space, Ctrl+b Space or Alt+Space | `leader.edn`, `desktop/bin/keyleader`, generated files |
 | Window focus | Ctrl+Alt+h/j/k/l | Generated `hypr/keybindings.lua` |

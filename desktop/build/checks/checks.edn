@@ -41,6 +41,9 @@
    :paths ["desktop/build/bbh/**" "desktop/configs/bbh/**" "desktop/bin/{bbh,wf,emacs-bbh}"
            "modules/engstrand/features/bbh-web.scm"]
    :checks ["cd desktop/build/bbh && bb test"]}
+  {:name "bbh voice shortcut"
+   :paths ["desktop/build/bbh/src/bbh/super/voice.clj" "desktop/configs/hypr/hyprland.lua"]
+   :checks ["make kanata-check"]}
   {:name "bbh-transcript-scroll"
    :paths ["desktop/configs/doom/agent-shell.el" "desktop/build/bbh/test/tty-scroll-test.el"
            "desktop/build/bbh/bb.edn"]

@@ -7,6 +7,7 @@
             [bbh.session :as session]
             [bbh.super.client :as super]
             [bbh.super.pane :as pane]
+            [bbh.super.voice :as voice]
             [bbh.transcript :as transcript]
             [bbh.web :as web]
             [clojure.string :as str])
@@ -116,5 +117,6 @@
                    (inbox/-poll (str (fs/path (super/data-dir) "conversations" id)) project))
     "web" (web/-main (super/data-dir))
     "super" (apply super/-main (rest args))
+    "say" (apply voice/-main (rest args))
     "inbox" (apply pane/-main (rest args))
     (terminal args)))

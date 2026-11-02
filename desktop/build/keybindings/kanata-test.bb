@@ -24,7 +24,13 @@
       (finally (fs/delete-if-exists file)))))
 
 (def cases
-  [["Cmd+C copies with Ctrl+Insert" "d:lmet d:c u:c u:lmet"
+  [["Cmd+Shift+M reaches Hyprland for agent voice" "d:lmet d:lsft d:m u:m u:lsft u:lmet"
+    "↓LGui ↓LShift ↓M ↑M ↑LShift ↑LGui"]
+   ["Terminal Cmd+Shift+M reaches Hyprland for agent voice" "ls:terminal d:lmet d:lsft d:m u:m u:lsft u:lmet"
+    "↓LGui ↓LShift ↓M ↑M ↑LShift ↑LGui"]
+   ["IntelliJ Cmd+Shift+M reaches Hyprland for agent voice" "ls:intellij d:lmet d:lsft d:m u:m u:lsft u:lmet"
+    "↓LGui ↓LShift ↓M ↑M ↑LShift ↑LGui"]
+   ["Cmd+C copies with Ctrl+Insert" "d:lmet d:c u:c u:lmet"
     "↓LGui ↑LGui ↓LCtrl ↓Insert ↑LCtrl ↑Insert ↓LGui ↑LGui"]
    ["Unmapped Cmd chords reach Hyprland as Super" "d:lmet d:b u:b u:lmet"
     "↓LGui ↓B ↑B ↑LGui"]
