@@ -315,6 +315,31 @@
    (when-let [line (or (:text ask) summary)]
      [:span.row-line (first-line line) (when came-back " · came back")])])
 
+(defn- say!
+  "Send the Inbox composer's text to the Router, or to the thread it names."
+  []
+  (let [text (str/trim (get @drafts :say ""))]
+    (when-not (str/blank? text)
+      (swap! state assoc :saying true)
+      (-> (request "/api/super/say" {:method "POST" :headers {"Content-Type" "application/json"}
+                                     :body (js/JSON.stringify (clj->js {:id (str "s-" (js/Date.now)) :text text}))})
+          (.then (fn [r]
+                   (swap! drafts dissoc :say)
+                   (when-let [el (.querySelector js/document ".say textarea")] (set! (.-value el) ""))
+                   (swap! state assoc :said (if (:thread r) (str "Sent to " (:thread r)) "Sent to the Router"))))
+          (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))
+          (.finally (fn [] (swap! state assoc :saying false) (sync-inbox!)))))))
+
+(defn- say-view [{:keys [saying said]}]
+  [:form.composer.say {:on {:submit (fn [e] (.preventDefault e) (say!))}}
+   [:textarea {:placeholder "Tell the Router, or \"T12 ...\" for a thread" :aria-label "Message to the Router"
+               :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) (get @drafts :say "")))
+               :on {:input (fn [e] (swap! drafts assoc :say (.. e -target -value)))
+                    :keydown (fn [e] (when (and (= "Enter" (.-key e)) (or (.-metaKey e) (.-ctrlKey e))) (.preventDefault e) (say!)))}}]
+   [:div.composer-actions
+    [:button {:type "submit" :disabled saying} (if saying "Sending" "Send")]
+    (when said [:span.said said])]])
+
 (defn- inbox-view [{:keys [inbox inbox-at inbox-error]}]
   (let [old? (and inbox-at (> (- (js/Date.now) inbox-at) stale-ms))]
     [:main#thread.thread.inbox
@@ -466,7 +491,7 @@
                   [:button.tab.inbox-tab {:class (when view "current") :on {:click #(show! :inbox)}}
                    [:span.tab-project "Inbox" (when (pos? badge) [:span.badge badge])]]]
                  (map #(tab-view (when-not view current) %)) agents)]
-          (cond (= :inbox view) [(inbox-view s)]
+          (cond (= :inbox view) [(inbox-view s) (say-view s)]
                 (vector? view) [(super-thread-view s (second view))]
                 :else [(cond current (thread-view current conversation)
                              (nil? agents) [:main#thread.thread (when error [:p.empty error])]

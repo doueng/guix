@@ -221,6 +221,13 @@
                (try (json/parse-string (slurp (:body request)) true) (catch Exception _ ::bad)))]
     (cond (and (= uri "/api/super/threads") (= :get request-method))
           (super-call dir {:command :sections :args {:cursors (cursors request)}} 200)
+          (= uri "/api/super/say")
+          (cond (not= :post request-method) (json-response 405 {:error "Method not allowed"})
+                (not (same-origin? request)) (json-response 403 {:error "Cross-origin request"})
+                (= ::bad body) (json-response 400 {:error "Bad JSON"})
+                (str/blank? (str (:text body))) (json-response 400 {:error "Empty message"})
+                (> (count (str (:text body))) max-text) (json-response 413 {:error "Message too long"})
+                :else (super-call dir {:command :say! :id (:id body) :args {:text (str/trim (str (:text body))) :origin :phone}} 202))
           (nil? id) (json-response 404 {:error "Not found"})
           (and (= :get request-method) (nil? verb))
           (let [thread (super/call! dir {:command :thread :args {:id id}})

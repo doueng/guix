@@ -4,6 +4,7 @@
             [bbh.super.client :as client]
             [bbh.super.pane]
             [babashka.process]
+            [cheshire.core]
             [bbh.super.model :as model]
             [bbh.super.store :as store]
             [clojure.test :refer [deftest is testing]]))
@@ -318,3 +319,63 @@
         (is (wait-for #(= [:acked] (map :state (vals (:outbox @(:state c)))))))
         (is (= {} (:replies @(:state c))) "a brief is not a reply")
         (locking (:db c) (is (= (store/replay (:db c)) (store/load (:db c)) @(:state c))))))))
+
+;; ---- the Router ------------------------------------------------------------
+
+(deftest a-handle-is-read-typed-or-spoken
+  (is (= ["T12" "also handle the phone layout"] (model/parse-handle "T12 also handle the phone layout")))
+  (is (= ["T12" "use plan B"] (model/parse-handle "t12: use plan B")))
+  (is (= ["T12" "option two"] (model/parse-handle "tee twelve, option two")))
+  (is (= ["T22" "go"] (model/parse-handle "Tee twenty two go")))
+  (is (= ["T7" ""] (model/parse-handle "T seven")))
+  (is (nil? (model/parse-handle "Make the page show cost per session")))
+  (is (nil? (model/parse-handle "tea for two")) "a word that is not a number is not a handle"))
+
+(deftest a-message-with-a-handle-goes-to-its-worker-without-the-router
+  (with-workers
+    (fn [c dir repo _]
+      (call dir {:command :thread! :args {:title "phone layout"}})
+      (start-worker dir "T1" :repo repo)
+      (let [root (fs/path (:conversations c) "super-W1")
+            files #(set (map str (fs/glob root "mailbox/*.json")))]
+        (is (wait-for #(= 1 (count (files)))) "the brief")
+        (let [brief (files)]
+          (doseq [[origin text] {:phone "T1 also handle the phone layout" :herdr "t1: keep the alias" :voice "tee one, option two"}]
+            (is (= {:ok {:thread "T1" :to "W1"}} (call dir {:command :say! :args {:text text :origin origin}})))
+            (is (wait-for #(= 2 (count (files)))))
+            (let [new (first (remove brief (files)))
+                  text (:text (cheshire.core/parse-string (slurp new) true))]
+              (is (re-find (case origin :phone #"\[T1 from phone\] also handle the phone layout"
+                                 :herdr #"\[T1 from herdr\] keep the alias"
+                                 :voice #"\[T1 from voice, dictated\] option two") text))
+              (fs/delete new))
+            (is (wait-for #(= 1 (count (files)))))))
+        (is (= :no-such-thread (:error (call dir {:command :say! :args {:text "T9 hello" :origin :phone}}))))
+        (is (= :no-router (:error (call dir {:command :say! :args {:text "no handle here" :origin :phone}}))) "nothing is owed to a Router that is not registered")))))
+
+(deftest unresolved-messages-reach-the-router-as-one-batched-prompt
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-r"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-rconv"}))
+        ;; a slow dispatcher, so two messages are pending at once
+        c (super/start! {:dir dir :conversations conversations :scan-ms 1500})]
+    (try
+      (let [token (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
+            root (fs/path conversations "router")]
+        (is (re-matches #"[0-9a-f]{48}" token))
+        (is (= {:ok {:to :router}} (call dir {:command :say! :args {:text "Make the page show cost per session" :origin :herdr}})))
+        (is (= {:ok {:to :router}} (call dir {:command :say! :args {:text "and what is T3 doing" :origin :voice}})))
+        (is (wait-for #(seq (fs/glob root "mailbox/*.json"))))
+        (Thread/sleep 100)
+        (is (= 1 (count (fs/glob root "mailbox/*.json"))) "one prompt for both")
+        (is (= "[herdr] Make the page show cost per session\n\n[voice] (spoken) and what is T3 doing"
+               (:text (cheshire.core/parse-string (slurp (str (first (fs/glob root "mailbox/*.json")))) true))))
+        (is (= #{:sent} (set (map :state (vals (:outbox @(:state c)))))))
+        (testing "the Router's token starts work but does not answer asks"
+          (is (= {:ok "T1"} (call dir {:token token :command :thread! :args {:title "web cost per session"}})))
+          (is (= :forbidden (:error (call dir {:token token :command :reply! :args {:thread "T1" :asks-version 0 :picks {}}})))))
+        (testing "a handle for a thread without a Worker goes to the Router with the thread named"
+          (is (= {:ok {:to :router :thread "T1"}} (call dir {:command :say! :args {:text "T1 go ahead" :origin :phone}}))))
+        (testing "registering again revokes the old token"
+          (call dir {:command :register-router! :args {:conversation "router"}})
+          (is (= :unauthorized (:error (call dir {:token token :command :threads}))))))
+      (finally (super/stop! c)))))

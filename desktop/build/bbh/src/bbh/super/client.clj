@@ -3,6 +3,8 @@
   and `call!`. This loads no database, so the CLI, the website and the pane
   start without libsqlite3."
   (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
@@ -20,6 +22,13 @@
   [dir port]
   (fs/create-dirs (listeners-dir dir))
   (spit (str (fs/path (listeners-dir dir) (str port))) (str port)))
+
+(defn herdr
+  "Run a Herdr command and return its :result."
+  [& args]
+  (let [{:keys [exit out err]} (apply p/shell {:out :string :err :string :continue true} "herdr" args)]
+    (when-not (zero? exit) (throw (ex-info (str "herdr " (str/join " " args) ": " (str/trim err)) {:error :herdr})))
+    (:result (json/parse-string out true))))
 
 (defn new-id
   "A command id for a caller that has none: unique and never repeated."
@@ -53,17 +62,40 @@
       (println (format "  %-4s %s%s" id title (if came-back "  (came back)" "")))
       (when-let [line (or (:text ask) summary)] (println (str "       " line))))))
 
+(defn start-router!
+  "The Inbox workspace in Herdr: `bbh inbox` in its first pane and the Router,
+  `bbh --id router` with its token and BBH_ROLE=router, in a split to the
+  right. Registers the Router first, which revokes an earlier Router token."
+  [dir]
+  (let [{:keys [ok error message]} (call! dir {:command :register-router! :args {:conversation "router"}})
+        _ (when error (throw (ex-info (str "register-router!: " (name error) " " message) {:error error})))
+        token (:token ok)
+        home (System/getProperty "user.home")
+        ws (herdr "workspace" "create" "--cwd" home "--label" "Inbox" "--no-focus")
+        ws-id (or (get-in ws [:workspace :workspace_id]) (:workspace_id ws))
+        left (:pane_id (first (:panes (herdr "pane" "list" "--workspace" ws-id))))
+        right (get-in (herdr "pane" "split" left "--direction" "right" "--ratio" "0.6" "--cwd" home "--no-focus"
+                             "--env" (str "BBH_SUPER_TOKEN=" token) "--env" "BBH_ROLE=router")
+                      [:pane :pane_id])]
+    (herdr "pane" "run" left "bbh" "inbox")
+    (herdr "pane" "rename" left "Inbox")
+    (herdr "pane" "run" right "bbh" "--id" "router")
+    (herdr "pane" "rename" right "Router")
+    {:workspace ws-id :inbox left :router right}))
+
 (defn -main
   "bbh super serve, bbh super list, or bbh super COMMAND [EDN-ARGS] [--id ID].
   Only serve loads the store."
   [& [command & args]]
   (case command
     "serve" ((requiring-resolve 'bbh.super/-main))
+    "start-router" (prn (start-router! (super-dir)))
     (nil "help" "--help")
     (println (str/join "\n" ["usage: bbh super serve"
                                "       bbh super list"
+                               "       bbh super start-router"
                                "       bbh super COMMAND [EDN-ARGS] [--id ID]"
-                               "commands: thread! link! attach-worker! ask! reply! dismiss! archive! note! milestone! answered! threads thread events sections"
+                               "commands: thread! link! attach-worker! start-worker! finish-worker! takeover! handback! say! ask! reply! dismiss! archive! note! milestone! answered! threads thread events sections"
                                "example: bbh super thread! '{:title \"Alt+W closes windows\"}'"]))
     (let [[edn-args & more] (if (= "list" command) (cons nil args) args)
           id (second (drop-while #(not= "--id" %) more))

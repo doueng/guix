@@ -36,6 +36,11 @@ This session is a Worker of bbh super: a thread's work, with a controller that r
 - (super-note! \"text\") updates the thread's summary line; (super-milestone! \"text\") marks progress worth the person's notice.
 - (super-done!) when the wf run is done, (super-failed! \"why\") when it cannot finish. Both end the Worker.")
 
+(def router-helpers
+  "# Router
+
+You are the Router of bbh super: one long-lived conversation that reads what the person says and the events no thread owns. Each prompt is a batch of messages, oldest first, each tagged with its origin. For every message: classify it with (jev-classify-task text) first; a question or a request for information gets a one-line answer from what (super-threads) and (super-thread id) show; a feature, fix or chore becomes a thread with (super-thread! title) and a Worker with (super-start-worker! {:thread id :workflow :change :brief text :repo \"/home/engstrand/guix\" :check \"make lint\"}) (:investigation for an open question, :bug-fix with :repro for a failure; :check is the command that proves the change, `make lint` for this repository unless the person names one); noise gets no reply. A message addressed to a thread you can see (`T12: ...`) is already delivered to its Worker; note it and do nothing. Reply in one line per message, such as \"Started T15 (change workflow). I'll ask if it needs you.\" Never run shell commands, edit files or read the repository: Workers do that.")
+
 (def pi-helpers
   "Skills written for Pi name Pi helpers. Drop `await` and map `tools/jev_classify_task {:task t}` to (jev-classify-task t), `fs/read` to read-lines, `tools/read` to slurp, `fs/list` to fs/glob, `tools/edit` to edit!, and `tools/bash`, `jj/...` and `make/...` to sh. Parallelize with future or pmap.")
 
@@ -222,7 +227,8 @@ This session is a Worker of bbh super: a thread's work, with a controller that r
   {:system (str base-prompt
                 "\n\n" helper-reference
                 "\n\n" pi-helpers
-                (when (System/getenv "BBH_SUPER_TOKEN") (str "\n\n" super-helpers))
+                (when (System/getenv "BBH_SUPER_TOKEN")
+                  (str "\n\n" (if (= "router" (System/getenv "BBH_ROLE")) router-helpers super-helpers)))
                 "\n\nWorking directory: " (fs/cwd)
                 (some->> (skill-index) (str "\n\n"))
                 (when-let [p (project-instructions)]
@@ -454,6 +460,12 @@ This session is a Worker of bbh super: a thread's work, with a controller that r
 (defn super-milestone! "Mark progress worth the person's notice." [text] (super-call! :milestone! {:text text}))
 (defn super-done! "End this Worker as done." [] (super-call! :finish-worker! {:state-after :done}))
 (defn super-failed! "End this Worker as failed, saying WHY." [why] (super-call! :finish-worker! {:state-after :failed :reason why}))
+
+(defn super-threads "Every thread, by id." [] (super-call! :threads {}))
+(defn super-thread "Thread ID with its asks, replies and Workers." [id] (super-call! :thread {:id id}))
+(defn super-thread! "A new thread titled TITLE; returns its handle." [title] (super-call! :thread! {:title title}))
+(defn super-link! "Link RESOURCE (such as \"repo:engstrand/guix\") to thread ID." [id resource] (super-call! :link! {:thread id :resource resource}))
+(defn super-start-worker! "Start a Worker: {:thread :workflow :brief :repo :locks :check}. Returns its id and state." [spec] (super-call! :start-worker! spec))
 
 (defn pwd "The working directory." [] (str (fs/cwd)))
 

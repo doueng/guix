@@ -5,7 +5,7 @@
   is the client every surface and Worker uses."
   (:require [babashka.fs :as fs]
             [bbh.inbox :as inbox]
-            [bbh.super.client :as client :refer [call! data-dir new-id super-dir]]
+            [bbh.super.client :as client :refer [call! data-dir herdr new-id super-dir]]
             [bbh.super.model :as model]
             [bbh.super.store :as store]
             [bbh.workflow :as workflow]
@@ -79,11 +79,6 @@
   "The wf run for WORKER in WORKSPACE, its brief as the task."
   [workspace {:keys [workflow brief check]}]
   (workflow/start! workflow {:cwd workspace :task brief :check check}))
-
-(defn- herdr [& args]
-  (let [{:keys [exit out err]} (apply p/shell {:out :string :err :string :continue true} "herdr" args)]
-    (when-not (zero? exit) (throw (ex-info (str "herdr " (str/join " " args) ": " (str/trim err)) {:error :herdr})))
-    (:result (json/parse-string out true))))
 
 (defn pane!
   "A Herdr pane for WORKER: split beside a pane of the workspace that holds
@@ -159,7 +154,7 @@
         {:ok read}
         (let [cmd {:id (or id (new-id)) :command command :args (or args {})}]
           (case command
-            :attach-worker!
+            (:attach-worker! :register-router!)
             (let [t (new-token)
                   r (run! c principal (assoc cmd :token-hash (sha256 t)))]
               {:ok (cond-> (:result r) (not (:repeat? r)) (assoc :token t))})
@@ -217,14 +212,24 @@
   sent row acked once its mailbox file is gone. Each step is a command with a
   fixed id, so a pass repeated after a crash changes nothing twice."
   [{:keys [state] :as c}]
-  (doseq [{:keys [id conversation text message] :as o} (sort-by :id (vals (:outbox @state)))]
+  (let [router (get-in @state [:router :router :conversation])
+        rows (sort-by #(parse-long (subs (:id %) 1)) (vals (:outbox @state)))
+        for-router? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
+        batch (filter for-router? rows)]
+    ;; The Router reads its pending rows as one prompt, oldest first.
+    (when (seq batch)
+      (let [m (inbox/send! (conversation-root c router) (str/join "\n\n" (map :text batch)))]
+        (doseq [{:keys [id]} batch]
+          (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))))
+  (doseq [{:keys [id conversation text message] :as o} rows
+          :when (not (and (= :pending (:state o)) (= router conversation)))]
     (case (:state o)
       :pending (let [root (conversation-root c conversation)
                      m (inbox/send! root text)]
                  (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))
       :sent (when-not (fs/exists? (fs/path (conversation-root c conversation) "mailbox" (str message ".json")))
               (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
-      nil)))
+      nil))))
 
 (defn start!
   "Open the store under DIR, listen on a loopback port written to <dir>/port,

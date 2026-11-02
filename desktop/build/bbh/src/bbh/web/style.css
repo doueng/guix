@@ -332,3 +332,5 @@ th {
 .bar-actions .quiet { color: var(--teal); background: transparent; border: 1px solid var(--teal); }
 .bar-actions .send { margin-left: auto; padding: 0 20px; color: #fff; background: var(--teal); border: 0; }
 .bar-actions button:disabled { opacity: 0.5; }
+.say textarea { height: 3.2em; }
+.said { color: var(--muted); font: 12px/1.3 var(--sans); text-align: center; }

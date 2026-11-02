@@ -6,9 +6,9 @@
   (:require [clojure.string :as str]))
 
 (def empty-state
-  {:counters {} :threads {} :workers {} :asks {} :replies {} :outbox {} :locks {} :tokens {}})
+  {:counters {} :threads {} :workers {} :asks {} :replies {} :outbox {} :locks {} :tokens {} :router {}})
 
-(def entity-kinds [:counters :threads :workers :asks :replies :outbox :locks :tokens])
+(def entity-kinds [:counters :threads :workers :asks :replies :outbox :locks :tokens :router])
 
 (defn- refuse [error & {:as more}]
   (throw (ex-info (name error) (assoc more :error error))))
@@ -16,7 +16,7 @@
 ;; ---- authorization ------------------------------------------------------
 
 (def ^:private grants
-  {:router #{:thread! :link! :attach-worker! :start-worker!}
+  {:router #{:thread! :link! :attach-worker! :start-worker! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
    :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running!}})
 
@@ -219,6 +219,65 @@
   {:events (filterv some? [(dismissal state thread id) {:kind :thread-resolved :thread thread :data {}}])
    :result thread})
 
+;; ---- routing ------------------------------------------------------------
+
+(def ^:private number-words
+  (merge (zipmap ["zero" "one" "two" "three" "four" "five" "six" "seven" "eight" "nine" "ten" "eleven" "twelve"
+                  "thirteen" "fourteen" "fifteen" "sixteen" "seventeen" "eighteen" "nineteen"] (range 20))
+         {"twenty" 20 "thirty" 30 "forty" 40 "fifty" 50 "sixty" 60 "seventy" 70 "eighty" 80 "ninety" 90}))
+
+(defn- spoken-number
+  "The number WORDS say (\"twenty two\", \"twelve\", \"1 2\"), and the words left."
+  [words]
+  (loop [n nil [w & more :as ws] words]
+    (let [w' (some-> w str/lower-case (str/replace #"[^a-z0-9]" ""))
+          v (when w' (or (number-words w') (when (re-matches #"\d{1,2}" w') (parse-long w'))))]
+      (cond (nil? v) [n ws]
+            (and n (< v 10) (>= n 20) (zero? (mod n 10))) (recur (+ n v) more)
+            (and n (re-matches #"\d{1,2}" w')) (recur (+ (* 10 n) v) more)
+            n [n ws]
+            :else (recur v more)))))
+
+(defn parse-handle
+  "[handle rest] when TEXT starts with a thread handle, typed (`T12`, `t12`)
+  or spoken (`tee twelve`, `T twelve`, `tee twenty two`); else nil."
+  [text]
+  (let [text (str/trim (str text))]
+    (if-let [[_ n rest] (re-matches #"(?is)t\s*(\d+)\b[\s,.:;-]*(.*)" text)]
+      [(str "T" (parse-long n)) (str/trim rest)]
+      (when-let [[_ rest] (re-matches #"(?is)(?:tee|tea|t)\b[\s,.:;-]*(.*)" text)]
+        (let [[n ws] (spoken-number (str/split rest #"\s+"))]
+          (when n [(str "T" n) (str/trim (str/replace (str/join " " ws) #"^[\s,.:;-]+" ""))]))))))
+
+(defn- router-row
+  "The outbox row that owes TEXT to the Router, or a refusal when none is registered."
+  [state text]
+  (let [conversation (or (get-in state [:router :router :conversation]) (refuse :no-router))]
+    {:outbox (next-id state :outbox "o") :conversation conversation :text text}))
+
+(defmethod decide* :say! [state {{:keys [text origin]} :args :keys [id]}]
+  (when (str/blank? text) (refuse :invalid :field :text))
+  (when-not (#{:phone :herdr :voice} origin) (refuse :invalid :field :origin))
+  (let [[handle rest] (parse-handle text)
+        t (when handle (get-in state [:threads handle]))
+        w (when t (get-in state [:workers (:worker t)]))
+        said (str (when (= :voice origin) "(spoken) ") (if handle (str handle ": " rest) text))]
+    (cond (and handle (nil? t)) (refuse :no-such-thread :thread handle)
+          w {:events [{:kind :message-routed :thread handle
+                       :data {:id id :origin origin :text rest :worker (:id w) :outbox (next-id state :outbox "o")
+                              :conversation (:conversation w)
+                              :mailbox-text (format "[%s from %s%s] %s" handle (name origin) (if (= :voice origin) ", dictated" "") rest)}}]
+              :result {:thread handle :to (:id w)}}
+          :else {:events [{:kind :router-queued :thread handle
+                           :data (assoc (router-row state (format "[%s] %s" (name origin) said)) :id id :origin origin :said text)}]
+                 :result (cond-> {:to :router} handle (assoc :thread handle))})))
+
+(defmethod decide* :register-router! [state {{:keys [conversation]} :args :keys [token-hash]}]
+  (when (str/blank? conversation) (refuse :invalid :field :conversation))
+  {:events [{:kind :router-registered :data {:conversation conversation}}
+            {:kind :token-issued :data {:hash token-hash :principal :router}}]
+   :result {:conversation conversation}})
+
 (defmethod decide* :note! [state {{:keys [thread text]} :args}]
   (thread-of state thread)
   {:events [{:kind :note :thread thread :data {:text text}}] :result thread})
@@ -398,6 +457,21 @@
 
 (defmethod fold* :thread-resolved [state {:keys [thread seq]}]
   (update-in state [:threads thread] assoc :resolved-at seq :execution :none))
+
+(defmethod fold* :message-routed [state {{:keys [outbox conversation mailbox-text]} :data :keys [thread]}]
+  (-> state (bump :outbox)
+      (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text mailbox-text
+                                  :state :pending :message nil})))
+
+(defmethod fold* :router-queued [state {{:keys [outbox conversation text]} :data :keys [thread]}]
+  (-> state (bump :outbox)
+      (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
+                                  :state :pending :message nil})))
+
+(defmethod fold* :router-registered [state {{:keys [conversation]} :data}]
+  (-> state
+      (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= :router (:principal t)) (assoc :revoked true))]) %)))
+      (assoc-in [:router :router] {:id :router :conversation conversation})))
 
 (defmethod fold* :note [state {{:keys [text]} :data :keys [thread]}]
   (assoc-in state [:threads thread :summary] text))
