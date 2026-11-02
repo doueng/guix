@@ -9,6 +9,7 @@
             [bbh.super.model :as model]
             [bbh.super.process :as process]
             [bbh.super.store :as store]
+            [bbh.super.triage :as triage]
             [bbh.workflow :as workflow]
             [babashka.process :as p]
             [bencode.core :as bencode]
@@ -351,11 +352,19 @@
   (let [router (get-in @state [:router :router :conversation])
         rows (sort-by #(parse-long (subs (:id %) 1)) (vals (:outbox @state)))
         for-router? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
-        batch (filter for-router? rows)]
-    ;; The Router reads its pending rows as one prompt, oldest first. Summaries of
-    ;; messages already routed to a Worker ride along but never wake it alone.
+        _ (doseq [o (filter for-router? rows) :when (and (:triage c) (not= :summary (:delivery o)) (nil? (:triage o)))]
+            (let [verdict (try ((:triage c) (str/replace (:text o) #"^\[[^\]]*\] " ""))
+                               (catch Exception _ {:failed true}))]
+              (run! c :controller {:id (str "triaged-" (:id o)) :command :router-triaged!
+                                   :args (assoc verdict :outbox (:id o) :threshold (:noise-probability (policy c)))})))
+        batch (filter for-router? (sort-by #(parse-long (subs (:id %) 1)) (vals (:outbox @state))))
+        line (fn [{:keys [text] {:keys [choice probability]} :triage}]
+               (if choice (format "(Jev: %s %.2f) %s" (name choice) probability text) text))]
+    ;; The Router reads its pending rows as one prompt, oldest first, each with
+    ;; Jev's triage. Summaries of messages already routed to a Worker ride along
+    ;; but never wake it alone, and noise never reaches it.
     (when (some #(not= :summary (:delivery %)) batch)
-      (let [m (inbox/send! (conversation-root c router) (str/join "\n\n" (map :text batch)))]
+      (let [m (inbox/send! (conversation-root c router) (str/join "\n\n" (map line batch)))]
         (doseq [{:keys [id]} batch]
           (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))))
   (doseq [{:keys [id conversation text message] :as o} rows
@@ -370,10 +379,12 @@
 
 (defn start!
   "Open the store under DIR, listen on a loopback port written to <dir>/port,
-  and run the dispatcher every SCAN-MS. Returns the controller; `stop!` ends it.
+  and run the dispatcher every SCAN-MS. TRIAGE, a function from a message to
+  {:choice :probability}, judges what reaches the Router (none: all of it).
+  Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms] :or {scan-ms 500 health-ms 120000}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms triage] :or {scan-ms 500 health-ms 120000}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -386,7 +397,7 @@
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
            :launch (merge {:workspace! workspace! :wf-start! wf-start! :pane! pane!} launch) :policy policy
-           :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0)
+           :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :triage triage
            :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)}]
     (ensure-owner-token! c)
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
@@ -418,6 +429,6 @@
 (defn -main
   "bbh super serve: run the controller until killed."
   []
-  (start! {:dir (super-dir)})
+  (start! {:dir (super-dir) :triage triage/jev})
   (println "bbh super on" (super-dir))
   @(promise))

@@ -18,14 +18,16 @@
 (def ^:private grants
   {:router #{:thread! :link! :attach-worker! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered!}})
+   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered! :router-triaged!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, the locks a Worker
   may hold, the ones never granted (a system switch is always an ask), and how
-  long a live Worker may leave a delivery in its mailbox before it needs you.
-  A reply waits for the current turn, which can include a 10 minute job-wait."
-  {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30})
+  long a live Worker may leave a delivery in its mailbox before it needs you
+  (a reply waits for the current turn, which can include a 10 minute job-wait),
+  and how sure Jev must be that a message is noise before the Router never
+  sees it."
+  {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30 :noise-probability 0.7})
 
 (defn authorize
   "Throw unless PRINCIPAL may run COMMAND on STATE. A Worker acts on its own
@@ -365,6 +367,13 @@
                    :data (assoc (router-row state (format "[%s] %s" (name origin) said)) :id id :origin origin :said text)}]
          :result (cond-> {:to :router} thread (assoc :thread thread))}))))
 
+(defmethod decide* :router-triaged! [state {{:keys [outbox choice probability failed threshold]} :args}]
+  (let [o (or (get-in state [:outbox outbox]) (refuse :no-such-outbox :outbox outbox))]
+    {:events [{:kind :router-triaged :thread (:thread o)
+               :data {:outbox outbox :choice choice :probability probability :failed (boolean failed)
+                      :drop (boolean (and (not failed) (= :noise choice) (>= probability threshold)))}}]
+     :result outbox}))
+
 (defmethod decide* :register-router! [state {{:keys [conversation]} :args :keys [token-hash]}]
   (when (str/blank? conversation) (refuse :invalid :field :conversation))
   {:events [{:kind :router-registered :data {:conversation conversation}}
@@ -616,6 +625,11 @@
   (-> state (bump :outbox)
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
                                   :state :pending :message nil})))
+
+(defmethod fold* :router-triaged [state {{:keys [outbox choice probability failed drop]} :data}]
+  (if drop
+    (assoc-in state [:outbox outbox :state] :dropped)
+    (assoc-in state [:outbox outbox :triage] (if failed {:failed true} {:choice choice :probability probability}))))
 
 (defmethod fold* :router-registered [state {{:keys [conversation]} :data}]
   (-> state

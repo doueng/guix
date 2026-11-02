@@ -749,3 +749,31 @@
         (call dir {:command :say! :args {:text "what is running" :origin :phone}})
         (is (wait-for #(seq (prompts))))
         (is (= ["[routed to T1 W1 from herdr] keep the alias\n\n[phone] what is running"] (prompts)))))))
+
+(deftest jev-triage-drops-noise-before-a-router-turn-and-tags-the-rest
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-tri"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-triconv"}))
+        judged (atom [])
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10
+                         :triage (fn [text] (swap! judged conj text)
+                                   (case text "thanks" {:choice :noise :probability 0.95}
+                                              "hmm" {:choice :noise :probability 0.5}
+                                              "boom" (throw (ex-info "TypeSafe 503" {}))
+                                              {:choice :request :probability 0.9}))})
+        router (fs/path conversations "router")
+        prompts #(mapv (fn [f] (:text (cheshire.core/parse-string (slurp (str f)) true))) (fs/glob router "mailbox/*.json"))]
+    (try
+      (call dir {:command :register-router! :args {:conversation "router"}})
+      (call dir {:command :say! :args {:text "thanks" :origin :herdr}})
+      (is (wait-for #(= :dropped (:state (get-in @(:state c) [:outbox "o1"])))))
+      (Thread/sleep 50)
+      (is (= [] (prompts)) "sure noise costs no Router turn")
+      (call dir {:command :say! :args {:text "hmm" :origin :herdr}})
+      (is (wait-for #(seq (prompts))))
+      (is (= ["(Jev: noise 0.50) [herdr] hmm"] (prompts)) "unsure noise still reaches the Router, tagged")
+      (doseq [f (fs/glob router "mailbox/*.json")] (fs/delete f))
+      (call dir {:command :say! :args {:text "boom" :origin :phone}})
+      (is (wait-for #(seq (prompts))))
+      (is (= ["[phone] boom"] (prompts)) "a triage failure fails open, untagged")
+      (is (= ["thanks" "hmm" "boom"] @judged) "each message judged once")
+      (finally (super/stop! c)))))
