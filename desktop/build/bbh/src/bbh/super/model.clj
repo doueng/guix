@@ -16,9 +16,9 @@
 ;; ---- authorization ------------------------------------------------------
 
 (def ^:private grants
-  {:router #{:thread! :link! :attach-worker! :start-worker! :steer! :note! :milestone!}
+  {:router #{:thread! :link! :attach-worker! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running! :job-exited!}})
+   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, the locks a Worker
@@ -39,7 +39,7 @@
             (when (and (:worker args) (not= (:worker args) id)) (refuse :forbidden :command command :worker (:worker args)))
             (-> cmd (assoc-in [:args :thread] thread) (assoc-in [:args :worker] id)))
           :else (do
-                  (when (and (= :router kind) (= :steer! command)
+                  (when (and (= :router kind) (#{:steer! :cancel!} command)
                              (not= :router (get-in state [:workers (:worker args) :lease])))
                     (refuse :human-lease :worker (:worker args)))
                   cmd))))
@@ -95,7 +95,7 @@
 (defn- open-asks [state thread]
   (into {} (filter (fn [[_ a]] (and (= thread (:thread a)) (= :open (:state a)))) (:asks state))))
 
-(def active-states #{:starting :working :waiting})
+(def active-states #{:starting :working :waiting :cancelling})
 
 (defn- active-workers [state]
   (filter #(active-states (:state %)) (vals (:workers state))))
@@ -143,20 +143,54 @@
                        (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
                                id thread wf-run (name workflow))]))
 
-(defmethod decide* :worker-running! [state {{:keys [worker conversation wf-run workspace pane]} :args}]
+(defmethod decide* :worker-prepared! [state {{:keys [worker] :as args} :args}]
+  (let [w (get-in state [:workers worker])]
+    {:events [{:kind :worker-prepared :thread (:thread w) :data args}] :result worker}))
+
+(defmethod decide* :worker-running! [state {{:keys [worker conversation wf-run workspace pane started-at]} :args}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
     (when-not (#{:starting :queued} (:state w)) (refuse :not-starting :worker worker :state (:state w)))
     {:events [{:kind :worker-running :thread (:thread w)
-               :data {:id worker :conversation conversation :wf-run wf-run :workspace workspace :pane pane
+               :data {:id worker :conversation conversation :wf-run wf-run :workspace workspace :pane pane :started-at started-at
                       :outbox (next-id state :outbox "o") :text (brief-text w wf-run)}}]
      :result worker}))
 
 (defmethod decide* :finish-worker! [state {{:keys [worker state-after reason]} :args}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+    (when (= :cancelling (:state w)) (refuse :cancelling :worker worker))
     (when-not (#{:done :failed} state-after) (refuse :invalid :field :state-after))
-    (when (#{:done :failed} (:state w)) (refuse :already-finished :worker worker))
+    (when (#{:done :failed :cancelled} (:state w)) (refuse :already-finished :worker worker))
     {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state state-after :reason reason}}]
      :result worker}))
+
+(defmethod decide* :cancel! [state {{:keys [worker reason]} :args}]
+  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+    (when-not (or (#{:starting :working :waiting} (:state w)) (= :queued (:state w))) (refuse :not-running :worker worker))
+    (when (str/blank? reason) (refuse :invalid :field :reason))
+    {:events [{:kind :cancel-requested :thread (:thread w) :data {:id worker :reason reason}}]
+     :result worker}))
+
+(defmethod decide* :cancel-delivered! [state {{:keys [worker]} :args}]
+  (let [w (get-in state [:workers worker])]
+    (when-not (= :cancelling (:state w)) (refuse :not-cancelling))
+    {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state :cancelled :reason (:cancel-reason w)}}]
+     :result worker}))
+
+(defmethod decide* :health! [_ {{:keys [worker health at]} :args}]
+  {:events [{:kind :health-observed :data {:worker worker :health health :at at}}] :result worker})
+
+(defmethod decide* :restart-worker! [state {{:keys [worker at]} :args :keys [token-hash]}]
+  (let [w (get-in state [:workers worker])]
+    (when-not (and (#{:working :waiting :starting} (:state w)) (< (or (:restarts w) 0) 3)) (refuse :restart-limit))
+    {:events [{:kind :restart-attempted :thread (:thread w) :data {:id worker :at at}}
+              {:kind :token-issued :thread (:thread w) :data {:hash token-hash :principal [:worker worker]}}]
+     :result worker}))
+
+(defmethod decide* :worker-restarted! [state {{:keys [worker pane]} :args}]
+  (let [w (get-in state [:workers worker])]
+    {:events [{:kind :worker-restarted :thread (:thread w)
+               :data {:id worker :pane pane :outbox (next-id state :outbox "o") :conversation (:conversation w)
+                      :text (str "[Recovery] Resume the existing wf run " (:wf-run w) " and conversation. Inspect existing jobs before acting; do not relaunch surviving jobs.")}}] :result worker}))
 
 (defmethod decide* :steer! [state {{:keys [worker text]} :args}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
@@ -373,6 +407,9 @@
       (assoc-in [:workers id] (assoc worker :thread thread :lease :router :conversation nil :wf-run nil :workspace nil :pane nil))
       (cond-> (= :queued (:state worker)) (assoc-in [:threads thread :execution] :queued))))
 
+(defmethod fold* :worker-prepared [state {{:keys [worker] :as args} :data}]
+  (update-in state [:workers worker] merge (dissoc args :worker)))
+
 (defmethod fold* :worker-running [state {{:keys [id outbox text conversation] :as running} :data :keys [thread]}]
   (let [w (get-in state [:workers id])]
     (-> state (bump :outbox)
@@ -387,12 +424,32 @@
   (let [t (get-in state [:threads thread])]
     (-> state
         (update-in [:workers id] assoc :state outcome :reason reason)
+        (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
+        (cond-> (= :cancelled outcome)
+          (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= thread (:thread a)) (= :open (:state a))) (assoc :state :superseded))]) %))))
         (update :locks #(into {} (remove (fn [[_ holder]] (= holder id)) %)))
         (cond-> (= id (:worker t))
           (-> (assoc-in [:threads thread :worker] nil)
               (update-in [:threads thread :history] conj id)
               (assoc-in [:threads thread :execution] outcome)
               (assoc-in [:threads thread :milestone-seq] seq))))))
+
+(defmethod fold* :cancel-requested [state {{:keys [id reason]} :data}]
+  (update-in state [:workers id] assoc :state :cancelling :cancel-reason reason))
+
+(defmethod fold* :health-observed [state {{:keys [worker health at]} :data}]
+  (cond-> (assoc-in state [:router :heartbeat] {:id :heartbeat :at at})
+    worker (assoc-in [:workers worker :health] health)))
+
+(defmethod fold* :restart-attempted [state {{:keys [id at]} :data}]
+  (-> state (update-in [:workers id :restarts] (fnil inc 0))
+      (assoc-in [:workers id :restart-at] at)
+      (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))))
+
+(defmethod fold* :worker-restarted [state {{:keys [id pane outbox conversation text]} :data :keys [thread]}]
+  (-> state (bump :outbox) (assoc-in [:workers id :pane] pane)
+      (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
+                                 :text text :state :pending :message nil})))
 
 (defmethod fold* :job-exited [state {{:keys [worker job exit log outbox conversation text]} :data :keys [thread]}]
   (-> state (bump :outbox)
@@ -421,7 +478,8 @@
   (let [t (get-in state [:threads thread])
         stopped? (some #(and (= thread (:thread %)) (= :open (:state %)) (:stopped %)) (vals (:asks state)))]
     (cond-> state
-      (and (:worker t) (not stopped?) (not (:resolved-at t)))
+      (and (:worker t) (not stopped?) (not (:resolved-at t))
+           (not= :cancelling (get-in state [:workers (:worker t) :state])))
       (-> (assoc-in [:threads thread :execution] :working)
           (assoc-in [:workers (:worker t) :state] :working)))))
 
@@ -455,7 +513,7 @@
           (some :stopped open) :stopped
           (some :holds-up open) :holding-up
           (seq open) :waiting
-          (and (= :failed execution) (empty? open)) :needs-attention
+          (and (or (= :failed execution) (= :needs-human (get-in state [:workers (:worker (get-in state [:threads id])) :health :classification]))) (empty? open)) :needs-attention
           (some #(#{:sent :delivered} (:state %)) replies) :sent
           (> (or milestone-seq 0) (or cursor 0)) :new
           (#{:working :queued} execution) :working

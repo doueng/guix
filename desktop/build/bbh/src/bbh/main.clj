@@ -82,6 +82,7 @@
         poller (promise)
         _ (deliver poller (inbox/start! {:root (inbox/root-dir dir) :project (str (fs/cwd))
                                          :deliver (fn [{:keys [id text kind]}]
+                                                    (session/receive-control! s {:id id :kind kind})
                                                     (future
                                                       (if (= "steer" kind)
                                                         ;; A busy tool may already have consumed it.

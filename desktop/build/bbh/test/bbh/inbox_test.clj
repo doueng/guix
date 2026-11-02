@@ -55,7 +55,7 @@
 (deftest a-poller-announces-its-session-until-it-stops
   (with-poller
     (fn [root p _]
-      (is (= {:project "/work/site" :busy false} (dissoc (inbox/agent root) :pid)))
+      (is (= {:project "/work/site" :busy false} (dissoc (inbox/agent root) :pid :start)))
       (inbox/busy! p true)
       (is (true? (:busy (inbox/agent root))))
       (inbox/stop! p)

@@ -7,9 +7,11 @@
             [bbh.inbox :as inbox]
             [bbh.super.client :as client :refer [call! data-dir herdr new-id super-dir]]
             [bbh.super.model :as model]
+            [bbh.super.process :as process]
             [bbh.super.store :as store]
             [bbh.workflow :as workflow]
             [babashka.process :as p]
+            [bencode.core :as bencode]
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -109,11 +111,14 @@
         workspace (workspace! dir w)
         conversation (str (fs/path (:conversations c) (str "super-" (:id w))))
         _ (fs/create-dirs conversation)
-        wf-run (wf-start! workspace w)
+        wf-run (or (:wf-run w) (wf-start! workspace w))
+        _ (run! c :controller {:id (str "prepared-" (:id w)) :command :worker-prepared!
+                                :args {:worker (:id w) :workspace workspace :wf-run wf-run
+                                       :conversation (fs/file-name conversation) :started-at (System/currentTimeMillis)}})
         pane (pane! {:repo (:repo w) :workspace workspace :thread (:thread w) :title (:title t)
                      :conversation (fs/file-name conversation) :token token :wf-run wf-run})]
     (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
-                         :args {:worker (:id w) :conversation (fs/file-name conversation) :wf-run wf-run :workspace workspace :pane pane}})))
+                         :args {:started-at (System/currentTimeMillis) :worker (:id w) :conversation (fs/file-name conversation) :wf-run wf-run :workspace workspace :pane pane}})))
 
 (defn- promote!
   "Start the next queued Worker that may run now, if any."
@@ -133,6 +138,7 @@
   [{:keys [db state]} {:keys [command args]}]
   (let [st @state]
     (case command
+      :health (into {} (map (fn [[id w]] [id (cond-> (:health w) (#{:done :cancelled} (:state w)) (assoc :classification :done) (= :failed (:state w)) (assoc :classification :needs-human))]) (:workers st)))
       :threads (vec (sort-by :id (vals (:threads st))))
       :thread (let [{:keys [id]} args
                     t (get-in st [:threads id])
@@ -142,6 +148,8 @@
       :sections (let [sections (model/sections st (or (:cursors args) {}))]
                   {:sections sections :badge (model/badge sections)})
       ::unknown)))
+
+(declare reconcile!)
 
 (defn handle
   "The response for one request map on controller C."
@@ -166,6 +174,10 @@
                 (launch! c w t))
               {:ok (let [w (get-in @(:state c) [:workers (:id (:result r))])]
                      (merge (:result r) (select-keys w [:state :workspace :pane :conversation :wf-run])))})
+            :cancel!
+            (let [r (run! c principal cmd)]
+              (reconcile! c)
+              {:ok (:result r)})
             :finish-worker!
             (let [r (run! c principal cmd)]
               (when-not (:repeat? r) (promote! c))
@@ -224,6 +236,87 @@
     (run! c :controller {:id (str "job-exited-" (pr-str [(:id w) job])) :command :job-exited!
                          :args {:worker (:id w) :job job :exit exit :log (str base ".log")}})))
 
+(defn- repl-answering? [root]
+  (try
+    (let [port (some-> (process/read-text (fs/path root "repl.port")) parse-long)]
+      (when port
+        (with-open [s (Socket.)]
+          (.connect s (java.net.InetSocketAddress. "127.0.0.1" (int port)) 300)
+          (.setSoTimeout s 300)
+          (bencode/write-bencode (.getOutputStream s) {"op" "describe" "id" "health"})
+          (.flush (.getOutputStream s))
+          (boolean (bencode/read-bencode (java.io.PushbackInputStream. (.getInputStream s)))))))
+    (catch Exception _ false)))
+
+(defn reconcile!
+  "Observe before acting, including after sleep/restart. Persist every restart
+  attempt before launching; never relaunch a surviving process or its jobs."
+  [{:keys [state] :as c}]
+  (locking (:recovery-lock c)
+    (let [now (System/currentTimeMillis)
+          grace (or (:restart-grace-ms c) 30000)]
+      (run! c :controller {:id (new-id) :command :health! :args {:at now}})
+      (doseq [w (vals (:workers @state))
+              :when (or (model/active-states (:state w)) (= :queued (:state w)))
+              :let [root (when (:conversation w) (conversation-root c (:conversation w)))
+                    agent (when root (inbox/agent root))
+                    jobs (if root (process/jobs root) [])
+                    uncertain? (some #(#{:unknown :lost} (:state %)) jobs)
+                    wf (when (:wf-run w) (try (select-keys (workflow/status (:wf-run w)) [:status :phase]) (catch Exception _ {:status :missing})))
+                    repl-ok? (boolean (and agent (repl-answering? root)))
+                    health {:at now :process (select-keys agent [:pid :start]) :repl repl-ok?
+                            :workflow wf
+                            :oldest-unacked (some->> (vals (:outbox @state))
+                                                    (filter #(and (= (:thread w) (:thread %)) (#{:pending :sent} (:state %))))
+                                                    (sort-by #(parse-long (subs (:id %) 1))) first :id)
+                            :oldest-stopped-ask (some->> (vals (:asks @state)) (filter #(and (= (:thread w) (:thread %)) (= :open (:state %)) (:stopped %))) (sort-by :seq) first :seq)
+                            :jobs (mapv #(select-keys % [:id :state :pid :start]) jobs)
+                            :classification (cond (= :queued (:state w)) :waiting
+                                                  uncertain? :needs-human
+                                                  (and (:workflow w) (= :missing (:status wf))) :needs-human
+                                                  (and agent (not repl-ok?)) :needs-human
+                                                  agent (if (= :waiting (:state w)) :waiting :running)
+                                                  (:workflow w) :recoverable
+                                                  :else :needs-human)}]]
+        (run! c :controller {:id (new-id) :command :health! :args {:worker (:id w) :health health :at now}})
+        (cond
+          (and agent (= :starting (:state w)) (:wf-run w))
+          (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
+                               :args (merge (select-keys w [:conversation :wf-run :workspace :pane :started-at]) {:worker (:id w)})})
+
+          (= :cancelling (:state w))
+          (let [blocked (filter #(#{:unknown :lost} (:state %)) jobs)
+                running (filter #(= :running (:state %)) jobs)
+                stopped? (every? true? (mapv process/stop-job! running))]
+            (when (and (empty? blocked) stopped?)
+              (doseq [j running] (spit (str (:base j) ".exit") "137\n"))
+              (when (and root agent (not (fs/exists? (fs/path root (str "0-cancel-" (:id w) ".received")))))
+                (inbox/send! root (str "[Cancelled] " (:cancel-reason w)) nil
+                             {:kind :cancel :message-id (str "0-cancel-" (:id w))}))
+              (when (or (not agent) (fs/exists? (fs/path root (str "0-cancel-" (:id w) ".received"))))
+                (run! c :controller {:id (str "cancelled-" (:id w)) :command :cancel-delivered! :args {:worker (:id w)}})
+                (promote! c))))
+
+          (and (not agent) (:workflow w) (:workspace w) (:conversation w)
+               (not= :missing (:status wf)) (not uncertain?) (not= :queued (:state w))
+               (> (- now (or (:restart-at w) (:started-at w) (:boot-at c))) grace))
+          (if (>= (or (:restarts w) 0) 3)
+            (do (run! c :controller {:id (str "restarts-exhausted-" (:id w)) :command :finish-worker!
+                                    :args {:worker (:id w) :state-after :failed :reason "Worker failed three restart attempts; needs human"}})
+                (promote! c))
+            (let [token (new-token)]
+              (run! c :controller {:id (new-id) :command :restart-worker! :token-hash (sha256 token) :args {:worker (:id w) :at now}})
+              (try
+                (let [pane ((get-in c [:launch :pane!])
+                            {:repo (:repo w) :workspace (:workspace w) :thread (:thread w)
+                             :title (get-in @state [:threads (:thread w) :title])
+                             :conversation (:conversation w) :token token :wf-run (:wf-run w)})]
+                  (if (= :starting (:state w))
+                    (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
+                                         :args (merge (select-keys w [:conversation :wf-run :workspace :started-at]) {:worker (:id w) :pane pane})})
+                    (run! c :controller {:id (new-id) :command :worker-restarted! :args {:worker (:id w) :pane pane}})))
+                (catch Exception _ nil)))))))))
+
 (defn dispatch!
   "One pass: send each pending outbox row to its Worker's mailbox, and mark a
   sent row acked once its mailbox file is gone. Each step is a command with a
@@ -253,7 +346,7 @@
   and run the dispatcher every SCAN-MS. Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy] :or {scan-ms 500}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms] :or {scan-ms 500 health-ms 120000}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -266,6 +359,7 @@
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
            :launch (merge {:workspace! workspace! :wf-start! wf-start! :pane! pane!} launch) :policy policy
+           :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0)
            :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)}]
     (ensure-owner-token! c)
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
@@ -275,7 +369,11 @@
       (.setDaemon true) (.start))
     (reset! (:dispatcher c)
      (doto (Thread. #(while (not @(:stopped c))
-                      (try (observe-jobs! c) (dispatch! c)
+                      (try
+                        (when (or (some (fn [w] (= :cancelling (:state w))) (vals (:workers @(:state c))))
+                                  (> (- (System/currentTimeMillis) @(:last-health c)) health-ms))
+                          (reconcile! c) (reset! (:last-health c) (System/currentTimeMillis)))
+                        (observe-jobs! c) (dispatch! c)
                            (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))
       (.setDaemon true) (.start)))

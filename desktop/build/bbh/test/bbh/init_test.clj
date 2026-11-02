@@ -98,6 +98,7 @@
       (is (nil? (session/start-repl! s)))
       (let [id (:value (repl/eval! (:repl @s) "(job \"sleep 3; echo done; exit 7\")" 30000))]
         (is (string? id))
+        (is (= "true" (:value (repl/eval! (:repl @s) (str "(loop [n 100] (let [f (job-file " id " \".start\")] (cond (fs/exists? f) (boolean (re-matches #\"[0-9]+\" (str/trim (slurp f)))) (pos? n) (do (Thread/sleep 10) (recur (dec n))) :else false)))") 30000))))
         (is (= "false" (:value (repl/eval! (:repl @s) (str "(:done? (job-status " id "))") 30000)))
             "job should return while the command still runs")
         (is (nil? (session/restart-repl! s)))

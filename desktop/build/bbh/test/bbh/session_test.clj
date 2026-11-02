@@ -556,3 +556,16 @@
              (get-in @(:requests h) [0 :messages 1 :content])))
       (is (= [] (bbh.inbox/pending (:dir h))))
       (finally (stop! h)))))
+
+(deftest typed-cancellation-interrupts-a-busy-evaluation-not-a-steering-request
+  (let [h (harness "" [{:code "(Thread/sleep 60000)"} "done"])
+        s (:s h)
+        turn (future (session/prompt! s "start"))]
+    (try
+      (loop [n 0] (when (and (< n 200) (not (:evaluating @s))) (Thread/sleep 5) (recur (inc n))))
+      (is (:evaluating @s))
+      (session/receive-control! s {:id "control-test" :kind "cancel"})
+      (is (= :cancelled (deref turn 10000 :timeout)))
+      (is (= "interrupted" (slurp (str (fs/path (:dir h) "control-test.received")))))
+      (is (not (:evaluating @s)))
+      (finally (stop! h)))))

@@ -463,3 +463,106 @@
         (is (= :forbidden (:error (call dir {:token token :command :steer! :args {:worker "W1" :text "worker says"}}))))
         (is (= :invalid (:error (call dir {:command :steer! :args {:worker "W1" :text " "}}))))
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
+
+(deftest cancellation-kills-only-identity-verified-detached-jobs
+  (with-controller
+    (fn [c dir conversations]
+      (thread-with-ask dir)
+      (let [root (fs/path conversations "conv-1")
+            jobs (fs/create-dirs (fs/path root "jobs"))
+            base (str (fs/path jobs "cancel-job"))]
+        (spit (str base ".cmd") "sleep 60")
+        (babashka.process/shell {:out :discard :err :discard} "setsid" "-f" "bash" "-c"
+                               (str "echo $$ > " (pr-str (str base ".pid")) "; sleep 60"))
+        (is (wait-for #(fs/exists? (str base ".pid"))))
+        (let [pid (parse-long (clojure.string/trim (slurp (str base ".pid"))))
+              identity (bbh.super.process/identity-of pid)]
+          (try
+            (is (string? (:start identity)))
+            (spit (str base ".start") "wrong-start")
+            (is (false? (bbh.super.process/stop-job! {:pid pid :start "wrong-start"})))
+            (is (= identity (bbh.super.process/identity-of pid)))
+            (spit (str base ".start") (:start identity))
+            (is (= {:ok "W1"} (call dir {:id "cancel-once" :command :cancel! :args {:worker "W1" :reason "stop the build"}})))
+            (is (= {:ok "W1"} (call dir {:id "cancel-once" :command :cancel! :args {:worker "W1" :reason "stop the build"}})))
+            (is (wait-for #(nil? (bbh.super.process/identity-of pid))))
+            (is (= "137\n" (slurp (str base ".exit"))))
+            (is (= :cancelled (get-in @(:state c) [:workers "W1" :state])))
+            (is (= [] (filter #(= :open (:state %)) (vals (:asks @(:state c))))))
+            (finally (when (bbh.super.process/matches? identity) (bbh.super.process/stop-job! identity)))))))))
+
+(deftest dead-workers-retry-three-times-with-the-same-conversation-and-workflow
+  (with-workers
+    (fn [c dir repo launches]
+      (call dir {:command :thread! :args {:title "recover me"}})
+      (let [w (:ok (start-worker dir "T1" :repo repo))
+            c (assoc c :restart-grace-ms -1)]
+        (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
+          (dotimes [_ 4] (super/reconcile! c)))
+        (is (= 4 (count @launches)) "original launch plus three persisted attempts")
+        (is (= ["super-W1" "super-W1" "super-W1" "super-W1"] (mapv :conversation @launches)))
+        (is (= ["run-W1" "run-W1" "run-W1" "run-W1"] (mapv :wf-run @launches)))
+        (is (= 3 (get-in @(:state c) [:workers "W1" :restarts])))
+        (is (= :failed (get-in @(:state c) [:workers "W1" :state])))
+        (is (= :needs-attention (model/section @(:state c) (get-in @(:state c) [:threads "T1"]) 0)))
+        (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
+
+(deftest surviving-workers-are-observed-not-restarted-and-cancel-waits-for-receipt
+  (with-workers
+    (fn [c dir repo launches]
+      (call dir {:command :thread! :args {:title "survive sleep"}})
+      (start-worker dir "T1" :repo repo)
+      (let [root (str (fs/path (:conversations c) "super-W1"))
+            poller (bbh.inbox/start! {:root root :project repo :scan-ms 5 :deliver (fn [_])})]
+        (try
+          (dotimes [_ 2] (super/reconcile! (assoc c :restart-grace-ms -1)))
+          (is (= 1 (count @launches)))
+          (is (= (.pid (java.lang.ProcessHandle/current)) (get-in @(:state c) [:workers "W1" :health :process :pid])))
+          (is (= {:ok "W1"} (call dir {:command :cancel! :args {:worker "W1" :reason "stop now"}})))
+          (is (= :cancelling (get-in @(:state c) [:workers "W1" :state])))
+          (is (= "W1" (get-in @(:state c) [:threads "T1" :worker])))
+          (is (= [{:kind "cancel" :text "[Cancelled] stop now"}]
+                 (mapv #(select-keys % [:kind :text]) (filter #(= "cancel" (:kind %)) (bbh.inbox/pending root)))))
+          (spit (str (fs/path root "0-cancel-W1.received")) "interrupted")
+          (super/reconcile! c)
+          (is (= :cancelled (get-in @(:state c) [:workers "W1" :state])))
+          (is (nil? (get-in @(:state c) [:threads "T1" :worker])))
+          (finally (bbh.inbox/stop! poller)))))))
+
+(deftest sigkill-controller-rediscovers-a-running-job-without-relaunch
+  (let [root (fs/create-temp-dir {:prefix "super-sigkill"})
+        dir (str (fs/path root "controller"))
+        conversations (str (fs/path root "conversations"))
+        opts {:dir dir :conversations conversations :scan-ms 10}
+        proc (babashka.process/process
+               {:out :string :err :string}
+               "bb" "-cp" "src" "-e"
+                (str "(require '[bbh.super :as s]) (s/start! " (pr-str opts) ") @(promise)"))
+        base (str (fs/path conversations "conv-1" "jobs" "survivor"))]
+    (try
+      (is (wait-for #(fs/exists? (fs/path dir "port"))))
+      (thread-with-ask dir)
+      (fs/create-dirs (fs/parent base))
+      (spit (str base ".cmd") "one execution")
+      (babashka.process/shell {:out :discard :err :discard} "setsid" "-f" "bash" "-c"
+        (str "echo $$ > " (pr-str (str base ".pid"))
+             "; stat=$(cat /proc/$$/stat); rest=${stat##*) }; set -- $rest; shift 19; echo $1 > " (pr-str (str base ".start"))
+             "; while [ ! -f " (pr-str (str base ".release")) " ]; do sleep 0.02; done; echo ran >> "
+             (pr-str (str base ".log")) "; echo 0 > " (pr-str (str base ".exit"))))
+      (is (wait-for #(fs/exists? (str base ".start"))))
+      (.destroyForcibly (:proc proc))
+      (deref proc 10000 nil)
+      (let [c (super/start! opts)]
+        (try
+          (super/reconcile! c)
+          (is (= :running (get-in @(:state c) [:workers "W1" :health :jobs 0 :state])))
+          (is (= {} (:outbox @(:state c))))
+          (spit (str base ".release") "go")
+          (is (wait-for #(seq (bbh.inbox/pending (str (fs/path conversations "conv-1"))))))
+          (is (= "ran\n" (slurp (str base ".log"))))
+          (is (= 1 (count (filter #(= :job-exited (:kind %)) (store/events (:db c))))))
+          (finally (super/stop! c))))
+      (finally
+        (spit (str base ".release") "go")
+        (when (babashka.process/alive? proc) (.destroyForcibly (:proc proc)))
+        (fs/delete-tree root)))))

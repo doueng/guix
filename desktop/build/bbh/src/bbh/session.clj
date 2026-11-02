@@ -188,6 +188,14 @@
       (some-> repl (repl/call "(when-let [f (resolve 'bbh.env/kill-running!)] (f))" 2000))
       (some-> repl repl/kill!))))
 
+(defn receive-control!
+  "Interrupt immediately on a typed cancellation, outside the front end turn lock.
+  The receipt is written only after interrupt! returns. Reason remains queued."
+  [s {:keys [id kind]}]
+  (when (= "cancel" kind)
+    (interrupt! s)
+    (spit (str (fs/path (inbox/root-dir (:repl-dir @s)) (str id ".received"))) "interrupted")))
+
 (defn- add-request [turn {:keys [input cached written output thinking cache] :as request}]
   (-> (or turn {})
       (update :requests (fnil inc 0))

@@ -73,7 +73,7 @@ You are the Router of bbh super: one long-lived conversation that reads what the
   (doseq [f @live-sh :when (fs/exists? f)
           :let [pid (str/trim (slurp f))] :when (seq pid)]
     (p/shell {:continue true :out :discard :err :discard} "kill" "-TERM" "--" (str "-" pid))
-    (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid"]]
+    (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid" ".start"]]
       (fs/delete-if-exists (str/replace f #"\.pid$" suffix))))
   (reset! live-sh #{})
   nil)
@@ -387,7 +387,9 @@ You are the Router of bbh super: one long-lived conversation that reads what the
     ;; setsid -f forks and returns, so the job is no longer the REPL's descendant and a restart's kill misses it.
     ;; The command runs from its file because a syntax error in this eval string would lose the exit code.
     (p/shell {:dir (or dir (str (fs/cwd))) :in "" :out :discard :err :discard
-              :extra-env {"BBH_JOB" (str "echo $$ >" (pr-str (file ".pid")) "; bash " (pr-str (file ".cmd")) " >" (pr-str (file ".log")) " "
+              :extra-env {"BBH_JOB" (str "echo $$ >" (pr-str (file ".pid"))
+                                           "; stat=$(cat /proc/$$/stat); rest=${stat##*) }; set -- $rest; shift 19; echo $1 >" (pr-str (file ".start"))
+                                           "; bash " (pr-str (file ".cmd")) " >" (pr-str (file ".log")) " "
                                            (if split-err? (str "2>" (pr-str (file ".err"))) "2>&1")
                                            " </dev/null; echo $? >" (pr-str (file ".exit")))}}
              "setsid" "-f" "bash" "-c" "eval \"$BBH_JOB\"")
@@ -484,7 +486,7 @@ You are the Router of bbh super: one long-lived conversation that reads what the
       (loop [pause 2]
         (if-let [exit (job-exit id)]
           (let [result (assoc (output) :exit exit)]
-            (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid"]] (fs/delete-if-exists (job-file id suffix)))
+            (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid" ".start"]] (fs/delete-if-exists (job-file id suffix)))
             result)
           (if (>= (System/currentTimeMillis) end)
             (assoc (output) :exit nil :timeout true :job id)

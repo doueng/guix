@@ -9,6 +9,7 @@
   the turn that held the message."
   (:require [babashka.fs :as fs]
             [bbh.transcript :as transcript]
+            [bbh.super.process :as process]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -54,15 +55,15 @@
   ROOT. Returns the message."
   ([root text] (send! root text nil))
   ([root text images] (send! root text images nil))
-  ([root text images {:keys [kind]}]
-   (let [id (format "%d-%04x" (System/currentTimeMillis) (rand-int 0x10000))
+  ([root text images {:keys [kind message-id]}]
+   (let [id (or message-id (format "%d-%04x" (System/currentTimeMillis) (rand-int 0x10000)))
          lines (map image-line (save-images! root id images))
          message (cond-> {:id id :text (str/join "\n\n" (remove str/blank? [text (str/join "\n" lines)]))}
                    kind (assoc :kind kind))
          dir (fs/create-dirs (mailbox root))
          tmp (fs/create-temp-file {:dir dir :prefix "."})]
      (spit (str tmp) (json/generate-string message))
-     (fs/move tmp (fs/path dir (str id ".json")) {:atomic-move true})
+     (fs/move tmp (fs/path dir (str id ".json")) {:atomic-move true :replace-existing true})
      message)))
 
 (defn pending
@@ -77,6 +78,7 @@
 (defn- announce! [{:keys [root] :as p} busy]
   (let [tmp (fs/create-temp-file {:dir root :prefix ".agent"})]
     (spit (str tmp) (json/generate-string {:pid (.pid (java.lang.ProcessHandle/current))
+                                           :start (:start (process/identity-of (.pid (java.lang.ProcessHandle/current))))
                                            :project (:project p) :busy busy}))
     (fs/move tmp (agent-file root) {:atomic-move true :replace-existing true})))
 
@@ -86,7 +88,8 @@
   (let [f (agent-file root)]
     (when (fs/exists? f)
       (let [{:keys [pid] :as a} (json/parse-string (slurp f) true)]
-        (when (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) .isAlive)
+        (when (if (:start a) (process/matches? a)
+                  (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) .isAlive))
           a)))))
 
 (defn- scan [{:keys [root seen deliver]}]
