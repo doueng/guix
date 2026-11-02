@@ -272,24 +272,24 @@
                                      (filter #(and (= :sent (:state %)) (= (:conversation w) (:conversation %)) (:sent-at %)
                                                    (>= (waited-ms %) limit-ms)))
                                      (sort-by :sent-at) first))
+                    [classification problem]
+                    (cond (= :queued (:state w)) [:waiting]
+                          uncertain? [:needs-human (format "Job %s can no longer be identified as the process that started it; check it before anything kills or reruns it."
+                                                           (:id (first (filter #(#{:unknown :lost} (:state %)) jobs))))]
+                          (and (:workflow w) (= :missing (:status wf))) [:needs-human (format "Its wf run %s is missing, so it cannot be restarted." (:wf-run w))]
+                          (and agent (not repl-ok?)) [:needs-human (format "Its session (pid %s) is alive but its REPL does not answer." (:pid agent))]
+                          stale [:needs-human (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
+                                                      (:id stale) (quot (waited-ms stale) 60000))]
+                          agent [(if (= :waiting (:state w)) :waiting :running)]
+                          (:workflow w) [:recoverable]
+                          :else [:needs-human "Its session is gone and it has no workflow to restart it from."])
                     health {:at now :process (select-keys agent [:pid :start]) :repl repl-ok?
-                            :workflow wf
-                            :problem (when stale
-                                       (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
-                                               (:id stale) (quot (waited-ms stale) 60000)))
+                            :workflow wf :classification classification :problem problem
                             :oldest-unacked (some->> (vals (:outbox @state))
                                                     (filter #(and (= (:thread w) (:thread %)) (#{:pending :sent} (:state %))))
                                                     (sort-by #(parse-long (subs (:id %) 1))) first :id)
                             :oldest-stopped-ask (some->> (vals (:asks @state)) (filter #(and (= (:thread w) (:thread %)) (= :open (:state %)) (:stopped %))) (sort-by :seq) first :seq)
-                            :jobs (mapv #(select-keys % [:id :state :pid :start]) jobs)
-                            :classification (cond (= :queued (:state w)) :waiting
-                                                  uncertain? :needs-human
-                                                  (and (:workflow w) (= :missing (:status wf))) :needs-human
-                                                  (and agent (not repl-ok?)) :needs-human
-                                                  stale :needs-human
-                                                  agent (if (= :waiting (:state w)) :waiting :running)
-                                                  (:workflow w) :recoverable
-                                                  :else :needs-human)}]]
+                            :jobs (mapv #(select-keys % [:id :state :pid :start]) jobs)}]]
         (run! c :controller {:id (new-id) :command :health! :args {:worker (:id w) :health health :at now}})
         (cond
           (and agent (= :starting (:state w)) (:wf-run w))

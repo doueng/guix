@@ -545,6 +545,7 @@
                (assoc t :section s :ask ask
                       :line (or (:text ask)
                                 (get-in state [:workers (:worker t) :health :problem])
+                                (when (= :failed (:execution t)) (get-in state [:workers (peek (:history t)) :reason]))
                                 (:summary t))
                       :came-back (boolean (and (:resolved-at t) (> (:milestone-seq t) (:resolved-at t))))))
         by (group-by :section rows)]

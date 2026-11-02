@@ -507,6 +507,8 @@
         (is (= 3 (get-in @(:state c) [:workers "W1" :restarts])))
         (is (= :failed (get-in @(:state c) [:workers "W1" :state])))
         (is (= :needs-attention (model/section @(:state c) (get-in @(:state c) [:threads "T1"]) 0)))
+        (is (= "Worker failed three restart attempts; needs human"
+               (:line (first (:threads (first (model/sections @(:state c) {})))))))
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
 
 (deftest surviving-workers-are-observed-not-restarted-and-cancel-waits-for-receipt
@@ -668,4 +670,7 @@
           (is (wait-for #(= :acked (:state (first (vals (:outbox @(:state c))))))))
           (super/reconcile! (assoc c :policy {:stale-delivery-minutes 0}))
           (is (= [:running nil] [(:classification (health)) (:problem (health))]) "it clears once the Worker takes it")
+          (bbh.inbox/stop! poller)
+          (super/reconcile! c)
+          (is (= ["T1" "Its session is gone and it has no workflow to restart it from."] [(:id (row)) (:line (row))]))
           (finally (bbh.inbox/stop! poller) (.close server)))))))
