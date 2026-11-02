@@ -352,8 +352,9 @@
         rows (sort-by #(parse-long (subs (:id %) 1)) (vals (:outbox @state)))
         for-router? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
         batch (filter for-router? rows)]
-    ;; The Router reads its pending rows as one prompt, oldest first.
-    (when (seq batch)
+    ;; The Router reads its pending rows as one prompt, oldest first. Summaries of
+    ;; messages already routed to a Worker ride along but never wake it alone.
+    (when (some #(not= :summary (:delivery %)) batch)
       (let [m (inbox/send! (conversation-root c router) (str/join "\n\n" (map :text batch)))]
         (doseq [{:keys [id]} batch]
           (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))))

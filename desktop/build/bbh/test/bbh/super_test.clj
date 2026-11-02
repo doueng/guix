@@ -733,3 +733,19 @@
           "a matched thread without a session goes to the Router, tagged")
       (call dir {:command :archive! :args {:thread "T1"}})
       (is (= {:to :router} (:ok (call dir {:command :say! :args {:origin :herdr :text "engstrand/guix#12 again"}}))) "archived threads do not match"))))
+
+(deftest routed-messages-ride-along-in-the-routers-next-batch-but-never-wake-it
+  (with-controller
+    (fn [c dir conversations]
+      (call dir {:command :register-router! :args {:conversation "router"}})
+      (call dir {:command :thread! :args {:title "Alt+W"}})
+      (call dir {:command :attach-worker! :args {:thread "T1" :conversation "conv-1"}})
+      (let [router (fs/path conversations "router")
+            prompts #(mapv (fn [f] (:text (cheshire.core/parse-string (slurp (str f)) true))) (fs/glob router "mailbox/*.json"))]
+        (call dir {:command :say! :args {:text "T1 keep the alias" :origin :herdr}})
+        (is (wait-for #(seq (fs/glob (fs/path conversations "conv-1") "mailbox/*.json"))) "the Worker got it")
+        (Thread/sleep 100)
+        (is (= [] (prompts)) "a routed message alone wakes no Router")
+        (call dir {:command :say! :args {:text "what is running" :origin :phone}})
+        (is (wait-for #(seq (prompts))))
+        (is (= ["[routed to T1 W1 from herdr] keep the alias\n\n[phone] what is running"] (prompts)))))))

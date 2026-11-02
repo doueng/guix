@@ -352,9 +352,13 @@
         w (when (and w (deliverable? w)) w)]
     (if w
       {:events [{:kind :worker-steered :thread thread
-                 :data {:id id :origin origin :text message :worker (:id w) :outbox (next-id state :outbox "o")
-                        :conversation (:conversation w)
-                        :mailbox-text (format "[%s from %s%s] %s" thread (name origin) (if (= :voice origin) ", dictated" "") message)}}]
+                 :data (cond-> {:id id :origin origin :text message :worker (:id w) :outbox (next-id state :outbox "o")
+                                :conversation (:conversation w)
+                                :mailbox-text (format "[%s from %s%s] %s" thread (name origin) (if (= :voice origin) ", dictated" "") message)}
+                         (get-in state [:router :router :conversation])
+                         (assoc :summary {:outbox (next-id (update-in state [:counters :outbox] (fnil inc 0)) :outbox "o")
+                                          :conversation (get-in state [:router :router :conversation])
+                                          :text (format "[routed to %s %s from %s] %s" thread (:id w) (name origin) message)}))}]
        :result (cond-> {:thread thread :to (:id w)} (= :resource via) (assoc :via :resource))}
       (let [said (str (when (= :voice origin) "(spoken) ") (if (= :handle via) (str thread ": " message) text))]
         {:events [{:kind :router-queued :thread thread
@@ -601,9 +605,12 @@
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text mailbox-text
                                   :state :pending :message nil})))
 
-(defmethod fold* :worker-steered [state event]
+(defmethod fold* :worker-steered [state {{:keys [summary]} :data :keys [thread] :as event}]
   (let [state (fold* state (assoc event :kind :message-routed))]
-    (assoc-in state [:outbox (get-in event [:data :outbox]) :delivery] :steer)))
+    (cond-> (assoc-in state [:outbox (get-in event [:data :outbox]) :delivery] :steer)
+      summary (-> (bump :outbox)
+                  (assoc-in [:outbox (:outbox summary)] {:id (:outbox summary) :thread thread :reply nil :conversation (:conversation summary)
+                                                         :text (:text summary) :state :pending :message nil :delivery :summary})))))
 
 (defmethod fold* :router-queued [state {{:keys [outbox conversation text]} :data :keys [thread]}]
   (-> state (bump :outbox)
