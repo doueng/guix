@@ -26,7 +26,7 @@
 (defn heading [{:keys [level title]}]
   [(keyword (str "h" level)) {:id (slug title)} title])
 
-(def surfaces ["Voice" "Emacs" "Herdr" "iPhone" "GitHub" "System"])
+(def surfaces ["Voice" "Herdr" "iPhone" "System"])
 
 (defn step
   "A journey step line's [surface text], from its bold prefix such as **Herdr.**"
@@ -68,7 +68,7 @@
        [:div.opt "[1] Alt+Space t  (recommended)"]
        [:div.opt "[2] Alt+Space a"]
        [:div.dim "stopped · W9 · wf change: implement"]]
-      [:div.keys "j/k  1-4 pick  r note  s send  ⏎ pane  e emacs  t takeover  m read  a archive"]]
+      [:div.keys "j/k  1-4 pick  r note  s send  ⏎ pane  d diff  t takeover  m read  a archive"]]
      [:div.pane.router
       [:div.ptitle "bbh · Router"]
       [:div.you "> make the bbh web page show cost per session"]
@@ -79,36 +79,6 @@
       [:div.bot "T14 stopped on a key choice. T9 waits for your review. T15 and T16 are working, T16 waits for guix-build."]
       [:div.cursor "> "]]]]
    [:figcaption "Herdr. Workspace 1 is the Inbox: the inbox pane on the left with the selected ask in its preview, the Router conversation on the right. Workers live in panes in their project workspaces."]])
-
-(def emacs-mockup
-  [:figure.mock
-   [:div.emacs
-    [:div.ebuf
-     [:div.hl "* STOPPED T14 Herdr key for the thread picker"]
-     [:div "  Asked by W9 (wf change, implement), 3 minutes ago."]
-     [:div "  Which key should open the inbox pane?"]
-     [:div "  - [X] Alt+Space t  (recommended)"]
-     [:div "  - [ ] Alt+Space a"]
-     [:div.hl "** Note"]
-     [:div "  Keep Ctrl+b a as the plain agent picker."]
-     [:div.hl "* WAITING T9 Cost per session on the web page"]
-     [:div "  Review revision 7c1e2a0 · gates: lint, bbh test, review pass"]
-     [:div "  [[jj diff -r 7c1e2a0]]  [[evidence]]"]
-     [:div.mode " super-agent.org   T14   C-c C-c pick   C-c C-s send   RET open"]]
-    [:div.ebuf.diff
-     [:div.dim "src/bbh/web/app.cljs"]
-     [:div.del "-  [:span.cost (format-cost usage)]"]
-     [:div.add "+  [:span.cost {:title 'this session'} (format-cost usage)]"]
-     [:div.add "+  [:span.cost.total (format-cost (:total sessions))]"]
-     [:div.cmt "  ;; you: total belongs in the header, not every tab"]
-     [:div.dim "src/bbh/web/style.css"]
-     [:div.add "+.cost{color:#555;font-variant-numeric:tabular-nums}"]
-     [:div.add "+.cost.total{font-weight:600}"]
-     [:div.dim "test/bbh/web/conversation_test.cljc"]
-     [:div.add "+(deftest cost-line-sums-sessions"]
-     [:div.add "+  (is (= \"$0.31\" (format-cost (total [s1 s2])))))"]
-     [:div.mode " *jj diff T9*   C-c C-a comment on line"]]]
-   [:figcaption "Emacs. The thread view as an org buffer with asks as checkboxes, beside the diff of the revision under review. Line comments join the next Send."]])
 
 (def phone-mockup
   [:figure.mock.phones
@@ -148,7 +118,6 @@
    [:figcaption "Voice. Nothing is pasted; the transcript becomes a voice event. Plain Cmd+M still pastes at the cursor."]])
 
 (def mockups {"Herdr: the main desk" herdr-mockup
-              "Emacs: long-form review and writing" emacs-mockup
               "iPhone: triage and answers away from the desk" phone-mockup
               "Voice: talking to the agent" voice-mockup})
 
@@ -178,9 +147,6 @@ figure.mock{margin:1.2rem 0 1.6rem;}figcaption{font-size:.9rem;color:#555;margin
 .preview{border-top:1px solid #2c313c;margin-top:.6rem;padding-top:.5rem}.q{color:#e0af68}.opt{padding-left:1rem}
 .keys{color:#6b7280;margin-top:.6rem;border-top:1px solid #2c313c;padding-top:.3rem}
 .you{color:#9ece6a;margin-top:.4rem}.bot{color:#d7dae0;padding-left:.6rem}.cursor{color:#9ece6a;margin-top:.5rem}
-.emacs{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#282c34;border-radius:8px;padding:4px;font:12.5px/1.5 ui-monospace,Menlo,monospace;color:#abb2bf}
-.ebuf{background:#21252b;padding:.5rem .7rem;position:relative;min-height:230px;padding-bottom:1.8rem}.hl{color:#e5c07b}.del{color:#e06c75}.add{color:#98c379}.cmt{color:#56b6c2}
-.mode{position:absolute;left:0;right:0;bottom:0;background:#3e4451;color:#abb2bf;padding:.1rem .5rem}
 .phones{display:flex;gap:1.2rem;flex-wrap:wrap}
 .phone{--paper:#fff1e5;--ink:#33302e;--muted:#66605c;--rule:#ccc1b7;--claret:#990f3d;--teal:#0d7680;width:280px;border:10px solid #111;border-radius:30px;background:var(--paper);color:var(--ink);font:13px/1.4 'Helvetica Neue',Arial,system-ui,sans-serif;overflow:hidden;min-height:470px;position:relative}
 .phone .bar{text-align:center;color:var(--muted);padding:.25rem;font-size:11px}
@@ -207,7 +173,7 @@ figure.mock{margin:1.2rem 0 1.6rem;}figcaption{font-size:.9rem;color:#555;margin
 .flow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.9rem}.box{border:1px solid #bbb;border-radius:6px;padding:.3rem .6rem;background:#fafafa}.box.ctl{background:#e8f0fe;border-color:#7aa2f7}.arrow{color:#888}.stack{display:flex;flex-direction:column;gap:.3rem}
 .journey{margin:1.4rem 0;padding:.2rem 1rem .6rem;border:1px solid #e3e3e3;border-radius:8px;background:#fcfcfb}.jid{color:#1a73e8}
 .steps{padding-left:1.4rem}.steps li{margin:.35rem 0;display:flex;align-items:baseline;gap:.5rem}.steps .tag{flex:none;margin-right:0}.tag{display:inline-block;font-size:.72rem;font-weight:600;letter-spacing:.03em;padding:.05rem .45rem;border-radius:999px;margin-right:.5rem;vertical-align:middle;color:#fff;background:#777}
-.tag.herdr{background:#2b7a78}.tag.emacs{background:#7e57c2}.tag.iphone{background:#1a73e8}.tag.voice{background:#c2185b}.tag.github{background:#333}.tag.system{background:#8d99ae}
+.tag.herdr{background:#2b7a78}.tag.iphone{background:#1a73e8}.tag.voice{background:#c2185b}.tag.system{background:#8d99ae}
 .legend{display:flex;gap:.5rem;flex-wrap:wrap;margin:.4rem 0 1rem}
 ")
 

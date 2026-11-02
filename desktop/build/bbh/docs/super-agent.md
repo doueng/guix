@@ -2,7 +2,7 @@
 
 Status: proposal, nothing built. Written 2026-11-02.
 
-This document describes how bbh could grow from separate conversations into one agent that you talk to from Herdr, Emacs and the iPhone, by typing or by voice, that works on several tasks at once, and that reacts to events such as GitHub comments. It adapts the Super-agent architecture from DeepSeek Harness (a Router, isolated Workers, event triggers, asynchronous tools, a watchdog) and the attention model of [Plannotator Inbox](https://github.com/backnotprop/plannotator#plannotator-inbox) (threads grouped by what they need from you, replies that wake the session that asked).
+This document describes how bbh could grow from separate conversations into one agent that you talk to from Herdr and the iPhone, by typing or by voice, and that works on several tasks at once. It adapts the Super-agent architecture from DeepSeek Harness (a Router, isolated Workers, event triggers, asynchronous tools, a watchdog) and the attention model of [Plannotator Inbox](https://github.com/backnotprop/plannotator#plannotator-inbox) (threads grouped by what they need from you, replies that wake the session that asked).
 
 The shortest description is a small durable workflow controller with agents attached. The controller owns truth: work identity, events, lifecycle, delivery, permissions and resource ownership. The Router owns interpretation. Workers own execution. The surfaces own attention. Prompts never enforce correctness; code does.
 
@@ -12,7 +12,6 @@ Today every bbh conversation is its own island. You start one per task, usually 
 
 - You remember which pane holds which task. `herdr-agent-pick` (Ctrl+b a, Alt+Space a) and the attention-sorted agent panel help, but they list sessions, not work.
 - A question an agent asks sits in its pane until you happen to look. From the phone you can only see sessions that have an Emacs front end.
-- Nothing starts without you. A review comment on a PR waits until you open a session and paste it in.
 - Long commands block a turn (`job-wait`), and what you type meanwhile queues until the turn ends.
 
 Human attention, not model ability, limits how many tasks run at once. In practice you can follow 3 to 5 live sessions.
@@ -21,20 +20,18 @@ Human attention, not model ability, limits how many tasks run at once. In practi
 
 Goals
 - One agent to talk to. You never pick a session to give an instruction.
-- Work is tracked as threads (a task, a PR, a topic), with one short list of what needs you.
+- Work is tracked as threads (a task, a topic), with one short list of what needs you.
 - An agent's question reaches you on whichever surface you are on, and your answer wakes the session that asked without that session waiting idle.
 - Several tasks run in parallel without mixing their contexts.
-- Configured events (GitHub, CI, job exits) start or continue work without you.
 - Everything keeps working across REPL restarts, rollovers and a laptop sleep. Work resumes when the laptop wakes.
 
 Non-goals for the first version
 - An always-on cloud host. The laptop is the only machine. Section 11 covers moving the Router later.
-- Team use or other people's messages. Every trigger source is yours or allowlisted.
-- Replacing Herdr, Emacs or the phone page. The design adds views to them.
+- Team use or other people's messages. Every input is yours.
+- GitHub and CI integrations, work the agent starts on its own, and Emacs views. Section 11 holds them.
+- Replacing Herdr or the phone page. The design adds views to them.
 - Compaction. bbh keeps its rollover model.
 - Several Workers on one thread. A thread has one active Worker at a time (section 4).
-
-Automated triggers (GitHub, CI, speculation) are gated on four properties being in place first: durable delivery, execution isolation, capabilities in code, and clear ownership. The manual thread and ask prototype needs none of them.
 
 ## 3. What already exists
 
@@ -59,13 +56,13 @@ Three identities are kept apart.
 
 | Concept | Example | Purpose |
 |---|---|---|
-| Origin | `:herdr`, `:emacs`, `:phone`, `:voice`, `:gh`, `:ci`, `:job` | Where an event arrived. Never used for routing. |
-| Resource key | `gh:engstrand/guix#41`, `ci:main`, `job:1234` | The external object an event concerns. Used for pass-through. |
+| Origin | `:herdr`, `:phone`, `:voice`, `:job` | Where an event arrived. Never used for routing. |
+| Resource key | `job:1234`, `repo:engstrand/guix` | The object an event concerns. Used for pass-through, and where external sources plug in later. |
 | Thread id | `T12` | The bbh work stream that owns the resource. |
 
-**Thread.** A unit of work you care about, such as "fix the keybinding check" or PR `engstrand/guix#41`. It has a short handle `T<n>` that every surface shows and that you can type or say anywhere. A thread links to resource keys and lives as long as the work matters, which is longer than any one Worker.
+**Thread.** A unit of work you care about, such as "fix the keybinding check" or "Alt+W closes windows everywhere". It has a short handle `T<n>` that every surface shows and that you can type or say anywhere. A thread links to resource keys and lives as long as the work matters, which is longer than any one Worker.
 
-**Event.** An accepted fact with a global sequence number: your message, a GitHub comment, a CI result, a job exit, an ask, a reply, a Worker or `wf` state change. Events enter only through the controller (section 6).
+**Event.** An accepted fact with a global sequence number: your message, a job exit, an ask, a reply, a Worker or `wf` state change. Events enter only through the controller (section 6).
 
 **Worker.** A durable execution record: conversation id, `wf` run, jj workspace path, process identity, model, current job, granted capabilities and an ownership lease. A thread has at most one active Worker. When work arrives after a Worker has finished, the thread gets a new Worker generation that inherits the thread's history. A Herdr pane is a view of a Worker, not its identity, so a Worker can also run headless.
 
@@ -81,7 +78,7 @@ Three identities are kept apart.
 
 ### Store: SQLite
 
-Authoritative orchestration state lives in `~/.local/share/bbh/super/super.db`, SQLite in WAL mode with `synchronous=FULL`, `foreign_keys=ON` and a 5 s busy timeout. The controller is the only writer. Views open read-only connections, so the inbox pane, the phone page and Emacs query indexed tables instead of folding history, and they read while the controller writes.
+Authoritative orchestration state lives in `~/.local/share/bbh/super/super.db`, SQLite in WAL mode with `synchronous=FULL`, `foreign_keys=ON` and a 5 s busy timeout. The controller is the only writer. Views open read-only connections, so the inbox pane and the phone page query indexed tables instead of folding history, and they read while the controller writes.
 
 ```
 super.db
@@ -105,7 +102,7 @@ Binding: `babashka.sqlite`, which calls `libsqlite3` through `babashka.ffi`. bb 
 ```clojure
 ;; thread
 {:id "T12" :title "Alt+W closes windows everywhere"
- :resources #{"gh:engstrand/guix#41"}
+ :resources #{"repo:engstrand/guix"}
  :worker "W7"                        ; active generation, or nil
  :history ["W3"]                     ; earlier generations
  :execution :waiting                 ; see dimensions below
@@ -183,10 +180,10 @@ The badge counts the first three. Progress notes update the thread's summary lin
  producers                 bbh super (controller)                        consumers
  ---------                 ----------------------                        ---------
  phone page   --\          command socket (loopback)                    Router conversation
- Herdr, Emacs ---+-------> validate, dedupe by command id, authorize     Worker conversations
+ Herdr panes  ---+-------> validate, dedupe by command id, authorize     Worker conversations
  voice (bbh say) /            |                                           (bbh mailboxes)
- gh / ci pollers             commit: event + fold + outbox   ---------->  dispatcher drains the
- job exits, wf journal        |                                           outbox, retries until acked
+ job exits, wf journal      commit: event + fold + outbox   ---------->  dispatcher drains the
+                              |                                           outbox, retries until acked
  watchdog (health check)   super.db (SQLite, WAL)                        views read it read-only
 ```
 
@@ -198,7 +195,7 @@ The badge counts the first three. Progress notes update the thread's summary lin
 
 ```clojure
 (thread! "Improve bbh web layout")                       ; => "T12"
-(link! "T12" "gh:engstrand/guix#41")
+(link! "T12" "repo:engstrand/guix")
 (start-worker! "T12" {:workflow :change :brief ... :capabilities ...})
 (ask! {:kind :question :text ... :options [...] :stopped true})
 (note! "progress text")                                    ; summary only
@@ -210,18 +207,18 @@ The badge counts the first three. Progress notes update the thread's summary lin
 (approve! "T12" {:revision "c068de11" :evidence-sha ...})
 ```
 
-**Fast path.** `policy.edn` names each origin's trust and what it may start. Events from unlisted authors are stored and shown to you but never reach a model with tools. Events with an external id (GitHub delivery id, CI run id) are deduplicated, and bursts on one resource key are coalesced before the Router sees them. The Router's pending queue is bounded; past the bound, new candidates wait as events, not as prompts.
+**Fast path.** Every input is yours in this version, so the fast path is deduplication by command id and routing by handle or resource key. `policy.edn` names each origin's capabilities and concurrency caps, which is where external origins attach later without a new mechanism.
 
 **Routing.** Deterministic first. A handle in the text (`T12`, spoken "tee twelve") or a resource key already linked to a thread resolves without a model. Only unresolved candidates reach the Router, and `jev-classify-task` runs before a Router turn so noise costs a Jev call. The Router sees linked events in its batch summary but does not act on them.
 
-**Router environment.** A pinned bbh conversation whose manifest exposes only the commands above plus read functions (`threads`, `thread`, `events`). Reads inline the ids of related objects so the Router can follow them hop by hop. Its mailbox is drained in batches ordered by `seq`. The Router has delegation authority, not execution authority: `start-worker!` names the task and its origin, and the controller sets the Worker's capabilities from the authenticated origin and `policy.edn`. So a Router with no shell can start a shell-capable Worker for your direct request, and cannot talk a GitHub-originated task into one.
+**Router environment.** A pinned bbh conversation whose manifest exposes only the commands above plus read functions (`threads`, `thread`, `events`). Reads inline the ids of related objects so the Router can follow them hop by hop. Its mailbox is drained in batches ordered by `seq`. The Router has delegation authority, not execution authority: `start-worker!` names the task and its origin, and the controller sets the Worker's capabilities from the authenticated origin and `policy.edn`. So a Router with no shell can start a shell-capable Worker for your request, and an origin added later cannot be talked into more than its policy grants.
 
 **Workers.** Ordinary bbh conversations running a pstack workflow, with these additions.
 
 - `start-worker!` creates a jj workspace per Worker (`jj workspace add`), so two Workers on the same repository never share a working copy, a `@` revision or generated files. The main checkout stays yours. The Worker's `wf` evidence directory is its own already.
 - Named resource locks in `policy.edn`, such as `guix-build`, `repo-push` and `guix-system`. A Worker that needs one waits in `queued` with the lock named in its summary. `guix-system` is never granted to a Worker; a system switch is always an `action` ask to you.
 - A concurrency cap, three Workers at first. A fourth is `queued`, not working.
-- A Worker runs headless by default. Attaching a Herdr pane is a view (`herdr pane` running `bbh --resume`), so speculative Workers do not clutter workspaces.
+- A Worker runs headless by default. Attaching a Herdr pane is a view (`herdr pane` running `bbh --resume`), so background Workers do not clutter workspaces.
 
 **Three kinds of input to a busy Worker.** They have different semantics and are different commands.
 
@@ -238,21 +235,21 @@ The badge counts the first three. Progress notes update the thread's summary lin
 - Shepherd supervises the controller. The controller writes a heartbeat row.
 - A health check every few minutes compares desired state (Worker records) with reality: process alive, REPL answering, `wf` journal advancing, job state, oldest unacked outbox record, oldest open stopped ask. Silence alone is not an anomaly; a Worker waiting on you or holding a build lock is expected to be quiet.
 - Each Worker ends up classified as running, waiting, recoverable, done or needs-human. Recoverable Workers are restarted with a bounded policy (three tries, then `failed`), which puts the thread under Needs attention.
-- After a sleep, reconciliation checks what survived before restarting anything. While the laptop sleeps nothing runs: no Router, no pollers, no page, no new pushes. Section 11 is the only way past that.
+- After a sleep, reconciliation checks what survived before restarting anything. While the laptop sleeps nothing runs: no Router, no page, no Workers. Section 11 is the only way past that.
 - Only an unexplained anomaly starts a short model session, which can read the records and raise an `action` ask on the Watchdog thread.
 
 **Full duplex, in short.** Your input never waits on a long tool call, because long work is a job and messages have the three delivery kinds above.
 
 ## 7. Surfaces
 
-All three surfaces show the same threads, sections and handles. They differ in what they are good at. Herdr is the main desk, because that is where the Workers already run and where you spend the day.
+Both surfaces show the same threads, sections and handles. Herdr is the desk, because that is where the Workers already run and where you spend the day. The phone is for triage and answers away from it.
 
 ### Herdr: the main desk
 
 The first Herdr workspace is **Inbox**, pinned to position 1 so Ctrl+1 (Cmd+1) always reaches it. Its first tab has two panes.
 
 - **Inbox pane (left, about 40%).** `bbh inbox`, a live list of threads grouped by section, with the badge count in the pane title. It is built like `herdr-agent-pick`, on fzf with `--listen`, so the controller pushes a reload whenever an event changes a thread and the list stays current without polling. The order holds while you look, and new activity waits behind an "N new" line.
-- **Router pane (right).** The Router conversation in bbh's terminal front end. Typing here talks to the Router, as the Emacs composer does.
+- **Router pane (right).** The Router conversation in bbh's terminal front end. Typing here talks to the Router.
 
 Keys in the inbox pane:
 
@@ -263,7 +260,7 @@ Keys in the inbox pane:
 | r | Write a note on the selected thread, in a small popup. |
 | s | Send every pick and note on the selected thread, as one message per Worker. |
 | Enter | Focus the Worker's pane, attaching one first if it runs headless. |
-| e | Open the thread in Emacs, for a diff review or a long reply. |
+| d | Open the revision under review as a `jj diff` in a scratch pane, with the `wf` evidence path in its title. |
 | m | Mark read, which closes the asks and tells the Worker not to wait. |
 | a | Archive. Open asks become dismissed, which the Worker is told. |
 
@@ -273,15 +270,6 @@ Workers run in panes in their project's workspace. The pane name starts with the
 - **Toasts.** Only Stopped and Waiting asks raise a Herdr system toast. Progress never does.
 - **Taking over.** `t` in the inbox pane, or `/takeover` in a Worker's pane, runs `takeover!`, which moves the Worker's lease to you. The Router stops relaying to it until `/handback`. Typing in a pane without the lease still works, but is a plain prompt and does not change who the Router thinks is steering.
 
-### Emacs: long-form review and writing
-
-Emacs is where you go from the inbox when a thread needs more than a pick.
-
-- **Thread view** (`e` in the inbox pane, or SPC o i). The thread's events in an org buffer, with asks as checkbox lists. `C-c C-c` on an option picks it, text under the ask adds a note, and `C-c C-s` sends. A `review` ask opens the diff with `jj diff` in a split, and comments on lines are added to the reply.
-- **Inbox buffer.** The same sections as org headings, for when you are already in Emacs.
-- **Router composer.** The existing bbh layout can be pinned to the Router conversation, so long instructions can be written with the Emacs editor.
-- **Worker transcript.** One key opens a Worker's own transcript in agent-shell, for when you want to steer the details yourself.
-
 ### iPhone: triage and answers away from the desk
 
 The `bbh web` page gains an Inbox view next to the session tabs. It stays loopback-only behind `tailscale serve` and the owner check, and it keeps the page's Financial Times idiom: paper background, a serif masthead, small uppercase sans labels, hairline rules, claret for what needs you and teal for actions, square corners. There are no notifications; you open the page when you want to know.
@@ -289,8 +277,8 @@ The `bbh web` page gains an Inbox view next to the session tabs. It stays loopba
 - **Inbox list.** Sections and badge as in section 5. A row shows handle, title, the open ask's first line and age. Nothing updates while the laptop sleeps; the page says when its data is older than a few minutes.
 - **Thread view.** Events as a chat. Asks show as cards with large option buttons and the recommended option marked. A tap saves the pick at once, and Send at the bottom sends every pick and note on the thread. Archive and "Mark read" (close the asks and tell the Worker not to wait) sit in the bottom bar beside Send.
 - **Talk to the Router.** A composer at the bottom of the Inbox list sends to the Router. Typing a handle first ("T12 ...") goes to that thread.
-- **Review on the phone.** A review card shows the summary, the gates that passed and the diff stat. Approving is allowed and names the exact revision. Line comments are left for Emacs.
-- **Hardening.** External text (GitHub comments, CI logs) is rendered as text, never as HTML or Markdown links. Mutations carry the command id and the owner's Tailscale identity, requests are size-limited, and the page refuses cross-origin POSTs as `bbh web` does today.
+- **Review on the phone.** A review card shows the summary, the gates that passed and the diff stat. Approving is allowed and names the exact revision. Line comments are left for the desk.
+- **Hardening.** Text from Workers and jobs is rendered as text, never as HTML or Markdown links. Mutations carry the command id and the owner's Tailscale identity, requests are size-limited, and the page refuses cross-origin POSTs as `bbh web` does today.
 
 ### Voice: talking to the agent
 
@@ -326,53 +314,40 @@ Dictation is a way of talking to the agent, not only a way of typing into a wind
 1. **System.** T15's Worker finds two ways to get the cost and calls `ask!` with `:stopped true` and a recommendation, then ends its turn.
 2. **Herdr.** T15 moves to the top of the inbox pane under Stopped on you. Herdr shows a toast.
 3. **Herdr.** At the desk you press Alt+Space t, which lands on T15 in the inbox pane. The preview shows the question with options 1 and 2. You press 1, then s.
-4. **iPhone.** You could equally answer from the phone or Emacs. If both you and the phone answered, the second Send carries a stale `:asks-version` and shows "already answered: option 1" instead of sending.
+4. **iPhone.** You could equally answer from the phone. If both you and the phone answered, the second Send carries a stale `:asks-version` and shows "already answered: option 1" instead of sending.
 
-### J4. A review comment on a PR you pushed
+### J4. Changing your mind in another channel
 
-1. **GitHub.** The `gh` poller sees a comment on `engstrand/guix#41` from an allowlisted author.
-2. **System.** The resource key `gh:engstrand/guix#41` is linked to T12, so the comment routes to T12 without the Router. T12's Worker finished earlier, so the controller starts a new Worker generation on T12 with the thread's history and the capabilities for a GitHub-originated task: read, edit its own workspace, run checks. No push.
-3. **System.** The Worker fixes the nit in its workspace, runs the check, and raises a `review` ask with the revision and evidence.
-4. **Herdr.** You see T12 under Waiting in the evening, approve the exact revision, and the Worker pushes and posts a short PR comment. Later, once this has gone well for a while, `policy.edn` can grant push for trivial fixes on your own PRs.
-
-### J5. Changing your mind in another channel
-
-1. **Emacs.** On Monday you told the Router in Emacs "T16 migrate to plan A".
+1. **Herdr.** On Monday you told the Router in its pane "T16 migrate to plan A".
 2. **iPhone.** On Tuesday, on the phone, you write "T16 actually plan B, A breaks the Asahi build".
 3. **System.** The message goes to T16's Worker as a new turn. The Worker reads its `wf` evidence, sees it is in `implement`, and either adjusts or calls `ask!` if plan B changes the shape. If so, its `wf` run goes back to `shape`, which `wf` already supports.
 
-### J6. Taking over and handing back
+### J5. Taking over and handing back
 
 1. **Herdr.** T15 is drifting. In the inbox pane you select T15 and press `t`, which runs `takeover!` and lands in its pane.
 2. **Herdr.** You type directly to the Worker for a few turns. The lease is yours, so the Router queues anything for T15 instead of relaying it.
 3. **Herdr.** You type `/handback` in the pane. The Router gets the queued items and resumes normal routing.
 
-### J7. Silent fix in the background
+### J6. The laptop sleeps
 
-1. **GitHub.** CI fails on main overnight. `policy.edn` marks CI failures on main as candidates with the "silently reproduce" rule.
-2. **System.** The Router starts a Worker on T17 with the `bug-fix` workflow and `--repro` set to the failing check, and marks the thread speculative. A speculative Worker gets the smallest capability set: its own jj workspace, checks, no push, no network beyond the model.
-3. **System.** Speculative threads stay in Quiet. If the `wf` run reaches `done`, with the reproduction failing first and passing after and an independent review, T17 moves to Waiting with a review ask. If the run blocks or gives up, the Worker's output is discarded, the thread is archived, and you were never interrupted.
-
-### J8. The laptop sleeps
-
-1. **System.** You close the lid during a run. Every process stops, and nothing happens until you open it: no pollers, no page, no pushes.
+1. **System.** You close the lid during a run. Every process stops, and nothing happens until you open it: no page, no Workers.
 2. **System.** On wake the controller opens the database, SQLite recovers the WAL, and the dispatcher resumes unacked outbox rows. Herdr restores panes and their bbh conversations, as it does today.
 3. **System.** The health check reconciles each Worker record with reality. A Worker whose REPL survived is left alone. One whose REPL died but whose `wf` journal is intact is restarted once with its journal. A running job is rediscovered by pid, not launched again. A Worker that fails three restarts goes to Needs attention.
 
-### J9. Sign-off at the desk
+### J7. Sign-off at the desk
 
 1. **Herdr.** T15 reaches `done`. Its `review` ask shows under Waiting.
-2. **Emacs.** In the inbox pane you select T15 and press e, which opens the thread view in Emacs. The diff opens beside the thread with the `wf` evidence links. You comment on two lines and press `C-c C-s`.
-3. **Emacs.** The Worker gets both comments in one turn, fixes them and asks for review again, with a new revision. The earlier approval is stale by construction. You approve the new revision, the Worker commits with jj, and the thread is archived.
+2. **Herdr.** In the inbox pane you select T15 and press d. The revision opens as a `jj diff` in a scratch pane beside the inbox, with the `wf` evidence path in its title. You add two line comments with r and press s.
+3. **Herdr.** The Worker gets both comments in one turn, fixes them and asks for review again, with a new revision. The earlier approval is stale by construction. You approve the new revision, the Worker commits with jj, and the thread is archived.
 
-### J10. Talking to the agent at the desk
+### J8. Talking to the agent at the desk
 
 1. **Voice.** You are reading a PR in Chrome. Without switching windows you hold Cmd+Shift+M and say "start a task, make Alt Space a open the inbox pane, and check kanata for Cmd Shift M".
 2. **System.** On release Hex prints the transcript and `bbh say` sends a command to the controller, which stores a voice event. Nothing was pasted into Chrome.
 3. **Herdr.** No handle was spoken and no thread was selected, so the Router gets it, starts T18 with the `change` workflow, and its one-line reply shows in the Router pane.
 4. **Voice.** Later T18 stops with a question. You select it in the inbox pane, hold Cmd+Shift+M and say "the recommended one, send". The pick and the Send show in the pane, and the Worker wakes.
 
-### J11. Talking to the agent away from the desk
+### J9. Talking to the agent away from the desk
 
 1. **iPhone.** Walking home you remember T16. You open the bbh page on the iPhone, tap the composer and use the keyboard's microphone: "T16, also keep the old plan as a fallback branch."
 2. **System.** The handle sends it straight to T16's Worker. The event is marked as dictated, so the Worker treats an odd word as a likely recognition error rather than an instruction.
@@ -382,23 +357,20 @@ Dictation is a way of talking to the agent, not only a way of typing into a wind
 - The Router does poteto-mode steps 1 and 2 for you. It classifies, picks the workflow from the route table and starts the Worker with `wf start`. The Router itself is not a workflow run, the same as the manual route.
 - One Worker is one `wf` run, which matches today's limit of one run per conversation.
 - `wf` states drive the inbox. `blocked` is Stopped on you, a phase failure stays inside the Worker, `done` makes a review ask. A model's prose never decides that a task is done.
-- Gates and the independent reviewer are what make speculative work (J7) safe to run unasked.
+- Gates and the independent reviewer are what will make work the agent starts on its own safe to run unasked, when section 11 adds it.
 - `large-project` could later hand each stage of its plan to its own Worker, with the stage's check as that Worker's `--check`. Not in the first version.
 
 ## 10. Security
 
-Trigger sources make untrusted text reach an agent on a laptop with private files in `local/`. Author allowlists help but are not a boundary: an allowed comment can quote an attacker's log, CI output can carry instructions, and an account can be compromised. So permissions are capabilities granted by the controller per task origin and enforced in code, and starting work is separate from publishing its effects.
+Every input in this version is yours, so the risks are mistakes and what a Worker can do with a shell, not hostile authors. Permissions are still capabilities granted by the controller per origin and enforced in code, and starting work is separate from publishing its effects, so external origins can be added later (section 11) without changing the model.
 
-| Task origin | Capabilities at first |
+| Task origin | Capabilities |
 |---|---|
-| Your direct instruction (Herdr, Emacs, phone, voice) | Today's bbh workflow permissions in the Worker's own jj workspace. Pushing and committing to the main checkout go through a `review` ask. |
-| GitHub comment, allowlisted author | Read, edit own workspace, run checks. Publishing needs your approval of the revision. |
-| CI failure | Reproduce and edit in own workspace. No push. |
-| Speculative task | Own workspace, checks, no network beyond the model. |
+| Your instruction (Herdr, phone, voice) | Today's bbh workflow permissions in the Worker's own jj workspace. Committing to the main checkout and pushing go through a `review` ask. |
 | System change (`make switch`, services) | Never a capability. Always an `action` ask naming the exact command. |
 
-- The controller, not the Router, decides a Worker's capabilities, from the authenticated origin of the request and `policy.edn`. A GitHub-originated task cannot become a Worker with push rights by the Router's choice.
-- A jj workspace isolates working copies, not processes. A Worker is a bbh REPL with a shell under your user, so a capability it lacks is enforced by what the controller will accept from its token, by resource locks, and by the review gate before publishing. Filesystem and network restrictions for speculative Workers need real process isolation, such as a bubblewrap or Guix container around the Worker's REPL, and are part of phase 6, not assumed before it.
+- The controller, not the Router, decides a Worker's capabilities, from the authenticated origin of the request and `policy.edn`. An origin added later gets what the policy grants it and nothing more.
+- A jj workspace isolates working copies, not processes. A Worker is a bbh REPL with a shell under your user, so a capability it lacks is enforced by what the controller will accept from its token, by resource locks, and by the review gate before publishing. Filesystem and network restrictions need real process isolation, such as a bubblewrap or Guix container around the Worker's REPL, and belong with the external origins in section 11.
 - Approval refers to an immutable artifact: a revision id and the hash of its `wf` evidence. A later change makes the approval stale, and `approve!` on a stale revision is rejected.
 - `wf` gates and the independent reviewer establish that code works. They are not a security boundary and do not stand in for your authorization of a side effect.
 - Voice input is yours, but a transcription error is still an instruction, so dictated text never completes an `action` ask.
@@ -406,9 +378,14 @@ Trigger sources make untrusted text reach an agent on a laptop with private file
 - Credentials stay out of events and asks. The controller refuses commands whose payload matches the secret patterns `make lint` already uses.
 - nREPL ports stay on loopback. A remote endpoint (section 11) needs tailnet ACLs first.
 
-## 11. Later: an always-on Router
+## 11. Later
 
-Moving the controller and the Router to an always-on host on the tailnet makes the agent reachable while the laptop sleeps. Workers that need the laptop's working copy then wait for it. On wake, the laptop's bb nREPL (already how bbh runs a REPL) serves as the endpoint that runs commands. This needs the security work in section 10 first and is out of scope here.
+Each of these keeps the model above and adds an origin, a surface or a host.
+
+- **GitHub and CI triggers.** A `gh` poller and a CI poller append events with external ids, deduplicated and coalesced per resource key. Comments on a PR linked to a thread pass through to its Worker; a CI failure on main is a candidate for the Router. They are gated on four properties being in place first: durable delivery (phase 1), execution isolation (phase 3), capabilities in code and token identity (phases 1 and 4), and clear ownership (phase 3). External text is shown to you but never reaches a model with tools unless `policy.edn` says so, and an external origin starts with read, edit own workspace and run checks, publishing only after your approval of the revision.
+- **Work the agent starts on its own.** A CI failure on main starts a `bug-fix` Worker with `--repro` set to the failing check, in a thread marked speculative that stays in Quiet. It surfaces only when the `wf` run reaches `done` with an independent review; otherwise the output is discarded. Speculative Workers need real process isolation first.
+- **Emacs views.** A thread view as an org buffer with asks as checkboxes beside a `jj diff`, an inbox buffer, and the bbh composer pinned to the Router, for long replies and line-by-line review.
+- **An always-on Router.** Moving the controller and the Router to an always-on host on the tailnet makes the agent reachable while the laptop sleeps. Workers that need the laptop's working copy then wait for it, and on wake the laptop's bb nREPL serves as the endpoint that runs commands. Needs tailnet ACLs on nREPL first.
 
 ## 12. Cost and measurement
 
@@ -426,17 +403,18 @@ The hard correctness properties come first, and the surfaces grow beside them. E
 | 1 | Controller and store | `babashka.sqlite` opens Guix's `libsqlite3` on this machine. `bbh super` with `thread!`, `ask!`, `reply!`, the events, commands and outbox tables. Kill the controller at every step of a reply and restart: accepted events are kept, a retried command returns its original result, and replaying all events into an empty database reproduces the materialized state. |
 | 2 | Ask and reply protocol | Picks, Send with `:asks-version`, dismiss, supersede, delivery states, `bbh super list` and one view (the Herdr inbox pane). Sending the same reply twice yields one logical reply and one Worker turn. Answering from two devices leaves one winner and one clear conflict. |
 | 3 | Worker ownership and isolation | Worker records, generations, jj workspaces, resource locks, the concurrency cap, `takeover!` and `handback!`. Two Workers change the same repository without touching each other's working copy, evidence or revision. |
-| 4 | Router and dispatch | Restricted env, handle and resource routing, batching. Requests from Herdr, Emacs and the phone resolve to the right thread, and a GitHub-origin task cannot get push rights. |
+| 4 | Router and dispatch | Restricted env, handle and resource routing, batching. Requests from Herdr and the phone resolve to the right thread. |
 | 5 | Jobs and recovery | Job exit events, `steer!` and `cancel!`, health check, bounded restarts, sleep reconciliation. Kill the controller during a job and it is rediscovered, not relaunched. Steer a busy Worker, then cancel it, and the two behave differently and predictably. |
-| 6 | Triggers, speculation, voice | `gh` poller, `policy.edn` capabilities, process isolation for speculative Workers, J7, `bbh say`. A malicious instruction inside an allowlisted comment gains no capability and bypasses no approval, and a speculative Worker cannot reach the network or files outside its workspace. |
+| 6 | Voice | `bbh say`, the Cmd+Shift+M hold-to-talk bind, routing to the selected thread or a spoken handle, Hex vocabulary for handles. J8 with Chrome focused, and a recorded clip of "tee twelve, option two" becoming a pick on T12. |
 
-The first slice worth building is smaller than phase 1 and 2 together: the controller with one Worker per thread, `thread!`, `attach-worker!`, `ask!` and `reply!`, durable and testable without a model, plus `bbh super list` and the inbox pane. That alone gives the key experience: a Worker asks, stops spending turns, and resumes from an answer sent elsewhere. Automated triggers wait until phases 1, 3 and 4 are done.
+The first slice worth building is smaller than phase 1 and 2 together: the controller with one Worker per thread, `thread!`, `attach-worker!`, `ask!` and `reply!`, durable and testable without a model, plus `bbh super list` and the inbox pane. That alone gives the key experience: a Worker asks, stops spending turns, and resumes from an answer sent elsewhere.
 
 ## 14. Decisions
 
+- This version has two surfaces, Herdr and the phone, and only your own input. GitHub and CI integrations, work the agent starts on its own, and Emacs views wait for section 11.
 - Voice uses Cmd+Shift+M for now. Hyprland has nothing on it; kanata and the application layers are checked when the bind is added, with the keybindings skill.
 - Router replies are text only, also when the request was spoken.
 - No push notifications. The phone shows what needs you when you open it, and the badge in the page title does the rest. The laptop cannot notify while asleep in any case.
-- Plannotator: phase 0 decides. If its thread and reply API can be bridged without a second ask lifecycle, bbh owns execution and workflow state and Plannotator owns ask and reply interaction, with a thin Emacs overview backed by bbh. If not, the inbox pane and phone view are built as described.
+- Plannotator: phase 0 decides. If its thread and reply API can be bridged without a second ask lifecycle, bbh owns execution and workflow state and Plannotator owns ask and reply interaction. If not, the inbox pane and phone view are built as described.
 - Router model: deterministic routing and Jev first, a mid-priced model for the rest. Routing accuracy is measured on real requests before the model is chosen.
 - Memory: archived threads, their summaries, events and links to conversations and `wf` evidence are kept indefinitely and searchable. No memory subsystem until that is a problem.
