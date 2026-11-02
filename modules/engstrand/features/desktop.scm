@@ -1,7 +1,7 @@
 (define-module (engstrand features desktop)
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages bluetui)
-  #:use-module (engstrand packages omarchy-mlx)
+  #:use-module (engstrand packages hex)
   #:use-module (engstrand nixpkgs)
   #:use-module (asahi guix systems desktop)
   #:use-module (gnu home services xdg)
@@ -12,8 +12,8 @@
 
 (define %desktop-home-packages
   (append (list bluetui
-                ;; desktop/bin/dictate: speech to text on the Neural Engine.
-                omarchy-mlx-parakeet
+                ;; Dictation on Cmd+M; Hyprland starts it (startup.lua).
+                hex
                 ;; Launchers may not inherit Home's LOCALE_ARCHIVE.
                 (nixpkgs-package "ghostty"
                                  #:environment

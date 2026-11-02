@@ -54,19 +54,19 @@ hl.bind("SUPER + G", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 4"))
 hl.bind("SUPER + B", hl.dsp.exec_cmd("~/.local/bin/herdr-terminal"))
 hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("ghostty nvim ~/.config/hypr/hyprland.lua"))
 hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
--- Dictation: hold Cmd+M to talk; words are typed while you speak.  Releasing M
--- or Cmd finishes it.  Hyprland reports a release of M only while Cmd is still
+-- Dictation with Hex: hold Cmd+M to talk; Hex pastes the text when you let go.
+-- Releasing M or Cmd finishes it.  Hyprland reports a release of M only while Cmd is still
 -- held, so Cmd's own release (code:133/134) also stops; the flag keeps every
 -- other Cmd release from starting a process.
 local dictating = false
 hl.bind("SUPER + M", function()
   dictating = true
-  hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/dictate start"))
+  hl.dispatch(hl.dsp.exec_cmd("hex dictation start"))
 end)
 local function stop_dictation()
   if dictating then
     dictating = false
-    hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/dictate stop"))
+    hl.dispatch(hl.dsp.exec_cmd("hex dictation stop"))
   end
 end
 hl.bind("SUPER + M", stop_dictation, { release = true })

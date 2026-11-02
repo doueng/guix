@@ -25,13 +25,9 @@
    :paths ["modules/engstrand/packages/omarchy-ane.scm" "modules/engstrand/system/bootloader.scm"
            "modules/engstrand/system/asahi.scm" "desktop/build/ane/**"]
    :slow ["bb desktop/build/ane/check-packages.bb" "bb desktop/build/ane/check-system.bb"]}
-  {:name "parakeet on the neural engine"
-   :paths ["modules/engstrand/packages/omarchy-mlx.scm" "desktop/build/ane/check-transcribe.bb"
-           "desktop/build/ane/parakeet_server.py" "desktop/build/ane/wer.clj" "desktop/build/ane/fixtures/**"]
-   :slow ["bb desktop/build/ane/check-transcribe.bb"]}
-  {:name "dictate"
-   :paths ["desktop/bin/dictate" "desktop/build/ane/check-dictate.bb" "desktop/build/ane/wer.clj"]
-   :slow ["bb desktop/build/ane/check-dictate.bb"]}
+  {:name "hex dictation"
+   :paths ["modules/engstrand/packages/hex.scm" "desktop/build/hex/**"]
+   :slow ["bb desktop/build/hex/check-transcribe.bb"]}
   {:name "doom"
    :paths ["desktop/configs/doom/**" "desktop/build/doom/**"]
    :checks ["make doom-check"]}
