@@ -4,7 +4,6 @@
 (define-module (engstrand packages hex)
   #:use-module (gnu packages audio)
   #:use-module (gnu packages base)
-  #:use-module (gnu packages curl)
   #:use-module (gnu packages elf)
   #:use-module (gnu packages fontutils)
   #:use-module (gnu packages freedesktop)
@@ -35,7 +34,7 @@
         (base32 "06s1j2vngb4rcv6l11105x62yj35drh819y0r974x9sa343lkaca"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
-    (inputs (list alsa-lib curl fontconfig (list gcc "lib") glibc
+    (inputs (list alsa-lib fontconfig (list gcc "lib") glibc
                   libva libxkbcommon openblas openssl pipewire vulkan-loader
                   wayland wl-clipboard wtype))
     (arguments
@@ -68,7 +67,7 @@
                   `("VK_DRIVER_FILES" = ("/run/opengl-driver/share/vulkan/icd.d/asahi_icd.aarch64.json"))
                   `("PATH" prefix
                     ,(map (lambda (name) (string-append (assoc-ref inputs name) "/bin"))
-                          '("curl" "wl-clipboard" "wtype"))))))))))
+                          '("wl-clipboard" "wtype"))))))))))
     (synopsis "Local voice dictation")
     (description "Hex records while a shortcut is held, transcribes on the device
 and pastes the text at the cursor.")
