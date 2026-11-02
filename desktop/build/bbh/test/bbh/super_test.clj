@@ -190,7 +190,7 @@
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
     (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
     (is (re-matches #"T3\tARCHIVED         T3   old \(came back\)    " row3))
-    (is (= "bbh inbox · 1 need you   1-4 pick  s send  r note  m mark read  a archive" (bbh.super.pane/header sections)))
+    (is (= "bbh inbox · 1 need you   1-4 pick  s send  A approve  r note  m mark read  a archive" (bbh.super.pane/header sections)))
     (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
            (clojure.string/split-lines
             (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
@@ -803,3 +803,54 @@
         (let [r (start-worker dir "T3" :repo repo :workflow :investigation)]
           (is (= :owner (:origin (get-in @(:state c) [:workers (:id (:ok r))]))) (pr-str r))))
       (finally (super/stop! c)))))
+
+(deftest approval-binds-to-the-reviewed-revision-and-its-evidence
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-ap"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-apconv"}))
+        wf-root (str (fs/create-temp-dir {:prefix "bbh-super-wf"}))
+        evidence (fs/path wf-root "run-W1" "evidence")
+        repo (jj-repo)
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10 :wf-root wf-root
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :pane! (fn [_] "wC:p1")}})]
+    (try
+      (fs/create-dirs evidence)
+      (spit (str (fs/path evidence "verify.md")) "checks pass")
+      (call dir {:command :thread! :args {:title "review me"}})
+      (call dir {:command :start-worker! :args {:thread "T1" :workflow :investigation :brief "b" :repo repo}})
+      (let [ask! (fn [m] (call dir {:command :ask! :args (merge {:thread "T1" :worker "W1" :kind :review :text "Ship it?"} m)}))]
+        (is (= :invalid (:error (ask! {}))) "a review names its revision")
+        (let [a1 (:ok (ask! {:revision "c068de11"}))
+              sha (:evidence-sha (get-in @(:state c) [:asks a1]))
+              approve #(call dir {:command :approve! :args (merge {:thread "T1" :ask a1 :revision "c068de11" :evidence-sha sha} %)})]
+          (is (= 64 (count sha)))
+          (is (= :stale (:error (approve {:revision "deadbeef"}))))
+          (is (= :stale (:error (approve {:evidence-sha "0000"}))))
+          (spit (str (fs/path evidence "verify.md")) "checks pass, then one more edit")
+          (is (= [:stale "the evidence changed since the review was asked"] ((juxt :error :message) (approve {}))))
+          (let [a2 (:ok (ask! {:revision "c068de12" :supersedes [a1]}))
+                sha2 (:evidence-sha (get-in @(:state c) [:asks a2]))]
+            (is (= :stale (:error (approve {}))) "a superseded review cannot be approved")
+            (let [r (:ok (call dir {:command :approve! :args {:thread "T1" :ask a2 :revision "c068de12" :evidence-sha sha2}}))]
+              (is (= :sent (get-in @(:state c) [:asks a2 :state])))
+              (is (clojure.string/includes? (:text (get-in @(:state c) [:outbox (get-in @(:state c) [:replies r :outbox])]))
+                                 (str "Approved " a2 " at revision c068de12 (evidence " (subs sha2 0 8) ")")))))))
+      (finally (super/stop! c)))))
+
+(deftest the-inbox-approves-a-review-at-what-it-shows-and-voice-cannot
+  (with-controller
+    (fn [c dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (call dir {:command :thread! :args {:title "review"}})
+            (let [token (:token (:ok (call dir {:command :attach-worker! :args {:thread "T1" :conversation "conv-1"}})))]
+              (call dir {:token token :command :ask! :args {:kind :review :text "Ship it?" :revision "c068de11" :stopped true}})
+              (is (clojure.string/includes? (pane/preview (:ok (call dir {:command :thread :args {:id "T1"}})) {})
+                                            "REVIEW revision c068de11 evidence none      A approve")
+                  "the preview shows what A approves")
+              (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "tee one approve")))
+              (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "tee one option one")))
+              (is (= :open (get-in @(:state c) [:asks "a1" :state])))
+              (let [r (pane/approve! "T1")]
+                (is (= {"a1" "c068de11"} (get-in @(:state c) [:replies r :approved])))
+                (is (= :sent (get-in @(:state c) [:asks "a1" :state])))))))))))

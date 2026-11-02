@@ -216,7 +216,7 @@
 (defn- super-api
   "/api/super: the inbox for the phone, over the controller under DIR."
   [dir {:keys [uri request-method] :as request}]
-  (let [[_ id verb] (re-matches #"/api/super/threads/(T\d+)(?:/(reply|dismiss|archive))?" uri)
+  (let [[_ id verb] (re-matches #"/api/super/threads/(T\d+)(?:/(reply|approve|dismiss|archive))?" uri)
         body (when (= :post request-method)
                (try (json/parse-string (slurp (:body request)) true) (catch Exception _ ::bad)))]
     (cond (and (= uri "/api/super/threads") (= :get request-method))
@@ -247,6 +247,12 @@
                                                 :picks (into {} (map (fn [[k v]] [(name k) (str v)])) picks)
                                                 :note (str/trim (str note))}}
                                     202)))
+          (= "approve" verb)
+          (if (and (string? (:id body)) (every? (comp string? body) [:ask :revision :evidence-sha]))
+            (super-call dir {:command :approve! :id (:id body)
+                             :args {:thread id :ask (:ask body) :revision (:revision body) :evidence-sha (:evidence-sha body)}}
+                        202)
+            (json-response 400 {:error "An approval names its id, ask, revision and evidence-sha"}))
           :else (super-call dir {:command (keyword (str verb "!")) :id (:id body) :args {:thread id}} 202))))
 
 (defn handler

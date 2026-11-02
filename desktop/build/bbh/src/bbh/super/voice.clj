@@ -27,10 +27,12 @@
               label-index (when ask (some (fn [[i o]] (when (= words (str/lower-case (str (:label o)))) (inc i))) (map-indexed vector (:options ask))))
               n (or n label-index (when recommended? (some (fn [[i o]] (when (= (:recommended ask) (:id o)) (inc i))) (map-indexed vector (:options ask)))))]
           (when (and handle (nil? t)) (throw (ex-info "No such thread" {:thread handle})))
+          (when (and thread (re-find #"\bapprove" words))
+            (throw (ex-info "Voice cannot approve; press A in the inbox or tap Approve" {:thread thread})))
           (cond
             (and thread (or n recommended?))
             (do
-              (when (or (nil? ask) (= :action (:kind ask))) (throw (ex-info "Voice cannot approve action asks" {:thread thread})))
+              (when (or (nil? ask) (#{:action :review} (:kind ask))) (throw (ex-info "Voice cannot approve action or review asks" {:thread thread})))
               (when-not (and n (<= 1 n (count (:options ask)))) (throw (ex-info "No such option" {:thread thread})))
               (pane/pick! thread n)
               {:thread thread :draft true :option n})

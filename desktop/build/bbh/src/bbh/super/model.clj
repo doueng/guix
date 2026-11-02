@@ -62,7 +62,7 @@
 
 (defn- reply-text
   "The mailbox message that carries REPLY to its Worker."
-  [state {:keys [id thread picks note dismiss]}]
+  [state {:keys [id thread picks note dismiss approved]}]
   (let [ask-line (fn [[ask option]]
                    (let [a (get-in state [:asks ask])
                          label (or (some #(when (= option (:id %)) (:label %)) (:options a)) option)]
@@ -70,6 +70,10 @@
     (str/join "\n" (remove str/blank?
                             [(format "[%s reply %s]" thread id)
                              (when (seq picks) (str/join "\n" (map ask-line picks)))
+                           (when (seq approved)
+                             (str/join "\n" (for [[ask revision] approved]
+                                               (format "Approved %s at revision %s (evidence %s)." ask revision
+                                                       (subs (str (get-in state [:asks ask :evidence-sha]) "        ") 0 8)))))
                              (when (seq dismiss) (str "Not answered, do not wait: " (str/join ", " dismiss)))
                              (when-not (str/blank? note) note)
                              (format "When this reply is handled, run (super-answered! \"%s\")." id)]))))
@@ -261,12 +265,14 @@
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
     {:events [{:kind :lease-moved :thread (:thread w) :data {:id worker :lease :router}}] :result worker}))
 
-(defmethod decide* :ask! [state {{:keys [thread worker kind text options recommended stopped holds-up supersedes]} :args}]
+(defmethod decide* :ask! [state {{:keys [thread worker kind text options recommended stopped holds-up supersedes revision evidence-sha]} :args}]
   (let [t (thread-of state thread)
         worker (or worker (:worker t))
         open (open-asks state thread)]
     (when-not (#{:question :action :review} kind) (refuse :invalid :field :kind))
     (when (str/blank? text) (refuse :invalid :field :text))
+    (when (and (= :review kind) (str/blank? revision))
+      (refuse :invalid :field :revision :message "a review ask names the revision to approve"))
     (when-not (= worker (:worker t)) (refuse :no-active-worker :thread thread))
     (doseq [a supersedes] (when-not (open a) (refuse :no-such-ask :ask a)))
     (let [id (next-id state :asks "a")]
@@ -274,7 +280,8 @@
                  :data (cond-> {:id id :worker worker :kind kind :text text :options (vec options)
                                 :stopped (boolean stopped) :supersedes (vec supersedes)}
                          recommended (assoc :recommended recommended)
-                         holds-up (assoc :holds-up holds-up))}]
+                         holds-up (assoc :holds-up holds-up)
+                         (= :review kind) (assoc :revision revision :evidence-sha evidence-sha))}]
        :result id})))
 
 (defmethod decide* :reply! [state {{:keys [thread asks-version picks note dismiss]} :args :keys [id]}]
@@ -293,6 +300,22 @@
           outbox (next-id state :outbox "o")]
       {:events [{:kind :reply-sent :thread thread
                  :data (assoc reply :outbox outbox
+                              :conversation (get-in state [:workers (:worker t) :conversation])
+                              :text (reply-text state reply))}]
+       :result id})))
+
+(defmethod decide* :approve! [state {{:keys [thread ask revision evidence-sha current-sha]} :args :keys [id]}]
+  (let [t (thread-of state thread)
+        open (open-asks state thread)
+        a (get open ask)
+        stale (fn [why] (refuse :stale :message why :current (:asks-version t) :asks (vec (sort-by :seq (vals open)))))]
+    (cond (not= :review (:kind a)) (stale "no open review ask by that id")
+          (not= revision (:revision a)) (stale (str "the review is of revision " (:revision a)))
+          (not= evidence-sha (:evidence-sha a)) (stale "the review's evidence is not the one you saw")
+          (not= current-sha (:evidence-sha a)) (stale "the evidence changed since the review was asked"))
+    (let [reply {:id id :thread thread :worker (:worker t) :picks {} :note "" :dismiss #{} :approved {ask revision}}]
+      {:events [{:kind :reply-sent :thread thread
+                 :data (assoc reply :outbox (next-id state :outbox "o")
                               :conversation (get-in state [:workers (:worker t) :conversation])
                               :text (reply-text state reply))}]
        :result id})))
@@ -555,7 +578,7 @@
       (assoc-in [:replies id] (-> reply (dissoc :outbox :conversation :text) (assoc :state :sent :outbox outbox :seq seq)))
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply id :conversation conversation :text text
                                   :state :pending :message nil})
-      (set-states :asks (keys picks) :sent)
+      (set-states :asks (concat (keys picks) (keys (:approved reply))) :sent)
       (set-states :asks dismiss :dismissed)
       (assoc-in [:threads thread :asks-version] seq)
       (resume thread)))
@@ -567,9 +590,9 @@
   [state kind id]
   (when-let [r (get-in state [kind id])]
     (case kind
-      :asks (assoc r :reply (some (fn [p] (when (or (contains? (:picks p) id) (contains? (set (:dismiss p)) id)) (:id p)))
+      :asks (assoc r :reply (some (fn [p] (when (or (contains? (:picks p) id) (contains? (:approved p) id) (contains? (set (:dismiss p)) id)) (:id p)))
                                   (sort-by :seq (vals (:replies state)))))
-      :replies (assoc r :asks (vec (sort (distinct (concat (keys (:picks r)) (:dismiss r))))))
+      :replies (assoc r :asks (vec (sort (distinct (concat (keys (:picks r)) (keys (:approved r)) (:dismiss r))))))
       :workers (assoc r :asks (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:asks state)))))
                         :replies (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:replies state))))))
       r)))
@@ -673,13 +696,13 @@
   (let [reply (get-in state [:replies (get-in state [:outbox id :reply])])]
     (cond-> (assoc-in state [:outbox id :state] :acked)
       reply (-> (assoc-in [:replies (:id reply) :state] :delivered)
-                (set-states :asks (keys (:picks reply)) :delivered)))))
+                (set-states :asks (concat (keys (:picks reply)) (keys (:approved reply))) :delivered)))))
 
 (defmethod fold* :reply-answered [state {{:keys [id]} :data :keys [thread]}]
   (let [reply (get-in state [:replies id])]
     (-> state (assoc-in [:replies id :state] :answered)
         (assoc-in [:outbox (:outbox reply) :state] :processed)
-        (set-states :asks (keys (:picks reply)) :answered)
+        (set-states :asks (concat (keys (:picks reply)) (keys (:approved reply))) :answered)
         (resume thread))))
 
 (defn changed

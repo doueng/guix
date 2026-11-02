@@ -64,7 +64,7 @@
                                      (or (age updated-at) ""))))))
 
 (defn header [{:keys [badge]}]
-  (format "bbh inbox · %d need you   1-4 pick  s send  r note  m mark read  a archive" badge))
+  (format "bbh inbox · %d need you   1-4 pick  s send  A approve  r note  m mark read  a archive" badge))
 
 (defn preview
   "What the selected thread needs: its open ask with numbered options and the
@@ -77,8 +77,10 @@
                                                  (when-let [w (last workers)] (str ", " (:id w) " " (name (:state w)))))
                        ""]
                       (if (seq open)
-                        (mapcat (fn [{:keys [id text options recommended stopped]}]
+                        (mapcat (fn [{:keys [id text options recommended stopped kind revision evidence-sha]}]
                                   (concat [(str (if stopped "STOPPED  " "") text)]
+                                          (when (= :review kind)
+                                            [(str "  REVIEW revision " revision " evidence " (subs (str evidence-sha "        ") 0 8) "  A approve")])
                                           (map-indexed (fn [i {oid :id label :label}]
                                                          (str "  " (inc i) ". " label
                                                               (when (= oid recommended) "  (recommended)")
@@ -117,6 +119,14 @@
                                       :picks (get picks id {}) :note (get notes id "")}})
       (save-client-state! (-> (client-state) (update :picks dissoc id) (update :notes dissoc id) (update :versions dissoc id))))))
 
+(defn approve!
+  "Approve the newest open review ask on thread ID at the revision and evidence
+  it shows. The controller refuses it as stale if either moved."
+  [id]
+  (let [{:keys [asks]} (thread id)]
+    (when-let [a (last (sort-by :seq (filter #(and (= :open (:state %)) (= :review (:kind %))) asks)))]
+      (call! {:command :approve! :args {:thread id :ask (:id a) :revision (:revision a) :evidence-sha (:evidence-sha a)}}))))
+
 (defn note!
   "Read one note for thread ID from the terminal."
   [id]
@@ -139,6 +149,7 @@
      "--bind" (str "focus:execute-silent(" bbh " select {1})")
      "--bind" (str/join "," (for [n (range 1 5)] (format "%d:execute-silent(%s pick {1} %d)+refresh-preview" n bbh n)))
      "--bind" (str "s:execute-silent(" bbh " send {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
+     "--bind" (str "A:execute-silent(" bbh " approve {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
      "--bind" (str "r:execute(" bbh " note {1})+refresh-preview")
      "--bind" (str "m:execute-silent(" bbh " dismiss {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
      "--bind" (str "a:execute-silent(" bbh " archive {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
@@ -160,11 +171,12 @@
       "pick" (with-state-lock! #(pick! id (parse-long n)))
       "send" (with-state-lock! #(send! id))
       "note" (with-state-lock! #(note! id))
+      "approve" (approve! id)
       "dismiss" (call! {:command :dismiss! :args {:thread id}})
       "archive" (call! {:command :archive! :args {:thread id}})
       "seen" (with-state-lock! #(seen! id))
       "register" (client/register-pane! (client/super-dir) (parse-long id))
-      (println "usage: bbh inbox [rows|header|preview T|pick T N|send T|note T|dismiss T|archive T|seen T|register PORT]"))
+      (println "usage: bbh inbox [rows|header|preview T|pick T N|send T|approve T|note T|dismiss T|archive T|seen T|register PORT]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))

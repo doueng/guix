@@ -476,6 +476,11 @@
                              :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) (get @drafts [:note id] "")))
                              :on {:input (fn [e] (swap! drafts assoc [:note id] (.. e -target -value)))}}]
         [:div.bar-actions
+         (when-let [r (last (filter #(= "review" (:kind %)) open))]
+           [:button.send {:type "button" :disabled busy
+                          :on {:click #(post-super! id "approve" {:id (str "ap-" (js/Date.now)) :ask (:id r)
+                                                                  :revision (:revision r) :evidence-sha (:evidence-sha r)})}}
+            (str "Approve " (subs (str (:revision r)) 0 (min 8 (count (str (:revision r))))))])
          [:button.quiet {:type "button" :disabled (or busy (empty? open)) :on {:click #(post-super! id "dismiss" {:id (str "d-" (js/Date.now))})}} "Mark read"]
          [:button.quiet {:type "button" :disabled busy :on {:click #(post-super! id "archive" {:id (str "a-" (js/Date.now))})}} "Archive"]
          [:button.send {:type "button" :disabled (or busy (and (empty? (get picks id)) (str/blank? (get @drafts [:note id] ""))))

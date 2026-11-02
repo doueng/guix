@@ -263,3 +263,21 @@
           (is (= [] (:asks body)) "nothing is open any more"))
         (is (= [202 "T1"] (post-super s "/api/super/threads/T1/archive" {:id "a-1"} from-page)))
         (is (= ["archived"] (map :section (:sections (second (get-json s "/api/super/threads"))))))))))
+
+(deftest an-approval-from-the-page-is-accepted-once-and-a-stale-one-is-a-conflict
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-web-ap"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-web-apconv"}))
+        c (bbh.super/start! {:dir dir :conversations conversations :scan-ms 10})
+        s (assoc (site) :app (web/handler conversations (constantly "owner@example.com") dir))
+        call (fn [req] (bbh.super.client/call! dir req))]
+    (try
+      (call {:command :thread! :args {:title "review"}})
+      (let [token (:token (:ok (call {:command :attach-worker! :args {:thread "T1" :conversation "w1"}})))
+            a (:ok (call {:token token :command :ask! :args {:kind :review :text "Ship?" :revision "c068de11"}}))
+            sha (:evidence-sha (first (:asks (second (get-json s "/api/super/threads/T1")))))
+            body {:id "ap-1" :ask a :revision "c068de11" :evidence-sha (str sha)}]
+        (is (= 400 (first (post-super s "/api/super/threads/T1/approve" (dissoc body :revision) from-page))))
+        (is (= 409 (first (post-super s "/api/super/threads/T1/approve" (assoc body :id "ap-0" :revision "deadbeef") from-page))))
+        (is (= [202 "ap-1"] (post-super s "/api/super/threads/T1/approve" body from-page)))
+        (is (= 409 (first (post-super s "/api/super/threads/T1/approve" (assoc body :id "ap-2") from-page))) "approved once"))
+      (finally (bbh.super/stop! c)))))

@@ -144,6 +144,20 @@
     (let [t (get-in state [:tokens (sha256 token)])]
       (when (and t (not (:revoked t))) (:principal t)))))
 
+(defn evidence-sha
+  "sha256 of wf run ID's evidence under ROOT (the wf state root): each file's
+  path under the evidence directory and its bytes, in path order. \"none\" for a
+  Worker without a wf run, whose approval then binds to the revision alone."
+  [root id]
+  (if-not id
+    "none"
+    (let [root (fs/path root id "evidence")
+          md (MessageDigest/getInstance "SHA-256")]
+      (doseq [f (sort-by str (filter fs/regular-file? (fs/glob root "**")))]
+        (.update md (.getBytes (str (fs/relativize root f) "\n") "UTF-8"))
+        (.update md (fs/read-all-bytes f)))
+      (apply str (map #(format "%02x" %) (.digest md))))))
+
 (defn- read-command
   "Reads never write and need no command id."
   [{:keys [db state]} {:keys [command args]}]
@@ -194,6 +208,16 @@
             (let [r (run! c principal cmd)]
               (reconcile! c)
               {:ok (:result r)})
+            (:ask! :approve!)
+            (let [st @(:state c)
+                  worker (if (= :ask! command)
+                           (or (when (vector? principal) (second principal)) (get-in st [:threads (:thread args) :worker]))
+                           (get-in st [:asks (:ask args) :worker]))
+                  sha (evidence-sha (or (:wf-root c) (workflow/state-root)) (get-in st [:workers worker :wf-run]))
+                  cmd (if (= :ask! command)
+                        (cond-> cmd (= :review (keyword (:kind args))) (assoc-in [:args :evidence-sha] sha))
+                        (assoc-in cmd [:args :current-sha] sha))]
+              {:ok (:result (run! c principal cmd))})
             :finish-worker!
             (let [r (run! c principal cmd)]
               (when-not (:repeat? r) (promote! c))
@@ -386,7 +410,7 @@
   Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms triage] :or {scan-ms 500 health-ms 120000}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms triage wf-root] :or {scan-ms 500 health-ms 120000}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -399,7 +423,7 @@
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
            :launch (merge {:workspace! workspace! :wf-start! wf-start! :pane! pane!} launch) :policy policy
-           :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :triage triage
+           :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :triage triage :wf-root wf-root
            :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)}]
     (ensure-owner-token! c)
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
