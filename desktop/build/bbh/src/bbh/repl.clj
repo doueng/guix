@@ -110,7 +110,7 @@
    :tool-description "Evaluate Clojure in the persistent babashka REPL. Returns printed output and the last value."
    :effort "medium"
    :deadline-ms 120000
-   :max-output-chars 30000
+   :max-output-chars 8000
    :rollover-at-tokens 350000})
 
 (def ^:private checks
