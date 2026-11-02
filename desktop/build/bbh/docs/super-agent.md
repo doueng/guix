@@ -79,22 +79,26 @@ Three identities are kept apart.
 
 ## 5. Data model
 
-### Store
+### Store: SQLite
 
-The controller is the only process that writes state. Everyone else sends it commands. State lives under `~/.local/share/bbh/super/`.
+Authoritative orchestration state lives in `~/.local/share/bbh/super/super.db`, SQLite in WAL mode with `synchronous=FULL`, `foreign_keys=ON` and a 5 s busy timeout. The controller is the only writer. Views open read-only connections, so the inbox pane, the phone page and Emacs query indexed tables instead of folding history, and they read while the controller writes.
 
 ```
-super/
-  events.jsonl      append-only accepted events, global seq, fsync per commit
-  snapshot.edn      folded state (threads, asks, workers, locks) at snapshot-seq
-  outbox.jsonl      deliveries owed to mailboxes, each marked when acked
-  commands.seen     command ids already accepted, for idempotency
-  policy.edn        trigger sources, capabilities per origin, concurrency caps
+super.db
+  events          append-only history, global seq
+  commands        idempotency keys with the result each returned
+  threads, workers, asks, replies, resource_locks   materialized state
+  outbox          deliveries owed, with acked and processed marks
+  schema_version  PRAGMA user_version, migrated before the controller starts
 ```
 
-A commit appends the event, appends any outbox records, then updates the in-memory fold. The snapshot is rewritten atomically every N events and on clean shutdown. On start the controller loads the snapshot and replays events after `snapshot-seq`, then resumes the outbox. Folding is a pure function of the event list, so the whole state machine is testable without the harness, and replaying every event into an empty store must reproduce the snapshot.
+An accepted command is one transaction: look up the command id and, if seen, return the original result; check the caller's identity and the expected state version; insert the event; update the materialized rows; insert any outbox rows; commit. A failed check rolls everything back. The duplicate check comes before the version check, so a retried Send returns its original success rather than a conflict.
 
-Files are kept because bbh keeps all state in files and babashka here has no SQLite. If the file protocol grows past log, snapshot and outbox, the `org.babashka/go-sqlite3` pod in WAL mode replaces the three files with one transaction and nothing above the store changes.
+State transitions stay pure Clojure functions over events. The tables are their materialization, and a test replays the whole `events` table into an empty database and compares it with the materialized state. Nothing above the store knows SQL.
+
+Delivery is at least once. The dispatcher drains `outbox` into the existing bbh mailboxes and marks a row acked when the mailbox poller says so, and processed when the Worker's turn records the reply id. Receivers drop a message id they have already processed. A model turn, a shell command or a GitHub push cannot join the transaction, so each external side effect carries its own idempotency key and a reconciliation rule.
+
+Binding: `babashka.sqlite`, which calls `libsqlite3` through `babashka.ffi`. bb 1.13.226 here has the FFI namespace, and Guix's `sqlite` package supplies the library; the library is experimental, so its git revision is pinned. Fallbacks are the `org.babashka/go-sqlite3` pod, whose aarch64 Linux build is unverified, and the `sqlite3` CLI with one SQL script per transaction. Backups use `.backup` or the backup API, never a copy of the file while WAL is active. Conversations, `wf` journals and job records keep their file formats.
 
 ### Records
 
@@ -183,12 +187,12 @@ The badge counts the first three. Progress notes update the thread's summary lin
  voice (bbh say) /            |                                           (bbh mailboxes)
  gh / ci pollers             commit: event + fold + outbox   ---------->  dispatcher drains the
  job exits, wf journal        |                                           outbox, retries until acked
- watchdog (health check)   snapshot                                      views read the snapshot
+ watchdog (health check)   super.db (SQLite, WAL)                        views read it read-only
 ```
 
-**Controller.** `bbh super`, a Guix Home Shepherd service like `bbh-web`. It listens on a loopback socket for commands, each with a stable `command-id`. A command is validated, checked against `commands.seen`, authorized against the sender's capabilities, then committed. It holds no model and no conversation. Restarting it is safe at any point, because every effect it owes is in the outbox.
+**Controller.** `bbh super`, a Guix Home Shepherd service like `bbh-web`. It listens on a loopback socket for commands, each with a stable `command-id`. A loopback socket does not identify its caller, so every command carries a token the controller issued: one for you (the surfaces), one for the Router, and one per Worker, handed to the Worker's environment at start and revoked when it ends. Capabilities are bound to the token, not to the sender's claim. A command is deduplicated, authenticated, authorized, then committed. It holds no model and no conversation. Restarting it is safe at any point, because every effect it owes is in the outbox.
 
-**Dispatcher.** Part of the controller. It writes outbox records into the existing bbh mailboxes and marks them acked when the mailbox poller reports `ack`. Delivery is effectively once: a crash between write and ack can deliver twice, and the receiving session drops a message whose reply id it has already seen. The mailbox stays the transport.
+**Dispatcher.** Part of the controller. It drains `outbox` into the existing bbh mailboxes as section 5 describes. The mailbox stays the transport.
 
 **Commands.** The whole API is a dozen commands, callable from a REPL helper, the CLI (`bbh super <command>`) or the socket.
 
@@ -210,7 +214,7 @@ The badge counts the first three. Progress notes update the thread's summary lin
 
 **Routing.** Deterministic first. A handle in the text (`T12`, spoken "tee twelve") or a resource key already linked to a thread resolves without a model. Only unresolved candidates reach the Router, and `jev-classify-task` runs before a Router turn so noise costs a Jev call. The Router sees linked events in its batch summary but does not act on them.
 
-**Router environment.** A pinned bbh conversation whose manifest exposes only the commands above plus read functions (`threads`, `thread`, `events`). Reads inline the ids of related objects so the Router can follow them hop by hop. Its mailbox is drained in batches ordered by `seq`. `start-worker!` cannot grant a capability the Router does not hold for that origin, so a Router with no shell cannot create a Worker with one for a GitHub-originated task.
+**Router environment.** A pinned bbh conversation whose manifest exposes only the commands above plus read functions (`threads`, `thread`, `events`). Reads inline the ids of related objects so the Router can follow them hop by hop. Its mailbox is drained in batches ordered by `seq`. The Router has delegation authority, not execution authority: `start-worker!` names the task and its origin, and the controller sets the Worker's capabilities from the authenticated origin and `policy.edn`. So a Router with no shell can start a shell-capable Worker for your direct request, and cannot talk a GitHub-originated task into one.
 
 **Workers.** Ordinary bbh conversations running a pstack workflow, with these additions.
 
@@ -231,7 +235,7 @@ The badge counts the first three. Progress notes update the thread's summary lin
 
 **Watchdog and recovery.** Deterministic, with a model only when an anomaly needs interpretation.
 
-- Shepherd supervises the controller. The controller heartbeats into `snapshot.edn`.
+- Shepherd supervises the controller. The controller writes a heartbeat row.
 - A health check every few minutes compares desired state (Worker records) with reality: process alive, REPL answering, `wf` journal advancing, job state, oldest unacked outbox record, oldest open stopped ask. Silence alone is not an anomaly; a Worker waiting on you or holding a build lock is expected to be quiet.
 - Each Worker ends up classified as running, waiting, recoverable, done or needs-human. Recoverable Workers are restarted with a bounded policy (three tries, then `failed`), which puts the thread under Needs attention.
 - After a sleep, reconciliation checks what survived before restarting anything. While the laptop sleeps nothing runs: no Router, no pollers, no page, no new pushes. Section 11 is the only way past that.
@@ -353,7 +357,7 @@ Dictation is a way of talking to the agent, not only a way of typing into a wind
 ### J8. The laptop sleeps
 
 1. You close the lid during a run. Every process stops, and nothing happens until you open it: no pollers, no page, no pushes.
-2. On wake the controller loads its snapshot, replays events after it, and the dispatcher resumes unacked outbox records. Herdr restores panes and their bbh conversations, as it does today.
+2. On wake the controller opens the database, SQLite recovers the WAL, and the dispatcher resumes unacked outbox rows. Herdr restores panes and their bbh conversations, as it does today.
 3. The health check reconciles each Worker record with reality. A Worker whose REPL survived is left alone. One whose REPL died but whose `wf` journal is intact is restarted once with its journal. A running job is rediscovered by pid, not launched again. A Worker that fails three restarts goes to Needs attention.
 
 ### J9. Sign-off at the desk
@@ -395,7 +399,8 @@ Trigger sources make untrusted text reach an agent on a laptop with private file
 | Speculative task | Own workspace, checks, no network beyond the model. |
 | System change (`make switch`, services) | Never a capability. Always an `action` ask naming the exact command. |
 
-- The Router cannot grant what it does not hold for the origin. A GitHub-originated task cannot become a Worker with push rights by the Router's choice.
+- The controller, not the Router, decides a Worker's capabilities, from the authenticated origin of the request and `policy.edn`. A GitHub-originated task cannot become a Worker with push rights by the Router's choice.
+- A jj workspace isolates working copies, not processes. A Worker is a bbh REPL with a shell under your user, so a capability it lacks is enforced by what the controller will accept from its token, by resource locks, and by the review gate before publishing. Filesystem and network restrictions for speculative Workers need real process isolation, such as a bubblewrap or Guix container around the Worker's REPL, and are part of phase 6, not assumed before it.
 - Approval refers to an immutable artifact: a revision id and the hash of its `wf` evidence. A later change makes the approval stale, and `approve!` on a stale revision is rejected.
 - `wf` gates and the independent reviewer establish that code works. They are not a security boundary and do not stand in for your authorization of a side effect.
 - Voice input is yours, but a transcription error is still an instruction, so dictated text never completes an `action` ask.
@@ -420,12 +425,12 @@ The hard correctness properties come first, and the surfaces grow beside them. E
 | Phase | Deliverable | Acceptance |
 |---|---|---|
 | 0 | Plannotator spike | A bbh Worker asks a question through Plannotator, you answer from its phone page over the tailnet, the answer arrives as a bbh turn. Decide build or integrate on what the bridge looks like. |
-| 1 | Controller and store | `bbh super` with `thread!`, `ask!`, `reply!`, the event log, snapshot and outbox. Kill the controller at every step of a reply and restart: accepted events are kept, and replaying all events into an empty store reproduces the snapshot. |
+| 1 | Controller and store | `babashka.sqlite` opens Guix's `libsqlite3` on this machine. `bbh super` with `thread!`, `ask!`, `reply!`, the events, commands and outbox tables. Kill the controller at every step of a reply and restart: accepted events are kept, a retried command returns its original result, and replaying all events into an empty database reproduces the materialized state. |
 | 2 | Ask and reply protocol | Picks, Send with `:asks-version`, dismiss, supersede, delivery states, `bbh super list` and one view (the Herdr inbox pane). Sending the same reply twice yields one logical reply and one Worker turn. Answering from two devices leaves one winner and one clear conflict. |
 | 3 | Worker ownership and isolation | Worker records, generations, jj workspaces, resource locks, the concurrency cap, `takeover!` and `handback!`. Two Workers change the same repository without touching each other's working copy, evidence or revision. |
 | 4 | Router and dispatch | Restricted env, handle and resource routing, batching. Requests from Herdr, Emacs and the phone resolve to the right thread, and a GitHub-origin task cannot get push rights. |
 | 5 | Jobs and recovery | Job exit events, `steer!` and `cancel!`, health check, bounded restarts, sleep reconciliation. Kill the controller during a job and it is rediscovered, not relaunched. Steer a busy Worker, then cancel it, and the two behave differently and predictably. |
-| 6 | Triggers, notifications, speculation, voice | `gh` poller, `policy.edn` capabilities, Web Push, J7, `bbh say`. A malicious instruction inside an allowlisted comment gains no capability and bypasses no approval. |
+| 6 | Triggers, notifications, speculation, voice | `gh` poller, `policy.edn` capabilities, process isolation for speculative Workers, Web Push, J7, `bbh say`. A malicious instruction inside an allowlisted comment gains no capability and bypasses no approval, and a speculative Worker cannot reach the network or files outside its workspace. |
 
 The first slice worth building is smaller than phase 1 and 2 together: the controller with one Worker per thread, `thread!`, `attach-worker!`, `ask!` and `reply!`, durable and testable without a model, plus `bbh super list` and the inbox pane. That alone gives the key experience: a Worker asks, stops spending turns, and resumes from an answer sent elsewhere. Automated triggers wait until phases 1, 3 and 4 are done.
 
