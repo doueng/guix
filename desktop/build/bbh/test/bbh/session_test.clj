@@ -392,6 +392,15 @@
       (is (= (str "=> 4\n\n" session/quiet-reminder) (nth results 4)))
       (is (= ["=> 0" "=> 1" "=> 2" "=> 3" "=> 5"] (map results [0 1 2 3 5]))))))
 
+(deftest a-text-reply-to-the-reminder-does-not-end-unfinished-work
+  (let [steps (-> (vec (for [i (range 5)] {:code (str i)}))
+                  (conj "Still waiting on the job." {:code "(+ 1 1)"} "done"))
+        h (harness "" steps)]
+    (session/prompt! (:s h) "go")
+    (stop! h)
+    (is (= "=> 2" (last (tool-results h))) "the work after the status sentence still runs")
+    (is (= "done" (:content (last (:messages @(:s h))))))))
+
 (deftest closing-an-unused-session-removes-its-folder
   (let [root (str (fs/create-temp-dir {:prefix "bbh-conversations"}))
         session-in (fn [id] (session/new-session {:dir (str (fs/path root id)) :model "faux"

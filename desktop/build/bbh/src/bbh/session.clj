@@ -359,10 +359,14 @@
       (assoc-in message [:tool_calls i :function :arguments] "{}"))))
 
 (def quiet-reminder
-  "[bbh] The user hasn't heard from you in a while. Say in a few words what you're doing, then continue.")
+  "[bbh] The user hasn't heard from you in a while. In your next reply, write one sentence on what you're doing and make your next tool call in the same reply.")
+
+(def after-reminder
+  "A text-only reply right after the reminder may be the status line rather than the end of the work."
+  "[bbh] If the task is not finished, continue with your next tool call. Otherwise give your final answer.")
 
 (defmethod turn! :loop [s]
-  (loop [round 1 overflowed false quiet 0 reminders 0]
+  (loop [round 1 overflowed false quiet 0 reminders 0 reminded false]
     (let [system (system-prompt! s)
           _ (when (rollover-due? s) (continue-mid-turn! s))
           result (when-not (:interrupted @s)
@@ -371,7 +375,7 @@
                           (if (and (:overflow (ex-data e)) (not overflowed)) ::overflow (throw e)))))]
       (if (= ::overflow result)
         (do (continue-mid-turn! s)
-            (when-not (:interrupted @s) (recur round true quiet reminders)))
+            (when-not (:interrupted @s) (recur round true quiet reminders reminded)))
         (let [{:keys [message usage truncated]} result
               message (cond-> message
                         (:interrupted @s) (dissoc :tool_calls)
@@ -383,7 +387,8 @@
             (add-usage! s usage))
           (when (and truncated (empty? calls) (not (:interrupted @s)))
             (note! s "The reply hit the model's output limit and was cut off."))
-          (when (seq calls)
+          (cond
+            (seq calls)
             ;; The reminder goes into the tool result as it is recorded, so the
             ;; prefix of every later request stays the same.
             (let [quiet (if (str/blank? (:content message)) (inc quiet) 0)
@@ -397,8 +402,12 @@
                               :content (cond-> text (and remind? (= last-id (:id call)))
                                          (str "\n\n" quiet-reminder))})))
               (cond (:interrupted @s) nil
-                    (< round max-rounds) (recur (inc round) false (if remind? 0 quiet) (cond-> reminders remind? inc))
-                    :else (swap! s update :notes conj (str "The previous turn stopped after " max-rounds " tool rounds."))))))))))
+                    (< round max-rounds) (recur (inc round) false (if remind? 0 quiet) (cond-> reminders remind? inc) remind?)
+                    :else (swap! s update :notes conj (str "The previous turn stopped after " max-rounds " tool rounds."))))
+
+            (and reminded (not truncated) (not (:interrupted @s)) (< round max-rounds))
+            (do (record! s {:role "user" :content after-reminder})
+                (recur (inc round) false 0 reminders false))))))))
 
 (defn set-model! [s model]
   (let [engine ((:make-engine @s) model)]
