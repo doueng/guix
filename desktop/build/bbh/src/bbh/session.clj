@@ -104,7 +104,7 @@
                            :env env})
         r (when (and init (fs/exists? init))
             (repl/eval! conn (str "(load-file " (pr-str (str init)) ")") 30000))]
-    (swap! s assoc :repl conn :checkpoint (checkpoint/replay! (checkpoint-path s) conn))
+    (swap! s assoc :repl conn :repl-ns "user" :checkpoint (checkpoint/replay! (checkpoint-path s) conn))
     (when (or (:timeout r) (:died r) (:error? r))
       (str "Loading " init " failed:\n" (render r 4000)))))
 
@@ -286,7 +286,9 @@
                         (when (seq partial) (str "\nOutput before that:\n" partial)))
                    :failed])
                 :else
-                (do (when-not (:error? r) (checkpoint/record! (checkpoint-path s) repl (or content code)))
+                (do (when-not (:error? r)
+                      (checkpoint/record! (checkpoint-path s) repl (or content code) (symbol (:repl-ns @s "user")))
+                      (when (:ns r) (swap! s assoc :repl-ns (:ns r))))
                     [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (name-hint s r))
                      (if (:error? r) :failed :completed)]))
           text (cond->> text note (str note "\n"))]

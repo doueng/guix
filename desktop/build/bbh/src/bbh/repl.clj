@@ -97,6 +97,7 @@
          :out (apply str (keep #(get % "out") messages))
          :err (apply str (keep #(get % "err") messages))
          :value (last (keep #(get % "value") messages))
+         :ns (last (keep #(get % "ns") messages))
          :error? (boolean (some #(get % "ex") messages))))
 
 (defn eval!

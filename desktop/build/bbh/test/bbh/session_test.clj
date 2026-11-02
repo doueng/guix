@@ -126,6 +126,21 @@
       (is (str/includes? file "(def nats (range))") "an infinite seq keeps its source")
       (is (str/includes? file "(def huge (vec (range 20000)))") "a value past the literal cap keeps its source"))))
 
+(deftest definitions-replay-into-the-namespace-they-were-made-in
+  (let [h (harness "(ns bbh.env) (def manifest {:deadline-ms 500})"
+                   [{:code "(ns foo) (def v (+ 1 2)) (defn f [] v)"}
+                    {:code "(def w (* 2 v)) (in-ns 'user) (def v :user)"}
+                    {:code "(loop [] (recur))"}
+                    {:code "[foo/v (foo/f) foo/w v (str *ns*)]"}
+                    "ok"])]
+    (session/prompt! (:s h) "work")
+    (stop! h)
+    (let [file (slurp (str (fs/path (:repl-dir @(:s h)) "checkpoint.clj")))]
+      (is (= "=> [3 3 6 :user \"user\"]" (last (tool-results h))) (pr-str (tool-results h)))
+      (is (str/includes? file "(def v 3)") "the literal was found in foo, not user")
+      (is (str/includes? file "(def w 6)"))
+      (is (str/includes? file "(in-ns 'user)\n\n(def v :user)") "the file switches back for user's v"))))
+
 (deftest a-restart-with-nothing-defined-says-definitions-are-gone
   (let [h (harness "(ns bbh.env) (def manifest {:deadline-ms 500})" [{:code "(loop [] (recur))"} "ok"])]
     (session/prompt! (:s h) "spin")
