@@ -6,6 +6,7 @@
   (:require [babashka.fs :as fs]
             [bbh.checkpoint :as checkpoint]
             [bbh.delimiters :as delimiters]
+            [bbh.inbox :as inbox]
             [bbh.repl :as repl]
             [bbh.runs :as runs]
             [bbh.transcript :as transcript]
@@ -55,14 +56,34 @@
          :interrupted false :evaluating false :cancel nil
          :manifest repl/defaults :repl nil :spent 0.0 :limits nil
          :context-size nil :last-input nil :turn-usage nil
-         :code-lock (Object.)}))
+         :code-lock (Object.) :steering {}}))
+
+(defn take-steering!
+  "Claim pending steering from the durable mailbox, serialized with evaluation.
+  Ordinary replies remain queued for the front end after the turn."
+  [s]
+  (locking (:code-lock @s)
+    (let [root (inbox/root-dir (:repl-dir @s))
+          messages (filter #(and (= "steer" (:kind %))
+                                 (not (contains? (:steering @s) (:id %))))
+                           (inbox/pending root))]
+      (when (seq messages)
+        ;; Claim in memory only. record! acknowledges after the transcript write.
+        (swap! s update :steering into (map (juxt :id :text) messages))
+        (str/join "\n\n" (map :text messages))))))
 
 (defn emit! [s event]
   ((:emit @s) event))
 
 (defn record! [s msg]
   (transcript/append! (:dir @s) msg)
-  (swap! s update :messages conj msg))
+  (swap! s update :messages conj msg)
+  (when (#{"user" "tool"} (:role msg))
+    (locking (:code-lock @s)
+      (doseq [[id text] (:steering @s)
+              :when (str/includes? (or (:content msg) "") text)]
+        (inbox/ack! {:root (inbox/root-dir (:repl-dir @s))} id)
+        (swap! s update :steering dissoc id)))))
 
 (defn trace-run!
   "Append a run of KIND that started at START-MS to the current turn's trace.
@@ -295,8 +316,9 @@
                     [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (name-hint s r))
                      (if (:error? r) :failed :completed)]))
           text (cond->> text note (str note "\n"))]
-      (emit! s {:type :tool-result :id id :code code :text text :status status})
-      text)))
+      (let [text (if-let [steering (take-steering! s)] (str text "\n\n" steering) text)]
+        (emit! s {:type :tool-result :id id :code code :text text :status status})
+        text))))
 
 (def tool-input-schema
   {:type "object"
@@ -396,6 +418,7 @@
   (loop [round 1 overflowed false quiet 0 reminders 0 reminded false]
     (let [system (system-prompt! s)
           _ (when (rollover-due? s) (continue-mid-turn! s))
+          _ (when-let [steering (take-steering! s)] (record! s {:role "user" :content steering}))
           result (when-not (:interrupted @s)
                    (try (sample! s system (:messages @s))
                         (catch clojure.lang.ExceptionInfo e
@@ -550,7 +573,7 @@
   "Handle one user input: a bbh command, an env reply, or a model turn.
   Returns :end-turn or :cancelled, and throws for a /command nothing handles."
   [s text]
-  (swap! s assoc :interrupted false :turn-usage nil :trace nil)
+  (swap! s assoc :interrupted false :turn-usage nil :trace nil :steering {})
   (let [[_ cmd args] (re-matches #"(?s)/(\S+)\s*(.*)" text)]
     (if-let [{:keys [run]} (get commands cmd)]
       (do (emit! s {:type :text :text (run s args)}) :end-turn)
@@ -569,8 +592,9 @@
                 _ (swap! s assoc :trace (str (random-uuid)) :turn-from (count (:messages @s)))
                 finish! #(trace-run! s "turn" start
                                      (merge {:messages [(:turn-from @s) (count (:messages @s))] :usage (:turn-usage @s)} %))]
-            (record! s {:role "user"
-                        :content (if (seq notes) (str "[bbh] " (str/join " " notes) "\n\n" prompt) prompt)})
+            (let [prompt (if-let [steering (take-steering! s)] (str steering "\n\n" prompt) prompt)]
+              (record! s {:role "user"
+                          :content (if (seq notes) (str "[bbh] " (str/join " " notes) "\n\n" prompt) prompt)}))
             (try (turn! s)
                  (catch Exception e
                    (finish! {:status "error" :error (ex-message e)})

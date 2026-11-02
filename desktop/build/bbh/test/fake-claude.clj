@@ -47,7 +47,10 @@
           (reset! pending
                   (future
                     (let [id (str (random-uuid))
-                          code (if (= "sleep" (:content message)) "(Thread/sleep 60000)" "(+ 40 2)")]
+                          code (case (:content message)
+                                 "sleep" "(Thread/sleep 60000)"
+                                 "steering-test" "(Thread/sleep 500) (+ 40 2)"
+                                 "(+ 40 2)")]
                       (when (= "full" (:content message))
                         (emit {:type "stream_event" :event {:type "message_delta" :usage {:input_tokens 350000 :output_tokens 7}}}))
                       (emit {:type "assistant" :message {:content [{:type "tool_use" :id id :name "mcp__bbh__clojure" :input {:code code}}]}})

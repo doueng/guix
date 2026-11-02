@@ -183,3 +183,19 @@
                       "again"]
                      @sent))
               (finally (session/close! s)))))))))
+
+(deftest steering-crosses-the-real-mcp-tool-result-boundary
+  (with-cli
+    (fn []
+      (let [{:keys [s events]} (harness)]
+        (try
+          (let [turn (future (session/prompt! s "steering-test"))]
+            (await-call events)
+            (bbh.inbox/send! (:dir @s) "[Steering] preserve the option" nil {:kind :steer})
+            (is (= :end-turn (deref turn 10000 :timeout)))
+            (is (= "=> 42\n\n[Steering] preserve the option"
+                   (:text (last (filter #(= :tool-result (:type %)) @events)))))
+            (is (= "=> 42\n\n[Steering] preserve the option"
+                   (:content (last (filter #(= "tool" (:role %)) (:messages @s))))))
+            (is (= [] (bbh.inbox/pending (:dir @s)))))
+          (finally (session/close! s)))))))

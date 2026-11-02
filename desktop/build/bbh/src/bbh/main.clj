@@ -81,11 +81,17 @@
         ;; message waits for the turn in progress, then runs as a prompt of its own.
         poller (promise)
         _ (deliver poller (inbox/start! {:root (inbox/root-dir dir) :project (str (fs/cwd))
-                                         :deliver (fn [{:keys [id text]}]
+                                         :deliver (fn [{:keys [id text kind]}]
                                                     (future
-                                                      (.printAbove reader (str (dim "[mailbox] ") text))
-                                                      (prompt! text)
-                                                      (inbox/ack! @poller id)))}))]
+                                                      (if (= "steer" kind)
+                                                        ;; A busy tool may already have consumed it.
+                                                        (locking turn
+                                                          (when (some #(= "steer" (:kind %)) (inbox/pending (inbox/root-dir dir)))
+                                                            (prompt! "Apply the pending steering.")))
+                                                        (do
+                                                          (.printAbove reader (str (dim "[mailbox] ") text))
+                                                          (prompt! text)
+                                                          (inbox/ack! @poller id)))))}))]
     (sun.misc.Signal/handle (sun.misc.Signal. "INT")
                             (reify sun.misc.SignalHandler (handle [_ _] (session/interrupt! s))))
     (println (dim (str "bbh " (fs/file-name dir) " " (:model @s) " nREPL " (:port (:repl @s)) "  /help lists commands")))

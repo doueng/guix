@@ -445,3 +445,21 @@
                                             :args {:job "fake" :exit 0 :log "fake.log"}}))))
         (spit (str (fs/path jobs "partial.exit")) "0")
         (is (wait-for #(= 0 (get-in @(:state c) [:workers "W1" :jobs "partial" :exit]))))))))
+
+(deftest steering-is-durable-typed-idempotent-and-respects-router-lease
+  (with-controller
+    (fn [c dir conversations]
+      (let [{:keys [token]} (thread-with-ask dir)
+            router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
+            command {:id "steer-once" :command :steer! :args {:worker "W1" :text "use the small build"}}]
+        (is (= {:ok "W1"} (call dir command)))
+        (is (= {:ok "W1"} (call dir command)))
+        (is (wait-for #(seq (fs/glob conversations "conv-1/mailbox/*.json"))))
+        (is (= [{:kind "steer" :text "[Steering] use the small build"}]
+               (mapv #(select-keys % [:kind :text]) (bbh.inbox/pending (str (fs/path conversations "conv-1"))))))
+        (is (= 1 (count (filter #(= :worker-steered (:kind %)) (store/events (:db c))))))
+        (call dir {:command :takeover! :args {:worker "W1"}})
+        (is (= :human-lease (:error (call dir {:token router :command :steer! :args {:worker "W1" :text "router says"}}))))
+        (is (= :forbidden (:error (call dir {:token token :command :steer! :args {:worker "W1" :text "worker says"}}))))
+        (is (= :invalid (:error (call dir {:command :steer! :args {:worker "W1" :text " "}}))))
+        (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))

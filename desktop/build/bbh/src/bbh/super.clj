@@ -242,7 +242,7 @@
           :when (not (and (= :pending (:state o)) (= router conversation)))]
     (case (:state o)
       :pending (let [root (conversation-root c conversation)
-                     m (inbox/send! root text)]
+                     m (inbox/send! root text nil (when (= :steer (:delivery o)) {:kind :steer}))]
                  (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))
       :sent (when-not (fs/exists? (fs/path (conversation-root c conversation) "mailbox" (str message ".json")))
               (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))

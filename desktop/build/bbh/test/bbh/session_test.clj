@@ -514,3 +514,45 @@
     (session/prompt! used "hello")
     (session/close! used)
     (is (fs/exists? (fs/path root "used" "messages.jsonl")))))
+
+(deftest steering-arriving-during-evaluation-reaches-the-next-model-request
+  (let [h (harness "" [{:code "(Thread/sleep 250) :finished"} "done"])
+        s (:s h)
+        turn (future (session/prompt! s "start"))]
+    (try
+      (loop [n 0]
+        (when (and (< n 100) (not (:evaluating @s))) (Thread/sleep 5) (recur (inc n))))
+      (is (:evaluating @s))
+      (bbh.inbox/send! (:dir h) "ordinary reply")
+      (bbh.inbox/send! (:dir h) "[Steering] use the small build" nil {:kind :steer})
+      (is (= :end-turn (deref turn 10000 :timeout)))
+      (is (= ["=> :finished\n\n[Steering] use the small build"] (tool-results h)))
+      (is (= "=> :finished\n\n[Steering] use the small build"
+             (get-in @(:requests h) [1 :messages 3 :content])))
+      (is (= ["ordinary reply"] (mapv :text (bbh.inbox/pending (:dir h)))))
+      (is (nil? (session/take-steering! s)))
+      (finally (stop! h)))))
+
+(deftest steering-survives-until-the-next-turn-without-a-tool
+  (let [h (harness "" ["done"])]
+    (try
+      (bbh.inbox/send! (:dir h) "[Steering] keep the old flag" nil {:kind :steer})
+      (is (= :end-turn (session/prompt! (:s h) "continue")))
+      (is (= "[Steering] keep the old flag\n\ncontinue"
+             (get-in @(:requests h) [0 :messages 1 :content])))
+      (is (= [] (bbh.inbox/pending (:dir h))))
+      (finally (stop! h)))))
+
+(deftest steering-is-not-acked-until-its-transcript-write-succeeds
+  (let [h (harness "" ["done"])
+        s (:s h)]
+    (try
+      (bbh.inbox/send! (:dir h) "[Steering] keep this through a crash" nil {:kind :steer})
+      (with-redefs [bbh.transcript/append! (fn [& _] (throw (ex-info "disk failed" {})))]
+        (is (thrown-with-msg? Exception #"disk failed" (session/prompt! s "start"))))
+      (is (= ["[Steering] keep this through a crash"] (mapv :text (bbh.inbox/pending (:dir h)))))
+      (is (= :end-turn (session/prompt! s "retry")))
+      (is (= "[Steering] keep this through a crash\n\nretry"
+             (get-in @(:requests h) [0 :messages 1 :content])))
+      (is (= [] (bbh.inbox/pending (:dir h))))
+      (finally (stop! h)))))

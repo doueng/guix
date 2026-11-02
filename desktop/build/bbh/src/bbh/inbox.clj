@@ -53,10 +53,12 @@
   "Leave TEXT and the JPEG byte arrays IMAGES for the session of conversation
   ROOT. Returns the message."
   ([root text] (send! root text nil))
-  ([root text images]
+  ([root text images] (send! root text images nil))
+  ([root text images {:keys [kind]}]
    (let [id (format "%d-%04x" (System/currentTimeMillis) (rand-int 0x10000))
          lines (map image-line (save-images! root id images))
-         message {:id id :text (str/join "\n\n" (remove str/blank? [text (str/join "\n" lines)]))}
+         message (cond-> {:id id :text (str/join "\n\n" (remove str/blank? [text (str/join "\n" lines)]))}
+                   kind (assoc :kind kind))
          dir (fs/create-dirs (mailbox root))
          tmp (fs/create-temp-file {:dir dir :prefix "."})]
      (spit (str tmp) (json/generate-string message))

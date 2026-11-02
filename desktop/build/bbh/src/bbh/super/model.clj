@@ -16,7 +16,7 @@
 ;; ---- authorization ------------------------------------------------------
 
 (def ^:private grants
-  {:router #{:thread! :link! :attach-worker! :start-worker! :note! :milestone!}
+  {:router #{:thread! :link! :attach-worker! :start-worker! :steer! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
    :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running! :job-exited!}})
 
@@ -38,7 +38,11 @@
             (when (not= asked thread) (refuse :forbidden :command command :thread asked))
             (when (and (:worker args) (not= (:worker args) id)) (refuse :forbidden :command command :worker (:worker args)))
             (-> cmd (assoc-in [:args :thread] thread) (assoc-in [:args :worker] id)))
-          :else cmd)))
+          :else (do
+                  (when (and (= :router kind) (= :steer! command)
+                             (not= :router (get-in state [:workers (:worker args) :lease])))
+                    (refuse :human-lease :worker (:worker args)))
+                  cmd))))
 
 ;; ---- decide -------------------------------------------------------------
 
@@ -152,6 +156,15 @@
     (when-not (#{:done :failed} state-after) (refuse :invalid :field :state-after))
     (when (#{:done :failed} (:state w)) (refuse :already-finished :worker worker))
     {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state state-after :reason reason}}]
+     :result worker}))
+
+(defmethod decide* :steer! [state {{:keys [worker text]} :args}]
+  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+    (when-not (and (#{:working :waiting} (:state w)) (:conversation w)) (refuse :not-running :worker worker))
+    (when (str/blank? text) (refuse :invalid :field :text))
+    {:events [{:kind :worker-steered :thread (:thread w)
+               :data {:worker worker :text text :outbox (next-id state :outbox "o")
+                      :conversation (:conversation w) :mailbox-text (str "[Steering] " text)}}]
      :result worker}))
 
 (defmethod decide* :job-exited! [state {{:keys [worker job exit log]} :args}]
@@ -275,7 +288,7 @@
         w (when t (get-in state [:workers (:worker t)]))
         said (str (when (= :voice origin) "(spoken) ") (if handle (str handle ": " rest) text))]
     (cond (and handle (nil? t)) (refuse :no-such-thread :thread handle)
-          w {:events [{:kind :message-routed :thread handle
+          w {:events [{:kind :worker-steered :thread handle
                        :data {:id id :origin origin :text rest :worker (:id w) :outbox (next-id state :outbox "o")
                               :conversation (:conversation w)
                               :mailbox-text (format "[%s from %s%s] %s" handle (name origin) (if (= :voice origin) ", dictated" "") rest)}}]
@@ -480,6 +493,10 @@
   (-> state (bump :outbox)
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text mailbox-text
                                   :state :pending :message nil})))
+
+(defmethod fold* :worker-steered [state event]
+  (let [state (fold* state (assoc event :kind :message-routed))]
+    (assoc-in state [:outbox (get-in event [:data :outbox]) :delivery] :steer)))
 
 (defmethod fold* :router-queued [state {{:keys [outbox conversation text]} :data :keys [thread]}]
   (-> state (bump :outbox)
