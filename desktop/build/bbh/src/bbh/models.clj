@@ -1,6 +1,7 @@
 (ns bbh.models
   "Model ids are PROVIDER/MODEL. The provider decides which engine runs turns."
   (:require [bbh.claude]
+            [bbh.codex :as codex]
             [bbh.llm :as llm]
             [cheshire.core :as json]
             [clojure.edn :as edn]
@@ -8,7 +9,8 @@
 
 (def available
   ["claude/claude-opus-5-5" "claude/claude-fable-5-1" "claude/haiku-5-5" "claude/sonnet-5-5"
-   "openrouter/deepseek/deepseek-v4.1-flash"])
+   "openrouter/deepseek/deepseek-v4.1-flash"
+   "codex/gpt-6.1-sol"])
 
 (defn default-model []
   (or (System/getenv "BBH_MODEL") "claude/claude-opus-5-5"))
@@ -35,5 +37,6 @@
     (case provider
       "claude" {:kind :claude :model model}
       "openrouter" {:kind :loop :sample (llm/openrouter model)}
+      "codex" {:kind :loop :sample (codex/sample model)}
       "script" {:kind :loop :sample (script model)}
-      (throw (ex-info (str "Unknown provider in " id "; use claude/, openrouter/ or script/") {})))))
+      (throw (ex-info (str "Unknown provider in " id "; use claude/, codex/, openrouter/ or script/") {})))))

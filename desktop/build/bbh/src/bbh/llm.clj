@@ -70,7 +70,7 @@
   [chunks]
   (finish (reduce step {:content ""} chunks)))
 
-(defn- chunks [body]
+(defn chunks [body]
   (->> (line-seq (io/reader body))
        (keep #(when (str/starts-with? % "data: ") (subs % 6)))
        (take-while #(not= % "[DONE]"))
@@ -132,15 +132,14 @@
   (and (= 400 status)
        (boolean (re-find #"(?i)context length|context window|maximum context|too many tokens|prompt is too long" text))))
 
-(defn- post!
-  "POST BODY, retrying while CANCELLED is false. Returns a 200 response or throws,
-  with :overflow in the ex-data when the request exceeded the model's context."
-  [key body cancelled on-retry]
+(defn stream!
+  "POST BODY to URL, retrying while CANCELLED is false. LABEL starts the retry
+  and error messages, such as OpenRouter or Codex. Returns a 200 response or
+  throws, with :overflow in the ex-data when the request exceeded the model's
+  context."
+  [label url headers body cancelled on-retry]
   (loop [delays retry-delays-ms]
-    (let [resp (try (http/post "https://openrouter.ai/api/v1/chat/completions"
-                               {:headers {"Authorization" (str "Bearer " key)
-                                          "Content-Type" "application/json"}
-                                :body body :as :stream :throw false})
+    (let [resp (try (http/post url {:headers headers :body body :as :stream :throw false})
                     (catch java.io.IOException e {:exception e}))
           status (:status resp)]
       (cond
@@ -149,13 +148,13 @@
         (let [wait (retry-wait-ms resp (first delays))
               end (+ (System/currentTimeMillis) wait)]
           (some-> ^java.io.InputStream (:body resp) .close)
-          (on-retry (str "OpenRouter " (or status (ex-message (:exception resp)))
+          (on-retry (str label " " (or status (ex-message (:exception resp)))
                          ", retrying in " (quot (+ wait 999) 1000) " s."))
           (while (and (not @cancelled) (< (System/currentTimeMillis) end)) (Thread/sleep 50))
           (when-not @cancelled (recur (rest delays))))
         (:exception resp) (throw (:exception resp))
         :else (let [text (with-open [b ^java.io.InputStream (:body resp)] (slurp b))]
-                (throw (ex-info (str "OpenRouter " status ": " text)
+                (throw (ex-info (str label " " status ": " text)
                                 {:status status :overflow (overflow? status text)})))))))
 
 (defn openrouter
@@ -169,8 +168,11 @@
     (let [cancelled (atom false)
           _ (on-open #(reset! cancelled true))
           info (model-info model)
-          resp (post! (openrouter-key) (json/generate-string (request-body model info req))
-                      cancelled (or on-retry (fn [_])))
+          resp (stream! "OpenRouter" "https://openrouter.ai/api/v1/chat/completions"
+                        {"Authorization" (str "Bearer " (openrouter-key))
+                         "Content-Type" "application/json"}
+                        (json/generate-string (request-body model info req))
+                        cancelled (or on-retry (fn [_])))
           acc (volatile! {:content ""})
           with-size #(cond-> % (and (:usage %) (:size info)) (assoc-in [:usage :size] (:size info)))]
       (if-not resp
