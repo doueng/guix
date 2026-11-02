@@ -531,10 +531,10 @@
                        (regexp-quote "3.3k in, 33% cached · miss on request 3 (8% of 1.2k) · 40 out · $0.0120"))
                (bbh-test--text transcript)))
       (should (equal (substring-no-properties (eng/bbh-usage-header shell))
-                     "ctx 1.2k/200k · cache miss 8% · $0.01"))
+                     "ctx 1.2k · cache miss 8%"))
       ;; Batch Emacs renders no header line, so evaluate the composer's :eval form.
       (with-current-buffer composer
-        (should (string-match-p "Ready .*ctx 1\\.2k/200k · cache miss 8%% · \\$0\\.01\\'"
+        (should (string-match-p "Ready .*ctx 1\\.2k · cache miss 8%%\\'"
                                 (eval (cadr header-line-format) t)))))))
 
 (defconst bbh-test-workflow-json

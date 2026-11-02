@@ -653,19 +653,14 @@ and cache, which is \"hit\", \"miss\" or \"cold\".")
     (_ (propertize (format "cache %d%%" (eng/bbh--percent (map-elt request 'ratio))) 'face 'success))))
 
 (defun eng/bbh-usage-header (shell)
-  "Context, cache and cost for SHELL's status line, or nil before a request."
+  "Context and cache for SHELL's status line, or nil before a request."
   (when (buffer-live-p shell)
     (with-current-buffer shell
       (when eng/bbh-usage-last
-        (let* ((usage (map-elt agent-shell--state :usage))
-               (used (map-elt usage :context-used))
-               (size (map-elt usage :context-size)))
+        (let ((used (map-nested-elt agent-shell--state '(:usage :context-used))))
           (string-join
-           (delq nil (list (when used
-                             (format "ctx %s%s" (eng/bbh--tokens used)
-                                     (if (and size (> size 0)) (concat "/" (eng/bbh--tokens size)) "")))
-                           (eng/bbh--cache-label eng/bbh-usage-last)
-                           (eng/bbh--cost "$%.2f" (map-elt usage :cost-amount))))
+           (delq nil (list (when used (format "ctx %s" (eng/bbh--tokens used)))
+                           (eng/bbh--cache-label eng/bbh-usage-last)))
            " · "))))))
 
 (defun eng/bbh--cost (fmt amount)
