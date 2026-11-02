@@ -700,3 +700,17 @@
       (is (empty? (:workers @(:state c))))
       (is (not (fs/exists? (fs/path dir "workspaces"))))
       (is (= :working (:state (:ok (start-worker dir "T1" :repo repo))))))))
+
+(deftest reads-name-their-neighbours-so-a-reader-can-hop-by-id
+  (with-controller
+    (fn [c dir _]
+      (let [{:keys [version]} (thread-with-ask dir)
+            reply (:ok (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "week"}}}))
+            worker (-> (call dir {:command :thread :args {:id "T1"}}) :ok :workers first :id)
+            w (:ok (call dir {:command :worker :args {:id worker}}))
+            ask (:ok (call dir {:command :ask :args {:id (first (:asks w))}}))
+            r (:ok (call dir {:command :reply :args {:id (:reply ask)}}))]
+        (is (= ["W1" ["a1"] [reply]] [worker (:asks w) (:replies w)]))
+        (is (= ["T1" "W1" reply] ((juxt :thread :worker :reply) ask)))
+        (is (= ["a1"] (:asks r)))
+        (is (= reply (-> (call dir {:command :thread :args {:id "T1"}}) :ok :asks first :reply)))))))

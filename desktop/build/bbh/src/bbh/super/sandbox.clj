@@ -14,6 +14,9 @@
 (def bindings
   {'super-threads (fn super-threads [] (call! :threads {}))
    'super-thread (fn super-thread [id] (call! :thread {:id id}))
+   'super-ask (fn super-ask [id] (call! :ask {:id id}))
+   'super-reply (fn super-reply [id] (call! :reply {:id id}))
+   'super-worker (fn super-worker [id] (call! :worker {:id id}))
    'super-events (fn super-events [{:keys [thread after]}] (call! :events {:thread thread :after after}))
    'super-thread! (fn super-thread! [title] (call! :thread! {:title title}))
    'super-link! (fn super-link! [id resource] (call! :link! {:thread id :resource resource}))

@@ -152,9 +152,12 @@
       :threads (vec (sort-by :id (vals (:threads st))))
       :thread (let [{:keys [id]} args
                     t (get-in st [:threads id])
-                    of (fn [kind] (vec (sort-by :seq (filter #(= id (:thread %)) (vals (kind st))))))]
-                (when t (assoc t :asks (of :asks) :replies (of :replies) :workers (vec (sort-by :generation (filter #(= id (:thread %)) (vals (:workers st))))))))
+                    of (fn [kind order] (vec (sort-by order (keep #(when (= id (:thread %)) (model/linked st kind (:id %))) (vals (kind st))))))]
+                (when t (assoc t :asks (of :asks :seq) :replies (of :replies :seq) :workers (of :workers :generation))))
       :events (store/events db (or (:after args) 0) (:thread args))
+      :ask (model/linked st :asks (:id args))
+      :reply (model/linked st :replies (:id args))
+      :worker (model/linked st :workers (:id args))
       :sections (let [sections (model/sections st (or (:cursors args) {}))]
                   {:sections sections :badge (model/badge sections)})
       ::unknown)))

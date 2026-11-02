@@ -503,6 +503,20 @@
       (assoc-in [:threads thread :asks-version] seq)
       (resume thread)))
 
+(defn linked
+  "The record KIND/ID of STATE with the ids it links, so a reader can hop from
+  one to the next: an ask's :reply, a reply's :asks, a Worker's :asks and
+  :replies. Nil when there is no such record."
+  [state kind id]
+  (when-let [r (get-in state [kind id])]
+    (case kind
+      :asks (assoc r :reply (some (fn [p] (when (or (contains? (:picks p) id) (contains? (set (:dismiss p)) id)) (:id p)))
+                                  (sort-by :seq (vals (:replies state)))))
+      :replies (assoc r :asks (vec (sort (distinct (concat (keys (:picks r)) (:dismiss r))))))
+      :workers (assoc r :asks (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:asks state)))))
+                        :replies (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:replies state))))))
+      r)))
+
 ;; ---- sections -----------------------------------------------------------
 
 (def section-order [:stopped :holding-up :waiting :needs-attention :sent :new :working :quiet :archived])
