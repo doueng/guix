@@ -141,6 +141,43 @@
       (is (str/includes? file "(def w 6)"))
       (is (str/includes? file "(in-ns 'user)\n\n(def v :user)") "the file switches back for user's v"))))
 
+;; Properties borrowed from Pi Durable's code mode tests: a result is journaled before it is delivered,
+;; a replay does not redo finished work, and a damaged journal is noticed rather than silently emptied.
+
+(deftest the-checkpoint-is-written-before-the-result-reaches-the-model
+  (let [h (harness "" [{:code "(defn helper [x] (inc x))"} "ok"])
+        checkpoint (str (fs/path (:dir h) "checkpoint.clj"))
+        seen (atom [])]
+    (swap! (:s h) update :emit (fn [emit] (fn [e]
+                                           (when (= :tool-result (:type e))
+                                             (swap! seen conj (when (fs/exists? checkpoint) (slurp checkpoint))))
+                                           (emit e))))
+    (session/prompt! (:s h) "define")
+    (stop! h)
+    (is (= ["(defn helper [x] (inc x))"] @seen) "the journal held the definition when the result event fired")))
+
+(deftest a-second-restart-restores-the-same-definitions-once
+  (let [h (harness "(ns bbh.env) (def manifest {:deadline-ms 500})"
+                   [{:code "(def a 1) (defn f [] a)"} {:code "(loop [] (recur))"} {:code "(loop [] (recur))"}
+                    {:code "[a (f)]"} "ok"])]
+    (session/prompt! (:s h) "work")
+    (stop! h)
+    (let [results (tool-results h)]
+      (is (= "=> [1 1]" (last results)) (pr-str results))
+      (is (= 2 (count (filter #(str/includes? % "2 definitions were restored") results))))
+      (is (= "(def a 1)\n\n(defn f [] a)" (slurp (str (fs/path (:dir h) "checkpoint.clj")))) "replaying did not duplicate entries"))))
+
+(deftest a-checkpoint-that-does-not-read-is-quarantined-not-emptied
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-test"}))
+        _ (spit (str (fs/path dir "checkpoint.clj")) "(def x 1)\n\n(def y (+ 1")
+        h (harness "" [{:code "(def z 3)"} "ok"] dir)]
+    (is (= {:quarantined (str (fs/path dir "checkpoint.clj.failed")) :error "it does not read as Clojure"}
+           (:checkpoint @(:s h))))
+    (session/prompt! (:s h) "define")
+    (stop! h)
+    (is (= "(def x 1)\n\n(def y (+ 1" (slurp (str (fs/path dir "checkpoint.clj.failed")))) "the damaged file is kept for inspection")
+    (is (= "(def z 3)" (slurp (str (fs/path dir "checkpoint.clj")))) "a fresh checkpoint starts after it")))
+
 (deftest a-restart-with-nothing-defined-says-definitions-are-gone
   (let [h (harness "(ns bbh.env) (def manifest {:deadline-ms 500})" [{:code "(loop [] (recur))"} "ok"])]
     (session/prompt! (:s h) "spin")

@@ -97,8 +97,22 @@
               e))
           entries)))
 
-(defn- read-entries [path]
-  (when (fs/exists? path) (mapv #(dissoc % :value?) (definitions (slurp path) 'user))))
+(defn- quarantine!
+  "Move the checkpoint at PATH aside and return where it went."
+  [path]
+  (let [failed-path (str path ".failed")]
+    (fs/move path failed-path {:replace-existing true})
+    failed-path))
+
+(defn- read-entries
+  "The entries at PATH, or nil when there is none. A file that does not read is
+  quarantined, since merging into it would lose whatever it held."
+  [path]
+  (when (fs/exists? path)
+    (let [code (slurp path)]
+      (if (read-forms code)
+        (mapv #(dissoc % :value?) (definitions code 'user))
+        (do (quarantine! path) nil)))))
 
 (defn- merge-entries
   "OLD with each NEW entry replacing the entry of the same name and namespace in place, or appended."
@@ -120,8 +134,12 @@
             after (or (:ns e) (when (str/starts-with? (str (:name e)) "ns ") (symbol (subs (str (:name e)) 3))) ns)]
         (recur more (inc i) after (cond-> acc switch (conj switch) true (conj {:source (:source e) :entry i})))))))
 
-(defn- write-entries! [path entries]
-  (spit path (str/join "\n\n" (map :source (rendered entries)))))
+(defn- write-entries!
+  "Replace the file at PATH, so a crash mid-write leaves the old checkpoint, not a torn one."
+  [path entries]
+  (let [tmp (str path ".tmp")]
+    (spit tmp (str/join "\n\n" (map :source (rendered entries))))
+    (fs/move tmp path {:replace-existing true :atomic-move true})))
 
 (defn record!
   "Journal the definitions in CODE, which REPL has just evaluated successfully
@@ -143,15 +161,16 @@
   file. Returns {:restored n :failed [[source error]]}, {:quarantined path}
   when the replay hung or killed the REPL, or nil when there is no checkpoint."
   [path repl]
-  (when-let [entries (seq (read-entries path))]
-    (let [forms (rendered entries)
-          {:keys [value error]} (repl/call repl (replay-code (map :source forms)) 60000)]
-      (if error
-        (let [failed-path (str path ".failed")]
-          (fs/move path failed-path {:replace-existing true})
-          {:quarantined failed-path :error error})
-        (let [failed (into {} (keep (fn [[i err]] (when-let [e (:entry (nth forms i))] [e err])) value))
-              kept (vec (keep-indexed (fn [i e] (when-not (failed i) e)) entries))]
-          (when (seq failed) (write-entries! path kept))
-          {:restored (count kept)
-           :failed (mapv (fn [[i err]] [(:source (nth entries i)) err]) (sort-by first failed))})))))
+  (when (fs/exists? path)
+    (if-let [entries (seq (read-entries path))]
+      (let [forms (rendered entries)
+            {:keys [value error]} (repl/call repl (replay-code (map :source forms)) 60000)]
+        (if error
+          {:quarantined (quarantine! path) :error error}
+          (let [failed (into {} (keep (fn [[i err]] (when-let [e (:entry (nth forms i))] [e err])) value))
+                kept (vec (keep-indexed (fn [i e] (when-not (failed i) e)) entries))]
+            (when (seq failed) (write-entries! path kept))
+            {:restored (count kept)
+             :failed (mapv (fn [[i err]] [(:source (nth entries i)) err]) (sort-by first failed))})))
+      (when-not (fs/exists? path)
+        {:quarantined (str path ".failed") :error "it does not read as Clojure"}))))
