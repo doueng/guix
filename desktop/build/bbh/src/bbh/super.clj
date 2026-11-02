@@ -100,13 +100,9 @@
     (herdr "pane" "rename" pane (str thread " " title))
     pane))
 
-(declare run!)
+(declare run! promote!)
 
-(defn- launch!
-  "The side effects that make Worker W a process, then the commit that records
-  them. Each step is idempotent by the Worker's name, so a repeat after a crash
-  reuses what exists."
-  [{:keys [dir state launch] :as c} w token]
+(defn- launch-steps! [{:keys [dir state launch] :as c} w token]
   (let [{:keys [workspace! wf-start! pane!]} launch
         t (get-in @state [:threads (:thread w)])
         workspace (workspace! dir w)
@@ -120,6 +116,19 @@
                      :conversation (fs/file-name conversation) :token token :wf-run wf-run})]
     (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
                          :args {:started-at (System/currentTimeMillis) :worker (:id w) :conversation (fs/file-name conversation) :wf-run wf-run :workspace workspace :pane pane}})))
+
+(defn- launch!
+  "The side effects that make Worker W a process, then the commit that records
+  them. Each step is idempotent by the Worker's name, so a repeat after a crash
+  reuses what exists. A step that throws fails the Worker with its reason, so it
+  frees its slot and its thread shows why, and the caller still gets the error."
+  [c w token]
+  (try (launch-steps! c w token)
+       (catch Exception e
+         (run! c :controller {:id (str "launch-failed-" (:id w)) :command :finish-worker!
+                              :args {:worker (:id w) :state-after :failed :reason (str "Launch failed: " (ex-message e))}})
+         (promote! c)
+         (throw e))))
 
 (defn- promote!
   "Start the next queued Worker that may run now, if any."

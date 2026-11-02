@@ -436,7 +436,7 @@
         (cond-> (= :cancelled outcome)
           (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= thread (:thread a)) (= :open (:state a))) (assoc :state :superseded))]) %))))
         (update :locks #(into {} (remove (fn [[_ holder]] (= holder id)) %)))
-        (cond-> (= id (:worker t))
+        (cond-> (contains? #{id nil} (:worker t))
           (-> (assoc-in [:threads thread :worker] nil)
               (update-in [:threads thread :history] conj id)
               (assoc-in [:threads thread :execution] outcome)

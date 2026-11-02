@@ -674,3 +674,19 @@
           (super/reconcile! c)
           (is (= ["T1" "Its session is gone and it has no workflow to restart it from."] [(:id (row)) (:line (row))]))
           (finally (bbh.inbox/stop! poller) (.close server)))))))
+
+(deftest a-worker-whose-launch-fails-is-failed-with-the-reason-and-frees-its-slot
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-lf"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-lfconv"}))
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10 :policy {:workers 1}
+                         :launch {:workspace! (fn [_ _] (throw (ex-info "jj workspace add: no repo" {})))}})]
+    (try
+      (call dir {:command :thread! :args {:title "bad repo"}})
+      (is (= :failed (:error (start-worker dir "T1" :repo "/nonexistent"))))
+      (is (= :failed (get-in @(:state c) [:workers "W1" :state])))
+      (let [row (first (:threads (first (model/sections @(:state c) {}))))]
+        (is (= [:needs-attention "Launch failed: jj workspace add: no repo"] [(:section row) (:line row)])))
+      (call dir {:command :thread! :args {:title "next"}})
+      (start-worker dir "T2" :repo "/nonexistent")
+      (is (= :failed (get-in @(:state c) [:workers "W2" :state])) "W2 was not queued behind the dead W1")
+      (finally (super/stop! c)))))
