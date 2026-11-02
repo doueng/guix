@@ -54,6 +54,22 @@
     (stop! h)
     (is (= ["=> #'user/x" "out:\n:hi\n=> 42"] (tool-results h)))))
 
+(deftest a-router-session-evaluates-only-in-the-sandbox
+  (let [secret (str (fs/create-temp-file {:prefix "bbh-secret"}))
+        h (harness "" [{:code "(def x 41)"} "ok" {:code "(println :hi) (inc x)"} "ok"
+                        {:code (str "(slurp " (pr-str secret) ")")} "ok"
+                        {:code "(babashka.process/shell \"true\")"} "ok"])]
+    (spit secret "hunter2")
+    (swap! (:s h) assoc :sandbox? true)
+    (doseq [p ["define" "use" "read" "run"]] (session/prompt! (:s h) p))
+    (stop! h)
+    (let [[defined used read ran] (tool-results h)]
+      (is (= ["=> #'user/x" "out:\n:hi\n=> 42"] [defined used]))
+      (is (str/includes? read "Unable to resolve symbol: slurp"))
+      (is (not (str/includes? read "hunter2")))
+      (is (str/includes? ran "babashka.process/shell")))
+    (is (not (fs/exists? (fs/path (:dir @(:s h)) "checkpoint.clj"))) "raw Router code is never replayed into the REPL")))
+
 (deftest a-turn-reports-its-call-result-and-text-as-events
   (let [h (harness "" [{:code "(+ 1 2)"} "three"])]
     (session/prompt! (:s h) "add")

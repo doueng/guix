@@ -46,10 +46,11 @@
 (defn new-session
   "DIR holds the transcript and logs, INIT is loaded into every new REPL, CWD is
   where the REPL runs with ENV added to its environment, MODEL names the engine
-  MAKE-ENGINE builds, and EMIT receives every event. The REPL keeps its port file in DIR even after /resume
+  MAKE-ENGINE builds, and EMIT receives every event. A SANDBOX? session, the super-agent's Router, evaluates in
+  bbh.super.sandbox instead of the REPL's own namespace and keeps no checkpoint. The REPL keeps its port file in DIR even after /resume
   moves the transcript, so a front end finds it under the id it started with."
-  [{:keys [dir init cwd model make-engine emit notes env]}]
-  (atom {:dir dir :repl-dir dir :init init :cwd (or cwd (str (fs/cwd))) :env env
+  [{:keys [dir init cwd model make-engine emit notes env sandbox?]}]
+  (atom {:dir dir :repl-dir dir :init init :cwd (or cwd (str (fs/cwd))) :env env :sandbox? (boolean sandbox?)
          :model model :make-engine make-engine :engine (make-engine model)
          :emit (or emit (fn [_])) :notes (vec notes)
          :messages (transcript/load-messages dir)
@@ -288,13 +289,16 @@
   (locking (:code-lock @s)
     (emit! s {:type :tool-call :id id :code code})
     (let [start (System/currentTimeMillis)
-          {:keys [repl manifest interrupted]} @s
+          {:keys [repl manifest interrupted sandbox?]} @s
           {:keys [content note]} (delimiters/repair code)
+          sent (cond->> (or content code)
+                 sandbox? (pr-str)
+                 sandbox? (format "((requiring-resolve 'bbh.super.sandbox/eval!) %s)"))
           r (when-not interrupted
               (swap! s assoc :evaluating true)
               (fs/delete-if-exists (deadline-file s))
               (repl/announce-deadline! repl (:deadline-ms manifest))
-              (try (repl/eval! repl (or content code) (:deadline-ms manifest)
+              (try (repl/eval! repl sent (:deadline-ms manifest)
                                (extended-until s (+ start (:deadline-ms manifest) max-extension-ms)))
                    (finally (swap! s assoc :evaluating false))))
           ;; Before the restart below, so the run survives a close and leaves out the reload.
@@ -318,10 +322,10 @@
                         (when (seq partial) (str "\nOutput before that:\n" partial)))
                    :failed])
                 :else
-                (do (when-not (:error? r)
+                (do (when-not (or (:error? r) sandbox?)
                       (checkpoint/record! (checkpoint-path s) repl (or content code) (symbol (:repl-ns @s "user")))
                       (when (:ns r) (swap! s assoc :repl-ns (:ns r))))
-                    [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (name-hint s r))
+                    [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (when-not sandbox? (name-hint s r)))
                      (if (:error? r) :failed :completed)]))
           text (cond->> text note (str note "\n"))]
       (let [text (if-let [steering (take-steering! s)] (str text "\n\n" steering) text)]

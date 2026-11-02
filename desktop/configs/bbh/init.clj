@@ -39,7 +39,7 @@ This session is a Worker of bbh super: a thread's work, with a controller that r
 (def router-helpers
   "# Router
 
-You are the Router of bbh super: one long-lived conversation that reads what the person says and the events no thread owns. Each prompt is a batch of messages, oldest first, each tagged with its origin. For every message: classify it with (jev-classify-task text) first; a question or a request for information gets a one-line answer from what (super-threads) and (super-thread id) show; a feature, fix or chore becomes a thread with (super-thread! title) and a Worker with (super-start-worker! {:thread id :workflow :change :brief text :repo \"/home/engstrand/guix\" :check \"make lint\"}) (:investigation for an open question, :bug-fix with :repro for a failure; :check is the command that proves the change, `make lint` for this repository unless the person names one); noise gets no reply. A message addressed to a thread you can see (`T12: ...`) is already delivered to its Worker; note it and do nothing. Reply in one line per message, such as \"Started T15 (change workflow). I'll ask if it needs you.\" Never run shell commands, edit files or read the repository: Workers do that.")
+You are the Router of bbh super: one long-lived conversation that reads what the person says and the events no thread owns. Each prompt is a batch of messages, oldest first, each tagged with its origin. For every message: classify it with (jev-classify-task text) first; a question or a request for information gets a one-line answer from what (super-threads) and (super-thread id) show; a feature, fix or chore becomes a thread with (super-thread! title) and a Worker with (super-start-worker! {:thread id :workflow :change :brief text :repo \"/home/engstrand/guix\" :check \"make lint\"}) (:investigation for an open question, :bug-fix with :repro for a failure; :check is the command that proves the change, `make lint` for this repository unless the person names one); noise gets no reply. A message addressed to a thread you can see (`T12: ...`) is already delivered to its Worker; note it and do nothing. Reply in one line per message, such as \"Started T15 (change workflow). I'll ask if it needs you.\" Your tool evaluates in a sandbox: pure Clojure plus jev-classify-task, (super-threads), (super-thread id), (super-events {:thread id :after seq}), (super-thread! title), (super-link! id resource), (super-start-worker! spec), (super-steer! worker text), (super-cancel! worker reason), (super-note! id text) and (super-milestone! id text). It has no shell, files or Java: Workers do that.")
 
 (def pi-helpers
   "Skills written for Pi name Pi helpers. Drop `await` and map `tools/jev_classify_task {:task t}` to (jev-classify-task t), `fs/read` to read-lines, `tools/read` to slurp, `fs/list` to fs/glob, `tools/edit` to edit!, and `tools/bash`, `jj/...` and `make/...` to sh. Parallelize with future or pmap.")
@@ -224,15 +224,16 @@ You are the Router of bbh super: one long-lived conversation that reads what the
       (str/join "\n\n" (for [f files] (str "## " f "\n\n" (str/trim (slurp (str f)))))))))
 
 (defn manifest []
-  {:system (str base-prompt
-                "\n\n" helper-reference
-                "\n\n" pi-helpers
-                (when (System/getenv "BBH_SUPER_TOKEN")
-                  (str "\n\n" (if (= "router" (System/getenv "BBH_ROLE")) router-helpers super-helpers)))
-                "\n\nWorking directory: " (fs/cwd)
-                (some->> (skill-index) (str "\n\n"))
-                (when-let [p (project-instructions)]
-                  (str "\n\n# Project instructions\n\n" p)))})
+  {:system (if (= "router" (System/getenv "BBH_ROLE"))
+             router-helpers
+             (str base-prompt
+                  "\n\n" helper-reference
+                  "\n\n" pi-helpers
+                  (when (System/getenv "BBH_SUPER_TOKEN") (str "\n\n" super-helpers))
+                  "\n\nWorking directory: " (fs/cwd)
+                  (some->> (skill-index) (str "\n\n"))
+                  (when-let [p (project-instructions)]
+                    (str "\n\n# Project instructions\n\n" p))))})
 
 (defn commands
   "Slash commands expand-prompt handles, for agent-shell's completion."

@@ -65,6 +65,7 @@
                                 :init (or (System/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
                                 :model (or model (models/default-model))
                                 :make-engine models/engine
+                                :sandbox? (= "router" (System/getenv "BBH_ROLE"))
                                 :emit print-event
                                 :notes (when resume ["This conversation resumed in a new REPL, so earlier live definitions are gone."])})
         _ (some-> (session/start-repl! s) println)

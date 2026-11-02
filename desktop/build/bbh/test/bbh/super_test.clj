@@ -3,6 +3,7 @@
             [bbh.super :as super]
             [bbh.super.client :as client]
             [bbh.super.pane :as pane]
+            [bbh.super.sandbox :as sandbox]
             [bbh.super.voice :as voice]
             [babashka.process]
             [cheshire.core]
@@ -620,3 +621,9 @@
                                               :args {:text "tee one use plan B" :origin :voice}})
                   :accepted
                   (catch clojure.lang.ExceptionInfo e (:error (ex-data e)))))))))
+
+(deftest the-router-sandbox-never-falls-back-to-the-owner-token
+  (when-not (System/getenv "BBH_SUPER_TOKEN")
+    (is (= [:unauthorized "bbh super: no Router token"]
+           (try (sandbox/eval-in (sandbox/context sandbox/bindings) "(super-threads)")
+                (catch clojure.lang.ExceptionInfo e [(:error (ex-data e)) (ex-message e)]))))))
