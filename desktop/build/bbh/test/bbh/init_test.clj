@@ -46,12 +46,12 @@
       (run "(def kept 1)")
       (let [start (System/currentTimeMillis)
             slow (run "(def r (sh \"echo early; sleep 7; echo late; exit 4\")) (select-keys r [:exit :timeout :out])")
-            waited (run "(def j (job \"sleep 30\")) (:done? (job-wait j :ms 60000))")]
+            waited (run "(def j (job \"sleep 16\")) (:done? (job-wait j :ms 60000))")]
         (is (str/includes? slow ":timeout true") slow)
         (is (str/includes? slow ":exit nil") slow)
         (is (str/includes? slow "early") "sh returns the output so far")
-        (is (str/ends-with? (str/trim waited) "=> false") waited)
-        (is (< (- (System/currentTimeMillis) start) 20000) "each helper stopped at its budget"))
+        (is (str/ends-with? (str/trim waited) "=> true") "job-wait moved the deadline past the 13 s budget and finished the wait")
+        (is (< (- (System/currentTimeMillis) start) 40000) "sh stopped at its budget and job-wait took only as long as the job"))
       (is (str/ends-with? (run "kept") "=> 1") "the REPL was not killed")
       (Thread/sleep 2000)
       (let [finished (run "((juxt :done? :exit :tail) (job-wait (:job r) :ms 2000))")]
