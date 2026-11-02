@@ -211,6 +211,17 @@
     (record-prompt! s system)
     system))
 
+(def ^:private max-extension-ms
+  "How far past its deadline an evaluation may run when a helper such as job-wait asks for it."
+  600000)
+
+(defn- deadline-file [s] (str (fs/path (:repl-dir @s) "deadline")))
+
+(defn- extended-until
+  "The instant the REPL asked this evaluation's deadline to move to, capped at CAP."
+  [s cap]
+  (fn [] (some-> (try (slurp (deadline-file s)) (catch Exception _ nil)) str/trim parse-long (min cap))))
+
 (defn run-code!
   "Evaluate CODE for tool call ID, healing a truncated form or extra trailing
   closers first. Emits the call and its result and returns the text the model
@@ -223,8 +234,10 @@
           {:keys [content note]} (delimiters/repair code)
           r (when-not interrupted
               (swap! s assoc :evaluating true)
+              (fs/delete-if-exists (deadline-file s))
               (repl/announce-deadline! repl (:deadline-ms manifest))
-              (try (repl/eval! repl (or content code) (:deadline-ms manifest))
+              (try (repl/eval! repl (or content code) (:deadline-ms manifest)
+                               (extended-until s (+ start (:deadline-ms manifest) max-extension-ms)))
                    (finally (swap! s assoc :evaluating false))))
           ;; Before the restart below, so the run survives a close and leaves out the reload.
           _ (trace-run! s "tool" start

@@ -22,7 +22,7 @@
 - (sh \"cmd string\") returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. For separate arguments use (p/shell {:out :string :err :string :continue true} \"cmd\" \"arg\").
 - (read-lines path) or (read-lines path start count) prints 1-based numbered lines and returns nil. Use slurp when code needs the text.
 - (edit! path old new) replaces exactly one occurrence, else throws.
-- (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits up to 60 s, or :ms, and returns {:done? :exit :tail :log}. It stops at the evaluation's budget, so check :done? and wait again in a later call. p/shell, http and Thread/sleep have no budget, so use a job for anything that may approach the deadline. Also job-status and jobs.
+- (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits for it to finish, up to 10 min or :ms, and returns {:done? :exit :tail :log}. Waiting does not count against the evaluation's budget, so one call covers a long command. p/shell, http and Thread/sleep do count, so use a job for anything that may approach the deadline. Also job-status and jobs.
 - (shot url) saves a headless Chrome screenshot and returns its path. (look question & paths) has a Claude delegate describe images, since tool results carry text only. (delegate brief) runs a fresh agent, for an independent check.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
 
@@ -345,16 +345,38 @@
              :tail (when (fs/exists? (job-file id ".log")) (end (slurp (job-file id ".log"))))}
       (fs/exists? (job-file id ".err")) (assoc :err (end (slurp (job-file id ".err")))))))
 
+(def ^:private max-wait-ms 600000)
+
+(defn- deadline-file
+  "Where a helper asks the bbh session to move the running evaluation's deadline. Absent outside bbh."
+  []
+  (some-> (System/getenv "BBH_PORT_FILE") fs/parent (fs/path "deadline") str))
+
+(defn- move-deadline! [until]
+  (spit (deadline-file) (str until))
+  (reset! bbh.env/eval-deadline until))
+
 (defn job-wait
-  "Wait up to MS (default 60000) for job ID to finish, then return its job-status. The evaluation's budget caps the
-  wait, so check :done? and wait again in a later call."
-  [id & {:keys [ms lines] :or {ms 60000 lines 20}}]
-  (let [end (+ (System/currentTimeMillis) (min ms (bbh.env/budget-ms)))]
-    (loop []
-      (let [st (job-status id :lines lines)]
-        (if (or (:done? st) (>= (System/currentTimeMillis) end))
-          st
-          (do (Thread/sleep 250) (recur)))))))
+  "Wait for job ID to finish, up to MS (default and most 600000), then return its job-status. Inside a bbh evaluation
+  the wait moves the evaluation's deadline, so it does not count against the budget. (job-wait id ms) also works."
+  [id & args]
+  (let [[ms & opts] (if (number? (first args)) args (cons nil args))
+        {:keys [lines] :or {lines 20} :as opts} (apply hash-map opts)
+        ms (min (or ms (:ms opts) max-wait-ms) max-wait-ms)
+        now (System/currentTimeMillis)
+        margin @#'bbh.env/deadline-margin-ms
+        before @bbh.env/eval-deadline
+        move? (and (deadline-file) before (> before now))
+        end (+ now (if move? ms (min ms (bbh.env/budget-ms))))]
+    (when move? (move-deadline! (max before (+ end margin))))
+    (try
+      (loop []
+        (let [st (job-status id :lines lines)]
+          (if (or (:done? st) (>= (System/currentTimeMillis) end))
+            st
+            (do (Thread/sleep 250) (recur)))))
+      (finally
+        (when move? (move-deadline! (max before (+ (System/currentTimeMillis) margin))))))))
 
 (defn sh
   "Run CMD with bash and an empty stdin. Returns {:exit :out :err}. A command that outlasts the evaluation's budget

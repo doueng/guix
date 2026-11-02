@@ -37,18 +37,23 @@
       (reset! closed true)
       (doseq [q (vals @queues)] (.put ^LinkedBlockingQueue q {::closed true})))))
 
-(defn- request! [{:keys [out queues closed]} msg deadline-ms]
+(defn- request!
+  "Send MSG and collect replies until done, or until DEADLINE-MS passes. EXTENDED-UNTIL, when given, returns an
+  epoch-ms instant the deadline may move to, or nil."
+  [{:keys [out queues closed]} msg deadline-ms & [extended-until]]
   (let [id (str (random-uuid))
         q (LinkedBlockingQueue.)
-        end (+ (System/currentTimeMillis) deadline-ms)]
+        start-end (+ (System/currentTimeMillis) deadline-ms)
+        end #(max start-end (or (some-> extended-until (apply [])) 0))]
     (swap! queues assoc id q)
     (try
       (if @closed
         {:died true :messages []}
         (do (locking out (b/write-bencode out (assoc msg "id" id)) (.flush out))
             (loop [acc []]
-              (let [m (.poll q (max 0 (- end (System/currentTimeMillis))) TimeUnit/MILLISECONDS)]
-                (cond (nil? m) {:timeout true :messages acc}
+              (let [m (.poll q (max 0 (min 1000 (- (end) (System/currentTimeMillis)))) TimeUnit/MILLISECONDS)]
+                (cond (and (nil? m) (< (System/currentTimeMillis) (end))) (recur acc)
+                      (nil? m) {:timeout true :messages acc}
                       (::closed m) {:died true :messages acc}
                       (some #{"done"} (get m "status")) {:messages (conj acc m)}
                       :else (recur (conj acc m)))))))
@@ -96,9 +101,9 @@
 
 (defn eval!
   "Evaluate CODE in the conversation's session. Returns {:out :err :value :error?},
-  plus :timeout or :died when no complete reply arrived."
-  [conn code deadline-ms]
-  (collect (request! conn {"op" "eval" "code" code "session" (:user conn)} deadline-ms)))
+  plus :timeout or :died when no complete reply arrived. EXTENDED-UNTIL is as for request!."
+  [conn code deadline-ms & [extended-until]]
+  (collect (request! conn {"op" "eval" "code" code "session" (:user conn)} deadline-ms extended-until)))
 
 (def defaults
   {:system "You work inside a persistent babashka REPL through the clojure tool. Definitions persist until the REPL process restarts."

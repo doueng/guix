@@ -69,7 +69,9 @@
                                       "BBH_BRIDGE_TOKEN" (:token bridge)}}}}
         proc (apply p/process
                     {:dir cwd :err :append :err-file (fs/file dir "claude.log")
-                     :extra-env {"DISABLE_AUTOUPDATER" "1" "DISABLE_AUTO_COMPACT" "1"}}
+                     :extra-env {"DISABLE_AUTOUPDATER" "1" "DISABLE_AUTO_COMPACT" "1"
+                                 ;; job-wait may hold one tool call for 10 min past the 120 s deadline.
+                                 "MCP_TOOL_TIMEOUT" "1800000"}}
                     (or (System/getenv "BBH_CLAUDE") "claude")
                     "-p" "--input-format" "stream-json" "--output-format" "stream-json"
                     "--verbose" "--include-partial-messages"
