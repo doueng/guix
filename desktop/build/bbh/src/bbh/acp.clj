@@ -33,6 +33,13 @@
 
 (defn- clojure-block [code] (str "```clojure\n" code "\n```"))
 
+(defn- config-options
+  "The model selector in the configOptions form that newer ACP clients read
+  instead of the models field."
+  [current]
+  [{:id "model" :name "Model" :category "model" :type "select" :currentValue current
+    :options (for [m (distinct (cons current models/available))] {:value m :name m})}])
+
 (defn- event->update [{:keys [type] :as ev}]
   (case type
     :text {:sessionUpdate "agent_message_chunk" :content {:type "text" :text (:text ev)}}
@@ -47,7 +54,9 @@
     :usage (cond-> {:sessionUpdate "usage_update" :cost {:amount (:spent ev) :currency "USD"}}
              (:used ev) (assoc :used (:used ev))
              (:size ev) (assoc :size (:size ev))
-             (:request ev) (assoc :_meta {:bbh {:request (:request ev)}}))))
+             (:request ev) (assoc :_meta {:bbh {:request (:request ev)}}))
+    ;; The /model command changes the model inside a prompt, so clients learn of it here.
+    :model {:sessionUpdate "config_option_update" :configOptions (config-options (:model ev))}))
 
 (defn- turn-usage
   "A turn's tokens in the PromptResponse usage form."
@@ -64,14 +73,6 @@
 (def ^:private resume-dir
   "The saved conversation `bbh acp --resume` names. The first session/new takes it."
   (atom nil))
-
-(defn- config-options
-  "The model selector in the configOptions form that newer ACP clients read
-  instead of the models field."
-  [s]
-  (let [current (:model @s)]
-    [{:id "model" :name "Model" :category "model" :type "select" :currentValue current
-      :options (for [m (distinct (cons current models/available))] {:value m :name m})}]))
 
 (defn- commands-update [sid s]
   (update! sid {:sessionUpdate "available_commands_update"
@@ -128,7 +129,7 @@
         (send! {:id id :result {:sessionId sid
                                 :models {:currentModelId current
                                          :availableModels (for [m (distinct (cons current models/available))] {:modelId m :name m})}
-                                :configOptions (config-options (get @sessions sid))}})
+                                :configOptions (config-options current)}})
         (commands-update sid (get @sessions sid))
         (when problem (update! sid (event->update {:type :text :text (str "[bbh] " problem)}))))
 
@@ -140,7 +141,7 @@
       (do (when-not (= "model" (:configId params))
             (throw (ex-info (str "bbh has no config option " (:configId params)) {:rpc-code -32602})))
           (session/set-model! s (:value params))
-          (send! {:id id :result {:configOptions (config-options s)}}))
+          (send! {:id id :result {:configOptions (config-options (:model @s))}}))
 
       "session/prompt"
       (let [text (prompt-text (:prompt params))]

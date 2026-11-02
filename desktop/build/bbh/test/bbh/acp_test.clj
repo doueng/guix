@@ -130,6 +130,19 @@
         (is (= ["second engine"] (keep #(get-in % [:params :update :content :text]) (until! c #(= 5 (:id %)))))))
       (finally (stop! c)))))
 
+(deftest the-model-command-tells-the-client-the-new-model
+  (let [c (client [])
+        other (str "script/" (fs/path (:dir c) "other.edn"))]
+    (spit (subs other 7) (pr-str []))
+    (try
+      (let [sid (start! c)]
+        (send! c 3 "session/prompt" {:sessionId sid :prompt [{:type "text" :text (str "/model " other)}]})
+        (is (= [other]
+               (keep #(when (= "config_option_update" (get-in % [:params :update :sessionUpdate]))
+                        (get-in % [:params :update :configOptions 0 :currentValue]))
+                     (until! c #(= 3 (:id %)))))))
+      (finally (stop! c)))))
+
 (deftest overlapping-turns-are-rejected-and-cancellation-recovers
   (let [c (client [{:code "(Thread/sleep 60000)"} "recovered"])]
     (try

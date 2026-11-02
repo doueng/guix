@@ -434,6 +434,8 @@
           (should (bbh-test--wait (lambda () (string-match-p (concat "^Model: " (regexp-quote model) "$") (bbh-test--text transcript))) 30))
           (should (member model offered))
           (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+          ;; The status line names the chosen model, less a repeated provider prefix.
+          (should (string-suffix-p (eng/bbh--model-name shell) model))
           (setq offered nil)
           (cl-letf (((symbol-function 'completing-read)
                      (lambda (_prompt collection &rest _)

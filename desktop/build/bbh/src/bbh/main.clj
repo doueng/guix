@@ -40,7 +40,8 @@
     :usage (when-let [r (:request ev)]
              (println (str "\n" (dim (format "[context %s%s, %s, $%.4f]" (or (:used ev) "?")
                                                (if (:size ev) (str "/" (:size ev)) "")
-                                               (cache-note r) (double (:spent ev)))))))))
+                                               (cache-note r) (double (:spent ev)))))))
+    :model nil))
 
 (defn- parse-args [args]
   (loop [[flag value & more] args opts {}]

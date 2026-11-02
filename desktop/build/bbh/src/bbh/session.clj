@@ -440,6 +440,7 @@
   (let [engine ((:make-engine @s) model)]
     (stop-engine! s)
     (swap! s assoc :model model :engine engine :last-input nil :context-size nil)
+    (emit! s {:type :model :model model})
     model))
 
 (defn- conversation-ids
