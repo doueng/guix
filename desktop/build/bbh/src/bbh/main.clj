@@ -5,17 +5,15 @@
             [bbh.inbox :as inbox]
             [bbh.models :as models]
             [bbh.session :as session]
+            [bbh.super :as super]
             [bbh.transcript :as transcript]
             [bbh.web :as web]
             [clojure.string :as str])
   (:import [org.jline.reader EndOfFileException LineReader LineReaderBuilder UserInterruptException]
            [org.jline.terminal TerminalBuilder]))
 
-(defn- data-dir []
-  (fs/path (or (System/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh"))
-
 (defn- conversation-dir [resume]
-  (let [root (fs/path (data-dir) "conversations")
+  (let [root (fs/path (super/data-dir) "conversations")
         saved (when (fs/exists? root)
                 (->> (fs/list-dir root) (filter #(fs/exists? (fs/path % "messages.jsonl"))) (map str) sort))]
     (cond (nil? resume) (str (fs/path root (transcript/new-id)))
@@ -63,7 +61,7 @@
         _ (some-> (session/start-repl! s) println)
         reader (-> (LineReaderBuilder/builder)
                    (.terminal (-> (TerminalBuilder/builder) (.system true) (.build)))
-                   (.variable LineReader/HISTORY_FILE (fs/path (data-dir) "history"))
+                   (.variable LineReader/HISTORY_FILE (fs/path (super/data-dir) "history"))
                    (.build))]
     (sun.misc.Signal/handle (sun.misc.Signal. "INT")
                             (reify sun.misc.SignalHandler (handle [_ _] (session/interrupt! s))))
@@ -87,6 +85,7 @@
   (case (first args)
     "acp" (acp/-main (some-> (:resume (parse-args (rest args))) conversation-dir))
     "inbox-poll" (let [[_ id project] args]
-                   (inbox/-poll (str (fs/path (data-dir) "conversations" id)) project))
-    "web" (web/-main (data-dir))
+                   (inbox/-poll (str (fs/path (super/data-dir) "conversations" id)) project))
+    "web" (web/-main (super/data-dir))
+    "super" (apply super/-main (rest args))
     (terminal args)))

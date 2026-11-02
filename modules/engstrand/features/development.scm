@@ -31,6 +31,8 @@
                 "go"
                 "lua"
                 "pandoc"
+                ;; libsqlite3 for bbh super, loaded through babashka's FFI.
+                "sqlite"
                 "xxd"
                 "unzip"
                 "zip"

@@ -28,7 +28,28 @@
                           #:log-file (string-append home "/.local/state/bbh-web.log"))))))
            (stop #~(make-kill-destructor))))))
 
+;; The super-agent controller: the store, the command socket and the
+;; dispatcher that feeds bbh mailboxes. Loopback only, so nothing to publish.
+(define %bbh-super-service
+  (simple-service 'familiar-bbh-super home-shepherd-service-type
+    (list (shepherd-service
+           (provision '(bbh-super))
+           (documentation "The bbh super-agent controller and its SQLite store.")
+           (respawn? #t)
+           (start #~(lambda ()
+                      (let ((home (getenv "HOME")))
+                        ((make-forkexec-constructor
+                          (list (string-append home "/.local/bin/bbh") "super" "serve")
+                          #:environment-variables
+                          (cons* (string-append "PATH=" home "/.guix-home/profile/bin"
+                                                ":/run/current-system/profile/bin")
+                                 (filter (lambda (variable)
+                                           (not (string-prefix? "PATH=" variable)))
+                                         (default-environment-variables)))
+                          #:log-file (string-append home "/.local/state/bbh-super.log"))))))
+           (stop #~(make-kill-destructor))))))
+
 (define (feature-familiar-bbh-web)
   (feature-package-set
    'familiar-bbh-web
-   #:home-services (list %bbh-web-service)))
+   #:home-services (list %bbh-web-service %bbh-super-service)))
