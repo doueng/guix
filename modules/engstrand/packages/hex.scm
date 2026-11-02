@@ -61,6 +61,9 @@
                                       "wayland"))))
                   `("ALSA_PLUGIN_DIR" = (,(string-append (assoc-ref inputs "pipewire")
                                                           "/lib/alsa-lib")))
+                  ;; Guix updates Hex; this is the updater's only runtime input,
+                  ;; so a closed local port makes every check fail offline.
+                  `("HEX_RELEASE_BASE_URL" = ("https://127.0.0.1:1"))
                   ;; The Asahi driver from nixpkgs mesa (engstrand nixpkgs).
                   `("VK_DRIVER_FILES" = ("/run/opengl-driver/share/vulkan/icd.d/asahi_icd.aarch64.json"))
                   `("PATH" prefix
