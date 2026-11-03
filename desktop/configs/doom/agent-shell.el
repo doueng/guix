@@ -1315,6 +1315,38 @@ Workers queue prompts in the background, and the echo area is shared."
 (defvar-local eng/bbh-super-conversation nil
   "The conversation this shell runs for `bbh super', or nil for an ordinary session.")
 
+(defvar eng/bbh-super-mode-map (make-sparse-keymap)
+  "Keys of every super-agent buffer.  Under Doom, SPC m r and SPC m i.")
+
+(define-minor-mode eng/bbh-super-mode
+  "A buffer of the super-agent: a Router or Worker session, or the Inbox.
+SPC m r shows the Router and SPC m i the Inbox.  Ordinary bbh sessions never
+get it, since an Inbox opened in another Emacs would take the controller's
+reload port from the bbh-super daemon."
+  :keymap eng/bbh-super-mode-map
+  ;; Turned on outside a command, by the controller's emacsclient, evil would
+  ;; not see the map until its next state change.
+  (when (fboundp 'evil-normalize-keymaps) (evil-normalize-keymaps)))
+;; The composer's major mode restarts when it returns from the history view.
+(put 'eng/bbh-super-mode 'permanent-local t)
+
+(define-key eng/bbh-super-mode-map (kbd "C-c r") #'eng/bbh-inbox-router)
+(define-key eng/bbh-super-mode-map (kbd "C-c i") #'eng/bbh-inbox)
+(when (fboundp 'map!)
+  (map! :map eng/bbh-super-mode-map
+        :localleader
+        :desc "Router" "r" #'eng/bbh-inbox-router
+        :desc "Inbox"  "i" #'eng/bbh-inbox))
+
+(defun eng/bbh-super--clear-frame ()
+  "Leave the selected frame one window, so a view starts from nothing.
+Side windows, the Inbox preview and a Worker's workflow panel, survive
+`delete-other-windows', so they go first."
+  (dolist (window (window-list nil 'nomini))
+    (when (and (window-live-p window) (window-parameter window 'window-side))
+      (delete-window window)))
+  (delete-other-windows))
+
 (defun eng/bbh-super-config (conversation env)
   "agent-shell configuration for CONVERSATION with ENV, an alist of variables."
   (agent-shell-make-agent-config
@@ -1362,18 +1394,22 @@ a new token.  Nothing is shown; `eng/bbh-super-visit' shows it."
   (let ((shell (agent-shell--start :config (eng/bbh-super-config conversation env)
                                    :new-session t :no-focus t :cwd (file-name-as-directory dir))))
     (with-current-buffer shell
-      (setq eng/bbh-super-conversation conversation))
+      (setq eng/bbh-super-conversation conversation)
+      (eng/bbh-super-mode 1))
     ;; shell-maker finds its buffer by this name; a plain rename-buffer would lose it.
     (shell-maker-set-buffer-name shell title)
     (with-current-buffer (eng/bbh--transcript shell)
-      (rename-buffer (concat title " transcript") t))
+      (rename-buffer (concat title " transcript") t)
+      (eng/bbh-super-mode 1))
     (buffer-name shell)))
 
 (defun eng/bbh-super-visit (name)
-  "Show the session in buffer NAME as its transcript above its composer."
+  "Show the session in buffer NAME as its transcript above its composer, alone in the frame."
   (let ((shell (or (get-buffer name) (user-error "No buffer %s; is its Worker running?" name))))
-    (delete-other-windows)
-    (eng/bbh-layout shell)))
+    (eng/bbh-super--clear-frame)
+    (let ((composer (eng/bbh-layout shell)))
+      (with-current-buffer composer (eng/bbh-super-mode 1))
+      composer)))
 
 ;;; Super-agent Inbox
 
@@ -1562,10 +1598,9 @@ read-only list has no use for; s also shadows the global avy jump here.")
         :desc "Open Worker"   "o" #'eng/bbh-inbox-open
         :desc "Send"          "s" #'eng/bbh-inbox-send
         :desc "Approve"       "A" #'eng/bbh-inbox-approve
-        :desc "Note"          "r" #'eng/bbh-inbox-note
+        :desc "Note"          "n" #'eng/bbh-inbox-note
         :desc "Mark read"     "m" #'eng/bbh-inbox-dismiss
         :desc "Archive"       "a" #'eng/bbh-inbox-archive
-        :desc "Router"        "R" #'eng/bbh-inbox-router
         :desc "Reload"        "g" #'eng/bbh-inbox-reveal))
 
 (defun eng/bbh-inbox--listen ()
@@ -1583,16 +1618,17 @@ read-only list has no use for; s also shadows the global avy jump here.")
 (defun eng/bbh-inbox-buffer ()
   "Make the Inbox buffer, listening for reloads, and return its name."
   (with-current-buffer (eng/bbh-inbox--buffer)
-    (unless (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox-mode)))
+    (unless (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox-mode))
+    (eng/bbh-super-mode 1))
   (eng/bbh-inbox--listen)
   (eng/bbh-inbox-refresh)
   (buffer-name (eng/bbh-inbox--buffer)))
 
 (defun eng/bbh-inbox ()
-  "Show the super-agent's Inbox in this frame."
+  "Show the super-agent's Inbox alone in this frame, its preview below."
   (interactive)
-  (switch-to-buffer (eng/bbh-inbox-buffer))
-  (delete-other-windows))
+  (eng/bbh-super--clear-frame)
+  (switch-to-buffer (eng/bbh-inbox-buffer)))
 
 (after! agent-shell-viewport
   (add-hook 'agent-shell-viewport-edit-mode-hook #'eng/bbh-setup-composer)

@@ -836,6 +836,49 @@
                                               (string-match-p "preview of T2" (bbh-test--text "*bbh inbox preview*"))))
                               10)))))
 
+(defun bbh-test--windows ()
+  "The buffer names in the selected frame's windows, sorted."
+  (sort (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list nil 'nomini)) #'string<))
+
+(ert-deftest bbh-super-views-switch-with-their-own-windows ()
+  ;; The Inbox's preview and a session's transcript and composer are each
+  ;; view's whole frame; nothing of the view you left stays behind.
+  (let* ((script (make-temp-file "bbh-fake" nil nil
+                                 (concat "#!/bin/sh\ncase \"$2\" in\n"
+                                         "view) printf 'bbh inbox · 0 need you\\nT1\\tNEW  T1 first\\n';;\n"
+                                         "preview) echo \"preview of $3\";;\n"
+                                         "esac\n")))
+         (eng/bbh-inbox-bbh (list script))
+         (dir (make-temp-file "bbh-super-ws" t))
+         (shell (get-buffer (eng/bbh-super-open "router" dir "Router" nil))))
+    (set-file-modes script #o700)
+    (dolist (name '("*bbh inbox*" "*bbh inbox preview*"))
+      (when (get-buffer name) (kill-buffer name)))
+    (unwind-protect
+        (progn
+          (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
+          (eng/bbh-inbox)
+          (with-current-buffer "*bbh inbox*"
+            (should (bbh-test--wait (lambda () (string-match-p "T1 first" (buffer-string))) 10)))
+          (should (bbh-test--wait (lambda () (get-buffer-window "*bbh inbox preview*")) 10))
+          (should (equal '("*bbh inbox preview*" "*bbh inbox*") (bbh-test--windows)))
+          ;; SPC m r in the Inbox: the Router alone, its composer selected.
+          (with-current-buffer "*bbh inbox*" (call-interactively (key-binding (kbd "C-c r"))))
+          (let ((composer (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)))
+            (should (equal (sort (list "Router transcript" (buffer-name composer)) #'string<) (bbh-test--windows)))
+            (should (eq composer (window-buffer (selected-window))))
+            ;; SPC m i in the composer and in the transcript: the Inbox and its preview again.
+            (dolist (from (list composer (buffer-local-value 'eng/bbh-transcript shell)))
+              (eng/bbh-super-visit "Router")
+              (with-current-buffer from (call-interactively (key-binding (kbd "C-c i"))))
+              (should (bbh-test--wait (lambda () (equal '("*bbh inbox preview*" "*bbh inbox*") (bbh-test--windows))) 10))
+              (should (equal "*bbh inbox*" (buffer-name (window-buffer (selected-window))))))))
+      (eng/bbh-super--kill shell))
+    ;; An ordinary session in another Emacs has neither key.
+    (with-temp-buffer
+      (eng/bbh-transcript-mode)
+      (should-not (memq (key-binding (kbd "C-c i")) '(eng/bbh-inbox eng/bbh-inbox-router))))))
+
 (ert-deftest bbh-super-refuses-a-prompt-outside-a-command ()
   (let ((this-command nil))
     (should-error (eng/bbh-super--refuse-prompt #'y-or-n-p "Continue? ")))

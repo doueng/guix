@@ -264,11 +264,12 @@ The Inbox is in evil normal state, so motions, search and `C-j`/`C-k` focus work
 | m | Mark read, which closes the asks and tells the Worker not to wait. |
 | a | Archive. Open asks become dismissed, which the Worker is told. |
 | R | Open the Router. |
+| SPC m r, SPC m i | Open the Router or the Inbox. These two work in the Router's and Workers' buffers too. |
 | gr | Reload in the current order, new threads included. Opening the Inbox does the same. |
 | g? | Describe the mode and its keys. |
 | q | Quit the window. |
 
-In the Router's and Workers' composers, C-n sends (Cmd+N through kanata) and C-c C-k stops the turn. Normal-state `C-d` and `C-u` page the transcript. The transcript uses Doom's evil-org keys: `gj`/`gk` by element, `]h`/`[h` between prompts, `gh` up.
+Each view takes the whole frame: opening the Router, a Worker or the Inbox first closes every other window, side windows included, so the Inbox preview or a Worker's workflow panel never follows you. In the Router's and Workers' composers, C-n sends (Cmd+N through kanata) and C-c C-k stops the turn. Normal-state `C-d` and `C-u` page the transcript. The transcript uses Doom's evil-org keys: `gj`/`gk` by element, `]h`/`[h` between prompts, `gh` up.
 
 Each Worker gets one buffer, named after its thread (`T12 keybindings`). The buffer runs `bbh acp --id super-W<n>` in the Worker's jj workspace with its token and `WF_RUN`. It opens in the background and never takes focus. A restarted Worker replaces its old buffer.
 
