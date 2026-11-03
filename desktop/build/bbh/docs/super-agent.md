@@ -251,11 +251,11 @@ The super-agent lives in one Emacs daemon, `bbh-super`, which the `bbh-emacs` Ho
 - **Inbox buffer, `*bbh inbox*`.** `bbh inbox` (`prefix+t` in Herdr) opens a terminal frame on it. It shows a live list of threads grouped by section, with the badge in the header line. When the buffer is created it opens a local port and registers it with the controller. The controller connects to that port whenever an event changes a thread, so the list reloads without polling. The order holds while you look, and new activity waits behind an "N new" line. A preview window below the list shows the thread under the cursor: the open ask with numbered options, or the Worker's latest state when nothing is open.
 - **Router buffer, `Router`.** The Router conversation (`bbh acp --id router` in agent-shell, sandboxed by `BBH_ROLE=router`). `bbh super start-router` opens it and the Inbox. What you send from its composer or type at its prompt goes through `bbh super say!` with origin `:emacs`, so it gets an `oN` id the Router can start Workers for, and a leading handle ("T12 ...") steers that thread instead.
 
-Keys in the Inbox buffer:
+The Inbox is in evil normal state, so motions, search and `C-j`/`C-k` focus work as in any Doom buffer, and SPC m lists the actions. Its keys:
 
 | Key | Action |
 |---|---|
-| j, k | Move between threads. The preview follows the cursor. |
+| j, k, gg, G, / | Evil motions and search. The preview follows the cursor. |
 | 1 to 4 | Pick an option on the selected thread's ask. The pick is saved at once. |
 | r | Write a note on the selected thread, in the minibuffer. |
 | s | Send every pick and note on the selected thread, as one message per Worker. |
@@ -263,9 +263,12 @@ Keys in the Inbox buffer:
 | RET | Open the buffer of the thread's latest Worker, running or finished, and mark the thread seen. |
 | m | Mark read, which closes the asks and tells the Worker not to wait. |
 | a | Archive. Open asks become dismissed, which the Worker is told. |
-| n | Show the new threads waiting behind the "N new" line. |
 | R | Open the Router. |
-| g | Reload in the current order, new threads included. Opening the Inbox does the same. |
+| gr | Reload in the current order, new threads included. Opening the Inbox does the same. |
+| g? | Describe the mode and its keys. |
+| q | Quit the window. |
+
+In the Router's and Workers' composers, `ZZ` in normal state sends and `ZQ` stops the turn, as in a commit message, alongside C-c C-c and C-c C-k. Normal-state `C-d` and `C-u` page the transcript. The transcript uses Doom's evil-org keys: `gj`/`gk` by element, `]h`/`[h` between prompts, `gh` up.
 
 Each Worker gets one buffer, named after its thread (`T12 keybindings`). The buffer runs `bbh acp --id super-W<n>` in the Worker's jj workspace with its token and `WF_RUN`. It opens in the background and never takes focus. A restarted Worker replaces its old buffer.
 

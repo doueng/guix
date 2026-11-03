@@ -859,16 +859,22 @@ Org leaves result blocks, a special block, without the code background."
 
 (define-key eng/bbh-transcript-mode-map (kbd "C-c C-t") #'eng/bbh-toggle-tools)
 
-;; Magit's section keys in evil normal state: n and p move between headings,
-;; M-n and M-p between prompts, ^ up, S-TAB cycles all tool results, q buries.
+(when (fboundp 'map!)
+  (map! :map eng/bbh-transcript-mode-map
+        :localleader
+        :desc "Toggle tool results" "t" #'eng/bbh-toggle-tools))
+
+;; Doom's evil-org keys, which win in Doom anyway: gj and gk move by element,
+;; ]h and [h between prompts, gh up.  These copies serve Emacs without
+;; evil-org.  S-TAB stays org's cycle; SPC m t or C-c C-t folds tool results.
+;; n, p and the other evil keys keep their meaning; q buries.
 (with-eval-after-load 'evil
   (evil-define-key 'normal eng/bbh-transcript-mode-map
-    (kbd "n") #'org-next-visible-heading
-    (kbd "p") #'org-previous-visible-heading
-    (kbd "M-n") #'org-forward-heading-same-level
-    (kbd "M-p") #'org-backward-heading-same-level
-    (kbd "^") #'outline-up-heading
-    (kbd "<backtab>") #'eng/bbh-toggle-tools
+    (kbd "gj") #'org-forward-element
+    (kbd "gk") #'org-backward-element
+    (kbd "]h") #'org-forward-heading-same-level
+    (kbd "[h") #'org-backward-heading-same-level
+    (kbd "gh") #'org-up-element
     (kbd "q") #'bury-buffer)
   ;; evil-org's C-j and C-k shadow focus, which moves between transcript and
   ;; composer. The transcript is read-only, so normal state is enough.
@@ -949,8 +955,17 @@ The key hints and conversation id are in `eng/bbh-keys'.  % is escaped because t
 (defun eng/bbh-keys ()
   "Show the composer keys in the echo area."
   (interactive)
-  (message "%s%s" "C-n send or queue · RET newline · M-p/M-n history · M-k/M-j scroll · C-c C-t tools · C-c C-k stop"
+  (message "%s%s" "C-n, C-c C-c or ZZ send · RET newline · M-p/M-n history · C-u/C-d or M-k/M-j scroll · C-c C-t tools · C-c C-k or ZQ stop · SPC m menu"
            (if-let* ((id (eng/bbh--conversation (eng/bbh--shell)))) (concat " · /resume " id) "")))
+
+(with-eval-after-load 'agent-shell-viewport
+  (when (fboundp 'map!)
+    (map! :map agent-shell-viewport-edit-mode-map
+          :localleader
+          :desc "Send"                "s" #'eng/bbh-send
+          :desc "Stop the turn"       "k" #'agent-shell-viewport-interrupt
+          :desc "Toggle tool results" "t" #'eng/bbh-toggle-tools
+          :desc "Keys"                "?" #'eng/bbh-keys)))
 
 (defun eng/bbh-composer-header (&rest _)
   "Keep the composer status line current when agent-shell refreshes its header."
@@ -1014,6 +1029,15 @@ history navigation and replies, which doubles `eng/bbh-composer-padding'."
       (when (fboundp 'evil-local-set-key)
         (dolist (state '(normal insert))
           (evil-local-set-key state (kbd (car binding)) (cdr binding)))))
+    ;; Normal state follows evil's commit-message keys: ZZ sends, ZQ stops.
+    ;; C-d and C-u page the transcript, since the composer is a few lines tall.
+    (when (fboundp 'evil-local-set-key)
+      (dolist (binding '(("ZZ" . eng/bbh-send)
+                         ("ZQ" . agent-shell-viewport-interrupt)
+                         ("g?" . eng/bbh-keys)
+                         ("C-d" . eng/bbh-output-page-down)
+                         ("C-u" . eng/bbh-output-page-up)))
+        (evil-local-set-key 'normal (kbd (car binding)) (cdr binding))))
     (eng/bbh-composer-header)))
 
 (defun eng/bbh-layout (&optional shell transcript)
@@ -1072,14 +1096,16 @@ Moving the selection changes only what this panel shows. Only `wf' advances a ph
 (define-key eng/bbh-workflow-mode-map (kbd "k") #'eng/bbh-workflow-previous)
 (define-key eng/bbh-workflow-mode-map (kbd "<down>") #'eng/bbh-workflow-next)
 (define-key eng/bbh-workflow-mode-map (kbd "<up>") #'eng/bbh-workflow-previous)
-(define-key eng/bbh-workflow-mode-map (kbd "g") #'eng/bbh-workflow-refresh)
+;; g is a prefix here, as in evil; special-mode's g would make gr undefinable.
+(define-key eng/bbh-workflow-mode-map (kbd "g") (make-sparse-keymap))
+(define-key eng/bbh-workflow-mode-map (kbd "gr") #'eng/bbh-workflow-refresh)
 
 (with-eval-after-load 'evil
   (dolist (state '(normal motion))
     (evil-define-key state eng/bbh-workflow-mode-map
       (kbd "j") #'eng/bbh-workflow-next
       (kbd "k") #'eng/bbh-workflow-previous
-      (kbd "g") #'eng/bbh-workflow-refresh)))
+      (kbd "gr") #'eng/bbh-workflow-refresh)))
 
 (defun eng/bbh-workflow--parse (json)
   "JSON from `wf status --json' as an alist, with null as nil."
@@ -1488,23 +1514,34 @@ A failure shows bbh's message."
     (eng/bbh-inbox--run (list "buffer" thread)
                         (lambda (name) (eng/bbh-super-visit (string-trim name))))))
 
+(defconst eng/bbh-inbox-keys
+  `(("RET" eng/bbh-inbox-open "Open the thread's Worker")
+    ("1" eng/bbh-inbox-pick "Pick option 1")
+    ("2" eng/bbh-inbox-pick "Pick option 2")
+    ("3" eng/bbh-inbox-pick "Pick option 3")
+    ("4" eng/bbh-inbox-pick "Pick option 4")
+    ("s" eng/bbh-inbox-send "Send picks and note")
+    ("A" eng/bbh-inbox-approve "Approve the review")
+    ("r" eng/bbh-inbox-note "Write a note")
+    ("m" eng/bbh-inbox-dismiss "Mark read")
+    ("a" eng/bbh-inbox-archive "Archive")
+    ("R" eng/bbh-inbox-router "Open the Router")
+    ("gr" eng/bbh-inbox-reveal "Reload, new threads included")
+    ("g?" describe-mode "Help")
+    ("q" quit-window "Quit"))
+  "The Inbox's evil normal-state keys: (KEYS COMMAND DESCRIPTION).
+Motions stay evil's own, so j, k, gg, G, / and C-j/C-k work as anywhere.
+The single letters replace evil commands that edit text, which this
+read-only list has no use for; s also shadows the global avy jump here.")
+
 (defvar eng/bbh-inbox-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map "j" #'next-line)
-    (define-key map "k" #'previous-line)
-    (dolist (n '("1" "2" "3" "4")) (define-key map n #'eng/bbh-inbox-pick))
-    (define-key map "s" #'eng/bbh-inbox-send)
-    (define-key map "A" #'eng/bbh-inbox-approve)
-    (define-key map "r" #'eng/bbh-inbox-note)
-    (define-key map "m" #'eng/bbh-inbox-dismiss)
-    (define-key map "a" #'eng/bbh-inbox-archive)
-    (define-key map "n" #'eng/bbh-inbox-reveal)
-    (define-key map "g" #'eng/bbh-inbox-reveal)
-    (define-key map (kbd "RET") #'eng/bbh-inbox-open)
-    (define-key map "R" #'eng/bbh-inbox-router)
-    (define-key map "q" #'quit-window)
+    ;; g is a prefix here, as in evil, not special-mode's revert.
+    (define-key map "g" (make-sparse-keymap))
+    (dolist (key eng/bbh-inbox-keys)
+      (define-key map (kbd (car key)) (cadr key)))
     map)
-  "Keys of the Inbox, the same in every evil state.")
+  "The Inbox keys, for Emacs without evil.")
 
 (define-derived-mode eng/bbh-inbox-mode special-mode "bbh inbox"
   "The threads that need you, from `bbh super'."
@@ -1513,7 +1550,22 @@ A failure shows bbh's message."
   (add-hook 'post-command-hook #'eng/bbh-inbox--moved nil t))
 
 (with-eval-after-load 'evil
-  (evil-set-initial-state 'eng/bbh-inbox-mode 'emacs))
+  (evil-set-initial-state 'eng/bbh-inbox-mode 'normal)
+  (dolist (key eng/bbh-inbox-keys)
+    (evil-define-key* '(normal motion) eng/bbh-inbox-mode-map (kbd (car key)) (cadr key))))
+
+;; The same commands under SPC m, where which-key lists them.
+(when (fboundp 'map!)
+  (map! :map eng/bbh-inbox-mode-map
+        :localleader
+        :desc "Open Worker"   "o" #'eng/bbh-inbox-open
+        :desc "Send"          "s" #'eng/bbh-inbox-send
+        :desc "Approve"       "A" #'eng/bbh-inbox-approve
+        :desc "Note"          "r" #'eng/bbh-inbox-note
+        :desc "Mark read"     "m" #'eng/bbh-inbox-dismiss
+        :desc "Archive"       "a" #'eng/bbh-inbox-archive
+        :desc "Router"        "R" #'eng/bbh-inbox-router
+        :desc "Reload"        "g" #'eng/bbh-inbox-reveal))
 
 (defun eng/bbh-inbox--listen ()
   "Listen for the controller's reload calls and register the port, once."

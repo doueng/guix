@@ -205,7 +205,7 @@
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
     (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
     (is (re-matches #"T3\tARCHIVED         T3   old \(came back\)    " row3))
-    (is (= "bbh inbox · 1 need you   1-4 pick  s send  A approve  r note  m mark read  a archive  n new  RET open  R router  g refresh" (bbh.super.pane/header sections)))
+    (is (= "bbh inbox · 1 need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  R router  gr reload  g? help" (bbh.super.pane/header sections)))
     (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
            (clojure.string/split-lines
             (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
@@ -897,7 +897,7 @@
   (let [text (bbh.super.pane/rows {:fresh 2 :sections [{:section :working :title "Working"
                                                          :threads [{:id "T3" :title "push" :now :stopped :line "Can I push?"}]}]})
         [new row] (clojure.string/split-lines text)]
-    (is (= "new\t── 2 new · n to show ──" new))
+    (is (= "new\t── 2 new · gr to show ──" new))
     (is (re-matches #"T3\tWORKING          T3   push → Stopped on you  Can I push\?  " row))
     (is (= 1 (count (clojure.string/split-lines (bbh.super.pane/rows {:fresh 0 :sections [{:title "Working" :threads [{:id "T3" :title "x"}]}]}))))
         "no new line when nothing waits")))

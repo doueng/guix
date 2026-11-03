@@ -187,7 +187,7 @@ No global keyboard listener or browser content script has been added.
 | Ctrl+b a opens the agent picker | Also Alt+Space a | Requested |
 | Ctrl+b Space s l copies visible text by hint | Cmd+Y, from any window. s l and Ctrl+b f still work | Yank in two keys. One-key s would clash with the Search group |
 | Ctrl+b Space . was unbound | It chooses a Herdr workspace, like TAB . | `.` opens the main picker in every context |
-| Ctrl+j/k in the bbh transcript move by org heading, Ctrl+k in insert state types a digraph | They move focus | Ctrl+h/j/k/l is focus everywhere. n, p, M-n and M-p still move by heading |
+| Ctrl+j/k in the bbh transcript move by org heading, Ctrl+k in insert state types a digraph | They move focus | Ctrl+h/j/k/l is focus everywhere. gj, gk, ]h and [h move by heading, as in Doom's evil-org |
 | Herdr Ctrl+b h/j/k/l stop at the last pane | They continue to Hyprland windows | Same behavior as the editors |
 | Neovim and Doom Ctrl+h/j/k/l stop at the last window | They continue to Herdr panes and Hyprland | Same behavior as Space w h/j/k/l |
 | Neovim Space c d shows line diagnostics | Space c d finds the definition, Space c x lists diagnostics | Match Doom and IntelliJ |

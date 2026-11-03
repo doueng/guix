@@ -62,7 +62,7 @@
   [{:keys [sections fresh]}]
   (str/join "\n"
             (concat
-             (when (pos? (or fresh 0)) [(format "new\t── %d new · n to show ──" fresh)])
+             (when (pos? (or fresh 0)) [(format "new\t── %d new · gr to show ──" fresh)])
              (for [{section :title :keys [threads]} sections
                    {:keys [id title line came-back updated-at now]} threads]
                (str id "\t" (format "%-16s %-4s %s%s%s  %s  %s" (str/upper-case section) id title
@@ -72,7 +72,7 @@
                                       (or (age updated-at) "")))))))
 
 (defn header [{:keys [badge]}]
-  (format "bbh inbox · %d need you   1-4 pick  s send  A approve  r note  m mark read  a archive  n new  RET open  R router  g refresh" badge))
+  (format "bbh inbox · %d need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  R router  gr reload  g? help" badge))
 
 (defn preview
   "What the selected thread needs: its open ask with numbered options and the
@@ -182,7 +182,7 @@
       ;; The Inbox buffer's reload: the header, then the rows, from one read.
       "view" (let [s (sections)] (println (header s)) (println (rows s)))
       "header" (println (header (sections)))
-      "preview" (println (if (= "new" id) "New threads wait here so the list holds still while you look. Press n to show them." (preview (thread id) (client-state))))
+      "preview" (println (if (= "new" id) "New threads wait here so the list holds still while you look. Press gr to show them." (preview (thread id) (client-state))))
       "reveal" (reveal!)
       "select" (select! id)
       "clear" (with-state-lock! #(save-client-state! (-> (client-state) (update :picks dissoc id) (update :notes dissoc id) (update :versions dissoc id))))
