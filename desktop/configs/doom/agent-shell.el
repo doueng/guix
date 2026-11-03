@@ -62,7 +62,33 @@ conversation."
            (setq eng/bbh-conversation id
                  eng/bbh-usage-last nil))
          (eng/bbh-inbox-switch (eng/bbh--shell)))
-       (agent-shell-viewport-compose-send t)))))
+       (if (equal "router" (buffer-local-value 'eng/bbh-super-conversation (eng/bbh--shell)))
+           (let ((composer (current-buffer)))
+             (eng/bbh-super-say draft (lambda () (when (buffer-live-p composer)
+                                                   (with-current-buffer composer (erase-buffer))))))
+         (agent-shell-viewport-compose-send t))))))
+
+(defun eng/bbh-super-say (text &optional on-done)
+  "Give TEXT to the Router through `bbh super say!', then call ON-DONE.
+The controller numbers it, so a Worker the Router starts for it can name it,
+routes a leading thread handle to that Worker, and delivers the rest to the
+Router's mailbox, which the Router's buffer runs as a prompt.  A failure
+keeps the text and shows bbh's message."
+  (let ((err (generate-new-buffer " *bbh say err*")))
+    (make-process
+     :name "bbh-say" :noquery t :buffer nil :stderr err :connection-type 'pipe
+     :command (list (or (executable-find "bbh") (expand-file-name "~/.local/bin/bbh"))
+                    "super" "say!" (format "{:origin :emacs :text %S}" (substring-no-properties text)))
+     :sentinel (lambda (process _)
+                 (when (memq (process-status process) '(exit signal))
+                   (let ((problem (with-current-buffer err (string-trim (buffer-string)))))
+                     (kill-buffer err)
+                     (if (zerop (process-exit-status process))
+                         (when on-done (funcall on-done))
+                       (message "Router: %s"
+                                (cond ((string-empty-p problem) "bbh super say! failed")
+                                      ((string-match "^Message: +\\(.*\\)$" problem) (match-string 1 problem))
+                                      (t problem))))))))))
 
 (defun eng/bbh--conversation-file (id file)
   (expand-file-name (format "bbh/conversations/%s/%s" id file)
@@ -1228,6 +1254,37 @@ and stop the daemon serving anyone, the controller included."
   (dolist (f '(y-or-n-p yes-or-no-p read-from-minibuffer))
     (advice-add f :around #'eng/bbh-super--refuse-prompt)))
 
+(defun eng/bbh-super--router-submit (submit &rest args)
+  "Send what you typed at the Router's prompt through the controller.
+Mailbox prompts, which arrive outside a command, still SUBMIT directly."
+  (if (and this-command (not args) (equal "router" eng/bbh-super-conversation))
+      (let* ((start (process-mark (get-buffer-process (current-buffer))))
+             (text (string-trim (buffer-substring-no-properties start (point-max)))))
+        (unless (string-empty-p text)
+          (eng/bbh-super-say text (lambda ()
+                                    (with-current-buffer (eng/bbh-super--shell "router")
+                                      (delete-region (process-mark (get-buffer-process (current-buffer)))
+                                                     (point-max)))))))
+    (apply submit args)))
+
+(advice-add 'shell-maker-submit :around #'eng/bbh-super--router-submit)
+
+(defun eng/bbh-super--on-screen-p (shell)
+  "Whether SHELL, its transcript or its composer shows in some window."
+  (seq-some (lambda (b) (and (buffer-live-p b) (get-buffer-window b t)))
+            (list shell
+                  (buffer-local-value 'eng/bbh-transcript shell)
+                  (agent-shell-viewport--buffer :shell-buffer shell :existing-only t))))
+
+(defun eng/bbh-super--quiet-echo (echo &rest args)
+  "Run ECHO with ARGS unless it comes from a super session you are not looking at.
+Workers queue prompts in the background, and the echo area is shared."
+  (unless (and (bound-and-true-p eng/bbh-super-conversation)
+               (not (eng/bbh-super--on-screen-p (current-buffer))))
+    (apply echo args)))
+
+(advice-add 'agent-shell--echo :around #'eng/bbh-super--quiet-echo)
+
 (defvar-local eng/bbh-super-conversation nil
   "The conversation this shell runs for `bbh super', or nil for an ordinary session.")
 
@@ -1260,7 +1317,9 @@ and stop the daemon serving anyone, the controller included."
   (let ((kill-buffer-query-functions nil)
         (transcript (buffer-local-value 'eng/bbh-transcript shell))
         (composer (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)))
-    (dolist (buffer (list composer transcript shell))
+    ;; The shell first: its clean-up shuts the client down, so killing the
+    ;; composer after it does not ask whether to kill the shell too.
+    (dolist (buffer (list shell composer transcript))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (defun eng/bbh-super-open (conversation dir title env)
@@ -1415,6 +1474,12 @@ A failure shows bbh's message."
   (interactive)
   (eng/bbh-inbox--run '("reveal") (lambda (_) (eng/bbh-inbox-refresh))))
 
+(defun eng/bbh-inbox-router ()
+  "Show the Router's conversation, where what you type goes to the Router."
+  (interactive)
+  (eng/bbh-super-visit (buffer-name (or (eng/bbh-super--shell "router")
+                                        (user-error "The Router is not running; start it with `bbh super start-router'")))))
+
 (defun eng/bbh-inbox-open ()
   "Show the thread's Worker, and mark the thread seen."
   (interactive)
@@ -1434,8 +1499,9 @@ A failure shows bbh's message."
     (define-key map "m" #'eng/bbh-inbox-dismiss)
     (define-key map "a" #'eng/bbh-inbox-archive)
     (define-key map "n" #'eng/bbh-inbox-reveal)
-    (define-key map "g" #'eng/bbh-inbox-refresh)
+    (define-key map "g" #'eng/bbh-inbox-reveal)
     (define-key map (kbd "RET") #'eng/bbh-inbox-open)
+    (define-key map "R" #'eng/bbh-inbox-router)
     (define-key map "q" #'quit-window)
     map)
   "Keys of the Inbox, the same in every evil state.")

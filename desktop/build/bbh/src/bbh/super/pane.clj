@@ -72,7 +72,7 @@
                                       (or (age updated-at) "")))))))
 
 (defn header [{:keys [badge]}]
-  (format "bbh inbox · %d need you   1-4 pick  s send  A approve  r note  m mark read  a archive  n new  RET open  g refresh" badge))
+  (format "bbh inbox · %d need you   1-4 pick  s send  A approve  r note  m mark read  a archive  n new  RET open  R router  g refresh" badge))
 
 (defn preview
   "What the selected thread needs: its open ask with numbered options and the
@@ -176,7 +176,8 @@
   [& [verb id n & more]]
   (try
     (case verb
-      nil (emacs/attach! "(eng/bbh-inbox)")
+      ;; Opening shows the current order; only live reloads hold it still.
+      nil (do (reveal!) (emacs/attach! "(eng/bbh-inbox)"))
       "rows" (println (rows (sections)))
       ;; The Inbox buffer's reload: the header, then the rows, from one read.
       "view" (let [s (sections)] (println (header s)) (println (rows s)))

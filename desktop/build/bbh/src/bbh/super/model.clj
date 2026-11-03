@@ -30,7 +30,7 @@
   it, what each origin's Workers may do (an origin not named gets :read), and
   the capability each lock needs."
   {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30 :noise-probability 0.7
-   :origins (assoc (zipmap [:owner :herdr :phone :voice] (repeat #{:read :edit-workspace :run-checks :publish})) :watchdog #{:read})
+   :origins (assoc (zipmap [:owner :emacs :herdr :phone :voice] (repeat #{:read :edit-workspace :run-checks :publish})) :watchdog #{:read})
    :watchdog-after-minutes 10
    :lock-capabilities {"repo-push" :publish "guix-build" :run-checks}})
 
@@ -186,12 +186,14 @@
 
 (defn- brief-text
   "The first mailbox message of Worker W: its brief and how it reports."
-  [{:keys [id thread brief workflow origin capabilities]} wf-run]
+  [{:keys [id thread brief workflow origin capabilities repo]} wf-run workspace]
   (str/join "\n\n" [(format "[%s brief for %s]" thread id)
                        brief
                        (format "Requested from %s. Capabilities: %s." (some-> origin name) (str/join ", " (map name (sort capabilities))))
                        (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
-                               id thread wf-run (name workflow))]))
+                               id thread wf-run (name workflow))
+                       (format "Work only in your jj workspace %s, your current directory. %s is the main checkout: read it if you need to, but do not edit it; the person takes your revision from the workspace."
+                               workspace repo)]))
 
 (defn- worker-of
   "Worker WORKER of STATE, or a refusal when there is none or, with STATES, when
@@ -218,7 +220,7 @@
     (when-not (= :starting (:state w)) (refuse :not-starting :worker worker :state (:state w)))
     {:events [{:kind :worker-running :thread (:thread w)
                :data {:id worker :conversation conversation :wf-run wf-run :workspace workspace :buffer buffer :started-at started-at
-                      :outbox (next-id state :outbox "o") :text (brief-text w wf-run)}}]
+                      :outbox (next-id state :outbox "o") :text (brief-text w wf-run workspace)}}]
      :result worker}))
 
 (defmethod decide* :finish-worker! [state {{:keys [worker state-after reason]} :args}]
@@ -430,7 +432,7 @@
 
 (defmethod decide* :say! [state {{:keys [text origin]} :args :keys [id]}]
   (when (str/blank? text) (refuse :invalid :field :text))
-  (when-not (#{:phone :herdr :voice} origin) (refuse :invalid :field :origin))
+  (when-not (#{:phone :emacs :herdr :voice} origin) (refuse :invalid :field :origin))
   (let [;; A typed or spoken handle names the thread and is stripped from the
         ;; message; a linked resource names it and the message stays whole.
         {:keys [thread message via]} (if-let [[handle rest] (parse-handle text)]

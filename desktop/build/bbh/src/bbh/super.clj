@@ -71,10 +71,14 @@
 
 (defn workspace!
   "A jj workspace of REPO for WORKER under DIR, named <thread>-<generation>.
-  Returns its path; an existing one is reused."
+  Returns its path; an existing one is reused. A REPO that does not exist yet
+  is a new project, made with `jj git init`."
   [dir {:keys [repo thread generation]}]
   (let [name (str thread "-" generation)
         path (str (fs/path dir "workspaces" name))]
+    (when-not (fs/exists? repo)
+      (fs/create-dirs repo)
+      (jj! repo "git" "init"))
     (when-not (fs/exists? path)
       (fs/create-dirs (fs/parent path))
       (jj! repo "workspace" "add" "--name" name path))

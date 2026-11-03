@@ -781,7 +781,11 @@
             (should (member "WF_RUN=run-7" (bbh-test--environ (process-id acp))))
             (should (member "PATH" (mapcar (lambda (v) (car (split-string v "="))) (bbh-test--environ (process-id acp)))))
             (should (file-equal-p dir (file-truename (format "/proc/%d/cwd" (process-id acp))))))
-          (let ((again (eng/bbh-super-open "super-W7" dir "T7 test" nil)))
+          ;; Shown, it has a composer; replacing it must not ask about the shell.
+          (eng/bbh-super-visit name)
+          (should (agent-shell-viewport--buffer :shell-buffer shell :existing-only t))
+          (let ((again (cl-letf (((symbol-function 'y-or-n-p) (lambda (p) (error "Asked: %s" p))))
+                         (eng/bbh-super-open "super-W7" dir "T7 test" nil))))
             (should (equal "T7 test" again))
             (should-not (buffer-live-p shell))
             (should (= 1 (seq-count (lambda (b) (equal "super-W7" (buffer-local-value 'eng/bbh-super-conversation b)))
@@ -826,3 +830,13 @@
     (should-error (eng/bbh-super--refuse-prompt #'y-or-n-p "Continue? ")))
   (let ((this-command 'some-command))
     (should (equal '("a" "b") (eng/bbh-super--refuse-prompt #'list "a" "b")))))
+
+(ert-deftest bbh-super-session-off-screen-does-not-echo ()
+  (let (shown)
+    (cl-letf (((symbol-function 'message) (lambda (&rest args) (push (apply #'format args) shown))))
+      (with-temp-buffer
+        (setq-local eng/bbh-super-conversation "super-W9")
+        (agent-shell--echo "queued  %s" "brief"))
+      (with-temp-buffer
+        (agent-shell--echo "queued  %s" "mine")))
+    (should (equal '("queued  mine") shown))))

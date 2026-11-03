@@ -205,7 +205,7 @@
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
     (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
     (is (re-matches #"T3\tARCHIVED         T3   old \(came back\)    " row3))
-    (is (= "bbh inbox · 1 need you   1-4 pick  s send  A approve  r note  m mark read  a archive  n new  RET open  g refresh" (bbh.super.pane/header sections)))
+    (is (= "bbh inbox · 1 need you   1-4 pick  s send  A approve  r note  m mark read  a archive  n new  RET open  R router  g refresh" (bbh.super.pane/header sections)))
     (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
            (clojure.string/split-lines
             (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
@@ -214,6 +214,13 @@
                                     {:picks {"T1" {"a1" "yes"}} :notes {"T1" "and why"}}))))))
 
 ;; ---- Workers ---------------------------------------------------------------
+
+(deftest a-worker-on-a-missing-repository-starts-a-new-project
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-new"}))
+        repo (str (fs/path dir "projects" "game"))
+        path (super/workspace! dir {:repo repo :thread "T1" :generation 1})]
+    (is (fs/exists? (fs/path repo ".jj")))
+    (is (fs/exists? (fs/path path ".jj")))))
 
 (defn- jj-repo
   "A temporary jj repository with one committed file."
@@ -331,7 +338,9 @@
         (let [text (slurp (str (first (fs/glob root "mailbox/*.json"))))]
           (is (re-find #"\[T1 brief for W1\]" text))
           (is (re-find #"Make Alt\+W close windows everywhere" text))
-          (is (re-find #"run-W1" text)))
+          (is (re-find #"run-W1" text))
+          (is (clojure.string/includes? text (str "Work only in your jj workspace " (fs/path dir "workspaces" "T1-1"))) "it says where to work")
+          (is (clojure.string/includes? text (str repo " is the main checkout"))))
         (doseq [f (fs/glob root "mailbox/*.json")] (fs/delete f))
         (is (wait-for #(= [:acked] (map :state (vals (:outbox @(:state c)))))))
         (is (= {} (:replies @(:state c))) "a brief is not a reply")

@@ -249,7 +249,7 @@ Both surfaces show the same threads, sections and handles. Emacs is the desk, be
 The super-agent lives in one Emacs daemon, `bbh-super`, which the `bbh-emacs` Home service runs. You only see it through terminal frames (`emacsclient -s bbh-super -t`), usually in a Herdr pane. The controller talks to the daemon with `emacsclient --eval`. If the daemon is down, starting a Worker fails with an error that says so. There is no fallback to Herdr panes.
 
 - **Inbox buffer, `*bbh inbox*`.** `bbh inbox` (`prefix+t` in Herdr) opens a terminal frame on it. It shows a live list of threads grouped by section, with the badge in the header line. When the buffer is created it opens a local port and registers it with the controller. The controller connects to that port whenever an event changes a thread, so the list reloads without polling. The order holds while you look, and new activity waits behind an "N new" line. A preview window below the list shows the thread under the cursor: the open ask with numbered options, or the Worker's latest state when nothing is open.
-- **Router buffer, `Router`.** The Router conversation (`bbh acp --id router` in agent-shell, sandboxed by `BBH_ROLE=router`). `bbh super start-router` opens it and the Inbox. Typing here talks to the Router.
+- **Router buffer, `Router`.** The Router conversation (`bbh acp --id router` in agent-shell, sandboxed by `BBH_ROLE=router`). `bbh super start-router` opens it and the Inbox. What you send from its composer or type at its prompt goes through `bbh super say!` with origin `:emacs`, so it gets an `oN` id the Router can start Workers for, and a leading handle ("T12 ...") steers that thread instead.
 
 Keys in the Inbox buffer:
 
@@ -264,7 +264,8 @@ Keys in the Inbox buffer:
 | m | Mark read, which closes the asks and tells the Worker not to wait. |
 | a | Archive. Open asks become dismissed, which the Worker is told. |
 | n | Show the new threads waiting behind the "N new" line. |
-| g | Reload. |
+| R | Open the Router. |
+| g | Reload in the current order, new threads included. Opening the Inbox does the same. |
 
 Each Worker gets one buffer, named after its thread (`T12 keybindings`). The buffer runs `bbh acp --id super-W<n>` in the Worker's jj workspace with its token and `WF_RUN`. It opens in the background and never takes focus. A restarted Worker replaces its old buffer.
 

@@ -468,7 +468,12 @@ You are the Router of bbh super: one long-lived conversation that reads what the
 (defn super-thread "Thread ID with its asks, replies and Workers." [id] (super-call! :thread {:id id}))
 (defn super-thread! "A new thread titled TITLE; returns its handle." [title] (super-call! :thread! {:title title}))
 (defn super-link! "Link RESOURCE (such as \"repo:engstrand/guix\") to thread ID." [id resource] (super-call! :link! {:thread id :resource resource}))
-(defn super-start-worker! "Start a Worker: {:thread :workflow :brief :repo :locks :check}. Returns its id and state." [spec] (super-call! :start-worker! spec))
+(defn super-start-worker!
+  "Start a Worker: {:thread :workflow :brief :repo :check :locks :for}. :for is
+  the id that opens the message you act on, such as \"o12\"; the Worker gets the
+  capabilities of where that message came from. A :repo that does not exist is
+  made as a new jj repository. Returns its id and state."
+  [spec] (super-call! :start-worker! spec))
 
 (defn pwd "The working directory." [] (str (fs/cwd)))
 
@@ -516,11 +521,15 @@ You are the Router of bbh super: one long-lived conversation that reads what the
    (fs/create-dirs shot-dir)
    (let [out (str shot-dir "/" (or name (str "shot-" w "x" h "-" (System/currentTimeMillis))) ".png")
          _ (fs/delete-if-exists out)
+         ;; One profile per call: Chrome refuses a profile another instance holds,
+         ;; and several sessions take screenshots at once.
+         profile (str "/tmp/bbh-chrome-" (random-uuid))
          r (p/shell {:out :string :err :string :continue true :timeout 60000}
                     "flatpak" "run" (str "--filesystem=" shot-dir) "com.google.Chrome"
                     "--headless=new" "--disable-gpu" "--no-first-run" "--hide-scrollbars"
-                    "--user-data-dir=/tmp/bbh-chrome" (str "--virtual-time-budget=" wait)
+                    (str "--user-data-dir=" profile) (str "--virtual-time-budget=" wait)
                     (str "--screenshot=" out) (str "--window-size=" w "," h) url)]
+     (fs/delete-tree profile)
      (if (fs/exists? out) out (throw (ex-info "screenshot failed" {:err (:err r)}))))))
 
 (defn look
