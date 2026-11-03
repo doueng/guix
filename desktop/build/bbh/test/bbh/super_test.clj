@@ -161,6 +161,14 @@
         (call dir {:token token :command :milestone! :args {:text "pushed 3 commits"}})
         (is (= [:archived true] (section-of)))))))
 
+(deftest threads-list-in-number-order
+  (with-controller
+    (fn [_ dir _]
+      (dotimes [n 10] (call dir {:command :thread! :args {:title (str "t" (inc n))}}))
+      (is (= "T10" (:id (last (:ok (call dir {:command :threads}))))))
+      (is (= (map #(str "T" %) (range 1 11))
+             (map :id (mapcat :threads (:sections (:ok (call dir {:command :sections}))))))))))
+
 (deftest sections-derive-from-a-fixed-event-list-as-the-table-says
   (let [base [{:seq 1 :at "2026-11-02T10:00:00Z" :kind :thread-created :thread "T1" :data {:id "T1" :title "t"}}
               {:seq 2 :at "2026-11-02T10:00:01Z" :kind :worker-attached :thread "T1" :data {:id "W1" :conversation "c" :generation 1}}]

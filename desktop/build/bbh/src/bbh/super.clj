@@ -178,7 +178,7 @@
   (let [st @state]
     (case command
       :health (into {} (map (fn [[id w]] [id (cond-> (:health w) (#{:done :cancelled} (:state w)) (assoc :classification :done) (= :failed (:state w)) (assoc :classification :needs-human))]) (:workers st)))
-      :threads (vec (sort-by :id (vals (:threads st))))
+      :threads (vec (sort-by (comp model/id-order :id) (vals (:threads st))))
       :thread (let [{:keys [id]} args
                     t (get-in st [:threads id])
                     of (fn [kind order] (vec (sort-by order (keep #(when (= id (:thread %)) (model/linked st kind (:id %))) (vals (kind st))))))]
@@ -360,7 +360,7 @@
                             :workflow wf :classification classification :problem problem :since since
                             :oldest-unacked (some->> (vals (:outbox @state))
                                                     (filter #(and (= (:thread w) (:thread %)) (#{:pending :sent} (:state %))))
-                                                    (sort-by #(parse-long (subs (:id %) 1))) first :id)
+                                                    (sort-by (comp model/id-order :id)) first :id)
                             :oldest-stopped-ask (some->> (vals (:asks @state)) (filter #(and (= (:thread w) (:thread %)) (= :open (:state %)) (:stopped %))) (sort-by :seq) first :seq)
                             :jobs (mapv #(select-keys % [:id :state :pid :start]) jobs)}]]
         (run! c :controller {:id (new-id) :command :health! :args {:worker (:id w) :health health :at now}})
@@ -416,14 +416,14 @@
   fixed id, so a pass repeated after a crash changes nothing twice."
   [{:keys [state] :as c}]
   (let [router (get-in @state [:router :router :conversation])
-        rows (sort-by #(parse-long (subs (:id %) 1)) (vals (:outbox @state)))
+        rows (sort-by (comp model/id-order :id) (vals (:outbox @state)))
         for-router? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
         _ (doseq [o (filter for-router? rows) :when (and (:triage c) (not= :summary (:delivery o)) (nil? (:triage o)))]
             (let [verdict (try ((:triage c) (str/replace (:text o) #"^\[[^\]]*\] " ""))
                                (catch Exception _ {:failed true}))]
               (run! c :controller {:id (str "triaged-" (:id o)) :command :router-triaged!
                                    :args (assoc verdict :outbox (:id o) :threshold (:noise-probability (policy c)))})))
-        batch (filter for-router? (sort-by #(parse-long (subs (:id %) 1)) (vals (:outbox @state))))
+        batch (filter for-router? (sort-by (comp model/id-order :id) (vals (:outbox @state))))
         line (fn [{:keys [id text delivery] {:keys [choice probability]} :triage}]
                (str (when-not (= :summary delivery) (str id " "))
                     (when choice (format "(Jev: %s %.2f) " (name choice) probability))

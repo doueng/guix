@@ -123,10 +123,12 @@
           (>= (count (remove #(= id (:id %)) (active-workers state))) (:workers policy)) (str (:workers policy) " Workers already running")
           :else nil)))
 
+(defn id-order "The order of ids of one kind: T12 → 12, so T9 comes before T10." [id] (parse-long (subs id 1)))
+
 (defn next-queued
   "The oldest queued Worker that may start now under POLICY, or nil."
   [state policy]
-  (->> (vals (:workers state)) (filter #(= :queued (:state %))) (sort-by :id)
+  (->> (vals (:workers state)) (filter #(= :queued (:state %))) (sort-by (comp id-order :id))
        (remove #(blocked-by state policy %)) first))
 
 (defn- request-origin
@@ -639,7 +641,7 @@
   whether an archived one came back. CURSORS maps thread id to the seq the
   client last saw."
   [state cursors]
-  (let [rows (for [t (sort-by :id (vals (:threads state)))
+  (let [rows (for [t (sort-by (comp id-order :id) (vals (:threads state)))
                    :let [s (section state t (get cursors (:id t)))
                          ask (ask-line state (:id t))]]
                (assoc t :section s :ask ask
