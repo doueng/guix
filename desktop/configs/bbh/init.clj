@@ -20,8 +20,8 @@
 `fs`, `p` and `str` are aliased.
 
 - (sh \"cmd string\") returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. (sh \"cmd\" \"arg\" ...) runs one argv, each word quoted.
-- (read-lines path) or (read-lines path start count) prints 1-based numbered lines and returns nil. Use slurp when code needs the text.
-- (edit! path old new) replaces exactly one occurrence, else throws.
+- (read-lines path) or (read-lines path start count) prints a line-count header and 1-based numbered lines (200 by default) and returns nil. It refuses binary files. Use slurp when code needs the text.
+- (edit! path old new) replaces exactly one occurrence, or every one with `:all true`, else throws. It tolerates whitespace and indentation drift in old, keeps BOM and CRLF, and returns a summary with a diff.
 - (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits for it to finish, up to 10 min or :ms, and returns {:done? :exit :tail :log}. Waiting does not count against the evaluation's budget, so one call covers a long command. p/shell, http and Thread/sleep do count, so use a job for anything that may approach the deadline. Also job-status and jobs.
 - (shot url) saves a headless Chrome screenshot and returns its path. (look question & paths) has a Claude delegate describe images, since tool results carry text only. (delegate brief) runs a fresh agent, for an independent check.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
@@ -324,50 +324,173 @@ You are the Router of bbh super: one long-lived conversation that reads what the
             [bbh.env :refer [jev-classify-task delegate]]
             [clojure.string :as str]))
 
+(def ^:private binary-extensions
+  #{"zip" "tar" "gz" "tgz" "bz2" "xz" "7z" "rar" "exe" "dll" "so" "dylib" "class" "jar" "war" "wasm"
+    "doc" "docx" "xls" "xlsx" "ppt" "pptx" "odt" "ods" "odp" "pdf" "bin" "dat" "obj" "o" "a" "lib"
+    "pyc" "pyo" "png" "jpg" "jpeg" "gif" "webp" "bmp" "ico" "mp3" "mp4" "mov" "avi" "ogg" "wav" "flac"})
+
+(defn- binary? [path ^bytes bs]
+  (let [sample (take 4096 bs)
+        control (count (filter #(or (< -1 % 9) (< 13 % 32)) sample))]
+    (or (contains? binary-extensions (some-> (re-find #"\.([^./]+)$" (str/lower-case (str path))) second))
+        (some zero? sample)
+        (and (seq sample) (> (quot (* 100 control) (count sample)) 30)))))
+
+(defn- text-lines
+  "Lines of S as Rust's str::lines splits them: on LF or CRLF, with no empty line after a final newline."
+  [s]
+  (let [ls (str/split s #"\r?\n" -1)]
+    (if (= "" (peek ls)) (pop ls) ls)))
+
+(defn- distance [a b]
+  (peek (reduce (fn [prev [i ca]]
+                  (reduce (fn [row [j cb]]
+                            (conj row (min (inc (peek row)) (inc (prev (inc j)))
+                                           (+ (prev j) (if (= ca cb) 0 1)))))
+                          [(inc i)] (map-indexed vector b)))
+                (vec (range (inc (count b)))) (map-indexed vector a))))
+
+(defn- nearby-path [path]
+  (let [f (fs/path path) dir (or (fs/parent f) (fs/path ".")) target (str (fs/file-name f))]
+    (when (fs/directory? dir)
+      (when-let [[d near] (first (sort (for [c (fs/list-dir dir) :let [n (str (fs/file-name c))]]
+                                         [(distance (str/lower-case target) (str/lower-case n)) n])))]
+        (when (and (not= near target) (<= d (max 2 (quot (count target) 3))))
+          (str (if (fs/parent f) (fs/path (fs/parent f) near) near)))))))
+
+(defn- read-bytes [path]
+  (when-not (fs/exists? path)
+    (throw (ex-info (str "File not found: " path (some->> (nearby-path path) (format ". Did you mean `%s`?"))) {})))
+  (fs/read-all-bytes path))
+
 (defn read-lines
-  "Print PATH with line numbers, N lines from line START."
+  "Print N lines of PATH from line START, numbered, under a header with the file's line count."
   ([path] (read-lines path 1 200))
   ([path start n]
-   (let [lines (fs/read-all-lines path)]
-     (doseq [[i line] (->> lines (map-indexed vector) (drop (dec start)) (take n))]
-       (println (format "%5d  %s" (inc i) line)))
-     (println (format "[%d of %d lines]" (min n (max 0 (- (count lines) (dec start)))) (count lines))))))
+   (let [bs (read-bytes path)
+         _ (when (binary? path bs) (throw (ex-info (str "Cannot read binary file: " path) {})))
+         lines (text-lines (str/replace-first (String. ^bytes bs "UTF-8") #"^\uFEFF" ""))
+         total (count lines)
+         offset (dec (max 1 start))
+         end (min (+ offset n) total)
+         width (count (str total))
+         clip #(if (> (count %) 16384) (str (subs % 0 16384) " …[line truncated]") %)]
+     (println
+      (cond (zero? total) "(empty file)"
+            (>= offset total) (format "(%d lines total; offset %d is past end of file — nothing to show)" total (inc offset))
+            :else (str (format "(%d lines total, showing lines %d-%d)\n\n" total (inc offset) end)
+                       (str/join "\n" (for [i (range offset end)]
+                                         (format (str "%" width "d: %s") (inc i) (clip (lines i)))))))))))
 
-(defn- closest-line
-  "Where TEXT has the line most like OLD's first non-blank line, as a hint for a failed edit!, or nil."
-  [text old]
-  (let [first-line (or (first (remove str/blank? (str/split-lines old))) "")
-        probe (str/trim first-line)
-        words #(set (re-seq #"[\w.-]+" %))
-        want (words probe)
-        lines (map-indexed vector (str/split-lines text))]
-    (when (seq want)
-      (if-let [[i line] (first (filter #(= probe (str/trim (second %))) lines))]
-        (if (str/includes? line first-line)
-          (str "OLD's first line is line " (inc i) ", so a later line of OLD differs from the file.")
-          (str "Line " (inc i) " matches OLD's first line except for whitespace: " (pr-str line)))
-        (let [[score i line] (->> lines
-                                  (map (fn [[i l]] [(/ (count (filter want (words l))) (count want)) i l]))
-                                  (apply max-key first))]
-          (when (>= score 1/2)
-            (str "Closest line " (inc i) ": " (pr-str (str/trim line)))))))))
+(defn- decode-for-edit
+  "PATH's text with any BOM removed and CRLF turned into LF, plus what restores both on write."
+  [path]
+  (let [bs (read-bytes path)
+        text (try (str (.decode (.newDecoder java.nio.charset.StandardCharsets/UTF_8) (java.nio.ByteBuffer/wrap bs)))
+                  (catch java.nio.charset.CharacterCodingException _
+                    (throw (ex-info "file is not valid UTF-8; refusing to edit so its other bytes are not corrupted. Use sh with sed or perl." {}))))
+        bom? (str/starts-with? text "\uFEFF")
+        text (cond-> text bom? (subs 1))
+        crlf (count (re-seq #"\r\n" text))
+        lf (- (count (re-seq #"\n" text)) crlf)]
+    {:content (str/replace text "\r\n" "\n") :bom? bom? :crlf crlf :lf lf}))
+
+(defn- reencode [{:keys [bom? crlf lf]} content]
+  (let [crlf? (and (pos? crlf) (>= crlf lf))]
+    {:text (str (when bom? "\uFEFF") (cond-> content crlf? (str/replace "\n" "\r\n")))
+     :note (when (and (pos? crlf) (pos? lf))
+             (format "note: file had mixed line endings (%d CRLF, %d LF); normalized to %s." crlf lf (if crlf? "CRLF" "LF")))}))
+
+(defn- block-matches
+  "[start end) character ranges of the blocks of CONTENT's lines, sized SIZES, that SAME? accepts."
+  [content sizes same?]
+  (let [lines (str/split content #"\n" -1)
+        starts (vec (reductions + 0 (map #(inc (count %)) lines)))]
+    (for [i (range (count lines))
+          :let [size (first (filter #(and (<= (+ i %) (count lines)) (same? (subvec lines i (+ i %)))) sizes))]
+          :when size]
+      [(starts i) (+ (starts i) (dec (- (starts (+ i size)) (starts i))))])))
+
+(defn- strip-min-indent [ls]
+  (let [indent (or (some->> (remove str/blank? ls) seq (map #(count (re-find #"^\s*" %))) (apply min)) 0)]
+    (mapv #(if (str/blank? %) % (subs % indent)) ls)))
+
+(defn- find-matches
+  "Ranges where OLD occurs in CONTENT and the fallback that found them, trying exact, line-trimmed,
+  whitespace-normalized and indentation-flexible matching in turn."
+  [content old]
+  (let [olds (str/split old #"\n" -1)
+        n (count olds)
+        squash #(str/trim (str/replace (str/join "\n" %) #"\s+" " "))]
+    (or (when-let [hits (seq (loop [from 0 acc []]
+                               (if-let [i (str/index-of content old from)]
+                                 (recur (+ i (count old)) (conj acc [i (+ i (count old))]))
+                                 acc)))]
+          [hits nil])
+        (some (fn [[label sizes same?]]
+                (when-let [hits (seq (block-matches content sizes same?))] [hits label]))
+              [["line-trimmed" [n] #(= (map str/trim %) (map str/trim olds))]
+               ["whitespace-normalized" (range n (+ n 6)) (let [want (squash olds)] #(and (seq want) (= want (squash %))))]
+               ["indentation-flexible" [n] #(= (strip-min-indent %) (strip-min-indent olds))]]))))
+
+(defn- disjoint [ranges]
+  (reduce (fn [kept [s e]] (if (and (seq kept) (< s (second (peek kept)))) kept (conj kept [s e])))
+          [] (sort ranges)))
+
+(defn- line-count [s] (count (text-lines s)))
+
+(defn- show-diff [path content pos old new]
+  (let [lines (text-lines content)
+        at (count (filter #{\newline} (subs content 0 pos)))
+        from (max 0 (- at 3))
+        after (min (+ at (line-count old)) (count lines))
+        until (min (+ after 3) (count lines))
+        ctx (+ (- at from) (- until after))]
+    (str "\n--- a/" path "\n+++ b/" path "\n"
+         (format "@@ -%d,%d +%d,%d @@\n" (inc from) (+ (line-count old) ctx) (inc from) (+ (line-count new) ctx))
+         (str/join (concat (map #(str " " % "\n") (subvec lines from at))
+                           (map #(str "-" % "\n") (text-lines old))
+                           (map #(str "+" % "\n") (text-lines new))
+                           (map #(str " " % "\n") (subvec lines after until)))))))
 
 (defn edit!
-  "Replace the single occurrence of OLD with NEW in PATH."
-  [path old new]
-  (let [text (slurp path)
-        starts (loop [from 0 acc []]
-                 (let [i (str/index-of text old from)]
-                   (if (and i (seq old)) (recur (+ i (count old)) (conj acc i)) acc)))
-        line-of #(inc (count (filter #{\newline} (subs text 0 %))))]
-    (when (not= 1 (count starts))
-      (throw (ex-info (str "Expected one match in " path ", found " (count starts)
-                           (if (seq starts)
-                             (str " at lines " (str/join ", " (map line-of starts)) ". Include more context in OLD.")
-                             (some->> (closest-line text old) (str ". "))))
-                      {})))
-    (spit path (str/replace-first text old new))
-    :ok))
+  "Replace OLD with NEW in PATH and return a summary with a diff. OLD must match once, or pass :all true.
+  Whitespace and indentation drift in OLD is tolerated, and the summary says when it was."
+  [path old new & {:keys [all]}]
+  (when (empty? old) (throw (ex-info "OLD must not be empty. Provide the exact text to replace." {})))
+  (let [{:keys [content] :as src} (decode-for-edit path)
+        old (str/replace old "\r\n" "\n")
+        new (str/replace new "\r\n" "\n")
+        [found fallback] (find-matches content old)
+        ranges (disjoint found)
+        line-of #(inc (count (filter #{\newline} (subs content 0 %))))]
+    (when (empty? ranges)
+      (throw (ex-info (str "OLD not found in '" path "'.\nEnsure the exact text matches including whitespace and line endings. "
+                           "Tried exact match, line-trimmed match, whitespace-normalized match, and indentation-flexible match.") {})))
+    (when (and (next ranges) (not all))
+      (throw (ex-info (str "OLD matched " (count ranges) " times in " path ":\n"
+                           (str/join "\n" (for [[s] (take 20 ranges)]
+                                              (let [ln (line-of s)]
+                                                (str "  Line " ln ": " (str/join (take 100 (nth (str/split content #"\n" -1) (dec ln))))))))
+                           (when (> (count ranges) 20)
+                             (let [more (- (count ranges) 20)] (str "\n  ... and " more " more match" (when (> more 1) "es"))))
+                           "\n\nPass :all true to replace every occurrence, or include more surrounding context in OLD.") {})))
+    (let [ranges (if all ranges [(first ranges)])
+          result (reduce (fn [s [b e]] (str (subs s 0 b) new (subs s e))) content (reverse ranges))
+          {:keys [text note]} (reencode src result)
+          tmp (fs/create-temp-file {:dir (fs/parent (fs/absolutize path)) :prefix ".edit-"})
+          [b e] (first ranges)
+          matched (subs content b e)
+          delta (reduce + (for [[b e] ranges] (- (line-count new) (line-count (subs content b e)))))]
+      (spit (str tmp) text)
+      (fs/set-posix-file-permissions tmp (fs/posix-file-permissions path))
+      (fs/move tmp path {:replace-existing true :atomic-move true})
+      (str "Applied edit" (when all (str " (" (count ranges) " replacements)"))
+           (when fallback (str " (matched via " fallback " fallback — exact text not found; whitespace/indent tolerated)"))
+           (when note (str "\n" note))
+           (when-not (zero? delta) (format " (%+d lines)" delta))
+           (when (and (<= (line-count matched) 200) (<= (line-count new) 200))
+             (show-diff path content b matched new))))))
 
 ;; Background jobs. State lives in files under the conversation's jobs directory, so a job and its result
 ;; survive the REPL restart that a deadline causes.

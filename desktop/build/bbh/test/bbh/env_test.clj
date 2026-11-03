@@ -31,15 +31,21 @@
                         10000)))
       (let [printed (repl/eval! conn "(read-lines \"sample.txt\" 2 1)" 10000)]
         (is (= "nil" (:value printed)))
-        (is (= "    2  second\n[1 of 2 lines]\n" (:out printed))))
-      (is (= ["Expected one match in sample.txt, found 0. Line 2 matches OLD's first line except for whitespace: \"second\""
-              "Expected one match in sample.txt, found 0. Closest line 1: \"first\""
-              "Expected one match in sample.txt, found 2 at lines 1, 2. Include more context in OLD."]
+        (is (= "(2 lines total, showing lines 2-2)\n\n2: second\n" (:out printed))))
+      (is (= ["File not found: sample.tx. Did you mean `sample.txt`?" "Cannot read binary file: image.png"]
+             (:value (repl/call conn "(vec (for [f [\"sample.tx\" \"image.png\"]]
+                                           (try (spit \"image.png\" \"x\") (read-lines f) (catch Exception e (ex-message e)))))" 10000))))
+      (is (= ["OLD not found in 'sample.txt'.\nEnsure the exact text matches including whitespace and line endings. Tried exact match, line-trimmed match, whitespace-normalized match, and indentation-flexible match."
+              "OLD matched 2 times in sample.txt:\n  Line 1: first\n  Line 2: second\n\nPass :all true to replace every occurrence, or include more surrounding context in OLD."]
              (:value (repl/call conn "(do (spit \"sample.txt\" \"first\\nsecond\\n\")
-                                          (vec (for [[old] [[\"  second\"] [\"first word\"] [\"s\"]]]
+                                          (vec (for [old [\"third\" \"s\"]]
                                                  (try (edit! \"sample.txt\" old \"x\") (catch Exception e (ex-message e))))))" 10000))))
-      (is (= {:value [:ok "first\nchanged\n"]}
-             (repl/call conn "[(edit! \"sample.txt\" \"second\" \"changed\") (slurp \"sample.txt\")]" 10000)))
+      (is (= {:value ["Applied edit (matched via line-trimmed fallback — exact text not found; whitespace/indent tolerated) (+1 lines)\n--- a/sample.txt\n+++ b/sample.txt\n@@ -1,2 +1,3 @@\n first\n-second\n+changed\n+more\n"
+                      "\ufefffirst\r\nchanged\r\nmore\r\n"]}
+             (repl/call conn "(do (spit \"sample.txt\" \"\\ufefffirst\\r\\nsecond\\r\\n\")
+                                 [(edit! \"sample.txt\" \"  second\" \"changed\\nmore\") (slurp \"sample.txt\")])" 10000)))
+      (is (= {:value ["Applied edit (2 replacements)\n--- a/sample.txt\n+++ b/sample.txt\n@@ -1,2 +1,2 @@\n-a\n+b\n a\n" "b\nb\n"]}
+             (repl/call conn "(do (spit \"sample.txt\" \"a\\na\\n\") [(edit! \"sample.txt\" \"a\" \"b\" :all true) (slurp \"sample.txt\")])" 10000)))
       (finally (repl/kill! conn)))))
 
 (deftest instructions-load-from-the-repository-root-down-to-the-working-directory
