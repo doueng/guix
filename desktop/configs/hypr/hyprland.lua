@@ -61,27 +61,31 @@ hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
 local dictating = false
 local agent_dictating = false
 local suppress_plain_dictation = false
+-- Each hold is one take.  The press's process records it and the release only
+-- asks that process to stop, so a quick tap whose release runs first cannot
+-- leave Hex recording.
+local agent_take = nil
+local agent_takes = 0
 hl.bind("SUPER + SHIFT + M", function()
   if not dictating and not agent_dictating then
     agent_dictating = true
     suppress_plain_dictation = true
-    hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/bbh say start"))
+    agent_takes = agent_takes + 1
+    agent_take = os.time() .. "-" .. agent_takes
+    hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/bbh say start " .. agent_take))
   end
 end)
 local function stop_agent_dictation()
   if agent_dictating then
     agent_dictating = false
-    hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/bbh say stop"))
+    hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/bbh say stop " .. agent_take))
   end
 end
-hl.bind("SUPER + SHIFT + M", function()
-  stop_agent_dictation()
-  suppress_plain_dictation = false
-end, { release = true })
 local function release_agent_cmd()
   stop_agent_dictation()
   suppress_plain_dictation = false
 end
+hl.bind("SUPER + SHIFT + M", release_agent_cmd, { release = true })
 hl.bind("SUPER + SHIFT + code:133", release_agent_cmd, { release = true, non_consuming = true })
 hl.bind("SUPER + SHIFT + code:134", release_agent_cmd, { release = true, non_consuming = true })
 hl.bind("SUPER + SHIFT + code:50", stop_agent_dictation, { release = true, non_consuming = true })
@@ -99,14 +103,11 @@ local function stop_dictation()
     hl.dispatch(hl.dsp.exec_cmd("hex dictation stop"))
   end
 end
-hl.bind("SUPER + M", function()
-  stop_dictation()
-  suppress_plain_dictation = false
-end, { release = true })
 local function release_cmd()
   stop_dictation()
   suppress_plain_dictation = false
 end
+hl.bind("SUPER + M", release_cmd, { release = true })
 hl.bind("SUPER + code:133", release_cmd, { release = true, non_consuming = true })
 hl.bind("SUPER + code:134", release_cmd, { release = true, non_consuming = true })
 -- Label every visible window, Herdr pane and editor window, then focus the typed one.

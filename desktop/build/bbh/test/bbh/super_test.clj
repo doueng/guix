@@ -205,7 +205,7 @@
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
     (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
     (is (re-matches #"T3\tARCHIVED         T3   old \(came back\)    " row3))
-    (is (= "bbh inbox · 1 need you   1-4 pick  s send  A approve  r note  m mark read  a archive  n new" (bbh.super.pane/header sections)))
+    (is (= "bbh inbox · 1 need you   1-4 pick  s send  A approve  r note  m mark read  a archive  n new  RET open  g refresh" (bbh.super.pane/header sections)))
     (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
            (clojure.string/split-lines
             (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
@@ -226,7 +226,7 @@
     dir))
 
 (defn- with-workers
-  "A controller whose pane and wf start are recorded instead of run, on a
+  "A controller whose Emacs buffer and wf start are recorded instead of run, on a
   temporary jj repo, with a policy of two Workers. Calls F with the controller,
   its dir, the repo and the atom of launches."
   [f]
@@ -237,7 +237,7 @@
         c (super/start! {:dir dir :conversations conversations :scan-ms 10
                          :policy {:workers 2 :locks ["guix-build"] :never-granted ["guix-system"]}
                          :launch {:wf-start! (fn [workspace w] (str "run-" (:id w)))
-                                  :pane! (fn [spec] (swap! launches conj spec) (str "wC:p" (count @launches)))}})]
+                                  :open! (fn [spec] (swap! launches conj spec) (str "wC:p" (count @launches)))}})]
     (try (f c dir repo launches)
          (finally (super/stop! c)))))
 
@@ -263,7 +263,7 @@
         (is (= #{"default" "T1-1" "T2-1"}
                (set (map #(first (clojure.string/split % #":")) (clojure.string/split-lines (:out (babashka.process/shell {:dir repo :out :string} "jj" "workspace" "list")))))))
         (is (= ["T1 first" "T2 second"] (map #(str (:thread %) " " (:title %)) @launches)))
-        (is (every? #(re-matches #"[0-9a-f]{48}" (:token %)) @launches) "each pane gets its Worker's token")
+        (is (every? #(re-matches #"[0-9a-f]{48}" (:token %)) @launches) "each buffer gets its Worker's token")
         (is (= "super-W1" (:conversation (first @launches))))
         (is (fs/exists? (fs/path (:conversations c) "super-W1")))
         (let [t (:ok (call dir {:command :thread :args {:id "T1"}}))]
@@ -292,13 +292,13 @@
 (deftest a-lock-holder-blocks-a-second-worker-until-it-finishes
   (with-workers
     (fn [c dir repo launches]
-      (doseq [t ["a" "b"]] (call dir {:command :thread! :args {:title t}}))
+      (doseq [t ["a" "b" "c"]] (call dir {:command :thread! :args {:title t}}))
       (is (= :working (:state (:ok (start-worker dir "T1" :repo repo :locks ["guix-build"])))))
       (is (= {"guix-build" "W1"} (:locks @(:state c))))
       (let [w2 (:ok (start-worker dir "T2" :repo repo :locks ["guix-build"]))]
         (is (= [:queued "guix-build held by W1"] [(:state w2) (:reason w2)]))
-        (is (= :never-granted (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :change :brief "x" :repo repo :check "true" :locks ["guix-system"]}}))))
-        (is (= :unknown-lock (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :change :brief "x" :repo repo :check "true" :locks ["repo-push"]}}))))
+        (is (= :never-granted (:error (call dir {:command :start-worker! :args {:thread "T3" :workflow :change :brief "x" :repo repo :check "true" :locks ["guix-system"]}}))))
+        (is (= :unknown-lock (:error (call dir {:command :start-worker! :args {:thread "T3" :workflow :change :brief "x" :repo repo :check "true" :locks ["repo-push"]}}))))
         (call dir {:command :finish-worker! :args {:worker "W1" :state-after :failed :reason "REPL died"}})
         (is (= {"guix-build" "W2"} (:locks @(:state c))))
         (is (= :working (:state (get-in @(:state c) [:workers "W2"]))))
@@ -622,12 +622,6 @@
               (is (= {:to :router} (voice/submit! "investigate my build")))
               (is (= :voice (:origin (:data (last (filter #(= :router-queued (:kind %)) (store/events (:db c)))))))))))))))
 
-(deftest only-your-cursor-moves-select-a-thread-for-voice
-  (let [binds (->> (#'pane/fzf-args) (partition 2 1) (keep (fn [[k v]] (when (= "--bind" k) v))))]
-    (is (not-any? #(clojure.string/starts-with? % "focus:") binds))
-    (doseq [[k move] {"j" "down" "k" "up" "down" "down" "up" "up"}]
-      (is (some #{(str k ":" move "+execute-silent(bbh inbox select {1})")} binds) k))))
-
 (deftest hex-stop-does-not-paste-or-route-silence
   (let [calls (atom [])]
     (with-redefs [voice/hex! (fn [& args] (swap! calls conj args) {:exit 4 :out ""})]
@@ -805,7 +799,7 @@
         repo (jj-repo)
         c (super/start! {:dir dir :conversations conversations :scan-ms 10
                          :policy {:origins {:herdr #{:read :edit-workspace :run-checks :publish} :phone #{:read :run-checks}}}
-                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :pane! (fn [_] "wC:p1")}})]
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :open! (fn [_] "wC:p1")}})]
     (try
       (let [router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
             start (fn [thread for & {:as more}]
@@ -832,7 +826,7 @@
         evidence (fs/path wf-root "run-W1" "evidence")
         repo (jj-repo)
         c (super/start! {:dir dir :conversations conversations :scan-ms 10 :wf-root wf-root
-                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :pane! (fn [_] "wC:p1")}})]
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :open! (fn [_] "wC:p1")}})]
     (try
       (fs/create-dirs evidence)
       (spit (str (fs/path evidence "verify.md")) "checks pass")
@@ -906,7 +900,7 @@
         launches (atom [])
         c (super/start! {:dir dir :conversations conversations :scan-ms 10 :restart-grace-ms 3600000
                          :policy {:watchdog-after-minutes 0}
-                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :pane! (fn [spec] (swap! launches conj spec) "wC:p1")}})]
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :open! (fn [spec] (swap! launches conj spec) "wC:p1")}})]
     (try
       (call dir {:command :thread! :args {:title "Alt+W"}})
       (start-worker dir "T1" :repo repo :workflow :investigation)
@@ -922,3 +916,250 @@
         (is (clojure.string/includes? (:brief w) "Its wf run run-W1 is missing, so it cannot be restarted."))
         (is (= 2 (count @launches)) "W1 and its Watchdog, each launched once across passes"))
       (finally (super/stop! c)))))
+
+
+;; ---- review regressions: the pure state machine -------------------------
+
+(defn- run-commands
+  "Commit each [principal command] in turn on an in-memory store. Returns the
+  db, the final state and each result, a refusal as {:error kw}."
+  [steps]
+  (let [db (store/open nil)]
+    (reduce (fn [{:keys [state] :as acc} [principal cmd]]
+              (let [r (try (store/commit! db state principal cmd)
+                           (catch clojure.lang.ExceptionInfo e {:state state :result {:error (:error (ex-data e))}}))]
+                (-> acc (assoc :state (:state r)) (update :results conj (:result r)))))
+            {:db db :state (store/load db) :results []}
+            steps)))
+
+(defn- start-cmd [id thread & {:as args}]
+  [:owner {:id id :command :start-worker! :token-hash (str "h-" id) :requires []
+           :policy {:workers 2 :locks ["guix-build"]}
+           :args (merge {:thread thread :workflow :change :brief "b" :repo "/r"} args)}])
+
+(deftest a-released-lock-row-is-deleted-so-a-restart-does-not-revive-it
+  (let [{:keys [db state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                          (start-cmd "s1" "T1" :locks ["guix-build"])
+                                          [:controller {:id "f1" :command :finish-worker! :args {:worker "W1" :state-after :done}}]])]
+    (is (= {} (:locks state)))
+    (is (= state (store/load db) (store/replay db)) "the table, the events and memory agree")))
+
+(deftest a-starting-worker-holds-its-locks-so-a-second-one-queues
+  (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                               [:owner {:id "t2" :command :thread! :args {:title "b"}}]
+                                               (start-cmd "s1" "T1" :locks ["guix-build"])
+                                               (start-cmd "s2" "T2" :locks ["guix-build"])])]
+    (is (= :starting (:state (nth results 2))))
+    (is (= [:queued "guix-build held by W1"] ((juxt :state :reason) (nth results 3))))
+    (is (= {"guix-build" "W1"} (:locks state)))))
+
+(deftest a-thread-with-a-queued-or-starting-worker-takes-no-second-one
+  (let [{:keys [results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                         (start-cmd "s1" "T1")
+                                         (start-cmd "s2" "T1")
+                                         [:owner {:id "a1" :command :attach-worker! :token-hash "ha" :args {:thread "T1" :conversation "c"}}]])]
+    (is (= [:thread-has-worker :thread-has-worker] (map :error (drop 2 results))))))
+
+(deftest a-stopped-ask-does-not-undo-a-cancel
+  (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                               [:owner {:id "a1" :command :attach-worker! :token-hash "ha" :args {:thread "T1" :conversation "c"}}]
+                                               [:owner {:id "c1" :command :cancel! :args {:worker "W1" :reason "stop"}}]
+                                               [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "q?" :stopped true}}]
+                                               [:controller {:id "cd" :command :cancel-delivered! :args {:worker "W1"}}]])]
+    (is (= :cancelling (:error (nth results 3))))
+    (is (= :cancelled (get-in state [:workers "W1" :state])))))
+
+(deftest a-finished-workers-open-asks-are-superseded
+  (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                               [:owner {:id "a1" :command :attach-worker! :token-hash "ha" :args {:thread "T1" :conversation "c"}}]
+                                               [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :review :text "ok?" :revision "abc" :evidence-sha "none"}}]
+                                               [[:worker "W1"] {:id "f1" :command :finish-worker! :args {:state-after :failed}}]])]
+    (is (= :superseded (get-in state [:asks "a1" :state])))
+    (is (empty? (filter #(= :open (:state %)) (vals (:asks state)))))))
+
+(deftest a-late-ack-does-not-move-an-answered-reply-back
+  (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                       [:owner {:id "a1" :command :attach-worker! :token-hash "ha" :args {:thread "T1" :conversation "c"}}]
+                                       [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "q?" :options [{:id "y" :label "Y"}]}}]
+                                       [:owner {:id "r1" :command :reply! :args {:thread "T1" :asks-version 4 :picks {"a1" "y"}}}]
+                                       [:controller {:id "s1" :command :outbox-sent! :args {:outbox "o1" :message "m1"}}]
+                                       [[:worker "W1"] {:id "n1" :command :answered! :args {:reply "r1"}}]
+                                       [:controller {:id "ack" :command :outbox-acked! :args {:outbox "o1"}}]
+                                       [:controller {:id "s2" :command :outbox-sent! :args {:outbox "o1" :message "m1"}}]])]
+    (is (= :answered (get-in state [:replies "r1" :state])))
+    (is (= :answered (get-in state [:asks "a1" :state])))
+    (is (= :processed (get-in state [:outbox "o1" :state])))))
+
+(deftest controller-commands-refuse-a-missing-or-ended-worker
+  (let [{:keys [results]} (run-commands [[:controller {:id "p" :command :worker-prepared! :args {:worker "W9"}}]
+                                         [:controller {:id "h" :command :health! :args {:worker "W9" :health {} :at 1}}]
+                                         [:controller {:id "r" :command :worker-restarted! :args {:worker "W9" :buffer "p"}}]
+                                         [:controller {:id "h0" :command :health! :args {:at 1}}]])]
+    (is (= [:no-such-worker :no-such-worker :no-such-worker] (map :error (take 3 results))))
+    (is (nil? (:error (last results))) "a heartbeat names no Worker")))
+
+(deftest promotion-is-one-commit-so-a-queued-worker-starts-once
+  (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                               [:owner {:id "t2" :command :thread! :args {:title "b"}}]
+                                               (start-cmd "s1" "T1" :locks ["guix-build"])
+                                               (start-cmd "s2" "T2" :locks ["guix-build"])
+                                               [:controller {:id "f1" :command :finish-worker! :args {:worker "W1" :state-after :done}}]
+                                               [:controller {:id "p1" :command :promote-worker! :token-hash "hp1" :policy {:workers 2 :locks ["guix-build"]}}]
+                                               [:controller {:id "p2" :command :promote-worker! :token-hash "hp2" :policy {:workers 2 :locks ["guix-build"]}}]])]
+    (is (= "W2" (nth results 5)))
+    (is (nil? (nth results 6)) "nothing left to promote")
+    (is (= :starting (get-in state [:workers "W2" :state])))
+    (is (= {"guix-build" "W2"} (:locks state)))
+    (is (= [:worker "W2"] (get-in state [:tokens "hp1" :principal])))))
+
+
+;; ---- review regressions: the controller ---------------------------------
+
+(deftest a-silent-client-does-not-block-the-controller
+  (with-controller
+    (fn [_ dir _]
+      (with-open [_ (java.net.Socket. "127.0.0.1" (int (parse-long (clojure.string/trim (slurp (str (fs/path dir "port")))))))]
+        (is (= {:ok []} (deref (future (call dir {:command :threads})) 3000 :blocked)))))))
+
+(deftest slow-triage-does-not-hold-up-worker-deliveries
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-slow"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-slowconv"}))
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10
+                         :triage (fn [_] (Thread/sleep 5000) {:choice :request :probability 0.9})})]
+    (try
+      (call dir {:command :register-router! :args {:conversation "router"}})
+      (call dir {:command :say! :args {:text "look at this" :origin :herdr}})
+      (let [{:keys [version]} (thread-with-ask dir)]
+        (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "no"}}})
+        (is (wait-for #(some (fn [o] (and (:reply o) (= :sent (:state o)))) (vals (:outbox @(:state c)))))
+            "the reply reaches its Worker while the Router message is still being judged"))
+      (finally (super/stop! c)))))
+
+(deftest a-failed-restart-is-recorded-and-named-when-restarts-run-out
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-rf"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-rfconv"}))
+        repo (jj-repo)
+        panes (atom 0)
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10 :policy {:workers 2}
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w)))
+                                  :open! (fn [_] (if (= 1 (swap! panes inc)) "wC:p1" (throw (ex-info "emacs is down" {}))))}})]
+    (try
+      (call dir {:command :thread! :args {:title "recover me"}})
+      (start-worker dir "T1" :repo repo)
+      (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
+        (dotimes [_ 4] (super/reconcile! (assoc c :restart-grace-ms -1))))
+      (let [w (get-in @(:state c) [:workers "W1"])]
+        (is (= :failed (:state w)))
+        (is (= "emacs is down" (:restart-error w)))
+        (is (clojure.string/includes? (str (:reason w)) "emacs is down")))
+      (finally (super/stop! c)))))
+
+(deftest the-owner-token-file-is-never-readable-by-others
+  (with-controller
+    (fn [_ dir _]
+      (is (= "rw-------" (java.nio.file.attribute.PosixFilePermissions/toString (fs/posix-file-permissions (fs/path dir "token"))))))))
+
+
+;; ---- review regressions: voice and the Inbox pane -------------------------
+
+(deftest voice-takes-a-pick-and-send-in-one-breath
+  (with-controller
+    (fn [c dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (let [{:keys [token]} (thread-with-ask dir)
+                  replies #(mapv :picks (sort-by :seq (vals (:replies @(:state c)))))]
+              (pane/select! "T1")
+              (is (= {:thread "T1" :draft true :option 2 :sent true} (voice/submit! "Yes, for a week, send.")))
+              (is (= [{"a1" "week"}] (replies)))
+              (call dir {:token token :command :ask! :args {:kind :question :text "Which build?" :recommended "small"
+                                                           :options [{:id "big" :label "Big"} {:id "small" :label "Small"}]}})
+              (is (= {:thread "T1" :draft true :option 2 :sent true} (voice/submit! "the recommended one, send")))
+              (call dir {:token token :command :ask! :args {:kind :question :text "Again?" :options [{:id "y" :label "Yes"} {:id "n" :label "No"}]}})
+              (is (= {:thread "T1" :draft true :option 1 :sent true} (voice/submit! "Option 1 and send")))
+              (is (= [{"a1" "week"} {"a2" "small"} {"a3" "y"}] (replies)))
+              (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "approve")))
+              (is (= "T1" (:thread (voice/submit! "don't approve until CI passes")))
+                  "a message that mentions approval is a message, not an approval"))))))))
+
+(deftest a-pick-lands-only-on-the-ask-it-was-checked-against
+  (with-controller
+    (fn [_ dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (let [{:keys [token]} (thread-with-ask dir)]
+              (call dir {:token token :command :ask! :args {:kind :action :text "Switch?" :options [{:id "yes" :label "Yes"}]}})
+              (is (thrown-with-msg? Exception #"changed" (pane/with-state-lock! #(pane/pick! "T1" 1 :ask "a1"))))
+              (is (= {} (:picks (pane/client-state) {}))))))))))
+
+
+(deftest a-quick-tap-stops-hex-only-after-it-started
+  (let [calls (atom [])
+        dir (str (fs/create-temp-dir {:prefix "bbh-say"}))]
+    (with-redefs [voice/hex! (fn [& args] (Thread/sleep 50) (swap! calls conj (vec args))
+                              (if (= "start" (second args)) {:exit 0 :out ""} {:exit 4 :out ""}))]
+      ;; The release's stop process wins the race and runs before the press's start.
+      (voice/request-stop! "take-1" :dir dir)
+      (is (= {:silence true} (deref (future (voice/take! "take-1" :dir dir :poll-ms 5)) 3000 :hung)))
+      (is (= [["dictation" "start"] ["dictation" "stop" "--print"]] @calls))
+      (is (empty? (fs/list-dir dir)) "the stop request is used up"))))
+
+
+;; ---- the super-agent's Emacs ---------------------------------------------
+
+(defn- fake-emacsclient
+  "A script that prints OUT and exits with EXIT, recording its arguments in a file."
+  [exit out]
+  (let [dir (fs/create-temp-dir {:prefix "bbh-emacsclient"})
+        script (fs/path dir "emacsclient")]
+    (spit (str (fs/path dir "out")) (str out "\n"))
+    (spit (str script) (str "#!/bin/sh\nprintf '%s\\n' \"$@\" > " (fs/path dir "args") "\n"
+                            "cat " (fs/path dir "out") (when-not (zero? exit) " >&2") "\nexit " exit "\n"))
+    (fs/set-posix-file-permissions script "rwx------")
+    {:bin (str script) :args #(clojure.string/split-lines (slurp (str (fs/path dir "args"))))}))
+
+(deftest a-worker-opens-as-an-emacs-buffer-with-its-token-and-run
+  (let [{:keys [bin args]} (fake-emacsclient 0 "\"T1 a\"")]
+    (binding [bbh.super.emacs/*emacsclient* bin]
+      (is (= "T1 a" (super/open! {:workspace "/w" :thread "T1" :title "a" :conversation "super-W1" :token "tok" :wf-run "run-1"})))
+      (is (= ["-s" "bbh-super" "--timeout=30" "--eval"
+              "(eng/bbh-super-open \"super-W1\" \"/w\" \"T1 a\" '((\"BBH_SUPER_TOKEN\" . \"tok\") (\"WF_RUN\" . \"run-1\")))"]
+             (args))))))
+
+(deftest no-emacs-daemon-is-an-error-that-says-how-to-start-it
+  (let [{:keys [bin]} (fake-emacsclient 1 "emacsclient: can't find socket; have you started the server?")]
+    (binding [bbh.super.emacs/*emacsclient* bin]
+      (let [e (try (super/open! {:workspace "/w" :thread "T1" :title "a" :conversation "c" :token "t" :wf-run "r"}) nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :emacs (:error (ex-data e))))
+        (is (clojure.string/includes? (ex-message e) "herd start bbh-emacs"))))))
+
+(deftest a-failed-emacs-launch-fails-the-worker-with-the-reason
+  (let [{:keys [bin]} (fake-emacsclient 1 "emacsclient: can't find socket")
+        dir (str (fs/create-temp-dir {:prefix "bbh-super-em"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-emconv"}))
+        repo (jj-repo)
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10 :policy {:workers 2}
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w)))}})]
+    (try
+      ;; with-redefs, not binding: the controller launches on its own thread.
+      (with-redefs [bbh.super.emacs/*emacsclient* bin]
+        (call dir {:command :thread! :args {:title "no daemon"}})
+        (is (= :emacs (:error (start-worker dir "T1" :repo repo))))
+        (is (= :failed (get-in @(:state c) [:workers "W1" :state])))
+        (is (clojure.string/includes? (get-in @(:state c) [:workers "W1" :reason]) "herd start bbh-emacs")))
+      (finally (super/stop! c)))))
+
+(deftest the-inbox-finds-a-threads-worker-buffer
+  (with-workers
+    (fn [_ dir repo _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (call dir {:command :thread! :args {:title "a"}})
+            (call dir {:command :thread! :args {:title "b"}})
+            (start-worker dir "T1" :repo repo)
+            (is (= "wC:p1" (#'pane/buffer "T1")))
+            (is (thrown-with-msg? Exception #"T2 has no Worker" (#'pane/buffer "T2")))))))))

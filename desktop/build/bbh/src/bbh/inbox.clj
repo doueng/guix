@@ -135,10 +135,12 @@
   [dir project]
   (let [out (Object.)
         p (start! {:root (root-dir dir) :project project
+                   ;; The session acts on a cancellation itself; it is never a prompt.
                    :deliver (fn [message]
-                              (locking out
-                                (println (json/generate-string message))
-                                (flush)))})]
+                              (when-not (= "cancel" (:kind message))
+                                (locking out
+                                  (println (json/generate-string message))
+                                  (flush))))})]
     (doseq [line (line-seq (io/reader System/in))]
       (let [[cmd arg] (str/split line #" " 2)]
         (try

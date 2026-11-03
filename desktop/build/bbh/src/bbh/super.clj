@@ -5,7 +5,8 @@
   is the client every surface and Worker uses."
   (:require [babashka.fs :as fs]
             [bbh.inbox :as inbox]
-            [bbh.super.client :as client :refer [call! data-dir herdr new-id super-dir]]
+            [bbh.super.client :as client :refer [call! data-dir new-id super-dir]]
+            [bbh.super.emacs :as emacs]
             [bbh.super.model :as model]
             [bbh.super.process :as process]
             [bbh.super.store :as store]
@@ -29,8 +30,8 @@
 
 ;; ---- controller ---------------------------------------------------------
 
-(defn notify-panes!
-  "Tell every fzf pane registered under DIR to reload its rows. A port that
+(defn notify-views!
+  "Tell every Inbox view registered under DIR to reload its rows. A port that
   refuses the connection is forgotten."
   [dir]
   (doseq [f (when (fs/exists? (client/listeners-dir dir)) (fs/list-dir (client/listeners-dir dir)))
@@ -44,16 +45,16 @@
 
 (defn- run!
   "Commit COMMAND for PRINCIPAL on controller C. Serialized: the controller is
-  the single writer. A commit that changed something reloads the panes."
+  the single writer. A commit that changed something reloads the Inbox views."
   [{:keys [db state dir]} principal command]
   (let [r (locking db
             (let [r (store/commit! db @state principal command)]
               (reset! state (:state r))
               r))]
-    (when-not (:repeat? r) (notify-panes! dir))
+    (when-not (:repeat? r) (notify-views! dir))
     r))
 
-;; ---- Workers: a record first, then the workspace, the wf run and the pane --
+;; ---- Workers: a record first, then the workspace, the wf run and the buffer --
 
 (defn- policy
   "The controller's policy over the defaults: its :policy when given, else
@@ -84,27 +85,18 @@
   [workspace {:keys [workflow brief check bench repro]}]
   (workflow/start! workflow {:cwd workspace :task brief :check check :bench bench :repro repro}))
 
-(defn pane!
-  "A Herdr pane for WORKER: split beside a pane of the workspace that holds
-  REPO (else a new workspace), in the jj workspace, with the Worker's token
-  and wf run in its environment, running bbh on the Worker's conversation,
-  named after the thread. Returns the pane id."
-  [{:keys [repo workspace thread title conversation token wf-run]}]
-  (let [panes (:panes (herdr "pane" "list"))
-        anchor (some #(when (= (str (fs/canonicalize repo)) (:cwd %)) %) panes)
-        env ["--env" (str "BBH_SUPER_TOKEN=" token) "--env" (str "WF_RUN=" wf-run)]
-        pane (if anchor
-               (get-in (apply herdr "pane" "split" (:pane_id anchor) "--direction" "right" "--cwd" workspace "--no-focus" env) [:pane :pane_id])
-               (let [ws (apply herdr "workspace" "create" "--cwd" workspace "--label" (str thread " " title) "--no-focus" env)]
-                 (:pane_id (first (:panes (herdr "pane" "list" "--workspace" (:workspace_id ws)))))))]
-    (herdr "pane" "run" pane "bbh" "--id" conversation)
-    (herdr "pane" "rename" pane (str thread " " title))
-    pane))
+(defn open!
+  "The Worker's buffer in the super-agent's Emacs: a bbh session on the
+  Worker's conversation in its jj workspace, with its token and wf run in the
+  session's environment, named after the thread. Returns the buffer name."
+  [{:keys [workspace thread title conversation token wf-run]}]
+  (emacs/open! {:conversation conversation :dir workspace :title (str thread " " title)
+                :env {"BBH_SUPER_TOKEN" token "WF_RUN" wf-run}}))
 
 (declare run! promote!)
 
 (defn- launch-steps! [{:keys [dir state launch] :as c} w token]
-  (let [{:keys [workspace! wf-start! pane!]} launch
+  (let [{:keys [workspace! wf-start! open!]} launch
         t (get-in @state [:threads (:thread w)])
         workspace (workspace! dir w)
         conversation (str (fs/path (:conversations c) (str "super-" (:id w))))
@@ -113,10 +105,10 @@
         _ (run! c :controller {:id (str "prepared-" (:id w)) :command :worker-prepared!
                                 :args {:worker (:id w) :workspace workspace :wf-run wf-run
                                        :conversation (fs/file-name conversation) :started-at (System/currentTimeMillis)}})
-        pane (pane! {:repo (:repo w) :workspace workspace :thread (:thread w) :title (:title t)
+        buffer (open! {:repo (:repo w) :workspace workspace :thread (:thread w) :title (:title t)
                      :conversation (fs/file-name conversation) :token token :wf-run wf-run})]
     (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
-                         :args {:started-at (System/currentTimeMillis) :worker (:id w) :conversation (fs/file-name conversation) :wf-run wf-run :workspace workspace :pane pane}})))
+                         :args {:started-at (System/currentTimeMillis) :worker (:id w) :conversation (fs/file-name conversation) :wf-run wf-run :workspace workspace :buffer buffer}})))
 
 (defn- launch!
   "The side effects that make Worker W a process, then the commit that records
@@ -132,12 +124,14 @@
          (throw e))))
 
 (defn- promote!
-  "Start the next queued Worker that may run now, if any."
+  "Start the next queued Worker that may run now, if any. Choosing it, moving
+  it to :starting with its locks and issuing its token is one commit, so two
+  callers at once never launch the same Worker or pass the cap."
   [{:keys [state] :as c}]
-  (when-let [w (model/next-queued @state (policy c))]
-    (let [t (new-token)]
-      (run! c :controller {:id (str "token-" (sha256 t)) :command :issue-token! :token-hash (sha256 t) :args {:principal [:worker (:id w)]}})
-      (launch! c w t))))
+  (let [t (new-token)]
+    (when-let [id (:result (run! c :controller {:id (str "promote-" (sha256 t)) :command :promote-worker!
+                                                 :token-hash (sha256 t) :policy (policy c)}))]
+      (launch! c (get-in @state [:workers id]) t))))
 
 (defn- start-worker*
   "Commit start-worker! CMD for PRINCIPAL with the workflow's requirements and
@@ -151,7 +145,7 @@
         w (get-in @(:state c) [:workers (:id (:result r))])]
     (when (and (not (:repeat? r)) (= :starting (:state w)))
       (launch! c w t))
-    (merge (:result r) (select-keys (get-in @(:state c) [:workers (:id (:result r))]) [:state :workspace :pane :conversation :wf-run]))))
+    (merge (:result r) (select-keys (get-in @(:state c) [:workers (:id (:result r))]) [:state :workspace :buffer :conversation :wf-run]))))
 
 (defn- principal-of [state token]
   (when (string? token)
@@ -245,8 +239,10 @@
       known
       (let [t (new-token)]
         (run! c :controller {:id (str "token-" (sha256 t)) :command :issue-token! :token-hash (sha256 t) :args {:principal :owner}})
+        ;; Created owner-only before the token is written, so it is never readable by others.
+        (fs/delete-if-exists f)
+        (fs/create-file f {:posix-file-permissions "rw-------"})
         (spit (str f) t)
-        (fs/set-posix-file-permissions f "rw-------")
         t))))
 
 (defn- serve-client [c ^Socket sock]
@@ -375,7 +371,7 @@
         (cond
           (and agent (= :starting (:state w)) (:wf-run w))
           (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
-                               :args (merge (select-keys w [:conversation :wf-run :workspace :pane :started-at]) {:worker (:id w)})})
+                               :args (merge (select-keys w [:conversation :wf-run :workspace :buffer :started-at]) {:worker (:id w)})})
 
           (= :cancelling (:state w))
           (let [blocked (filter #(#{:unknown :lost} (:state %)) jobs)
@@ -395,35 +391,53 @@
                (> (- now (or (:restart-at w) (:started-at w) (:boot-at c))) grace))
           (if (>= (or (:restarts w) 0) 3)
             (do (run! c :controller {:id (str "restarts-exhausted-" (:id w)) :command :finish-worker!
-                                    :args {:worker (:id w) :state-after :failed :reason "Worker failed three restart attempts; needs human"}})
+                                    :args {:worker (:id w) :state-after :failed
+                                           :reason (str "Worker failed three restart attempts; needs human"
+                                                        (when-let [e (:restart-error w)] (str ". Last error: " e)))}})
                 (promote! c))
             (let [token (new-token)]
               (run! c :controller {:id (new-id) :command :restart-worker! :token-hash (sha256 token) :args {:worker (:id w) :at now}})
               (try
-                (let [pane ((get-in c [:launch :pane!])
+                (let [buffer ((get-in c [:launch :open!])
                             {:repo (:repo w) :workspace (:workspace w) :thread (:thread w)
                              :title (get-in @state [:threads (:thread w) :title])
                              :conversation (:conversation w) :token token :wf-run (:wf-run w)})]
                   (if (= :starting (:state w))
                     (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
-                                         :args (merge (select-keys w [:conversation :wf-run :workspace :started-at]) {:worker (:id w) :pane pane})})
-                    (run! c :controller {:id (new-id) :command :worker-restarted! :args {:worker (:id w) :pane pane}})))
-                (catch Exception _ nil)))))))))
+                                         :args (merge (select-keys w [:conversation :wf-run :workspace :started-at]) {:worker (:id w) :buffer buffer})})
+                    (run! c :controller {:id (new-id) :command :worker-restarted! :args {:worker (:id w) :buffer buffer}})))
+                (catch Exception e
+                  ;; The attempt is already counted; say why it failed so the end state names it.
+                  (binding [*out* *err*] (println "bbh super: restart of" (:id w) "failed:" (ex-message e)))
+                  (run! c :controller {:id (new-id) :command :restart-failed! :args {:worker (:id w) :reason (ex-message e)}}))))))))))
+
+(defn- untriaged?
+  "Whether outbox row O for the Router still waits for Jev's verdict on C."
+  [c o]
+  (and (:triage c) (not= :summary (:delivery o)) (nil? (:triage o))))
+
+(defn triage!
+  "Judge each pending Router message once. Runs on its own thread, so a slow or
+  down TypeSafe delays only the Router, never a Worker's delivery."
+  [{:keys [state] :as c}]
+  (let [router (get-in @state [:router :router :conversation])]
+    (doseq [o (sort-by (comp model/id-order :id) (vals (:outbox @state)))
+            :when (and (= :pending (:state o)) (= router (:conversation o)) (untriaged? c o))]
+      (let [verdict (try ((:triage c) (str/replace (:text o) #"^\[[^\]]*\] " ""))
+                         (catch Exception _ {:failed true}))]
+        (run! c :controller {:id (str "triaged-" (:id o)) :command :router-triaged!
+                             :args (assoc verdict :outbox (:id o) :threshold (:noise-probability (policy c)))})))))
 
 (defn dispatch!
   "One pass: send each pending outbox row to its Worker's mailbox, and mark a
   sent row acked once its mailbox file is gone. Each step is a command with a
-  fixed id, so a pass repeated after a crash changes nothing twice."
+  fixed id, so a pass repeated after a crash changes nothing twice. Router
+  messages wait for `triage!`."
   [{:keys [state] :as c}]
   (let [router (get-in @state [:router :router :conversation])
         rows (sort-by (comp model/id-order :id) (vals (:outbox @state)))
         for-router? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
-        _ (doseq [o (filter for-router? rows) :when (and (:triage c) (not= :summary (:delivery o)) (nil? (:triage o)))]
-            (let [verdict (try ((:triage c) (str/replace (:text o) #"^\[[^\]]*\] " ""))
-                               (catch Exception _ {:failed true}))]
-              (run! c :controller {:id (str "triaged-" (:id o)) :command :router-triaged!
-                                   :args (assoc verdict :outbox (:id o) :threshold (:noise-probability (policy c)))})))
-        batch (filter for-router? (sort-by (comp model/id-order :id) (vals (:outbox @state))))
+        batch (filter for-router? rows)
         line (fn [{:keys [id text delivery] {:keys [choice probability]} :triage}]
                (str (when-not (= :summary delivery) (str id " "))
                     (when choice (format "(Jev: %s %.2f) " (name choice) probability))
@@ -431,7 +445,7 @@
     ;; The Router reads its pending rows as one prompt, oldest first, each with
     ;; Jev's triage. Summaries of messages already routed to a Worker ride along
     ;; but never wake it alone, and noise never reaches it.
-    (when (some #(not= :summary (:delivery %)) batch)
+    (when (and (some #(not= :summary (:delivery %)) batch) (not-any? #(untriaged? c %) batch))
       (let [m (inbox/send! (conversation-root c router) (str/join "\n\n" (map line batch)))]
         (doseq [{:keys [id]} batch]
           (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))))
@@ -464,15 +478,29 @@
         db (store/open (str (fs/path dir "super.db")))
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
-           :launch (merge {:workspace! workspace! :wf-start! wf-start! :pane! pane!} launch) :policy policy
+           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open!} launch) :policy policy
            :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :triage triage :wf-root wf-root
-           :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)}]
+           :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil) :triager (atom nil)}]
     (ensure-owner-token! c)
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
+    ;; Each client gets its own thread and a read timeout, so a client that
+    ;; never sends its line, or a slow launch, holds up nobody else. Commits
+    ;; stay serialized by run!.
     (doto (Thread. #(while (not @(:stopped c))
-                      (try (serve-client c (.accept server))
+                      (try (let [sock (.accept server)]
+                             (.setSoTimeout sock 10000)
+                             (doto (Thread. (fn [] (try (serve-client c sock)
+                                                        (catch Exception e (when-not @(:stopped c) (binding [*out* *err*] (println "bbh super:" (ex-message e))))))))
+                               (.setDaemon true) (.start)))
                            (catch Exception e (when-not @(:stopped c) (binding [*out* *err*] (println "bbh super:" (ex-message e))))))))
       (.setDaemon true) (.start))
+    (when triage
+      (reset! (:triager c)
+              (doto (Thread. #(while (not @(:stopped c))
+                                (try (triage! c)
+                                     (catch Exception e (binding [*out* *err*] (println "bbh super triage:" (ex-message e)))))
+                                (Thread/sleep (long scan-ms))))
+                (.setDaemon true) (.start))))
     (reset! (:dispatcher c)
      (doto (Thread. #(while (not @(:stopped c))
                       (try
@@ -485,11 +513,13 @@
       (.setDaemon true) (.start)))
     c))
 
-(defn stop! [{:keys [stopped server db dir lock dispatcher]}]
+(defn stop! [{:keys [stopped server db dir lock dispatcher triager]}]
   (reset! stopped true)
   (.close ^ServerSocket server)
   ;; Wait for the current observation/delivery transaction before closing SQLite.
   (when-let [t @dispatcher] (.join ^Thread t))
+  ;; A triage call can take its HTTP timeout; its commit after close would fail harmlessly.
+  (when-let [t @triager] (.interrupt ^Thread t) (.join ^Thread t 1000))
   (fs/delete-if-exists (fs/path dir "port"))
   (locking db (store/close! db))
   (.close ^java.nio.channels.FileChannel lock))

@@ -352,13 +352,15 @@ CONVERSATION is the saved conversation herdr should resume."
   (eng/bbh-status--herdr state msg conversation))
 
 (defun eng/bbh-status--on-event (shell event)
+  ;; A `bbh super' session shares the daemon with others; the Inbox reports for it.
+  (unless (buffer-local-value 'eng/bbh-super-conversation shell)
   (let ((conversation (when-let* ((id (eng/bbh--conversation shell)))
                         (and (file-exists-p (eng/bbh--conversation-file id "messages.jsonl")) id))))
     (pcase (map-elt event :event)
       ('input-submitted (eng/bbh-status 'working "Working" conversation))
       ('turn-complete (eng/bbh-status 'done "bbh is waiting for input" conversation))
       ('error (eng/bbh-status 'error (or (map-nested-elt event '(:data :message)) "The request failed")
-                              conversation)))))
+                              conversation))))))
 
 (defun eng/bbh-status--clear ()
   (eng/bbh-status 'clear))
@@ -1205,6 +1207,273 @@ The panel appears only when the session has started a run.  Return the window, o
                              :port (string-to-number (with-temp-buffer
                                                        (insert-file-contents port-file)
                                                        (buffer-string)))))))
+
+;;; Super-agent
+
+;; `bbh super' keeps its Workers, its Router and its Inbox in one terminal
+;; Emacs daemon, `emacs --daemon=bbh-super'.  The controller calls
+;; `eng/bbh-super-open' through emacsclient to give a conversation a buffer,
+;; and you attach with `bbh inbox', which opens a frame on *bbh inbox*.
+
+(defun eng/bbh-super--refuse-prompt (prompt-fn &rest args)
+  "Signal an error instead of calling PROMPT-FN when no command is running.
+A prompt from a server eval, timer or process filter would wait in some frame
+and stop the daemon serving anyone, the controller included."
+  (if this-command
+      (apply prompt-fn args)
+    (error "bbh-super: refused to prompt %S outside a command; nobody would answer it"
+           (car args))))
+
+(when (equal (daemonp) "bbh-super")
+  (dolist (f '(y-or-n-p yes-or-no-p read-from-minibuffer))
+    (advice-add f :around #'eng/bbh-super--refuse-prompt)))
+
+(defvar-local eng/bbh-super-conversation nil
+  "The conversation this shell runs for `bbh super', or nil for an ordinary session.")
+
+(defun eng/bbh-super-config (conversation env)
+  "agent-shell configuration for CONVERSATION with ENV, an alist of variables."
+  (agent-shell-make-agent-config
+   :identifier 'bbh
+   :mode-line-name "bbh"
+   :buffer-name "bbh"
+   :shell-prompt "bbh> "
+   :shell-prompt-regexp "bbh> "
+   :client-maker (lambda (buffer)
+                   (agent-shell--make-acp-client
+                    :command (or (executable-find "bbh") (expand-file-name "~/.local/bin/bbh"))
+                    :command-params (list "acp" "--id" conversation)
+                    :environment-variables
+                    (apply #'agent-shell-make-environment-variables
+                           (append (mapcan (lambda (pair) (list (car pair) (cdr pair))) env)
+                                   '(:inherit-env t)))
+                    :context-buffer buffer))))
+
+(defun eng/bbh-super--shell (conversation)
+  "The live shell running CONVERSATION for `bbh super', or nil."
+  (seq-find (lambda (buffer)
+              (equal conversation (buffer-local-value 'eng/bbh-super-conversation buffer)))
+            (buffer-list)))
+
+(defun eng/bbh-super--kill (shell)
+  "Kill SHELL with its transcript and composer, without asking."
+  (let ((kill-buffer-query-functions nil)
+        (transcript (buffer-local-value 'eng/bbh-transcript shell))
+        (composer (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)))
+    (dolist (buffer (list composer transcript shell))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(defun eng/bbh-super-open (conversation dir title env)
+  "Run CONVERSATION in DIR as buffer TITLE with ENV, and return the buffer's name.
+A session already running CONVERSATION is replaced: the controller opens one
+to launch a Worker, to restart one whose session died, and to give the Router
+a new token.  Nothing is shown; `eng/bbh-super-visit' shows it."
+  (require 'agent-shell)
+  (require 'agent-shell-viewport)
+  (unless (file-directory-p dir) (error "No directory %s for %s" dir conversation))
+  (when-let* ((old (eng/bbh-super--shell conversation)))
+    (eng/bbh-super--kill old))
+  (let ((shell (agent-shell--start :config (eng/bbh-super-config conversation env)
+                                   :new-session t :no-focus t :cwd (file-name-as-directory dir))))
+    (with-current-buffer shell
+      (setq eng/bbh-super-conversation conversation))
+    ;; shell-maker finds its buffer by this name; a plain rename-buffer would lose it.
+    (shell-maker-set-buffer-name shell title)
+    (with-current-buffer (eng/bbh--transcript shell)
+      (rename-buffer (concat title " transcript") t))
+    (buffer-name shell)))
+
+(defun eng/bbh-super-visit (name)
+  "Show the session in buffer NAME as its transcript above its composer."
+  (let ((shell (or (get-buffer name) (user-error "No buffer %s; is its Worker running?" name))))
+    (delete-other-windows)
+    (eng/bbh-layout shell)))
+
+;;; Super-agent Inbox
+
+(defvar eng/bbh-inbox-bbh nil
+  "The bbh command the Inbox runs, as a list, or nil for bbh on the PATH.")
+
+(defvar eng/bbh-inbox--listener nil
+  "The local server the controller connects to when the Inbox should reload.")
+
+(defvar-local eng/bbh-inbox--thread nil
+  "The thread under the cursor when the Inbox last looked.")
+
+(defvar-local eng/bbh-inbox--timer nil
+  "The pending preview update.")
+
+(defun eng/bbh-inbox--command (&rest args)
+  (append (or eng/bbh-inbox-bbh
+              (list (or (executable-find "bbh") (expand-file-name "~/.local/bin/bbh"))))
+          (list "inbox") args))
+
+(defun eng/bbh-inbox--run (args on-done)
+  "Run `bbh inbox ARGS' and call ON-DONE with its output when it succeeds.
+A failure shows bbh's message."
+  (let ((out (generate-new-buffer " *bbh inbox out*"))
+        (err (generate-new-buffer " *bbh inbox err*")))
+    (make-process
+     :name "bbh-inbox-cmd" :noquery t :buffer out :stderr err :connection-type 'pipe
+     :command (apply #'eng/bbh-inbox--command args)
+     :sentinel (lambda (process _)
+                 (when (memq (process-status process) '(exit signal))
+                   (let ((text (with-current-buffer out (buffer-string)))
+                         (problem (with-current-buffer err (string-trim (buffer-string)))))
+                     (kill-buffer out)
+                     (when (buffer-live-p err) (kill-buffer err))
+                     (if (zerop (process-exit-status process))
+                         (when on-done (funcall on-done text))
+                       (message "%s" (if (string-empty-p problem) (format "bbh inbox %s failed" (car args)) problem)))))))))
+
+(defun eng/bbh-inbox--buffer ()
+  (get-buffer-create "*bbh inbox*"))
+
+(defun eng/bbh-inbox--render (text)
+  "Show TEXT, `bbh inbox view' output: the header line, then id TAB row lines."
+  (let ((buffer (eng/bbh-inbox--buffer)))
+    (with-current-buffer buffer
+      (let* ((lines (split-string (string-trim-right text) "\n"))
+             (thread (eng/bbh-inbox--at-point))
+             (line (line-number-at-pos))
+             (inhibit-read-only t))
+        (setq header-line-format (car lines))
+        (erase-buffer)
+        (dolist (row (cdr lines))
+          (pcase-let ((`(,id ,shown) (split-string row "\t")))
+            (insert (propertize (or shown "") 'eng/bbh-thread id) "\n")))
+        (goto-char (point-min))
+        (unless (and thread (text-property-search-forward 'eng/bbh-thread thread t))
+          (forward-line (1- line)))
+        (beginning-of-line)
+        (dolist (window (get-buffer-window-list buffer nil t))
+          (set-window-point window (point)))))
+    (eng/bbh-inbox--preview)))
+
+(defun eng/bbh-inbox-refresh ()
+  "Reload the Inbox from the controller."
+  (interactive)
+  (eng/bbh-inbox--run '("view") #'eng/bbh-inbox--render))
+
+(defun eng/bbh-inbox--at-point ()
+  (get-text-property (line-beginning-position) 'eng/bbh-thread))
+
+(defun eng/bbh-inbox--thread ()
+  (or (eng/bbh-inbox--at-point) (user-error "No thread on this line")))
+
+(defun eng/bbh-inbox--preview ()
+  "Show the thread under the cursor in the preview below the list."
+  (when-let* ((buffer (get-buffer "*bbh inbox*"))
+              (thread (with-current-buffer buffer (eng/bbh-inbox--at-point))))
+    (eng/bbh-inbox--run (list "preview" thread)
+                        (lambda (text)
+                          (with-current-buffer (get-buffer-create "*bbh inbox preview*")
+                            (let ((inhibit-read-only t))
+                              (erase-buffer)
+                              (insert text)
+                              (goto-char (point-min))
+                              (special-mode)))
+                          (when (get-buffer-window buffer)
+                            (display-buffer-in-side-window (get-buffer "*bbh inbox preview*")
+                                                           '((side . bottom) (window-height . 0.5))))))))
+
+(defun eng/bbh-inbox--moved ()
+  "After a command, tell bbh which thread your cursor is on, for voice, and preview it."
+  (let ((thread (eng/bbh-inbox--at-point)))
+    (unless (equal thread eng/bbh-inbox--thread)
+      (setq eng/bbh-inbox--thread thread)
+      (when (timerp eng/bbh-inbox--timer) (cancel-timer eng/bbh-inbox--timer))
+      (when (and thread (not (equal thread "new")))
+        (setq eng/bbh-inbox--timer
+              (run-at-time 0.15 nil (lambda ()
+                                      (eng/bbh-inbox--run (list "select" thread) nil)
+                                      (eng/bbh-inbox--preview))))))))
+
+(defun eng/bbh-inbox--act (&rest args)
+  "Run `bbh inbox ARGS' on the thread under the cursor, then reload."
+  (let ((thread (eng/bbh-inbox--thread)))
+    (eng/bbh-inbox--run (append (list (car args) thread) (cdr args))
+                        (lambda (_) (eng/bbh-inbox-refresh)))))
+
+(defun eng/bbh-inbox-pick (n)
+  "Pick option N of the thread's open ask."
+  (interactive (list (- last-command-event ?0)))
+  (eng/bbh-inbox--act "pick" (number-to-string n)))
+
+(defun eng/bbh-inbox-send () "Send the thread's picks and note." (interactive) (eng/bbh-inbox--act "send"))
+(defun eng/bbh-inbox-approve () "Approve the thread's review." (interactive) (eng/bbh-inbox--act "approve"))
+(defun eng/bbh-inbox-dismiss () "Mark the thread read." (interactive) (eng/bbh-inbox--act "dismiss"))
+(defun eng/bbh-inbox-archive () "Archive the thread." (interactive) (eng/bbh-inbox--act "archive"))
+
+(defun eng/bbh-inbox-note (text)
+  "Save TEXT as the thread's note, sent with its picks."
+  (interactive (list (read-string (format "%s note: " (eng/bbh-inbox--thread)))))
+  (eng/bbh-inbox--act "note" text))
+
+(defun eng/bbh-inbox-reveal ()
+  "Show the threads waiting behind the new line."
+  (interactive)
+  (eng/bbh-inbox--run '("reveal") (lambda (_) (eng/bbh-inbox-refresh))))
+
+(defun eng/bbh-inbox-open ()
+  "Show the thread's Worker, and mark the thread seen."
+  (interactive)
+  (let ((thread (eng/bbh-inbox--thread)))
+    (eng/bbh-inbox--run (list "seen" thread) (lambda (_) (eng/bbh-inbox-refresh)))
+    (eng/bbh-inbox--run (list "buffer" thread)
+                        (lambda (name) (eng/bbh-super-visit (string-trim name))))))
+
+(defvar eng/bbh-inbox-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map "j" #'next-line)
+    (define-key map "k" #'previous-line)
+    (dolist (n '("1" "2" "3" "4")) (define-key map n #'eng/bbh-inbox-pick))
+    (define-key map "s" #'eng/bbh-inbox-send)
+    (define-key map "A" #'eng/bbh-inbox-approve)
+    (define-key map "r" #'eng/bbh-inbox-note)
+    (define-key map "m" #'eng/bbh-inbox-dismiss)
+    (define-key map "a" #'eng/bbh-inbox-archive)
+    (define-key map "n" #'eng/bbh-inbox-reveal)
+    (define-key map "g" #'eng/bbh-inbox-refresh)
+    (define-key map (kbd "RET") #'eng/bbh-inbox-open)
+    (define-key map "q" #'quit-window)
+    map)
+  "Keys of the Inbox, the same in every evil state.")
+
+(define-derived-mode eng/bbh-inbox-mode special-mode "bbh inbox"
+  "The threads that need you, from `bbh super'."
+  (setq truncate-lines t)
+  (hl-line-mode 1)
+  (add-hook 'post-command-hook #'eng/bbh-inbox--moved nil t))
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'eng/bbh-inbox-mode 'emacs))
+
+(defun eng/bbh-inbox--listen ()
+  "Listen for the controller's reload calls and register the port, once."
+  (unless (process-live-p eng/bbh-inbox--listener)
+    (setq eng/bbh-inbox--listener
+          (make-network-process
+           :name "bbh-inbox-listen" :server t :host "127.0.0.1" :service t :family 'ipv4 :noquery t
+           :filter (lambda (connection _)
+                     (delete-process connection)
+                     (eng/bbh-inbox-refresh))))
+    (eng/bbh-inbox--run (list "register" (number-to-string (process-contact eng/bbh-inbox--listener :service)))
+                        nil)))
+
+(defun eng/bbh-inbox-buffer ()
+  "Make the Inbox buffer, listening for reloads, and return its name."
+  (with-current-buffer (eng/bbh-inbox--buffer)
+    (unless (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox-mode)))
+  (eng/bbh-inbox--listen)
+  (eng/bbh-inbox-refresh)
+  (buffer-name (eng/bbh-inbox--buffer)))
+
+(defun eng/bbh-inbox ()
+  "Show the super-agent's Inbox in this frame."
+  (interactive)
+  (switch-to-buffer (eng/bbh-inbox-buffer))
+  (delete-other-windows))
 
 (after! agent-shell-viewport
   (add-hook 'agent-shell-viewport-edit-mode-hook #'eng/bbh-setup-composer)

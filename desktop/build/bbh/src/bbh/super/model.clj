@@ -19,7 +19,7 @@
 (def ^:private grants
   {:router #{:thread! :link! :attach-worker! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered! :router-triaged! :thread! :start-worker!}})
+   :controller #{:promote-worker! :restart-failed! :issue-token! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered! :router-triaged! :thread! :start-worker!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, the locks a Worker
@@ -96,12 +96,14 @@
   (when (str/blank? resource) (refuse :invalid :field :resource))
   {:events [{:kind :thread-linked :thread thread :data {:resource resource}}] :result thread})
 
+(declare thread-worker)
+
 (defmethod decide* :attach-worker! [state {{:keys [thread conversation]} :args :keys [token-hash]}]
   (let [t (thread-of state thread)
         id (next-id state :workers "W")]
     (when (str/blank? conversation) (refuse :invalid :field :conversation))
     (when (:resolved-at t) (refuse :archived :thread thread :message (str thread " is archived; start a new thread")))
-    (when (:worker t) (refuse :thread-has-worker :thread thread :worker (:worker t)))
+    (when-let [w (thread-worker state thread)] (refuse :thread-has-worker :thread thread :worker w))
     {:events [{:kind :worker-attached :thread thread
                :data {:id id :conversation conversation :generation (inc (count (:history t)))}}
               {:kind :token-issued :thread thread :data {:hash token-hash :principal [:worker id]}}]
@@ -132,6 +134,13 @@
   (->> (vals (:workers state)) (filter #(= :queued (:state %))) (sort-by (comp id-order :id))
        (remove #(blocked-by state policy %)) first))
 
+(defn- thread-worker
+  "The Worker that THREAD has now, queued or active, or nil. A thread has at
+  most one, and it counts from the moment it is started, not once it runs."
+  [state thread]
+  (some #(when (and (= thread (:thread %)) (or (= :queued (:state %)) (active-states (:state %)))) (:id %))
+        (vals (:workers state))))
+
 (defn- request-origin
   "Where a start-worker! request came from: the owner's own, or for the Router
   the origin of the message it names with FOR, which the controller recorded
@@ -155,7 +164,7 @@
         granted (get-in policy [:origins origin] #{:read})
         caps (if capabilities (set/intersection (set capabilities) granted) granted)]
     (when (:resolved-at t) (refuse :archived :thread thread :message (str thread " is archived; start a new thread")))
-    (when (:worker t) (refuse :thread-has-worker :thread thread :worker (:worker t)))
+    (when-let [w (thread-worker state thread)] (refuse :thread-has-worker :thread thread :worker w))
     (when-not (keyword? workflow) (refuse :invalid :field :workflow))
     (when (str/blank? brief) (refuse :invalid :field :brief))
     (when (str/blank? repo) (refuse :invalid :field :repo))
@@ -184,15 +193,31 @@
                        (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
                                id thread wf-run (name workflow))]))
 
+(defn- worker-of
+  "Worker WORKER of STATE, or a refusal when there is none or, with STATES, when
+  it is in none of them."
+  ([state worker] (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker)))
+  ([state worker states]
+   (let [w (worker-of state worker)]
+     (when-not (states (:state w)) (refuse :not-active :worker worker :state (:state w)))
+     w)))
+
+(defmethod decide* :promote-worker! [state {:keys [token-hash policy]}]
+  (if-let [w (next-queued state (merge default-policy policy))]
+    {:events [{:kind :worker-promoted :thread (:thread w) :data {:id (:id w)}}
+              {:kind :token-issued :thread (:thread w) :data {:hash token-hash :principal [:worker (:id w)]}}]
+     :result (:id w)}
+    {:events [] :result nil}))
+
 (defmethod decide* :worker-prepared! [state {{:keys [worker] :as args} :args}]
-  (let [w (get-in state [:workers worker])]
+  (let [w (worker-of state worker active-states)]
     {:events [{:kind :worker-prepared :thread (:thread w) :data args}] :result worker}))
 
-(defmethod decide* :worker-running! [state {{:keys [worker conversation wf-run workspace pane started-at]} :args}]
+(defmethod decide* :worker-running! [state {{:keys [worker conversation wf-run workspace buffer started-at]} :args}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
-    (when-not (#{:starting :queued} (:state w)) (refuse :not-starting :worker worker :state (:state w)))
+    (when-not (= :starting (:state w)) (refuse :not-starting :worker worker :state (:state w)))
     {:events [{:kind :worker-running :thread (:thread w)
-               :data {:id worker :conversation conversation :wf-run wf-run :workspace workspace :pane pane :started-at started-at
+               :data {:id worker :conversation conversation :wf-run wf-run :workspace workspace :buffer buffer :started-at started-at
                       :outbox (next-id state :outbox "o") :text (brief-text w wf-run)}}]
      :result worker}))
 
@@ -217,7 +242,8 @@
     {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state :cancelled :reason (:cancel-reason w)}}]
      :result worker}))
 
-(defmethod decide* :health! [_ {{:keys [worker health at]} :args}]
+(defmethod decide* :health! [state {{:keys [worker health at]} :args}]
+  (when worker (worker-of state worker))
   {:events [{:kind :health-observed :data {:worker worker :health health :at at}}] :result worker})
 
 (defmethod decide* :restart-worker! [state {{:keys [worker at]} :args :keys [token-hash]}]
@@ -227,10 +253,14 @@
               {:kind :token-issued :thread (:thread w) :data {:hash token-hash :principal [:worker worker]}}]
      :result worker}))
 
-(defmethod decide* :worker-restarted! [state {{:keys [worker pane]} :args}]
-  (let [w (get-in state [:workers worker])]
+(defmethod decide* :restart-failed! [state {{:keys [worker reason]} :args}]
+  (let [w (worker-of state worker)]
+    {:events [{:kind :restart-failed :thread (:thread w) :data {:id worker :reason (str reason)}}] :result worker}))
+
+(defmethod decide* :worker-restarted! [state {{:keys [worker buffer]} :args}]
+  (let [w (worker-of state worker active-states)]
     {:events [{:kind :worker-restarted :thread (:thread w)
-               :data {:id worker :pane pane :outbox (next-id state :outbox "o") :conversation (:conversation w)
+               :data {:id worker :buffer buffer :outbox (next-id state :outbox "o") :conversation (:conversation w)
                       :text (str "[Recovery] Resume the existing wf run " (:wf-run w) " and conversation. Inspect existing jobs before acting; do not relaunch surviving jobs.")}}] :result worker}))
 
 (defn- deliverable?
@@ -281,6 +311,9 @@
     (when (and (= :review kind) (str/blank? revision))
       (refuse :invalid :field :revision :message "a review ask names the revision to approve"))
     (when-not (= worker (:worker t)) (refuse :no-active-worker :thread thread))
+    (let [ws (get-in state [:workers worker :state])]
+      (when (= :cancelling ws) (refuse :cancelling :worker worker :message (str worker " is being cancelled")))
+      (when-not (#{:starting :working :waiting} ws) (refuse :no-active-worker :thread thread)))
     (doseq [a supersedes] (when-not (open a) (refuse :no-such-ask :ask a)))
     (let [id (next-id state :asks "a")]
       {:events [{:kind :ask-opened :thread thread
@@ -320,6 +353,7 @@
           (not= revision (:revision a)) (stale (str "the review is of revision " (:revision a)))
           (not= evidence-sha (:evidence-sha a)) (stale "the review's evidence is not the one you saw")
           (not= current-sha (:evidence-sha a)) (stale "the evidence changed since the review was asked"))
+    (when-not (:worker t) (refuse :no-active-worker :thread thread))
     (let [reply {:id id :thread thread :worker (:worker t) :picks {} :note "" :dismiss #{} :approved {ask revision}}]
       {:events [{:kind :reply-sent :thread thread
                  :data (assoc reply :outbox (next-id state :outbox "o")
@@ -500,10 +534,20 @@
       (assoc-in [:threads thread :worker] id)
       (assoc-in [:threads thread :execution] :working)))
 
+(defn- take-locks
+  "STATE with Worker ID holding its locks. A Worker holds them from the moment
+  it is :starting, so another start in its launch window sees them."
+  [state id]
+  (update state :locks merge (zipmap (get-in state [:workers id :locks]) (repeat id))))
+
 (defmethod fold* :worker-started [state {{:keys [id] :as worker} :data :keys [thread]}]
   (-> state (bump :workers)
-      (assoc-in [:workers id] (assoc worker :thread thread :lease :router :conversation nil :wf-run nil :workspace nil :pane nil))
-      (cond-> (= :queued (:state worker)) (assoc-in [:threads thread :execution] :queued))))
+      (assoc-in [:workers id] (assoc worker :thread thread :lease :router :conversation nil :wf-run nil :workspace nil :buffer nil))
+      (cond-> (= :queued (:state worker)) (assoc-in [:threads thread :execution] :queued)
+              (= :starting (:state worker)) (take-locks id))))
+
+(defmethod fold* :worker-promoted [state {{:keys [id]} :data}]
+  (-> state (update-in [:workers id] assoc :state :starting :queued-reason nil) (take-locks id)))
 
 (defmethod fold* :worker-prepared [state {{:keys [worker] :as args} :data}]
   (update-in state [:workers worker] merge (dissoc args :worker)))
@@ -514,7 +558,7 @@
         (update-in [:workers id] merge (dissoc running :id :outbox :text) {:state :working :queued-reason nil})
         (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
                                     :state :pending :message nil})
-        (update :locks merge (zipmap (:locks w) (repeat id)))
+        (take-locks id)
         (assoc-in [:threads thread :worker] id)
         (assoc-in [:threads thread :execution] :working))))
 
@@ -523,8 +567,8 @@
     (-> state
         (update-in [:workers id] assoc :state outcome :reason reason)
         (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
-        (cond-> (= :cancelled outcome)
-          (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= thread (:thread a)) (= :open (:state a))) (assoc :state :superseded))]) %))))
+        ;; Nobody is left to read an answer, whatever the outcome.
+        (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= id (:worker a)) (= :open (:state a))) (assoc :state :superseded))]) %)))
         (update :locks #(into {} (remove (fn [[_ holder]] (= holder id)) %)))
         (cond-> (contains? #{id nil} (:worker t))
           (-> (assoc-in [:threads thread :worker] nil)
@@ -544,8 +588,11 @@
       (assoc-in [:workers id :restart-at] at)
       (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))))
 
-(defmethod fold* :worker-restarted [state {{:keys [id pane outbox conversation text]} :data :keys [thread]}]
-  (-> state (bump :outbox) (assoc-in [:workers id :pane] pane)
+(defmethod fold* :restart-failed [state {{:keys [id reason]} :data}]
+  (assoc-in state [:workers id :restart-error] reason))
+
+(defmethod fold* :worker-restarted [state {{:keys [id buffer outbox conversation text]} :data :keys [thread]}]
+  (-> state (bump :outbox) (assoc-in [:workers id :buffer] buffer)
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
                                  :text text :state :pending :message nil})))
 
@@ -717,13 +764,18 @@
   (-> state (assoc-in [:threads thread :summary] text) (assoc-in [:threads thread :milestone-seq] seq)))
 
 (defmethod fold* :outbox-sent [state {{:keys [id message]} :data :keys [at]}]
-  (update-in state [:outbox id] assoc :state :sent :message message :sent-at at))
+  ;; Only a pending row becomes sent; a late repeat never moves one back.
+  (cond-> state
+    (= :pending (get-in state [:outbox id :state])) (update-in [:outbox id] assoc :state :sent :message message :sent-at at)))
 
 (defmethod fold* :outbox-acked [state {{:keys [id]} :data}]
-  (let [reply (get-in state [:replies (get-in state [:outbox id :reply])])]
-    (cond-> (assoc-in state [:outbox id :state] :acked)
-      reply (-> (assoc-in [:replies (:id reply) :state] :delivered)
-                (set-states :asks (concat (keys (:picks reply)) (keys (:approved reply))) :delivered)))))
+  ;; An ack that arrives after the Worker answered must not undo the answer.
+  (let [reply (get-in state [:replies (get-in state [:outbox id :reply])])
+        asks (filter #(= :sent (get-in state [:asks % :state])) (concat (keys (:picks reply)) (keys (:approved reply))))]
+    (cond-> state
+      (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :acked)
+      (= :sent (:state reply)) (-> (assoc-in [:replies (:id reply) :state] :delivered)
+                                   (set-states :asks asks :delivered)))))
 
 (defmethod fold* :reply-answered [state {{:keys [id]} :data :keys [thread]}]
   (let [reply (get-in state [:replies id])]
@@ -733,9 +785,15 @@
         (resume thread))))
 
 (defn changed
-  "[kind id record] for every record that differs between BEFORE and AFTER."
+  "[kind id record] for every record that differs between BEFORE and AFTER,
+  with record nil for one AFTER no longer has."
   [before after]
-  (for [kind entity-kinds
-        [id record] (kind after)
-        :when (not= record (get-in before [kind id]))]
-    [kind id record]))
+  (concat
+   (for [kind entity-kinds
+         [id record] (kind after)
+         :when (not= record (get-in before [kind id]))]
+     [kind id record])
+   (for [kind entity-kinds
+         id (keys (kind before))
+         :when (not (contains? (kind after) id))]
+     [kind id nil])))

@@ -195,20 +195,31 @@
           (= :post request-method) (send-message root request)
           :else (json-response 405 {:error "Method not allowed"}))))
 
-(defn- super-call
-  "REQUEST to the controller under DIR as a JSON response: 200 or 202 with the
-  result, 409 with the current asks when a Send is stale, 503 when the
-  controller is down."
-  [dir request ok-status]
-  (try (let [{:keys [ok error message data]} (super/call! dir request)]
-         (cond (nil? error) (json-response ok-status ok)
-               (= :stale error) (json-response 409 {:error "stale" :current (:current data) :asks (:asks data)})
-               :else (json-response 400 {:error (str (name error) (when message (str ": " message)))})))
+(defn- when-super-up
+  "(F) as the response, or 503 when the controller is down."
+  [f]
+  (try (f)
        (catch java.io.IOException _ (json-response 503 {:error "bbh super is not running"}))
        (catch clojure.lang.ExceptionInfo e
          (if (= :down (:error (ex-data e)))
            (json-response 503 {:error "bbh super is not running"})
            (json-response 400 {:error (ex-message e)})))))
+
+(defn- super-call
+  "REQUEST to the controller under DIR as a JSON response: 200 or 202 with the
+  result, 409 with the current asks when a Send is stale, 503 when the
+  controller is down."
+  [dir request ok-status]
+  (when-super-up
+   #(let [{:keys [ok error message data]} (super/call! dir request)]
+      (cond (nil? error) (json-response ok-status ok)
+            (= :stale error) (json-response 409 {:error "stale" :current (:current data) :asks (:asks data)})
+            :else (json-response 400 {:error (str (name error) (when message (str ": " message)))})))))
+
+(defn- picks?
+  "Whether PICKS from JSON is a map of ask id to option id."
+  [picks]
+  (and (map? picks) (every? (fn [[k v]] (and (keyword? k) (string? v))) picks)))
 
 (defn- cursors [{:keys [query-string]}]
   (let [[_ q] (re-find #"(?:^|&)cursors=([^&]*)" (str query-string))]
@@ -237,11 +248,12 @@
                 :else (super-call dir {:command :say! :id (:id body) :args {:text (str/trim (str (:text body))) :origin :phone}} 202))
           (nil? id) (json-response 404 {:error "Not found"})
           (and (= :get request-method) (nil? verb))
-          (let [thread (super/call! dir {:command :thread :args {:id id}})
-                events (super/call! dir {:command :events :args {:thread id}})]
-            (if-let [t (:ok thread)]
-              (json-response 200 (assoc t :events (:ok events)))
-              (json-response 404 {:error "No such thread"})))
+          (when-super-up
+           #(let [thread (super/call! dir {:command :thread :args {:id id}})
+                  events (super/call! dir {:command :events :args {:thread id}})]
+              (cond (nil? (:ok thread)) (json-response 404 {:error "No such thread"})
+                    (:error events) (json-response 400 {:error (str (name (:error events)))})
+                    :else (json-response 200 (assoc (:ok thread) :events (:ok events))))))
           (not= :post request-method) (json-response 405 {:error "Method not allowed"})
           (not (same-origin? request)) (json-response 403 {:error "Cross-origin request"})
           (= ::bad body) (json-response 400 {:error "Bad JSON"})
@@ -249,9 +261,10 @@
           (let [{:keys [picks note asks-version]} body]
             (cond (> (count (str note)) max-text) (json-response 413 {:error "Note too long"})
                   (not (string? (:id body))) (json-response 400 {:error "A reply needs an id"})
+                  (not (or (nil? picks) (picks? picks))) (json-response 400 {:error "Picks map an ask id to an option id"})
                   :else (super-call dir {:command :reply! :id (:id body)
                                          :args {:thread id :asks-version asks-version
-                                                :picks (into {} (map (fn [[k v]] [(name k) (str v)])) picks)
+                                                :picks (into {} (map (fn [[k v]] [(name k) v])) picks)
                                                 :note (str/trim (str note))}}
                                     202)))
           (= "approve" verb)
@@ -260,6 +273,8 @@
                              :args {:thread id :ask (:ask body) :revision (:revision body) :evidence-sha (:evidence-sha body)}}
                         202)
             (json-response 400 {:error "An approval names its id, ask, revision and evidence-sha"}))
+          ;; The id makes a retry the same command, so it is required here as for a reply.
+          (not (string? (:id body))) (json-response 400 {:error (str "A " verb " needs an id")})
           :else (super-call dir {:command (keyword (str verb "!")) :id (:id body) :args {:thread id}} 202))))
 
 (defn handler

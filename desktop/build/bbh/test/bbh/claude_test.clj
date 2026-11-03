@@ -193,9 +193,10 @@
             (await-call events)
             (bbh.inbox/send! (:dir @s) "[Steering] preserve the option" nil {:kind :steer})
             (is (= :end-turn (deref turn 10000 :timeout)))
-            (is (= "=> 42\n\n[Steering] preserve the option"
-                   (:text (last (filter #(= :tool-result (:type %)) @events)))))
-            (is (= "=> 42\n\n[Steering] preserve the option"
-                   (:content (last (filter #(= "tool" (:role %)) (:messages @s))))))
+            ;; Steering leads the result, tagged with its message id.
+            (is (re-matches #"\[Steering [^\]]+\] preserve the option\n\n=> 42"
+                            (:text (last (filter #(= :tool-result (:type %)) @events)))))
+            (is (re-matches #"\[Steering [^\]]+\] preserve the option\n\n=> 42"
+                            (:content (last (filter #(= "tool" (:role %)) (:messages @s))))))
             (is (= [] (bbh.inbox/pending (:dir @s)))))
           (finally (session/close! s)))))))

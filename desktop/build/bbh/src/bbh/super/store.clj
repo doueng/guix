@@ -57,13 +57,17 @@
   [db]
   (reduce model/fold model/empty-state (events db)))
 
-(defn- upsert! [db [kind id record]]
-  (sq/execute! db [(format "insert into %s (id, thread, state, data) values (?, ?, ?, ?) on conflict (id) do update set thread = excluded.thread, state = excluded.state, data = excluded.data"
+(defn- upsert!
+  "Write one changed record, or delete its row when the record is gone."
+  [db [kind id record]]
+  (if (nil? record)
+    (sq/execute! db [(format "delete from %s where id = ?" (name kind)) (pr-str id)])
+    (sq/execute! db [(format "insert into %s (id, thread, state, data) values (?, ?, ?, ?) on conflict (id) do update set thread = excluded.thread, state = excluded.state, data = excluded.data"
                            (name kind))
                    (pr-str id)
                    (when (map? record) (:thread record))
                    (when (map? record) (some-> (:state record) name))
-                   (pr-str record)]))
+                   (pr-str record)])))
 
 (defn commit!
   "Run COMMAND for PRINCIPAL against STATE in one transaction. A command id

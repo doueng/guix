@@ -1,10 +1,9 @@
 (ns bbh.super.client
   "What every surface and Worker needs to talk to `bbh super`: where it lives
-  and `call!`. This loads no database, so the CLI, the website and the pane
+  and `call!`. This loads no database, so the CLI, the website and the Inbox
   start without libsqlite3."
   (:require [babashka.fs :as fs]
-            [babashka.process :as p]
-            [cheshire.core :as json]
+            [bbh.super.emacs :as emacs]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
@@ -17,18 +16,11 @@
 
 (defn listeners-dir [dir] (fs/path dir "listeners"))
 
-(defn register-pane!
-  "Remember the fzf pane listening on PORT so commits reload it."
+(defn register-view!
+  "Remember the Inbox view listening on PORT so commits reload it."
   [dir port]
   (fs/create-dirs (listeners-dir dir))
   (spit (str (fs/path (listeners-dir dir) (str port))) (str port)))
-
-(defn herdr
-  "Run a Herdr command and return its :result."
-  [& args]
-  (let [{:keys [exit out err]} (apply p/shell {:out :string :err :string :continue true} "herdr" args)]
-    (when-not (zero? exit) (throw (ex-info (str "herdr " (str/join " " args) ": " (str/trim err)) {:error :herdr})))
-    (:result (json/parse-string out true))))
 
 (defn new-id
   "A command id for a caller that has none: unique and never repeated."
@@ -63,25 +55,16 @@
       (when line (println (str "       " line))))))
 
 (defn start-router!
-  "The Inbox workspace in Herdr: `bbh inbox` in its first pane and the Router,
-  `bbh --id router` with its token and BBH_ROLE=router, in a split to the
-  right. Registers the Router first, which revokes an earlier Router token."
+  "The Router and the Inbox in the super-agent's Emacs: the Router session,
+  `router`, with its token and BBH_ROLE=router, in buffer Router, and the
+  *bbh inbox* buffer. Registers the Router first, which revokes an earlier
+  Router token, so a Router session already open is replaced."
   [dir]
   (let [{:keys [ok error message]} (call! dir {:command :register-router! :args {:conversation "router"}})
         _ (when error (throw (ex-info (str "register-router!: " (name error) " " message) {:error error})))
-        token (:token ok)
-        home (System/getProperty "user.home")
-        ws (herdr "workspace" "create" "--cwd" home "--label" "Inbox" "--no-focus")
-        ws-id (or (get-in ws [:workspace :workspace_id]) (:workspace_id ws))
-        left (:pane_id (first (:panes (herdr "pane" "list" "--workspace" ws-id))))
-        right (get-in (herdr "pane" "split" left "--direction" "right" "--ratio" "0.6" "--cwd" home "--no-focus"
-                             "--env" (str "BBH_SUPER_TOKEN=" token) "--env" "BBH_ROLE=router")
-                      [:pane :pane_id])]
-    (herdr "pane" "run" left "bbh" "inbox")
-    (herdr "pane" "rename" left "Inbox")
-    (herdr "pane" "run" right "bbh" "--id" "router")
-    (herdr "pane" "rename" right "Router")
-    {:workspace ws-id :inbox left :router right}))
+        router (emacs/open! {:conversation "router" :dir (System/getProperty "user.home") :title "Router"
+                             :env {"BBH_SUPER_TOKEN" (:token ok) "BBH_ROLE" "router"}})]
+    {:router router :inbox (emacs/read-string* (emacs/call! "eng/bbh-inbox-buffer"))}))
 
 (defn -main
   "bbh super serve, bbh super list, or bbh super COMMAND [EDN-ARGS] [--id ID].

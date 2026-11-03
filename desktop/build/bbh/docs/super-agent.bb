@@ -26,7 +26,7 @@
 (defn heading [{:keys [level title]}]
   [(keyword (str "h" level)) {:id (slug title)} title])
 
-(def surfaces ["Voice" "Herdr" "iPhone" "System"])
+(def surfaces ["Voice" "Emacs" "Herdr" "iPhone" "System"])
 
 (defn step
   "A journey step line's [surface text], from its bold prefix such as **Herdr.**"
@@ -47,8 +47,8 @@
 (def herdr-mockup
   [:figure.mock
    [:div.term
-    [:div.tabs [:span.tab.active "1 Inbox"] [:span.tab "2 guix"] [:span.tab "3 research_lab"] [:span.tab "4 reader"]
-     [:span.right "Herdr"]]
+    [:div.tabs [:span.tab.active "*bbh inbox*"] [:span.tab "Router"] [:span.tab "T14 Herdr key"] [:span.tab "T15 web cost"]
+     [:span.right "emacsclient -s bbh-super -t"]]
     [:div.panes
      [:div.pane.inbox
       [:div.ptitle "bbh inbox · 2 need you"]
@@ -68,7 +68,7 @@
        [:div.opt "[1] Alt+Space t  (recommended)"]
        [:div.opt "[2] Alt+Space a"]
        [:div.dim "stopped · W9 · wf change: implement"]]
-      [:div.keys "j/k  1-4 pick  r note  s send  ⏎ pane  d diff  t takeover  m read  a archive"]]
+      [:div.keys "j/k  1-4 pick  s send  A approve  r note  m read  a archive  n new  RET open"]]
      [:div.pane.router
       [:div.ptitle "bbh · Router"]
       [:div.you "> make the bbh web page show cost per session"]
@@ -78,7 +78,7 @@
       [:div.you "> what's open?"]
       [:div.bot "T14 stopped on a key choice. T9 waits for your review. T15 and T16 are working, T16 waits for guix-build."]
       [:div.cursor "> "]]]]
-   [:figcaption "Herdr. Workspace 1 is the Inbox: the inbox pane on the left with the selected ask in its preview, the Router conversation on the right. Workers live in panes in their project workspaces."]])
+   [:figcaption "Terminal Emacs on the bbh-super daemon: the *bbh inbox* buffer on the left with the selected ask in its preview, the Router buffer on the right. Each Worker has its own buffer, named after its thread."]])
 
 (def phone-mockup
   [:figure.mock.phones
@@ -117,7 +117,7 @@
     [:span.stack [:span.box "spoken handle: that thread"] [:span.box "selected in inbox pane: that thread"] [:span.box "otherwise: Router"]]]
    [:figcaption "Voice. Nothing is pasted; the transcript becomes a voice event. Plain Cmd+M still pastes at the cursor."]])
 
-(def mockups {"Herdr: the main desk" herdr-mockup
+(def mockups {"Emacs: the main desk" herdr-mockup
               "iPhone: triage and answers away from the desk" phone-mockup
               "Voice: talking to the agent" voice-mockup})
 
@@ -173,7 +173,7 @@ figure.mock{margin:1.2rem 0 1.6rem;}figcaption{font-size:.9rem;color:#555;margin
 .flow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.9rem}.box{border:1px solid #bbb;border-radius:6px;padding:.3rem .6rem;background:#fafafa}.box.ctl{background:#e8f0fe;border-color:#7aa2f7}.arrow{color:#888}.stack{display:flex;flex-direction:column;gap:.3rem}
 .journey{margin:1.4rem 0;padding:.2rem 1rem .6rem;border:1px solid #e3e3e3;border-radius:8px;background:#fcfcfb}.jid{color:#1a73e8}
 .steps{padding-left:1.4rem}.steps li{margin:.35rem 0;display:flex;align-items:baseline;gap:.5rem}.steps .tag{flex:none;margin-right:0}.tag{display:inline-block;font-size:.72rem;font-weight:600;letter-spacing:.03em;padding:.05rem .45rem;border-radius:999px;margin-right:.5rem;vertical-align:middle;color:#fff;background:#777}
-.tag.herdr{background:#2b7a78}.tag.iphone{background:#1a73e8}.tag.voice{background:#c2185b}.tag.system{background:#8d99ae}
+.tag.herdr{background:#2b7a78}.tag.emacs{background:#7e57c2}.tag.iphone{background:#1a73e8}.tag.voice{background:#c2185b}.tag.system{background:#8d99ae}
 .legend{display:flex;gap:.5rem;flex-wrap:wrap;margin:.4rem 0 1rem}
 ")
 

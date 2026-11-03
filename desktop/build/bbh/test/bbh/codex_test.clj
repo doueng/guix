@@ -59,7 +59,13 @@
                     {:type "response.completed"
                      :response {:incomplete_details {:reason "max_output_tokens"}}}])))
   (is (nil? (:truncated (codex/accumulate
-                         [{:type "response.completed" :response {:incomplete_details nil}}])))))
+                         [{:type "response.completed" :response {:incomplete_details nil}}]))))
+  (let [r (codex/accumulate [{:type "response.output_text.delta" :delta "partial"}
+                             {:type "response.incomplete"
+                              :response {:status "incomplete" :incomplete_details {:reason "max_output_tokens"}
+                                         :usage {:input_tokens 10 :output_tokens 5}}}])]
+    (is (:truncated r) "the Responses API ends a cut-off reply with response.incomplete")
+    (is (= 10 (get-in r [:usage :input])))))
 
 (defn- stream [body]
   {:status 200 :headers {}

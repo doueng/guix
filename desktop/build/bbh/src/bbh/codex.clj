@@ -67,8 +67,10 @@
         (update acc :calls conj {:id call_id :type "function"
                                  :function {:name name :arguments arguments}})
         acc))
-    "response.completed" (assoc acc :usage (get-in e [:response :usage])
-                                 :incomplete (get-in e [:response :incomplete_details :reason]))
+    ;; A reply cut off by the output limit ends with response.incomplete instead.
+    ("response.completed" "response.incomplete")
+    (assoc acc :usage (get-in e [:response :usage])
+           :incomplete (get-in e [:response :incomplete_details :reason]))
     acc))
 
 (defn- finish

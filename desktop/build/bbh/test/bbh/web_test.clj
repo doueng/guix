@@ -293,3 +293,16 @@
           (is (= ["T1"] (mapv :id (mapcat :threads (:sections held))))))
         (is (= 2 (count (mapcat :threads (:sections (second (get-json s "/api/super/threads"))))))
             "without shown the page gets everything")))))
+
+
+(deftest bad-inbox-requests-are-refused-and-a-stopped-controller-is-503
+  (with-super
+    (fn [s c _]
+      (doseq [picks [[1 2] "a1" {:a1 3} {:a1 nil}]]
+        (is (= 400 (first (post-super s "/api/super/threads/T1/reply" {:id "p-9" :asks-version 1 :picks picks} from-page)))
+            (pr-str picks)))
+      (doseq [verb ["dismiss" "archive"] id [nil 7]]
+        (is (= 400 (first (post-super s (str "/api/super/threads/T1/" verb) (cond-> {} id (assoc :id id)) from-page)))
+            (str verb " " (pr-str id))))
+      (bbh.super/stop! c)
+      (is (= 503 (first (get-json s "/api/super/threads/T1"))) "opening a thread with the controller down"))))

@@ -74,27 +74,19 @@
                    (.variable LineReader/HISTORY_FILE (fs/path (super/data-dir) "history"))
                    (.build))
         turn (Object.)
-        prompt! (fn [text]
+        prompt! (fn [text & opts]
                   (locking turn
-                    (try (session/prompt! s text)
+                    (try (apply session/prompt! s text opts)
                          (catch Exception e (println (str "\n" (ex-message e)))))
                     (println)))
         ;; The mailbox is how the website and bbh super reach this session. A
         ;; message waits for the turn in progress, then runs as a prompt of its own.
         poller (promise)
         _ (deliver poller (inbox/start! {:root (inbox/root-dir dir) :project (str (fs/cwd))
-                                         :deliver (fn [{:keys [id text kind]}]
-                                                    (session/receive-control! s {:id id :kind kind})
-                                                    (future
-                                                      (if (= "steer" kind)
-                                                        ;; A busy tool may already have consumed it.
-                                                        (locking turn
-                                                          (when (some #(= "steer" (:kind %)) (inbox/pending (inbox/root-dir dir)))
-                                                            (prompt! "Apply the pending steering.")))
-                                                        (do
-                                                          (.printAbove reader (str (dim "[mailbox] ") text))
-                                                          (prompt! text)
-                                                          (inbox/ack! @poller id)))))}))]
+                                         :deliver (session/mailbox-handler
+                                                   s {:prompt! prompt!
+                                                      :show! #(.printAbove reader (str (dim "[mailbox] ") %))
+                                                      :ack! #(inbox/ack! @poller %)})}))]
     (sun.misc.Signal/handle (sun.misc.Signal. "INT")
                             (reify sun.misc.SignalHandler (handle [_ _] (session/interrupt! s))))
     (println (dim (str "bbh " (fs/file-name dir) " " (:model @s) " nREPL " (:port (:repl @s)) "  /help lists commands")))
@@ -113,7 +105,8 @@
 
 (defn -main [& args]
   (case (first args)
-    "acp" (acp/-main (some-> (:resume (parse-args (rest args))) (conversation-dir nil)))
+    "acp" (let [{:keys [resume id]} (parse-args (rest args))]
+            (acp/-main (when (or resume id) (conversation-dir resume id))))
     "inbox-poll" (let [[_ id project] args]
                    (inbox/-poll (str (fs/path (super/data-dir) "conversations" id)) project))
     "web" (web/-main (super/data-dir))

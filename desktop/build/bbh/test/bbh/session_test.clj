@@ -531,6 +531,8 @@
     (session/close! used)
     (is (fs/exists? (fs/path root "used" "messages.jsonl")))))
 
+(defn- untag "TEXT with steering tags' message ids removed." [text] (str/replace (str text) #"\[Steering [^\]]+\]" "[Steering]"))
+
 (deftest steering-arriving-during-evaluation-reaches-the-next-model-request
   (let [h (harness "" [{:code "(Thread/sleep 250) :finished"} "done"])
         s (:s h)
@@ -542,9 +544,9 @@
       (bbh.inbox/send! (:dir h) "ordinary reply")
       (bbh.inbox/send! (:dir h) "[Steering] use the small build" nil {:kind :steer})
       (is (= :end-turn (deref turn 10000 :timeout)))
-      (is (= ["=> :finished\n\n[Steering] use the small build"] (tool-results h)))
-      (is (= "=> :finished\n\n[Steering] use the small build"
-             (get-in @(:requests h) [1 :messages 3 :content])))
+      (is (= ["[Steering] use the small build\n\n=> :finished"] (map untag (tool-results h))))
+      (is (= "[Steering] use the small build\n\n=> :finished"
+             (untag (get-in @(:requests h) [1 :messages 3 :content]))))
       (is (= ["ordinary reply"] (mapv :text (bbh.inbox/pending (:dir h)))))
       (is (nil? (session/take-steering! s)))
       (finally (stop! h)))))
@@ -555,7 +557,7 @@
       (bbh.inbox/send! (:dir h) "[Steering] keep the old flag" nil {:kind :steer})
       (is (= :end-turn (session/prompt! (:s h) "continue")))
       (is (= "[Steering] keep the old flag\n\ncontinue"
-             (get-in @(:requests h) [0 :messages 1 :content])))
+             (untag (get-in @(:requests h) [0 :messages 1 :content]))))
       (is (= [] (bbh.inbox/pending (:dir h))))
       (finally (stop! h)))))
 
@@ -569,7 +571,7 @@
       (is (= ["[Steering] keep this through a crash"] (mapv :text (bbh.inbox/pending (:dir h)))))
       (is (= :end-turn (session/prompt! s "retry")))
       (is (= "[Steering] keep this through a crash\n\nretry"
-             (get-in @(:requests h) [0 :messages 1 :content])))
+             (untag (get-in @(:requests h) [0 :messages 1 :content]))))
       (is (= [] (bbh.inbox/pending (:dir h))))
       (finally (stop! h)))))
 
@@ -585,3 +587,49 @@
       (is (= "interrupted" (slurp (str (fs/path (:dir h) "control-test.received")))))
       (is (not (:evaluating @s)))
       (finally (stop! h)))))
+
+
+(deftest steering-is-acked-by-its-tag-not-by-matching-text
+  (let [h (harness "" ["done"])
+        s (:s h)]
+    (try
+      (bbh.inbox/send! (:dir h) "[Steering] use the small build" nil {:kind :steer})
+      (let [handed (session/take-steering! s)]
+        (session/record! s {:role "tool" :content "earlier output said: use the small build"})
+        (is (= 1 (count (bbh.inbox/pending (:dir h)))) "the same words without the tag are not a delivery")
+        (session/record! s {:role "tool" :content (str handed "\n\n=> :ok")})
+        (is (= [] (bbh.inbox/pending (:dir h)))))
+      (finally (stop! h)))))
+
+(deftest the-mailbox-runs-in-order-and-a-cancel-never-starts-a-turn
+  (let [h (harness "" ["done"])
+        s (:s h)
+        prompts (atom [])
+        acked (atom [])
+        deliver (session/mailbox-handler s {:prompt! (fn [text & _] (Thread/sleep (rand-int 20)) (swap! prompts conj text))
+                                            :show! (fn [_]) :ack! #(swap! acked conj %)})]
+    (try
+      (doseq [i (range 5)] (deliver {:id (str "m" i) :text (str "message " i)}))
+      (loop [n 0] (when (and (< n 300) (< (count @acked) 5)) (Thread/sleep 10) (recur (inc n))))
+      (is (= (mapv #(str "message " %) (range 5)) @prompts) "one at a time, in arrival order")
+      (bbh.inbox/send! (:dir h) "[Cancelled] stop now" nil {:kind :cancel :message-id "0-cancel-W1"})
+      (deliver {:id "0-cancel-W1" :kind "cancel" :text "[Cancelled] stop now"})
+      (deliver {:id "m9" :text "a reply that was already queued"})
+      (loop [n 0] (when (and (< n 300) (< (count @acked) 6)) (Thread/sleep 10) (recur (inc n))))
+      (is (= 5 (count @prompts)) "neither the cancel nor a later message starts a turn")
+      (is (= "m9" (last @acked)))
+      (is (fs/exists? (fs/path (:dir h) "0-cancel-W1.received")))
+      (is (= [] (filter #(= "cancel" (:kind %)) (bbh.inbox/pending (:dir h)))))
+      (is (= :cancelled (session/prompt! s "late mailbox prompt" :mailbox? true)))
+      (is (empty? @(:requests h)) "no model request after the cancel")
+      (finally (stop! h)))))
+
+(deftest a-front-end-without-a-poller-still-acts-on-a-cancel
+  (let [h (harness "" ["done"])
+        stop-watch (session/watch-controls! (:s h) :scan-ms 10)]
+    (try
+      (bbh.inbox/send! (:dir h) "[Cancelled] stop" nil {:kind :cancel :message-id "0-cancel-W2"})
+      (loop [n 0] (when (and (< n 300) (not (fs/exists? (fs/path (:dir h) "0-cancel-W2.received")))) (Thread/sleep 10) (recur (inc n))))
+      (is (fs/exists? (fs/path (:dir h) "0-cancel-W2.received")))
+      (is (:cancelled @(:s h)))
+      (finally (stop-watch) (stop! h)))))

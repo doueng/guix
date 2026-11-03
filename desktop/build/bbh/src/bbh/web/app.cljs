@@ -93,7 +93,9 @@
   (-> (request (str "/api/super/threads/" id) {})
       (.then (fn [t]
                (local! "super-cursors" (assoc (local "super-cursors" {}) id (:milestone-seq t)))
-               (swap! state assoc-in [:threads id] t)))))
+               (swap! state assoc-in [:threads id] t)
+               (swap! state assoc :inbox-error nil)))
+      (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))))
 
 (defn- shown-query []
   (str/join "," (for [[t s] (local "super-shown" [])] (str t ":" s))))
@@ -330,7 +332,7 @@
     (when-not (str/blank? text)
       (swap! state assoc :saying true)
       (-> (request "/api/super/say" {:method "POST" :headers {"Content-Type" "application/json"}
-                                     :body (js/JSON.stringify (clj->js {:id (str "s-" (js/Date.now)) :text text}))})
+                                     :body (js/JSON.stringify (clj->js {:id (str "s-" (random-uuid)) :text text}))})
           (.then (fn [r]
                    (swap! drafts dissoc :say)
                    (when-let [el (.querySelector js/document ".say textarea")] (set! (.-value el) ""))
@@ -435,8 +437,12 @@
         picks (get (:picks @state) thread {})
         note (get @drafts [:note thread] "")
         pending (local "super-pending" {})
-        id (or (get pending thread) (str "p-" (js/Date.now) "-" (rand-int 65536)))]
-    (local! "super-pending" (assoc pending thread id))
+        draft (js/JSON.stringify (clj->js {:picks picks :note note :asks-version (:asks-version t)}))
+        ;; A retry of the same draft keeps its id, so the controller sees one reply.
+        ;; A changed draft is a new reply; reusing the id would return the old one.
+        id (or (when (= draft (get-in pending [thread "draft"])) (get-in pending [thread "id"]))
+               (str "p-" (random-uuid)))]
+    (local! "super-pending" (assoc pending thread {"id" id "draft" draft}))
     (swap! state update :busy-super conj thread)
     (-> (js/fetch (str "/api/super/threads/" thread "/reply")
                   (clj->js {:method "POST" :headers {"Content-Type" "application/json"}
@@ -483,7 +489,7 @@
               (when-let [c (get conflicts id)] (conflict-view id c t))
               (when inbox-error [:p.conflict inbox-error])
               (into [:div.events] (keep #(event-view id picks (:asks t) (:replies t) %)) (:events t)))
-        [:p.empty "Loading the thread"])]
+        [:p.empty (or inbox-error "Loading the thread")])]
      (when (and t (not archived))
        [:div.bar
         [:textarea.note-box {:placeholder "Note to the Worker" :aria-label "Note"
@@ -492,11 +498,11 @@
         [:div.bar-actions
          (when-let [r (last (filter #(= "review" (:kind %)) open))]
            [:button.send {:type "button" :disabled busy
-                          :on {:click #(post-super! id "approve" {:id (str "ap-" (js/Date.now)) :ask (:id r)
+                          :on {:click #(post-super! id "approve" {:id (str "ap-" (random-uuid)) :ask (:id r)
                                                                   :revision (:revision r) :evidence-sha (:evidence-sha r)})}}
             (str "Approve " (subs (str (:revision r)) 0 (min 8 (count (str (:revision r))))))])
-         [:button.quiet {:type "button" :disabled (or busy (empty? open)) :on {:click #(post-super! id "dismiss" {:id (str "d-" (js/Date.now))})}} "Mark read"]
-         [:button.quiet {:type "button" :disabled busy :on {:click #(post-super! id "archive" {:id (str "a-" (js/Date.now))})}} "Archive"]
+         [:button.quiet {:type "button" :disabled (or busy (empty? open)) :on {:click #(post-super! id "dismiss" {:id (str "d-" (random-uuid))})}} "Mark read"]
+         [:button.quiet {:type "button" :disabled busy :on {:click #(post-super! id "archive" {:id (str "a-" (random-uuid))})}} "Archive"]
          [:button.send {:type "button" :disabled (or busy (and (empty? (get picks id)) (str/blank? (get @drafts [:note id] ""))))
                         :on {:click #(send-reply! id)}} (if busy "Sending" "Send")]]])]))
 

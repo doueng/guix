@@ -751,3 +751,78 @@
           (should (bbh-test--wait (lambda () (equal first-id (car (last (bbh-test--inbox-lines dir "ids"))))) 30))
           (should-not (process-live-p second-process))
           (should (process-live-p (buffer-local-value 'eng/bbh-inbox--process next))))))))
+
+
+;;; Super-agent
+
+(defun bbh-test--environ (pid)
+  (with-temp-buffer
+    (insert-file-contents-literally (format "/proc/%d/environ" pid))
+    (split-string (buffer-string) "\0" t)))
+
+(ert-deftest bbh-super-open-runs-the-conversation-in-its-workspace-with-its-environment ()
+  (let* ((dir (make-temp-file "bbh-super-ws" t))
+         (name (eng/bbh-super-open "super-W7" dir "T7 test"
+                                   '(("BBH_SUPER_TOKEN" . "tok-7") ("WF_RUN" . "run-7"))))
+         (shell (get-buffer name)))
+    (unwind-protect
+        (progn
+          (should (equal "T7 test" name))
+          (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
+          (should (equal "super-W7" (eng/bbh--conversation shell)))
+          (should (equal "T7 test transcript" (buffer-name (buffer-local-value 'eng/bbh-transcript shell))))
+          ;; The renamed shell still takes a prompt and runs it.
+          (bbh-test--submit shell "add forty and two")
+          (should (bbh-test--wait (lambda () (and (bbh-test--idle-p shell) (string-match-p "=> 42" (bbh-test--text shell)))) 60))
+          (let ((acp (seq-find (lambda (p) (and (member "acp" (process-command p)) (member "super-W7" (process-command p)))) (process-list))))
+            (should acp)
+            (should (equal '("acp" "--id" "super-W7") (last (process-command acp) 3)))
+            (should (member "BBH_SUPER_TOKEN=tok-7" (bbh-test--environ (process-id acp))))
+            (should (member "WF_RUN=run-7" (bbh-test--environ (process-id acp))))
+            (should (member "PATH" (mapcar (lambda (v) (car (split-string v "="))) (bbh-test--environ (process-id acp)))))
+            (should (file-equal-p dir (file-truename (format "/proc/%d/cwd" (process-id acp))))))
+          (let ((again (eng/bbh-super-open "super-W7" dir "T7 test" nil)))
+            (should (equal "T7 test" again))
+            (should-not (buffer-live-p shell))
+            (should (= 1 (seq-count (lambda (b) (equal "super-W7" (buffer-local-value 'eng/bbh-super-conversation b)))
+                                    (buffer-list))))))
+      (when-let* ((s (eng/bbh-super--shell "super-W7"))) (eng/bbh-super--kill s)))))
+
+(ert-deftest bbh-super-open-refuses-a-missing-directory ()
+  (should-error (eng/bbh-super-open "super-W8" "/nonexistent/bbh" "T8" nil)))
+
+(ert-deftest bbh-inbox-shows-the-view-and-its-keys-call-bbh ()
+  (let* ((log (make-temp-file "bbh-inbox-log"))
+         (script (make-temp-file "bbh-fake" nil nil
+                                 (concat "#!/bin/sh\necho \"$@\" >> " log "\n"
+                                         "case \"$2\" in\n"
+                                         "view) printf 'bbh inbox · 1 need you\\nT1\\tSTOPPED  T1 first\\nT2\\tNEW  T2 second\\n';;\n"
+                                         "preview) echo \"preview of $3\";;\n"
+                                         "esac\n")))
+         (eng/bbh-inbox-bbh (list script))
+         (logged (lambda (line) (with-temp-buffer (insert-file-contents log)
+                                                  (string-match-p (concat "^" line "$") (buffer-string))))))
+    (set-file-modes script #o700)
+    (eng/bbh-inbox)
+    (with-current-buffer "*bbh inbox*"
+      (should (bbh-test--wait (lambda () (string-match-p "T2 second" (buffer-string))) 10))
+      (should (equal "bbh inbox · 1 need you" header-line-format))
+      (should (bbh-test--wait (lambda () (funcall logged "inbox register [0-9]+")) 0))
+      (goto-char (point-min))
+      (should (equal "T1" (eng/bbh-inbox--at-point)))
+      (let ((last-command-event ?2)) (call-interactively (lookup-key eng/bbh-inbox-mode-map "2")))
+      (should (bbh-test--wait (lambda () (funcall logged "inbox pick T1 2")) 10))
+      (call-interactively (lookup-key eng/bbh-inbox-mode-map "s"))
+      (should (bbh-test--wait (lambda () (funcall logged "inbox send T1")) 10))
+      (forward-line 1)
+      (eng/bbh-inbox--moved)
+      (should (bbh-test--wait (lambda () (funcall logged "inbox select T2")) 10))
+      (should (bbh-test--wait (lambda () (and (get-buffer "*bbh inbox preview*")
+                                              (string-match-p "preview of T2" (bbh-test--text "*bbh inbox preview*"))))
+                              10)))))
+
+(ert-deftest bbh-super-refuses-a-prompt-outside-a-command ()
+  (let ((this-command nil))
+    (should-error (eng/bbh-super--refuse-prompt #'y-or-n-p "Continue? ")))
+  (let ((this-command 'some-command))
+    (should (equal '("a" "b") (eng/bbh-super--refuse-prompt #'list "a" "b")))))

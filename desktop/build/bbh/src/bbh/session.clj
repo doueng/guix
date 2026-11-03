@@ -59,6 +59,11 @@
          :context-size nil :last-input nil :turn-usage nil
          :code-lock (Object.) :steering {}}))
 
+(defn- steering-tag
+  "The tag that marks steering message ID where it is handed to the model."
+  [id]
+  (str "[Steering " id "]"))
+
 (defn take-steering!
   "Claim pending steering from the durable mailbox, serialized with evaluation.
   Ordinary replies remain queued for the front end after the turn."
@@ -71,7 +76,8 @@
       (when (seq messages)
         ;; Claim in memory only. record! acknowledges after the transcript write.
         (swap! s update :steering into (map (juxt :id :text) messages))
-        (str/join "\n\n" (map :text messages))))))
+        ;; Each carries its message id, which record! acknowledges it by.
+        (str/join "\n\n" (map #(str (steering-tag (:id %)) " " (str/replace-first (:text %) #"^\[Steering\] " "")) messages))))))
 
 (defn emit! [s event]
   ((:emit @s) event))
@@ -81,8 +87,8 @@
   (swap! s update :messages conj msg)
   (when (#{"user" "tool"} (:role msg))
     (locking (:code-lock @s)
-      (doseq [[id text] (:steering @s)
-              :when (str/includes? (or (:content msg) "") text)]
+      (doseq [[id _] (:steering @s)
+              :when (str/includes? (or (:content msg) "") (steering-tag id))]
         (inbox/ack! {:root (inbox/root-dir (:repl-dir @s))} id)
         (swap! s update :steering dissoc id)))))
 
@@ -190,12 +196,53 @@
       (some-> repl repl/kill!))))
 
 (defn receive-control!
-  "Interrupt immediately on a typed cancellation, outside the front end turn lock.
-  The receipt is written only after interrupt! returns. Reason remains queued."
+  "Act on a typed cancellation at once, outside the front end turn lock: mark
+  S cancelled so no mailbox message starts another turn, interrupt, then write
+  the receipt and remove the message. Returns true when MESSAGE was a control."
   [s {:keys [id kind]}]
   (when (= "cancel" kind)
+    (swap! s assoc :cancelled true)
     (interrupt! s)
-    (spit (str (fs/path (inbox/root-dir (:repl-dir @s)) (str id ".received"))) "interrupted")))
+    (let [root (inbox/root-dir (:repl-dir @s))]
+      (spit (str (fs/path root (str id ".received"))) "interrupted")
+      (inbox/ack! {:root root} id))
+    true))
+
+(defn watch-controls!
+  "For a front end that has no mailbox poller of its own, such as ACP: watch
+  S's mailbox and act on each cancellation as it arrives. Returns a function
+  that stops the watch."
+  [s & {:keys [scan-ms] :or {scan-ms 200}}]
+  (let [stopped (atom false)]
+    (doto (Thread. #(while (not @stopped)
+                      (try (doseq [m (inbox/pending (inbox/root-dir (:repl-dir @s)))]
+                             (receive-control! s m))
+                           (catch Exception e (binding [*out* *err*] (println "bbh controls:" (ex-message e)))))
+                      (Thread/sleep (long scan-ms))))
+      (.setDaemon true) (.start))
+    #(reset! stopped true)))
+
+(defn mailbox-handler
+  "The mailbox poller's DELIVER for a terminal session S. A cancellation acts at
+  once and never starts a turn. Other messages run one at a time in arrival
+  order, each as a prompt of its own, and none once S is cancelled. PROMPT! runs
+  a turn and takes :mailbox? true, SHOW! prints a line, ACK! removes a message."
+  [s {:keys [prompt! show! ack!]}]
+  (let [exec (java.util.concurrent.Executors/newSingleThreadExecutor
+              (reify java.util.concurrent.ThreadFactory
+                (newThread [_ r] (doto (Thread. ^Runnable r) (.setDaemon true)))))]
+    (fn [{:keys [id text kind] :as message}]
+      (if (receive-control! s message)
+        (show! text)
+        (.execute exec
+                  (fn []
+                    (try
+                      (cond (:cancelled @s) (ack! id)
+                            ;; A busy tool may already have consumed it.
+                            (= "steer" kind) (when (some #(= "steer" (:kind %)) (inbox/pending (inbox/root-dir (:repl-dir @s))))
+                                               (prompt! "Apply the pending steering." :mailbox? true))
+                            :else (do (show! text) (prompt! text :mailbox? true) (ack! id)))
+                      (catch Exception e (show! (str "mailbox: " (ex-message e)))))))))))
 
 (defn- add-request [turn {:keys [input cached written output thinking cache] :as request}]
   (-> (or turn {})
@@ -328,7 +375,8 @@
                     [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (when-not sandbox? (name-hint s r)))
                      (if (:error? r) :failed :completed)]))
           text (cond->> text note (str note "\n"))]
-      (let [text (if-let [steering (take-steering! s)] (str text "\n\n" steering) text)]
+      ;; Steering goes first, where a front end that shortens long output keeps it.
+      (let [text (if-let [steering (take-steering! s)] (str steering "\n\n" text) text)]
         (emit! s {:type :tool-result :id id :code code :text text :status status})
         text))))
 
@@ -584,8 +632,9 @@
 (defn prompt!
   "Handle one user input: a bbh command, an env reply, or a model turn.
   Returns :end-turn or :cancelled, and throws for a /command nothing handles."
-  [s text]
-  (swap! s assoc :interrupted false :turn-usage nil :trace nil :steering {})
+  [s text & {:keys [mailbox?]}]
+  ;; One swap, so a cancellation that lands just before cannot be cleared by it.
+  (swap! s (fn [st] (assoc st :interrupted (boolean (and mailbox? (:cancelled st))) :turn-usage nil :trace nil :steering {})))
   (let [[_ cmd args] (re-matches #"(?s)/(\S+)\s*(.*)" text)]
     (if-let [{:keys [run]} (get commands cmd)]
       (do (emit! s {:type :text :text (run s args)}) :end-turn)

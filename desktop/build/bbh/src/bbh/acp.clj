@@ -84,7 +84,10 @@
               (str (fs/file-name resume))
               (transcript/new-id))
         s (session/new-session {:dir (or resume (str (fs/path (data-dir) sid)))
-                                :notes (when resume ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
+                                :notes (when (and resume (fs/exists? (fs/path resume "messages.jsonl")))
+                                         ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
+                                ;; The Router's session evaluates in the sandbox, as in the terminal front end.
+                                :sandbox? (= "router" (System/getenv "BBH_ROLE"))
                                 :init (or (System/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
                                 :cwd (or cwd (str (fs/cwd)))
                                 :model (models/default-model)
@@ -92,6 +95,8 @@
                                 :emit #(when-not (and (= :text (:type %)) (empty? (:text %)))
                                          (update! sid (event->update %)))})
         problem (session/start-repl! s)]
+    ;; Emacs gets mailbox messages through `bbh inbox-poll`; a cancellation is acted on here.
+    (session/watch-controls! s)
     (swap! sessions assoc sid s)
     [sid problem]))
 
@@ -163,8 +168,9 @@
         (send! {:id id :error {:code -32601 :message (str "bbh does not implement " method)}})))))
 
 (defn -main
-  "Serve ACP on stdin and stdout. RESUME is a saved conversation directory the
-  first session continues, under its own id."
+  "Serve ACP on stdin and stdout. RESUME is the conversation directory the
+  first session runs in, under its own id: a saved one to continue, or a new
+  one a controller named (`bbh acp --id`)."
   [& [resume]]
   (reset! resume-dir resume)
   (try

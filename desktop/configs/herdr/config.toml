@@ -105,7 +105,7 @@ description = "focus an agent"
 width = "85%"
 height = "80%"
 
-# The bbh inbox: threads that need you, with their asks. 1-4 pick, s send.
+# The bbh inbox: a terminal frame on *bbh inbox* in the bbh-super Emacs daemon.
 [[keys.command]]
 key = "prefix+t"
 type = "popup"
