@@ -161,20 +161,22 @@
 
 (defn- fzf-args []
   (let [bbh "bbh inbox"]
-    ["fzf" "--listen" "--delimiter" "\t" "--with-nth" "2.." "--no-sort" "--layout" "reverse"
-     "--disabled" "--no-multi" "--prompt" "Inbox> " "--border"
-     "--bind" (str "start:execute-silent(" bbh " register $FZF_PORT)+transform-header(" bbh " header)")
-     "--bind" "j:down,k:up"
-     "--bind" (str "n:execute-silent(" bbh " reveal)+reload(" bbh " rows)+transform-header(" bbh " header)")
-     "--bind" (str "focus:execute-silent(" bbh " select {1})")
-     "--bind" (str/join "," (for [n (range 1 5)] (format "%d:execute-silent(%s pick {1} %d)+refresh-preview" n bbh n)))
-     "--bind" (str "s:execute-silent(" bbh " send {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
-     "--bind" (str "A:execute-silent(" bbh " approve {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
-     "--bind" (str "r:execute(" bbh " note {1})+refresh-preview")
-     "--bind" (str "m:execute-silent(" bbh " dismiss {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
-     "--bind" (str "a:execute-silent(" bbh " archive {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
-     "--bind" (str "enter:execute-silent(" bbh " seen {1})+reload(" bbh " rows)")
-     "--preview" (str bbh " preview {1}") "--preview-window" "down,60%,border-top"]))
+    (concat
+     ["fzf" "--listen" "--delimiter" "\t" "--with-nth" "2.." "--no-sort" "--layout" "reverse"
+      "--disabled" "--no-multi" "--prompt" "Inbox> " "--border"
+      "--bind" (str "start:execute-silent(" bbh " register $FZF_PORT)+transform-header(" bbh " header)")]
+     ;; Only moves you make select a thread for voice; fzf's focus event also fires on start and reload.
+     (mapcat (fn [[k move]] ["--bind" (str k ":" move "+execute-silent(" bbh " select {1})")])
+             [["j" "down"] ["k" "up"] ["down" "down"] ["up" "up"]])
+     ["--bind" (str "n:execute-silent(" bbh " reveal)+reload(" bbh " rows)+transform-header(" bbh " header)")
+      "--bind" (str/join "," (for [n (range 1 5)] (format "%d:execute-silent(%s pick {1} %d)+refresh-preview" n bbh n)))
+      "--bind" (str "s:execute-silent(" bbh " send {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
+      "--bind" (str "A:execute-silent(" bbh " approve {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
+      "--bind" (str "r:execute(" bbh " note {1})+refresh-preview")
+      "--bind" (str "m:execute-silent(" bbh " dismiss {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
+      "--bind" (str "a:execute-silent(" bbh " archive {1})+reload(" bbh " rows)+transform-header(" bbh " header)+refresh-preview")
+      "--bind" (str "enter:execute-silent(" bbh " seen {1})+reload(" bbh " rows)")
+      "--preview" (str bbh " preview {1}") "--preview-window" "down,60%,border-top"])))
 
 (defn -main
   "bbh inbox runs the pane; the verbs are what its keys call."

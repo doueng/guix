@@ -607,6 +607,12 @@
               (is (= {:to :router} (voice/submit! "investigate my build")))
               (is (= :voice (:origin (:data (last (filter #(= :router-queued (:kind %)) (store/events (:db c)))))))))))))))
 
+(deftest only-your-cursor-moves-select-a-thread-for-voice
+  (let [binds (->> (#'pane/fzf-args) (partition 2 1) (keep (fn [[k v]] (when (= "--bind" k) v))))]
+    (is (not-any? #(clojure.string/starts-with? % "focus:") binds))
+    (doseq [[k move] {"j" "down" "k" "up" "down" "down" "up" "up"}]
+      (is (some #{(str k ":" move "+execute-silent(bbh inbox select {1})")} binds) k))))
+
 (deftest hex-stop-does-not-paste-or-route-silence
   (let [calls (atom [])]
     (with-redefs [voice/hex! (fn [& args] (swap! calls conj args) {:exit 4 :out ""})]
