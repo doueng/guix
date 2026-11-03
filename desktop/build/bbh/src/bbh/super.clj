@@ -139,6 +139,20 @@
       (run! c :controller {:id (str "token-" (sha256 t)) :command :issue-token! :token-hash (sha256 t) :args {:principal [:worker (:id w)]}})
       (launch! c w t))))
 
+(defn- start-worker*
+  "Commit start-worker! CMD for PRINCIPAL with the workflow's requirements and
+  the policy, launch the Worker unless it queued or this is a repeat, and return
+  its result with where it runs."
+  [c principal {:keys [args] :as cmd}]
+  (let [t (new-token)
+        requires (try (:requires (workflow/load-workflow (:workflow args)))
+                      (catch Exception _ (throw (ex-info (str "unknown workflow " (pr-str (:workflow args))) {:error :unknown-workflow}))))
+        r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c) :requires requires))
+        w (get-in @(:state c) [:workers (:id (:result r))])]
+    (when (and (not (:repeat? r)) (= :starting (:state w)))
+      (launch! c w t))
+    (merge (:result r) (select-keys (get-in @(:state c) [:workers (:id (:result r))]) [:state :workspace :pane :conversation :wf-run]))))
+
 (defn- principal-of [state token]
   (when (string? token)
     (let [t (get-in state [:tokens (sha256 token)])]
@@ -196,16 +210,7 @@
             (let [t (new-token)
                   r (run! c principal (assoc cmd :token-hash (sha256 t)))]
               {:ok (cond-> (:result r) (not (:repeat? r)) (assoc :token t))})
-            :start-worker!
-            (let [t (new-token)
-                  requires (try (:requires (workflow/load-workflow (:workflow args)))
-                                (catch Exception _ (throw (ex-info (str "unknown workflow " (pr-str (:workflow args))) {:error :unknown-workflow}))))
-                  r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c) :requires requires))
-                  w (get-in @(:state c) [:workers (:id (:result r))])]
-              (when (and (not (:repeat? r)) (= :starting (:state w)))
-                (launch! c w t))
-              {:ok (let [w (get-in @(:state c) [:workers (:id (:result r))])]
-                     (merge (:result r) (select-keys w [:state :workspace :pane :conversation :wf-run])))})
+            :start-worker! {:ok (start-worker* c principal cmd)}
             :cancel!
             (let [r (run! c principal cmd)]
               (reconcile! c)
@@ -278,6 +283,30 @@
     (run! c :controller {:id (str "job-exited-" (pr-str [(:id w) job])) :command :job-exited!
                          :args {:worker (:id w) :job job :exit exit :log (str base ".log")}})))
 
+(defn- watchdog-brief [w health]
+  (str "You are the Watchdog for Worker " (:id w) " of thread " (:thread w) ". The controller found it needs a person:\n\n"
+       (:problem health) "\n\nIts record: " (pr-str (dissoc w :health :brief)) "\nIts health: " (pr-str health)
+       "\n\nRead more with (sh \"bbh super worker '{:id \\\"" (:id w) "\\\"}'\") and the thread and events reads, and look at its conversation and jobs if that helps. "
+       "Change nothing: you may only read. Then file exactly one stopped action ask, "
+       "(super-ask! {:kind :action :text \"<what is wrong, in one line> Run: <the exact command that fixes it>\" "
+       ":options [{:id \"run\" :label \"I will run it\"} {:id \"leave\" :label \"Leave it\"}] :stopped true}), "
+       "and end your turn. When the reply arrives, call (super-answered! <reply id>) and (super-done!)."))
+
+(defn- watchdog!
+  "Start the Watchdog for Worker W's current problem: a thread that says which
+  Worker it watches and a read-only investigation Worker on it, in W's
+  repository. Keyed by the Worker and its problem, so a repeated pass starts
+  nothing new. A Worker without a repository, one only attached to a
+  conversation, gets none."
+  [c w health]
+  (when (:repo w)
+    (let [k (str (:id w) "-" (subs (sha256 (str (:problem health))) 0 12))
+          thread (:result (run! c :controller {:id (str "watchdog-thread-" k) :command :thread!
+                                               :args {:title (str "Watchdog: " (:id w) " " (get-in @(:state c) [:threads (:thread w) :title]))
+                                                      :watchdog-of (:id w)}}))]
+      (start-worker* c :controller {:id (str "watchdog-worker-" k) :command :start-worker!
+                                    :args {:thread thread :workflow :investigation :repo (:repo w) :brief (watchdog-brief w health)}}))))
+
 (defn- repl-answering? [root]
   (try
     (let [port (some-> (process/read-text (fs/path root "repl.port")) parse-long)]
@@ -324,14 +353,25 @@
                           agent [(if (= :waiting (:state w)) :waiting :running)]
                           (:workflow w) [:recoverable]
                           :else [:needs-human "Its session is gone and it has no workflow to restart it from."])
+                    since (if (and (= :needs-human classification) (= problem (get-in w [:health :problem])))
+                            (or (get-in w [:health :since]) now)
+                            now)
                     health {:at now :process (select-keys agent [:pid :start]) :repl repl-ok?
-                            :workflow wf :classification classification :problem problem
+                            :workflow wf :classification classification :problem problem :since since
                             :oldest-unacked (some->> (vals (:outbox @state))
                                                     (filter #(and (= (:thread w) (:thread %)) (#{:pending :sent} (:state %))))
                                                     (sort-by #(parse-long (subs (:id %) 1))) first :id)
                             :oldest-stopped-ask (some->> (vals (:asks @state)) (filter #(and (= (:thread w) (:thread %)) (= :open (:state %)) (:stopped %))) (sort-by :seq) first :seq)
                             :jobs (mapv #(select-keys % [:id :state :pid :start]) jobs)}]]
         (run! c :controller {:id (new-id) :command :health! :args {:worker (:id w) :health health :at now}})
+        (when (and (= :needs-human classification)
+                   (>= (- now since) (* 60000 (:watchdog-after-minutes (policy c))))
+                   (not (get-in @state [:threads (:thread w) :watchdog-of]))
+                   (not (get-in @state [:threads (:thread w) :resolved-at])))
+          ;; A failed start is retried next pass by the same command ids; the log says why.
+          (try (watchdog! c w health)
+               (catch Exception e
+                 (binding [*out* *err*] (println "bbh super: Watchdog for" (:id w) "did not start:" (ex-message e))))))
         (cond
           (and agent (= :starting (:state w)) (:wf-run w))
           (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!

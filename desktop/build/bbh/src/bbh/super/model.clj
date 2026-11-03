@@ -19,7 +19,7 @@
 (def ^:private grants
   {:router #{:thread! :link! :attach-worker! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered! :router-triaged!}})
+   :controller #{:issue-token! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered! :router-triaged! :thread! :start-worker!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, the locks a Worker
@@ -30,7 +30,8 @@
   it, what each origin's Workers may do (an origin not named gets :read), and
   the capability each lock needs."
   {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30 :noise-probability 0.7
-   :origins (zipmap [:owner :herdr :phone :voice] (repeat #{:read :edit-workspace :run-checks :publish}))
+   :origins (assoc (zipmap [:owner :herdr :phone :voice] (repeat #{:read :edit-workspace :run-checks :publish})) :watchdog #{:read})
+   :watchdog-after-minutes 10
    :lock-capabilities {"repo-push" :publish "guix-build" :run-checks}})
 
 (defn authorize
@@ -84,10 +85,11 @@
 
 (defmethod decide* :default [_ {:keys [command]}] (refuse :unknown-command :command command))
 
-(defmethod decide* :thread! [state {{:keys [title]} :args}]
+(defmethod decide* :thread! [state {{:keys [title watchdog-of]} :args :keys [principal]}]
   (when (str/blank? title) (refuse :invalid :field :title))
+  (when (and watchdog-of (not= :controller principal)) (refuse :forbidden :field :watchdog-of))
   (let [id (next-id state :threads "T")]
-    {:events [{:kind :thread-created :thread id :data {:id id :title title}}] :result id}))
+    {:events [{:kind :thread-created :thread id :data (cond-> {:id id :title title} watchdog-of (assoc :watchdog-of watchdog-of))}] :result id}))
 
 (defmethod decide* :link! [state {{:keys [thread resource]} :args}]
   (thread-of state thread)
@@ -134,6 +136,7 @@
   [state principal for]
   (case principal
     :owner :owner
+    :controller :watchdog
     :router (let [o (get-in state [:outbox for])]
               (when-not (and o (some? (:origin o)) (= (:conversation o) (get-in state [:router :router :conversation])))
                 (refuse :invalid :field :for :message "name the Router message this Worker is for, such as :for \"o12\""))
@@ -476,11 +479,12 @@
     (cond-> state
       (get-in state [:threads thread]) (assoc-in [:threads thread :updated-at] at))))
 
-(defmethod fold* :thread-created [state {{:keys [id title]} :data :keys [seq]}]
+(defmethod fold* :thread-created [state {{:keys [id title watchdog-of]} :data :keys [seq]}]
   (-> state (bump :threads)
-      (assoc-in [:threads id] {:id id :title title :resources #{} :worker nil :history []
-                               :execution :none :asks-version seq :resolved-at nil :summary nil
-                               :milestone-seq seq})))
+      (assoc-in [:threads id] (cond-> {:id id :title title :resources #{} :worker nil :history []
+                                       :execution :none :asks-version seq :resolved-at nil :summary nil
+                                       :milestone-seq seq}
+                                watchdog-of (assoc :watchdog-of watchdog-of)))))
 
 (defmethod fold* :thread-linked [state {{:keys [resource]} :data :keys [thread]}]
   (update-in state [:threads thread :resources] conj resource))
