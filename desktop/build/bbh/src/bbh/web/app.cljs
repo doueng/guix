@@ -95,9 +95,15 @@
                (local! "super-cursors" (assoc (local "super-cursors" {}) id (:milestone-seq t)))
                (swap! state assoc-in [:threads id] t)))))
 
+(defn- shown-query []
+  (str/join "," (for [[t s] (local "super-shown" [])] (str t ":" s))))
+
 (defn- sync-inbox! []
-  (-> (request (str "/api/super/threads?cursors=" (cursor-query)) {})
+  (-> (request (str "/api/super/threads?cursors=" (cursor-query)
+                    (when (seq (local "super-shown" [])) (str "&shown=" (shown-query)))) {})
       (.then (fn [inbox]
+               ;; The list holds the order it first showed until you ask for the new rows.
+               (when (empty? (local "super-shown" [])) (local! "super-shown" (:order inbox)))
                (swap! state assoc :inbox inbox :inbox-at (js/Date.now) :inbox-error nil)
                (set! (.-title js/document) (if (pos? (:badge inbox 0)) (str "(" (:badge inbox) ") Agents") "Agents"))
                (when-let [[_ id] (let [v (:view @state)] (when (vector? v) v))]
@@ -309,9 +315,11 @@
 
 (defn- first-line [s] (first (str/split-lines (str s))))
 
-(defn- row-view [{:keys [id title line came-back updated-at]}]
+(defn- row-view [{:keys [id title line came-back updated-at now]}]
   [:button.row {:replicant/key id :on {:click #(show! [:thread id])}}
-   [:span.row-head [:span.handle id] [:span.row-title title] [:span.age (age-text updated-at)]]
+   [:span.row-head [:span.handle id] [:span.row-title title]
+    (when now [:span.moved (str "→ " (str/replace (str now) "-" " "))])
+    [:span.age (age-text updated-at)]]
    (when line
      [:span.row-line (first-line line) (when came-back " · came back")])])
 
@@ -340,6 +348,10 @@
     [:button {:type "submit" :disabled saying} (if saying "Sending" "Send")]
     (when said [:span.said said])]])
 
+(defn- reveal! []
+  (local! "super-shown" [])
+  (sync-inbox!))
+
 (defn- inbox-view [{:keys [inbox inbox-at inbox-error]}]
   (let [old? (and inbox-at (> (- (js/Date.now) inbox-at) stale-ms))]
     [:main#thread.thread.inbox
@@ -347,6 +359,8 @@
            (nil? inbox) [:p.empty "Loading the inbox"]
            (empty? (:sections inbox)) [:p.empty "Nothing in the inbox. Start a thread from the Router pane."])
      (when old? [:p.stale (str "Data from " (age-text (.toISOString (js/Date. inbox-at))) " ago")])
+     (when (pos? (:fresh inbox 0))
+       [:button.fresh {:type "button" :on {:click reveal!}} (str (:fresh inbox) " new")])
      (for [{:keys [section title threads]} (:sections inbox)]
        [:section.group {:replicant/key section}
         [:h2 {:class (when (#{"stopped" "holding-up" "waiting"} section) "needs-you")} title]

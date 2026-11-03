@@ -648,6 +648,25 @@
     (vec (for [s section-order :when (seq (by s))]
            {:section s :title (section-titles s) :threads (vec (by s))}))))
 
+(defn order
+  "The display order of SECTIONS as [[thread-id section] ...]."
+  [sections]
+  (vec (for [{:keys [section threads]} sections t threads] [(:id t) section])))
+
+(defn hold
+  "SECTIONS as a client that last showed SHOWN ([[id section] ...]) should see
+  them while you look: every shown thread keeps its section and place, with
+  current data and :now naming the section it has moved to, and threads not
+  shown yet wait, counted in :fresh."
+  [shown sections]
+  (let [current (into {} (for [{:keys [section threads]} sections t threads] [(:id t) (assoc t :section section)]))
+        shown-ids (set (map first shown))
+        held (group-by :section (for [[id section] shown :let [t (current id)] :when t]
+                                  (cond-> (assoc t :section section) (not= section (:section t)) (assoc :now (:section t)))))]
+    {:sections (vec (for [s section-order :when (seq (held s))]
+                      {:section s :title (section-titles s) :threads (vec (held s))}))
+     :fresh (count (remove shown-ids (keys current)))}))
+
 (defn badge
   "How many threads need you: the first three sections."
   [sections]

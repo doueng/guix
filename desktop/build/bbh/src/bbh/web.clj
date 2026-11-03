@@ -211,7 +211,14 @@
            (json-response 400 {:error (ex-message e)})))))
 
 (defn- cursors [{:keys [query-string]}]
-  (into {} (for [[_ k v] (re-seq #"(T\d+):(\d+)" (str query-string))] [k (parse-long v)])))
+  (let [[_ q] (re-find #"(?:^|&)cursors=([^&]*)" (str query-string))]
+    (into {} (for [[_ k v] (re-seq #"(T\d+):(\d+)" (str q))] [k (parse-long v)]))))
+
+(defn- shown
+  "The order the page last showed, from shown=T1:stopped,T3:working, or nil."
+  [{:keys [query-string]}]
+  (when-let [[_ q] (re-find #"(?:^|&)shown=([^&]*)" (str query-string))]
+    (vec (for [[_ k v] (re-seq #"(T\d+):([a-z-]+)" q)] [k (keyword v)]))))
 
 (defn- super-api
   "/api/super: the inbox for the phone, over the controller under DIR."
@@ -220,7 +227,7 @@
         body (when (= :post request-method)
                (try (json/parse-string (slurp (:body request)) true) (catch Exception _ ::bad)))]
     (cond (and (= uri "/api/super/threads") (= :get request-method))
-          (super-call dir {:command :sections :args {:cursors (cursors request)}} 200)
+          (super-call dir {:command :sections :args (cond-> {:cursors (cursors request)} (shown request) (assoc :shown (shown request)))} 200)
           (= uri "/api/super/say")
           (cond (not= :post request-method) (json-response 405 {:error "Method not allowed"})
                 (not (same-origin? request)) (json-response 403 {:error "Cross-origin request"})

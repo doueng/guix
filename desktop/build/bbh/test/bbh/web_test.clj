@@ -281,3 +281,15 @@
         (is (= [202 "ap-1"] (post-super s "/api/super/threads/T1/approve" body from-page)))
         (is (= 409 (first (post-super s "/api/super/threads/T1/approve" (assoc body :id "ap-2") from-page))) "approved once"))
       (finally (bbh.super/stop! c)))))
+
+(deftest the-inbox-holds-the-order-the-page-showed
+  (with-super
+    (fn [s c _]
+      (let [[_ first-read] (get-json s "/api/super/threads")]
+        (is (= [["T1" "stopped"]] (:order first-read)))
+        (bbh.super.client/call! (:dir c) {:command :thread! :args {:title "another"}})
+        (let [[_ held] (get-json s "/api/super/threads" "cursors=&shown=T1:stopped")]
+          (is (= 1 (:fresh held)))
+          (is (= ["T1"] (mapv :id (mapcat :threads (:sections held))))))
+        (is (= 2 (count (mapcat :threads (:sections (second (get-json s "/api/super/threads"))))))
+            "without shown the page gets everything")))))

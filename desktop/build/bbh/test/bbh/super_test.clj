@@ -190,7 +190,7 @@
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
     (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
     (is (re-matches #"T3\tARCHIVED         T3   old \(came back\)    " row3))
-    (is (= "bbh inbox · 1 need you   1-4 pick  s send  A approve  r note  m mark read  a archive" (bbh.super.pane/header sections)))
+    (is (= "bbh inbox · 1 need you   1-4 pick  s send  A approve  r note  m mark read  a archive  n new" (bbh.super.pane/header sections)))
     (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
            (clojure.string/split-lines
             (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
@@ -854,3 +854,26 @@
               (let [r (pane/approve! "T1")]
                 (is (= {"a1" "c068de11"} (get-in @(:state c) [:replies r :approved])))
                 (is (= :sent (get-in @(:state c) [:asks "a1" :state])))))))))))
+
+(deftest the-list-holds-its-order-while-you-look-and-new-threads-wait
+  (let [row (fn [id & {:as m}] (merge {:id id :title id} m))
+        before [{:section :stopped :threads [(row "T1")]} {:section :working :threads [(row "T2") (row "T3")]}]
+        shown (model/order before)
+        now [{:section :stopped :threads [(row "T1") (row "T3" :line "Can I push?")]}
+             {:section :working :threads [(row "T2") (row "T4")]}]
+        {:keys [sections fresh]} (model/hold shown now)]
+    (is (= [["T1" :stopped] ["T2" :working] ["T3" :working]] shown))
+    (is (= [["T1" :stopped nil] ["T2" :working nil] ["T3" :working :stopped]]
+           (for [{:keys [section threads]} sections t threads] [(:id t) section (:now t)])))
+    (is (= "Can I push?" (:line (second (:threads (second sections))))) "a held row shows current data")
+    (is (= 1 fresh) "T4 waits")
+    (is (= (model/order now) (model/order (:sections (model/hold (model/order now) now)))) "revealing shows the current list")))
+
+(deftest held-pane-rows-show-the-new-line-and-where-a-row-went
+  (let [text (bbh.super.pane/rows {:fresh 2 :sections [{:section :working :title "Working"
+                                                         :threads [{:id "T3" :title "push" :now :stopped :line "Can I push?"}]}]})
+        [new row] (clojure.string/split-lines text)]
+    (is (= "new\t── 2 new · n to show ──" new))
+    (is (re-matches #"T3\tWORKING          T3   push → Stopped on you  Can I push\?  " row))
+    (is (= 1 (count (clojure.string/split-lines (bbh.super.pane/rows {:fresh 0 :sections [{:title "Working" :threads [{:id "T3" :title "x"}]}]}))))
+        "no new line when nothing waits")))

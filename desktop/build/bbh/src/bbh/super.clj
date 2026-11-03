@@ -173,8 +173,10 @@
       :ask (model/linked st :asks (:id args))
       :reply (model/linked st :replies (:id args))
       :worker (model/linked st :workers (:id args))
-      :sections (let [sections (model/sections st (or (:cursors args) {}))]
-                  {:sections sections :badge (model/badge sections)})
+      :sections (let [sections (model/sections st (or (:cursors args) {}))
+                      {held :sections fresh :fresh} (when (:shown args) (model/hold (:shown args) sections))]
+                  {:sections (or held sections) :badge (model/badge sections)
+                   :order (model/order sections) :fresh (or fresh 0)})
       ::unknown)))
 
 (declare reconcile!)
