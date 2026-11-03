@@ -170,7 +170,7 @@ Execution state, attention state and read state are independent facts. The secti
 | New | unseen milestone events |
 | Working | execution working or queued |
 | Quiet | nothing above and not resolved |
-| Archived | resolved. A new event shows it as "came back" without unresolving. |
+| Archived | resolved, unless a row above matches. An ask opened after archiving needs you (archiving dismissed the asks open then); other new events show it as "came back" without unresolving. |
 
 The badge counts the first three. Progress notes update the thread's summary line without making it New; only milestones (a `wf` phase change, a push, an ask) do. The list order holds while you look, and new rows wait behind an "N new" line.
 

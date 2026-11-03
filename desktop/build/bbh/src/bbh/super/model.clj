@@ -100,6 +100,7 @@
   (let [t (thread-of state thread)
         id (next-id state :workers "W")]
     (when (str/blank? conversation) (refuse :invalid :field :conversation))
+    (when (:resolved-at t) (refuse :archived :thread thread :message (str thread " is archived; start a new thread")))
     (when (:worker t) (refuse :thread-has-worker :thread thread :worker (:worker t)))
     {:events [{:kind :worker-attached :thread thread
                :data {:id id :conversation conversation :generation (inc (count (:history t)))}}
@@ -153,6 +154,7 @@
         origin (request-origin state principal for)
         granted (get-in policy [:origins origin] #{:read})
         caps (if capabilities (set/intersection (set capabilities) granted) granted)]
+    (when (:resolved-at t) (refuse :archived :thread thread :message (str thread " is archived; start a new thread")))
     (when (:worker t) (refuse :thread-has-worker :thread thread :worker (:worker t)))
     (when-not (keyword? workflow) (refuse :invalid :field :workflow))
     (when (str/blank? brief) (refuse :invalid :field :brief))
@@ -619,10 +621,10 @@
   (let [asks (filter #(= id (:thread %)) (vals (:asks state)))
         open (filter #(= :open (:state %)) asks)
         replies (filter #(= id (:thread %)) (vals (:replies state)))]
-    (cond resolved-at :archived
-          (some :stopped open) :stopped
+    (cond (some :stopped open) :stopped
           (some :holds-up open) :holding-up
           (seq open) :waiting
+          resolved-at :archived
           (and (or (= :failed execution) (= :needs-human (get-in state [:workers (:worker (get-in state [:threads id])) :health :classification]))) (empty? open)) :needs-attention
           (some #(#{:sent :delivered} (:state %)) replies) :sent
           (> (or milestone-seq 0) (or cursor 0)) :new

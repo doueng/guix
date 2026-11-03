@@ -159,7 +159,14 @@
         (call dir {:command :archive! :args {:thread "T1"}})
         (is (= [:archived false] (section-of)))
         (call dir {:token token :command :milestone! :args {:text "pushed 3 commits"}})
-        (is (= [:archived true] (section-of)))))))
+        (is (= [:archived true] (section-of)))
+        (call dir {:token token :command :ask! :args {:kind :question :text "Still there?" :options [] :stopped true}})
+        (is (= [:stopped true] (section-of)) "an ask opened after archiving needs you")
+        (call dir {:command :thread! :args {:title "done"}})
+        (call dir {:command :archive! :args {:thread "T2"}})
+        (is (= :archived (:error (call dir {:command :attach-worker! :args {:thread "T2" :conversation "c2"}}))))
+        (is (= :archived (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :investigation :brief "b" :repo "/tmp"}}))))
+        (is (nil? (:worker (:ok (call dir {:command :thread :args {:id "T2"}})))))))))
 
 (deftest threads-list-in-number-order
   (with-controller
