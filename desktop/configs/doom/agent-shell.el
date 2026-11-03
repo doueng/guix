@@ -955,7 +955,7 @@ The key hints and conversation id are in `eng/bbh-keys'.  % is escaped because t
 (defun eng/bbh-keys ()
   "Show the composer keys in the echo area."
   (interactive)
-  (message "%s%s" "C-n, C-c C-c or ZZ send · RET newline · M-p/M-n history · C-u/C-d or M-k/M-j scroll · C-c C-t tools · C-c C-k or ZQ stop · SPC m menu"
+  (message "%s%s" "C-n send · RET newline · M-p/M-n history · C-u/C-d or M-k/M-j scroll · C-c C-t tools · C-c C-k stop · SPC m menu"
            (if-let* ((id (eng/bbh--conversation (eng/bbh--shell)))) (concat " · /resume " id) "")))
 
 (with-eval-after-load 'agent-shell-viewport
@@ -1017,6 +1017,9 @@ history navigation and replies, which doubles `eng/bbh-composer-padding'."
     ;; The header line carries the status; Doom's mode-line only repeats the buffer name.
     (setq-local mode-line-format nil)
     (use-local-map (copy-keymap (current-local-map)))
+    ;; agent-shell's own send keys, such as normal-state ZZ, take bbh's path too,
+    ;; so the Router's input always goes through the controller.
+    (local-set-key [remap agent-shell-viewport-compose-send] #'eng/bbh-send)
     (dolist (binding '(("C-n" . eng/bbh-send)
                        ("C-c C-c" . eng/bbh-send)
                        ("M-RET" . eng/bbh-send)
@@ -1029,12 +1032,10 @@ history navigation and replies, which doubles `eng/bbh-composer-padding'."
       (when (fboundp 'evil-local-set-key)
         (dolist (state '(normal insert))
           (evil-local-set-key state (kbd (car binding)) (cdr binding)))))
-    ;; Normal state follows evil's commit-message keys: ZZ sends, ZQ stops.
-    ;; C-d and C-u page the transcript, since the composer is a few lines tall.
+    ;; C-n sends in every state.  In normal state C-d and C-u page the
+    ;; transcript, since the composer is a few lines tall.
     (when (fboundp 'evil-local-set-key)
-      (dolist (binding '(("ZZ" . eng/bbh-send)
-                         ("ZQ" . agent-shell-viewport-interrupt)
-                         ("g?" . eng/bbh-keys)
+      (dolist (binding '(("g?" . eng/bbh-keys)
                          ("C-d" . eng/bbh-output-page-down)
                          ("C-u" . eng/bbh-output-page-up)))
         (evil-local-set-key 'normal (kbd (car binding)) (cdr binding))))
