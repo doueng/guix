@@ -5,7 +5,27 @@
 ;; A Worker gets the capabilities of the origin its request came from (an origin
 ;; not named gets :read), and a lock needs the capability named for it. A Worker
 ;; that needs you for :watchdog-after-minutes gets a read-only Watchdog Worker.
+;; :projects are the repositories the Router starts Workers in, by name, with
+;; the check that proves a change there; each check passed on 2026-11-03.
 {:workers 3
+ :projects {"guix" {:repo "~/guix" :check "make lint"
+                    :about "this Guix system and Home config: desktop, Doom Emacs, Herdr, kanata, bbh and its super-agent"}
+            "cv" {:repo "~/projects/cv" :check "make"
+                  :about "CV and cover letters, Org rendered to PDF with pandoc and Typst"}
+            "iphone-agents" {:repo "~/projects/iphone_agents"
+                             :check "guix shell -m manifest.scm -- sh -c 'cd bridge && npm run check && npm test'"
+                             :about "iPhone web app and bridge for driving Pi agent sessions"}
+            "lca-lc-foundations" {:repo "~/projects/langchain/lca-lc-foundations" :check "./dev/check.sh"
+                                  :about "LangChain Academy foundations course: notebooks and its environment"}
+            "reader" {:repo "~/projects/langchain/reader" :check "npm test"
+                      :about "RSS reader: Python Cloudflare Worker, ClojureScript page, LangSmith-traced blog suggester"}
+            "research-lab" {:repo "~/projects/langchain/research_lab"
+                            :check "bash -c 'source dev/env.sh && pytest -q && ruff check .'"
+                            :about "LangGraph research agent, the `lab` CLI with SQLite datarooms"}
+            "c-editor" {:repo "~/src/c-editor" :check "make test"
+                        :about "small raw-mode terminal text editor in C"}
+            "cljs-platformer" {:repo "~/src/cljs-platformer" :check "./check.sh"
+                               :about "Mario-style canvas platformer in ClojureScript and shadow-cljs"}}
  :locks ["guix-build" "repo-push"]
  :never-granted ["guix-system"]
  :stale-delivery-minutes 30

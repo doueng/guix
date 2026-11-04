@@ -13,6 +13,7 @@
 
 (def bindings
   {'super-threads (fn super-threads [] (call! :threads {}))
+   'super-projects (fn super-projects [] (call! :projects {}))
    'super-thread (fn super-thread [id] (call! :thread {:id id}))
    'super-ask (fn super-ask [id] (call! :ask {:id id}))
    'super-reply (fn super-reply [id] (call! :reply {:id id}))

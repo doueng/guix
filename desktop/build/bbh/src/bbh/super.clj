@@ -137,12 +137,45 @@
                                                  :token-hash (sha256 t) :policy (policy c)}))]
       (launch! c (get-in @state [:workers id]) t))))
 
+(defn- expand-home [path]
+  (let [p (str path)]
+    (if (str/starts-with? p "~/") (str (fs/path (fs/home) (subs p 2))) p)))
+
+(defn projects
+  "The repositories Workers can start in, by name: policy :projects, with ~
+  expanded, then every other repository a Worker has used, named after its
+  folder, with that Worker's check. A listed project wins over a used one."
+  [c]
+  (let [listed (into {} (for [[n p] (:projects (policy c))] [(name n) (update p :repo expand-home)]))
+        listed-repos (set (map (comp str fs/normalize :repo) (vals listed)))
+        used (->> (vals (:workers @(:state c)))
+                  (filter :repo)
+                  (sort-by (comp model/id-order :id))
+                  (remove #(listed-repos (str (fs/normalize (:repo %)))))
+                  (map (fn [w] [(str (fs/file-name (:repo w))) {:repo (:repo w) :check (:check w) :used true}]))
+                  (into {}))]
+    (merge used listed)))
+
+(defn- resolve-project
+  "ARGS of start-worker! with :project replaced by its :repo, and its :check
+  unless ARGS name one. An unknown name is refused with the known ones."
+  [c {:keys [project] :as args}]
+  (if-not project
+    args
+    (let [all (projects c)
+          p (or (get all (name project))
+                (throw (ex-info (str "no project " (pr-str (name project)) "; known: " (str/join ", " (sort (keys all))))
+                                {:error :no-such-project :projects (vec (sort (keys all)))})))]
+      (cond-> (-> args (dissoc :project) (assoc :repo (:repo p)))
+        (and (not (:check args)) (:check p)) (assoc :check (:check p))))))
+
 (defn- start-worker*
   "Commit start-worker! CMD for PRINCIPAL with the workflow's requirements and
   the policy, launch the Worker unless it queued or this is a repeat, and return
   its result with where it runs."
-  [c principal {:keys [args] :as cmd}]
-  (let [t (new-token)
+  [c principal cmd]
+  (let [{:keys [args] :as cmd} (update cmd :args #(resolve-project c %))
+        t (new-token)
         requires (try (:requires (workflow/load-workflow (:workflow args)))
                       (catch Exception _ (throw (ex-info (str "unknown workflow " (pr-str (:workflow args))) {:error :unknown-workflow}))))
         r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c) :requires requires))
@@ -172,7 +205,7 @@
 
 (defn- read-command
   "Reads never write and need no command id."
-  [{:keys [db state]} {:keys [command args]}]
+  [{:keys [db state] :as c} {:keys [command args]}]
   (let [st @state]
     (case command
       :health (into {} (map (fn [[id w]] [id (cond-> (:health w) (#{:done :cancelled} (:state w)) (assoc :classification :done) (= :failed (:state w)) (assoc :classification :needs-human))]) (:workers st)))
@@ -185,6 +218,7 @@
       :ask (model/linked st :asks (:id args))
       :reply (model/linked st :replies (:id args))
       :worker (model/linked st :workers (:id args))
+      :projects (projects c)
       :sections (let [sections (model/sections st (or (:cursors args) {}))
                       {held :sections fresh :fresh} (when (:shown args) (model/hold (:shown args) sections))]
                   {:sections (or held sections) :badge (model/badge sections)

@@ -251,6 +251,27 @@
 (defn- start-worker [dir thread & {:as more}]
   (call dir {:command :start-worker! :args (merge {:thread thread :workflow :change :brief (str "work on " thread) :repo (:repo more) :check "true"} more)}))
 
+(deftest a-project-name-brings-its-repo-and-check
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-p"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-pconv"}))
+        repo (jj-repo)
+        other (jj-repo)
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10
+                         :policy {:workers 3 :projects {"demo" {:repo repo :check "make t" :about "a demo"}}}
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :open! (fn [_] "buf")}})]
+    (try
+      (dotimes [_ 3] (call dir {:command :thread! :args {:title "p"}}))
+      (is (= {"demo" {:repo repo :check "make t" :about "a demo"}} (:ok (call dir {:command :projects}))))
+      (call dir {:command :start-worker! :args {:thread "T1" :workflow :change :brief "b" :project "demo"}})
+      (is (= [repo "make t"] ((juxt :repo :check) (get-in @(:state c) [:workers "W1"]))))
+      (call dir {:command :start-worker! :args {:thread "T2" :workflow :change :brief "b" :project "demo" :check "make u"}})
+      (is (= "make u" (get-in @(:state c) [:workers "W2" :check])) "a named check wins")
+      (is (= :no-such-project (:error (call dir {:command :start-worker! :args {:thread "T3" :workflow :change :brief "b" :project "nope"}}))))
+      (call dir {:command :start-worker! :args {:thread "T3" :workflow :change :brief "b" :repo other :check "make v"}})
+      (is (= {:repo other :check "make v" :used true} (get (:ok (call dir {:command :projects})) (str (fs/file-name other))))
+          "a repository a Worker used joins the list under its folder name")
+      (finally (super/stop! c)))))
+
 (deftest two-workers-get-their-own-jj-workspaces-and-the-main-checkout-is-untouched
   (with-workers
     (fn [c dir repo launches]
