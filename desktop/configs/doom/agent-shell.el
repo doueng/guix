@@ -938,6 +938,11 @@ This reads no process, so it is cheap enough for the status line."
     (let ((n (length (map-elt (buffer-local-value 'agent-shell--state shell) :pending-prompts))))
       (when (> n 0) (format "%d queued" n)))))
 
+;; agent-shell lists the running and queued prompts in the echo area after every
+;; enqueue, including each inbox delivery, and the list vanishes on the next
+;; keystroke.  The count above, in the composer header, replaces it.
+(advice-add 'agent-shell--prompt-queue-echo :override #'ignore)
+
 (defun eng/bbh--header ()
   "The composer status line: state, timing, workflow phase, model, effort and usage.
 The key hints and conversation id are in `eng/bbh-keys'.  % is escaped because the header is a mode-line."

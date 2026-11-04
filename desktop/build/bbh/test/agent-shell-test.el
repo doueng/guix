@@ -894,3 +894,17 @@
       (with-temp-buffer
         (agent-shell--echo "queued  %s" "mine")))
     (should (equal '("queued  mine") shown))))
+
+(ert-deftest bbh-prompt-queue-never-echoes-the-queue ()
+  ;; agent-shell listed the active and queued prompts in the echo area on every
+  ;; enqueue, such as an inbox delivery, and it vanished on the next keystroke.
+  ;; The composer header's count is where to look instead.
+  (let (shown)
+    (with-temp-buffer
+      (setq major-mode 'agent-shell-mode)
+      (setq-local agent-shell--state (list (cons :pending-prompts nil)))
+      (cl-letf (((symbol-function 'message) (lambda (&rest args) (push (apply #'format args) shown))))
+        (agent-shell--prompt-queue-enqueue :prompt "sent from the phone")
+        (agent-shell--prompt-queue-enqueue :prompt "and another"))
+      (should (equal "2 queued" (eng/bbh--queued (current-buffer)))))
+    (should-not shown)))
