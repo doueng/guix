@@ -1526,6 +1526,11 @@ A failure shows bbh's message."
 (defun eng/bbh-inbox-approve () "Approve the thread's review." (interactive) (eng/bbh-inbox--act "approve"))
 (defun eng/bbh-inbox-dismiss () "Mark the thread read." (interactive) (eng/bbh-inbox--act "dismiss"))
 (defun eng/bbh-inbox-archive () "Archive the thread." (interactive) (eng/bbh-inbox--act "archive"))
+(defun eng/bbh-inbox-cancel ()
+  "Cancel the thread's Worker, archived or not, after asking."
+  (interactive)
+  (when (y-or-n-p (format "Cancel %s's Worker? " (eng/bbh-inbox--thread)))
+    (eng/bbh-inbox--act "cancel")))
 
 (defun eng/bbh-inbox-note (text)
   "Save TEXT as the thread's note, sent with its picks."
@@ -1581,6 +1586,7 @@ it replaces a terminal Inbox, which comes back when jjui quits."
     ("r" eng/bbh-inbox-note "Write a note")
     ("m" eng/bbh-inbox-dismiss "Mark read")
     ("a" eng/bbh-inbox-archive "Archive")
+    ("x" eng/bbh-inbox-cancel "Cancel the Worker")
     ("R" eng/bbh-inbox-router "Open the Router")
     ("J" eng/bbh-inbox-jjui "jjui on the thread's workspace")
     ("gr" eng/bbh-inbox-reveal "Reload, new threads included")
@@ -1622,6 +1628,7 @@ read-only list has no use for; s also shadows the global avy jump here.")
         :desc "Note"          "n" #'eng/bbh-inbox-note
         :desc "Mark read"     "m" #'eng/bbh-inbox-dismiss
         :desc "Archive"       "a" #'eng/bbh-inbox-archive
+        :desc "Cancel Worker" "x" #'eng/bbh-inbox-cancel
         :desc "Reload"        "g" #'eng/bbh-inbox-reveal))
 
 (defun eng/bbh-inbox--listen ()

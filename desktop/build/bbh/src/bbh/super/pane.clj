@@ -73,7 +73,7 @@
                                       (or (age updated-at) "")))))))
 
 (defn header [{:keys [badge]}]
-  (format "bbh inbox · %d need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  R router  J jjui  gr reload  g? help" badge))
+  (format "bbh inbox · %d need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" badge))
 
 (defn preview
   "What the selected thread needs: its open ask with numbered options and the
@@ -160,6 +160,14 @@
     (save-client-state! (-> (client-state) (assoc-in [:notes id] line)
                              (update-in [:versions id] #(or % version))))))
 
+(defn cancel!
+  "Cancel thread ID's Worker, archived or not: the way to stop one whose
+  session is gone, which nothing else ends."
+  [id]
+  (let [{:keys [worker]} (thread id)]
+    (when-not worker (throw (ex-info (str id " has no running Worker") {:error :no-active-worker})))
+    (call! {:command :cancel! :args {:worker worker :reason "Cancelled from the inbox"}})))
+
 (defn- seen! [id]
   (let [{:keys [milestone-seq]} (thread id)]
     (save-client-state! (assoc-in (client-state) [:cursors id] milestone-seq))))
@@ -203,11 +211,12 @@
       "approve" (approve! id)
       "dismiss" (call! {:command :dismiss! :args {:thread id}})
       "archive" (call! {:command :archive! :args {:thread id}})
+      "cancel" (println (cancel! id))
       "seen" (with-state-lock! #(seen! id))
       "buffer" (println (buffer id))
       "dir" (println (workdir (thread id)))
       "register" (client/register-view! (client/super-dir) (parse-long id))
-      (println "usage: bbh inbox [view|rows|header|preview T|reveal|pick T N|send T|approve T|note T TEXT|dismiss T|archive T|seen T|buffer T|dir T|register PORT]"))
+      (println "usage: bbh inbox [view|rows|header|preview T|reveal|pick T N|send T|approve T|note T TEXT|dismiss T|archive T|cancel T|seen T|buffer T|dir T|register PORT]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))

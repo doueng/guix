@@ -114,8 +114,21 @@
 
 (def active-states #{:starting :working :waiting :cancelling})
 
+(defn- gone?
+  "Whether Worker W's session is gone and nothing can bring it back: the last
+  health pass found no process, and it has no workflow to restart it from."
+  [w]
+  (and (nil? (:workflow w)) (= :needs-human (get-in w [:health :classification])) (empty? (get-in w [:health :process]))))
+
+(defn holds-slot?
+  "Whether Worker W counts against the Worker cap: it is active, its thread is
+  not archived, and it is not gone. A gone Worker, or one on an archived
+  thread, keeps its state until cancelled but runs nothing the cap protects."
+  [state w]
+  (and (active-states (:state w)) (not (get-in state [:threads (:thread w) :resolved-at])) (not (gone? w))))
+
 (defn- active-workers [state]
-  (filter #(active-states (:state %)) (vals (:workers state))))
+  (filter #(holds-slot? state %) (vals (:workers state))))
 
 (defn- blocked-by
   "Why WORKER cannot run now under POLICY, or nil: the cap, or a lock held by

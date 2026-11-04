@@ -136,7 +136,20 @@
   (let [t (new-token)]
     (when-let [id (:result (run! c :controller {:id (str "promote-" (sha256 t)) :command :promote-worker!
                                                  :token-hash (sha256 t) :policy (policy c)}))]
-      (launch! c (get-in @state [:workers id]) t))))
+      (launch! c (get-in @state [:workers id]) t)
+      id)))
+
+(defn- promote-all!
+  "Start queued Workers until none may start now, as after a health pass or an
+  archive that freed slots. A failed launch fails only that Worker."
+  [{:keys [state] :as c}]
+  (loop [n (count (filter #(= :queued (:state %)) (vals (:workers @state))))]
+    (when (and (pos? n)
+               (try (promote! c)
+                    (catch Exception e
+                      (binding [*out* *err*] (println "bbh super: promotion failed:" (ex-message e)))
+                      true)))
+      (recur (dec n)))))
 
 (defn- expand-home [path]
   (let [p (str path)]
@@ -247,6 +260,11 @@
             :cancel!
             (let [r (run! c principal cmd)]
               (reconcile! c)
+              {:ok (:result r)})
+            ;; An archived thread's Worker no longer holds a slot.
+            :archive!
+            (let [r (run! c principal cmd)]
+              (promote-all! c)
               {:ok (:result r)})
             (:ask! :approve!)
             (let [st @(:state c)
@@ -545,7 +563,8 @@
                       (try
                         (when (or (some (fn [w] (= :cancelling (:state w))) (vals (:workers @(:state c))))
                                   (> (- (System/currentTimeMillis) @(:last-health c)) health-ms))
-                          (reconcile! c) (reset! (:last-health c) (System/currentTimeMillis)))
+                          ;; A pass can find a Worker gone, which frees its slot.
+                          (reconcile! c) (promote-all! c) (reset! (:last-health c) (System/currentTimeMillis)))
                         (observe-jobs! c) (dispatch! c)
                            (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))

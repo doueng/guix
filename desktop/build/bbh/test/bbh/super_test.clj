@@ -208,7 +208,7 @@
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
     (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
     (is (re-matches #"T3\tARCHIVED         T3   old \(came back\)    " row3))
-    (is (= "bbh inbox · 1 need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  R router  J jjui  gr reload  g? help" (bbh.super.pane/header sections)))
+    (is (= "bbh inbox · 1 need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" (bbh.super.pane/header sections)))
     (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
            (clojure.string/split-lines
             (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
@@ -1055,6 +1055,42 @@
     (is (= {"guix-build" "W2"} (:locks state)))
     (is (= [:worker "W2"] (get-in state [:tokens "hp1" :principal])))))
 
+
+(deftest a-worker-that-is-gone-or-archived-holds-no-slot
+  (let [policy {:workers 1}
+        {:keys [results state]}
+        (run-commands [[:owner {:id "t1" :command :thread! :args {:title "gone"}}]
+                       [:owner {:id "t2" :command :thread! :args {:title "archived"}}]
+                       [:owner {:id "t3" :command :thread! :args {:title "next"}}]
+                       [:owner {:id "t4" :command :thread! :args {:title "after"}}]
+                       ;; W1's session is gone and it has no workflow to restart it from.
+                       [:owner {:id "a1" :command :attach-worker! :token-hash "h1" :args {:thread "T1" :conversation "c1"}}]
+                       [:controller {:id "h1" :command :health! :args {:worker "W1" :at 1
+                                                                          :health {:classification :needs-human :process {} :workflow nil
+                                                                                   :problem "Its session is gone and it has no workflow to restart it from."}}}]
+                       ;; W2 is still running, but its thread is archived.
+                       [:owner {:id "a2" :command :attach-worker! :token-hash "h2" :args {:thread "T2" :conversation "c2"}}]
+                       [:owner {:id "r2" :command :archive! :args {:thread "T2"}}]
+                       [:owner {:id "s3" :command :start-worker! :token-hash "h3" :requires [] :policy policy
+                                :args {:thread "T3" :workflow :change :brief "b" :repo "/r"}}]
+                       [:owner {:id "s4" :command :start-worker! :token-hash "h4" :requires [] :policy policy
+                                :args {:thread "T4" :workflow :change :brief "b" :repo "/r"}}]])]
+    (is (= :starting (:state (nth results 8))) "neither W1 nor W2 holds the only slot")
+    (is (= [:queued "1 Workers already running"] ((juxt :state :reason) (nth results 9))) "W3 does hold it")
+    (is (= :working (get-in state [:workers "W2" :state])) "archiving leaves the Worker itself alone")))
+
+(deftest the-inbox-cancels-a-worker-on-an-archived-thread
+  (with-controller
+    (fn [c dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (call dir {:command :thread! :args {:title "a"}})
+            (call dir {:command :attach-worker! :args {:thread "T1" :conversation "gone-conv"}})
+            (call dir {:command :archive! :args {:thread "T1"}})
+            (pane/-main "cancel" "T1")
+            (is (wait-for #(= :cancelled (get-in @(:state c) [:workers "W1" :state]))) "the inbox cancels W1 though T1 is archived")
+            (is (nil? (get-in @(:state c) [:threads "T1" :worker])))))))))
 
 ;; ---- review regressions: the controller ---------------------------------
 
