@@ -95,7 +95,7 @@ The transcript is durable and only grows. The context is the transcript, so each
 [The evaluation guide](eval/README.md) covers two kinds of checks. The trace tools assert, render, and label every conversation, and score an LLM judge against your labels. The paired Pi evaluation compares live task completion and scripted protocol behavior. [Its baseline report](eval/RESULTS.md) includes the observed UI tradeoffs.
 
 ```sh
-bb test                  # sessions, streaming, ACP process, Claude adapter, MCP and workflows
+bb test                  # sessions, streaming, ACP process, Claude adapter, MCP and workflows, in parallel (BBH_TEST_JOBS)
 bb test:emacs            # composer, history, cancellation and nREPL endpoint
 bb test:doom             # installed Doom startup and Ctrl-N, in a separate terminal
 bb test:doom launcher    # installed emacs-bbh launcher, including automatic session startup
