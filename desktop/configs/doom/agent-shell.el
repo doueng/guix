@@ -1447,14 +1447,28 @@ a new token.  Nothing is shown; `eng/bbh-super-visit' shows it."
 (defvar-local eng/bbh-inbox--timer nil
   "The pending preview update.")
 
+(defvar-local eng/bbh-inbox--rows nil
+  "The row lines the Inbox shows, so a reload that changed none redraws nothing.")
+
+(defvar eng/bbh-inbox-reload-delay 0.5
+  "Seconds of idleness a pushed change waits for before it reloads the Inbox.
+Pushes inside that time make one reload, and none runs while you type.")
+
+(defvar eng/bbh-inbox--reload nil
+  "Where the pushed reload is: nil, `pending' while it waits for idleness,
+`running' while bbh runs, `again' when a push came during that run.")
+
+(defvar eng/bbh-inbox--stale nil
+  "Whether a push came while no window showed the Inbox.")
+
 (defun eng/bbh-inbox--command (&rest args)
   (append (or eng/bbh-inbox-bbh
               (list (or (executable-find "bbh") (expand-file-name "~/.local/bin/bbh"))))
           (list "inbox") args))
 
-(defun eng/bbh-inbox--run (args on-done)
+(defun eng/bbh-inbox--run (args on-done &optional on-fail)
   "Run `bbh inbox ARGS' and call ON-DONE with its output when it succeeds.
-A failure shows bbh's message."
+A failure calls ON-FAIL with bbh's message, or shows it without ON-FAIL."
   (let ((out (generate-new-buffer " *bbh inbox out*"))
         (err (generate-new-buffer " *bbh inbox err*")))
     (make-process
@@ -1468,36 +1482,96 @@ A failure shows bbh's message."
                      (when (buffer-live-p err) (kill-buffer err))
                      (if (zerop (process-exit-status process))
                          (when on-done (funcall on-done text))
-                       (message "%s" (if (string-empty-p problem) (format "bbh inbox %s failed" (car args)) problem)))))))))
+                       (let ((problem (if (string-empty-p problem) (format "bbh inbox %s failed" (car args)) problem)))
+                         (if on-fail (funcall on-fail problem) (message "%s" problem))))))))))
 
 (defun eng/bbh-inbox--buffer ()
   (get-buffer-create "*bbh inbox*"))
 
-(defun eng/bbh-inbox--render (text)
-  "Show TEXT, `bbh inbox view' output: the header line, then id TAB row lines."
+(defun eng/bbh-inbox--place (pos)
+  "Where POS is in the Inbox: its line's thread and line number."
+  (cons (get-text-property (save-excursion (goto-char pos) (line-beginning-position)) 'eng/bbh-thread)
+        (line-number-at-pos pos)))
+
+(defun eng/bbh-inbox--find (place)
+  "The start of PLACE's thread's line, else of its line number."
+  (save-excursion
+    (goto-char (point-min))
+    (if (and (car place) (text-property-search-forward 'eng/bbh-thread (car place) t))
+        (line-beginning-position)
+      (forward-line (1- (cdr place)))
+      (line-beginning-position))))
+
+(defun eng/bbh-inbox--render (text &optional quiet)
+  "Show TEXT, `bbh inbox view' output: the header line, then id TAB row lines.
+The cursor stays on its thread, and every window keeps that line where it was
+on screen.  QUIET, for a pushed reload, leaves a hidden preview hidden."
   (let ((buffer (eng/bbh-inbox--buffer)))
     (with-current-buffer buffer
-      (let* ((lines (split-string (string-trim-right text) "\n"))
-             (thread (eng/bbh-inbox--at-point))
-             (line (line-number-at-pos))
-             (inhibit-read-only t))
+      (let ((lines (split-string (string-trim-right text) "\n"))
+            (inhibit-read-only t))
         (setq header-line-format (car lines))
-        (erase-buffer)
-        (dolist (row (cdr lines))
-          (pcase-let ((`(,id ,shown) (split-string row "\t")))
-            (insert (propertize (or shown "") 'eng/bbh-thread id) "\n")))
-        (goto-char (point-min))
-        (unless (and thread (text-property-search-forward 'eng/bbh-thread thread t))
-          (forward-line (1- line)))
-        (beginning-of-line)
-        (dolist (window (get-buffer-window-list buffer nil t))
-          (set-window-point window (point)))))
-    (eng/bbh-inbox--preview)))
+        (unless (equal (cdr lines) eng/bbh-inbox--rows)
+          (let ((here (eng/bbh-inbox--place (point)))
+                (windows (mapcar (lambda (window)
+                                   (list window (eng/bbh-inbox--place (window-point window))
+                                         (count-lines (window-start window)
+                                                      (save-excursion (goto-char (window-point window)) (line-beginning-position)))))
+                                 (get-buffer-window-list buffer nil t))))
+            (setq eng/bbh-inbox--rows (cdr lines))
+            (erase-buffer)
+            (dolist (row (cdr lines))
+              (pcase-let ((`(,id ,shown) (split-string row "\t")))
+                (insert (propertize (or shown "") 'eng/bbh-thread id) "\n")))
+            (goto-char (eng/bbh-inbox--find here))
+            (pcase-dolist (`(,window ,place ,row) windows)
+              (let ((pos (eng/bbh-inbox--find place)))
+                (set-window-point window pos)
+                (set-window-start window (save-excursion (goto-char pos) (forward-line (- row)) (point)) t)))
+            (when (bound-and-true-p hl-line-mode) (hl-line-highlight))))))
+    (eng/bbh-inbox--preview quiet)))
 
 (defun eng/bbh-inbox-refresh ()
   "Reload the Inbox from the controller."
   (interactive)
   (eng/bbh-inbox--run '("view") #'eng/bbh-inbox--render))
+
+(defun eng/bbh-inbox--shown-p ()
+  (when-let* ((buffer (get-buffer "*bbh inbox*"))) (get-buffer-window buffer t)))
+
+(defun eng/bbh-inbox--changed (&rest _)
+  "The controller committed a change: reload once Emacs is idle, if a window
+shows the Inbox, else when one does."
+  (cond ((not (eng/bbh-inbox--shown-p)) (setq eng/bbh-inbox--stale t))
+        ((eq eng/bbh-inbox--reload 'running) (setq eng/bbh-inbox--reload 'again))
+        ((null eng/bbh-inbox--reload)
+         (setq eng/bbh-inbox--reload 'pending)
+         ;; Idle since before the push counts, or an idle Emacs would wait for a key.
+         (run-with-idle-timer (time-add (or (current-idle-time) 0) eng/bbh-inbox-reload-delay)
+                              nil #'eng/bbh-inbox--reload))))
+
+(defun eng/bbh-inbox--reload ()
+  "The pushed reload: quiet, one bbh at a time, again if a push came meanwhile."
+  (if (not (eng/bbh-inbox--shown-p))
+      (setq eng/bbh-inbox--reload nil eng/bbh-inbox--stale t)
+    (setq eng/bbh-inbox--reload 'running eng/bbh-inbox--stale nil)
+    (let* ((done (lambda ()
+                   (let ((again (eq eng/bbh-inbox--reload 'again)))
+                     (setq eng/bbh-inbox--reload nil)
+                     (when again (eng/bbh-inbox--changed)))))
+           (fail (lambda (problem)
+                   (with-current-buffer (eng/bbh-inbox--buffer)
+                     (setq header-line-format (format "bbh inbox · reload failed: %s   gr retry" problem)))
+                   (funcall done))))
+      (condition-case err
+          (eng/bbh-inbox--run '("view")
+                              (lambda (text) (unwind-protect (eng/bbh-inbox--render text t) (funcall done)))
+                              fail)
+        (error (funcall fail (error-message-string err)))))))
+
+(defun eng/bbh-inbox--on-show (_window)
+  "A window began to show the Inbox: catch up on what was pushed while hidden."
+  (when eng/bbh-inbox--stale (eng/bbh-inbox--changed)))
 
 (defun eng/bbh-inbox--at-point ()
   (get-text-property (line-beginning-position) 'eng/bbh-thread))
@@ -1505,21 +1579,38 @@ A failure shows bbh's message."
 (defun eng/bbh-inbox--thread ()
   (or (eng/bbh-inbox--at-point) (user-error "No thread on this line")))
 
-(defun eng/bbh-inbox--preview ()
-  "Show the thread under the cursor in the preview below the list."
+(defvar-local eng/bbh-inbox--previewed nil
+  "The thread the preview shows.")
+
+(defun eng/bbh-inbox--preview (&optional quiet)
+  "Show the thread under the cursor in the preview below the list.
+QUIET, for a pushed reload, updates a preview on screen only, says nothing
+on failure, and keeps your place in it while it shows the same thread."
   (when-let* ((buffer (get-buffer "*bbh inbox*"))
-              (thread (with-current-buffer buffer (eng/bbh-inbox--at-point))))
-    (eng/bbh-inbox--run (list "preview" thread)
-                        (lambda (text)
-                          (with-current-buffer (get-buffer-create "*bbh inbox preview*")
-                            (let ((inhibit-read-only t))
-                              (erase-buffer)
-                              (insert text)
-                              (goto-char (point-min))
-                              (special-mode)))
-                          (when (get-buffer-window buffer)
-                            (display-buffer-in-side-window (get-buffer "*bbh inbox preview*")
-                                                           '((side . bottom) (window-height . 0.5))))))))
+              (thread (with-current-buffer buffer (eng/bbh-inbox--at-point)))
+              ((or (not quiet) (get-buffer-window "*bbh inbox preview*" t))))
+    (eng/bbh-inbox--run
+     (list "preview" thread)
+     (lambda (text)
+       (with-current-buffer (get-buffer-create "*bbh inbox preview*")
+         (unless (and (equal thread eng/bbh-inbox--previewed) (equal text (buffer-string)))
+           (let ((inhibit-read-only t)
+                 (same (equal thread eng/bbh-inbox--previewed))
+                 (windows (mapcar (lambda (w) (list w (window-start w) (window-point w)))
+                                  (get-buffer-window-list (current-buffer) nil t)))
+                 (here (point)))
+             (unless (derived-mode-p 'special-mode) (special-mode))
+             (erase-buffer)
+             (insert text)
+             (setq eng/bbh-inbox--previewed thread)
+             (goto-char (if same (min here (point-max)) (point-min)))
+             (pcase-dolist (`(,w ,start ,at) windows)
+               (set-window-start w (if same (min start (point-max)) (point-min)) t)
+               (set-window-point w (if same (min at (point-max)) (point-min)))))))
+       (when (and (not quiet) (get-buffer-window buffer))
+         (display-buffer-in-side-window (get-buffer "*bbh inbox preview*")
+                                        '((side . bottom) (window-height . 0.5)))))
+     (when quiet #'ignore))))
 
 (defun eng/bbh-inbox--moved ()
   "After a command, tell bbh which thread your cursor is on, for voice, and preview it."
@@ -1527,7 +1618,7 @@ A failure shows bbh's message."
     (unless (equal thread eng/bbh-inbox--thread)
       (setq eng/bbh-inbox--thread thread)
       (when (timerp eng/bbh-inbox--timer) (cancel-timer eng/bbh-inbox--timer))
-      (when (and thread (not (equal thread "new")))
+      (when thread
         (setq eng/bbh-inbox--timer
               (run-at-time 0.15 nil (lambda ()
                                       (eng/bbh-inbox--run (list "select" thread) nil)
@@ -1558,11 +1649,6 @@ A failure shows bbh's message."
   "Save TEXT as the thread's note, sent with its picks."
   (interactive (list (read-string (format "%s note: " (eng/bbh-inbox--thread)))))
   (eng/bbh-inbox--act "note" text))
-
-(defun eng/bbh-inbox-reveal ()
-  "Show the threads waiting behind the new line."
-  (interactive)
-  (eng/bbh-inbox--run '("reveal") (lambda (_) (eng/bbh-inbox-refresh))))
 
 (defun eng/bbh-inbox-router ()
   "Show the Router's conversation, where what you type goes to the Router."
@@ -1611,7 +1697,7 @@ it replaces a terminal Inbox, which comes back when jjui quits."
     ("x" eng/bbh-inbox-cancel "Cancel the Worker")
     ("R" eng/bbh-inbox-router "Open the Router")
     ("J" eng/bbh-inbox-jjui "jjui on the thread's workspace")
-    ("gr" eng/bbh-inbox-reveal "Reload, new threads included")
+    ("gr" eng/bbh-inbox-refresh "Reload now; pushed changes reload by themselves")
     ("g?" describe-mode "Help")
     ("q" quit-window "Quit"))
   "The Inbox's evil normal-state keys: (KEYS COMMAND DESCRIPTION).
@@ -1632,7 +1718,8 @@ read-only list has no use for; s also shadows the global avy jump here.")
   "The threads that need you, from `bbh super'."
   (setq truncate-lines t)
   (hl-line-mode 1)
-  (add-hook 'post-command-hook #'eng/bbh-inbox--moved nil t))
+  (add-hook 'post-command-hook #'eng/bbh-inbox--moved nil t)
+  (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t))
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'eng/bbh-inbox-mode 'normal)
@@ -1651,7 +1738,7 @@ read-only list has no use for; s also shadows the global avy jump here.")
         :desc "Mark read"     "m" #'eng/bbh-inbox-dismiss
         :desc "Archive"       "a" #'eng/bbh-inbox-archive
         :desc "Cancel Worker" "x" #'eng/bbh-inbox-cancel
-        :desc "Reload"        "g" #'eng/bbh-inbox-reveal))
+        :desc "Reload"        "g" #'eng/bbh-inbox-refresh))
 
 (defun eng/bbh-inbox--listen ()
   "Listen for the controller's reload calls and register the port, once."
@@ -1661,7 +1748,7 @@ read-only list has no use for; s also shadows the global avy jump here.")
            :name "bbh-inbox-listen" :server t :host "127.0.0.1" :service t :family 'ipv4 :noquery t
            :filter (lambda (connection _)
                      (delete-process connection)
-                     (eng/bbh-inbox-refresh))))
+                     (eng/bbh-inbox--changed))))
     (eng/bbh-inbox--run (list "register" (number-to-string (process-contact eng/bbh-inbox--listener :service)))
                         nil)))
 

@@ -911,15 +911,6 @@
     (is (= 1 fresh) "T4 waits")
     (is (= (model/order now) (model/order (:sections (model/hold (model/order now) now)))) "revealing shows the current list")))
 
-(deftest held-pane-rows-show-the-new-line-and-where-a-row-went
-  (let [text (bbh.super.pane/rows {:fresh 2 :sections [{:section :working :title "Working"
-                                                         :threads [{:id "T3" :title "push" :now :stopped :line "Can I push?"}]}]})
-        [new row] (clojure.string/split-lines text)]
-    (is (= "new\t── 2 new · gr to show ──" new))
-    (is (re-matches #"T3\tWORKING          T3   push → Stopped on you  Can I push\?  " row))
-    (is (= 1 (count (clojure.string/split-lines (bbh.super.pane/rows {:fresh 0 :sections [{:title "Working" :threads [{:id "T3" :title "x"}]}]}))))
-        "no new line when nothing waits")))
-
 (deftest a-worker-stuck-needing-you-gets-one-read-only-watchdog
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-wd"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-wdconv"}))
@@ -1341,3 +1332,23 @@
           (is (re-find #"2 heads.*one|2 heads.*yours" (:message r)) (:message r)))
         (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done :onto (landed c "W1")}})))
         (is (= ["two" "one" "start"] (line-of repo (landed c "W2"))))))))
+
+(deftest inbox-views-reload-on-a-change-but-not-on-a-health-pass-that-found-nothing-new
+  (with-controller
+    (fn [c dir _]
+      (let [server (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1"))
+            pokes (atom 0)
+            settled #(let [n @pokes] (Thread/sleep 200) (= n @pokes))]
+        (future (while true (with-open [_ (.accept server)] (swap! pokes inc))))
+        (try
+          (client/register-view! dir (.getLocalPort server))
+          (let [{:keys [token]} (thread-with-ask dir)]
+            (super/reconcile! c)
+            (is (wait-for settled))
+            (let [before @pokes]
+              (super/reconcile! c)
+              (is (wait-for settled))
+              (is (= before @pokes) "a health pass that saw the same health pokes no view")
+              (call dir {:token token :command :note! :args {:text "looking at kanata"}})
+              (is (wait-for #(< before @pokes)) "a Worker's note pokes the views")))
+          (finally (.close server)))))))

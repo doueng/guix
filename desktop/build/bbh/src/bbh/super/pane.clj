@@ -1,6 +1,6 @@
 (ns bbh.super.pane
   "`bbh inbox`: the verbs behind the Inbox buffer in the super-agent's Emacs,
-  which shows `rows`, `header` and `preview` and calls the rest from its keys.
+  which shows `view` and `preview` and calls the rest from its keys.
   The controller reloads it through the port `register` records. Picks, notes
   and read cursors are this client's and live in ~/.local/state/bbh/inbox.edn
   until `send` turns them into one reply. Bare `bbh inbox` opens a terminal
@@ -9,7 +9,6 @@
             [babashka.fs :as fs]
             [bbh.super.client :as client]
             [bbh.super.emacs :as emacs]
-            [bbh.super.model :as model]
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
@@ -57,20 +56,15 @@
 (defn- first-line [s] (first (str/split-lines (str s))))
 
 (defn rows
-  "The Inbox rows: one `id<TAB>display` line per thread, grouped in section
-  order, after a `new` line when threads wait behind the held order. A held
-  row that changed section names where it went."
-  [{:keys [sections fresh]}]
+  "The Inbox rows: one `id<TAB>display` line per thread, grouped in section order."
+  [{:keys [sections]}]
   (str/join "\n"
-            (concat
-             (when (pos? (or fresh 0)) [(format "new\t── %d new · gr to show ──" fresh)])
-             (for [{section :title :keys [threads]} sections
-                   {:keys [id title line came-back updated-at now]} threads]
-               (str id "\t" (format "%-16s %-4s %s%s%s  %s  %s" (str/upper-case section) id title
-                                      (if came-back " (came back)" "")
-                                      (if now (str " → " (model/section-titles now)) "")
-                                      (or (some-> line first-line) "")
-                                      (or (age updated-at) "")))))))
+            (for [{section :title :keys [threads]} sections
+                  {:keys [id title line came-back updated-at]} threads]
+              (str id "\t" (format "%-16s %-4s %s%s  %s  %s" (str/upper-case section) id title
+                                     (if came-back " (came back)" "")
+                                     (or (some-> line first-line) "")
+                                     (or (age updated-at) ""))))))
 
 (defn header [{:keys [badge]}]
   (format "bbh inbox · %d need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" badge))
@@ -101,19 +95,9 @@
                       (when-let [n (get notes id)] ["note:" n])))))
 
 (defn- sections
-  "The controller's sections held in the order this pane last showed, which
-  is remembered the first time and on `reveal`."
+  "The controller's sections in the current order, with this pane's read cursors."
   []
-  (let [{:keys [cursors shown]} (client-state)
-        r (call! {:command :sections :args (cond-> {:cursors cursors} shown (assoc :shown shown))})]
-    (when-not shown (with-state-lock! #(save-client-state! (assoc (client-state) :shown (:order r)))))
-    r))
-
-(defn reveal!
-  "Show the current order, new threads included."
-  []
-  (let [r (call! {:command :sections :args {:cursors (:cursors (client-state))}})]
-    (with-state-lock! #(save-client-state! (assoc (client-state) :shown (:order r))))))
+  (call! {:command :sections :args {:cursors (:cursors (client-state))}}))
 
 (defn- thread [id] (call! {:command :thread :args {:id id}}))
 
@@ -193,14 +177,11 @@
   [& [verb id n & more]]
   (try
     (case verb
-      ;; Opening shows the current order; only live reloads hold it still.
-      nil (do (reveal!) (emacs/attach! "(eng/bbh-inbox)"))
-      "rows" (println (rows (sections)))
+      nil (emacs/attach! "(eng/bbh-inbox)")
       ;; The Inbox buffer's reload: the header, then the rows, from one read.
+      ;; The buffer keeps your place across reloads.
       "view" (let [s (sections)] (println (header s)) (println (rows s)))
-      "header" (println (header (sections)))
-      "preview" (println (if (= "new" id) "New threads wait here so the list holds still while you look. Press gr to show them." (preview (thread id) (client-state))))
-      "reveal" (reveal!)
+      "preview" (println (preview (thread id) (client-state)))
       "select" (select! id)
       "clear" (with-state-lock! #(save-client-state! (-> (client-state) (update :picks dissoc id) (update :notes dissoc id) (update :versions dissoc id))))
       "pick" (with-state-lock! #(pick! id (parse-long n)))
@@ -216,7 +197,7 @@
       "buffer" (println (buffer id))
       "dir" (println (workdir (thread id)))
       "register" (client/register-view! (client/super-dir) (parse-long id))
-      (println "usage: bbh inbox [view|rows|header|preview T|reveal|pick T N|send T|approve T|note T TEXT|dismiss T|archive T|cancel T|seen T|buffer T|dir T|register PORT]"))
+      (println "usage: bbh inbox [view|preview T|pick T N|send T|approve T|note T TEXT|dismiss T|archive T|cancel T|seen T|buffer T|dir T|register PORT]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))

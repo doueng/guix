@@ -32,7 +32,7 @@
     (eng/bbh-inbox-mode)
     (evil-local-mode 1)
     (should (eq 'normal evil-state))
-    (dolist (key '(("gr" . eng/bbh-inbox-reveal) ("s" . eng/bbh-inbox-send) ("2" . eng/bbh-inbox-pick)
+    (dolist (key '(("gr" . eng/bbh-inbox-refresh) ("s" . eng/bbh-inbox-send) ("2" . eng/bbh-inbox-pick)
                    ("RET" . eng/bbh-inbox-open) ("R" . eng/bbh-inbox-router) ("J" . eng/bbh-inbox-jjui) ("q" . quit-window)
                    ("j" . evil-next-line) ("gg" . evil-goto-first-line) ("G" . evil-goto-line)))
       (should (eq (cdr key) (key-binding (kbd (car key))))))))
@@ -908,3 +908,86 @@
         (agent-shell--prompt-queue-enqueue :prompt "and another"))
       (should (equal "2 queued" (eng/bbh--queued (current-buffer)))))
     (should-not shown)))
+
+;;; The super-agent Inbox reloads itself
+
+(defun bbh-test--inbox-view (ids)
+  "`bbh inbox view' output listing thread IDS."
+  (mapconcat (lambda (id) (format "%s\t%s row" id id)) (cons "bbh inbox · 0 need you" ids) "\n"))
+
+(defun bbh-test--inbox-ids (from to)
+  (mapcar (lambda (n) (format "T%d" n)) (number-sequence from to)))
+
+(defmacro bbh-test--with-fake-inbox (spec &rest body)
+  "Run BODY with the Inbox shown and a fake bbh: `view' prints file VIEW,
+`preview' a line, and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
+  (declare (indent 1))
+  (let ((view (car spec)) (log (cadr spec)))
+    `(let* ((,view (make-temp-file "bbh-inbox-view"))
+            (,log (make-temp-file "bbh-inbox-log"))
+            (eng/bbh-inbox-bbh
+             (list "sh" "-c" (format "echo \"$2\" >> %s; case $2 in view) cat %s || exit 1;; preview) echo preview $3;; *) exit 1;; esac"
+                                     (shell-quote-argument ,log) (shell-quote-argument ,view))
+                   "sh"))
+            (eng/bbh-inbox--reload nil)
+            (eng/bbh-inbox--stale nil))
+       (unwind-protect
+           (progn
+             (delete-other-windows)
+             (switch-to-buffer (eng/bbh-inbox--buffer))
+             (unless (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox-mode))
+             (setq eng/bbh-inbox--rows nil)
+             ,@body)
+         (dolist (timer timer-idle-list)
+           (when (eq (timer--function timer) #'eng/bbh-inbox--reload) (cancel-timer timer)))
+         (kill-buffer (eng/bbh-inbox--buffer))))))
+
+(defun bbh-test--inbox-log (log)
+  (with-temp-buffer (insert-file-contents log) (split-string (buffer-string) "\n" t)))
+
+(defun bbh-test--inbox-reloads ()
+  (seq-filter (lambda (timer) (eq (timer--function timer) #'eng/bbh-inbox--reload)) timer-idle-list))
+
+(ert-deftest bbh-inbox-reload-keeps-the-thread-under-the-cursor-on-its-screen-line ()
+  (bbh-test--with-fake-inbox (view log)
+    (eng/bbh-inbox--render (bbh-test--inbox-view (bbh-test--inbox-ids 1 30)) t)
+    (goto-char (eng/bbh-inbox--find '("T20" . 1)))
+    (set-window-start (selected-window) (eng/bbh-inbox--find '("T16" . 1)))
+    ;; Three new threads above, and one gone above the cursor.
+    (eng/bbh-inbox--render (bbh-test--inbox-view (append '("T31" "T32" "T33") (delete "T5" (bbh-test--inbox-ids 1 30)))) t)
+    (should (equal "T20" (eng/bbh-inbox--at-point)))
+    (should (equal "T31 row" (save-excursion (goto-char (point-min)) (buffer-substring-no-properties (point) (line-end-position)))))
+    (should (= 4 (count-lines (window-start) (point))))))
+
+(ert-deftest bbh-inbox-pushes-make-one-quiet-reload-and-a-hidden-inbox-waits ()
+  (bbh-test--with-fake-inbox (view log)
+    (with-temp-file view (insert (bbh-test--inbox-view '("T1" "T2"))))
+    (let ((messages (with-current-buffer (messages-buffer) (buffer-size))))
+      (dotimes (_ 3) (eng/bbh-inbox--changed))
+      (should (eq 'pending eng/bbh-inbox--reload))
+      (should (= 1 (length (bbh-test--inbox-reloads))))
+      (mapc #'cancel-timer (bbh-test--inbox-reloads))
+      (eng/bbh-inbox--reload)
+      (eng/bbh-inbox--changed)
+      (should (eq 'again eng/bbh-inbox--reload))
+      (should (bbh-test--wait (lambda () (eq 'pending eng/bbh-inbox--reload)) 10))
+      (should (equal "T1 row\nT2 row\n" (buffer-substring-no-properties (point-min) (point-max))))
+      (should (equal '("view") (seq-filter (lambda (verb) (equal verb "view")) (bbh-test--inbox-log log))))
+      ;; A failed reload says so in the header, not the echo area.
+      (mapc #'cancel-timer (bbh-test--inbox-reloads))
+      (setq eng/bbh-inbox--reload nil)
+      (delete-file view)
+      (eng/bbh-inbox--changed)
+      (mapc #'cancel-timer (bbh-test--inbox-reloads))
+      (eng/bbh-inbox--reload)
+      (should (bbh-test--wait (lambda () (null eng/bbh-inbox--reload)) 10))
+      (should (string-match-p "reload failed" header-line-format))
+      (should (= messages (with-current-buffer (messages-buffer) (buffer-size)))))
+    ;; Hidden, a push only marks the Inbox stale; showing it reloads.
+    (switch-to-buffer "*scratch*")
+    (eng/bbh-inbox--changed)
+    (should (and eng/bbh-inbox--stale (null eng/bbh-inbox--reload)))
+    (switch-to-buffer (eng/bbh-inbox--buffer))
+    ;; Redisplay runs this hook; batch Emacs has none.
+    (run-hook-with-args 'window-buffer-change-functions (selected-window))
+    (should (eq 'pending eng/bbh-inbox--reload))))

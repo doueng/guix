@@ -39,20 +39,30 @@
           :let [port (parse-long (str/trim (slurp (str f))))]]
     (try (with-open [sock (Socket. "127.0.0.1" (int port))
                      out (io/writer (.getOutputStream sock))]
-           (let [body "reload(bbh inbox rows)+refresh-preview"]
+           (let [body "changed"]
              (.write out (str "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: " (count body) "\r\n\r\n" body))
              (.flush out)))
          (catch java.io.IOException _ (fs/delete-if-exists f)))))
 
+(defn- shown
+  "STATE without what changes on every health pass and no view shows: the
+  heartbeat and when each health was observed."
+  [state]
+  (-> state
+      (update :router dissoc :heartbeat)
+      (update :workers update-vals #(cond-> % (:health %) (update :health dissoc :at :since)))))
+
 (defn- run!
   "Commit COMMAND for PRINCIPAL on controller C. Serialized: the controller is
-  the single writer. A commit that changed something reloads the Inbox views."
+  the single writer. A commit that changed what the Inbox views show reloads
+  them; a health pass that found nothing new does not."
   [{:keys [db state dir]} principal command]
-  (let [r (locking db
-            (let [r (store/commit! db @state principal command)]
-              (reset! state (:state r))
-              r))]
-    (when-not (:repeat? r) (notify-views! dir))
+  (let [[before r] (locking db
+                     (let [before @state
+                           r (store/commit! db before principal command)]
+                       (reset! state (:state r))
+                       [before r]))]
+    (when-not (or (:repeat? r) (= (shown before) (shown (:state r)))) (notify-views! dir))
     r))
 
 ;; ---- Workers: a record first, then the workspace, the wf run and the buffer --
