@@ -1244,11 +1244,16 @@
     (clojure.string/trim out)))
 
 (defn- line-of
-  "The descriptions from workspace NAME's revision down to the root, skipping empty undescribed commits."
-  [repo name]
+  "The descriptions from REV down to the root, skipping empty undescribed commits."
+  [repo rev]
   (clojure.string/split-lines
-   (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" (str "::" name "@ ~ root() ~ (empty() & description(exact:\"\"))")
+   (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" (str "::" rev " ~ root() ~ (empty() & description(exact:\"\"))")
           "-T" "description.first_line() ++ \"\\n\"")))
+
+(defn- landed [c worker] (get-in @(:state c) [:workers worker :landed]))
+
+(defn- workspaces [repo]
+  (set (clojure.string/split-lines (jj-in repo "--ignore-working-copy" "workspace" "list" "-T" "name ++ \"\\n\""))))
 
 (defn- commit-file [workspace file text message]
   (assert workspace "a Worker without a workspace")
@@ -1267,8 +1272,11 @@
           (commit-file (:workspace w2) "two" "2\n" "two")
           (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
           (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})))
-          (is (= ["one" "two" "start"] (line-of repo "T1-1")) "the later finish lands on the earlier one")
-          (is (fs/exists? (fs/path (:workspace w1) "two")) "the workspace holds the line it landed on")
+          (is (= ["one" "two" "start"] (line-of repo (landed c "W1"))) "the later finish lands on the earlier one")
+          (is (= #{"default"} (workspaces repo)) "a done Worker's workspace is forgotten")
+          (is (not (fs/exists? (:workspace w1))) "and its directory removed")
+          (is (= "one" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "heads(all()) ~ default@" "-T" "description.first_line()"))
+              "no empty change dangles beside the line")
           (is (= users (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@" "-T" "commit_id"))
               "the user's working-copy change is not rewritten")
           (let [w3 (:ok (start-worker dir "T3" :repo repo))]
@@ -1279,10 +1287,12 @@
             (let [r (call dir {:command :finish-worker! :args {:worker "W3" :state-after :done}})]
               (is (= :conflicts (:error r)) (pr-str r)))
             (is (= :working (:state (get-in @(:state c) [:workers "W3"]))) "a refused finish leaves the Worker running")
-            (is (= ["three" "one" "two" "start"] (line-of repo "T3-1")) "its commits moved, conflicted, onto the tip")
+            (is (= ["three" "one" "two" "start"] (line-of repo "T3-1@")) "its commits moved, conflicted, onto the tip")
             (spit (str (fs/path (:workspace w3) "one")) "clash\n")
             (jj-in (:workspace w3) "squash")
-            (is (= {:ok "W3"} (call dir {:command :finish-worker! :args {:worker "W3" :state-after :done}})) "once resolved it lands")))))))
+            (is (= {:ok "W3"} (call dir {:command :finish-worker! :args {:worker "W3" :state-after :done}})) "once resolved it lands")
+            (is (= ["three" "one" "two" "start"] (line-of repo (landed c "W3"))))
+            (is (= #{"default"} (workspaces repo)))))))))
 
 (deftest an-unclear-tip-is-refused-until-the-worker-names-one
   (with-workers
@@ -1297,5 +1307,5 @@
         (let [r (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})]
           (is (= :unclear-tip (:error r)))
           (is (re-find #"2 heads.*one|2 heads.*yours" (:message r)) (:message r)))
-        (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done :onto "T1-1@-"}})))
-        (is (= ["two" "one" "start"] (line-of repo "T2-1")))))))
+        (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done :onto (landed c "W1")}})))
+        (is (= ["two" "one" "start"] (line-of repo (landed c "W2"))))))))

@@ -205,7 +205,7 @@
                        (format "Requested from %s. Capabilities: %s." (some-> origin name) (str/join ", " (map name (sort capabilities))))
                        (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
                                id thread wf-run (name workflow))
-                       (format "Work only in your jj workspace %s, your current directory. %s is the main checkout: read it if you need to, but do not edit it; the person takes your revision from the workspace."
+                       (format "Work only in your jj workspace %s, your current directory. %s is the main checkout: read it if you need to, but do not edit it. Commit your work there: (super-done!) lands it on the tip of the person's line and removes the workspace."
                                workspace repo)]))
 
 (defn- worker-of
@@ -236,12 +236,12 @@
                       :outbox (next-id state :outbox "o") :text (brief-text w wf-run workspace)}}]
      :result worker}))
 
-(defmethod decide* :finish-worker! [state {{:keys [worker state-after reason]} :args}]
+(defmethod decide* :finish-worker! [state {{:keys [worker state-after reason landed]} :args}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
     (when (= :cancelling (:state w)) (refuse :cancelling :worker worker))
     (when-not (#{:done :failed} state-after) (refuse :invalid :field :state-after))
     (when (#{:done :failed :cancelled} (:state w)) (refuse :already-finished :worker worker))
-    {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state state-after :reason reason}}]
+    {:events [{:kind :worker-finished :thread (:thread w) :data (cond-> {:id worker :state state-after :reason reason} (and landed (= :done state-after)) (assoc :landed landed))}]
      :result worker}))
 
 (defmethod decide* :cancel! [state {{:keys [worker reason]} :args}]
@@ -577,10 +577,10 @@
         (assoc-in [:threads thread :worker] id)
         (assoc-in [:threads thread :execution] :working))))
 
-(defmethod fold* :worker-finished [state {{:keys [id reason] outcome :state} :data :keys [thread seq]}]
+(defmethod fold* :worker-finished [state {{:keys [id reason landed] outcome :state} :data :keys [thread seq]}]
   (let [t (get-in state [:threads thread])]
     (-> state
-        (update-in [:workers id] assoc :state outcome :reason reason)
+        (update-in [:workers id] #(cond-> (assoc % :state outcome :reason reason) landed (assoc :landed landed)))
         (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
         ;; Nobody is left to read an answer, whatever the outcome.
         (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= id (:worker a)) (= :open (:state a))) (assoc :state :superseded))]) %)))

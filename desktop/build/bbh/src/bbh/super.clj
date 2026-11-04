@@ -96,20 +96,18 @@
   "Rebase the revision of the Worker in WORKSPACE, the commits its workspace has
   that the line lacks, onto the tip of the line, so finished work forms one
   line. The line is the user's committed history, `::default@-` (their
-  working-copy change stays in progress and is never moved), and the revisions
-  of the LANDED workspaces, those of finished Workers. ONTO names the tip when
+  working-copy change stays in progress and is never moved), and LANDED, the
+  change ids finished Workers landed. ONTO names the tip when
   the line has more than one head. Runs jj in WORKSPACE, so the user's working
   copy is not even snapshotted. Throws, leaving the Worker to act, when its
   working copy has uncommitted changes, when the tip is unclear, and when the
   rebase leaves conflicts in its commits; a repeat once they are resolved is a
-  no-op. Returns {:onto tip :revisions [...]}, empty when there was nothing to land."
+  no-op. Returns {:onto tip :landed change-id}, the head of what it landed or nil."
   [{:keys [workspace landed onto]}]
-  (let [names (set (str/split-lines (jj-out workspace "workspace" "list" "-T" "name ++ \"\\n\"")))
-        refuse (fn [error message] (throw (ex-info message {:error error})))]
+  (let [refuse (fn [error message] (throw (ex-info message {:error error})))]
     (when (seq (revs workspace "@ & ~empty() & description(exact:\"\")"))
       (refuse :in-progress "your working copy has uncommitted changes: commit them, or discard them, before super-done!"))
-    (let [others (keep #(when (names %) (str % "@")) landed)
-          line (str "(::default@-" (when (seq others) (str " | ::(" (str/join " | " others) ")")) ") ~ " placeholder)
+    (let [line (str "(::default@-" (apply str (for [id landed] (str " | ::present(" id ")"))) ") ~ " placeholder)
           heads (if onto (revs workspace (str "exactly(" onto ", 1)")) (revs workspace (str "heads(" line ")")))
           _ (when (not= 1 (count heads))
               (refuse :unclear-tip (str "the line has " (count heads) " heads, so its tip is unclear: " (str/join "; " heads)
@@ -117,12 +115,24 @@
           tip (first (str/split (first heads) #" "))
           mine (str "(" tip "..@) ~ " placeholder)]
       (if (empty? (revs workspace mine))
-        {:onto tip :revisions []}
+        {:onto tip :landed nil}
         (do (jj-out workspace "rebase" "-s" (str "roots(" tip "..@)") "-d" tip)
             (when-let [c (seq (revs workspace (str "(" mine ") & conflicts()")))]
               (refuse :conflicts (str "landing on " tip " left conflicts in " (str/join "; " c)
                                       ". Resolve them in your workspace, then super-done! again.")))
-            {:onto tip :revisions (vec (revs workspace mine))})))))
+            {:onto tip :landed (jj-out workspace "log" "--no-graph" "-r" (str "heads(" mine ")") "-T" "change_id")})))))
+
+(defn retire!
+  "Forget the jj workspace of a done Worker and delete its directory, so its
+  empty working-copy change does not dangle. A done finish was refused while
+  the working copy had uncommitted changes, so nothing is lost. Runs in REPO
+  without a snapshot, so the user's working copy is untouched."
+  [{:keys [repo workspace]}]
+  (let [name (str (fs/file-name workspace))
+        names (set (str/split-lines (jj-out repo "--ignore-working-copy" "workspace" "list" "-T" "name ++ \"\\n\"")))]
+    (when-not (names name) (throw (ex-info (str "no jj workspace " name " in " repo) {:error :jj})))
+    (jj-out repo "--ignore-working-copy" "workspace" "forget" name)
+    (fs/delete-tree workspace)))
 
 (defn wf-start!
   "The wf run for WORKER in WORKSPACE, its brief as the task."
@@ -284,16 +294,24 @@
 
 (defn- land-worker!
   "Land the revision of the Worker that CMD, a :done finish by PRINCIPAL, ends,
-  before the finish is committed, so a refusal leaves it running. Called under
-  land-lock with the commit, so the next one sees this one landed."
+  before the finish is committed, so a refusal leaves it running. Returns the
+  change id it landed, or nil. Called under land-lock with the commit, so the
+  next one sees this one landed."
   [{:keys [state launch]} principal cmd]
   (let [st @state
         {:keys [worker onto]} (:args (model/authorize st principal cmd))
         w (get-in st [:workers worker])]
     (when (and (:workspace w) (fs/exists? (:workspace w)) (not (#{:done :failed :cancelled} (:state w))))
-      ((:land! launch) {:workspace (:workspace w) :onto onto
-                        :landed (keep #(when (and (= :done (:state %)) (= (:repo w) (:repo %)) (:workspace %)) (str (fs/file-name (:workspace %))))
-                                      (vals (:workers st)))}))))
+      (:landed ((:land! launch) {:workspace (:workspace w) :onto onto
+                                 :landed (keep #(when (and (= :done (:state %)) (= (:repo w) (:repo %))) (:landed %)) (vals (:workers st)))})))))
+
+(defn- retire-worker!
+  "Remove done Worker WORKER's workspace; a failure is logged, the finish stands."
+  [{:keys [state launch]} worker]
+  (let [w (get-in @state [:workers worker])]
+    (when (and (= :done (:state w)) (:repo w) (:workspace w) (fs/exists? (:workspace w)))
+      (try ((:retire! launch) w)
+           (catch Exception e (binding [*out* *err*] (println "bbh super: retiring" worker "failed:" (ex-message e))))))))
 
 (defn handle
   "The response for one request map on controller C."
@@ -332,7 +350,10 @@
               {:ok (:result (run! c principal cmd))})
             :finish-worker!
             (let [r (if (= :done (keyword (:state-after args)))
-                      (locking land-lock (land-worker! c principal cmd) (run! c principal cmd))
+                      (locking land-lock
+                        (let [r (run! c principal (assoc-in cmd [:args :landed] (land-worker! c principal cmd)))]
+                          (retire-worker! c (:result r))
+                          r))
                       (run! c principal cmd))]
               (when-not (:repeat? r) (promote! c))
               {:ok (:result r)})
@@ -591,7 +612,7 @@
         db (store/open (str (fs/path dir "super.db")))
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
-           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land!} launch) :policy policy
+           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land! :retire! retire!} launch) :policy policy
            :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :triage triage :wf-root wf-root
            :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil) :triager (atom nil)}]
     (ensure-owner-token! c)

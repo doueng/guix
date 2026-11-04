@@ -34,7 +34,7 @@ This session is a Worker of bbh super: a thread's work, with a controller that r
 - (super-ask! {:kind :question :text \"...\" :options [{:id \"no\" :label \"No\"} ...] :recommended \"no\" :stopped true}) files a question (or :action, or :review with :revision, the commit id to approve from `jj log -r @- --no-graph -T commit_id`) and returns its id. An approval names that revision and the wf evidence as it was when you asked, so ask for review only once the evidence is final. With :stopped true, end your turn after it; the reply arrives as a new prompt. Omit :stopped when you can go on meanwhile.
 - (super-answered! \"reply-id\") after you have acted on a reply, naming the id the mailbox message gave.
 - (super-note! \"text\") updates the thread's summary line; (super-milestone! \"text\") marks progress worth the person's notice.
-- (super-done!) when the wf run is done, (super-failed! \"why\") when it cannot finish. Both end the Worker. super-done! first rebases your revision onto the tip of the person's line and refuses, saying why, while your working copy has uncommitted changes, the rebase leaves conflicts for you to resolve, or the line has two tips; then ask which, and call (super-done! {:onto \"<commit id>\"}).")
+- (super-done!) when the wf run is done, (super-failed! \"why\") when it cannot finish. Both end the Worker. super-done! first rebases your revision onto the tip of the person's line, then removes your workspace, and refuses, saying why, while your working copy has uncommitted changes, the rebase leaves conflicts for you to resolve, or the line has two tips; then ask which, and call (super-done! {:onto \"<commit id>\"}).")
 
 (def router-helpers
   "# Router
