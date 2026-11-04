@@ -964,6 +964,38 @@
            :policy {:workers 2 :locks ["guix-build"]}
            :args (merge {:thread thread :workflow :change :brief "b" :repo "/r"} args)}])
 
+(deftest a-worker-that-supersedes-its-stopped-ask-with-an-open-one-is-working
+  (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                       [:owner {:id "at" :command :attach-worker! :token-hash "h" :args {:thread "T1" :conversation "c1"}}]
+                                       [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "Which?" :stopped true}}]
+                                       [[:worker "W1"] {:id "k2" :command :ask! :args {:kind :question :text "FYI" :supersedes ["a1"]}}]])]
+    (is (= :working (get-in state [:workers "W1" :state])))
+    (is (= :working (get-in state [:threads "T1" :execution])))))
+
+(deftest a-worker-on-an-archived-thread-resumes-when-its-stopped-ask-is-answered
+  (let [asking [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                [:owner {:id "at" :command :attach-worker! :token-hash "h" :args {:thread "T1" :conversation "c1"}}]
+                [:owner {:id "ar" :command :archive! :args {:thread "T1"}}]
+                [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "Which?" :options [{:id "y" :label "Y"}] :stopped true}}]]
+        version (get-in (run-commands asking) [:state :threads "T1" :asks-version])
+        {:keys [state]} (run-commands (conj asking [:owner {:id "r1" :command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "y"}}}]))]
+    (is (= :sent (get-in state [:asks "a1" :state])))
+    (is (= :working (get-in state [:workers "W1" :state])))
+    (is (some? (get-in state [:threads "T1" :resolved-at])) "the thread stays archived")))
+
+(deftest archiving-a-thread-cancels-its-queued-worker-so-it-never-launches
+  (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                               [:owner {:id "t2" :command :thread! :args {:title "b"}}]
+                                               (start-cmd "s1" "T1" :locks ["guix-build"])
+                                               (start-cmd "s2" "T2" :locks ["guix-build"])
+                                               [:owner {:id "ar" :command :archive! :args {:thread "T2"}}]
+                                               [:controller {:id "f1" :command :finish-worker! :args {:worker "W1" :state-after :done}}]
+                                               [:controller {:id "p1" :command :promote-worker! :token-hash "h-p" :policy {:workers 2}}]])]
+    (is (= :queued (:state (nth results 3))))
+    (is (nil? (last results)) "nothing to promote")
+    (is (= [:cancelled "thread archived"] ((juxt :state :reason) (get-in state [:workers "W2"]))))
+    (is (= {} (:locks state)))))
+
 (deftest a-released-lock-row-is-deleted-so-a-restart-does-not-revive-it
   (let [{:keys [db state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
                                           (start-cmd "s1" "T1" :locks ["guix-build"])

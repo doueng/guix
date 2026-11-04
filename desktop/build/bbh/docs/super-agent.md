@@ -262,7 +262,7 @@ The Inbox is in evil normal state, so motions, search and `C-j`/`C-k` focus work
 | A | Approve the review the thread is waiting on. |
 | RET | Open the buffer of the thread's latest Worker, running or finished, and mark the thread seen. |
 | m | Mark read, which closes the asks and tells the Worker not to wait. |
-| a | Archive. Open asks become dismissed, which the Worker is told. |
+| a | Archive. Open asks become dismissed, which the Worker is told, and a queued Worker is cancelled before it launches. |
 | R | Open the Router. |
 | SPC m r, SPC m i | Open the Router or the Inbox. These two work in the Router's and Workers' buffers too. |
 | gr | Reload in the current order, new threads included. Opening the Inbox does the same. |

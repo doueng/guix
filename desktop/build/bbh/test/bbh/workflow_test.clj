@@ -351,3 +351,37 @@
     (with-redefs [wf/session-run-id (constantly "20000101-000000-000-bug-fix") fs/cwd (constantly repo)]
       (is (= older (wf/default-id)) "a session run from another state root falls back too"))
     (is (= "abandoned" (:status (wf/status-json (wf/status newer)))))))
+
+(def ^:private held-check
+  "A check whose first call says it started, then fails once go exists. Later
+  calls pass at once."
+  "if mkdir first 2>/dev/null; then touch started; while [ ! -f go ]; do sleep 0.02; done; exit 1; fi")
+
+(defn- held-attest
+  "Run ID's first attest in a future, held in its gates, and wait until it is."
+  [repo id]
+  (let [f (future (try (wf/attest! id "held") (catch clojure.lang.ExceptionInfo e (ex-message e))))]
+    (while (not (fs/exists? (str repo "/started"))) (Thread/sleep 10))
+    f))
+
+(deftest an-attest-records-nothing-when-the-run-was-abandoned-while-its-gates-ran
+  (let [repo (buggy-repo)
+        id (wf/start! :change {:cwd repo :task "t" :check held-check})]
+    (evidence! id "shape.md" "s")
+    (wf/attest! id "shape")
+    (let [held (held-attest repo id)]
+      (wf/abandon! id "stop")
+      (spit (str repo "/go") "")
+      (is (re-find #"moved while the gates ran" @held))
+      (is (= :abandoned (:status (wf/status id)))))))
+
+(deftest an-attest-records-nothing-when-another-attest-moved-the-run
+  (let [repo (buggy-repo)
+        id (wf/start! :change {:cwd repo :task "t" :check held-check})]
+    (evidence! id "shape.md" "s")
+    (wf/attest! id "shape")
+    (let [held (held-attest repo id)]
+      (is (= :pass (:outcome (wf/attest! id "fast"))))
+      (spit (str repo "/go") "")
+      (is (re-find #"moved while the gates ran" @held))
+      (is (= [:verify 1] (at id))))))

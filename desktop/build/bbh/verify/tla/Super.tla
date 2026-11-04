@@ -50,10 +50,11 @@ NextReply(r) == replies[r].st = "none" /\ \A q \in ReplyIds : q < r => replies[q
 
 \* thread-worker: the queued or active Worker of thread t.
 ThreadWorkers(t) == {w \in Workers : wthread[w] = t /\ wstate[w] \in Active \cup {"queued"}}
-ActiveWorkers == {w \in Workers : wstate[w] \in Active}
+\* holds-slot? (its health-based gone? case is not modeled)
+SlotWorkers == {w \in Workers : wstate[w] \in Active /\ ~resolved[wthread[w]]}
 \* blocked-by
 Blocked(w, ls) == \/ \E l \in ls : holder[l] \notin {None, w}
-                  \/ Cardinality(ActiveWorkers \ {w}) >= Cap
+                  \/ Cardinality(SlotWorkers \ {w}) >= Cap
 OpenAsks(t) == {a \in AskIds : asks[a].st = "open" /\ asks[a].thread = t}
 \* take-locks
 TakeLocks(w, ls) == [l \in Locks |-> IF l \in ls THEN w ELSE holder[l]]
@@ -64,7 +65,6 @@ Resume(t, as, ws) ==
   LET w == tworker[t] IN
   IF /\ w /= None
      /\ ~\E a \in AskIds : as[a].st = "open" /\ as[a].thread = t /\ as[a].stopped
-     /\ ~resolved[t]
      /\ ws[w] /= "cancelling"
   THEN [ws EXCEPT ![w] = "working"] ELSE ws
 
@@ -136,32 +136,37 @@ Ask(w, a, stopped, sup) ==
   /\ NextAsk(a)
   /\ wstate[w] \in Running /\ tworker[t] = w
   /\ sup \subseteq OpenAsks(t)
-  /\ asks' = [SetAsks(asks, sup, "superseded") EXCEPT ![a] =
-                 [st |-> "open", worker |-> w, thread |-> t, stopped |-> stopped]]
-  /\ wstate' = IF stopped THEN [wstate EXCEPT ![w] = "waiting"] ELSE wstate
+  /\ LET as == [SetAsks(asks, sup, "superseded") EXCEPT ![a] =
+                   [st |-> "open", worker |-> w, thread |-> t, stopped |-> stopped]]
+     IN /\ asks' = as
+        /\ wstate' = IF stopped THEN [wstate EXCEPT ![w] = "waiting"] ELSE Resume(t, as, wstate)
   /\ UNCHANGED <<wthread, wlocks, launched, holder, tworker, resolved, replies>>
 
 \* fold* :reply-sent, from decide* :reply!, :approve!, :dismiss! and :archive!
-ReplySent(t, r, picks, dismiss) ==
+ReplySent(t, r, picks, dismiss, then(_)) ==
   LET as == SetAsks(SetAsks(asks, picks, "sent"), dismiss, "dismissed") IN
   /\ replies' = [replies EXCEPT ![r] = [st |-> "sent", thread |-> t, picks |-> picks]]
   /\ asks' = as
-  /\ wstate' = Resume(t, as, wstate)
+  /\ wstate' = then(Resume(t, as, wstate))
 
 \* decide* :reply! and :approve! by the person, with the current asks-version
 Reply(t, r, picks, dismiss) ==
   /\ NextReply(r) /\ tworker[t] /= None
   /\ picks \subseteq OpenAsks(t) /\ dismiss \subseteq OpenAsks(t)
-  /\ ReplySent(t, r, picks, dismiss)
+  /\ ReplySent(t, r, picks, dismiss, LAMBDA ws : ws)
   /\ UNCHANGED <<wthread, wlocks, launched, holder, tworker, resolved>>
 
-\* decide* :archive!: dismissal, then fold* :thread-resolved
+\* decide* :archive!: dismissal, the thread's queued Worker cancelled, then
+\* fold* :thread-resolved. A queued Worker holds no lock and asked nothing.
 Archive(t) ==
+  LET queued == {w \in Workers : wthread[w] = t /\ wstate[w] = "queued"}
+      cancel(ws) == [w \in Workers |-> IF w \in queued THEN "cancelled" ELSE ws[w]]
+  IN
   /\ ~resolved[t]
   /\ resolved' = [resolved EXCEPT ![t] = TRUE]
   /\ IF OpenAsks(t) /= {} /\ tworker[t] /= None
-     THEN \E r \in ReplyIds : NextReply(r) /\ ReplySent(t, r, {}, OpenAsks(t))
-     ELSE UNCHANGED <<wstate, asks, replies>>
+     THEN \E r \in ReplyIds : NextReply(r) /\ ReplySent(t, r, {}, OpenAsks(t), cancel)
+     ELSE /\ wstate' = cancel(wstate) /\ UNCHANGED <<asks, replies>>
   /\ UNCHANGED <<wthread, wlocks, launched, holder, tworker>>
 
 \* decide* :outbox-acked! on a reply's outbox, fold* :outbox-acked
@@ -195,8 +200,9 @@ Spec == Init /\ [][Next]_vars
 
 \* ---- rules ----
 
-\* The cap counts launched Workers; an attached conversation has no process.
-CapRespected == Cardinality({w \in Workers : launched[w] /\ wstate[w] \in Active}) <= Cap
+\* The cap counts launched Workers on live threads; an attached conversation
+\* has no process, and holds-slot? frees the slot of an archived thread.
+CapRespected == Cardinality({w \in SlotWorkers : launched[w]}) <= Cap
 \* A launched Worker holds every lock it asked for until it finishes.
 LocksHeld == \A w \in Workers : launched[w] /\ wstate[w] \in Active => \A l \in wlocks[w] : holder[l] = w
 \* Nobody holds a lock for a Worker that has finished.

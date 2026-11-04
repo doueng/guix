@@ -236,6 +236,19 @@
     (throw (ex-info (str "no run named " id) {:id id})))
   (replay (read-journal id)))
 
+(defn- locked
+  "F's value, called while this process holds run ID's lock file, which closing
+  the channel releases, so one wf's read-decide-append never interleaves with
+  another's."
+  [id f]
+  (locking locked
+    (with-open [ch (java.nio.channels.FileChannel/open
+                    (fs/path (run-dir id) "lock")
+                    (into-array java.nio.file.OpenOption [java.nio.file.StandardOpenOption/CREATE
+                                                          java.nio.file.StandardOpenOption/WRITE]))]
+      (.lock ch)
+      (f))))
+
 (defn- append! [id event]
   (let [e (assoc event :at (str (java.time.Instant/now)))]
     (spit (journal-file id) (str (pr-str e) "\n") :append true)
@@ -265,21 +278,21 @@
 (defn set-commands!
   "Gives active run ID new run commands, a map with any of :repro :check :bench. The next attest uses them."
   [id cmds]
-  (let [st (current id)
-        cmds (into {} (filter (comp some? val)) (select-keys cmds [:repro :check :bench]))]
-    (when-not (= :active (:status st))
-      (throw (ex-info (str "run is " (name (:status st))) {:id id})))
-    (when (empty? cmds)
-      (throw (ex-info "set needs --repro, --check or --bench" {:id id})))
-    (append! id (merge {:type :set} cmds))))
+  (locked id #(let [st (current id)
+                    cmds (into {} (filter (comp some? val)) (select-keys cmds [:repro :check :bench]))]
+                (when-not (= :active (:status st))
+                  (throw (ex-info (str "run is " (name (:status st))) {:id id})))
+                (when (empty? cmds)
+                  (throw (ex-info "set needs --repro, --check or --bench" {:id id})))
+                (append! id (merge {:type :set} cmds)))))
 
 (defn abandon!
   "Retires run ID so it no longer counts as the default run. Done runs stay done."
   [id reason]
-  (let [st (current id)]
-    (when-not (#{:active :blocked} (:status st))
-      (throw (ex-info (str "run is " (name (:status st)) ", nothing to abandon") {:id id})))
-    (append! id {:type :abandon :reason reason})))
+  (locked id #(let [st (current id)]
+                (when-not (#{:active :blocked} (:status st))
+                  (throw (ex-info (str "run is " (name (:status st)) ", nothing to abandon") {:id id})))
+                (append! id {:type :abandon :reason reason}))))
 
 (defn- abandoned? [id]
   (try (= :abandoned (:status (current id))) (catch Exception _ false)))
@@ -293,30 +306,41 @@
               :principles (get-in (run-workflow st) [:phases (:phase st) :principles])
               :evidence (evidence-dir id))))
 
-(defn attest! [id claim]
-  (let [st (current id)]
+(defn attest!
+  "Runs the gates of run ID's phase, then records them and what follows. The
+  gates can take minutes, so the record is made only if the run is still
+  active at the phase and visit they ran for; otherwise nothing is recorded."
+  [id claim]
+  (let [st (current id)
+        at (fn [s] [(:status s) (:phase s) (get-in s [:visits (:phase s)])])]
     (when-not (= :active (:status st))
       (throw (ex-info (str "run is " (name (:status st))) {:id id})))
     (let [wf (run-workflow st)
           results (run-gates wf id st)
-          result (outcome results)
-          attested (append! id {:type :attest :phase (:phase st)
-                                :visit (get-in st [:visits (:phase st)])
-                                :claim claim :outcome result :gates results})]
-      (doseq [e (decide wf (fold-event st attested) results)]
-        (append! id e))
+          result (outcome results)]
+      (locked id #(let [now (current id)]
+                    (when (not= (at st) (at now))
+                      (let [[status phase visit] (at now)]
+                        (throw (ex-info (str "the run moved while the gates ran, to phase " (name phase) " visit " visit
+                                             " status " (name status) "; nothing was recorded")
+                                        {:id id}))))
+                    (let [attested (append! id {:type :attest :phase (:phase st)
+                                                :visit (get-in st [:visits (:phase st)])
+                                                :claim claim :outcome result :gates results})]
+                      (doseq [e (decide wf (fold-event st attested) results)]
+                        (append! id e)))))
       {:outcome result :results results})))
 
 (defn verdict!
   "Records a verdict from a named human. Agents use review!, which runs a reviewer they do not control."
   [id reviewer verdict note]
-  (let [st (current id)]
-    (when (str/blank? reviewer)
-      (throw (ex-info "verdict needs --human NAME" {})))
-    (when-not (#{:pass :fail} verdict)
-      (throw (ex-info "verdict must be pass or fail" {:verdict verdict})))
-    (append! id {:type :verdict :phase (:phase st) :visit (get-in st [:visits (:phase st)])
-                 :reviewer reviewer :source :human :verdict verdict :note note})))
+  (when (str/blank? reviewer)
+    (throw (ex-info "verdict needs --human NAME" {})))
+  (when-not (#{:pass :fail} verdict)
+    (throw (ex-info "verdict must be pass or fail" {:verdict verdict})))
+  (locked id #(let [st (current id)]
+                (append! id {:type :verdict :phase (:phase st) :visit (get-in st [:visits (:phase st)])
+                             :reviewer reviewer :source :human :verdict verdict :note note}))))
 
 (defn- last-assistant-text [messages]
   (let [c (:content (last (filter #(= "assistant" (:role %)) messages)))]

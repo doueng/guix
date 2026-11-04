@@ -4,7 +4,8 @@
 \* applies each appended line. attest! is two steps, because it reads the
 \* journal (current), runs the phase's gates (run-gates, which runs the
 \* :check command and can take minutes), and only then appends the :attest
-\* line and the events that decide computed from what it read.
+\* line and the events that decide computed from what it read, under the
+\* run's lock and only if the run is still where it read it.
 EXTENDS Naturals
 
 CONSTANTS Attesters, Cap  \* concurrent `wf attest` calls; default-max-visits
@@ -23,7 +24,7 @@ Init ==
   /\ status = "active" /\ phase = Start
   /\ visits = [p \in Phases |-> IF p = Start THEN 1 ELSE 0]
   /\ pc = [a \in Attesters |-> "idle"]
-  /\ decided = [a \in Attesters |-> [type |-> "none", phase |-> Start, visit |-> 0]]
+  /\ decided = [a \in Attesters |-> [e |-> [type |-> "none", phase |-> Start, visit |-> 0], read |-> <<Start, 1>>]]
 
 \* enter
 Enter(st, p) ==
@@ -41,23 +42,29 @@ Decide(st) ==
 BeginAttest(a) ==
   /\ pc[a] = "idle" /\ status = "active"
   /\ \E o \in Outcomes :
-       decided' = [decided EXCEPT ![a] = Decide([phase |-> phase, visits |-> visits, outcome |-> o])]
+       decided' = [decided EXCEPT ![a] = [e |-> Decide([phase |-> phase, visits |-> visits, outcome |-> o]),
+                                          read |-> <<phase, visits[phase]>>]]
   /\ pc' = [pc EXCEPT ![a] = "gates"]
   /\ UNCHANGED <<status, phase, visits>>
 
-\* attest!, second half: append! of the events, each folded by fold-event.
+\* attest!, second half, one step because it runs under `locked`: current
+\* again, then append! of the events, each folded by fold-event, or nothing
+\* when the run moved.
 EndAttest(a) ==
-  LET e == decided[a] IN
+  LET e == decided[a].e IN
   /\ pc[a] = "gates"
   /\ pc' = [pc EXCEPT ![a] = "idle"]
-  /\ CASE e.type = "enter" -> /\ phase' = e.phase /\ visits' = [visits EXCEPT ![e.phase] = e.visit]
-                               /\ UNCHANGED status
-       [] e.type = "done" -> status' = "done" /\ UNCHANGED <<phase, visits>>
-       [] e.type = "block" -> status' = "blocked" /\ UNCHANGED <<phase, visits>>
-       [] OTHER -> UNCHANGED <<status, phase, visits>>
+  /\ IF status /= "active" \/ decided[a].read /= <<phase, visits[phase]>>
+     THEN UNCHANGED <<status, phase, visits>>
+     ELSE CASE e.type = "enter" -> /\ phase' = e.phase
+                                    /\ visits' = [visits EXCEPT ![e.phase] = e.visit]
+                                    /\ UNCHANGED status
+            [] e.type = "done" -> status' = "done" /\ UNCHANGED <<phase, visits>>
+            [] e.type = "block" -> status' = "blocked" /\ UNCHANGED <<phase, visits>>
+            [] OTHER -> UNCHANGED <<status, phase, visits>>
   /\ UNCHANGED decided
 
-\* abandon!
+\* abandon!, under `locked`
 Abandon ==
   /\ status \in {"active", "blocked"}
   /\ status' = "abandoned"

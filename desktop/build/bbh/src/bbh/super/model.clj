@@ -393,8 +393,13 @@
   {:events (filterv some? [(dismissal state thread id)]) :result thread})
 
 (defmethod decide* :archive! [state {{:keys [thread]} :args :keys [id]}]
-  {:events (filterv some? [(dismissal state thread id) {:kind :thread-resolved :thread thread :data {}}])
-   :result thread})
+  ;; A queued Worker has no process yet, so it is new work, which an archived
+  ;; thread takes none of. A running Worker carries on.
+  (let [queued (some #(when (and (= thread (:thread %)) (= :queued (:state %))) (:id %)) (vals (:workers state)))]
+    {:events (filterv some? [(dismissal state thread id)
+                             (when queued {:kind :worker-finished :thread thread :data {:id queued :state :cancelled :reason "thread archived"}})
+                             {:kind :thread-resolved :thread thread :data {}}])
+     :result thread}))
 
 ;; ---- routing ------------------------------------------------------------
 
@@ -623,6 +628,17 @@
 (defmethod fold* :token-issued [state {{:keys [hash principal]} :data}]
   (assoc-in state [:tokens hash] {:id hash :principal principal :revoked false}))
 
+(defn- resume
+  "STATE with THREAD's Worker working again when no stopped ask is open. A
+  Worker on an archived thread resumes too, and the thread stays archived."
+  [state thread]
+  (let [t (get-in state [:threads thread])
+        stopped? (some #(and (= thread (:thread %)) (= :open (:state %)) (:stopped %)) (vals (:asks state)))]
+    (cond-> state
+      (and (:worker t) (not stopped?) (not= :cancelling (get-in state [:workers (:worker t) :state])))
+      (-> (assoc-in [:threads thread :execution] :working)
+          (assoc-in [:workers (:worker t) :state] :working)))))
+
 (defmethod fold* :ask-opened [state {{:keys [id stopped supersedes] :as ask} :data :keys [thread seq]}]
   (-> state (bump :asks)
       (set-states :asks supersedes :superseded)
@@ -630,18 +646,8 @@
       (assoc-in [:threads thread :asks-version] seq)
       (assoc-in [:threads thread :milestone-seq] seq)
       (cond-> stopped (-> (assoc-in [:threads thread :execution] :waiting)
-                          (assoc-in [:workers (:worker ask) :state] :waiting)))))
-
-(defn- resume
-  "STATE with THREAD and its Worker working again when no stopped ask is open."
-  [state thread]
-  (let [t (get-in state [:threads thread])
-        stopped? (some #(and (= thread (:thread %)) (= :open (:state %)) (:stopped %)) (vals (:asks state)))]
-    (cond-> state
-      (and (:worker t) (not stopped?) (not (:resolved-at t))
-           (not= :cancelling (get-in state [:workers (:worker t) :state])))
-      (-> (assoc-in [:threads thread :execution] :working)
-          (assoc-in [:workers (:worker t) :state] :working)))))
+                          (assoc-in [:workers (:worker ask) :state] :waiting))
+              (not stopped) (resume thread))))
 
 (defmethod fold* :reply-sent [state {{:keys [id picks dismiss outbox conversation text] :as reply} :data :keys [thread seq]}]
   (-> state (bump :outbox)
