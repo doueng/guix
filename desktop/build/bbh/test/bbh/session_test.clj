@@ -206,8 +206,8 @@
 
 (deftest job-wait-moves-the-deadline-instead-of-timing-out
   (let [init (str (fs/absolutize "../../configs/bbh/init.clj"))
-        h (harness (str "(load-file " (pr-str init) ") (ns bbh.env) (def manifest {:deadline-ms 2000})")
-                   [{:code "(def j (job \"sleep 4; echo finished\")) (select-keys (job-wait j) [:done? :tail])"}
+        h (harness (str "(load-file " (pr-str init) ") (ns bbh.env) (def manifest {:deadline-ms 1000})")
+                   [{:code "(def j (job \"sleep 2; echo finished\")) (select-keys (job-wait j) [:done? :tail])"}
                     {:code "(select-keys (job-wait (job \"sleep 4\") 500) [:done?])"}
                     {:code "(loop [] (recur))"}
                     "ok"])
@@ -217,8 +217,8 @@
     (let [[waited short spin] (tool-results h)]
       (is (= "=> {:done? true, :tail \"finished\"}" waited))
       (is (= "=> {:done? false}" short) "the positional wait is honoured and stops early")
-      (is (str/starts-with? spin "Timed out after 2000 ms.") "an evaluation that does not wait keeps its deadline"))
-    (is (< (- (System/currentTimeMillis) start) 20000))))
+      (is (str/starts-with? spin "Timed out after 1000 ms.") "an evaluation that does not wait keeps its deadline"))
+    (is (< (- (System/currentTimeMillis) start) 10000))))
 
 (deftest an-unresolved-symbol-gets-similar-names-from-the-env
   (let [init (str (fs/absolutize "../../configs/bbh/init.clj"))

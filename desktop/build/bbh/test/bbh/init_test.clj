@@ -43,21 +43,22 @@
     s))
 
 (deftest long-helpers-return-before-the-deadline-and-the-repl-survives
-  (let [s (session-with-deadline 13000)
+  (let [s (session-with-deadline 3000)
         run #(session/run-code! s (str (random-uuid)) %)]
     (try
+      ;; A 1 s margin instead of 10 s gives sh a 2 s budget, so the test need not wait out a long deadline.
+      (repl/eval! (:repl @s) "(alter-var-root #'bbh.env/deadline-margin-ms (constantly 1000))" 5000)
       (run "(def kept 1)")
       (let [start (System/currentTimeMillis)
-            slow (run "(def r (sh \"echo early; sleep 7; echo late; exit 4\")) (select-keys r [:exit :timeout :out])")
-            waited (run "(def j (job \"sleep 16\")) (:done? (job-wait j :ms 60000))")]
+            slow (run "(def r (sh \"echo early; sleep 4; echo late; exit 4\")) (select-keys r [:exit :timeout :out])")
+            waited (run "(def j (job \"sleep 4\")) (:done? (job-wait j :ms 60000))")]
         (is (str/includes? slow ":timeout true") slow)
         (is (str/includes? slow ":exit nil") slow)
         (is (str/includes? slow "early") "sh returns the output so far")
-        (is (str/ends-with? (str/trim waited) "=> true") "job-wait moved the deadline past the 13 s budget and finished the wait")
-        (is (< (- (System/currentTimeMillis) start) 40000) "sh stopped at its budget and job-wait took only as long as the job"))
+        (is (str/ends-with? (str/trim waited) "=> true") "job-wait moved the deadline past the 3 s budget and finished the wait")
+        (is (< (- (System/currentTimeMillis) start) 15000) "sh stopped at its budget and job-wait took only as long as the job"))
       (is (str/ends-with? (run "kept") "=> 1") "the REPL was not killed")
-      (Thread/sleep 2000)
-      (let [finished (run "((juxt :done? :exit :tail) (job-wait (:job r) :ms 2000))")]
+      (let [finished (run "((juxt :done? :exit :tail) (job-wait (:job r) :ms 5000))")]
         (is (str/includes? finished "[true 4 \"early\\nlate\"]") finished))
       (finally (session/close! s)))))
 
@@ -79,12 +80,14 @@
 (deftest an-interrupt-stops-a-running-sh
   (let [s (session-with-deadline 60000)
         marker (str (fs/path (fs/create-temp-dir {:prefix "bbh-sh-kill"}) "ran"))
-        call (future (session/run-code! s "a" (str "(sh \"sleep 4; touch " marker "\")")))]
+        started (System/currentTimeMillis)
+        call (future (session/run-code! s "a" (str "(sh \"sleep 2; touch " marker "\")")))]
     (try
-      (Thread/sleep 1500)
+      (Thread/sleep 700)
       (session/interrupt! s)
       (deref call 10000 nil)
-      (Thread/sleep 4000)
+      ;; Past the moment the command would have touched the marker.
+      (Thread/sleep (max 0 (- (+ started 3000) (System/currentTimeMillis))))
       (is (not (fs/exists? marker)) "the detached command died with the interrupt")
       (is (empty? (fs/glob (:repl-dir @s) "jobs/*")) "an interrupted sh leaves no job files")
       (finally (session/close! s)))))
@@ -99,7 +102,7 @@
                                 :emit (fn [_])})]
     (try
       (is (nil? (session/start-repl! s)))
-      (let [id (:value (repl/eval! (:repl @s) "(job \"sleep 3; echo done; exit 7\")" 30000))]
+      (let [id (:value (repl/eval! (:repl @s) "(job \"sleep 1; echo done; exit 7\")" 30000))]
         (is (string? id))
         (is (= "true" (:value (repl/eval! (:repl @s) (str "(loop [n 100] (let [f (job-file " id " \".start\")] (cond (fs/exists? f) (boolean (re-matches #\"[0-9]+\" (str/trim (slurp f)))) (pos? n) (do (Thread/sleep 10) (recur (dec n))) :else false)))") 30000))))
         (is (= "false" (:value (repl/eval! (:repl @s) (str "(:done? (job-status " id "))") 30000)))
