@@ -66,9 +66,9 @@
              (let [f (fs/path (or (sysenv/getenv "XDG_CONFIG_HOME") (fs/expand-home "~/.config")) "bbh" "policy.edn")]
                (when (fs/exists? f) (edn/read-string (slurp (str f))))))))
 
-(defn- jj! [dir & args]
-  (let [{:keys [exit err]} (apply p/shell {:dir dir :out :string :err :string :continue true} "jj" args)]
-    (when-not (zero? exit) (throw (ex-info (str "jj " (str/join " " args) ": " (str/trim err)) {:error :jj})))))
+(defn- jj-out [dir & args]
+  (let [{:keys [exit out err]} (apply p/shell {:dir dir :out :string :err :string :continue true} "jj" args)]
+    (if (zero? exit) (str/trim out) (throw (ex-info (str "jj " (str/join " " args) ": " (str/trim err)) {:error :jj})))))
 
 (defn workspace!
   "A jj workspace of REPO for WORKER under DIR, named <thread>-<generation>.
@@ -79,11 +79,50 @@
         path (str (fs/path dir "workspaces" name))]
     (when-not (fs/exists? repo)
       (fs/create-dirs repo)
-      (jj! repo "git" "init"))
+      (jj-out repo "git" "init"))
     (when-not (fs/exists? path)
       (fs/create-dirs (fs/parent path))
-      (jj! repo "workspace" "add" "--name" name path))
+      (jj-out repo "workspace" "add" "--name" name path))
     path))
+
+(defn- revs
+  "One line per revision of REVSET in DIR: commit id, then the first line of its description."
+  [dir revset]
+  (remove str/blank? (str/split-lines (jj-out dir "log" "--no-graph" "-r" revset "-T" "commit_id.short() ++ \" \" ++ description.first_line() ++ \"\\n\""))))
+
+(def ^:private placeholder "(empty() & description(exact:\"\"))")
+
+(defn land!
+  "Rebase the revision of the Worker in WORKSPACE, the commits its workspace has
+  that the line lacks, onto the tip of the line, so finished work forms one
+  line. The line is the user's committed history, `::default@-` (their
+  working-copy change stays in progress and is never moved), and the revisions
+  of the LANDED workspaces, those of finished Workers. ONTO names the tip when
+  the line has more than one head. Runs jj in WORKSPACE, so the user's working
+  copy is not even snapshotted. Throws, leaving the Worker to act, when its
+  working copy has uncommitted changes, when the tip is unclear, and when the
+  rebase leaves conflicts in its commits; a repeat once they are resolved is a
+  no-op. Returns {:onto tip :revisions [...]}, empty when there was nothing to land."
+  [{:keys [workspace landed onto]}]
+  (let [names (set (str/split-lines (jj-out workspace "workspace" "list" "-T" "name ++ \"\\n\"")))
+        refuse (fn [error message] (throw (ex-info message {:error error})))]
+    (when (seq (revs workspace "@ & ~empty() & description(exact:\"\")"))
+      (refuse :in-progress "your working copy has uncommitted changes: commit them, or discard them, before super-done!"))
+    (let [others (keep #(when (names %) (str % "@")) landed)
+          line (str "(::default@-" (when (seq others) (str " | ::(" (str/join " | " others) ")")) ") ~ " placeholder)
+          heads (if onto (revs workspace (str "exactly(" onto ", 1)")) (revs workspace (str "heads(" line ")")))
+          _ (when (not= 1 (count heads))
+              (refuse :unclear-tip (str "the line has " (count heads) " heads, so its tip is unclear: " (str/join "; " heads)
+                                        ". Ask the person which one your revision goes on, then (super-done! {:onto \"<commit id>\"}).")))
+          tip (first (str/split (first heads) #" "))
+          mine (str "(" tip "..@) ~ " placeholder)]
+      (if (empty? (revs workspace mine))
+        {:onto tip :revisions []}
+        (do (jj-out workspace "rebase" "-s" (str "roots(" tip "..@)") "-d" tip)
+            (when-let [c (seq (revs workspace (str "(" mine ") & conflicts()")))]
+              (refuse :conflicts (str "landing on " tip " left conflicts in " (str/join "; " c)
+                                      ". Resolve them in your workspace, then super-done! again.")))
+            {:onto tip :revisions (vec (revs workspace mine))})))))
 
 (defn wf-start!
   "The wf run for WORKER in WORKSPACE, its brief as the task."
@@ -241,6 +280,21 @@
 
 (declare reconcile!)
 
+(def ^:private land-lock (Object.))
+
+(defn- land-worker!
+  "Land the revision of the Worker that CMD, a :done finish by PRINCIPAL, ends,
+  before the finish is committed, so a refusal leaves it running. Called under
+  land-lock with the commit, so the next one sees this one landed."
+  [{:keys [state launch]} principal cmd]
+  (let [st @state
+        {:keys [worker onto]} (:args (model/authorize st principal cmd))
+        w (get-in st [:workers worker])]
+    (when (and (:workspace w) (fs/exists? (:workspace w)) (not (#{:done :failed :cancelled} (:state w))))
+      ((:land! launch) {:workspace (:workspace w) :onto onto
+                        :landed (keep #(when (and (= :done (:state %)) (= (:repo w) (:repo %)) (:workspace %)) (str (fs/file-name (:workspace %))))
+                                      (vals (:workers st)))}))))
+
 (defn handle
   "The response for one request map on controller C."
   [c {:keys [token id command args]}]
@@ -277,7 +331,9 @@
                         (assoc-in cmd [:args :current-sha] sha))]
               {:ok (:result (run! c principal cmd))})
             :finish-worker!
-            (let [r (run! c principal cmd)]
+            (let [r (if (= :done (keyword (:state-after args)))
+                      (locking land-lock (land-worker! c principal cmd) (run! c principal cmd))
+                      (run! c principal cmd))]
               (when-not (:repeat? r) (promote! c))
               {:ok (:result r)})
             {:ok (:result (run! c principal cmd))}))))
@@ -535,7 +591,7 @@
         db (store/open (str (fs/path dir "super.db")))
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
-           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open!} launch) :policy policy
+           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land!} launch) :policy policy
            :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :triage triage :wf-root wf-root
            :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil) :triager (atom nil)}]
     (ensure-owner-token! c)

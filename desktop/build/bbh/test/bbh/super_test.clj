@@ -1242,3 +1242,69 @@
             (start-worker dir "T1" :repo repo)
             (is (= "wC:p1" (#'pane/buffer "T1")))
             (is (thrown-with-msg? Exception #"T2 has no Worker" (#'pane/buffer "T2")))))))))
+
+
+(defn- jj-in [dir & args]
+  ;; A nil DIR would run jj in the checkout the tests run from.
+  (when-not (and dir (fs/starts-with? dir (System/getProperty "java.io.tmpdir")))
+    (throw (ex-info (str "jj-in outside the temporary directory: " dir) {})))
+  (let [{:keys [exit out err]} (apply babashka.process/shell {:dir dir :out :string :err :string :continue true} "jj" args)]
+    (when-not (zero? exit) (throw (ex-info (str "jj " args ": " err) {})))
+    (clojure.string/trim out)))
+
+(defn- line-of
+  "The descriptions from workspace NAME's revision down to the root, skipping empty undescribed commits."
+  [repo name]
+  (clojure.string/split-lines
+   (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" (str "::" name "@ ~ root() ~ (empty() & description(exact:\"\"))")
+          "-T" "description.first_line() ++ \"\\n\"")))
+
+(defn- commit-file [workspace file text message]
+  (assert workspace "a Worker without a workspace")
+  (spit (str (fs/path workspace file)) text)
+  (jj-in workspace "commit" "-m" message))
+
+(deftest finished-workers-land-in-one-line-and-the-users-change-stays-put
+  (with-workers
+    (fn [c dir repo _]
+      (doseq [t ["one" "two" "three"]] (call dir {:command :thread! :args {:title t}}))
+      (let [[w1 w2] (map #(:ok (start-worker dir % :repo repo)) ["T1" "T2"])]
+        (assert (every? :workspace [w1 w2]) "both Workers started")
+        (spit (str (fs/path repo "mine")) "in progress\n")
+        (let [users (jj-in repo "log" "--no-graph" "-r" "@" "-T" "commit_id")]
+          (commit-file (:workspace w1) "one" "1\n" "one")
+          (commit-file (:workspace w2) "two" "2\n" "two")
+          (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
+          (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})))
+          (is (= ["one" "two" "start"] (line-of repo "T1-1")) "the later finish lands on the earlier one")
+          (is (fs/exists? (fs/path (:workspace w1) "two")) "the workspace holds the line it landed on")
+          (is (= users (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@" "-T" "commit_id"))
+              "the user's working-copy change is not rewritten")
+          (let [w3 (:ok (start-worker dir "T3" :repo repo))]
+            (assert (:workspace w3) "the third Worker started")
+            (spit (str (fs/path (:workspace w3) "one")) "clash\n")
+            (is (= :in-progress (:error (call dir {:command :finish-worker! :args {:worker "W3" :state-after :done}}))))
+            (jj-in (:workspace w3) "commit" "-m" "three")
+            (let [r (call dir {:command :finish-worker! :args {:worker "W3" :state-after :done}})]
+              (is (= :conflicts (:error r)) (pr-str r)))
+            (is (= :working (:state (get-in @(:state c) [:workers "W3"]))) "a refused finish leaves the Worker running")
+            (is (= ["three" "one" "two" "start"] (line-of repo "T3-1")) "its commits moved, conflicted, onto the tip")
+            (spit (str (fs/path (:workspace w3) "one")) "clash\n")
+            (jj-in (:workspace w3) "squash")
+            (is (= {:ok "W3"} (call dir {:command :finish-worker! :args {:worker "W3" :state-after :done}})) "once resolved it lands")))))))
+
+(deftest an-unclear-tip-is-refused-until-the-worker-names-one
+  (with-workers
+    (fn [c dir repo _]
+      (doseq [t ["one" "two"]] (call dir {:command :thread! :args {:title t}}))
+      (let [[w1 w2] (map #(:ok (start-worker dir % :repo repo)) ["T1" "T2"])]
+        (assert (every? :workspace [w1 w2]) "both Workers started")
+        (commit-file (:workspace w1) "one" "1\n" "one")
+        (commit-file (:workspace w2) "two" "2\n" "two")
+        (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})
+        (commit-file repo "yours" "y\n" "yours")
+        (let [r (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})]
+          (is (= :unclear-tip (:error r)))
+          (is (re-find #"2 heads.*one|2 heads.*yours" (:message r)) (:message r)))
+        (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done :onto "T1-1@-"}})))
+        (is (= ["two" "one" "start"] (line-of repo "T2-1")))))))
