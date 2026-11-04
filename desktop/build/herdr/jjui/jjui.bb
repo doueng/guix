@@ -37,6 +37,13 @@
       (when-let [e (:error reply)] (throw (ex-info (str "Herdr " (:code e) ": " (:message e)) e)))
       (:result reply))))
 
+(defn close-popup!
+  "Close Herdr's open popup. Having none open, as from GUI Emacs, is fine."
+  []
+  (try (call! {:id "1" :method "popup.close" :params {}})
+       (catch clojure.lang.ExceptionInfo e
+         (when-not (= "popup_not_open" (:code (ex-data e))) (throw e)))))
+
 (defn pane!
   "The popup's command: jjui, then THEN in the same terminal."
   []
@@ -51,7 +58,7 @@
         (= "--pane" dir) (pane!)
         (nil? dir) (throw (ex-info "usage: herdr-jjui DIR [THEN...]" {}))
         :else (let [req (request dir then)]
-                (call! {:id "1" :method "popup.close" :params {}})
+                (close-popup!)
                 (call! req))))
     (catch Exception e
       (binding [*out* *err*] (println "herdr-jjui:" (ex-message e)))
