@@ -9,7 +9,7 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-herdr))
 
-(define %herdr-plugins (list herdr-sesh herdr-tiny-fingers))
+(define %herdr-plugins (list herdr-sesh herdr-tiny-fingers herdr-jjui))
 
 (define %herdr-home-packages
   (append (list herdr)

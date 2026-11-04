@@ -73,7 +73,7 @@
                                       (or (age updated-at) "")))))))
 
 (defn header [{:keys [badge]}]
-  (format "bbh inbox · %d need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  R router  gr reload  g? help" badge))
+  (format "bbh inbox · %d need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  R router  J jjui  gr reload  g? help" badge))
 
 (defn preview
   "What the selected thread needs: its open ask with numbered options and the
@@ -172,6 +172,14 @@
     (or (:buffer w)
         (throw (ex-info (str id (if w (str "'s Worker " (:id w) " has no buffer") " has no Worker")) {:error :no-buffer})))))
 
+(defn workdir
+  "Where thread T's latest Worker works: its jj workspace while that still
+  exists, else the repo it was started on, or an error naming why there is none."
+  [{:keys [id workers]}]
+  (let [w (last workers)]
+    (or (some #(when (and % (fs/directory? %)) (str %)) [(:workspace w) (:repo w)])
+        (throw (ex-info (str id (if w (str "'s Worker " (:id w) " has no workspace or repo") " has no Worker")) {:error :no-dir})))))
+
 (defn -main
   "bbh inbox opens the Inbox in the super-agent's Emacs; the verbs are what its keys call."
   [& [verb id n & more]]
@@ -197,8 +205,9 @@
       "archive" (call! {:command :archive! :args {:thread id}})
       "seen" (with-state-lock! #(seen! id))
       "buffer" (println (buffer id))
+      "dir" (println (workdir (thread id)))
       "register" (client/register-view! (client/super-dir) (parse-long id))
-      (println "usage: bbh inbox [view|rows|header|preview T|reveal|pick T N|send T|approve T|note T TEXT|dismiss T|archive T|seen T|buffer T|register PORT]"))
+      (println "usage: bbh inbox [view|rows|header|preview T|reveal|pick T N|send T|approve T|note T TEXT|dismiss T|archive T|seen T|buffer T|dir T|register PORT]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))

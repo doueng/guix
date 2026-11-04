@@ -33,7 +33,7 @@
     (evil-local-mode 1)
     (should (eq 'normal evil-state))
     (dolist (key '(("gr" . eng/bbh-inbox-reveal) ("s" . eng/bbh-inbox-send) ("2" . eng/bbh-inbox-pick)
-                   ("RET" . eng/bbh-inbox-open) ("R" . eng/bbh-inbox-router) ("q" . quit-window)
+                   ("RET" . eng/bbh-inbox-open) ("R" . eng/bbh-inbox-router) ("J" . eng/bbh-inbox-jjui) ("q" . quit-window)
                    ("j" . evil-next-line) ("gg" . evil-goto-first-line) ("G" . evil-goto-line)))
       (should (eq (cdr key) (key-binding (kbd (car key))))))))
 

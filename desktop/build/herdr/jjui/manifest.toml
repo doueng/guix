@@ -1,0 +1,14 @@
+id = "engstrand.jjui"
+name = "jjui popup"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "jjui in a popup that gives way to what it replaced when jjui quits"
+platforms = ["linux"]
+
+# `herdr-jjui DIR` opens this entrypoint as a popup in DIR. The Herdr CLI
+# cannot ask for a popup placement, so the launcher calls the socket API.
+[[panes]]
+id = "jjui"
+title = "jjui"
+placement = "popup"
+command = ["./bin/herdr-jjui", "--pane"]

@@ -208,13 +208,24 @@
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
     (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
     (is (re-matches #"T3\tARCHIVED         T3   old \(came back\)    " row3))
-    (is (= "bbh inbox · 1 need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  R router  gr reload  g? help" (bbh.super.pane/header sections)))
+    (is (= "bbh inbox · 1 need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  R router  J jjui  gr reload  g? help" (bbh.super.pane/header sections)))
     (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
            (clojure.string/split-lines
             (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
                                      :asks [{:id "a1" :state :open :seq 3 :text "Keep?" :stopped true :recommended "no"
                                              :options [{:id "no" :label "No"} {:id "yes" :label "Yes"}]}]}
                                     {:picks {"T1" {"a1" "yes"}} :notes {"T1" "and why"}}))))))
+
+(deftest jjui-opens-in-the-worker-workspace-until-it-is-gone-then-the-repo
+  (let [dir (fs/create-temp-dir {:prefix "bbh-inbox-dir"})
+        repo (str (fs/create-dirs (fs/path dir "repo")))
+        workspace (str (fs/create-dirs (fs/path dir "T1-2")))
+        thread {:id "T1" :workers [{:id "W1" :repo repo :workspace (str (fs/path dir "T1-1"))}
+                                     {:id "W2" :repo repo :workspace workspace}]}]
+    (is (= workspace (bbh.super.pane/workdir thread)))
+    (fs/delete workspace)
+    (is (= repo (bbh.super.pane/workdir thread)))
+    (is (thrown-with-msg? Exception #"T2 has no Worker" (bbh.super.pane/workdir {:id "T2" :workers []})))))
 
 ;; ---- Workers ---------------------------------------------------------------
 

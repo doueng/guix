@@ -80,6 +80,16 @@ entry point SCRIPT becomes bin/NAME after its tests.bb passes."
    #:description "Sesh-style Herdr workspace picker with zoxide and project tabs."
    #:home-page "https://github.com/fullerzz/herdr-plugin-sesh"))
 
+(define-public herdr-jjui
+  (babashka-herdr-plugin
+   #:name "herdr-jjui"
+   #:version "0.1.0"
+   #:directory "jjui"
+   #:script "jjui.bb"
+   #:synopsis "jjui in a temporary Herdr popup"
+   #:description "Opens jjui on a directory in a Herdr popup that closes when jjui quits."
+   #:home-page "https://github.com/idursun/jjui"))
+
 (define-public herdr-tiny-fingers
   (babashka-herdr-plugin
    #:name "herdr-tiny-fingers"

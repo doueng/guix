@@ -1551,6 +1551,25 @@ A failure shows bbh's message."
     (eng/bbh-inbox--run (list "buffer" thread)
                         (lambda (name) (eng/bbh-super-visit (string-trim name))))))
 
+(defun eng/bbh-inbox-jjui ()
+  "Open jjui on the thread's Worker workspace, or its repo once that is gone.
+It runs in a Herdr popup, `herdr-jjui'.  Herdr shows one popup at a time, so
+it replaces a terminal Inbox, which comes back when jjui quits."
+  (interactive)
+  (eng/bbh-inbox--run
+   (list "dir" (eng/bbh-inbox--thread))
+   (lambda (dir)
+     (let ((err (generate-new-buffer " *herdr-jjui*")))
+       (make-process
+        :name "herdr-jjui" :noquery t :buffer err :connection-type 'pipe
+        :command (append (list "herdr-jjui" (string-trim dir))
+                          (unless (display-graphic-p) (eng/bbh-inbox--command)))
+        :sentinel (lambda (process _)
+                    (when (memq (process-status process) '(exit signal))
+                      (unless (zerop (process-exit-status process))
+                        (message "%s" (string-trim (with-current-buffer err (buffer-string)))))
+                      (kill-buffer err))))))))
+
 (defconst eng/bbh-inbox-keys
   `(("RET" eng/bbh-inbox-open "Open the thread's Worker")
     ("1" eng/bbh-inbox-pick "Pick option 1")
@@ -1563,6 +1582,7 @@ A failure shows bbh's message."
     ("m" eng/bbh-inbox-dismiss "Mark read")
     ("a" eng/bbh-inbox-archive "Archive")
     ("R" eng/bbh-inbox-router "Open the Router")
+    ("J" eng/bbh-inbox-jjui "jjui on the thread's workspace")
     ("gr" eng/bbh-inbox-reveal "Reload, new threads included")
     ("g?" describe-mode "Help")
     ("q" quit-window "Quit"))
@@ -1596,6 +1616,7 @@ read-only list has no use for; s also shadows the global avy jump here.")
   (map! :map eng/bbh-inbox-mode-map
         :localleader
         :desc "Open Worker"   "o" #'eng/bbh-inbox-open
+        :desc "jjui"          "j" #'eng/bbh-inbox-jjui
         :desc "Send"          "s" #'eng/bbh-inbox-send
         :desc "Approve"       "A" #'eng/bbh-inbox-approve
         :desc "Note"          "n" #'eng/bbh-inbox-note

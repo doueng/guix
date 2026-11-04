@@ -37,6 +37,9 @@
            "desktop/bin/{keyleader,keyguide,keylog,palette,winhint,hyprkan}"]
    :checks ["make keybindings-check"]
    :slow ["make hypr-nested-check"]}
+  {:name "herdr jjui popup"
+   :paths ["desktop/build/herdr/jjui/**"]
+   :checks ["cd desktop/build/herdr/jjui && bb tests.bb"]}
   {:name "bbh"
    :paths ["desktop/build/bbh/**" "desktop/configs/bbh/**" "desktop/bin/{bbh,wf,emacs-bbh}"
            "modules/engstrand/features/bbh-web.scm"]
