@@ -56,7 +56,9 @@
 (defn- first-line [s] (first (str/split-lines (str s))))
 
 (defn rows
-  "The Inbox rows: one `id<TAB>display` line per thread, grouped in section order."
+  "The Inbox rows: one `id<TAB>display` line per thread, grouped in section order.
+  Each display starts with its section's title in capitals; the Emacs Inbox reads
+  ARCHIVED there to move the cursor off a thread you just archived."
   [{:keys [sections]}]
   (str/join "\n"
             (for [{section :title :keys [threads]} sections

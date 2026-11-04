@@ -1502,10 +1502,35 @@ A failure calls ON-FAIL with bbh's message, or shows it without ON-FAIL."
       (forward-line (1- (cdr place)))
       (line-beginning-position))))
 
+(defun eng/bbh-inbox--threads ()
+  "The Inbox's threads in order, each (ID . ARCHIVED)."
+  (save-excursion
+    (goto-char (point-min))
+    (let (threads)
+      (while (not (eobp))
+        (when-let* ((id (get-text-property (point) 'eng/bbh-thread)))
+          (push (cons id (get-text-property (point) 'eng/bbh-archived)) threads))
+        (forward-line 1))
+      (nreverse threads))))
+
+(defun eng/bbh-inbox--land (place before)
+  "Where PLACE lands after a redraw, BEFORE being `eng/bbh-inbox--threads' then.
+On its thread, unless that is gone or has just moved to Archived at the
+bottom, as archiving does; then on the nearest thread below it, else above
+it, that is still live, or still archived if the thread was."
+  (let* ((now (eng/bbh-inbox--threads))
+         (tail (member (assoc (car place) before) before))
+         (archived (cdr (car tail)))
+         (like (lambda (id) (when-let* ((cell (assoc id now))) (eq (and (cdr cell) t) (and archived t)))))
+         (id (seq-find like (append (when (car place) (list (car place)))
+                                    (mapcar #'car (cdr tail))
+                                    (when tail (reverse (mapcar #'car (seq-take before (- (length before) (length tail))))))))))
+    (eng/bbh-inbox--find (cons id (cdr place)))))
+
 (defun eng/bbh-inbox--render (text &optional quiet)
   "Show TEXT, `bbh inbox view' output: the header line, then id TAB row lines.
-The cursor stays on its thread, and every window keeps that line where it was
-on screen.  QUIET, for a pushed reload, leaves a hidden preview hidden."
+The cursor stays on its thread, or the nearest one when that thread is gone
+or archived, and every window keeps that line where it was on screen.  QUIET, for a pushed reload, leaves a hidden preview hidden."
   (let ((buffer (eng/bbh-inbox--buffer)))
     (with-current-buffer buffer
       (let ((lines (split-string (string-trim-right text) "\n"))
@@ -1517,15 +1542,19 @@ on screen.  QUIET, for a pushed reload, leaves a hidden preview hidden."
                                    (list window (eng/bbh-inbox--place (window-point window))
                                          (count-lines (window-start window)
                                                       (save-excursion (goto-char (window-point window)) (line-beginning-position)))))
-                                 (get-buffer-window-list buffer nil t))))
+                                 (get-buffer-window-list buffer nil t)))
+                (before (eng/bbh-inbox--threads)))
             (setq eng/bbh-inbox--rows (cdr lines))
             (erase-buffer)
             (dolist (row (cdr lines))
               (pcase-let ((`(,id ,shown) (split-string row "\t")))
-                (insert (propertize (or shown "") 'eng/bbh-thread id) "\n")))
-            (goto-char (eng/bbh-inbox--find here))
+                ;; `bbh inbox view' starts a row with its section's title.
+                (insert (propertize (or shown "") 'eng/bbh-thread id
+                                    'eng/bbh-archived (string-prefix-p "ARCHIVED " (or shown "")))
+                        "\n")))
+            (goto-char (eng/bbh-inbox--land here before))
             (pcase-dolist (`(,window ,place ,row) windows)
-              (let ((pos (eng/bbh-inbox--find place)))
+              (let ((pos (eng/bbh-inbox--land place before)))
                 (set-window-point window pos)
                 (set-window-start window (save-excursion (goto-char pos) (forward-line (- row)) (point)) t)))
             (when (bound-and-true-p hl-line-mode) (hl-line-highlight))))))

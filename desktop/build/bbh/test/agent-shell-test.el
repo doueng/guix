@@ -959,6 +959,47 @@
     (should (equal "T31 row" (save-excursion (goto-char (point-min)) (buffer-substring-no-properties (point) (line-end-position)))))
     (should (= 4 (count-lines (window-start) (point))))))
 
+(defun bbh-test--inbox-rows (rows)
+  "`bbh inbox view' output for ROWS, each (ID SECTION) as `bbh inbox' formats it."
+  (mapconcat (pcase-lambda (`(,id ,section)) (format "%s\t%-16s %-4s %s row" id (upcase section) id id))
+             rows "\n"))
+
+(ert-deftest bbh-inbox-archiving-leaves-the-cursor-on-the-next-thread ()
+  ;; Archiving moves the thread to the Archived section at the bottom; the
+  ;; cursor stays in place, on the thread below, and the window does not scroll.
+  (bbh-test--with-fake-inbox (view log)
+    (let ((before (mapcar (lambda (id) (list id "waiting")) (bbh-test--inbox-ids 1 30))))
+      (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (append before '(("T40" "archived"))))) t)
+      (goto-char (eng/bbh-inbox--find '("T20" . 1)))
+      (set-window-start (selected-window) (eng/bbh-inbox--find '("T16" . 1)))
+      (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (append (assoc-delete-all "T20" (copy-tree before))
+                                                                             '(("T20" "archived") ("T40" "archived")))))
+                             t)
+      (should (equal "T21" (eng/bbh-inbox--at-point)))
+      (should (= 4 (count-lines (window-start) (point))))
+      ;; The last live thread archived: the cursor goes to the one above.
+      (goto-char (eng/bbh-inbox--find '("T30" . 1)))
+      (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (append (bbh-test--inbox-rows-without before "T20" "T30")
+                                                                             '(("T30" "archived") ("T20" "archived") ("T40" "archived")))))
+                             t)
+      (should (equal "T29" (eng/bbh-inbox--at-point)))
+      ;; A thread already archived, and one moving between live sections, keep the cursor.
+      (goto-char (eng/bbh-inbox--find '("T40" . 1)))
+      (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (append (bbh-test--inbox-rows-without before "T20" "T30")
+                                                                             '(("T40" "archived") ("T20" "archived") ("T30" "archived")))))
+                             t)
+      (should (equal "T40" (eng/bbh-inbox--at-point)))
+      (goto-char (eng/bbh-inbox--find '("T10" . 1)))
+      (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (cons '("T10" "stopped on you") (bbh-test--inbox-rows-without before "T10" "T20" "T30"))))
+                             t)
+      (should (equal "T10" (eng/bbh-inbox--at-point)))
+      ;; T10, now first, gone from the view leaves the cursor on the one below it.
+      (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (bbh-test--inbox-rows-without before "T10" "T20" "T30"))) t)
+      (should (equal "T1" (eng/bbh-inbox--at-point))))))
+
+(defun bbh-test--inbox-rows-without (rows &rest ids)
+  (seq-remove (lambda (row) (member (car row) ids)) rows))
+
 (ert-deftest bbh-inbox-pushes-make-one-quiet-reload-and-a-hidden-inbox-waits ()
   (bbh-test--with-fake-inbox (view log)
     (with-temp-file view (insert (bbh-test--inbox-view '("T1" "T2"))))
