@@ -1,9 +1,12 @@
 (ns bbh.runs-page-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.runs-page :as page]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (defn- jsonl! [f rows]
   (fs/create-dirs (fs/parent f))

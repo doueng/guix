@@ -1,10 +1,14 @@
 (ns bbh.acp-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]])
+            [clojure.test :refer [deftest is use-fixtures]])
   (:import [java.util.concurrent LinkedBlockingQueue TimeUnit]))
+
+(use-fixtures :once hermetic/fixture)
 
 (defn- client [steps & {:keys [args setup]}]
   (let [dir (fs/create-temp-dir {:prefix "bbh-acp-test"})
@@ -13,8 +17,8 @@
         init (str (fs/path dir "init.clj"))
         _ (spit script (pr-str steps))
         _ (spit init "")
-        proc (apply p/process {:extra-env {"XDG_DATA_HOME" (str dir) "BBH_INIT" init
-                                     "BBH_MODEL" (str "script/" script)}
+        proc (apply p/process {:env (merge (sysenv/getenv) {"XDG_DATA_HOME" (str dir) "BBH_INIT" init
+                                                       "BBH_MODEL" (str "script/" script)})
                          :err :string}
                         "bb" "-m" "bbh.main" "acp" args)
         queue (LinkedBlockingQueue.)]

@@ -1,7 +1,8 @@
 (ns bbh.labels
   "Binary good or bad labels with critiques, from the human and from an LLM
   judge, and how well each judge agrees with the human."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [bbh.traces :as traces]
             [cheshire.core :as json]
@@ -11,7 +12,7 @@
   (str (fs/path (fs/parent (fs/parent (fs/absolutize *file*))) "judge.md")))
 
 (defn- data-dir []
-  (or (System/getenv "BBH_EVAL_DATA") (str (fs/expand-home "~/.local/share/bbh/eval"))))
+  (or (sysenv/getenv "BBH_EVAL_DATA") (str (fs/expand-home "~/.local/share/bbh/eval"))))
 
 (defn- labels-file [] (str (fs/path (data-dir) "labels.jsonl")))
 
@@ -78,7 +79,7 @@
   (fn [text]
     (let [{:keys [exit out err]} @(p/process {:in text :out :string :err :string
                                               :extra-env {"DISABLE_AUTOUPDATER" "1"}}
-                                             (or (System/getenv "BBH_CLAUDE") "claude")
+                                             (or (sysenv/getenv "BBH_CLAUDE") "claude")
                                              "-p" "--output-format" "json" "--model" model
                                              "--tools" "" "--strict-mcp-config" "--setting-sources" ""
                                              "--system-prompt" system)
@@ -98,7 +99,7 @@
   no roots are given. BBH_JUDGE_MODEL picks the Claude model. Editing judge.md
   starts a new labeler, so earlier verdicts stay comparable."
   [& roots]
-  (let [model (or (System/getenv "BBH_JUDGE_MODEL") "opus")
+  (let [model (or (sysenv/getenv "BBH_JUDGE_MODEL") "opus")
         prompt (slurp judge-prompt-file)
         labeler (str "judge:" model ":" (sha8 prompt))
         labels (load-labels)

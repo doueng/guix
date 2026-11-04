@@ -1,6 +1,7 @@
 (ns bbh.workflow
   "Runs pstack workflows as state machines. Gates run here, so a claim alone never advances a phase."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.edn :as edn]
@@ -12,14 +13,14 @@
 (def default-max-visits 3)
 
 (defn state-root []
-  (str (fs/path (or (System/getenv "XDG_STATE_HOME") (fs/expand-home "~/.local/state"))
+  (str (fs/path (or (sysenv/getenv "XDG_STATE_HOME") (fs/expand-home "~/.local/state"))
                 "bbh" "workflows")))
 
 (defn session-run-file
   "The file that holds the run this bbh conversation started. It sits beside the conversation's repl.port.
   Nil outside a bbh conversation."
   []
-  (when-let [port (System/getenv "BBH_PORT_FILE")]
+  (when-let [port (sysenv/getenv "BBH_PORT_FILE")]
     (str (fs/path (fs/parent port) "workflow-run"))))
 
 (defn session-run-id
@@ -356,7 +357,7 @@
                      (str "Judge against these principles too:\n\n" (principles-text ps) "\n\n"))
                    "Read the evidence and the repo as needed. Finish with one line, VERDICT: pass or VERDICT: fail, then a short reason.")
         s (session/new-session {:dir dir :init nil :cwd (:cwd st)
-                                :model (or model (System/getenv "WF_REVIEW_MODEL") default-review-model)
+                                :model (or model (sysenv/getenv "WF_REVIEW_MODEL") default-review-model)
                                 :make-engine models/engine :emit (fn [_])})]
     (try
       (session/start-repl! s)
@@ -395,7 +396,7 @@
   newest run for the current directory. Other agents' runs in other repositories never qualify. Abandoned runs
   only qualify through $WF_RUN, and a session run missing from this state root is skipped."
   []
-  (or (System/getenv "WF_RUN")
+  (or (sysenv/getenv "WF_RUN")
       (some-> (session-run-id) (as-> id (when (live? id) id)))
       (latest-id (fs/cwd))))
 
@@ -414,7 +415,7 @@
   "Pi's session directory for a workspace. Resolution order matches the Pi settings docs."
   ([workspace] (session-dir workspace nil))
   ([workspace explicit]
-   (let [env (System/getenv)
+   (let [env (sysenv/getenv)
          cwd (str (fs/normalize (fs/absolutize (or workspace "."))))
          home (or (get env "HOME") (System/getProperty "user.home"))
          resolve-path (fn [value]

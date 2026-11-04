@@ -3,7 +3,8 @@
   socket as one EDN line each with a token, are run through the store as one
   transaction, and the dispatcher drains the outbox into bbh mailboxes. `call!`
   is the client every surface and Worker uses."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [bbh.inbox :as inbox]
             [bbh.super.client :as client :refer [call! data-dir new-id super-dir]]
             [bbh.super.emacs :as emacs]
@@ -62,7 +63,7 @@
   [c]
   (merge model/default-policy
          (or (:policy c)
-             (let [f (fs/path (or (System/getenv "XDG_CONFIG_HOME") (fs/expand-home "~/.config")) "bbh" "policy.edn")]
+             (let [f (fs/path (or (sysenv/getenv "XDG_CONFIG_HOME") (fs/expand-home "~/.config")) "bbh" "policy.edn")]
                (when (fs/exists? f) (edn/read-string (slurp (str f))))))))
 
 (defn- jj! [dir & args]

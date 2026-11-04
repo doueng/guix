@@ -1,11 +1,14 @@
 (ns bbh.init-test
   "Loads the installed init.clj in a real session, the same path a conversation takes."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.models :as models]
             [bbh.repl :as repl]
             [bbh.session :as session]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (deftest init-loads-in-a-real-session
   (let [init (str (fs/absolutize "../../configs/bbh/init.clj"))

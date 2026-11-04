@@ -1,6 +1,7 @@
 (ns bbh.repl
   "A conversation's bb REPL process, driven over nREPL."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [bencode.core :as b]
             [clojure.edn :as edn]
@@ -74,7 +75,7 @@
         _ (fs/delete-if-exists port-file)
         config (System/getProperty "babashka.config")
         ;; Nothing writes the REPL's stdin, and an open pipe there would hang any child that reads it.
-        proc (apply p/process {:dir cwd :extra-env (assoc env "BBH_PORT_FILE" port-file)
+        proc (apply p/process {:dir cwd :env (merge (sysenv/getenv) env {"BBH_PORT_FILE" port-file})
                                :in (fs/file "/dev/null")
                                :out :append :out-file log :err :append :err-file log}
                     (concat ["bb"] (when config ["--config" config]) ["-e" bootstrap]))

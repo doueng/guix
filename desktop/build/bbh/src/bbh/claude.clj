@@ -2,7 +2,8 @@
   "Claude Code as the agent loop. It runs on the user's Claude subscription and
   calls the session's clojure tool through bbh.mcp, which forwards each call
   back here over a loopback socket."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [bbh.session :as session]
             [cheshire.core :as json]
@@ -72,7 +73,7 @@
                      :extra-env {"DISABLE_AUTOUPDATER" "1" "DISABLE_AUTO_COMPACT" "1"
                                  ;; job-wait may hold one tool call for 10 min past the 120 s deadline.
                                  "MCP_TOOL_TIMEOUT" "1800000"}}
-                    (or (System/getenv "BBH_CLAUDE") "claude")
+                    (or (sysenv/getenv "BBH_CLAUDE") "claude")
                     "-p" "--input-format" "stream-json" "--output-format" "stream-json"
                     "--verbose" "--include-partial-messages"
                     "--tools" "" "--strict-mcp-config" "--mcp-config" (json/generate-string mcp)

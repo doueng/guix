@@ -1,6 +1,9 @@
 (ns bbh.delimiters-test
-  (:require [bbh.delimiters :as d]
-            [clojure.test :refer [deftest is]]))
+  (:require [bbh.hermetic :as hermetic]
+            [bbh.delimiters :as d]
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (deftest a-form-truncated-at-the-end-gets-its-closers-appended
   (is (= {:kind :repaired

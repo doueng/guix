@@ -1,8 +1,11 @@
 (ns bbh.inbox-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.inbox :as inbox]
             [bbh.transcript :as transcript]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (defn- wait-for [pred]
   (loop [n 0]

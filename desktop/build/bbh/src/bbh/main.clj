@@ -1,6 +1,7 @@
 (ns bbh.main
   "Command line entry: the terminal front end, or bbh acp for agent-shell."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [bbh.acp :as acp]
             [bbh.inbox :as inbox]
             [bbh.models :as models]
@@ -62,10 +63,10 @@
   (let [{:keys [model resume id]} (parse-args args)
         dir (conversation-dir resume id)
         s (session/new-session {:dir dir
-                                :init (or (System/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
+                                :init (or (sysenv/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
                                 :model (or model (models/default-model))
                                 :make-engine models/engine
-                                :sandbox? (= "router" (System/getenv "BBH_ROLE"))
+                                :sandbox? (= "router" (sysenv/getenv "BBH_ROLE"))
                                 :emit print-event
                                 :notes (when resume ["This conversation resumed in a new REPL, so earlier live definitions are gone."])})
         _ (some-> (session/start-repl! s) println)

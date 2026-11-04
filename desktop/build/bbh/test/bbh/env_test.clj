@@ -1,8 +1,11 @@
 (ns bbh.env-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.repl :as repl]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (deftest documented-helper-examples-work-in-the-real-repl
   (let [dir (fs/create-temp-dir {:prefix "bbh-env-test"})

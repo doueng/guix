@@ -1,10 +1,13 @@
 (ns bbh.session-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.session :as session]
             [bbh.transcript :as transcript]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (defn- reply [step]
   (cond (string? step) {:role "assistant" :content step}

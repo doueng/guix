@@ -1,8 +1,11 @@
 (ns bbh.codex-test
-  (:require [bbh.auth :as auth]
+  (:require [bbh.hermetic :as hermetic]
+            [bbh.auth :as auth]
             [bbh.codex :as codex]
             [bbh.llm :as llm]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (def ^:private tool
   {:type "function"

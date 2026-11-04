@@ -1,5 +1,6 @@
 (ns bbh.web-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.inbox :as inbox]
             [bbh.super]
             [bbh.super.client]
@@ -9,7 +10,9 @@
             [bbh.web.markdown :as md]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (defn- wait-for [pred]
   (loop [n 0]

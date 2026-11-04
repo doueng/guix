@@ -1,5 +1,6 @@
 (ns bbh.tasks
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [clojure.string :as str]))
 
@@ -102,7 +103,7 @@
 (defn selected-tasks
   "The tasks named by BBH_EVAL_TASKS, comma separated, or all of them."
   []
-  (if-let [ids (System/getenv "BBH_EVAL_TASKS")]
+  (if-let [ids (sysenv/getenv "BBH_EVAL_TASKS")]
     (let [wanted (set (str/split ids #","))
           chosen (filterv #(wanted (:id %)) tasks)]
       (when (not= (count wanted) (count chosen)) (throw (ex-info "Unknown task in BBH_EVAL_TASKS" {:ids ids})))

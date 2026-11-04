@@ -1,6 +1,7 @@
 (ns bbh.super.voice
   "Spoken input shares the Inbox's selection and versioned drafts. No paste."
-  (:require [bbh.super.client :as client] [bbh.super.model :as model]
+  (:require [bbh.sysenv :as sysenv]
+            [bbh.super.client :as client] [bbh.super.model :as model]
             [bbh.super.pane :as pane] [babashka.fs :as fs] [babashka.process :as p] [clojure.string :as str]))
 
 (defn- call! [request]
@@ -82,7 +83,7 @@
       (throw (ex-info (str "Hex failed: " err) {:exit exit})))))
 
 (defn- say-dir []
-  (str (fs/path (or (System/getenv "XDG_RUNTIME_DIR") (str (fs/temp-dir))) "bbh-say")))
+  (str (fs/path (or (sysenv/getenv "XDG_RUNTIME_DIR") (str (fs/temp-dir))) "bbh-say")))
 
 (defn request-stop!
   "End dictation TAKE: leave a stop request for the process recording it,

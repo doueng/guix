@@ -1,5 +1,6 @@
 (ns bbh.claude-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [bbh.claude]
             [bbh.models :as models]
@@ -7,7 +8,9 @@
             [bbh.session :as session]
             [bbh.transcript :as transcript]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (defn- harness []
   (let [events (atom [])

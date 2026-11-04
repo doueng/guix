@@ -1,6 +1,7 @@
 (ns bbh.models
   "Model ids are PROVIDER/MODEL. The provider decides which engine runs turns."
-  (:require [bbh.claude]
+  (:require [bbh.sysenv :as sysenv]
+            [bbh.claude]
             [bbh.codex :as codex]
             [bbh.llm :as llm]
             [cheshire.core :as json]
@@ -13,7 +14,7 @@
    "codex/gpt-6.1-sol"])
 
 (defn default-model []
-  (or (System/getenv "BBH_MODEL") "claude/claude-opus-5-5"))
+  (or (sysenv/getenv "BBH_MODEL") "claude/claude-opus-5-5"))
 
 (defn- script
   "Replies read in order from an EDN file of steps: a string answers, {:code ...}

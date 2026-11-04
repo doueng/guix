@@ -1,5 +1,6 @@
 (ns bbh.super-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.super :as super]
             [bbh.super.client :as client]
             [bbh.super.pane :as pane]
@@ -9,7 +10,9 @@
             [cheshire.core]
             [bbh.super.model :as model]
             [bbh.super.store :as store]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (defn- wait-for [pred]
   (loop [n 0]
@@ -670,10 +673,9 @@
                   (catch clojure.lang.ExceptionInfo e (:error (ex-data e)))))))))
 
 (deftest the-router-sandbox-never-falls-back-to-the-owner-token
-  (when-not (System/getenv "BBH_SUPER_TOKEN")
-    (is (= [:unauthorized "bbh super: no Router token"]
-           (try (sandbox/eval-in (sandbox/context sandbox/bindings) "(super-threads)")
-                (catch clojure.lang.ExceptionInfo e [(:error (ex-data e)) (ex-message e)]))))))
+  (is (= [:unauthorized "bbh super: no Router token"]
+         (try (sandbox/eval-in (sandbox/context sandbox/bindings) "(super-threads)")
+              (catch clojure.lang.ExceptionInfo e [(:error (ex-data e)) (ex-message e)])))))
 
 (defn- fake-nrepl!
   "A loopback socket that answers each request with one bencode map, as

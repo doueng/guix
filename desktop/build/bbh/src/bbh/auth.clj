@@ -1,6 +1,7 @@
 (ns bbh.auth
   "Credentials shared with Pi and Claude Code."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.string :as str]))
@@ -20,13 +21,13 @@
   variable, and anything else is the key itself."
   [v]
   (cond (str/starts-with? v "!") (str/trim (:out (p/shell {:out :string} "bash" "-c" (subs v 1))))
-        (System/getenv v) (System/getenv v)
+        (sysenv/getenv v) (sysenv/getenv v)
         :else v))
 
 (defn api-key
   "ENV-VAR, or PROVIDER's key from Pi's auth.json."
   [env-var provider]
-  (or (System/getenv env-var)
+  (or (sysenv/getenv env-var)
       (some-> (pi-entry provider) :key resolve-key)))
 
 (defn oauth-token

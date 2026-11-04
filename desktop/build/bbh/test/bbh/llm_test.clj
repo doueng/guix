@@ -1,9 +1,12 @@
 (ns bbh.llm-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [babashka.http-client :as http]
             [bbh.auth :as auth]
             [bbh.llm :as llm]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (deftest accumulate-joins-text-and-split-tool-arguments
   (is (= {:message {:role "assistant"

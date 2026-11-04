@@ -2,7 +2,8 @@
   "What every surface and Worker needs to talk to `bbh super`: where it lives
   and `call!`. This loads no database, so the CLI, the website and the Inbox
   start without libsqlite3."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [bbh.super.emacs :as emacs]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -10,7 +11,7 @@
   (:import [java.net Socket]))
 
 (defn data-dir []
-  (fs/path (or (System/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh"))
+  (fs/path (or (sysenv/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh"))
 
 (defn super-dir [] (str (fs/path (data-dir) "super")))
 
@@ -36,7 +37,7 @@
    (let [port-file (fs/path dir "port")
          _ (when-not (fs/exists? port-file) (throw (ex-info "bbh super is not running" {:dir dir :error :down})))
          port (parse-long (str/trim (slurp (str port-file))))
-         token (or token (System/getenv "BBH_SUPER_TOKEN") (str/trim (slurp (str (fs/path dir "token")))))]
+         token (or token (sysenv/getenv "BBH_SUPER_TOKEN") (str/trim (slurp (str (fs/path dir "token")))))]
      (with-open [sock (Socket. "127.0.0.1" (int port))
                  out (io/writer (.getOutputStream sock))
                  in (io/reader (.getInputStream sock))]

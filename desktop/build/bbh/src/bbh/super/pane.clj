@@ -5,7 +5,8 @@
   and read cursors are this client's and live in ~/.local/state/bbh/inbox.edn
   until `send` turns them into one reply. Bare `bbh inbox` opens a terminal
   frame on that buffer."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [bbh.super.client :as client]
             [bbh.super.emacs :as emacs]
             [bbh.super.model :as model]
@@ -15,7 +16,7 @@
 (def ^:dynamic *state-file* nil)
 
 (defn- state-file []
-  (or *state-file* (str (fs/path (or (System/getenv "XDG_STATE_HOME") (fs/expand-home "~/.local/state")) "bbh" "inbox.edn"))))
+  (or *state-file* (str (fs/path (or (sysenv/getenv "XDG_STATE_HOME") (fs/expand-home "~/.local/state")) "bbh" "inbox.edn"))))
 
 (defn client-state []
   (let [f (state-file)]

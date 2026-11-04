@@ -1,12 +1,13 @@
 (ns bbh.mcp
   "The MCP server Claude Code starts for the clojure tool. It forwards every
   call to the bbh session that started Claude Code."
-  (:require [bbh.session :as session]
+  (:require [bbh.sysenv :as sysenv]
+            [bbh.session :as session]
             [cheshire.core :as json]
             [clojure.java.io :as io]))
 
-(def ^:private port (some-> (System/getenv "BBH_BRIDGE_PORT") parse-long))
-(def ^:private token (System/getenv "BBH_BRIDGE_TOKEN"))
+(def ^:private port (some-> (sysenv/getenv "BBH_BRIDGE_PORT") parse-long))
+(def ^:private token (sysenv/getenv "BBH_BRIDGE_TOKEN"))
 
 (defn- ask [req]
   (with-open [sock (java.net.Socket. "127.0.0.1" (int port))]

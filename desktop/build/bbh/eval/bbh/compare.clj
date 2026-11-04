@@ -1,5 +1,6 @@
 (ns bbh.compare
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [bbh.runs :as runs]
             [bbh.tasks :as tasks]
@@ -11,7 +12,7 @@
 (def root (str (fs/parent (fs/parent (fs/parent (fs/absolutize *file*))))))
 (def desktop (str (fs/parent (fs/parent root))))
 (def default-model "deepseek/deepseek-v4.1-flash")
-(def model (or (System/getenv "BBH_EVAL_MODEL") default-model))
+(def model (or (sysenv/getenv "BBH_EVAL_MODEL") default-model))
 
 (def codemode-settings {:defaultTools ["+codemode"] :codemode {:mode "only"}})
 
@@ -30,7 +31,7 @@
    :bbh-baseline {:engine :bbh :init-env "BBH_EVAL_BASELINE_INIT" :effort "none"}
    :bbh-claude {:engine :bbh :init (str (fs/path desktop "configs/bbh/init.clj")) :claude true}})
 
-(def claude-model (or (System/getenv "BBH_EVAL_CLAUDE_MODEL") "claude-opus-5-5"))
+(def claude-model (or (sysenv/getenv "BBH_EVAL_CLAUDE_MODEL") "claude-opus-5-5"))
 
 (defn thinking
   "What a profile's reasoning is set to: Pi runs --thinking off, which reaches OpenRouter as effort none."
@@ -64,7 +65,7 @@
                             (fs/path desktop "pi/agent/AGENTS.md")
                             (fs/path desktop "pi/agent/extensions/sci-codemode/index.ts")
                             (fs/path desktop "build/pi-sci/dist/sci.js")]
-                           (when-let [baseline (System/getenv "BBH_EVAL_BASELINE_INIT")] [baseline]))
+                           (when-let [baseline (sysenv/getenv "BBH_EVAL_BASELINE_INIT")] [baseline]))
               :when (fs/regular-file? path)]
           [(str path)
            (format "%064x" (java.math.BigInteger.
@@ -85,7 +86,7 @@
         spec (profiles profile)
         _ (json! (fs/path agent "settings.json") (merge {:quietStartup true} (:settings spec)))
         init-source (or (:init spec)
-                        (some-> (:init-env spec) System/getenv)
+                        (some-> (:init-env spec) sysenv/getenv)
                         (when (bbh? profile)
                           (throw (ex-info (str profile " requires " (:init-env spec)) {}))))
         _ (when init-source
@@ -266,7 +267,7 @@
                    (every? profiles selected))
       (throw (ex-info "Unknown or duplicated evaluation profiles" {:profiles selected})))
     (doseq [p selected :let [env (get-in profiles [p :init-env])] :when env]
-      (when-not (some-> (System/getenv env) fs/regular-file?)
+      (when-not (some-> (sysenv/getenv env) fs/regular-file?)
         (throw (ex-info (str p " needs a readable " env " file") {}))))
     (tasks/verify-graders!)
     (fs/create-dirs out)
@@ -281,7 +282,7 @@
             :fixture-source "eval/bbh/tasks.clj, four tasks adapted from desktop/build/pi-sci/eval/tasks.mjs"
             :sources sources
             :bbh-init "production init with skills and poteto disabled"
-            :baseline-init (System/getenv "BBH_EVAL_BASELINE_INIT")
+            :baseline-init (sysenv/getenv "BBH_EVAL_BASELINE_INIT")
             :pi-sci "production SCI extension and AGENTS guidance; other extensions disabled"
             :timing "not a performance benchmark"})
     (let [records (doall

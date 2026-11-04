@@ -1,9 +1,12 @@
 (ns bbh.swe-report-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.swe-report :as r]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (defn- trial! [root job task reward cost error]
   (let [dir (fs/create-dirs (fs/path root job (str task "__abc")))]

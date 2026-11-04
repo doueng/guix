@@ -1,7 +1,8 @@
 (ns bbh.runs-page
   "Render the newest bbh conversations, with their system prompts, tool calls
   and workflow runs, as one self-contained HTML page for a person to read."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [bbh.transcript :as transcript]
             [bbh.workflow :as workflow]
             [cheshire.core :as json]
@@ -12,7 +13,7 @@
 ;; Loading
 
 (defn conversations-root []
-  (str (fs/path (or (System/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh" "conversations")))
+  (str (fs/path (or (sysenv/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh" "conversations")))
 
 (defn- read-lines-of [f parse]
   (if (fs/exists? f)
@@ -351,7 +352,7 @@ function setAll(open){document.querySelectorAll('details').forEach(d=>d.open=ope
   (default ~/.cache/bbh/runs.html) and prints the path."
   [& [n out]]
   (let [n (if n (parse-long n) 10)
-        out (or out (str (fs/path (or (System/getenv "XDG_CACHE_HOME") (fs/expand-home "~/.cache")) "bbh" "runs.html")))
+        out (or out (str (fs/path (or (sysenv/getenv "XDG_CACHE_HOME") (fs/expand-home "~/.cache")) "bbh" "runs.html")))
         convs (mapv #(load-conversation % (workflow/state-root))
                     (newest-conversations (conversations-root) n))]
     (fs/create-dirs (fs/parent out))

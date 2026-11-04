@@ -1,5 +1,6 @@
 (ns bbh.eval-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.compare :as compare]
             [bbh.labels :as labels]
             [bbh.models :as models]
@@ -10,7 +11,9 @@
             [bbh.workflow-eval :as workflow-eval]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (deftest a-workflow-eval-run-stays-out-of-the-real-state-root
   (let [real-root (wf/state-root)

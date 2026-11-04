@@ -1,5 +1,6 @@
 (ns bbh.workflow-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.workflow :as wf]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -7,6 +8,8 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]))
+
+(use-fixtures :once hermetic/fixture)
 
 (def ^:private repro "! grep -q bug file.txt")
 

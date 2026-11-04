@@ -1,6 +1,7 @@
 (ns bbh.acp
   "bbh as an Agent Client Protocol agent over stdio, for Emacs agent-shell."
-  (:require [babashka.fs :as fs]
+  (:require [bbh.sysenv :as sysenv]
+            [babashka.fs :as fs]
             [bbh.models :as models]
             [bbh.repl :as repl]
             [bbh.session :as session]
@@ -66,7 +67,7 @@
      :thoughtTokens thinking :totalTokens (+ input output)}))
 
 (defn- data-dir []
-  (fs/path (or (System/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh" "conversations"))
+  (fs/path (or (sysenv/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh" "conversations"))
 
 (def ^:private sessions (atom {}))
 
@@ -87,8 +88,8 @@
                                 :notes (when (and resume (fs/exists? (fs/path resume "messages.jsonl")))
                                          ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
                                 ;; The Router's session evaluates in the sandbox, as in the terminal front end.
-                                :sandbox? (= "router" (System/getenv "BBH_ROLE"))
-                                :init (or (System/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
+                                :sandbox? (= "router" (sysenv/getenv "BBH_ROLE"))
+                                :init (or (sysenv/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
                                 :cwd (or cwd (str (fs/cwd)))
                                 :model (models/default-model)
                                 :make-engine models/engine

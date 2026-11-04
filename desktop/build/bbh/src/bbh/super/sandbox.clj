@@ -3,11 +3,12 @@
   authority, so its session sends every tool call here instead of to the REPL:
   SCI with pure Clojure and these functions only, no files, shell, interop or
   host namespaces. Commands carry the pane's Router token, never the owner's."
-  (:require [bbh.super.client :as client]
+  (:require [bbh.sysenv :as sysenv]
+            [bbh.super.client :as client]
             [sci.core :as sci]))
 
 (defn- call! [command args]
-  (let [token (or (System/getenv "BBH_SUPER_TOKEN") (throw (ex-info "bbh super: no Router token" {:error :unauthorized})))
+  (let [token (or (sysenv/getenv "BBH_SUPER_TOKEN") (throw (ex-info "bbh super: no Router token" {:error :unauthorized})))
         {:keys [ok error message data]} (client/call! {:command command :args args :token token})]
     (if error (throw (ex-info (str "bbh super: " (name error) (when message (str ", " message))) (or data {}))) ok)))
 

@@ -1,10 +1,13 @@
 (ns bbh.runs-test
-  (:require [babashka.fs :as fs]
+  (:require [bbh.hermetic :as hermetic]
+            [babashka.fs :as fs]
             [bbh.metrics :as metrics]
             [bbh.runs :as runs]
             [bbh.session :as session]
             [cheshire.core :as json]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is use-fixtures]]))
+
+(use-fixtures :once hermetic/fixture)
 
 (defn- session-with [steps]
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-runs-test"}))
