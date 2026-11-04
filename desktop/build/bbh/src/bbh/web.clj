@@ -8,6 +8,7 @@
             [bbh.inbox :as inbox]
             [bbh.super.client :as super]
             [bbh.transcript :as transcript]
+            [bbh.version :as version]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -296,11 +297,28 @@
   (let [answer (atom nil)]
     (fn [] (or @answer (reset! answer (f))))))
 
+(defn- counted
+  "HANDLER that counts the requests it is answering in IN-FLIGHT."
+  [handler in-flight]
+  (fn [request]
+    (swap! in-flight inc)
+    (try (handler request) (finally (swap! in-flight dec)))))
+
 (defn -main
-  "Serve the site for the conversations under DATA-DIR and publish it to the tailnet."
+  "Serve the site for the conversations under DATA-DIR and publish it to the
+  tailnet. Exits once the bbh source changed and no request is being answered,
+  so its service restarts it on the new code."
   [data-dir]
-  (server/run-server (handler (str (fs/path data-dir "conversations")) (remembered owner))
-                     {:ip "127.0.0.1" :port port :max-body max-body})
+  (let [boot (version/fingerprint)
+        in-flight (atom 0)
+        stop (server/run-server (counted (handler (str (fs/path data-dir "conversations")) (remembered owner)) in-flight)
+                                {:ip "127.0.0.1" :port port :max-body max-body})]
+    (version/record! data-dir "web" boot)
+    (version/follow! {:boot boot :idle? #(zero? @in-flight)
+                      :exit! (fn [why]
+                               (println "bbh web: exiting because" why)
+                               (stop :timeout 5000)
+                               (System/exit 0))}))
   (let [{:keys [exit err]} (p/shell {:out :string :err :string :continue true}
                                     "tailscale" "serve" "--bg" (str "--https=" https-port)
                                     (str "http://127.0.0.1:" port))]

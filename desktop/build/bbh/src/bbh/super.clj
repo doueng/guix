@@ -12,6 +12,7 @@
             [bbh.super.process :as process]
             [bbh.super.store :as store]
             [bbh.super.triage :as triage]
+            [bbh.version :as version]
             [bbh.workflow :as workflow]
             [babashka.process :as p]
             [bencode.core :as bencode]
@@ -193,14 +194,19 @@
   "The side effects that make Worker W a process, then the commit that records
   them. Each step is idempotent by the Worker's name, so a repeat after a crash
   reuses what exists. A step that throws fails the Worker with its reason, so it
-  frees its slot and its thread shows why, and the caller still gets the error."
+  frees its slot and its thread shows why, and the caller still gets the error,
+  except a buffer that could not open because Emacs is down: that Worker waits."
   [c w token]
   (try (launch-steps! c w token)
        (catch Exception e
-         (run! c :controller {:id (str "launch-failed-" (:id w)) :command :finish-worker!
-                              :args {:worker (:id w) :state-after :failed :reason (str "Launch failed: " (ex-message e))}})
-         (promote! c)
-         (throw e))))
+         (if (and (= :emacs (:error (ex-data e))) (not ((get-in c [:launch :emacs-up?]))))
+           ;; Emacs is down: the Worker stays :starting, and reconcile! opens
+           ;; its buffer once Emacs is back.
+           (binding [*out* *err*] (println "bbh super:" (:id w) "waits for Emacs:" (ex-message e)))
+           (do (run! c :controller {:id (str "launch-failed-" (:id w)) :command :finish-worker!
+                                    :args {:worker (:id w) :state-after :failed :reason (str "Launch failed: " (ex-message e))}})
+               (promote! c)
+               (throw e))))))
 
 (defn- promote!
   "Start the next queued Worker that may run now, if any. Choosing it, moving
@@ -313,7 +319,7 @@
                    :order (model/order sections) :fresh (or fresh 0)})
       ::unknown)))
 
-(declare reconcile!)
+(declare reconcile! ensure-router! conversation-root)
 
 (def ^:private land-lock (Object.))
 
@@ -338,6 +344,17 @@
   (or (nil? w)
       (= :done (:state w))
       (boolean (and (#{:failed :cancelled} (:state w)) (get-in st [:threads (:thread w) :resolved-at])))))
+
+(defn- stop-jobs!
+  "Stop the detached jobs of Worker WORKER that are still running, now that it
+  ended, each marked exited 137. Only a Worker the controller launched, one
+  with a workflow, owns its conversation; an attached one is the person's and
+  outlives it. Jobs whose identity cannot be verified are left alone."
+  [{:keys [state] :as c} worker]
+  (when-let [conversation (let [w (get-in @state [:workers worker])] (when (:workflow w) (:conversation w)))]
+    (doseq [j (process/jobs (conversation-root c conversation))
+            :when (and (= :running (:state j)) (process/stop-job! j))]
+      (spit (str (:base j) ".exit") "137\n"))))
 
 (defn- retire-worker!
   "Remove Worker WORKER's workspace when it is retirable?, keeping work that
@@ -423,7 +440,8 @@
                       (run! c principal cmd))]
               (if-let [conflicts (:conflicts r)]
                 {:ok conflicts}
-                (do (retire-worker! c (:result r))
+                (do (stop-jobs! c (:result r))
+                    (retire-worker! c (:result r))
                     (when-not (:repeat? r) (promote! c))
                     {:ok (:result r)})))
             {:ok (:result (run! c principal cmd))}))))
@@ -524,7 +542,9 @@
   [{:keys [state] :as c}]
   (locking (:recovery-lock c)
     (let [now (System/currentTimeMillis)
-          grace (or (:restart-grace-ms c) 30000)]
+          grace (or (:restart-grace-ms c) 30000)
+          ;; Asked once a pass, and only when a Worker needs its buffer opened.
+          emacs-up? (delay ((get-in c [:launch :emacs-up?])))]
       (run! c :controller {:id (new-id) :command :health! :args {:at now}})
       (doseq [w (vals (:workers @state))
               :when (or (model/active-states (:state w)) (= :queued (:state w)))
@@ -591,7 +611,9 @@
 
           (and (not agent) (:workflow w) (:workspace w) (:conversation w)
                (not= :missing (:status wf)) (not uncertain?) (not= :queued (:state w))
-               (> (- now (or (:restart-at w) (:started-at w) (:boot-at c))) grace))
+               (> (- now (or (:restart-at w) (:started-at w) (:boot-at c))) grace)
+               ;; While Emacs is down a restart could only fail, so none is tried or counted.
+               @emacs-up?)
           (if (>= (or (:restarts w) 0) 3)
             (do (run! c :controller {:id (str "restarts-exhausted-" (:id w)) :command :finish-worker!
                                     :args {:worker (:id w) :state-after :failed
@@ -612,7 +634,28 @@
                 (catch Exception e
                   ;; The attempt is already counted; say why it failed so the end state names it.
                   (binding [*out* *err*] (println "bbh super: restart of" (:id w) "failed:" (ex-message e)))
-                  (run! c :controller {:id (new-id) :command :restart-failed! :args {:worker (:id w) :reason (ex-message e)}}))))))))))
+                  (run! c :controller {:id (new-id) :command :restart-failed! :args {:worker (:id w) :reason (ex-message e)}})))))))
+      ;; Jobs outlive a Worker that ended elsewhere: restarts exhausted, a failed launch, a controller that was down.
+      (doseq [w (vals (:workers @state)) :when (#{:done :failed} (:state w))]
+        (stop-jobs! c (:id w)))
+      (try (ensure-router! c)
+           (catch Exception e (binding [*out* *err*] (println "bbh super: the Router did not start:" (ex-message e))))))))
+
+(defn- ensure-router!
+  "With :manage-router, start the Router session and the Inbox when no Router
+  session runs and Emacs is up, at most once a restart grace. A new
+  registration revokes the token of the session that died."
+  [{:keys [state launch] :as c}]
+  (when (:manage-router c)
+    (let [conversation (or (get-in @state [:router :router :conversation]) "router")
+          now (System/currentTimeMillis)]
+      (when (and (not (inbox/agent (conversation-root c conversation)))
+                 (> (- now @(:router-tried c)) (or (:restart-grace-ms c) 30000))
+                 ((:emacs-up? launch)))
+        (reset! (:router-tried c) now)
+        (let [t (new-token)]
+          (run! c :controller {:id (new-id) :command :register-router! :token-hash (sha256 t) :args {:conversation conversation}})
+          ((:open-router! launch) {:conversation conversation :token t}))))))
 
 (defn- untriaged?
   "Whether outbox row O for the Router still waits for Jev's verdict on C."
@@ -669,7 +712,7 @@
   Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms triage wf-root] :or {scan-ms 500 health-ms 120000}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms triage wf-root manage-router] :or {scan-ms 500 health-ms 120000}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -681,9 +724,15 @@
         db (store/open (str (fs/path dir "super.db")))
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
-           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land! :retire! retire!} launch) :policy policy
+           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land! :retire! retire!
+                           :open-router! client/open-router!
+                           ;; Whether open! can work: the daemon's, unless a caller brought its own open!.
+                           :emacs-up? (if (:open! launch) (constantly true) emacs/alive?)}
+                          launch)
+           :policy policy
            :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :triage triage :wf-root wf-root
-           :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil) :triager (atom nil)}]
+           :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil) :triager (atom nil)
+           :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0)}]
     (ensure-owner-token! c)
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
     ;; Each client gets its own thread and a read timeout, so a client that
@@ -692,8 +741,10 @@
     (doto (Thread. #(while (not @(:stopped c))
                       (try (let [sock (.accept server)]
                              (.setSoTimeout sock 10000)
+                             (swap! (:in-flight c) inc)
                              (doto (Thread. (fn [] (try (serve-client c sock)
-                                                        (catch Exception e (when-not @(:stopped c) (binding [*out* *err*] (println "bbh super:" (ex-message e))))))))
+                                                        (catch Exception e (when-not @(:stopped c) (binding [*out* *err*] (println "bbh super:" (ex-message e)))))
+                                                        (finally (swap! (:in-flight c) dec)))))
                                (.setDaemon true) (.start)))
                            (catch Exception e (when-not @(:stopped c) (binding [*out* *err*] (println "bbh super:" (ex-message e))))))))
       (.setDaemon true) (.start))
@@ -717,9 +768,12 @@
       (.setDaemon true) (.start)))
     c))
 
-(defn stop! [{:keys [stopped server db dir lock dispatcher triager]}]
+(defn stop! [{:keys [stopped server db dir lock dispatcher triager in-flight]}]
   (reset! stopped true)
   (.close ^ServerSocket server)
+  ;; Let the requests already accepted finish, a launch among them.
+  (let [deadline (+ (System/currentTimeMillis) 30000)]
+    (while (and (pos? @in-flight) (< (System/currentTimeMillis) deadline)) (Thread/sleep 50)))
   ;; Wait for the current observation/delivery transaction before closing SQLite.
   (when-let [t @dispatcher] (.join ^Thread t))
   ;; A triage call can take its HTTP timeout; its commit after close would fail harmlessly.
@@ -728,9 +782,26 @@
   (locking db (store/close! db))
   (.close ^java.nio.channels.FileChannel lock))
 
+(defn serve!
+  "Run the controller on DIR, recording its version under DATA-DIR, until it
+  exits: when the source changes and it is idle, so its service restarts it on
+  the new code, or when DIR is deleted, as a test's temp directory is."
+  [{:keys [dir data-dir interval-ms] :as opts}]
+  (let [boot (version/fingerprint)
+        c (start! (dissoc opts :data-dir :interval-ms))]
+    (version/record! data-dir "controller" boot)
+    (println "bbh super on" dir "running" boot)
+    (version/follow! {:boot boot :interval-ms (or interval-ms 10000)
+                      :idle? #(zero? @(:in-flight c))
+                      :gone? #(not (fs/exists? (fs/path dir "super.db")))
+                      :exit! (fn [why]
+                               (println "bbh super: exiting because" why)
+                               (try (stop! c) (catch Exception _))
+                               (System/exit 0))})
+    @(promise)))
+
 (defn -main
-  "bbh super serve: run the controller until killed."
+  "bbh super serve: run the controller until killed or its code changes."
   []
-  (start! {:dir (super-dir) :triage triage/jev})
-  (println "bbh super on" (super-dir))
-  @(promise))
+  (serve! {:dir (super-dir) :data-dir (str (data-dir)) :triage triage/jev :manage-router true
+           :interval-ms (some-> (sysenv/getenv "BBH_SUPER_FOLLOW_MS") parse-long)}))

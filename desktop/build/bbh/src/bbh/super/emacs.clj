@@ -6,9 +6,13 @@
   (:require [babashka.process :as p]
             [clojure.string :as str]))
 
-(def server
-  "The Emacs server name the super-agent's daemon runs under."
-  "bbh-super")
+(defn server
+  "The Emacs server name the super-agent's daemon runs under: bbh-super, or
+  BBH_EMACS_SERVER, which the test runner points at a daemon that does not
+  exist so no test reaches yours. Read from the process environment, which
+  the test fixture's hermetic getenv does not cover."
+  []
+  (or (System/getenv "BBH_EMACS_SERVER") "bbh-super"))
 
 (def ^:dynamic *emacsclient* "emacsclient")
 
@@ -41,13 +45,20 @@
   [f & args]
   (let [form (str "(" f (when (seq args) " ") (str/join " " (map elisp args)) ")")
         {:keys [exit out err]} (p/shell {:out :string :err :string :continue true}
-                                        *emacsclient* "-s" server (str "--timeout=" timeout-seconds) "--eval" form)]
+                                        *emacsclient* "-s" (server) (str "--timeout=" timeout-seconds) "--eval" form)]
     (when-not (zero? exit)
-      (throw (ex-info (str "Emacs daemon " server ": " (str/trim (str err out))
+      (throw (ex-info (str "Emacs daemon " (server) ": " (str/trim (str err out))
                            (when (re-find #"(?i)socket|server" (str err))
-                             (str ". Start it with `herd start bbh-emacs`, or by hand with `~/.local/bin/emacs --daemon=" server "`.")))
+                             (str ". Start it with `herd start bbh-emacs`, or by hand with `~/.local/bin/emacs --daemon=" (server) "`.")))
                       {:error :emacs :form form})))
     (str/trim out)))
+
+(defn alive?
+  "Whether the daemon answers within a few seconds."
+  []
+  (try (zero? (:exit (p/shell {:out :string :err :string :continue true}
+                              *emacsclient* "-s" (server) "--timeout=5" "--eval" "t")))
+       (catch Exception _ false)))
 
 (defn read-string*
   "An elisp string printed by emacsclient, unquoted."
@@ -67,4 +78,4 @@
 (defn attach!
   "Replace this process with a terminal Emacs frame on the daemon running FORM."
   [form]
-  (p/exec *emacsclient* "-s" server "-t" "--eval" form))
+  (p/exec *emacsclient* "-s" (server) "-t" "--eval" form))

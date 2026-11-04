@@ -19,7 +19,7 @@
 (def ^:private grants
   {:router #{:thread! :link! :attach-worker! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:promote-worker! :restart-failed! :issue-token! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered! :router-triaged! :thread! :start-worker!}})
+   :controller #{:promote-worker! :restart-failed! :issue-token! :register-router! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered! :router-triaged! :thread! :start-worker!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, the locks a Worker

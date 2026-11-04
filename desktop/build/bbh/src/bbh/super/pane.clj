@@ -9,6 +9,7 @@
             [babashka.fs :as fs]
             [bbh.super.client :as client]
             [bbh.super.emacs :as emacs]
+            [bbh.version :as version]
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
@@ -68,8 +69,11 @@
                                      (or (some-> line first-line) "")
                                      (or (age updated-at) ""))))))
 
-(defn header [{:keys [badge]}]
-  (format "bbh inbox · %d need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" badge))
+(defn header
+  "The Inbox's first line: what needs you, the processes on older code, then the keys."
+  [{:keys [badge]} stale]
+  (format "bbh inbox · %d need you%s   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" badge
+          (if (seq stale) (str " · old code: " (str/join ", " stale)) "")))
 
 (defn preview
   "What the selected thread needs: its open ask with numbered options and the
@@ -182,7 +186,7 @@
       nil (emacs/attach! "(eng/bbh-inbox)")
       ;; The Inbox buffer's reload: the header, then the rows, from one read.
       ;; The buffer keeps your place across reloads.
-      "view" (let [s (sections)] (println (header s)) (println (rows s)))
+      "view" (let [s (sections)] (println (header s (version/stale (client/data-dir)))) (println (rows s)))
       "preview" (println (preview (thread id) (client-state)))
       "select" (select! id)
       "clear" (with-state-lock! #(save-client-state! (-> (client-state) (update :picks dissoc id) (update :notes dissoc id) (update :versions dissoc id))))

@@ -192,7 +192,8 @@
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
     (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
     (is (re-matches #"T3\tARCHIVED         T3   old \(came back\)    " row3))
-    (is (= "bbh inbox · 1 need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" (bbh.super.pane/header sections)))
+    (is (= "bbh inbox · 1 need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" (bbh.super.pane/header sections [])))
+    (is (clojure.string/starts-with? (bbh.super.pane/header sections ["controller" "web"]) "bbh inbox · 1 need you · old code: controller, web   RET open"))
     (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
            (clojure.string/split-lines
             (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
@@ -536,6 +537,50 @@
             (is (= [] (filter #(= :open (:state %)) (vals (:asks @(:state c))))))
             (finally (when (bbh.super.process/matches? identity) (bbh.super.process/stop-job! identity)))))))))
 
+(defn- running-job!
+  "A detached job in conversation ROOT that sleeps, as `job` starts one, with
+  its identity recorded. Returns its identity."
+  [root id]
+  (let [base (str (fs/path root "jobs" id))]
+    (fs/create-dirs (fs/parent base))
+    (spit (str base ".cmd") "sleep 60")
+    (babashka.process/shell {:out :discard :err :discard} "setsid" "-f" "bash" "-c"
+                            (str "echo $$ > " (pr-str (str base ".pid")) "; sleep 60"))
+    (wait-for #(fs/exists? (str base ".pid")))
+    (let [identity (bbh.super.process/identity-of (parse-long (clojure.string/trim (slurp (str base ".pid")))))]
+      (spit (str base ".start") (:start identity))
+      identity)))
+
+(deftest an-ended-worker-leaves-no-job-running
+  (with-workers
+    (fn [c dir repo _]
+      (call dir {:command :thread! :args {:title "t"}})
+      (start-worker dir "T1" :repo repo)
+      (let [root (fs/path (:conversations c) "super-W1")
+            during (running-job! root "during")]
+        (try
+          (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :failed :reason "gave up"}})))
+          (is (nil? (bbh.super.process/identity-of (:pid during))) "its job is stopped at the finish")
+          (is (= "137\n" (slurp (str (fs/path root "jobs" "during.exit")))))
+          (let [after (running-job! root "after")]
+            (try
+              (super/reconcile! c)
+              (is (nil? (bbh.super.process/identity-of (:pid after))) "a health pass stops one an ended Worker still has")
+              (finally (when (bbh.super.process/matches? after) (bbh.super.process/stop-job! after)))))
+          (finally (when (bbh.super.process/matches? during) (bbh.super.process/stop-job! during))))))))
+
+(deftest an-attached-workers-conversation-keeps-its-jobs
+  ;; An attached conversation is the person's: it was there before the Worker and outlives it.
+  (with-controller
+    (fn [c dir conversations]
+      (let [{:keys [token]} (thread-with-ask dir)
+            job (running-job! (fs/path conversations "conv-1") "mine")]
+        (try
+          (is (= {:ok "W1"} (call dir {:token token :command :finish-worker! :args {:worker "W1" :state-after :failed :reason "gave up"}})))
+          (super/reconcile! c)
+          (is (bbh.super.process/matches? job) "its job still runs after the finish and a health pass")
+          (finally (when (bbh.super.process/matches? job) (bbh.super.process/stop-job! job))))))))
+
 (deftest dead-workers-retry-three-times-with-the-same-conversation-and-workflow
   (with-workers
     (fn [c dir repo launches]
@@ -553,6 +598,70 @@
         (is (= "Worker failed three restart attempts; needs human"
                (:line (first (:threads (first (model/sections @(:state c) {})))))))
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
+
+(deftest a-dead-worker-waits-for-emacs-without-spending-a-restart
+  (with-workers
+    (fn [c dir repo launches]
+      (call dir {:command :thread! :args {:title "recover me"}})
+      (start-worker dir "T1" :repo repo)
+      (let [up (atom false)
+            c (-> c (assoc :restart-grace-ms -1) (assoc-in [:launch :emacs-up?] #(deref up)))]
+        (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
+          (dotimes [_ 4] (super/reconcile! c))
+          (is (= [1 nil :working] [(count @launches) (get-in @(:state c) [:workers "W1" :restarts]) (get-in @(:state c) [:workers "W1" :state])])
+              "Emacs down: no restart tried, none counted")
+          (reset! up true)
+          (super/reconcile! c)
+          (is (= [2 1] [(count @launches) (get-in @(:state c) [:workers "W1" :restarts])])))))))
+
+(deftest a-launch-that-meets-emacs-down-waits-instead-of-failing
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-ed"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-edconv"}))
+        up (atom false)
+        opened (atom [])
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10 :restart-grace-ms -1
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w)))
+                                  :emacs-up? #(deref up)
+                                  :open! (fn [spec] (if @up (do (swap! opened conj (:conversation spec)) "buf")
+                                                        (throw (ex-info "Emacs daemon bbh-super: no socket" {:error :emacs}))))}})]
+    (try
+      (call dir {:command :thread! :args {:title "t"}})
+      (is (= :starting (:state (:ok (start-worker dir "T1" :repo (jj-repo))))))
+      (is (= :starting (get-in @(:state c) [:workers "W1" :state])))
+      (reset! up true)
+      (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
+        (super/reconcile! c))
+      (is (= ["super-W1"] @opened))
+      (is (= :working (get-in @(:state c) [:workers "W1" :state])))
+      (finally (super/stop! c)))))
+
+(deftest the-controller-keeps-a-router-running-once-emacs-is-up
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-rt"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-rtconv"}))
+        up (atom false)
+        opened (atom [])
+        session (atom nil)
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10 :restart-grace-ms -1 :manage-router true
+                         :launch {:emacs-up? #(deref up)
+                                  ;; The Router session announces itself in its conversation, as bbh acp does.
+                                  :open-router! (fn [{:keys [conversation token]}]
+                                                  (swap! opened conj [conversation token])
+                                                  (reset! session (bbh.inbox/start! {:root (str (fs/path conversations conversation)) :deliver (fn [_])})))}})]
+    (try
+      (is (wait-for #(pos? @(:last-health c))) "the dispatcher's first pass is done")
+      (super/reconcile! c)
+      (is (= [] @opened) "Emacs down: no Router yet")
+      (reset! up true)
+      (super/reconcile! c)
+      (super/reconcile! c)
+      (is (= ["router"] (map first @opened)) "started once, kept while its session lives")
+      (is (= "router" (get-in @(:state c) [:router :router :conversation])))
+      (is (= {:ok []} (call dir {:token (second (first @opened)) :command :threads})) "its token is the Router's")
+      (bbh.inbox/stop! @session)
+      (super/reconcile! c)
+      (is (= 2 (count @opened)) "a Router whose session ended is started again")
+      (is (= :unauthorized (:error (call dir {:token (second (first @opened)) :command :threads}))) "and the old token is revoked")
+      (finally (some-> @session bbh.inbox/stop!) (super/stop! c)))))
 
 (deftest surviving-workers-are-observed-not-restarted-and-cancel-waits-for-receipt
   (with-workers
@@ -1210,7 +1319,7 @@
   (let [{:keys [bin args]} (fake-emacsclient 0 "\"T1 a\"")]
     (binding [bbh.super.emacs/*emacsclient* bin]
       (is (= "T1 a" (super/open! {:workspace "/w" :thread "T1" :title "a" :conversation "super-W1" :token "tok" :wf-run "run-1"})))
-      (is (= ["-s" "bbh-super" "--timeout=30" "--eval"
+      (is (= ["-s" (bbh.super.emacs/server) "--timeout=30" "--eval"
               "(eng/bbh-super-open \"super-W1\" \"/w\" \"T1 a\" '((\"BBH_SUPER_TOKEN\" . \"tok\") (\"WF_RUN\" . \"run-1\")))"]
              (args))))))
 
@@ -1222,20 +1331,28 @@
         (is (= :emacs (:error (ex-data e))))
         (is (clojure.string/includes? (ex-message e) "herd start bbh-emacs"))))))
 
-(deftest a-failed-emacs-launch-fails-the-worker-with-the-reason
-  (let [{:keys [bin]} (fake-emacsclient 1 "emacsclient: can't find socket")
+(deftest a-launch-waits-for-a-down-daemon-and-fails-on-one-that-refuses
+  (let [down (:bin (fake-emacsclient 1 "emacsclient: can't find socket"))
+        ;; Answers the liveness check, refuses to open the buffer.
+        refusing (str (fs/create-temp-file {:prefix "fake-emacsclient"}))
         dir (str (fs/create-temp-dir {:prefix "bbh-super-em"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-emconv"}))
         repo (jj-repo)
         c (super/start! {:dir dir :conversations conversations :scan-ms 10 :policy {:workers 2}
                          :launch {:wf-start! (fn [_ w] (str "run-" (:id w)))}})]
+    (spit refusing "#!/bin/sh\nfor a; do last=$a; done\n[ \"$last\" = t ] && { echo t; exit 0; }\necho 'No such directory: /w' >&2\nexit 1\n")
+    (fs/set-posix-file-permissions refusing "rwx------")
     (try
       ;; with-redefs, not binding: the controller launches on its own thread.
-      (with-redefs [bbh.super.emacs/*emacsclient* bin]
+      (with-redefs [bbh.super.emacs/*emacsclient* down]
         (call dir {:command :thread! :args {:title "no daemon"}})
-        (is (= :emacs (:error (start-worker dir "T1" :repo repo))))
-        (is (= :failed (get-in @(:state c) [:workers "W1" :state])))
-        (is (clojure.string/includes? (get-in @(:state c) [:workers "W1" :reason]) "herd start bbh-emacs")))
+        (is (= :starting (:state (:ok (start-worker dir "T1" :repo repo)))))
+        (is (= :starting (get-in @(:state c) [:workers "W1" :state])) "it waits for Emacs"))
+      (with-redefs [bbh.super.emacs/*emacsclient* refusing]
+        (call dir {:command :thread! :args {:title "refused"}})
+        (is (= :emacs (:error (start-worker dir "T2" :repo repo))))
+        (is (= :failed (get-in @(:state c) [:workers "W2" :state])))
+        (is (clojure.string/includes? (get-in @(:state c) [:workers "W2" :reason]) "No such directory: /w")))
       (finally (super/stop! c)))))
 
 (deftest the-inbox-finds-a-threads-worker-buffer

@@ -5,6 +5,7 @@
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [bbh.super.emacs :as emacs]
+            [bbh.version :as version]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
@@ -48,6 +49,7 @@
 
 (defn- print-list! [{:keys [badge sections]}]
   (println (format "%d need you" badge))
+  (println (version/status-line (data-dir)))
   (doseq [{:keys [title threads]} sections]
     (println)
     (println (str/upper-case title))
@@ -55,17 +57,23 @@
       (println (format "  %-4s %s%s" id title (if came-back "  (came back)" "")))
       (when line (println (str "       " line))))))
 
+(defn open-router!
+  "The Router and the Inbox in the super-agent's Emacs: the Router session of
+  CONVERSATION with TOKEN and BBH_ROLE=router, in buffer Router, and the
+  *bbh inbox* buffer."
+  [{:keys [conversation token]}]
+  {:router (emacs/open! {:conversation conversation :dir (System/getProperty "user.home") :title "Router"
+                         :env {"BBH_SUPER_TOKEN" token "BBH_ROLE" "router"}})
+   :inbox (emacs/read-string* (emacs/call! "eng/bbh-inbox-buffer"))})
+
 (defn start-router!
-  "The Router and the Inbox in the super-agent's Emacs: the Router session,
-  `router`, with its token and BBH_ROLE=router, in buffer Router, and the
-  *bbh inbox* buffer. Registers the Router first, which revokes an earlier
-  Router token, so a Router session already open is replaced."
+  "Start the Router now, as the controller does by itself when none runs.
+  Registers the Router first, which revokes an earlier Router token, so a
+  Router session already open is replaced."
   [dir]
-  (let [{:keys [ok error message]} (call! dir {:command :register-router! :args {:conversation "router"}})
-        _ (when error (throw (ex-info (str "register-router!: " (name error) " " message) {:error error})))
-        router (emacs/open! {:conversation "router" :dir (System/getProperty "user.home") :title "Router"
-                             :env {"BBH_SUPER_TOKEN" (:token ok) "BBH_ROLE" "router"}})]
-    {:router router :inbox (emacs/read-string* (emacs/call! "eng/bbh-inbox-buffer"))}))
+  (let [{:keys [ok error message]} (call! dir {:command :register-router! :args {:conversation "router"}})]
+    (when error (throw (ex-info (str "register-router!: " (name error) " " message) {:error error})))
+    (open-router! {:conversation "router" :token (:token ok)})))
 
 (defn -main
   "bbh super serve, bbh super list, or bbh super COMMAND [EDN-ARGS] [--id ID].

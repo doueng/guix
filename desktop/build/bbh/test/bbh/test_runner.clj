@@ -50,18 +50,41 @@
     (for [n nss, v (sort-by (comp :line meta) (vals (ns-interns n))) :when (:test (meta v))]
       (symbol v))))
 
+(def ^:private marker-var
+  "Set on the test workers and inherited by everything they start, so what
+  outlives the suite can be found. Not BBH_-prefixed: hermetic drops those."
+  "BB_TEST_RUN")
+
+(defn- read-proc [pid file]
+  (try (str/replace (slurp (str "/proc/" pid "/" file)) "\u0000" " ") (catch Exception _ "")))
+
+(defn leaked-controllers
+  "The controllers, `bbh super serve` or `bbh.super/start!` in a bb, still
+  running from the test run MARKER, as {:pid :cmd}."
+  [marker]
+  (for [d (fs/list-dir "/proc")
+        :let [pid (str (fs/file-name d))]
+        :when (re-matches #"\d+" pid)
+        :when (str/includes? (read-proc pid "environ") (str marker-var "=" marker " "))
+        :let [cmd (str/trim (read-proc pid "cmdline"))]
+        :when (re-find #"super serve|bbh\.super.*start!" cmd)]
+    {:pid (parse-long pid) :cmd cmd}))
+
 (defn -main
   "Run every test var on BBH_TEST_JOBS workers (default the core count), print failures and the slowest tests,
   and exit nonzero on any failure or error."
   [& _]
   (let [start (System/currentTimeMillis)
+        marker (str (random-uuid))
         times (last-times)
         queue (java.util.concurrent.LinkedBlockingQueue. (sort-by #(- (get times % 0)) (all-vars)))
         jobs (or (some-> (System/getenv "BBH_TEST_JOBS") parse-long)
                  (.availableProcessors (Runtime/getRuntime)))
         results (atom [])
         run-worker (fn []
-                     (let [proc (p/process {:in :pipe :out :pipe :err :inherit}
+                     (let [proc (p/process {:in :pipe :out :pipe :err :inherit
+                                            ;; No test reaches the Emacs daemon of the person running the suite.
+                                            :extra-env {marker-var marker "BBH_EMACS_SERVER" (str "bbh-test-" marker)}}
                                            "bb" "-e" "(require 'bbh.test-runner) (bbh.test-runner/worker)")
                            in (io/writer (:in proc))
                            send! #(if-let [v (.poll queue)]
@@ -82,7 +105,11 @@
                            :else (do (println (first lines)) (recur current (rest lines)))))
                        @proc))
         _ (run! deref (doall (repeatedly jobs #(future (run-worker)))))
-        rs @results
+        leaked (doall (leaked-controllers marker))
+        _ (doseq [{:keys [pid cmd]} leaked]
+            (println (str "\nERROR: a test left controller " pid " running: " cmd))
+            (p/shell {:continue true :err :discard} "kill" "-KILL" (str pid)))
+        rs (cond-> @results (seq leaked) (conj {:var 'leaked-controllers :ms 0 :counters {:test 1 :error 1}}))
         total (apply merge-with + (map :counters rs))
         bad (+ (:fail total 0) (:error total 0))]
     (spit (times-file) (pr-str (into times (map (juxt :var :ms)) rs)))

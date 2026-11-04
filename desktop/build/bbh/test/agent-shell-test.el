@@ -836,6 +836,40 @@
                                               (string-match-p "preview of T2" (bbh-test--text "*bbh inbox preview*"))))
                               10)))))
 
+(ert-deftest bbh-inbox-reload-replaces-a-stale-listener-and-rehooks-the-buffer ()
+  ;; A Doom reload loads this file again; the live Inbox must follow the new code.
+  (let* ((log (make-temp-file "bbh-inbox-log"))
+         (script (make-temp-file "bbh-fake" nil nil
+                                 (concat "#!/bin/sh\necho \"$@\" >> " log "\n"
+                                         "case \"$2\" in\nview) printf 'bbh inbox · 0 need you\\nT1\\tNEW  T1 first\\n';;\nesac\n")))
+         (eng/bbh-inbox-bbh (list script))
+         (registered (lambda () (with-temp-buffer (insert-file-contents log)
+                                  (how-many "^inbox register [0-9]+$" (point-min) (point-max))))))
+    (set-file-modes script #o700)
+    (when (process-live-p eng/bbh-inbox--listener) (delete-process eng/bbh-inbox--listener))
+    ;; The listener as older code made it: a closure filter.
+    (setq eng/bbh-inbox--listener
+          (make-network-process :name "bbh-inbox-listen" :server t :host "127.0.0.1" :service t
+                                :family 'ipv4 :noquery t :filter (lambda (c _) (delete-process c))))
+    (let ((old eng/bbh-inbox--listener))
+      (with-current-buffer (eng/bbh-inbox--buffer)
+        (eng/bbh-inbox-mode)
+        (remove-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show t)
+        (load (getenv "BBH_DOOM_AGENT_SHELL") nil t)
+        (should (memq #'eng/bbh-inbox--on-show window-buffer-change-functions)))
+      (should-not (process-live-p old))
+      (should (eq #'eng/bbh-inbox--on-push (process-filter eng/bbh-inbox--listener)))
+      (should (bbh-test--wait (lambda () (= 1 (funcall registered))) 10))
+      ;; A current listener is kept, and not registered again.
+      (let ((current eng/bbh-inbox--listener))
+        (eng/bbh-inbox--listen)
+        (should (eq current eng/bbh-inbox--listener))
+        (sleep-for 0.3)
+        (should (= 1 (funcall registered)))
+        (delete-process current)
+        (setq eng/bbh-inbox--listener nil)
+        (kill-buffer (eng/bbh-inbox--buffer))))))
+
 (defun bbh-test--windows ()
   "The buffer names in the selected frame's windows, sorted."
   (sort (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list nil 'nomini)) #'string<))

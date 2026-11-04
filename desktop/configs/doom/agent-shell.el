@@ -1743,12 +1743,17 @@ read-only list has no use for; s also shadows the global avy jump here.")
     map)
   "The Inbox keys, for Emacs without evil.")
 
-(define-derived-mode eng/bbh-inbox-mode special-mode "bbh inbox"
-  "The threads that need you, from `bbh super'."
+(defun eng/bbh-inbox--setup ()
+  "The Inbox buffer's settings and hooks. The mode runs it, and loading this
+file runs it again in a live Inbox, so a Doom reload reaches it."
   (setq truncate-lines t)
   (hl-line-mode 1)
   (add-hook 'post-command-hook #'eng/bbh-inbox--moved nil t)
   (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t))
+
+(define-derived-mode eng/bbh-inbox-mode special-mode "bbh inbox"
+  "The threads that need you, from `bbh super'."
+  (eng/bbh-inbox--setup))
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'eng/bbh-inbox-mode 'normal)
@@ -1769,15 +1774,22 @@ read-only list has no use for; s also shadows the global avy jump here.")
         :desc "Cancel Worker" "x" #'eng/bbh-inbox-cancel
         :desc "Reload"        "g" #'eng/bbh-inbox-refresh))
 
+(defun eng/bbh-inbox--on-push (connection _)
+  "The controller connected to say something changed."
+  (delete-process connection)
+  (eng/bbh-inbox--changed))
+
 (defun eng/bbh-inbox--listen ()
-  "Listen for the controller's reload calls and register the port, once."
-  (unless (process-live-p eng/bbh-inbox--listener)
+  "Listen for the controller's reload calls and register the port. A live
+listener made by older code, whose filter is not `eng/bbh-inbox--on-push',
+is replaced."
+  (unless (and (process-live-p eng/bbh-inbox--listener)
+               (eq (process-filter eng/bbh-inbox--listener) #'eng/bbh-inbox--on-push))
+    (when (process-live-p eng/bbh-inbox--listener) (delete-process eng/bbh-inbox--listener))
     (setq eng/bbh-inbox--listener
           (make-network-process
            :name "bbh-inbox-listen" :server t :host "127.0.0.1" :service t :family 'ipv4 :noquery t
-           :filter (lambda (connection _)
-                     (delete-process connection)
-                     (eng/bbh-inbox--changed))))
+           :filter #'eng/bbh-inbox--on-push))
     (eng/bbh-inbox--run (list "register" (number-to-string (process-contact eng/bbh-inbox--listener :service)))
                         nil)))
 
@@ -1795,6 +1807,14 @@ read-only list has no use for; s also shadows the global avy jump here.")
   (interactive)
   (eng/bbh-super--clear-frame)
   (switch-to-buffer (eng/bbh-inbox-buffer)))
+
+;; Loading this file again, as a Doom reload does, brings a live Inbox up to
+;; the new code: its buffer setup and the listener.
+(when-let* ((buffer (get-buffer "*bbh inbox*")))
+  (with-current-buffer buffer
+    (when (derived-mode-p 'eng/bbh-inbox-mode)
+      (eng/bbh-inbox--setup)
+      (eng/bbh-inbox--listen))))
 
 (after! agent-shell-viewport
   (add-hook 'agent-shell-viewport-edit-mode-hook #'eng/bbh-setup-composer)
