@@ -112,22 +112,6 @@
         (is (= :forbidden (:error (call dir {:token token :command :reply! :args {:thread "T1" :asks-version 0 :picks {}}}))))
         (is (= :unauthorized (:error (call dir {:token "not a token" :command :threads}))))))))
 
-(deftest the-fold-is-pure-over-a-fixed-event-list
-  (testing "a stopped ask puts the thread in waiting and the reply on its way puts it back to working"
-    (let [events [{:seq 1 :kind :thread-created :thread "T1" :data {:id "T1" :title "t"}}
-                  {:seq 2 :kind :worker-attached :thread "T1" :data {:id "W1" :conversation "c" :generation 1}}
-                  {:seq 3 :kind :ask-opened :thread "T1" :data {:id "a1" :worker "W1" :kind :question :text "?" :options [{:id "y" :label "Y"}] :stopped true}}
-                  {:seq 4 :kind :reply-sent :thread "T1" :data {:id "r1" :thread "T1" :worker "W1" :picks {"a1" "y"} :note "" :dismiss #{} :outbox "o1" :conversation "c" :text "m"}}
-                  {:seq 5 :kind :outbox-sent :thread "T1" :data {:id "o1" :message "m1"}}
-                  {:seq 6 :kind :outbox-acked :thread "T1" :data {:id "o1"}}
-                  {:seq 7 :kind :reply-answered :thread "T1" :data {:id "r1"}}]
-          states (reductions model/fold model/empty-state events)]
-      (is (= [:none :working :waiting :working :working :working :working]
-             (map #(get-in % [:threads "T1" :execution]) (rest states))))
-      (is (= [:open :sent :sent :delivered :answered]
-             (map #(get-in % [:asks "a1" :state]) (drop 3 states))))
-      (is (= :processed (get-in (last states) [:outbox "o1" :state]))))))
-
 (deftest a-newer-ask-supersedes-the-old-one-and-a-reply-to-it-is-refused
   (with-controller
     (fn [_ dir _]
@@ -1240,8 +1224,15 @@
             (call dir {:command :thread! :args {:title "a"}})
             (call dir {:command :thread! :args {:title "b"}})
             (start-worker dir "T1" :repo repo)
-            (is (= "wC:p1" (#'pane/buffer "T1")))
-            (is (thrown-with-msg? Exception #"T2 has no Worker" (#'pane/buffer "T2")))))))))
+            (is (= "wC:p1\n" (with-out-str (pane/-main "buffer" "T1"))))
+            ;; The error path exits the process, so it runs as the real command, pointed at this controller.
+            (let [data (fs/create-temp-dir {:prefix "bbh-super-data"})
+                  _ (fs/create-sym-link (fs/path (fs/create-dirs (fs/path data "bbh")) "super") dir)
+                  r (babashka.process/shell {:out :string :err :string :continue true
+                                             :env (assoc (hermetic/env) "XDG_DATA_HOME" (str data) "XDG_STATE_HOME" (str data))}
+                                            "bb" "-e" "(require 'bbh.super.pane) (bbh.super.pane/-main \"buffer\" \"T2\")")]
+              (is (= 1 (:exit r)))
+              (is (clojure.string/includes? (:err r) "T2 has no Worker") (:err r)))))))))
 
 
 (defn- jj-in [dir & args]

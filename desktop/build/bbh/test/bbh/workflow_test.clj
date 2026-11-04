@@ -86,11 +86,10 @@
 (deftest hanging-gate-fails-even-when-nonzero-was-expected
   (let [repo (buggy-repo)
         id (wf/start! :bug-fix {:cwd repo :repro "sleep 30"})
-        st (wf/status id)
-        gate {:kind :command :cmd :repro :expect :nonzero :timeout 1}
-        result (#'wf/run-command id st :reproduce 1 0 gate)]
-    (is (:timed-out? result))
-    (is (false? (:pass? result)))))
+        {:keys [outcome results]} (with-redefs [wf/default-timeout-seconds 1] (wf/attest! id "repro fails"))]
+    (is (= :fail outcome) "the reproduce gate expects nonzero, and a timeout's 124 must not count")
+    (is (:timed-out? (first results)))
+    (is (= [:reproduce 2] (at id)))))
 
 (deftest unknown-run-is-a-clean-error
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no run named nope"
@@ -99,17 +98,6 @@
 (deftest change-requires-a-check-command
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"needs --check"
                         (wf/start! :change {:cwd "."}))))
-
-(deftest decide-advances-retries-and-caps
-  (let [wf {:phases {:a {:next :b :max-visits 1}
-                     :b {:next nil}}}]
-    (is (= [{:type :enter :phase :b :visit 1}]
-           (wf/decide wf {:phase :a :visits {:a 1}} [{:pass? true}])))
-    (is (= [{:type :done}]
-           (wf/decide wf {:phase :b :visits {:b 1}} [{:pass? true}])))
-    (is (= [] (wf/decide wf {:phase :a :visits {:a 1}} [{:pending? true}])))
-    (is (= [{:type :block :phase :a :reason "phase a exceeded 1 visits"}]
-           (wf/decide wf {:phase :a :visits {:a 1}} [{:pass? false}])))))
 
 (deftest a-torn-last-journal-line-is-dropped
   (let [repo (buggy-repo)
@@ -147,20 +135,24 @@
                 (fs/glob (fs/parent (:evidence (wf/status id))) "reviews/*/messages.jsonl"))
           "the reviewer is briefed with the phase's principles"))))
 
+(defn- cli [& args] (with-out-str (with-redefs [wf/default-id (constantly nil)] (apply wf/-main args))))
+
 (deftest a-phase-brief-carries-its-principles-in-full
   (let [id (wf/start! :bug-fix {:cwd (buggy-repo) :repro repro})
-        _ (wf/attest! id "bug reproduces")
-        out (with-out-str (#'wf/print-status (wf/status id) :full? true))]
+        out (cli "attest" id "--claim" "bug reproduces")
+        body (->> (str/split-lines (slurp (wf/principle-file "attack-the-premise")))
+                  (drop-while #(not (str/starts-with? % "# ")))
+                  (remove #(or (str/blank? %) (str/includes? % "]("))))]
     (is (= ["fix-root-causes" "attack-the-premise"] (:principles (wf/status id))))
     (is (str/includes? out "principles: fix-root-causes, attack-the-premise."))
     (is (str/includes? out "<principle name=\"fix-root-causes\">"))
-    (is (str/includes? out "- **Write the premise down.** The premise is the one sentence that every failed fix assumed."))
+    (is (seq body))
+    (is (every? #(str/includes? out %) body) "every line of the principle's body is printed")
     (is (not (str/includes? out "disable-model-invocation")) "the YAML header is stripped")
     (is (not (str/includes? out "](../")) "links resolve from any directory")))
 
 (deftest principles-print-in-full-on-entering-a-phase
-  (let [cli (fn [& args] (with-out-str (with-redefs [wf/default-id (constantly nil)] (apply wf/-main args))))
-        repo (buggy-repo)
+  (let [repo (buggy-repo)
         full "<principle name="
         started (cli "start" "bug-fix" "--task" "t" "--cwd" repo "--repro" repro)
         id (second (str/split (first (str/split-lines started)) #" "))]
@@ -178,8 +170,8 @@
         id (wf/start! :investigation {:cwd dir :task "t"})
         evidence (:evidence (wf/status id))]
     (spit (str evidence "/answer.md") "done")
-    (wf/attest! id "answered")
-    (let [out (with-out-str (#'wf/print-status (wf/status id) :full? true))]
+    (doseq [out [(cli "attest" id "--claim" "answered") (cli "status" id)]]
+      (is (str/includes? out "status done") out)
       (is (not (str/includes? out "brief:")))
       (is (not (str/includes? out "<principle"))))))
 

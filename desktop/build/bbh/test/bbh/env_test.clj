@@ -64,7 +64,7 @@
         conn (repl/start! {:dir (str (fs/path dir "runtime")) :cwd (str sub)})]
     (try
       (repl/eval! conn (str "(load-file " (pr-str init) ")") 10000)
-      (let [text (:value (repl/call conn "(#'bbh.env/project-instructions)" 10000))]
+      (let [text (:value (repl/call conn "(:system (bbh.env/manifest))" 10000))]
         (is (< (str/index-of text "root rules") (str/index-of text "sub rules")))
         (is (str/includes? text (str "## " (fs/canonicalize (fs/path sub "CLAUDE.md")))))
         (is (not (str/includes? text "outside the repo"))))
