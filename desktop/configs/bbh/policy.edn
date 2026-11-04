@@ -7,7 +7,7 @@
 ;; that needs you for :watchdog-after-minutes gets a read-only Watchdog Worker.
 ;; :projects are the repositories the Router starts Workers in, by name, with
 ;; the check that proves a change there; each check passed on 2026-11-03.
-{:workers 3
+{:workers 10
  :projects {"guix" {:repo "~/guix" :check "make lint"
                     :about "this Guix system and Home config: desktop, Doom Emacs, Herdr, kanata, bbh and its super-agent"}
             "cv" {:repo "~/projects/cv" :check "make"

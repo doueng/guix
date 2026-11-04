@@ -29,7 +29,7 @@
   how sure Jev must be that a message is noise before the Router never sees
   it, what each origin's Workers may do (an origin not named gets :read), and
   the capability each lock needs."
-  {:workers 3 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30 :noise-probability 0.7
+  {:workers 10 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30 :noise-probability 0.7
    :origins (assoc (zipmap [:owner :emacs :herdr :phone :voice] (repeat #{:read :edit-workspace :run-checks :publish})) :watchdog #{:read})
    :watchdog-after-minutes 10
    :lock-capabilities {"repo-push" :publish "guix-build" :run-checks}})

@@ -217,7 +217,7 @@ The badge counts the first three. Progress notes update the thread's summary lin
 
 - `start-worker!` creates a jj workspace per Worker (`jj workspace add`), so two Workers on the same repository never share a working copy, a `@` revision or generated files. The main checkout stays yours. The Worker's `wf` evidence directory is its own already.
 - Named resource locks in `policy.edn`, such as `guix-build`, `repo-push` and `guix-system`. A Worker that needs one waits in `queued` with the lock named in its summary. `guix-system` is never granted to a Worker; a system switch is always an `action` ask to you.
-- A concurrency cap, three Workers at first. A fourth is `queued`, not working.
+- A concurrency cap, `:workers` in `policy.edn`. A Worker past it is `queued`, not working.
 - A Worker's buffer opens in the background of the `bbh-super` daemon, so Workers do not clutter what you are looking at.
 
 **Three kinds of input to a busy Worker.** They have different semantics and are different commands.
