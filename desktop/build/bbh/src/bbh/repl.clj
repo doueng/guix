@@ -28,10 +28,21 @@
             (throw (ex-info "The REPL process did not start; see repl.log" {:port-file port-file}))
             :else (do (Thread/sleep 10) (recur (dec tries)))))))
 
-(defn- read-loop [{:keys [in queues closed]}]
+(def ^:private quickack
+  "Linux's TCP_QUICKACK, or nil where the platform lacks it. The nREPL server leaves Nagle's algorithm on, so its
+  second reply to a request waits for our ACK, which Linux delays by 40 ms unless quick ACKs are on. The kernel turns
+  them back off, so the read loop sets them again after each message."
+  (some #(when (= "TCP_QUICKACK" (str %)) %) (.supportedOptions (java.net.Socket.))))
+
+(defn- ack-quickly! [^java.net.Socket sock]
+  (when quickack
+    (try (.setOption sock quickack true) (catch Exception _ nil))))
+
+(defn- read-loop [{:keys [in sock queues closed]}]
   (try
     (loop []
       (let [m (decode (b/read-bencode in))]
+        (ack-quickly! sock)
         (some-> (get @queues (get m "id")) (.put m))
         (recur)))
     (catch Exception _
@@ -80,7 +91,7 @@
                                :out :append :out-file log :err :append :err-file log}
                     (concat ["bb"] (when config ["--config" config]) ["-e" bootstrap]))
         port (wait-for-port port-file proc)
-        sock (java.net.Socket. "127.0.0.1" (int port))
+        sock (doto (java.net.Socket. "127.0.0.1" (int port)) (.setTcpNoDelay true) ack-quickly!)
         conn {:proc proc :port port :sock sock
               :in (java.io.PushbackInputStream. (.getInputStream sock))
               :out (.getOutputStream sock)
