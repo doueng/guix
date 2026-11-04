@@ -90,5 +90,7 @@
 (deftest a-rolled-over-conversation-keeps-its-mailbox
   (let [base (str (fs/create-temp-dir {:prefix "bbh-inbox"}))
         root (str (fs/create-dirs (fs/path base "first")))
-        rolled (transcript/continue! root "second")]
-    (is (= root (inbox/root-dir rolled)))))
+        rolled (transcript/continue! root "second")
+        grandchild (transcript/continue! rolled "third")]
+    (is (= root (inbox/root-dir rolled)))
+    (is (= root (inbox/root-dir grandchild)) "a second rollover still finds the first conversation's mailbox")))

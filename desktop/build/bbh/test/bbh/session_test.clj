@@ -361,13 +361,6 @@
       (is (= "=> 42" (peek (tool-results h))))
       (is (= new-dir (transcript/continuation old))))))
 
-(deftest the-inbox-id-survives-a-rollover
-  (let [root (str (fs/create-temp-dir {:prefix "bbh-root"}))
-        first-dir (str (fs/create-dirs (fs/path root "first")))
-        rolled (transcript/continue! first-dir "second")
-        grandchild (transcript/continue! rolled "third")]
-    (is (= ["first" "first" "first"] (map transcript/inbox-id [first-dir rolled grandchild])))))
-
 (deftest a-full-context-mid-turn-continues-the-work-in-a-new-conversation
   (let [h (harness "(ns bbh.env) (def manifest {:rollover-at-tokens 1000})"
                    [{:code "(+ 1 2)" :usage {:input 1000}} "finished"])
