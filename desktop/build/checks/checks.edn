@@ -49,6 +49,7 @@
    :checks ["make kanata-check"]}
   {:name "bbh-transcript-scroll"
    :paths ["desktop/configs/doom/agent-shell.el" "desktop/build/bbh/test/tty-scroll-test.el"
+           "desktop/build/bbh/test/tty-visit-test.el"
            "desktop/build/bbh/bb.edn"]
    :checks ["cd desktop/build/bbh && bb test:transcript-scroll"]}
   {:name "bbh inbox"

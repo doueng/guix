@@ -188,6 +188,8 @@ keeps the text and shows bbh's message."
     (when input
       (set-window-buffer input (agent-shell-viewport--buffer :shell-buffer shell)))
     (prog1 (eng/bbh-layout shell transcript)
+      ;; You were typing /new, so keep typing.
+      (when (fboundp 'evil-insert-state) (evil-insert-state))
       (let ((kill-buffer-query-functions nil))
         (when (buffer-live-p old-composer) (kill-buffer old-composer))
         (kill-buffer old)))))
@@ -514,6 +516,14 @@ strips `display' text properties from whole blocks on partial redisplays."
     (when at-end (goto-char (point-max)))
     (dolist (w followers) (set-window-point w (point-max)))))
 
+(defun eng/bbh-transcript--latest-start (window)
+  "The start of WINDOW that puts the end of its transcript on the bottom row."
+  (with-current-buffer (window-buffer window)
+    (save-excursion
+      (goto-char (point-max))
+      (vertical-motion (- 1 (window-body-height window)) window)
+      (point))))
+
 (defun eng/bbh-transcript--clamp-scroll ()
   "Pull back any window that scrolled past the end of a transcript.
 The last line then stays on the window's bottom row instead of leaving
@@ -523,14 +533,10 @@ because Emacs does not support repositioning a window from
 another buffer is current."
   (walk-windows
    (lambda (window)
-     (with-current-buffer (window-buffer window)
-       (when (derived-mode-p 'eng/bbh-transcript-mode)
-         (let ((latest (save-excursion
-                         (goto-char (point-max))
-                         (vertical-motion (- 1 (window-body-height window)) window)
-                         (point))))
-           (when (> (window-start window) latest)
-             (set-window-start window latest))))))
+     (when (with-current-buffer (window-buffer window) (derived-mode-p 'eng/bbh-transcript-mode))
+       (let ((latest (eng/bbh-transcript--latest-start window)))
+         (when (> (window-start window) latest)
+           (set-window-start window latest)))))
    'nomini 'visible))
 
 (add-hook 'post-command-hook #'eng/bbh-transcript--clamp-scroll)
@@ -1068,8 +1074,19 @@ called interactively, restore this layout for the current session."
       (setq-local eng/bbh-composer t)
       (eng/bbh-setup-composer))
     (eng/bbh-workflow-show shell)
+    ;; `set-window-buffer' brings back the start the transcript had when it
+    ;; was last shown, above output that arrived since.  Left to redisplay,
+    ;; that would recentre on point and leave blank rows until the next
+    ;; command's clamp, so a transcript following its end shows its latest
+    ;; output now.  This runs after the panel, which narrows the window.
+    (when (= (window-point output) (with-current-buffer transcript (point-max)))
+      (set-window-start output (eng/bbh-transcript--latest-start output)))
     (select-window input)
-    (when (fboundp 'evil-insert-state) (evil-insert-state))
+    ;; Normal state, so leader keys work at once.  This may run outside a
+    ;; command, from the Inbox's sentinel or the controller's emacsclient,
+    ;; where no hook tells the terminal the new cursor shape.
+    (when (fboundp 'evil-normal-state) (evil-normal-state))
+    (when (fboundp 'etcc--set-cursor) (etcc--set-cursor))
     composer))
 
 ;;; Workflow panel
