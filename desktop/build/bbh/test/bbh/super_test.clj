@@ -1308,8 +1308,10 @@
             (is (= :in-progress (:error (call dir {:command :finish-worker! :args {:worker "W3" :state-after :done}}))))
             (jj-in (:workspace w3) "commit" "-m" "three")
             (let [r (call dir {:command :finish-worker! :args {:worker "W3" :state-after :done}})]
-              (is (= :conflicts (:error r)) (pr-str r)))
-            (is (= :working (:state (get-in @(:state c) [:workers "W3"]))) "a refused finish leaves the Worker running")
+              (is (= 1 (count (:conflicts (:ok r)))) (pr-str r))
+              (is (re-find #"Resolve them now in your workspace" (:todo (:ok r))) "it tells the Worker to resolve them"))
+            (is (= :working (:state (get-in @(:state c) [:workers "W3"]))) "a conflicted landing leaves the Worker running")
+            (is (fs/exists? (:workspace w3)) "and its workspace in place")
             (is (= ["three" "one" "two" "start"] (line-of repo "T3-1@")) "its commits moved, conflicted, onto the tip")
             (spit (str (fs/path (:workspace w3) "one")) "clash\n")
             (jj-in (:workspace w3) "squash")
@@ -1352,3 +1354,53 @@
               (call dir {:token token :command :note! :args {:text "looking at kanata"}})
               (is (wait-for #(< before @pokes)) "a Worker's note pokes the views")))
           (finally (.close server)))))))
+
+(deftest failed-work-stays-until-its-thread-is-archived-then-is-kept-under-a-bookmark
+  (with-workers
+    (fn [c dir repo _]
+      (call dir {:command :thread! :args {:title "one"}})
+      (let [w (:ok (start-worker dir "T1" :repo repo))]
+        (assert (:workspace w) "the Worker started")
+        (commit-file (:workspace w) "one" "1\n" "half done")
+        (spit (str (fs/path (:workspace w) "two")) "uncommitted\n")
+        (call dir {:command :finish-worker! :args {:worker "W1" :state-after :failed :reason "stuck"}})
+        (is (= #{"default" "T1-1"} (workspaces repo)) "a failed Worker's workspace stays for inspection")
+        (is (fs/exists? (:workspace w)))
+        (call dir {:command :archive! :args {:thread "T1"}})
+        (is (= #{"default"} (workspaces repo)) "archiving the thread forgets it")
+        (is (not (fs/exists? (:workspace w))) "and deletes its directory")
+        (is (= ["half done" "start"] (line-of repo "super/T1-1")) "its work is kept under a bookmark")
+        (is (= "uncommitted" (jj-in repo "--ignore-working-copy" "file" "show" "-r" "super/T1-1" "two"))
+            "including what it had not committed")))))
+
+(deftest retire-is-idempotent-and-survives-a-forgotten-workspace-or-a-missing-repo
+  (let [repo (jj-repo)
+        ws (str (fs/path (fs/create-temp-dir) "T9-1"))]
+    (jj-in repo "workspace" "add" "--name" "T9-1" ws)
+    (is (nil? (super/retire! {:repo repo :workspace ws})))
+    (is (= #{"default"} (workspaces repo)))
+    (fs/create-dirs ws)
+    (is (nil? (super/retire! {:repo repo :workspace ws :keep? true})) "a forgotten workspace's directory still goes")
+    (is (not (fs/exists? ws)))
+    (is (nil? (super/retire! {:repo repo :workspace ws})) "a second retire is a no-op")
+    (fs/create-dirs ws)
+    (is (nil? (super/retire! {:repo (str repo "-gone") :workspace ws})) "a missing repo is skipped")
+    (is (not (fs/exists? ws)))))
+
+(deftest sweep-lists-orphaned-workspaces-and-retires-them-only-when-confirmed
+  (with-workers
+    (fn [c dir repo _]
+      (doseq [t ["one" "two"]] (call dir {:command :thread! :args {:title t}}))
+      (let [[w1 w2] (map #(:ok (start-worker dir % :repo repo)) ["T1" "T2"])
+            stray (str (fs/path dir "workspaces" "T7-1"))]
+        (assert (every? :workspace [w1 w2]) "both Workers started")
+        (jj-in repo "workspace" "add" "--name" "T7-1" stray)
+        (call dir {:command :finish-worker! :args {:worker "W2" :state-after :failed :reason "x"}})
+        (is (= [{:workspace stray :worker nil :state nil :repo repo}]
+               (:ok (call dir {:command :sweep! :args {}})))
+            "a running Worker and a failed one on an open thread are not orphans; a directory nothing owns is")
+        (is (fs/exists? stray) "a dry run deletes nothing")
+        (is (= [{:workspace stray :worker nil :state nil :repo repo :bookmark nil}]
+               (:ok (call dir {:command :sweep! :args {:confirm true}}))))
+        (is (= #{"default" "T1-1" "T2-1"} (workspaces repo)))
+        (is (not (fs/exists? stray)))))))
