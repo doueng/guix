@@ -84,4 +84,14 @@
    :idea "<Action>(ManageRecentProjects)" :herdr {:plugin "fullerzz.sesh" :action "open-picker"}}
   {:keys ["TAB" "."] :label "Switch workspace" :doom-match :exact :doom "+workspace/switch-to" :herdr :choose-workspace}
   {:keys ["TAB" "`"] :label "Last workspace" :doom-match :exact :doom "+workspace/other"
-   :herdr {:plugin "fullerzz.sesh" :action "last"} :desktop ["focus" {:workspace "previous"}]}]}
+   :herdr {:plugin "fullerzz.sesh" :action "last"} :desktop ["focus" {:workspace "previous"}]}
+  {:keys ["TAB" "1"] :label "Workspace 1" :doom-match :analogous :desktop ["focus" {:workspace 1}]}
+  {:keys ["TAB" "2"] :label "Workspace 2" :doom-match :analogous :desktop ["focus" {:workspace 2}]}
+  {:keys ["TAB" "3"] :label "Workspace 3" :doom-match :analogous :desktop ["focus" {:workspace 3}]}
+  {:keys ["TAB" "4"] :label "Workspace 4" :doom-match :analogous :desktop ["focus" {:workspace 4}]}
+  {:keys ["TAB" "5"] :label "Workspace 5" :doom-match :analogous :desktop ["focus" {:workspace 5}]}
+  {:keys ["TAB" "6"] :label "Workspace 6" :doom-match :analogous :desktop ["focus" {:workspace 6}]}
+  {:keys ["TAB" "7"] :label "Workspace 7" :doom-match :analogous :desktop ["focus" {:workspace 7}]}
+  {:keys ["TAB" "8"] :label "Workspace 8" :doom-match :analogous :desktop ["focus" {:workspace 8}]}
+  {:keys ["TAB" "9"] :label "Workspace 9" :doom-match :analogous :desktop ["focus" {:workspace 9}]}
+  {:keys ["TAB" "0"] :label "Workspace 10" :doom-match :differs :desktop ["focus" {:workspace 10}]}]}
