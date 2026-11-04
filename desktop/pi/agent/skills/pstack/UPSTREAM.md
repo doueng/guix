@@ -22,6 +22,8 @@ Omitted changes, with reasons.
 - `/goal` and `/loop 1h` arming in the autopilot and multi-phase playbooks. They are upstream host commands. The Pi playbooks keep their session-bound monitoring rule.
 - Host-specific PR tooling stays generic. `opening-a-pr.md` names a run's built-in PR tool only when one exists.
 
+`create-formal-verification-skill` was imported on its own from pstack 0.15.36 at `bb68f2365eceafa0cb2d253112f675acf5f144cc`, without moving the baseline. Its generated skill goes in `.agents/skills/`. Its references to `/statechart` and `/maintain-formal-verification-skill` were dropped because neither skill is in this bundle.
+
 Local changes include Pi entry commands, Jev routing with a manual fallback, the route map, mode persistence, conditional delegation, read-only self-review, session-directory resolution, GNU-system audit support, codemode-based MCP discovery and calls, batched read-only evidence gathering, port validation, and `show-me-your-work/scripts/log.bb`, a babashka port of upstream `log.sh` because this repository allows no shell scripts. Keep the MIT license with the bundle.
 
 ## Runtime and paths

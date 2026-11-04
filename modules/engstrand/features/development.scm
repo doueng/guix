@@ -33,6 +33,8 @@
                 "pandoc"
                 ;; libsqlite3 for bbh super, loaded through babashka's FFI.
                 "sqlite"
+                ;; TLC for the bbh TLA+ models, `make bbh-tla-check`.
+                "tla2tools"
                 "xxd"
                 "unzip"
                 "zip"

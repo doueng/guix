@@ -44,6 +44,11 @@
    :paths ["desktop/build/bbh/**" "desktop/configs/bbh/**" "desktop/bin/{bbh,wf,emacs-bbh}"
            "modules/engstrand/features/bbh-web.scm"]
    :checks ["cd desktop/build/bbh && bb test"]}
+  {:name "bbh state machines"
+   :paths ["desktop/build/bbh/src/bbh/super/model.clj" "desktop/build/bbh/src/bbh/workflow.clj"
+           "desktop/build/bbh/src/bbh/workflows/change.edn" "desktop/build/bbh/verify/**"
+           ".agents/skills/verify-bbh-state-machines/**"]
+   :slow ["make bbh-tla-check"]}
   {:name "bbh voice shortcut"
    :paths ["desktop/build/bbh/src/bbh/super/voice.clj" "desktop/configs/hypr/hyprland.lua"]
    :checks ["make kanata-check"]}
