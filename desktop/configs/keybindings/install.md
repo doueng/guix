@@ -41,7 +41,7 @@ The existing inventory command also includes native application bindings.
 ## Add an application layer
 
 1. Focus the application and read its class from `hyprctl -j activewindow`.
-2. In `desktop/kanata.kbd`, copy the `intellij` and `cmd-intellij` layers and their two aliases. Keep only the Cmd keys whose chord differs in the new application.
+2. In `desktop/kanata.kbd`, add an empty `deflayermap` named for the application, like `intellij`. For each Cmd key whose chord differs there, add a `((base-layer <name>))` branch to that key's `switch` in the `cmd` layer, on one line. A separate Cmd layer would be chosen when Cmd goes down and would stay active after focus moves while Cmd is held.
 3. Map the class to the new layer in `desktop/configs/kanata/apps.edn`.
 4. Add a case for each changed chord to `desktop/build/keybindings/kanata-test.bb`, then run `make kanata-check`.
 5. Run `make switch`, then `hyprkan reload` so kanata rereads `/etc/kanata/kanata.kbd`.

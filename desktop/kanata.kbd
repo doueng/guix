@@ -27,12 +27,7 @@
   lalt (multi lalt (layer-while-held alt))
   ralt (multi ralt (layer-while-held alt))
   lcmd (multi lmet (layer-while-held cmd))
-  rcmd (multi rmet (layer-while-held cmd))
-  ;; An app's Cmd layer sits on cmd and lists only the keys that differ.
-  lcmd-intellij (multi lmet (layer-while-held cmd) (layer-while-held cmd-intellij))
-  rcmd-intellij (multi rmet (layer-while-held cmd) (layer-while-held cmd-intellij))
-  lcmd-terminal (multi lmet (layer-while-held cmd) (layer-while-held cmd-terminal))
-  rcmd-terminal (multi rmet (layer-while-held cmd) (layer-while-held cmd-terminal)))
+  rcmd (multi rmet (layer-while-held cmd)))
 
 (deflayermap (base)
   caps @caps
@@ -46,20 +41,28 @@
 
 ;; Cmd chords become the Linux chords for the same command. Unmapped keys stay
 ;; Super chords for Hyprland, and Shift passes through.
+;; App differences test the base layer when the key is pressed, not when Cmd
+;; is. Cmd held from a terminal through Cmd+U into Chrome must give Ctrl+T.
+;; IntelliJ's default keymap redoes on Ctrl+Shift+Z. Its Ctrl+Y deletes a line.
+;; In terminals Ctrl+Z suspends Neovim or a running job, and fish's vi insert
+;; mode has no undo on it, so Cmd+Z and Cmd+Shift+Z do nothing there. Cmd+W and
+;; Cmd+T do nothing rather than delete a path component or transpose characters.
 (deflayermap (cmd)
   c (unmod $meta lctl ins)
   v (unmod $meta lsft ins)
   x (unmod $meta lsft del)
-  z (fork (unmod $meta lctl z) (unmod (lmet rmet lsft rsft) lctl y) (lsft rsft))
+  z (switch ((base-layer terminal)) XX break ((base-layer intellij)) (unmod $meta lctl z) break () (fork (unmod $meta lctl z) (unmod (lmet rmet lsft rsft) lctl y) (lsft rsft)) break)
   a (unmod $meta lctl a)
   s (unmod $meta lctl s)
   ;; f stays Super+F, which Hyprland runs as winhint. Ctrl+F (Caps+F) still finds.
-  w (unmod $meta lctl w)
+  w (switch ((base-layer terminal)) XX break () (unmod $meta lctl w) break)
   q (unmod $meta lctl q)
   n (unmod $meta lctl n)
-  t (unmod $meta lctl t)
+  t (switch ((base-layer terminal)) XX break () (unmod $meta lctl t) break)
   r (unmod $meta lctl r)
-  bspc (macro (unmod $meta lsft home) 40 (unmod $meta bspc))
+  ;; fish ignores Shift+Home, so terminals delete to the line start with Ctrl+U,
+  ;; which fish, Pi, and Neovim and Doom insert mode share.
+  bspc (switch ((base-layer terminal)) (unmod $meta lctl u) break () (macro (unmod $meta lsft home) 40 (unmod $meta bspc)) break)
   1 (unmod $meta lctl 1)
   2 (unmod $meta lctl 2)
   ;; Cmd+Shift+3 and Cmd+Shift+4 take screenshots as on macOS, through Print
@@ -82,27 +85,9 @@
   left (unmod $alt lctl left)
   right (unmod $alt lctl right))
 
-;; App layers. hyprkan switches to them from ~/.config/kanata/apps.edn.
+;; App layers. hyprkan switches to them from ~/.config/kanata/apps.edn. They
+;; only name the base layer that the cmd layer's switches test.
 
-(deflayermap (intellij)
-  lmet @lcmd-intellij
-  rmet @rcmd-intellij)
+(deflayermap (intellij))
 
-;; IntelliJ's default keymap redoes on Ctrl+Shift+Z. Its Ctrl+Y deletes a line.
-(deflayermap (cmd-intellij)
-  z (unmod $meta lctl z))
-
-(deflayermap (terminal)
-  lmet @lcmd-terminal
-  rmet @rcmd-terminal)
-
-;; fish ignores Shift+Home, so the shared Cmd+Backspace deleted one character.
-;; Ctrl+U deletes to the line start in fish, Pi, and Neovim and Doom insert mode.
-;; Ctrl+Z suspends Neovim or a running job, and fish's vi insert mode has no
-;; undo on it, so Cmd+Z and Cmd+Shift+Z do nothing here. Cmd+W and Cmd+T do
-;; nothing rather than delete a path component or transpose characters.
-(deflayermap (cmd-terminal)
-  bspc (unmod $meta lctl u)
-  z XX
-  w XX
-  t XX)
+(deflayermap (terminal))

@@ -90,6 +90,11 @@
    ["Terminal Cmd+T sends nothing" "ls:terminal d:lmet d:t u:t u:lmet" "↓LGui ↑LGui"]
    ["Terminal Cmd+N still sends Ctrl+N for Pi and bbh" "ls:terminal d:lmet d:n u:n u:lmet"
     "↓LGui ↑LGui ↓LCtrl ↓N ↑LCtrl ↑N ↓LGui ↑LGui"]
+   ;; hyprkan changes the base layer on focus while Cmd may still be held.
+   ["Cmd held from a terminal through Cmd+U into Chrome sends Ctrl+T" "ls:terminal d:lmet d:u u:u ls:base d:t u:t u:lmet"
+    "↓LGui ↓U ↑U ↑LGui ↓LCtrl ↓T ↑LCtrl ↑T ↓LGui ↑LGui"]
+   ["Cmd held from Chrome into a terminal sends nothing for Cmd+T" "d:lmet d:u u:u ls:terminal d:t u:t u:lmet"
+    "↓LGui ↓U ↑U ↑LGui"]
    ["Cmd+Z outside terminals still undoes" "d:lmet d:z u:z u:lmet"
     "↓LGui ↑LGui ↓LCtrl ↓Z ↑LCtrl ↑Z ↓LGui ↑LGui"]])
 
