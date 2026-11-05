@@ -803,6 +803,43 @@
                                     (buffer-list))))))
       (when-let* ((s (eng/bbh-super--shell "super-W7"))) (eng/bbh-super--kill s)))))
 
+(ert-deftest bbh-super-session-takes-mail-after-its-workspace-is-deleted ()
+  ;; super-done! deletes the Worker's workspace, the shell's directory, in the
+  ;; middle of its last turn, after the controller released the session. The
+  ;; shell must still go idle and run what the controller or the person sends
+  ;; it next.
+  (let* ((dir (bbh-test--inbox-dir))
+         (ws (make-temp-file "bbh-super-ws" t))
+         (repo (make-temp-file "bbh-super-repo" t))
+         (shell (get-buffer (eng/bbh-super-open "super-W9" ws "T9 test" nil))))
+    (unwind-protect
+        (progn
+          (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
+          (should (bbh-test--wait (lambda () (bbh-test--inbox-lines dir "ids")) 10))
+          (bbh-test--submit shell (concat "/model script/"
+                                          (make-temp-file "bbh-inbox" nil ".edn"
+                                                          "[{:code \"(Thread/sleep 1500)\"} \"landed\" \"woken\" \"typed\"]")))
+          (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+          (bbh-test--submit shell "finish")
+          (should (bbh-test--wait (lambda () (string-match-p "Thread/sleep" (bbh-test--text shell))) 30))
+          ;; What the controller does while the turn runs: release, then retire.
+          (should (equal "T9 test" (eng/bbh-super-release "super-W9" repo)))
+          (should-not (eng/bbh-super-release "super-W404" repo))
+          (delete-directory ws t)
+          (should (bbh-test--wait (lambda () (string-match-p "landed" (bbh-test--text shell))) 30))
+          (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+          ;; Mail to the now idle Worker runs at once.
+          (bbh-test--wake shell "m9" "job exited")
+          (should (bbh-test--wait (lambda () (string-match-p "woken" (bbh-test--text shell))) 30))
+          (should (bbh-test--told-p dir "ack m9"))
+          (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+          ;; So does what the person types.
+          (bbh-test--submit shell "are you there")
+          (should (bbh-test--wait (lambda () (string-match-p "typed" (bbh-test--text shell))) 30)))
+      (setq eng/bbh-inbox-command nil)
+      (when-let* ((s (eng/bbh-super--shell "super-W9"))) (eng/bbh-super--kill s))
+      (delete-directory repo t))))
+
 (ert-deftest bbh-super-open-refuses-a-missing-directory ()
   (should-error (eng/bbh-super-open "super-W8" "/nonexistent/bbh" "T8" nil)))
 

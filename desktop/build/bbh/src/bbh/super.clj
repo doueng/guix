@@ -173,6 +173,13 @@
   (emacs/open! {:conversation conversation :dir workspace :title (str thread " " title)
                 :env {"BBH_SUPER_TOKEN" token "WF_RUN" wf-run}}))
 
+(defn release!
+  "Move the live Emacs session of CONVERSATION out of its workspace into DIR,
+  so deleting the workspace cannot leave it stuck busy. Returns its buffer name,
+  or nil when none runs."
+  [{:keys [conversation dir]}]
+  (some-> (emacs/call! "eng/bbh-super-release" conversation dir) emacs/read-string* (#(when-not (= "nil" %) %))))
+
 (declare run! promote!)
 
 (defn- launch-steps! [{:keys [dir state launch] :as c} w token]
@@ -356,13 +363,25 @@
             :when (and (= :running (:state j)) (process/stop-job! j))]
       (spit (str (:base j) ".exit") "137\n"))))
 
+(defn- release-session!
+  "Move Worker W's session out of its workspace before the workspace goes. Its
+  buffer outlives the Worker, so the person can still talk to it, and a shell
+  whose directory is deleted stays busy forever. With Emacs down there is no
+  session to move, so a failure is logged and the retire goes on."
+  [{:keys [launch]} w]
+  (when (:conversation w)
+    (try ((:release! launch) {:conversation (:conversation w)
+                              :dir (str (if (some-> (:repo w) fs/directory?) (:repo w) (fs/home)))})
+         (catch Exception e (binding [*out* *err*] (println "bbh super: releasing" (:id w) "failed:" (ex-message e)))))))
+
 (defn- retire-worker!
   "Remove Worker WORKER's workspace when it is retirable?, keeping work that
   did not land under a bookmark; a failure is logged, the finish stands."
-  [{:keys [state launch]} worker]
+  [{:keys [state launch] :as c} worker]
   (let [st @state
         w (get-in st [:workers worker])]
     (when (and (:workspace w) (retirable? st w))
+      (release-session! c w)
       (try ((:retire! launch) (assoc w :keep? (not= :done (:state w))))
            (catch Exception e (binding [*out* *err*] (println "bbh super: retiring" worker "failed:" (ex-message e))))))))
 
@@ -377,7 +396,7 @@
   "The workspace directories under DIR/workspaces that no live Worker owns, as
   {:workspace :worker :state :repo}. With CONFIRM, each is retired as its
   Worker's finish would have been, work off the line kept under a bookmark."
-  [{:keys [dir state launch]} confirm]
+  [{:keys [dir state launch] :as c} confirm]
   (let [st @state
         owner (into {} (keep #(when (:workspace %) [(str (:workspace %)) %]) (vals (:workers st))))]
     (vec (for [d (when (fs/directory? (fs/path dir "workspaces")) (sort (map str (fs/list-dir (fs/path dir "workspaces")))))
@@ -385,7 +404,8 @@
                :when (and (fs/directory? d) (retirable? st w))
                :let [row {:workspace d :worker (:id w) :state (:state w) :repo (or (repo-of d) (:repo w))}]]
            (if confirm
-             (assoc row :bookmark ((:retire! launch) {:repo (:repo row) :workspace d :keep? (not= :done (:state w))}))
+             (do (when w (release-session! c w))
+                 (assoc row :bookmark ((:retire! launch) {:repo (:repo row) :workspace d :keep? (not= :done (:state w))})))
              row)))))
 
 (defn handle
@@ -724,7 +744,7 @@
         db (store/open (str (fs/path dir "super.db")))
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
-           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land! :retire! retire!
+           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land! :retire! retire! :release! release!
                            :open-router! client/open-router!
                            ;; Whether open! can work: the daemon's, unless a caller brought its own open!.
                            :emacs-up? (if (:open! launch) (constantly true) emacs/alive?)}

@@ -1425,6 +1425,28 @@ a new token.  Nothing is shown; `eng/bbh-super-visit' shows it."
       (eng/bbh-super-mode 1))
     (buffer-name shell)))
 
+(defun eng/bbh-super-release (conversation dir)
+  "Move CONVERSATION's live session out of its workspace into DIR.
+The controller calls this before it deletes a finished Worker's workspace.
+Each submit starts processes in the shell's directory, and shell-maker
+marks the shell busy before the first of them.  In a deleted directory
+that process fails, so busy is never cleared and every later prompt and
+mailbox wake waits for a turn end that never comes.  Returns the shell's
+name, or nil when no session runs CONVERSATION."
+  (when-let* ((shell (eng/bbh-super--shell conversation)))
+    (let ((dir (file-name-as-directory (expand-file-name dir))))
+      (dolist (buffer (list shell
+                            (buffer-local-value 'eng/bbh-transcript shell)
+                            (and (featurep 'agent-shell-viewport)
+                                 (agent-shell-viewport--buffer :shell-buffer shell :existing-only t))))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (setq default-directory dir))))
+      (when-let* ((panel (get-buffer eng/bbh-workflow-buffer)))
+        (with-current-buffer panel
+          (when (equal eng/bbh-workflow--session (eng/bbh--session-id shell))
+            (setq eng/bbh-workflow--dir dir)))))
+    (buffer-name shell)))
+
 (defun eng/bbh-super-visit (name)
   "Show the session in buffer NAME as its transcript above its composer, alone in the frame."
   (let ((shell (or (get-buffer name) (user-error "No buffer %s; is its Worker running?" name))))

@@ -243,7 +243,8 @@
         c (super/start! {:dir dir :conversations conversations :scan-ms 10
                          :policy {:workers 2 :locks ["guix-build"] :never-granted ["guix-system"]}
                          :launch {:wf-start! (fn [workspace w] (str "run-" (:id w)))
-                                  :open! (fn [spec] (swap! launches conj spec) (str "wC:p" (count @launches)))}})]
+                                  :open! (fn [spec] (swap! launches conj spec) (str "wC:p" (count @launches)))
+                                  :release! (constantly nil)}})]
     (try (f c dir repo launches)
          (finally (super/stop! c)))))
 
@@ -1541,3 +1542,38 @@
                (:ok (call dir {:command :sweep! :args {:confirm true}}))))
         (is (= #{"default" "T1-1" "T2-1"} (workspaces repo)))
         (is (not (fs/exists? stray)))))))
+
+(deftest a-workers-session-leaves-its-workspace-before-the-workspace-goes
+  ;; Its Emacs shell outlives the Worker. Left in a deleted directory it stays
+  ;; busy forever, and every message to it waits in its queue.
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-r"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-rconv"}))
+        repo (jj-repo)
+        released (atom [])
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10 :policy {:workers 2}
+                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :open! (fn [_] "buf")
+                                  :release! (fn [spec] (swap! released conj (assoc spec :workspaces (set (map (comp str fs/file-name) (fs/list-dir (fs/path dir "workspaces"))))))
+                                              "buf")}})]
+    (try
+      (doseq [t ["done" "failed"]] (call dir {:command :thread! :args {:title t}}))
+      (let [[w1 w2] (map #(:ok (start-worker dir % :repo repo)) ["T1" "T2"])]
+        (assert (every? :workspace [w1 w2]) "both Workers started")
+        (commit-file (:workspace w1) "one" "1\n" "one")
+        (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})
+        (is (= [{:conversation "super-W1" :dir repo :workspaces #{"T1-1" "T2-1"}}] @released)
+            "a done Worker's session moves to the repo while its workspace still exists")
+        (is (not (fs/exists? (:workspace w1))))
+        (call dir {:command :finish-worker! :args {:worker "W2" :state-after :failed :reason "x"}})
+        (is (= 1 (count @released)) "a failed Worker's workspace stays, and so does its session")
+        (call dir {:command :archive! :args {:thread "T2"}})
+        (is (= {:conversation "super-W2" :dir repo :workspaces #{"T2-1"}} (last @released))
+            "archiving moves it out before the workspace goes")
+        (is (not (fs/exists? (:workspace w2)))))
+      (finally (super/stop! c)))))
+
+(deftest release-asks-emacs-to-move-the-session
+  (let [{:keys [bin args]} (fake-emacsclient 0 "\"T1 a\"")]
+    (binding [bbh.super.emacs/*emacsclient* bin]
+      (is (= "T1 a" (super/release! {:conversation "super-W1" :dir "/repo"})))
+      (is (= ["-s" (bbh.super.emacs/server) "--timeout=30" "--eval" "(eng/bbh-super-release \"super-W1\" \"/repo\")"]
+             (args))))))
