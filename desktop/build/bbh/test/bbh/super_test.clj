@@ -928,34 +928,6 @@
         (is (wait-for #(seq (prompts))))
         (is (= ["[routed to T1 W1 from herdr] keep the alias\n\no3 [phone] what is running"] (prompts)))))))
 
-(deftest jev-triage-drops-noise-before-a-router-turn-and-tags-the-rest
-  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-tri"}))
-        conversations (str (fs/create-temp-dir {:prefix "bbh-super-triconv"}))
-        judged (atom [])
-        c (super/start! {:dir dir :conversations conversations :scan-ms 10
-                         :triage (fn [text] (swap! judged conj text)
-                                   (case text "thanks" {:choice :noise :probability 0.95}
-                                              "hmm" {:choice :noise :probability 0.5}
-                                              "boom" (throw (ex-info "TypeSafe 503" {}))
-                                              {:choice :request :probability 0.9}))})
-        router (fs/path conversations "router")
-        prompts #(mapv (fn [f] (:text (cheshire.core/parse-string (slurp (str f)) true))) (fs/glob router "mailbox/*.json"))]
-    (try
-      (call dir {:command :register-router! :args {:conversation "router"}})
-      (call dir {:command :say! :args {:text "thanks" :origin :herdr}})
-      (is (wait-for #(= :dropped (:state (get-in @(:state c) [:outbox "o1"])))))
-      (Thread/sleep 50)
-      (is (= [] (prompts)) "sure noise costs no Router turn")
-      (call dir {:command :say! :args {:text "hmm" :origin :herdr}})
-      (is (wait-for #(seq (prompts))))
-      (is (= ["o2 (Jev: noise 0.50) [herdr] hmm"] (prompts)) "unsure noise still reaches the Router, tagged")
-      (doseq [f (fs/glob router "mailbox/*.json")] (fs/delete f))
-      (call dir {:command :say! :args {:text "boom" :origin :phone}})
-      (is (wait-for #(seq (prompts))))
-      (is (= ["o3 [phone] boom"] (prompts)) "a triage failure fails open, untagged")
-      (is (= ["thanks" "hmm" "boom"] @judged) "each message judged once")
-      (finally (super/stop! c)))))
-
 (deftest a-workers-capabilities-come-from-the-authenticated-origin-not-the-router
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-cap"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-capconv"}))
@@ -1242,20 +1214,6 @@
     (fn [_ dir _]
       (with-open [_ (java.net.Socket. "127.0.0.1" (int (parse-long (clojure.string/trim (slurp (str (fs/path dir "port")))))))]
         (is (= {:ok []} (deref (future (call dir {:command :threads})) 3000 :blocked)))))))
-
-(deftest slow-triage-does-not-hold-up-worker-deliveries
-  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-slow"}))
-        conversations (str (fs/create-temp-dir {:prefix "bbh-super-slowconv"}))
-        c (super/start! {:dir dir :conversations conversations :scan-ms 10
-                         :triage (fn [_] (Thread/sleep 5000) {:choice :request :probability 0.9})})]
-    (try
-      (call dir {:command :register-router! :args {:conversation "router"}})
-      (call dir {:command :say! :args {:text "look at this" :origin :herdr}})
-      (let [{:keys [version]} (thread-with-ask dir)]
-        (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "no"}}})
-        (is (wait-for #(some (fn [o] (and (:reply o) (= :sent (:state o)))) (vals (:outbox @(:state c)))))
-            "the reply reaches its Worker while the Router message is still being judged"))
-      (finally (super/stop! c)))))
 
 (deftest a-failed-restart-is-recorded-and-named-when-restarts-run-out
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-rf"}))

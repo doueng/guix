@@ -11,7 +11,6 @@
             [bbh.super.model :as model]
             [bbh.super.process :as process]
             [bbh.super.store :as store]
-            [bbh.super.triage :as triage]
             [bbh.version :as version]
             [bbh.workflow :as workflow]
             [babashka.process :as p]
@@ -677,41 +676,20 @@
           (run! c :controller {:id (new-id) :command :register-router! :token-hash (sha256 t) :args {:conversation conversation}})
           ((:open-router! launch) {:conversation conversation :token t}))))))
 
-(defn- untriaged?
-  "Whether outbox row O for the Router still waits for Jev's verdict on C."
-  [c o]
-  (and (:triage c) (not= :summary (:delivery o)) (nil? (:triage o))))
-
-(defn triage!
-  "Judge each pending Router message once. Runs on its own thread, so a slow or
-  down TypeSafe delays only the Router, never a Worker's delivery."
-  [{:keys [state] :as c}]
-  (let [router (get-in @state [:router :router :conversation])]
-    (doseq [o (sort-by (comp model/id-order :id) (vals (:outbox @state)))
-            :when (and (= :pending (:state o)) (= router (:conversation o)) (untriaged? c o))]
-      (let [verdict (try ((:triage c) (str/replace (:text o) #"^\[[^\]]*\] " ""))
-                         (catch Exception _ {:failed true}))]
-        (run! c :controller {:id (str "triaged-" (:id o)) :command :router-triaged!
-                             :args (assoc verdict :outbox (:id o) :threshold (:noise-probability (policy c)))})))))
-
 (defn dispatch!
   "One pass: send each pending outbox row to its Worker's mailbox, and mark a
   sent row acked once its mailbox file is gone. Each step is a command with a
-  fixed id, so a pass repeated after a crash changes nothing twice. Router
-  messages wait for `triage!`."
+  fixed id, so a pass repeated after a crash changes nothing twice."
   [{:keys [state] :as c}]
   (let [router (get-in @state [:router :router :conversation])
         rows (sort-by (comp model/id-order :id) (vals (:outbox @state)))
         for-router? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
         batch (filter for-router? rows)
-        line (fn [{:keys [id text delivery] {:keys [choice probability]} :triage}]
-               (str (when-not (= :summary delivery) (str id " "))
-                    (when choice (format "(Jev: %s %.2f) " (name choice) probability))
-                    text))]
-    ;; The Router reads its pending rows as one prompt, oldest first, each with
-    ;; Jev's triage. Summaries of messages already routed to a Worker ride along
-    ;; but never wake it alone, and noise never reaches it.
-    (when (and (some #(not= :summary (:delivery %)) batch) (not-any? #(untriaged? c %) batch))
+        line (fn [{:keys [id text delivery]}]
+               (str (when-not (= :summary delivery) (str id " ")) text))]
+    ;; The Router reads its pending rows as one prompt, oldest first. Summaries
+    ;; of messages already routed to a Worker ride along but never wake it alone.
+    (when (some #(not= :summary (:delivery %)) batch)
       (let [m (inbox/send! (conversation-root c router) (str/join "\n\n" (map line batch)))]
         (doseq [{:keys [id]} batch]
           (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))))
@@ -727,12 +705,10 @@
 
 (defn start!
   "Open the store under DIR, listen on a loopback port written to <dir>/port,
-  and run the dispatcher every SCAN-MS. TRIAGE, a function from a message to
-  {:choice :probability}, judges what reaches the Router (none: all of it).
-  Returns the controller; `stop!` ends it.
+  and run the dispatcher every SCAN-MS. Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms triage wf-root manage-router] :or {scan-ms 500 health-ms 120000}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router] :or {scan-ms 500 health-ms 120000}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -750,8 +726,8 @@
                            :emacs-up? (if (:open! launch) (constantly true) emacs/alive?)}
                           launch)
            :policy policy
-           :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :triage triage :wf-root wf-root
-           :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil) :triager (atom nil)
+           :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
+           :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
            :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0)}]
     (ensure-owner-token! c)
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
@@ -768,13 +744,6 @@
                                (.setDaemon true) (.start)))
                            (catch Exception e (when-not @(:stopped c) (binding [*out* *err*] (println "bbh super:" (ex-message e))))))))
       (.setDaemon true) (.start))
-    (when triage
-      (reset! (:triager c)
-              (doto (Thread. #(while (not @(:stopped c))
-                                (try (triage! c)
-                                     (catch Exception e (binding [*out* *err*] (println "bbh super triage:" (ex-message e)))))
-                                (Thread/sleep (long scan-ms))))
-                (.setDaemon true) (.start))))
     (reset! (:dispatcher c)
      (doto (Thread. #(while (not @(:stopped c))
                       (try
@@ -788,7 +757,7 @@
       (.setDaemon true) (.start)))
     c))
 
-(defn stop! [{:keys [stopped server db dir lock dispatcher triager in-flight]}]
+(defn stop! [{:keys [stopped server db dir lock dispatcher in-flight]}]
   (reset! stopped true)
   (.close ^ServerSocket server)
   ;; Let the requests already accepted finish, a launch among them.
@@ -796,8 +765,6 @@
     (while (and (pos? @in-flight) (< (System/currentTimeMillis) deadline)) (Thread/sleep 50)))
   ;; Wait for the current observation/delivery transaction before closing SQLite.
   (when-let [t @dispatcher] (.join ^Thread t))
-  ;; A triage call can take its HTTP timeout; its commit after close would fail harmlessly.
-  (when-let [t @triager] (.interrupt ^Thread t) (.join ^Thread t 1000))
   (fs/delete-if-exists (fs/path dir "port"))
   (locking db (store/close! db))
   (.close ^java.nio.channels.FileChannel lock))
@@ -823,5 +790,5 @@
 (defn -main
   "bbh super serve: run the controller until killed or its code changes."
   []
-  (serve! {:dir (super-dir) :data-dir (str (data-dir)) :triage triage/jev :manage-router true
+  (serve! {:dir (super-dir) :data-dir (str (data-dir)) :manage-router true
            :interval-ms (some-> (sysenv/getenv "BBH_SUPER_FOLLOW_MS") parse-long)}))
