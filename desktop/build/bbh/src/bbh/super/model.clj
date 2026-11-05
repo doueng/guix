@@ -632,7 +632,7 @@
           (seq open) :waiting
           resolved-at :archived
           (and (or (= :failed execution) (= :needs-human (get-in state [:workers (:worker (get-in state [:threads id])) :health :classification]))) (empty? open)) :needs-attention
-          (some #(#{:sent :delivered} (:state %)) replies) :sent
+          (some #(= :sent (:state %)) replies) :sent
           (> (or milestone-seq 0) (or cursor 0)) :new
           (#{:working :queued} execution) :working
           :else :quiet)))
@@ -724,13 +724,9 @@
     (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :dropped)))
 
 (defmethod fold* :outbox-acked [state {{:keys [id]} :data}]
-  ;; An ack that arrives after the Worker answered must not undo the answer.
-  (let [reply (get-in state [:replies (get-in state [:outbox id :reply])])
-        asks (filter #(= :sent (get-in state [:asks % :state])) (concat (keys (:picks reply)) (keys (:approved reply))))]
-    (cond-> state
-      (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :acked)
-      (= :sent (:state reply)) (-> (assoc-in [:replies (:id reply) :state] :delivered)
-                                   (set-states :asks asks :delivered)))))
+  ;; Only the row moves. A reply stays :sent until the Worker answers it.
+  (cond-> state
+    (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :acked)))
 
 (defmethod fold* :reply-answered [state {{:keys [id]} :data :keys [thread]}]
   (let [reply (get-in state [:replies id])]

@@ -57,7 +57,7 @@
       [:div.sec "Waiting on you"]
       [:div.row "◆ T9   review: cost per session, 4 files, gates ok  1h"]
       [:div.sec "Sent"]
-      [:div.row "→ T12  Alt+W everywhere · delivered, not yet read   2m"]
+      [:div.row "→ T12  Alt+W everywhere · sent, not yet read   2m"]
       [:div.sec "Working"]
       [:div.row "… T15  web cost · change: implement                12m"]
       [:div.row "… T16  Asahi build fix · queued (guix-build)        40m"]

@@ -133,7 +133,7 @@ Picks, drafts and read cursors are per client, not in the thread record. A clien
 ### Ask lifecycle
 
 ```
-open ──pick (client only)──> picked ──send──> sent ──mailbox ack──> delivered ──worker turn──> answered
+open ──pick (client only)──> picked ──send──> sent ──worker turn──> answered
  │                                                                                        
  ├──dismiss (mark read / skip)──> dismissed   (delivered to the Worker as "do not wait", never as an answer)
  └──newer ask supersedes──────> superseded  (shown as replaced)
@@ -166,7 +166,7 @@ Execution state, attention state and read state are independent facts. The secti
 | Holding up work | attention holds-up |
 | Waiting on you | attention waiting or review |
 | Needs attention | execution failed with no open ask. A technical blockage, not a decision. |
-| Sent | a reply is sent or delivered but not yet answered |
+| Sent | a reply is sent but not yet answered |
 | New | unseen milestone events |
 | Working | execution working or queued |
 | Quiet | nothing above and not resolved |

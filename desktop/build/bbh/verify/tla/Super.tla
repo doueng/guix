@@ -150,13 +150,6 @@ Archive(t) ==
      ELSE /\ wstate' = cancel(wstate) /\ UNCHANGED <<asks, replies>>
   /\ UNCHANGED <<wthread, launched, tworker>>
 
-\* decide* :outbox-acked! on a reply's outbox, fold* :outbox-acked
-Acked(r) ==
-  /\ replies[r].st = "sent"
-  /\ replies' = [replies EXCEPT ![r].st = "delivered"]
-  /\ asks' = SetAsks(asks, {a \in replies[r].picks : asks[a].st = "sent"}, "delivered")
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved>>
-
 \* decide* :answered! by a live Worker of the reply's thread, fold* :reply-answered
 Answered(w, r) ==
   LET t == replies[r].thread
@@ -175,7 +168,7 @@ Next ==
   \/ \E w \in Workers, a \in AskIds, s \in BOOLEAN, sup \in SUBSET AskIds : Ask(w, a, s, sup)
   \/ \E t \in Threads, r \in ReplyIds, p \in SUBSET AskIds, d \in SUBSET AskIds : Reply(t, r, p, d)
   \/ \E t \in Threads : Archive(t)
-  \/ \E r \in ReplyIds : Acked(r) \/ \E w \in Workers : Answered(w, r)
+  \/ \E r \in ReplyIds, w \in Workers : Answered(w, r)
 
 Spec == Init /\ [][Next]_vars
 

@@ -470,7 +470,7 @@
         label (fn [{:keys [options picks]}] (str/join ", " (map (fn [[_ o]] (or (some #(when (= o (:id %)) (:label %)) options) o)) picks)))]
     [:p.conflict
      (str "Already answered"
-          (when-let [a (first (filter #(#{"sent" "delivered" "answered"} (:state %)) answered))]
+          (when-let [a (first (filter #(#{"sent" "answered"} (:state %)) answered))]
             (let [reply (last (filter #(contains? (:picks %) (:id a)) (:replies t)))]
               (when reply (str ": " (label {:options (:options a) :picks (:picks reply)})))))
           (when (empty? asks) ". Nothing is open."))]))

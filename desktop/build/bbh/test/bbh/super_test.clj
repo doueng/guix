@@ -119,7 +119,7 @@
 (deftest an-outbox-row-is-acked-when-its-mailbox-file-is-removed
   (with-controller
     (fn [c dir conversations]
-      (let [{:keys [version]} (thread-with-ask dir)]
+      (let [{:keys [version token]} (thread-with-ask dir)]
         (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "no"}}})
         (is (wait-for #(seq (fs/glob conversations "super-W1/mailbox/*.json"))))
         (let [files (fs/glob conversations "super-W1/mailbox/*.json")
@@ -129,7 +129,10 @@
           (is (wait-for #(= :sent (get-in @(:state c) [:outbox "o2" :state]))) "the send is recorded after the file lands")
           (doseq [f files] (fs/delete f))
           (is (wait-for #(= :acked (get-in @(:state c) [:outbox "o2" :state]))))
-          (is (= [:delivered] (map :state (vals (:asks @(:state c)))))))))))
+          (is (= [:sent] (map :state (vals (:asks @(:state c))))) "an ack moves only the row")
+          (is (= [:sent] (map :state (vals (:replies @(:state c))))))
+          (call dir {:token token :command :answered! :args {:reply (ffirst (:replies @(:state c)))}})
+          (is (= [:answered] (map :state (vals (:replies @(:state c))))) "the Worker's answered! does"))))))
 
 (deftest a-second-controller-on-the-same-store-is-refused
   (with-controller
