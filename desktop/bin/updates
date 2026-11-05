@@ -40,10 +40,18 @@
                 (slurp channels-file))]
     {:name name :url url :branch branch :current commit}))
 
+;; Channels whose branch head breaks with the others, held at a commit that works.
+;; Drop an entry once upstream fixes the incompatibility.
+(def channel-holds
+  {"guix" {:commit "704ad8ced8ac2a6f94ddaf6edbfa1ae7d154dd44"
+           :reason "rde contrib/packages/node.scm uses node-bootstrap, removed by guix 66d30bdf6d3"}})
+
 (defn channel-refresh [items]
-  (for [{:keys [url branch current] :as item} items
-        :let [latest (head-commit url (str "refs/heads/" branch))]]
-    (assoc item :latest latest :changelog (compare-url url current latest))))
+  (for [{:keys [name url branch current] :as item} items
+        :let [{:keys [commit reason]} (channel-holds name)
+              latest (or commit (head-commit url (str "refs/heads/" branch)))]]
+    (assoc item :latest latest
+           :changelog (cond-> (compare-url url current latest) reason (str " (held: " reason ")")))))
 
 (defn bumped-channels [items]
   (reduce (fn [text {:keys [current latest]}] (str/replace text current latest))
@@ -82,6 +90,19 @@
        (remove #(or (str/starts-with? (:name %) "nixpkgs-") (@custom-package-names (:name %))))
        (group-by :name) vals (map first) (sort-by :name)))
 
+(defn last-line [text]
+  (last (remove str/blank? (str/split (str/trim (str text)) #"[\r\n]+"))))
+
+;; Name the failing module and exception from a failed time-machine build log.
+(defn build-failure [message]
+  (let [log (second (re-find #"View build log at '([^']+)'" message))
+        lines (when log (try (str/split-lines (sh "zcat" log)) (catch Exception _ nil)))
+        module (last (keep #(second (re-find #"^In ((?!ice-9/|unknown file|guix/|gnu/packages\.scm|srfi/)\S+):$" (str/trim %)))
+                           lines))
+        exception (last (filter #(str/starts-with? % "(exception ") lines))]
+    (str/join "; " (remove nil? [(last-line message) (some->> module (str "in ")) exception
+                                  (some->> log (str "build log: "))]))))
+
 (defn guix-refresh [items]
   (let [channels (channel-refresh (channel-items))
         dir (fs/create-temp-dir)
@@ -97,7 +118,11 @@
       (println "guix: evaluating the bumped channels; the first run per bump takes minutes"))
     (try
       (let [now (versions guix "repl" "--" script names)
-            later (versions guix "time-machine" "-C" bumped "--" "repl" "--" script names)]
+            later (try (versions guix "time-machine" "-C" bumped "--" "repl" "--" script names)
+                       (catch Exception e
+                         (throw (ex-info (str "time-machine on the bumped channels failed: "
+                                              (build-failure (ex-message e)))
+                                         {}))))]
         (for [{:keys [name current] :as item} items
               :let [before (now name) after (later name)]]
           (assoc item
@@ -445,8 +470,12 @@ copy; return the files left with conflict markers."
   (let [items (inventory selectors)
         fresh (apply concat
                      (pmap (fn [[source group]]
-                             (try ((get-in sources [source :refresh]) group)
-                                  (catch Exception e (map #(assoc % :error (ex-message e)) group))))
+                             (try (doall ((get-in sources [source :refresh]) group))
+                                  (catch Exception e
+                                    (let [error (last-line (ex-message e))]
+                                      (binding [*out* *err*]
+                                        (println (str "updates: " source " refresh failed: " error)))
+                                      (map #(assoc % :error error) group)))))
                            (group-by :source items)))
         cache (read-cache)]
     (fs/create-dirs (fs/parent cache-file))
@@ -474,11 +503,16 @@ copy; return the files left with conflict markers."
 
 (defn print-status [items]
   (let [{:keys [refreshed-at]} (read-cache)
-        shown (filter #(or (outdated? %) (:error %)) items)]
+        shown (filter #(and (outdated? %) (not (:error %))) items)]
     (println (if refreshed-at (str "Latest versions from " refreshed-at) "Never refreshed; run: updates refresh"))
     (when (seq shown) (print-table shown))
+    (doseq [[[source error] group] (group-by (juxt :source :error) (filter :error items))]
+      (println (str "ERROR " source " (" (count group) " items): " error)))
     (println (str (count (filter outdated? items)) " of " (count items) " have updates; "
-                  (count (remove :latest items)) " unknown."))))
+                  (count (remove :latest items)) " unknown"
+                  (when-let [errors (seq (filter :error items))] (str ", " (count errors) " failed"))
+                  "."))
+    (some :error items)))
 
 (defn apply! [selectors]
   (let [items (filter outdated? (with-latest (read-cache) (inventory selectors)))
@@ -496,9 +530,9 @@ copy; return the files left with conflict markers."
 
 (let [[command & selectors] *command-line-args*]
   (case (or command "status")
-    "status" (print-status (with-latest (read-cache) (inventory selectors)))
+    "status" (when (print-status (with-latest (read-cache) (inventory selectors))) (System/exit 1))
     "list" (print-table (with-latest (read-cache) (inventory selectors)))
-    "refresh" (print-status (refresh! selectors))
+    "refresh" (when (print-status (refresh! selectors)) (System/exit 1))
     "apply" (apply! selectors)
     (do (println "usage: updates [status|list|refresh|apply] [SOURCE[/NAME] ...]")
         (println (str "sources: " (str/join " " source-order)))
