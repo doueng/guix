@@ -1,9 +1,6 @@
-;; What bbh super grants: the Worker cap, the resource locks a Worker may hold,
-;; and the ones never granted (a system switch is always an action ask to you).
-;; A delivery a live Worker leaves in its mailbox longer than
-;; :stale-delivery-minutes puts its thread under Needs attention.
-;; A Worker gets the capabilities of the origin its request came from (an origin
-;; not named gets :read), and a lock needs the capability named for it.
+;; bbh super's policy: the Worker cap, and how long a live Worker may leave a
+;; delivery in its mailbox (:stale-delivery-minutes) before its thread shows
+;; under Needs attention.
 ;; :projects are the repositories the Router starts Workers in, by name, with
 ;; the check that proves a change there; each check passed on 2026-11-03.
 {:workers 10
@@ -25,12 +22,4 @@
                         :about "small raw-mode terminal text editor in C"}
             "cljs-platformer" {:repo "~/src/cljs-platformer" :check "./check.sh"
                                :about "Mario-style canvas platformer in ClojureScript and shadow-cljs"}}
- :locks ["guix-build" "repo-push"]
- :never-granted ["guix-system"]
- :stale-delivery-minutes 30
- :origins {:owner #{:read :edit-workspace :run-checks :publish}
-           :emacs #{:read :edit-workspace :run-checks :publish}
-           :herdr #{:read :edit-workspace :run-checks :publish}
-           :phone #{:read :edit-workspace :run-checks :publish}
-           :voice #{:read :edit-workspace :run-checks :publish}}
- :lock-capabilities {"repo-push" :publish "guix-build" :run-checks}}
+ :stale-delivery-minutes 30}

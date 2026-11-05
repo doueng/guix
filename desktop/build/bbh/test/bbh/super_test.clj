@@ -274,7 +274,7 @@
         repo (jj-repo)
         launches (atom [])
         c (super/start! {:dir dir :conversations conversations :scan-ms 10
-                         :policy {:workers 2 :locks ["guix-build"] :never-granted ["guix-system"]}
+                         :policy {:workers 2}
                          :launch {:wf-start! (fn [workspace w] (str "run-" (:id w)))
                                   :open! (fn [spec] (swap! launches conj spec) (str "wC:p" (count @launches)))
                                   :release! (constantly nil)}})]
@@ -350,21 +350,17 @@
           (is (= ["W1"] (:history t)))
           (is (= :done (:execution t))))))))
 
-(deftest a-lock-holder-blocks-a-second-worker-until-it-finishes
+(deftest a-full-cap-queues-a-worker-until-one-finishes
   (with-workers
     (fn [c dir repo launches]
       (doseq [t ["a" "b" "c"]] (call dir {:command :thread! :args {:title t}}))
-      (is (= :working (:state (:ok (start-worker dir "T1" :repo repo :locks ["guix-build"])))))
-      (is (= {"guix-build" "W1"} (:locks @(:state c))))
-      (let [w2 (:ok (start-worker dir "T2" :repo repo :locks ["guix-build"]))]
-        (is (= [:queued "guix-build held by W1"] [(:state w2) (:reason w2)]))
-        (is (= :never-granted (:error (call dir {:command :start-worker! :args {:thread "T3" :workflow :change :brief "x" :repo repo :check "true" :locks ["guix-system"]}}))))
-        (is (= :unknown-lock (:error (call dir {:command :start-worker! :args {:thread "T3" :workflow :change :brief "x" :repo repo :check "true" :locks ["repo-push"]}}))))
+      (is (= :working (:state (:ok (start-worker dir "T1" :repo repo)))))
+      (is (= :working (:state (:ok (start-worker dir "T2" :repo repo)))))
+      (let [w3 (:ok (start-worker dir "T3" :repo repo))]
+        (is (= [:queued "2 Workers already running"] [(:state w3) (:reason w3)]))
         (call dir {:command :finish-worker! :args {:worker "W1" :state-after :failed :reason "REPL died"}})
-        (is (= {"guix-build" "W2"} (:locks @(:state c))))
-        (is (= :working (:state (get-in @(:state c) [:workers "W2"]))))
+        (is (wait-for #(= :working (:state (get-in @(:state c) [:workers "W3"])))))
         (is (= :failed (:execution (:ok (call dir {:command :thread :args {:id "T1"}})))))))))
-
 (deftest there-is-no-lease-so-the-router-steers-any-worker
   (with-workers
     (fn [c dir repo launches]
@@ -942,12 +938,11 @@
         (is (wait-for #(seq (prompts))))
         (is (= ["[routed to T1 W1 from herdr] keep the alias\n\no4 [phone] what is running"] (prompts)))))))
 
-(deftest a-workers-capabilities-come-from-the-authenticated-origin-not-the-router
+(deftest a-workers-origin-comes-from-the-message-the-router-names
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-cap"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-capconv"}))
         repo (jj-repo)
         c (super/start! {:dir dir :conversations conversations :scan-ms 10
-                         :policy {:origins {:herdr #{:read :edit-workspace :run-checks :publish} :phone #{:read :run-checks}}}
                          :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :open! (fn [_] "wC:p1")}})]
     (try
       (let [router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
@@ -955,19 +950,14 @@
                     (call dir {:token router :command :start-worker!
                                :args (merge {:thread thread :for for :workflow :investigation :brief "look" :repo repo} more)}))]
         (call dir {:command :say! :args {:text "push the fix" :origin :phone}})
-        (call dir {:command :say! :args {:text "push it for real" :origin :herdr}})
-        (doseq [t ["a" "b" "c"]] (call dir {:command :thread! :args {:title t}}))
-        (is (= [:capability "repo-push needs :publish, which phone does not grant"]
-               ((juxt :error :message) (start "T1" "o1" :locks ["repo-push"]))))
+        (doseq [t ["a" "b"]] (call dir {:command :thread! :args {:title t}}))
         (is (= :invalid (:error (start "T1" nil))) "the Router must name the message")
         (is (= :invalid (:error (start "T1" "o9"))) "and a real one")
-        (let [r (start "T1" "o1" :capabilities [:read :publish])]
-          (is (= [:phone #{:read}] ((juxt :origin :capabilities) (get-in @(:state c) [:workers (:id (:ok r))])))))
-        (is (= "W2" (:id (:ok (start "T2" "o2" :locks ["repo-push"])))) "the owner's Herdr message grants :publish")
-        (let [r (start-worker dir "T3" :repo repo :workflow :investigation)]
+        (let [r (start "T1" "o1")]
+          (is (= :phone (:origin (get-in @(:state c) [:workers (:id (:ok r))]))) (pr-str r)))
+        (let [r (start-worker dir "T2" :repo repo :workflow :investigation)]
           (is (= :owner (:origin (get-in @(:state c) [:workers (:id (:ok r))]))) (pr-str r))))
       (finally (super/stop! c)))))
-
 (deftest approval-binds-to-the-reviewed-revision-and-its-evidence
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-ap"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-apconv"}))
@@ -1073,7 +1063,7 @@
 
 (defn- start-cmd [id thread & {:as args}]
   [:owner {:id id :command :start-worker! :token-hash (str "h-" id) :requires []
-           :policy {:workers 2 :locks ["guix-build"]}
+           :policy {:workers 1}
            :args (merge {:thread thread :workflow :change :brief "b" :repo "/r"} args)}])
 
 (deftest a-worker-that-supersedes-its-stopped-ask-with-an-open-one-is-working
@@ -1098,31 +1088,23 @@
 (deftest archiving-a-thread-cancels-its-queued-worker-so-it-never-launches
   (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
                                                [:owner {:id "t2" :command :thread! :args {:title "b"}}]
-                                               (start-cmd "s1" "T1" :locks ["guix-build"])
-                                               (start-cmd "s2" "T2" :locks ["guix-build"])
+                                               (start-cmd "s1" "T1")
+                                               (start-cmd "s2" "T2")
                                                [:owner {:id "ar" :command :archive! :args {:thread "T2"}}]
                                                [:controller {:id "f1" :command :finish-worker! :args {:worker "W1" :state-after :done}}]
                                                [:controller {:id "p1" :command :promote-worker! :token-hash "h-p" :policy {:workers 2}}]])]
     (is (= :queued (:state (nth results 3))))
     (is (nil? (last results)) "nothing to promote")
-    (is (= [:cancelled "thread archived"] ((juxt :state :reason) (get-in state [:workers "W2"]))))
-    (is (= {} (:locks state)))))
+    (is (= [:cancelled "thread archived"] ((juxt :state :reason) (get-in state [:workers "W2"]))))))
 
-(deftest a-released-lock-row-is-deleted-so-a-restart-does-not-revive-it
-  (let [{:keys [db state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                                          (start-cmd "s1" "T1" :locks ["guix-build"])
-                                          [:controller {:id "f1" :command :finish-worker! :args {:worker "W1" :state-after :done}}]])]
-    (is (= {} (:locks state)))
-    (is (= state (store/load db) (store/replay db)) "the table, the events and memory agree")))
-
-(deftest a-starting-worker-holds-its-locks-so-a-second-one-queues
+(deftest a-starting-worker-holds-the-only-slot-so-a-second-one-queues
   (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
                                                [:owner {:id "t2" :command :thread! :args {:title "b"}}]
-                                               (start-cmd "s1" "T1" :locks ["guix-build"])
-                                               (start-cmd "s2" "T2" :locks ["guix-build"])])]
+                                               (start-cmd "s1" "T1")
+                                               (start-cmd "s2" "T2")])]
     (is (= :starting (:state (nth results 2))))
-    (is (= [:queued "guix-build held by W1"] ((juxt :state :reason) (nth results 3))))
-    (is (= {"guix-build" "W1"} (:locks state)))))
+    (is (= [:queued "1 Workers already running"] ((juxt :state :reason) (nth results 3))))
+    (is (= #{:counters :threads :workers :asks :replies :outbox :tokens :router} (set (keys state))) "no lock records")))
 
 (deftest a-thread-with-a-starting-worker-takes-no-second-one
   (let [{:keys [results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
@@ -1176,15 +1158,14 @@
 (deftest promotion-is-one-commit-so-a-queued-worker-starts-once
   (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
                                                [:owner {:id "t2" :command :thread! :args {:title "b"}}]
-                                               (start-cmd "s1" "T1" :locks ["guix-build"])
-                                               (start-cmd "s2" "T2" :locks ["guix-build"])
+                                               (start-cmd "s1" "T1")
+                                               (start-cmd "s2" "T2")
                                                [:controller {:id "f1" :command :finish-worker! :args {:worker "W1" :state-after :done}}]
-                                               [:controller {:id "p1" :command :promote-worker! :token-hash "hp1" :policy {:workers 2 :locks ["guix-build"]}}]
-                                               [:controller {:id "p2" :command :promote-worker! :token-hash "hp2" :policy {:workers 2 :locks ["guix-build"]}}]])]
+                                               [:controller {:id "p1" :command :promote-worker! :token-hash "hp1" :policy {:workers 1}}]
+                                               [:controller {:id "p2" :command :promote-worker! :token-hash "hp2" :policy {:workers 1}}]])]
     (is (= "W2" (nth results 5)))
     (is (nil? (nth results 6)) "nothing left to promote")
     (is (= :starting (get-in state [:workers "W2" :state])))
-    (is (= {"guix-build" "W2"} (:locks state)))
     (is (= [:worker "W2"] (get-in state [:tokens "hp1" :principal])))))
 
 

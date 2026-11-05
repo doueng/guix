@@ -216,7 +216,7 @@
 
 (defn- promote!
   "Start the next queued Worker that may run now, if any. Choosing it, moving
-  it to :starting with its locks and issuing its token is one commit, so two
+  it to :starting and issuing its token is one commit, so two
   callers at once never launch the same Worker or pass the cap."
   [{:keys [state] :as c}]
   (let [t (new-token)]

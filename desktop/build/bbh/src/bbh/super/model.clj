@@ -3,13 +3,12 @@
   or refuses it, `fold` applies one event, and `changed` names the records a
   fold touched so the store can materialize them. Nothing here knows SQL,
   sockets or mailboxes."
-  (:require [clojure.set :as set]
-            [clojure.string :as str]))
+  (:require [clojure.string :as str]))
 
 (def empty-state
-  {:counters {} :threads {} :workers {} :asks {} :replies {} :outbox {} :locks {} :tokens {} :router {}})
+  {:counters {} :threads {} :workers {} :asks {} :replies {} :outbox {} :tokens {} :router {}})
 
-(def entity-kinds [:counters :threads :workers :asks :replies :outbox :locks :tokens :router])
+(def entity-kinds [:counters :threads :workers :asks :replies :outbox :tokens :router])
 
 (defn- refuse [error & {:keys [message] :as more}]
   (throw (ex-info (or message (name error)) (assoc (dissoc more :message) :error error))))
@@ -22,15 +21,10 @@
    :controller #{:promote-worker! :restart-failed! :issue-token! :register-router! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered!}})
 
 (def default-policy
-  "What policy.edn says when it is absent: the Worker cap, the locks a Worker
-  may hold, the ones never granted (a system switch is always an ask), and how
-  long a live Worker may leave a delivery in its mailbox before it needs you
-  (a reply waits for the current turn, which can include a 10 minute job-wait),
-  what each origin's Workers may do (an origin not named gets :read), and
-  the capability each lock needs."
-  {:workers 10 :locks ["guix-build" "repo-push"] :never-granted ["guix-system"] :stale-delivery-minutes 30
-   :origins (zipmap [:owner :emacs :herdr :phone :voice] (repeat #{:read :edit-workspace :run-checks :publish}))
-   :lock-capabilities {"repo-push" :publish "guix-build" :run-checks}})
+  "What policy.edn says when it is absent: the Worker cap, and how long a live
+  Worker may leave a delivery in its mailbox before it needs you (a reply waits
+  for the current turn, which can include a 10 minute job-wait)."
+  {:workers 10 :stale-delivery-minutes 30})
 
 (defn authorize
   "Throw unless PRINCIPAL may run COMMAND on STATE. A Worker acts on its own
@@ -105,13 +99,10 @@
   (filter #(holds-slot? state %) (vals (:workers state))))
 
 (defn- blocked-by
-  "Why WORKER cannot run now under POLICY, or nil: the cap, or a lock held by
-  another Worker."
-  [state policy {:keys [id locks]}]
-  (let [held (keep (fn [l] (when-let [w (get-in state [:locks l])] (when (not= w id) (str l " held by " w)))) locks)]
-    (cond (seq held) (str/join ", " held)
-          (>= (count (remove #(= id (:id %)) (active-workers state))) (:workers policy)) (str (:workers policy) " Workers already running")
-          :else nil)))
+  "Why WORKER cannot run now under POLICY, or nil: the cap is full."
+  [state policy {:keys [id]}]
+  (when (>= (count (remove #(= id (:id %)) (active-workers state))) (:workers policy))
+    (str (:workers policy) " Workers already running")))
 
 (defn id-order "The order of ids of one kind: T12 → 12, so T9 comes before T10." [id] (parse-long (subs id 1)))
 
@@ -141,14 +132,11 @@
               (:origin o))
     (refuse :forbidden :command :start-worker!)))
 
-(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo locks check bench repro for capabilities] :as args} :args :keys [token-hash policy requires principal]}]
+(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo check bench repro for] :as args} :args :keys [token-hash policy requires principal]}]
   (let [t (thread-of state thread)
         policy (merge default-policy policy)
-        locks (set locks)
         id (next-id state :workers "W")
-        origin (request-origin state principal for)
-        granted (get-in policy [:origins origin] #{:read})
-        caps (if capabilities (set/intersection (set capabilities) granted) granted)]
+        origin (request-origin state principal for)]
     (when (:resolved-at t) (refuse :archived :thread thread :message (str thread " is archived; start a new thread")))
     (when-let [w (thread-worker state thread)] (refuse :thread-has-worker :thread thread :worker w))
     (when-not (keyword? workflow) (refuse :invalid :field :workflow))
@@ -156,13 +144,8 @@
     (when (str/blank? repo) (refuse :invalid :field :repo))
     (doseq [flag requires]
       (when (str/blank? (get args flag)) (refuse :invalid :field flag :message (str (name workflow) " needs " flag))))
-    (doseq [l locks]
-      (when (some #{l} (:never-granted policy)) (refuse :never-granted :lock l))
-      (when-not (some #{l} (:locks policy)) (refuse :unknown-lock :lock l))
-      (when-let [need (get-in policy [:lock-capabilities l])]
-        (when-not (caps need) (refuse :capability :lock l :needs need :message (str l " needs " need ", which " (name origin) " does not grant")))))
-    (let [worker (cond-> {:id id :generation (inc (count (:history t))) :workflow workflow :brief brief :repo repo :locks locks
-                          :origin origin :capabilities caps}
+    (let [worker (cond-> {:id id :generation (inc (count (:history t))) :workflow workflow :brief brief :repo repo
+                          :origin origin}
                    check (assoc :check check) bench (assoc :bench bench) repro (assoc :repro repro))
           reason (blocked-by state policy (assoc worker :thread thread))]
       {:events [{:kind :worker-started :thread thread
@@ -172,10 +155,10 @@
 
 (defn- brief-text
   "The first mailbox message of Worker W: its brief and how it reports."
-  [{:keys [id thread brief workflow origin capabilities repo]} wf-run workspace]
+  [{:keys [id thread brief workflow origin repo]} wf-run workspace]
   (str/join "\n\n" [(format "[%s brief for %s]" thread id)
                        brief
-                       (format "Requested from %s. Capabilities: %s." (some-> origin name) (str/join ", " (map name (sort capabilities))))
+                       (format "Requested from %s." (some-> origin name))
                        (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
                                id thread wf-run (name workflow))
                        (format "Work only in your jj workspace %s, your current directory. %s is the main checkout: read it if you need to, but do not edit it. Commit your work there: (super-done!) lands it on the tip of the person's line and removes the workspace. When it returns :conflicts instead, resolve them in your workspace and call it again."
@@ -521,20 +504,13 @@
       (assoc-in [:threads thread :worker] id)
       (assoc-in [:threads thread :execution] :working)))
 
-(defn- take-locks
-  "STATE with Worker ID holding its locks. A Worker holds them from the moment
-  it is :starting, so another start in its launch window sees them."
-  [state id]
-  (update state :locks merge (zipmap (get-in state [:workers id :locks]) (repeat id))))
-
 (defmethod fold* :worker-started [state {{:keys [id] :as worker} :data :keys [thread]}]
   (-> state (bump :workers)
       (assoc-in [:workers id] (assoc worker :thread thread :conversation nil :wf-run nil :workspace nil :buffer nil))
-      (cond-> (= :queued (:state worker)) (assoc-in [:threads thread :execution] :queued)
-              (= :starting (:state worker)) (take-locks id))))
+      (cond-> (= :queued (:state worker)) (assoc-in [:threads thread :execution] :queued))))
 
 (defmethod fold* :worker-promoted [state {{:keys [id]} :data}]
-  (-> state (update-in [:workers id] assoc :state :starting :queued-reason nil) (take-locks id)))
+  (-> state (update-in [:workers id] assoc :state :starting :queued-reason nil)))
 
 (defmethod fold* :worker-prepared [state {{:keys [worker] :as args} :data}]
   (update-in state [:workers worker] merge (dissoc args :worker)))
@@ -545,7 +521,6 @@
         (update-in [:workers id] merge (dissoc running :id :outbox :text) {:state :working :queued-reason nil})
         (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
                                     :state :pending :message nil})
-        (take-locks id)
         (assoc-in [:threads thread :worker] id)
         (assoc-in [:threads thread :execution] :working))))
 
@@ -556,7 +531,6 @@
         (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
         ;; Nobody is left to read an answer, whatever the outcome.
         (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= id (:worker a)) (= :open (:state a))) (assoc :state :superseded))]) %)))
-        (update :locks #(into {} (remove (fn [[_ holder]] (= holder id)) %)))
         (cond-> (contains? #{id nil} (:worker t))
           (-> (assoc-in [:threads thread :worker] nil)
               (update-in [:threads thread :history] conj id)
