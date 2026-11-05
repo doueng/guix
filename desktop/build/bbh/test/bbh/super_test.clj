@@ -731,15 +731,15 @@
           (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
             (let [{:keys [token]} (thread-with-ask dir)]
               (pane/select! "T1")
-              (is (= {:thread "T1" :draft true :option 2} (voice/submit! "option two")))
+              (is (= {:thread "T1" :draft true :option 2} (voice/submit! "option two" :target :selected)))
               (is (= {"T1" {"a1" "week"}} (:picks (pane/client-state))))
               (is (= {} (:replies @(:state c))))
-              (is (= {:thread "T1" :sent true} (voice/submit! "send")))
+              (is (= {:thread "T1" :sent true} (voice/submit! "send" :target :selected)))
               (is (= [{"a1" "week"}] (mapv :picks (vals (:replies @(:state c))))))
               (call dir {:token token :command :ask! :args {:kind :action :text "Switch system?" :options [{:id "yes" :label "Yes"}]}})
-              (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "option one")))
+              (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "option one" :target :selected)))
               (pane/with-state-lock! #(pane/pick! "T1" 1))
-              (is (thrown-with-msg? Exception #"keyboard" (voice/submit! "send"))))))))))
+              (is (thrown-with-msg? Exception #"keyboard" (voice/submit! "send" :target :selected))))))))))
 
 (deftest voice-expiry-handle-precedence-and-stale-drafts
   (with-controller
@@ -756,8 +756,28 @@
               (call dir {:token token :command :ask! :args {:kind :question :text "A new question" :options []}})
               (is (thrown? Exception (voice/submit! "tee one send")))
               (spit pane/*state-file* (pr-str {:selected {:thread "T2" :at 1}}))
-              (is (= {:to :router} (voice/submit! "investigate my build")))
+              (is (= {:to :router} (voice/submit! "investigate my build" :target :selected)))
               (is (= :voice (:origin (:data (last (filter #(= :router-queued (:kind %)) (store/events (:db c)))))))))))))))
+
+(deftest the-agent-voice-binding-goes-to-the-router-whatever-the-inbox-selected
+  ;; Cmd+Shift+M runs `bbh say start TAKE` and `bbh say stop TAKE`, which end in
+  ;; stop!. A thread the Inbox cursor selected must not become a "T1:" prefix.
+  (with-controller
+    (fn [c dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))
+                        voice/hex! (fn [& _] {:exit 0 :out "Hey, look at my commit history"})]
+            (thread-with-ask dir)
+            (call dir {:command :register-router! :args {:conversation "router"}})
+            (pane/select! "T1")
+            (is (= {:to :router} (voice/stop!)))
+            (is (= ["[voice] (spoken) Hey, look at my commit history"] (mapv :text (vals (:outbox @(:state c))))))
+            (is (= {} (:picks (pane/client-state) {})) "no draft was made on the selected thread")
+            (testing "a spoken handle still names its thread"
+              (is (= {:thread "T1" :draft true :option 2} (voice/submit! "tee one, option two"))))
+            (testing "the selected-thread mode keeps acting on the selection"
+              (is (= {:thread "T1" :sent true} (voice/submit! "send" :target :selected))))))))))
 
 (deftest hex-stop-does-not-paste-or-route-silence
   (let [calls (atom [])]
@@ -1266,16 +1286,16 @@
             (let [{:keys [token]} (thread-with-ask dir)
                   replies #(mapv :picks (sort-by :seq (vals (:replies @(:state c)))))]
               (pane/select! "T1")
-              (is (= {:thread "T1" :draft true :option 2 :sent true} (voice/submit! "Yes, for a week, send.")))
+              (is (= {:thread "T1" :draft true :option 2 :sent true} (voice/submit! "Yes, for a week, send." :target :selected)))
               (is (= [{"a1" "week"}] (replies)))
               (call dir {:token token :command :ask! :args {:kind :question :text "Which build?" :recommended "small"
                                                            :options [{:id "big" :label "Big"} {:id "small" :label "Small"}]}})
-              (is (= {:thread "T1" :draft true :option 2 :sent true} (voice/submit! "the recommended one, send")))
+              (is (= {:thread "T1" :draft true :option 2 :sent true} (voice/submit! "the recommended one, send" :target :selected)))
               (call dir {:token token :command :ask! :args {:kind :question :text "Again?" :options [{:id "y" :label "Yes"} {:id "n" :label "No"}]}})
-              (is (= {:thread "T1" :draft true :option 1 :sent true} (voice/submit! "Option 1 and send")))
+              (is (= {:thread "T1" :draft true :option 1 :sent true} (voice/submit! "Option 1 and send" :target :selected)))
               (is (= [{"a1" "week"} {"a2" "small"} {"a3" "y"}] (replies)))
-              (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "approve")))
-              (is (= "T1" (:thread (voice/submit! "don't approve until CI passes")))
+              (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "approve" :target :selected)))
+              (is (= "T1" (:thread (voice/submit! "don't approve until CI passes" :target :selected)))
                   "a message that mentions approval is a message, not an approval"))))))))
 
 (deftest a-pick-lands-only-on-the-ask-it-was-checked-against

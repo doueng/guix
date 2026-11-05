@@ -114,7 +114,7 @@
    [:div.flow
     [:span.box "hold Cmd+Shift+M"] [:span.arrow "→"] [:span.box "Hex transcribes"] [:span.arrow "→"]
     [:span.box "bbh say"] [:span.arrow "→"] [:span.box.ctl "controller"] [:span.arrow "→"]
-    [:span.stack [:span.box "spoken handle: that thread"] [:span.box "selected in inbox pane: that thread"] [:span.box "otherwise: Router"]]]
+    [:span.stack [:span.box "spoken handle: that thread"] [:span.box "otherwise: Router"]]]
    [:figcaption "Voice. Nothing is pasted; the transcript becomes a voice event. Plain Cmd+M still pastes at the cursor."]])
 
 (def mockups {"Emacs: the main desk" herdr-mockup

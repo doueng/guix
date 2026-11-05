@@ -36,10 +36,12 @@
     (pane/send! thread)))
 
 (defn submit!
-  "Act on one spoken utterance TEXT for the thread it names or the one your
-  Inbox cursor selected in the last minute: pick an option, send the draft, or
-  both in one breath (\"option two, send\"); anything else is a message."
-  [text]
+  "Act on one spoken utterance TEXT for the thread it names: pick an option,
+  send the draft, or both in one breath (\"option two, send\"); anything else
+  is a message. With no spoken handle the message goes to the Router. Only
+  TARGET :selected uses the thread your Inbox cursor selected in the last
+  minute, so a cursor resting on a row cannot redirect what you say."
+  [text & {:keys [target] :or {target :router}}]
   (when-not (str/blank? text)
     (pane/with-state-lock!
       (fn []
@@ -47,7 +49,7 @@
               [handle rest] (model/parse-handle text)
               {:keys [selected]} (pane/client-state)
               age (- (System/currentTimeMillis) (or (:at selected) 0))
-              thread (or handle (when (<= 0 age 60000) (:thread selected)))
+              thread (or handle (when (and (= :selected target) (<= 0 age 60000)) (:thread selected)))
               words (plain (if handle rest text))
               [_ pick-words] (re-matches #"(.*?)\s*(?:and )?send" words)
               send? (some? pick-words)
@@ -75,10 +77,10 @@
 (defn hex! [& args]
   (apply p/shell {:out :string :err :string :continue true} "hex" args))
 
-(defn stop! []
+(defn stop! [& {:keys [target]}]
   (let [{:keys [exit out err]} (hex! "dictation" "stop" "--print")]
     (case exit
-      0 (submit! out)
+      0 (submit! out :target target)
       4 {:silence true}
       (throw (ex-info (str "Hex failed: " err) {:exit exit})))))
 
@@ -99,7 +101,7 @@
   "Record dictation TAKE: start Hex, wait for its stop request, then stop and
   submit what was said. Requests older than a day are left from takes whose
   start failed, and are removed."
-  [take & {:keys [dir poll-ms wait-ms] :or {dir (say-dir) poll-ms 20 wait-ms 600000}}]
+  [take & {:keys [dir poll-ms wait-ms target] :or {dir (say-dir) poll-ms 20 wait-ms 600000}}]
   (fs/create-dirs dir)
   (doseq [old (fs/glob dir "*.stop")
           :when (< (.toMillis (fs/last-modified-time old)) (- (System/currentTimeMillis) 86400000))]
@@ -114,7 +116,7 @@
         (Thread/sleep (long poll-ms))
         (recur (+ waited poll-ms))))
     (fs/delete-if-exists stop-file)
-    (stop!)))
+    (stop! :target target)))
 
 (defn vocabulary! []
   (doseq [{:keys [id resources]} (call! {:command :threads})
@@ -125,17 +127,22 @@
       (when-not (zero? exit) (throw (ex-info (str "Hex vocabulary: " err) {:exit exit})))))
   {:synced true})
 
-(defn -main [& args]
+(defn -main
+  "bbh say [--selected] start|stop [TAKE] | vocabulary | TEXT. Words go to the
+  thread they name or the Router; --selected acts on the Inbox selection instead."
+  [& args]
   (try
-    (prn (case (first args)
-           ;; With a take id, the press records and the release only asks it to stop.
-           "start" (if-let [take (second args)]
-                     (take! take)
-                     (let [{:keys [exit err]} (hex! "dictation" "start")]
-                       (when-not (zero? exit) (throw (ex-info err {:exit exit}))) {:recording true}))
-           "stop" (if-let [take (second args)] (request-stop! take) (stop!))
-           "vocabulary" (vocabulary!)
-           (submit! (if (seq args) (str/join " " args) (slurp *in*)))))
+    (let [target (when (some #{"--selected"} args) :selected)
+          args (remove #{"--selected"} args)]
+      (prn (case (first args)
+             ;; With a take id, the press records and the release only asks it to stop.
+             "start" (if-let [take (second args)]
+                       (take! take :target target)
+                       (let [{:keys [exit err]} (hex! "dictation" "start")]
+                         (when-not (zero? exit) (throw (ex-info err {:exit exit}))) {:recording true}))
+             "stop" (if-let [take (second args)] (request-stop! take) (stop! :target target))
+             "vocabulary" (vocabulary!)
+             (submit! (if (seq args) (str/join " " args) (slurp *in*)) :target target))))
     (catch Exception e
       (binding [*out* *err*] (println "bbh say:" (ex-message e)))
       (System/exit 1))))
