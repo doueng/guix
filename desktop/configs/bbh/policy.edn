@@ -3,8 +3,7 @@
 ;; A delivery a live Worker leaves in its mailbox longer than
 ;; :stale-delivery-minutes puts its thread under Needs attention.
 ;; A Worker gets the capabilities of the origin its request came from (an origin
-;; not named gets :read), and a lock needs the capability named for it. A Worker
-;; that needs you for :watchdog-after-minutes gets a read-only Watchdog Worker.
+;; not named gets :read), and a lock needs the capability named for it.
 ;; :projects are the repositories the Router starts Workers in, by name, with
 ;; the check that proves a change there; each check passed on 2026-11-03.
 {:workers 10
@@ -33,7 +32,5 @@
            :emacs #{:read :edit-workspace :run-checks :publish}
            :herdr #{:read :edit-workspace :run-checks :publish}
            :phone #{:read :edit-workspace :run-checks :publish}
-           :voice #{:read :edit-workspace :run-checks :publish}
-           :watchdog #{:read}}
- :watchdog-after-minutes 10
+           :voice #{:read :edit-workspace :run-checks :publish}}
  :lock-capabilities {"repo-push" :publish "guix-build" :run-checks}}

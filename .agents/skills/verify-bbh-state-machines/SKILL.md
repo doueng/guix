@@ -26,7 +26,7 @@ description: Model-check the bbh super Worker, ask and reply lifecycles and the 
 
 Bounds. `Super.workers.cfg` has 3 Workers, 3 threads, 1 lock, a cap of 2 and no asks. `Super.asks.cfg` has 2 Worker generations on 1 thread, 2 asks and 2 replies. `Workflow.change.cfg` has two overlapping `wf attest` calls and `Workflow.serial.cfg` has one. A pass covers these bounds only.
 
-Left out. The health-based `gone?` case of `holds-slot?`, leases (`takeover!`, `handback!`), restarts, steering, job exits, health, the Router's routing and triage, outbox rows other than a reply's, tokens, `asks-version` staleness (the model's person always replies to the current version), and the SQL store. Gate results are chosen freely, so the wf model covers every pass, fail and pending order but not what a gate checks.
+Left out. The health-based `gone?` case of `holds-slot?`, restarts, steering, job exits, health, the Router's routing, outbox rows other than a reply's, tokens, `asks-version` staleness (the model's person always replies to the current version), and the SQL store. Gate results are chosen freely, so the wf model covers every pass, fail and pending order but not what a gate checks.
 
 ## Coverage
 

@@ -1012,28 +1012,21 @@
     (is (= 1 fresh) "T4 waits")
     (is (= (model/order now) (model/order (:sections (model/hold (model/order now) now)))) "revealing shows the current list")))
 
-(deftest a-worker-stuck-needing-you-gets-one-read-only-watchdog
+(deftest a-worker-stuck-needing-you-starts-no-other-thread
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-wd"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-wdconv"}))
         repo (jj-repo)
         launches (atom [])
         c (super/start! {:dir dir :conversations conversations :scan-ms 10 :restart-grace-ms 3600000
-                         :policy {:watchdog-after-minutes 0}
                          :launch {:wf-start! (fn [_ w] (str "run-" (:id w))) :open! (fn [spec] (swap! launches conj spec) "wC:p1")}})]
     (try
       (call dir {:command :thread! :args {:title "Alt+W"}})
       (start-worker dir "T1" :repo repo :workflow :investigation)
-      (call dir {:command :thread! :args {:title "archived"}})
-      (call dir {:command :attach-worker! :args {:thread "T2" :conversation "conv-2"}})
-      (call dir {:command :archive! :args {:thread "T2"}})
       (dotimes [_ 3] (super/reconcile! c))
-      (let [st @(:state c)
-            watchdogs (filter :watchdog-of (vals (:threads st)))
-            w (get-in st [:workers (:worker (first watchdogs))])]
-        (is (= [["T3" "Watchdog: W1 Alt+W" "W1"]] (mapv (juxt :id :title :watchdog-of) watchdogs)) "one, for W1 only")
-        (is (= [:watchdog #{:read} :investigation] ((juxt :origin :capabilities :workflow) w)))
-        (is (clojure.string/includes? (:brief w) "Its wf run run-W1 is missing, so it cannot be restarted."))
-        (is (= 2 (count @launches)) "W1 and its Watchdog, each launched once across passes"))
+      (let [st @(:state c)]
+        (is (= :needs-human (get-in st [:workers "W1" :health :classification])))
+        (is (= ["T1"] (keys (:threads st))) "it shows under Needs attention and starts nothing else")
+        (is (= 1 (count @launches))))
       (finally (super/stop! c)))))
 
 
