@@ -83,6 +83,12 @@
           (locking db
             (is (= (store/replay db) (store/load db) @(:state c)))))))))
 
+(deftest a-retired-event-kind-folds-to-nothing-and-an-unknown-one-throws
+  (let [state (model/fold model/empty-state {:seq 1 :at "t" :kind :thread-created :thread "T1" :data {:id "T1" :title "x"}})]
+    (is (= state (model/fold state {:seq 2 :at "t" :kind :message-routed :thread nil :data {:outbox "o1"}})))
+    (is (= :unknown-event (:error (ex-data (try (model/fold state {:seq 3 :at "t" :kind :no-such-kind :data {}})
+                                                (catch Exception e e))))))))
+
 (deftest an-outbox-row-is-acked-when-its-mailbox-file-is-removed
   (with-controller
     (fn [c dir conversations]

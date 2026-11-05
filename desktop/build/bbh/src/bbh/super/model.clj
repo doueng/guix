@@ -530,6 +530,16 @@
   "STATE after EVENT, which has :seq, :at, :kind, :thread and :data."
   (fn [_state event] (:kind event)))
 
+(def retired-events
+  "Event kinds no command emits any more. An old log still holds them, so they
+  fold to nothing; store/load keeps whatever they once wrote."
+  #{:message-routed})
+
+(defmethod fold* :default [state {:keys [kind]}]
+  (if (retired-events kind)
+    state
+    (throw (ex-info (str "unknown event " kind) {:error :unknown-event :kind kind}))))
+
 (defn fold
   "STATE after EVENT, with the thread it concerns stamped :updated-at."
   [state {:keys [thread at] :as event}]
@@ -751,13 +761,10 @@
 (defmethod fold* :thread-resolved [state {:keys [thread seq]}]
   (update-in state [:threads thread] assoc :resolved-at seq :execution :none))
 
-(defmethod fold* :message-routed [state {{:keys [outbox conversation mailbox-text]} :data :keys [thread]}]
-  (-> state (bump :outbox)
-      (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text mailbox-text
-                                  :state :pending :message nil})))
-
-(defmethod fold* :worker-steered [state {{:keys [summary]} :data :keys [thread] :as event}]
-  (let [state (fold* state (assoc event :kind :message-routed))]
+(defmethod fold* :worker-steered [state {{:keys [summary outbox conversation mailbox-text]} :data :keys [thread] :as event}]
+  (let [state (-> state (bump :outbox)
+                  (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text mailbox-text
+                                              :state :pending :message nil}))]
     (cond-> (assoc-in state [:outbox (get-in event [:data :outbox]) :delivery] :steer)
       summary (-> (bump :outbox)
                   (assoc-in [:outbox (:outbox summary)] {:id (:outbox summary) :thread thread :reply nil :conversation (:conversation summary)
