@@ -184,36 +184,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
 ;; jumping instead, so disable evil-snipe auto-enablement (per Doom docs).
 (remove-hook 'doom-first-input-hook #'evil-snipe-mode)
 
-(setq select-enable-clipboard t
-      select-enable-primary t
-      save-interprogram-paste-before-kill t
-      kill-do-not-save-duplicates t
-      yank-pop-change-selection t)
-
-(setq savehist-additional-variables '(search-ring regexp-search-ring kill-ring))
-(savehist-mode 1)
-(add-hook 'savehist-save-hook
-          (lambda ()
-            (setq kill-ring
-                  (mapcar #'substring-no-properties
-                          (cl-remove-if-not #'stringp kill-ring)))))
-
-(defun eng/system-clipboard-copy (text &optional _push)
-  "Copy TEXT to the Wayland clipboard."
-  (when (and (stringp text) (not (string-empty-p text)))
-    (with-temp-buffer
-      (insert text)
-      (call-process-region (point-min) (point-max) "wl-copy" nil 0 nil
-                           "--type" "text/plain"))))
-
-(defun eng/system-clipboard-paste ()
-  "Read text from the Wayland clipboard."
-  (with-temp-buffer
-    (when (zerop (call-process "wl-paste" nil t nil "--no-newline"))
-      (buffer-string))))
-
-(setq interprogram-cut-function #'eng/system-clipboard-copy
-      interprogram-paste-function #'eng/system-clipboard-paste)
+(load (expand-file-name "clipboard.el" eng/doom-config-dir) nil 'nomessage)
 
 (setq-default search-upper-case t)
 

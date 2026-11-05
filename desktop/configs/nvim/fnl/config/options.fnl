@@ -94,6 +94,20 @@
         (table.remove lines (length lines)))
       (values lines regtype))))
 
+;; Neovim started outside Hyprland, e.g. by a shepherd service or a bbh agent,
+;; lacks WAYLAND_DISPLAY, so wl-copy would miss the compositor. Use its socket.
+(let [dir (or vim.env.XDG_RUNTIME_DIR (.. "/run/user/" (vim.uv.getuid)))
+      display vim.env.WAYLAND_DISPLAY]
+  (when (or (= display nil)
+            (= (vim.uv.fs_stat (if (= (display:sub 1 1) "/") display
+                                   (.. dir "/" display)))
+               nil))
+    (let [sockets (vim.fn.glob (.. dir "/wayland-[0-9]*") false true)
+          sockets (vim.tbl_filter #(not (vim.endswith $1 ".lock")) sockets)]
+      (table.sort sockets)
+      (when (. sockets 1)
+        (set vim.env.WAYLAND_DISPLAY (vim.fs.basename (. sockets 1)))))))
+
 (set vim.g.clipboard {:name "Wayland"
                       :copy {:+ [:wl-copy "--type" "text/plain"]
                              :* [:wl-copy "--primary" "--type" "text/plain"]}

@@ -16,7 +16,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify pi-sci pi-sci-test \
-        doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check swe-rebench-check updates-check
+        doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check swe-rebench-check updates-check clipboard-check
 
 help:
 	@echo 'lint          fast checks for every change: Scheme compiles, scripts parse, docs agree'
@@ -56,6 +56,7 @@ help:
 	@echo 'updates-check test which nixpkgs revision updates apply locks'
 	@echo 'keybindings-check kanata-check plus generated-binding, Hyprland, Emacs and Neovim tests'
 	@echo 'hypr-nested-check test Hyprland keybindings in a nested session'
+	@echo 'clipboard-check yank and paste between Emacs, Neovim and the Wayland clipboard (uses the live clipboard)'
 
 # desktop/build/checks/checks.edn maps paths to the checks that cover them.
 REV ?= @
@@ -221,6 +222,10 @@ $(KANATA_SIM):
 
 updates-check:
 	bb desktop/build/updates/test.bb
+
+# Talks to the live compositor and running Emacs daemons, then restores the clipboard text.
+clipboard-check:
+	bb desktop/build/clipboard/check.bb
 
 kanata-check: $(KANATA_SIM)
 	@test "$$("$(GUIX)" show kanata | sed -n 's/^version: //p')" = "$(KANATA_VERSION)" || \

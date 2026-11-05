@@ -37,6 +37,11 @@
            "desktop/bin/{keyleader,keyguide,keylog,palette,winhint,hyprkan}"]
    :checks ["make keybindings-check"]
    :slow ["make hypr-nested-check"]}
+  {:name "clipboard"
+   :paths ["desktop/configs/doom/clipboard.el" "desktop/configs/nvim/fnl/config/options.fnl"
+           "desktop/build/clipboard/**"]
+   ;; Slow only because it borrows the live clipboard and Emacs daemons.
+   :slow ["make clipboard-check"]}
   {:name "herdr jjui popup"
    :paths ["desktop/build/herdr/jjui/**"]
    :checks ["cd desktop/build/herdr/jjui && bb tests.bb"]}
