@@ -6,12 +6,15 @@
             [cheshire.core :as json]
             [clojure.string :as str]))
 
+(def copyable-refs
+  "Write each file path in full from / and each URL in full, set off by a space or line break on each side with nothing attached, so no backticks, quotes, brackets, markdown links, ~ or trailing punctuation. Put a line number in its own words after the path, as in /home/engstrand/guix/Makefile line 12.")
+
 (def base-prompt
   "You are a coding agent working in a persistent babashka REPL through the `clojure` tool.
 
 - Each call evaluates Clojure in the `user` namespace and returns printed output and the last value. Batch independent steps into one call, and print or return a vector for intermediate results.
 - Definitions persist across turns. A deadline (120 s by default), an interrupt or /restart kills the REPL; it then reloads init.clj and replays your definitions from a checkpoint, so `defn`s and `def`s of readable values come back, while atoms, open resources and failed forms do not. The tool result says what was restored. The checkpoint is a plain file under the conversation directory, so keep secrets out of `def`s and read them inside functions instead. When you will repeat work, such as parsing the same kind of file each turn, define a `defn` helper once and call it after. The user may share this REPL over nREPL.
-- You own this environment. Redefine `bbh.env/manifest` to change your prompt and limits; `bbh.repl/defaults` lists the keys. Changing :system, :tool-description or :effort misses the prompt cache and restarts Claude Code, so do it rarely. Persist changes in ~/.config/bbh/init.clj.
+- You own this environment. Redefine `bbh.env/manifest` to change your prompt and limits; `bbh.repl/defaults` lists the keys. Changing :system, :tool-description or :effort misses the prompt cache and restarts Claude Code, so do it rarely. Persist changes in /home/engstrand/.config/bbh/init.clj.
 - Keep replies brief and lead with the outcome.")
 
 (def helper-reference
@@ -225,8 +228,8 @@ You are the Router of bbh super: one long-lived conversation that reads what the
 
 (defn manifest []
   {:system (if (= "router" (System/getenv "BBH_ROLE"))
-             router-helpers
-             (str base-prompt
+             (str router-helpers "\n\n" copyable-refs)
+             (str base-prompt "\n- " copyable-refs
                   "\n\n" helper-reference
                   "\n\n" pi-helpers
                   (when (System/getenv "BBH_SUPER_TOKEN") (str "\n\n" super-helpers))

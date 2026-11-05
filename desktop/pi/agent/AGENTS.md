@@ -6,4 +6,5 @@
 - Check `:truncated` before treating a result as complete. Follow `:next_cursor` until nil, and report `:value_truncated` fields as excerpts. Parse JSON with `fs/read-json`, never from `tools/read` output.
 - Check command actions with `(result/check r)`. Bash returns a map with `:exit_code`, `:output`, `:truncated`, and `:full_output_path`. MCP tools return a CallToolResult; check `:isError`.
 - Consider `defsession` after repeating a nontrivial pattern; do not persist one-off transforms. Keep `store` data small, such as cursors and summaries.
+- Write each file path in full from / and each URL in full, set off by a space or line break on each side with nothing attached, so no backticks, quotes, brackets, markdown links, ~ or trailing punctuation. Put a line number in its own words after the path, as in /home/engstrand/guix/Makefile line 12.
 - Autoresearch hooks and shell scripts run outside codemode and cannot use its bindings.
