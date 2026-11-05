@@ -873,6 +873,28 @@
                                               (string-match-p "preview of T2" (bbh-test--text "*bbh inbox preview*"))))
                               10)))))
 
+(ert-deftest bbh-inbox-opens-from-a-buffer-whose-workspace-is-gone ()
+  ;; A finished Worker's workspace is removed while its buffers stay, so SPC m i
+  ;; runs with a default-directory that no longer exists.
+  (let* ((log (make-temp-file "bbh-inbox-log"))
+         (script (make-temp-file "bbh-fake" nil nil
+                                 (concat "#!/bin/sh\necho \"$@\" >> " log "\n"
+                                         "case \"$2\" in\nview) printf 'bbh inbox · 0 need you\\nT1\\tNEW  T1 first\\n';;\nesac\n")))
+         (eng/bbh-inbox-bbh (list script))
+         (gone (make-temp-file "bbh-workspace" t))
+         (worker (get-buffer-create "T9 done [viewport]")))
+    (set-file-modes script #o700)
+    (with-current-buffer worker (setq default-directory (file-name-as-directory gone)))
+    (delete-directory gone)
+    (delete-other-windows)
+    (switch-to-buffer worker)
+    (split-window)
+    (eng/bbh-inbox)
+    (should (equal "*bbh inbox*" (buffer-name (window-buffer (selected-window)))))
+    (with-current-buffer "*bbh inbox*"
+      (should (bbh-test--wait (lambda () (string-match-p "T1 first" (buffer-string))) 10)))
+    (kill-buffer worker)))
+
 (ert-deftest bbh-inbox-reload-replaces-a-stale-listener-and-rehooks-the-buffer ()
   ;; A Doom reload loads this file again; the live Inbox must follow the new code.
   (let* ((log (make-temp-file "bbh-inbox-log"))

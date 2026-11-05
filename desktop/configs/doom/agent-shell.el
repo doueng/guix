@@ -1492,7 +1492,10 @@ Pushes inside that time make one reload, and none runs while you type.")
   "Run `bbh inbox ARGS' and call ON-DONE with its output when it succeeds.
 A failure calls ON-FAIL with bbh's message, or shows it without ON-FAIL."
   (let ((out (generate-new-buffer " *bbh inbox out*"))
-        (err (generate-new-buffer " *bbh inbox err*")))
+        (err (generate-new-buffer " *bbh inbox err*"))
+        ;; bbh starts in the current buffer's directory.  A finished Worker's
+        ;; buffers outlive its workspace, so that directory may be gone.
+        (default-directory (expand-file-name "~/")))
     (make-process
      :name "bbh-inbox-cmd" :noquery t :buffer out :stderr err :connection-type 'pipe
      :command (apply #'eng/bbh-inbox--command args)
@@ -1827,8 +1830,10 @@ is replaced."
 (defun eng/bbh-inbox ()
   "Show the super-agent's Inbox alone in this frame, its preview below."
   (interactive)
-  (eng/bbh-super--clear-frame)
-  (switch-to-buffer (eng/bbh-inbox-buffer)))
+  ;; Make the Inbox before clearing the frame, so a failure leaves the layout.
+  (let ((buffer (eng/bbh-inbox-buffer)))
+    (eng/bbh-super--clear-frame)
+    (switch-to-buffer buffer)))
 
 ;; Loading this file again, as a Doom reload does, brings a live Inbox up to
 ;; the new code: its buffer setup and the listener.
