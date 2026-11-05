@@ -490,7 +490,7 @@
 (defmethod fold* :thread-created [state {{:keys [id title]} :data :keys [seq]}]
   (-> state (bump :threads)
       (assoc-in [:threads id] {:id id :title title :resources #{} :worker nil :history []
-                               :execution :none :asks-version seq :resolved-at nil :summary nil
+                               :asks-version seq :resolved-at nil :summary nil
                                :milestone-seq seq})))
 
 ;; Only old logs hold this event.
@@ -502,13 +502,11 @@
   (-> state (bump :workers)
       (assoc-in [:workers id] {:id id :thread thread :generation generation :conversation conversation
                                :state :working})
-      (assoc-in [:threads thread :worker] id)
-      (assoc-in [:threads thread :execution] :working)))
+      (assoc-in [:threads thread :worker] id)))
 
 (defmethod fold* :worker-started [state {{:keys [id] :as worker} :data :keys [thread]}]
   (-> state (bump :workers)
-      (assoc-in [:workers id] (assoc worker :thread thread :conversation nil :wf-run nil :workspace nil :buffer nil))
-      (cond-> (= :queued (:state worker)) (assoc-in [:threads thread :execution] :queued))))
+      (assoc-in [:workers id] (assoc worker :thread thread :conversation nil :wf-run nil :workspace nil :buffer nil))))
 
 (defmethod fold* :worker-promoted [state {{:keys [id]} :data}]
   (-> state (update-in [:workers id] assoc :state :starting :queued-reason nil)))
@@ -522,8 +520,7 @@
         (update-in [:workers id] merge (dissoc running :id :outbox :text) {:state :working :queued-reason nil})
         (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
                                     :state :pending :message nil})
-        (assoc-in [:threads thread :worker] id)
-        (assoc-in [:threads thread :execution] :working))))
+        (assoc-in [:threads thread :worker] id))))
 
 (defmethod fold* :worker-finished [state {{:keys [id reason landed] outcome :state} :data :keys [thread seq]}]
   (let [t (get-in state [:threads thread])]
@@ -535,7 +532,6 @@
         (cond-> (contains? #{id nil} (:worker t))
           (-> (assoc-in [:threads thread :worker] nil)
               (update-in [:threads thread :history] conj id)
-              (assoc-in [:threads thread :execution] outcome)
               (assoc-in [:threads thread :milestone-seq] seq))))))
 
 (defmethod fold* :cancel-requested [state {{:keys [id reason]} :data}]
@@ -574,8 +570,7 @@
         stopped? (some #(and (= thread (:thread %)) (= :open (:state %)) (:stopped %)) (vals (:asks state)))]
     (cond-> state
       (and (:worker t) (not stopped?) (not= :cancelling (get-in state [:workers (:worker t) :state])))
-      (-> (assoc-in [:threads thread :execution] :working)
-          (assoc-in [:workers (:worker t) :state] :working)))))
+      (assoc-in [:workers (:worker t) :state] :working))))
 
 (defmethod fold* :ask-opened [state {{:keys [id stopped supersedes] :as ask} :data :keys [thread seq]}]
   (-> state (bump :asks)
@@ -583,8 +578,7 @@
       (assoc-in [:asks id] (assoc ask :thread thread :seq seq :state :open))
       (assoc-in [:threads thread :asks-version] seq)
       (assoc-in [:threads thread :milestone-seq] seq)
-      (cond-> stopped (-> (assoc-in [:threads thread :execution] :waiting)
-                          (assoc-in [:workers (:worker ask) :state] :waiting))
+      (cond-> stopped (assoc-in [:workers (:worker ask) :state] :waiting)
               (not stopped) (resume thread))))
 
 (defmethod fold* :reply-sent [state {{:keys [id picks dismiss outbox conversation text] :as reply} :data :keys [thread seq]}]
@@ -620,11 +614,31 @@
    :needs-attention "Needs attention" :sent "Sent" :new "New" :working "Working"
    :quiet "Quiet" :archived "Archived"})
 
+(def ^:private execution-of
+  {:queued :queued :starting :working :working :working :cancelling :working :waiting :waiting
+   :done :done :failed :failed :cancelled :cancelled})
+
+(defn execution
+  "What THREAD's work is doing, from its latest Worker: :none without one,
+  :queued, :working, :waiting, or how it finished. An archived thread shows
+  :none unless its Worker is queued, starting, working or waiting."
+  [state thread]
+  (let [t (get-in state [:threads thread])
+        w (->> (vals (:workers state)) (filter #(= thread (:thread %))) (sort-by (comp id-order :id)) last)
+        e (get execution-of (:state w) :none)]
+    (if (and (:resolved-at t) (not (#{:queued :starting :working :waiting} (:state w)))) :none e)))
+
+(defn thread-view
+  "Thread record T as reads show it, with its derived :execution."
+  [state t]
+  (assoc t :execution (execution state (:id t))))
+
 (defn section
   "THREAD's section in STATE, by the doc's rule, first match wins. CURSOR is
   the last seq this client has seen on the thread."
-  [state {:keys [id execution resolved-at milestone-seq]} cursor]
-  (let [asks (filter #(= id (:thread %)) (vals (:asks state)))
+  [state {:keys [id resolved-at milestone-seq]} cursor]
+  (let [execution (execution state id)
+        asks (filter #(= id (:thread %)) (vals (:asks state)))
         open (filter #(= :open (:state %)) asks)
         replies (filter #(= id (:thread %)) (vals (:replies state)))]
     (cond (some :stopped open) :stopped
@@ -649,7 +663,7 @@
   whether an archived one came back. CURSORS maps thread id to the seq the
   client last saw."
   [state cursors]
-  (let [rows (for [t (sort-by (comp id-order :id) (vals (:threads state)))
+  (let [rows (for [t (map #(thread-view state %) (sort-by (comp id-order :id) (vals (:threads state))))
                    :let [s (section state t (get cursors (:id t)))
                          ask (ask-line state (:id t))]]
                (assoc t :section s :ask ask
@@ -687,7 +701,7 @@
   (reduce + (map #(count (:threads %)) (filter #(#{:stopped :holding-up :waiting} (:section %)) sections))))
 
 (defmethod fold* :thread-resolved [state {:keys [thread seq]}]
-  (update-in state [:threads thread] assoc :resolved-at seq :execution :none))
+  (update-in state [:threads thread] assoc :resolved-at seq))
 
 (defmethod fold* :worker-steered [state {{:keys [summary outbox conversation mailbox-text]} :data :keys [thread] :as event}]
   (let [state (-> state (bump :outbox)

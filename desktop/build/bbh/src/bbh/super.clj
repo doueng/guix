@@ -306,9 +306,9 @@
   (let [st @state]
     (case command
       :health (into {} (map (fn [[id w]] [id (cond-> (:health w) (#{:done :cancelled} (:state w)) (assoc :classification :done) (= :failed (:state w)) (assoc :classification :needs-human))]) (:workers st)))
-      :threads (vec (sort-by (comp model/id-order :id) (vals (:threads st))))
+      :threads (vec (map #(model/thread-view st %) (sort-by (comp model/id-order :id) (vals (:threads st)))))
       :thread (let [{:keys [id]} args
-                    t (get-in st [:threads id])
+                    t (some->> (get-in st [:threads id]) (model/thread-view st))
                     of (fn [kind order] (vec (sort-by order (keep #(when (= id (:thread %)) (model/linked st kind (:id %))) (vals (kind st))))))]
                 (when t (assoc t :asks (of :asks :seq) :replies (of :replies :seq) :workers (of :workers :generation))))
       :events (store/events db (or (:after args) 0) (:thread args))

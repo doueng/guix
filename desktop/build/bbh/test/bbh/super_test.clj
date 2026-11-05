@@ -168,7 +168,7 @@
       (is (= [:dismissed] (map :state (:asks (:ok (call dir {:command :thread :args {:id "T1"}}))))))
       (is (wait-for #(seq (fs/glob conversations "super-W1/mailbox/*.json"))))
       (is (re-find #"Not answered, do not wait: a1" (slurp (str (first (fs/glob conversations "super-W1/mailbox/*.json"))))))
-      (is (= :working (get-in @(:state c) [:threads "T1" :execution])) "the Worker is told, so the thread is no longer waiting")
+      (is (= :working (model/execution @(:state c) "T1")) "the Worker is told, so the thread is no longer waiting")
       (is (= {:ok "T1"} (call dir {:command :dismiss! :args {:thread "T1"}})) "nothing open: no second message")
       (is (= 2 (count (:outbox @(:state c)))) "the brief and one dismissal"))))
 
@@ -1111,7 +1111,7 @@
                                        [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "Which?" :stopped true}}]
                                        [[:worker "W1"] {:id "k2" :command :ask! :args {:kind :question :text "FYI" :supersedes ["a1"]}}]])]
     (is (= :working (get-in state [:workers "W1" :state])))
-    (is (= :working (get-in state [:threads "T1" :execution])))))
+    (is (= :working (model/execution state "T1")))))
 
 (deftest a-worker-on-an-archived-thread-resumes-when-its-stopped-ask-is-answered
   (let [asking [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
@@ -1164,6 +1164,14 @@
                                                [:controller {:id "cd" :command :cancel-delivered! :args {:worker "W1"}}]])]
     (is (= :cancelling (:error (nth results 4))))
     (is (= :cancelled (get-in state [:workers "W1" :state])))))
+
+(deftest thread-execution-is-derived-not-stored
+  (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                       (start-cmd "s1" "T1") (running "W1")
+                                       [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "ok?" :stopped true}}]])]
+    (is (not (contains? (get-in state [:threads "T1"]) :execution)) "the record holds no copy")
+    (is (= :waiting (model/execution state "T1")))
+    (is (= :waiting (:execution (model/thread-view state (get-in state [:threads "T1"])))))))
 
 (deftest a-finished-workers-open-asks-are-superseded
   (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
