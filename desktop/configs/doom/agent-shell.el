@@ -301,27 +301,78 @@ It is called with the conversation id and the project directory.")
                            (when (buffer-live-p shell)
                              (eng/bbh-inbox--on-line shell line))))))))))
 
-(defun eng/bbh-inbox-connect (shell)
-  "Connect SHELL to its mailbox."
+(defvar-local eng/bbh-mail--watch nil
+  "The timer that checks this shell's mailbox, kept only to cancel it.")
+
+(defun eng/bbh-mail-dir (conversation)
+  "The mailbox of CONVERSATION's rollover root."
+  (let* ((pointer (eng/bbh--conversation-file conversation "inbox-session"))
+         (root (if (file-exists-p pointer)
+                   (string-trim (with-temp-buffer (insert-file-contents pointer) (buffer-string)))
+                 conversation)))
+    (eng/bbh--conversation-file root "mailbox")))
+
+(defun eng/bbh-mail-waiting-p (dir)
+  "Whether mailbox DIR holds a message for the agent.  A cancel is not one:
+bbh acts on it without a turn."
+  (seq-some (lambda (file)
+              (not (equal "cancel"
+                          (ignore-errors
+                            (map-elt (json-parse-string
+                                      (with-temp-buffer (insert-file-contents file) (buffer-string))
+                                      :object-type 'alist)
+                                     'kind)))))
+            (and (file-directory-p dir) (directory-files dir t "\\`[0-9].*\\.json\\'"))))
+
+(defun eng/bbh-mail-wake (shell)
+  "Send SHELL the prompt `[mail]' when its mailbox has mail and it is idle.
+A running turn takes the mail itself."
+  (when (buffer-live-p shell)
+    (with-current-buffer shell
+      (when-let* ((conversation (eng/bbh--conversation shell))
+                  ((not (shell-maker-busy)))
+                  ((not (map-elt agent-shell--state :pending-prompts)))
+                  ((eng/bbh-mail-waiting-p (eng/bbh-mail-dir conversation))))
+        (agent-shell--prompt-queue-enqueue :prompt "[mail]")
+        (agent-shell--prompt-queue-process-next)))))
+
+(defun eng/bbh-mail-watch (shell)
+  "Check SHELL's mailbox every second, and now.  It reads the conversation
+SHELL is on at each check, so /new and /resume need nothing more.  A timer
+rather than file-notify, whose events Emacs reads only between commands."
   (with-current-buffer shell
-    (setq eng/bbh-inbox--seen (make-hash-table :test #'equal)))
+    (unless (timerp eng/bbh-mail--watch)
+      (let (timer)
+        (setq timer (run-with-timer 1 1 (lambda ()
+                                          (if (buffer-live-p shell)
+                                              (eng/bbh-mail-wake shell)
+                                            (cancel-timer timer))))
+              eng/bbh-mail--watch timer)))
+    (eng/bbh-mail-wake shell)))
+
+(defun eng/bbh-mail--on-event (shell event)
+  "Watch SHELL's mailbox once its session exists, and check it after each turn."
+  (pcase (map-elt event :event)
+    ((or 'prompt-ready 'init-finished)
+     (unless (buffer-local-value 'eng/bbh-mail--watch shell) (eng/bbh-mail-watch shell)))
+    ((or 'turn-complete 'error)
+     ;; After agent-shell has sent any prompt it queued meanwhile.
+     (run-at-time 0 nil #'eng/bbh-mail-wake shell))
+    ('clean-up
+     (with-current-buffer shell
+       (when (timerp eng/bbh-mail--watch) (cancel-timer eng/bbh-mail--watch))
+       (setq eng/bbh-mail--watch nil)))))
+
+(defun eng/bbh-inbox-connect (shell)
+  "Wake SHELL whenever its mailbox has mail."
   (agent-shell-subscribe-to :shell-buffer shell
-                            :on-event (lambda (event) (eng/bbh-inbox--on-event shell event)))
-  (eng/bbh-inbox-start shell))
+                            :on-event (lambda (event) (eng/bbh-mail--on-event shell event)))
+  (eng/bbh-mail-watch shell))
 
 (defun eng/bbh-inbox-switch (shell)
-  "Move SHELL's poller to the conversation it is on now.
+  "Move SHELL's mailbox watch to the conversation it is on now.
 Messages to the old conversation stay in its mailbox until it is resumed."
-  (with-current-buffer shell
-    (when eng/bbh-inbox--process
-      (let ((process eng/bbh-inbox--process))
-        (setq eng/bbh-inbox--process nil
-              eng/bbh-inbox--waiting nil
-              eng/bbh-inbox--inflight nil
-              eng/bbh-inbox--failed nil)
-        (clrhash eng/bbh-inbox--seen)
-        (delete-process process))
-      (eng/bbh-inbox-start shell))))
+  (eng/bbh-mail-watch shell))
 
 ;;; Program status
 

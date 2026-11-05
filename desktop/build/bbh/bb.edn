@@ -90,7 +90,9 @@
                                                  "BBH_ELISP_BUILD" (or (System/getenv "BBH_ELISP_BUILD")
                                                                        (str home "/.config/emacs/.local/straight/build-31.1"))
                                                  "BBH_DOOM_AGENT_SHELL" (str (babashka.fs/absolutize "../../configs/doom/agent-shell.el"))
-                                                 "HERDR_ENV" ""}}
+                                                 "HERDR_ENV" ""
+                                                 ;; This checkout's bbh, not the installed one.
+                                                 "PATH" (str (babashka.fs/absolutize "../../bin") ":" (System/getenv "PATH"))}}
                                     "emacs" "-Q" "--batch" "-l" "test/agent-shell-test.el" "-f" "ert-run-tests-batch-and-exit"))}
          test:transcript-scroll {:doc "Check in a terminal frame that the transcript does not scroll past its end, and that entering a session shows its latest output in normal state."
                                  ;; stdin is not a terminal, so script leaves the caller's tty alone, and

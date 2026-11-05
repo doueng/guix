@@ -641,108 +641,62 @@
 
 ;;; Website mailbox
 
-(defun bbh-test--inbox-dir ()
-  "A directory for the fake poller, which logs its ids and saves what it is told."
-  (let ((dir (make-temp-file "bbh-inbox" t)))
-    (setq eng/bbh-inbox-command
-          (list "sh" "-c" (format "echo \"$1\" >> %s/ids; exec cat >> %s/said" dir dir) "sh"))
-    dir))
+(defun bbh-test--mail (conversation id text &optional kind)
+  "Leave TEXT in CONVERSATION's mailbox as bbh does, under message ID."
+  (let ((dir (eng/bbh-mail-dir conversation)))
+    (make-directory dir t)
+    (with-temp-file (expand-file-name (concat id ".json") dir)
+      (insert (json-serialize (append (list :id id :text text) (when kind (list :kind kind))))))
+    (expand-file-name (concat id ".json") dir)))
 
-(defun bbh-test--inbox-lines (dir file)
-  (let ((path (expand-file-name file dir)))
-    (when (file-exists-p path)
-      (with-temp-buffer
-        (insert-file-contents path)
-        (split-string (buffer-string) "\n" t)))))
-
-(defun bbh-test--told-p (dir line)
-  (bbh-test--wait (lambda () (member line (bbh-test--inbox-lines dir "said"))) 10))
-
-(defun bbh-test--wake (shell id text)
-  (eng/bbh-inbox--on-line shell (json-serialize (list :id id :text text))))
-
-(defun bbh-test--script (steps)
-  "Move the current composer's session to the script STEPS, an EDN string."
-  (insert "/model script/" (make-temp-file "bbh-inbox" nil ".edn" steps))
-  (eng/bbh-send)
-  (should (bbh-test--wait (lambda () (bbh-test--idle-p (eng/bbh--shell))) 30)))
-
-(defmacro bbh-test--with-inbox (spec &rest body)
-  "Bind SPEC, (SHELL COMPOSER TRANSCRIPT DIR), around BODY in a fresh layout."
+(defmacro bbh-test--with-shell (spec &rest body)
+  "Bind SPEC, (SHELL COMPOSER TRANSCRIPT), around BODY in a fresh layout."
   (declare (indent 1))
-  (pcase-let ((`(,shell ,composer ,transcript ,dir) spec))
+  (pcase-let ((`(,shell ,composer ,transcript) spec))
     `(save-window-excursion
        (delete-other-windows)
-       (let* ((,dir (bbh-test--inbox-dir))
-              (,shell (bbh-test--start))
+       (let* ((,shell (bbh-test--start))
               (,composer (eng/bbh-layout ,shell))
               (,transcript (buffer-local-value 'eng/bbh-transcript ,shell)))
          (ignore ,composer ,transcript)
-         (unwind-protect (progn ,@body)
-           (setq eng/bbh-inbox-command nil))))))
+         ,@body))))
 
-(ert-deftest bbh-inbox-wake-runs-as-a-turn-and-keeps-the-draft ()
-  (bbh-test--with-inbox (shell composer transcript dir)
+(ert-deftest bbh-mail-wakes-an-idle-shell-and-keeps-the-draft ()
+  (bbh-test--with-shell (shell composer transcript)
     (with-current-buffer composer (insert "half typed"))
-    (should (bbh-test--wait (lambda () (bbh-test--inbox-lines dir "ids")) 10))
-    (should (equal (bbh-test--inbox-lines dir "ids") (list (eng/bbh--conversation shell))))
-    (bbh-test--wake shell "m1" "sent from the phone")
-    (should (bbh-test--wait (lambda () (string-match-p "The answer is 42" (bbh-test--text transcript))) 30))
-    (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
-    (should (string-match-p "^\\* sent from the phone$" (bbh-test--text transcript)))
-    (should (equal "half typed" (with-current-buffer composer (string-trim (buffer-string)))))
-    (should (bbh-test--told-p dir "ack m1"))
-    (should (bbh-test--told-p dir "busy false"))
-    (should (equal (bbh-test--inbox-lines dir "said") '("busy true" "ack m1" "busy false")))))
+    (should (buffer-local-value 'eng/bbh-mail--watch shell))
+    (let ((file (bbh-test--mail (eng/bbh--conversation shell) "1-m1" "sent from the phone")))
+      (should (bbh-test--wait (lambda () (string-match-p "The answer is 42" (bbh-test--text transcript))) 30))
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+      (should (string-match-p "^\\* \\[mail\\]$" (bbh-test--text transcript)))
+      (should (string-match-p "sent from the phone" (bbh-test--text transcript)))
+      (should-not (file-exists-p file))
+      (should (equal "half typed" (with-current-buffer composer (string-trim (buffer-string))))))))
 
-(ert-deftest bbh-inbox-wake-waits-out-a-running-turn-once ()
-  (bbh-test--with-inbox (shell composer transcript dir)
-    (with-current-buffer composer
-      (bbh-test--script "[{:code \"(Thread/sleep 2500)\"} \"slept\" \"woken\"]")
-      (insert "sleep")
-      (eng/bbh-send))
-    (should (bbh-test--wait (lambda () (string-match-p "Thread/sleep" (bbh-test--text transcript))) 30))
-    (bbh-test--wake shell "m2" "from the phone: second")
-    (bbh-test--wake shell "m2" "from the phone: second")
-    (should (= 1 (length (map-elt (buffer-local-value 'agent-shell--state shell) :pending-prompts))))
-    (should-not (member "ack m2" (bbh-test--inbox-lines dir "said")))
-    (should (bbh-test--wait (lambda () (string-match-p "woken" (bbh-test--text transcript))) 30))
-    (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
-    (should (= 1 (with-current-buffer transcript (how-many "^\\* from the phone: second$" (point-min) (point-max)))))
-    (should (bbh-test--told-p dir "ack m2"))
-    (should (= 1 (seq-count (lambda (line) (equal line "ack m2")) (bbh-test--inbox-lines dir "said"))))))
+(ert-deftest bbh-mail-waits-while-the-shell-is-stuck-busy ()
+  ;; T36: shell-maker-busy stayed t after a turn, and every wake was lost.
+  (bbh-test--with-shell (shell composer transcript)
+    (let (file)
+      (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t)))
+        (setq file (bbh-test--mail (eng/bbh--conversation shell) "2-m2" "sent while stuck"))
+        (bbh-test--wait (lambda () nil) 1.5)
+        (should-not (string-match-p "\\[mail\\]" (bbh-test--text transcript)))
+        (should (file-exists-p file)))
+      (eng/bbh-mail--on-event shell '((:event . turn-complete)))
+      (should (bbh-test--wait (lambda () (not (file-exists-p file))) 30))
+      (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+      (should (= 1 (with-current-buffer transcript (how-many "^\\* \\[mail\\]$" (point-min) (point-max)))))
+      (should (string-match-p "sent while stuck" (bbh-test--text transcript))))))
 
-(ert-deftest bbh-inbox-failed-wake-is-not-acked-and-retries-after-the-next-turn ()
-  (bbh-test--with-inbox (shell composer transcript dir)
-    (with-current-buffer composer (bbh-test--script "[\"worked\" \"retried\"]"))
-    (bbh-test--wake shell "m3" "/not-a-command wake")
-    (should (bbh-test--wait (lambda () (and (bbh-test--idle-p shell)
-                                            (buffer-local-value 'eng/bbh-inbox--failed shell)))
-                            30))
-    (should-not (member "ack m3" (bbh-test--inbox-lines dir "said")))
-    (with-current-buffer composer
-      (insert "something that works")
-      (eng/bbh-send))
-    (should (bbh-test--told-p dir "retry m3"))
-    (should-not (member "ack m3" (bbh-test--inbox-lines dir "said")))
-    (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
-    (bbh-test--wake shell "m3" "from the phone: retried")
-    (should (bbh-test--told-p dir "ack m3"))))
+(ert-deftest bbh-a-cancel-in-the-mailbox-starts-no-turn ()
+  (bbh-test--with-shell (shell composer transcript)
+    (bbh-test--mail (eng/bbh--conversation shell) "0-cancel-W1" "[Cancelled] stop" "cancel")
+    (bbh-test--wait (lambda () nil) 1.5)
+    (should-not (string-match-p "\\[mail\\]" (bbh-test--text transcript)))))
 
-(ert-deftest bbh-inbox-cancelled-turn-acks-because-the-wake-reached-the-transcript ()
-  (bbh-test--with-inbox (shell composer transcript dir)
-    (with-current-buffer composer
-      (bbh-test--script "[{:code \"(Thread/sleep 60000)\"} \"not reached\"]"))
-    (bbh-test--wake shell "m4" "from the phone: cancelled")
-    (should (bbh-test--wait (lambda () (string-match-p "Thread/sleep" (bbh-test--text transcript))) 30))
-    (with-current-buffer shell (agent-shell-interrupt t))
-    (should (bbh-test--told-p dir "ack m4"))))
-
-(ert-deftest bbh-inbox-poller-follows-new-and-resume ()
-  (bbh-test--with-inbox (shell composer transcript dir)
-    (should (bbh-test--wait (lambda () (bbh-test--inbox-lines dir "ids")) 10))
-    (let ((first-id (eng/bbh--conversation shell))
-          (first-process (buffer-local-value 'eng/bbh-inbox--process shell)))
+(ert-deftest bbh-mail-watch-follows-new-and-resume ()
+  (bbh-test--with-shell (shell composer transcript)
+    (let ((first-id (eng/bbh--conversation shell)))
       (with-current-buffer composer
         (insert "add forty")
         (eng/bbh-send))
@@ -751,17 +705,19 @@
       (with-current-buffer composer
         (insert "/new")
         (eng/bbh-send))
-      (should-not (process-live-p first-process))
       (let ((next (eng/bbh--shell)))
         (should-not (eq next shell))
-        (should (bbh-test--wait (lambda () (= 2 (length (bbh-test--inbox-lines dir "ids")))) 30))
-        (should (bbh-test--wait (lambda () (bbh-test--idle-p next)) 30))
-        (let ((second-process (buffer-local-value 'eng/bbh-inbox--process next)))
-          (insert "/resume " first-id)
-          (eng/bbh-send)
-          (should (bbh-test--wait (lambda () (equal first-id (car (last (bbh-test--inbox-lines dir "ids"))))) 30))
-          (should-not (process-live-p second-process))
-          (should (process-live-p (buffer-local-value 'eng/bbh-inbox--process next))))))))
+        (should (bbh-test--wait (lambda () (with-current-buffer next
+                                             (and (map-nested-elt agent-shell--state '(:session :id))
+                                                  (string-match-p "Ready" (buffer-string)))))
+                                30))
+        (insert "/resume " first-id)
+        (eng/bbh-send)
+        (should (bbh-test--wait (lambda () (and (equal first-id (eng/bbh--conversation next)) (bbh-test--idle-p next))) 30))
+        (let ((file (bbh-test--mail first-id "3-m3" "to the resumed conversation")))
+          (should (bbh-test--wait (lambda () (not (file-exists-p file))) 30))
+          (should (bbh-test--wait (lambda () (string-match-p "to the resumed conversation" (bbh-test--text transcript)))
+                                  30)))))))
 
 
 ;;; Super-agent
@@ -808,14 +764,12 @@
   ;; middle of its last turn, after the controller released the session. The
   ;; shell must still go idle and run what the controller or the person sends
   ;; it next.
-  (let* ((dir (bbh-test--inbox-dir))
-         (ws (make-temp-file "bbh-super-ws" t))
+  (let* ((ws (make-temp-file "bbh-super-ws" t))
          (repo (make-temp-file "bbh-super-repo" t))
          (shell (get-buffer (eng/bbh-super-open "super-W9" ws "T9 test" nil))))
     (unwind-protect
         (progn
           (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
-          (should (bbh-test--wait (lambda () (bbh-test--inbox-lines dir "ids")) 10))
           (bbh-test--submit shell (concat "/model script/"
                                           (make-temp-file "bbh-inbox" nil ".edn"
                                                           "[{:code \"(Thread/sleep 1500)\"} \"landed\" \"woken\" \"typed\"]")))
@@ -829,14 +783,13 @@
           (should (bbh-test--wait (lambda () (string-match-p "landed" (bbh-test--text shell))) 30))
           (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
           ;; Mail to the now idle Worker runs at once.
-          (bbh-test--wake shell "m9" "job exited")
-          (should (bbh-test--wait (lambda () (string-match-p "woken" (bbh-test--text shell))) 30))
-          (should (bbh-test--told-p dir "ack m9"))
+          (let ((file (bbh-test--mail "super-W9" "9-m9" "job exited")))
+            (should (bbh-test--wait (lambda () (string-match-p "woken" (bbh-test--text shell))) 30))
+            (should (bbh-test--wait (lambda () (not (file-exists-p file))) 30)))
           (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
           ;; So does what the person types.
           (bbh-test--submit shell "are you there")
           (should (bbh-test--wait (lambda () (string-match-p "typed" (bbh-test--text shell))) 30)))
-      (setq eng/bbh-inbox-command nil)
       (when-let* ((s (eng/bbh-super--shell "super-W9"))) (eng/bbh-super--kill s))
       (delete-directory repo t))))
 

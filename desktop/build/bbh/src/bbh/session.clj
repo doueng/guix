@@ -57,27 +57,42 @@
          :interrupted false :evaluating false :cancel nil
          :manifest repl/defaults :repl nil :spent 0.0 :limits nil
          :context-size nil :last-input nil :turn-usage nil
-         :code-lock (Object.) :steering {}}))
+         :code-lock (Object.) :taken {}}))
 
-(defn- steering-tag
-  "The tag that marks steering message ID where it is handed to the model."
-  [id]
-  (str "[Steering " id "]"))
+(defn mail-root
+  "The directory whose mailbox/ holds S's mail: the rollover root of the
+  conversation S is on, which /resume can change."
+  [s]
+  (inbox/root-dir (:dir @s)))
 
-(defn take-steering!
-  "Claim pending steering from the durable mailbox, serialized with evaluation.
-  Ordinary replies remain queued for the front end after the turn."
+(def mail-wake
+  "The prompt a front end sends when the mailbox has mail. The session puts the
+  mail in its place."
+  "[mail]")
+
+(defn- mail-tag
+  "The tag that marks MESSAGE where it is handed to the model."
+  [{:keys [id kind]}]
+  (str (if (= "steer" kind) "[Steering " "[Mail ") id "]"))
+
+(defn- claimable
+  "S's mailbox messages that no input holds yet. A cancel is a control, not mail,
+  and a cancelled session takes nothing."
+  [s]
+  (when-not (:cancelled @s)
+    (filter #(and (not= "cancel" (:kind %)) (not (contains? (:taken @s) (:id %))))
+            (inbox/pending (mail-root s)))))
+
+(defn take-mail!
+  "Claim S's pending mailbox messages, serialized with evaluation, as the text
+  that hands them to the model, or nil when there are none."
   [s]
   (locking (:code-lock @s)
-    (let [root (inbox/root-dir (:repl-dir @s))
-          messages (filter #(and (= "steer" (:kind %))
-                                 (not (contains? (:steering @s) (:id %))))
-                           (inbox/pending root))]
+    (let [messages (claimable s)]
       (when (seq messages)
-        ;; Claim in memory only. record! acknowledges after the transcript write.
-        (swap! s update :steering into (map (juxt :id :text) messages))
-        ;; Each carries its message id, which record! acknowledges it by.
-        (str/join "\n\n" (map #(str (steering-tag (:id %)) " " (str/replace-first (:text %) #"^\[Steering\] " "")) messages))))))
+        ;; Claim in memory only. record! deletes each file once the transcript holds its tag.
+        (swap! s update :taken into (map (juxt :id mail-tag) messages))
+        (str/join "\n\n" (map #(str (mail-tag %) " " (str/replace-first (:text %) #"^\[Steering\] " "")) messages))))))
 
 (defn emit! [s event]
   ((:emit @s) event))
@@ -87,10 +102,10 @@
   (swap! s update :messages conj msg)
   (when (#{"user" "tool"} (:role msg))
     (locking (:code-lock @s)
-      (doseq [[id _] (:steering @s)
-              :when (str/includes? (or (:content msg) "") (steering-tag id))]
-        (inbox/ack! {:root (inbox/root-dir (:repl-dir @s))} id)
-        (swap! s update :steering dissoc id)))))
+      (doseq [[id tag] (:taken @s)
+              :when (str/includes? (or (:content msg) "") tag)]
+        (inbox/ack! {:root (mail-root s)} id)
+        (swap! s update :taken dissoc id)))))
 
 (defn trace-run!
   "Append a run of KIND that started at START-MS to the current turn's trace.
@@ -203,7 +218,7 @@
   (when (= "cancel" kind)
     (swap! s assoc :cancelled true)
     (interrupt! s)
-    (let [root (inbox/root-dir (:repl-dir @s))]
+    (let [root (mail-root s)]
       (spit (str (fs/path root (str id ".received"))) "interrupted")
       (inbox/ack! {:root root} id))
     true))
@@ -215,7 +230,7 @@
   [s & {:keys [scan-ms] :or {scan-ms 200}}]
   (let [stopped (atom false)]
     (doto (Thread. #(while (not @stopped)
-                      (try (doseq [m (inbox/pending (inbox/root-dir (:repl-dir @s)))]
+                      (try (doseq [m (inbox/pending (mail-root s))]
                              (receive-control! s m))
                            (catch Exception e (binding [*out* *err*] (println "bbh controls:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))
@@ -224,24 +239,23 @@
 
 (defn mailbox-handler
   "The mailbox poller's DELIVER for a terminal session S. A cancellation acts at
-  once and never starts a turn. Other messages run one at a time in arrival
-  order, each as a prompt of its own, and none once S is cancelled. PROMPT! runs
-  a turn and takes :mailbox? true, SHOW! prints a line, ACK! removes a message."
+  once and never starts a turn. Other messages wake S one at a time, and the
+  turn takes all mail waiting, so a burst becomes one turn. Once S is cancelled
+  a message is removed unread. PROMPT! runs a turn, SHOW! prints a line, ACK!
+  removes a message."
   [s {:keys [prompt! show! ack!]}]
   (let [exec (java.util.concurrent.Executors/newSingleThreadExecutor
               (reify java.util.concurrent.ThreadFactory
                 (newThread [_ r] (doto (Thread. ^Runnable r) (.setDaemon true)))))]
-    (fn [{:keys [id text kind] :as message}]
+    (fn [{:keys [id text] :as message}]
       (if (receive-control! s message)
         (show! text)
         (.execute exec
                   (fn []
                     (try
-                      (cond (:cancelled @s) (ack! id)
-                            ;; A busy tool may already have consumed it.
-                            (= "steer" kind) (when (some #(= "steer" (:kind %)) (inbox/pending (inbox/root-dir (:repl-dir @s))))
-                                               (prompt! "Apply the pending steering." :mailbox? true))
-                            :else (do (show! text) (prompt! text :mailbox? true) (ack! id)))
+                      (if (:cancelled @s)
+                        (ack! id)
+                        (do (show! text) (prompt! mail-wake)))
                       (catch Exception e (show! (str "mailbox: " (ex-message e)))))))))))
 
 (defn- add-request [turn {:keys [input cached written output thinking cache] :as request}]
@@ -375,8 +389,8 @@
                     [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (when-not sandbox? (name-hint s r)))
                      (if (:error? r) :failed :completed)]))
           text (cond->> text note (str note "\n"))]
-      ;; Steering goes first, where a front end that shortens long output keeps it.
-      (let [text (if-let [steering (take-steering! s)] (str steering "\n\n" text) text)]
+      ;; Mail goes first, where a front end that shortens long output keeps it.
+      (let [text (if-let [mail (take-mail! s)] (str mail "\n\n" text) text)]
         (emit! s {:type :tool-result :id id :code code :text text :status status})
         text))))
 
@@ -478,7 +492,7 @@
   (loop [round 1 overflowed false quiet 0 reminders 0 reminded false]
     (let [system (system-prompt! s)
           _ (when (rollover-due? s) (continue-mid-turn! s))
-          _ (when-let [steering (take-steering! s)] (record! s {:role "user" :content steering}))
+          _ (when-let [mail (take-mail! s)] (record! s {:role "user" :content mail}))
           result (when-not (:interrupted @s)
                    (try (sample! s system (:messages @s))
                         (catch clojure.lang.ExceptionInfo e
@@ -630,20 +644,31 @@
           :else {:prompt text})))
 
 (defn prompt!
-  "Handle one user input: a bbh command, an env reply, or a model turn.
-  Returns :end-turn or :cancelled, and throws for a /command nothing handles."
+  "Handle one user input: a bbh command, an env reply, a mail wake or a model
+  turn. Returns :end-turn or :cancelled, and throws for a /command nothing
+  handles. MAILBOX? marks input from the mailbox, which a cancelled session
+  ignores. A wake is mailbox input whose text the waiting mail replaces."
   [s text & {:keys [mailbox?]}]
-  ;; One swap, so a cancellation that lands just before cannot be cleared by it.
-  (swap! s (fn [st] (assoc st :interrupted (boolean (and mailbox? (:cancelled st))) :turn-usage nil :trace nil :steering {})))
-  (let [[_ cmd args] (re-matches #"(?s)/(\S+)\s*(.*)" text)]
-    (if-let [{:keys [run]} (get commands cmd)]
-      (do (emit! s {:type :text :text (run s args)}) :end-turn)
-      (let [{:keys [prompt reply]} (expand s text)]
+  (let [wake? (= mail-wake text)
+        mailbox? (or mailbox? wake?)
+        [_ cmd args] (re-matches #"(?s)/(\S+)\s*(.*)" text)]
+    ;; One swap, so a cancellation that lands just before cannot be cleared by it.
+    (swap! s (fn [st] (assoc st :interrupted (boolean (and mailbox? (:cancelled st))) :turn-usage nil :trace nil :taken {})))
+    (cond
+      ;; An earlier input may already have taken the mail this wake was for.
+      (and wake? (empty? (claimable s)))
+      (if (:interrupted @s) :cancelled :end-turn)
+
+      (get commands cmd)
+      (do (emit! s {:type :text :text ((:run (get commands cmd)) s args)}) :end-turn)
+
+      :else
+      (let [{:keys [prompt reply]} (if wake? {:prompt text} (expand s text))]
         (cond
           reply
           (do (emit! s {:type :text :text reply}) :end-turn)
 
-          (and (= prompt text) (re-matches #"(?s)/[^\s/]+(\s.*)?" text))
+          (and (= prompt text) (not wake?) (re-matches #"(?s)/[^\s/]+(\s.*)?" text))
           (throw (ex-info (str "Unknown command " (first (str/split text #"\s")) ". /help lists commands.") {}))
 
           :else
@@ -652,10 +677,15 @@
                 start (System/currentTimeMillis)
                 _ (swap! s assoc :trace (str (random-uuid)) :turn-from (count (:messages @s)))
                 finish! #(trace-run! s "turn" start
-                                     (merge {:messages [(:turn-from @s) (count (:messages @s))] :usage (:turn-usage @s)} %))]
-            (let [prompt (if-let [steering (take-steering! s)] (str steering "\n\n" prompt) prompt)]
-              (record! s {:role "user"
-                          :content (if (seq notes) (str "[bbh] " (str/join " " notes) "\n\n" prompt) prompt)}))
+                                     (merge {:messages [(:turn-from @s) (count (:messages @s))] :usage (:turn-usage @s)} %))
+                mail (take-mail! s)
+                prompt (cond (and wake? mail) mail
+                             mail (str mail "\n\n" prompt)
+                             :else prompt)
+                ;; The front end showed only the wake, so it is shown what the wake brought.
+                _ (when (and wake? mail) (emit! s {:type :text :text (str mail "\n\n")}))]
+            (record! s {:role "user"
+                        :content (if (seq notes) (str "[bbh] " (str/join " " notes) "\n\n" prompt) prompt)})
             (try (turn! s)
                  (catch Exception e
                    (finish! {:status "error" :error (ex-message e)})

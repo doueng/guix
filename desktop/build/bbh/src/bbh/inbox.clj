@@ -75,8 +75,11 @@
            (keep #(try (json/parse-string (slurp %) true) (catch java.io.IOException _ nil)))
            vec))))
 
-(defn- announce! [{:keys [root] :as p} busy]
-  (let [tmp (fs/create-temp-file {:dir root :prefix ".agent"})]
+(defn announce!
+  "Mark conversation ROOT's session, this process, as live in agent.json, with
+  its PROJECT and whether it is BUSY in a turn."
+  [{:keys [root] :as p} busy]
+  (let [tmp (fs/create-temp-file {:dir (fs/create-dirs root) :prefix ".agent"})]
     (spit (str tmp) (json/generate-string {:pid (.pid (java.lang.ProcessHandle/current))
                                            :start (:start (process/identity-of (.pid (java.lang.ProcessHandle/current))))
                                            :project (:project p) :busy busy}))
@@ -113,9 +116,14 @@
       (.setDaemon true) (.start))
     p))
 
+(defn withdraw!
+  "Mark conversation ROOT's session as gone."
+  [root]
+  (fs/delete-if-exists (agent-file root)))
+
 (defn stop! [{:keys [root stopped]}]
   (reset! stopped true)
-  (fs/delete-if-exists (agent-file root)))
+  (withdraw! root))
 
 (defn ack! [{:keys [root]} id]
   (fs/delete-if-exists (fs/path (mailbox root) (str (fs/file-name id) ".json"))))

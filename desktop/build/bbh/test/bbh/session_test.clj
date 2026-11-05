@@ -527,9 +527,9 @@
     (session/close! used)
     (is (fs/exists? (fs/path root "used" "messages.jsonl")))))
 
-(defn- untag "TEXT with steering tags' message ids removed." [text] (str/replace (str text) #"\[Steering [^\]]+\]" "[Steering]"))
+(defn- untag "TEXT with mail tags' message ids removed." [text] (str/replace (str text) #"\[(Steering|Mail) [^\]]+\]" "[$1]"))
 
-(deftest steering-arriving-during-evaluation-reaches-the-next-model-request
+(deftest mail-arriving-during-evaluation-reaches-the-next-model-request
   (let [h (harness "" [{:code "(Thread/sleep 250) :finished"} "done"])
         s (:s h)
         turn (future (session/prompt! s "start"))]
@@ -537,14 +537,30 @@
       (loop [n 0]
         (when (and (< n 100) (not (:evaluating @s))) (Thread/sleep 5) (recur (inc n))))
       (is (:evaluating @s))
-      (bbh.inbox/send! (:dir h) "ordinary reply")
+      (bbh.inbox/send! (:dir h) "ordinary note")
+      (Thread/sleep 2)
       (bbh.inbox/send! (:dir h) "[Steering] use the small build" nil {:kind :steer})
+      (Thread/sleep 2)
+      (bbh.inbox/send! (:dir h) "[Reply] Keep the alias?: No")
       (is (= :end-turn (deref turn 10000 :timeout)))
-      (is (= ["[Steering] use the small build\n\n=> :finished"] (map untag (tool-results h))))
-      (is (= "[Steering] use the small build\n\n=> :finished"
-             (untag (get-in @(:requests h) [1 :messages 3 :content]))))
-      (is (= ["ordinary reply"] (mapv :text (bbh.inbox/pending (:dir h)))))
-      (is (nil? (session/take-steering! s)))
+      (let [handed "[Mail] ordinary note\n\n[Steering] use the small build\n\n[Mail] [Reply] Keep the alias?: No\n\n=> :finished"]
+        (is (= [handed] (map untag (tool-results h))))
+        (is (= handed (untag (get-in @(:requests h) [1 :messages 3 :content]))) "all three reach the next model call"))
+      (is (= [] (bbh.inbox/pending (:dir h))) "and their files are gone")
+      (is (nil? (session/take-mail! s)))
+      (finally (stop! h)))))
+
+(deftest a-wake-hands-the-waiting-mail-to-the-model-and-an-empty-one-does-nothing
+  (let [h (harness "" ["done"])
+        s (:s h)]
+    (try
+      (is (= :end-turn (session/prompt! s session/mail-wake)))
+      (is (empty? @(:requests h)) "no mail, no model call")
+      (is (empty? (:messages @s)) "and nothing in the transcript")
+      (bbh.inbox/send! (:dir h) "[Reply] Keep the alias?: No")
+      (is (= :end-turn (session/prompt! s session/mail-wake)))
+      (is (= "[Mail] [Reply] Keep the alias?: No" (untag (get-in @(:requests h) [0 :messages 1 :content]))) "the mail is the whole prompt")
+      (is (= [] (bbh.inbox/pending (:dir h))))
       (finally (stop! h)))))
 
 (deftest steering-survives-until-the-next-turn-without-a-tool
@@ -590,14 +606,14 @@
         s (:s h)]
     (try
       (bbh.inbox/send! (:dir h) "[Steering] use the small build" nil {:kind :steer})
-      (let [handed (session/take-steering! s)]
+      (let [handed (session/take-mail! s)]
         (session/record! s {:role "tool" :content "earlier output said: use the small build"})
         (is (= 1 (count (bbh.inbox/pending (:dir h)))) "the same words without the tag are not a delivery")
         (session/record! s {:role "tool" :content (str handed "\n\n=> :ok")})
         (is (= [] (bbh.inbox/pending (:dir h)))))
       (finally (stop! h)))))
 
-(deftest the-mailbox-runs-in-order-and-a-cancel-never-starts-a-turn
+(deftest the-mailbox-wakes-the-session-and-a-cancel-never-starts-a-turn
   (let [h (harness "" ["done"])
         s (:s h)
         prompts (atom [])
@@ -606,12 +622,13 @@
                                             :show! (fn [_]) :ack! #(swap! acked conj %)})]
     (try
       (doseq [i (range 5)] (deliver {:id (str "m" i) :text (str "message " i)}))
-      (loop [n 0] (when (and (< n 300) (< (count @acked) 5)) (Thread/sleep 10) (recur (inc n))))
-      (is (= (mapv #(str "message " %) (range 5)) @prompts) "one at a time, in arrival order")
+      (loop [n 0] (when (and (< n 300) (< (count @prompts) 5)) (Thread/sleep 10) (recur (inc n))))
+      (is (= (repeat 5 session/mail-wake) @prompts) "each wakes the session, which takes the mail itself")
+      (is (empty? @acked))
       (bbh.inbox/send! (:dir h) "[Cancelled] stop now" nil {:kind :cancel :message-id "0-cancel-W1"})
       (deliver {:id "0-cancel-W1" :kind "cancel" :text "[Cancelled] stop now"})
       (deliver {:id "m9" :text "a reply that was already queued"})
-      (loop [n 0] (when (and (< n 300) (< (count @acked) 6)) (Thread/sleep 10) (recur (inc n))))
+      (loop [n 0] (when (and (< n 300) (< (count @acked) 1)) (Thread/sleep 10) (recur (inc n))))
       (is (= 5 (count @prompts)) "neither the cancel nor a later message starts a turn")
       (is (= "m9" (last @acked)))
       (is (fs/exists? (fs/path (:dir h) "0-cancel-W1.received")))

@@ -3,6 +3,7 @@
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [bbh.models :as models]
+            [bbh.inbox :as inbox]
             [bbh.repl :as repl]
             [bbh.session :as session]
             [bbh.transcript :as transcript]
@@ -79,6 +80,16 @@
   (update! sid {:sessionUpdate "available_commands_update"
                 :availableCommands (session/all-commands s)}))
 
+(defn- announce!
+  "Mark session S live, and BUSY or not, in the agent.json of the conversation
+  it is on now, and withdraw it from one it left through /resume."
+  [s busy]
+  (let [root (session/mail-root s)]
+    (when-let [old (:announced @s)]
+      (when (not= old root) (inbox/withdraw! old)))
+    (swap! s assoc :announced root)
+    (inbox/announce! {:root root :project (:cwd @s)} busy)))
+
 (defn- new-session [{:keys [cwd]}]
   (let [[resume] (reset-vals! resume-dir nil)
         sid (if resume
@@ -96,8 +107,9 @@
                                 :emit #(when-not (and (= :text (:type %)) (empty? (:text %)))
                                          (update! sid (event->update %)))})
         problem (session/start-repl! s)]
-    ;; Emacs gets mailbox messages through `bbh inbox-poll`; a cancellation is acted on here.
+    ;; The session takes its mail itself, Emacs only wakes it, and a cancellation is acted on here.
     (session/watch-controls! s)
+    (announce! s false)
     (swap! sessions assoc sid s)
     [sid problem]))
 
@@ -152,6 +164,7 @@
       "session/prompt"
       (let [text (prompt-text (:prompt params))]
         (swap! s assoc :busy true)
+        (announce! s true)
         (future
           (let [response (try
                            (let [stop ({:end-turn "end_turn" :cancelled "cancelled"} (session/prompt! s text))]
@@ -160,6 +173,7 @@
                            (catch Exception e
                              {:id id :error {:code -32000 :message (or (ex-message e) (str e))}}))]
             (swap! s assoc :busy false)
+            (announce! s false)
             (send! response))))
 
       "session/cancel"
@@ -185,5 +199,7 @@
           (try (handle request)
                (catch Exception e (rpc-error! (:id request) e))))))
     (finally
-      (doseq [s (vals @sessions)] (session/close! s))
+      (doseq [s (vals @sessions)]
+        (some-> (:announced @s) inbox/withdraw!)
+        (session/close! s))
       (shutdown-agents))))
