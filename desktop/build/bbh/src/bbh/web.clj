@@ -304,25 +304,43 @@
     (swap! in-flight inc)
     (try (handler request) (finally (swap! in-flight dec)))))
 
+(defn- publish!
+  "Have Tailscale serve loopback PORT to the tailnet over HTTPS."
+  [port]
+  (let [{:keys [exit err]} (p/shell {:out :string :err :string :continue true}
+                                    "tailscale" "serve" "--bg" (str "--https=" https-port)
+                                    (str "http://127.0.0.1:" port))]
+    (when-not (zero? exit)
+      (binding [*out* *err*] (println "tailscale serve:" err)))))
+
+(defn serve!
+  "Serve the site for the conversations under CONVERSATIONS, and the inbox of
+  the controller in SUPER-DIR, on loopback PORT, published to the tailnet when
+  PUBLISH?. Returns {:stop :in-flight}, or nil when PORT is taken."
+  [{:keys [conversations super-dir publish?] :as opts}]
+  (let [in-flight (atom 0)
+        at (or (:port opts) port)
+        stop (try (server/run-server (counted (handler conversations (remembered owner) super-dir) in-flight)
+                                     {:ip "127.0.0.1" :port at :max-body max-body})
+                  (catch java.net.BindException _ nil))]
+    (when stop
+      (when publish? (publish! at))
+      {:stop stop :in-flight in-flight})))
+
 (defn -main
-  "Serve the site for the conversations under DATA-DIR and publish it to the
-  tailnet. Exits once the bbh source changed and no request is being answered,
-  so its service restarts it on the new code."
+  "Serve the site for the conversations under DATA-DIR on its own, for working
+  on it. The controller serves it otherwise. Exits once the bbh source changed
+  and no request is being answered."
   [data-dir]
   (let [boot (version/fingerprint)
-        in-flight (atom 0)
-        stop (server/run-server (counted (handler (str (fs/path data-dir "conversations")) (remembered owner)) in-flight)
-                                {:ip "127.0.0.1" :port port :max-body max-body})]
+        {:keys [stop in-flight]} (or (serve! {:conversations (str (fs/path data-dir "conversations"))
+                                              :super-dir (super/super-dir) :publish? true})
+                                     (throw (ex-info (str "bbh web: port " port " is taken") {})))]
     (version/record! data-dir "web" boot)
+    (println "bbh web on port" port)
     (version/follow! {:boot boot :idle? #(zero? @in-flight)
                       :exit! (fn [why]
                                (println "bbh web: exiting because" why)
                                (stop :timeout 5000)
                                (System/exit 0))}))
-  (let [{:keys [exit err]} (p/shell {:out :string :err :string :continue true}
-                                    "tailscale" "serve" "--bg" (str "--https=" https-port)
-                                    (str "http://127.0.0.1:" port))]
-    (when-not (zero? exit)
-      (binding [*out* *err*] (println "tailscale serve:" err))))
-  (println "bbh web on port" port)
   @(promise))

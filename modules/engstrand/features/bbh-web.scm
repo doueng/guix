@@ -6,35 +6,17 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-bbh-web))
 
-;; The bbh checkout is mutable and the service follows it, as the shell does.
-;; The command publishes itself with `tailscale serve', which the operator
-;; setting in tailscaled lets this user do without root.
-(define %bbh-web-service
-  (simple-service 'familiar-bbh-web home-shepherd-service-type
-    (list (shepherd-service
-           (provision '(bbh-web))
-           (documentation "The website for bbh sessions, published to the tailnet.")
-           (respawn? #t)
-           (start #~(lambda ()
-                      (let ((home (getenv "HOME")))
-                        ((make-forkexec-constructor
-                          (list (string-append home "/.local/bin/bbh") "web")
-                          #:environment-variables
-                          (cons* (string-append "PATH=" home "/.guix-home/profile/bin"
-                                                ":/run/current-system/profile/bin")
-                                 (filter (lambda (variable)
-                                           (not (string-prefix? "PATH=" variable)))
-                                         (default-environment-variables)))
-                          #:log-file (string-append home "/.local/state/bbh-web.log"))))))
-           (stop #~(make-kill-destructor))))))
+;; The bbh checkout is mutable and the services follow it, as the shell does.
 
-;; The super-agent controller: the store, the command socket and the
-;; dispatcher that feeds bbh mailboxes. Loopback only, so nothing to publish.
+;; The super-agent controller: the store, the command socket, the dispatcher
+;; that feeds bbh mailboxes, and the website.  It publishes the website with
+;; `tailscale serve', which the operator setting in tailscaled lets this user
+;; do without root.
 (define %bbh-super-service
   (simple-service 'familiar-bbh-super home-shepherd-service-type
     (list (shepherd-service
            (provision '(bbh-super))
-           (documentation "The bbh super-agent controller and its SQLite store.")
+           (documentation "The bbh super-agent controller, its SQLite store and the website.")
            (respawn? #t)
            (start #~(lambda ()
                       (let ((home (getenv "HOME")))
@@ -74,4 +56,4 @@
 (define (feature-familiar-bbh-web)
   (feature-package-set
    'familiar-bbh-web
-   #:home-services (list %bbh-web-service %bbh-super-service %bbh-emacs-service)))
+   #:home-services (list %bbh-super-service %bbh-emacs-service)))

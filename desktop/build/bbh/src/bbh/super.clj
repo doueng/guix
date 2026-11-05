@@ -677,12 +677,25 @@
                 (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
         nil)))))
 
+(defn- serve-web!
+  "Serve the website from controller C with WEB's options for `bbh.web/serve!`.
+  While its port is taken, as by a bbh web still running on its own, try again
+  every 30 s."
+  [{:keys [dir conversations stopped] :as c} web]
+  (let [serve! (requiring-resolve 'bbh.web/serve!)]
+    (doto (Thread. #(loop []
+                      (when-not @stopped
+                        (if-let [w (serve! (merge {:conversations conversations :super-dir dir} web))]
+                          (do (reset! (:web c) w) (println "bbh super: serving the website"))
+                          (do (Thread/sleep 30000) (recur))))))
+      (.setDaemon true) (.start))))
+
 (defn start!
   "Open the store under DIR, listen on a loopback port written to <dir>/port,
   and run the dispatcher every SCAN-MS. Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router] :or {scan-ms 500 health-ms 120000}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router web] :or {scan-ms 500 health-ms 120000}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -702,7 +715,7 @@
            :policy policy
            :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
            :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
-           :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0)}]
+           :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :web (atom nil)}]
     (ensure-owner-token! c)
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
     ;; Each client gets its own thread and a read timeout, so a client that
@@ -729,10 +742,12 @@
                            (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))
       (.setDaemon true) (.start)))
+    (when web (serve-web! c web))
     c))
 
-(defn stop! [{:keys [stopped server db dir lock dispatcher in-flight]}]
+(defn stop! [{:keys [stopped server db dir lock dispatcher in-flight web]}]
   (reset! stopped true)
+  (some-> web deref :stop (apply [:timeout 5000]))
   (.close ^ServerSocket server)
   ;; Let the requests already accepted finish, a launch among them.
   (let [deadline (+ (System/currentTimeMillis) 30000)]
@@ -744,8 +759,8 @@
   (.close ^java.nio.channels.FileChannel lock))
 
 (defn serve!
-  "Run the controller on DIR, recording its version under DATA-DIR, until it
-  exits: when the source changes and it is idle, so its service restarts it on
+  "Run the controller on DIR, and the website when WEB, recording its version
+  under DATA-DIR, until it exits: when the source changes and it is idle, so its service restarts it on
   the new code, or when DIR is deleted, as a test's temp directory is."
   [{:keys [dir data-dir interval-ms] :as opts}]
   (let [boot (version/fingerprint)
@@ -753,7 +768,7 @@
     (version/record! data-dir "controller" boot)
     (println "bbh super on" dir "running" boot)
     (version/follow! {:boot boot :interval-ms (or interval-ms 10000)
-                      :idle? #(zero? @(:in-flight c))
+                      :idle? #(and (zero? @(:in-flight c)) (zero? (or (some-> (:web c) deref :in-flight deref) 0)))
                       :gone? #(not (fs/exists? (fs/path dir "super.db")))
                       :exit! (fn [why]
                                (println "bbh super: exiting because" why)
@@ -764,5 +779,5 @@
 (defn -main
   "bbh super serve: run the controller until killed or its code changes."
   []
-  (serve! {:dir (super-dir) :data-dir (str (data-dir)) :manage-router true
+  (serve! {:dir (super-dir) :data-dir (str (data-dir)) :manage-router true :web {:publish? true}
            :interval-ms (some-> (sysenv/getenv "BBH_SUPER_FOLLOW_MS") parse-long)}))

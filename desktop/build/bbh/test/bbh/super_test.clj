@@ -135,6 +135,22 @@
           (call dir {:token token :command :answered! :args {:reply (ffirst (:replies @(:state c)))}})
           (is (= [:answered] (map :state (vals (:replies @(:state c))))) "the Worker's answered! does"))))))
 
+(deftest the-controller-serves-the-website-and-leaves-a-taken-port-alone
+  (let [port (with-open [s (java.net.ServerSocket. 0)] (.getLocalPort s))
+        dir (str (fs/create-temp-dir {:prefix "bbh-super"}))
+        c (super/start! {:dir dir :conversations (str (fs/create-temp-dir {:prefix "bbh-super-conv"})) :scan-ms 10
+                         :launch (stub-launch dir (str (fs/create-temp-dir {:prefix "bbh-super-ws"})))
+                         :web {:port port}})]
+    (try
+      (is (wait-for #(some? @(:web c))))
+      (let [r (babashka.http-client/get (str "http://127.0.0.1:" port "/api/super/threads") {:throw false})]
+        (is (= 403 (:status r)) "the controller answers the site's requests")
+        (is (re-find #"Tailnet owner only" (:body r))))
+      (is (nil? ((requiring-resolve 'bbh.web/serve!) {:port port :conversations dir :super-dir dir})) "a taken port gives nil")
+      (finally (super/stop! c)))
+    (is (thrown? java.net.ConnectException
+                 (with-open [_ (java.net.Socket. "127.0.0.1" (int port))])) "stop! closes it")))
+
 (deftest a-second-controller-on-the-same-store-is-refused
   (with-controller
     (fn [_ dir _]
