@@ -32,14 +32,6 @@
         (inbox/ack! p id)
         (is (empty? (inbox/pending root)))))))
 
-(deftest a-retried-message-is-delivered-again
-  (with-poller
-    (fn [root p delivered]
-      (let [{:keys [id]} (inbox/send! root "again")]
-        (is (wait-for #(= 1 (count @delivered))))
-        (inbox/retry! p id)
-        (is (wait-for #(= 2 (count @delivered))))))))
-
 (deftest messages-arrive-oldest-first
   (let [root (str (fs/create-temp-dir {:prefix "bbh-inbox"}))]
     (inbox/send! root "one")
@@ -59,7 +51,7 @@
   (with-poller
     (fn [root p _]
       (is (= {:project "/work/site" :busy false} (dissoc (inbox/agent root) :pid :start)))
-      (inbox/busy! p true)
+      (inbox/announce! p true)
       (is (true? (:busy (inbox/agent root))))
       (inbox/stop! p)
       (is (nil? (inbox/agent root))))))

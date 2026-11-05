@@ -1,17 +1,15 @@
 (ns bbh.inbox
   "What a live session and the website share, kept in the conversation's
-  directory so that neither needs the other running. A poller announces the
-  session in agent.json and hands each file in mailbox/ to its front end. The
+  directory so that neither needs the other running. A session announces itself
+  in agent.json, and mailbox/ holds the messages it has not taken yet. The
   directory is the rollover root's, so a rollover keeps both.
 
-  A front end owns delivery. The poller hands it each message once and is told
-  `ack`, `retry` or `busy`. Delivery is at least once, because an ack follows
-  the turn that held the message."
+  The session takes its own mail and deletes a message once its transcript
+  holds it, so delivery is at least once."
   (:require [babashka.fs :as fs]
             [bbh.transcript :as transcript]
             [bbh.super.process :as process]
             [cheshire.core :as json]
-            [clojure.java.io :as io]
             [clojure.string :as str]))
 
 (def ^:private scan-ms 500)
@@ -127,36 +125,3 @@
 
 (defn ack! [{:keys [root]} id]
   (fs/delete-if-exists (fs/path (mailbox root) (str (fs/file-name id) ".json"))))
-
-(defn retry!
-  "Have the next scan deliver ID again."
-  [{:keys [seen]} id]
-  (swap! seen disj id))
-
-(defn busy! [p busy]
-  (announce! p busy))
-
-(defn -poll
-  "Serve conversation DIR to a front end on stdio. Deliveries go out as JSON
-  lines. Input lines are `ack ID`, `retry ID`, `busy true` and `busy false`, and
-  EOF ends it."
-  [dir project]
-  (let [out (Object.)
-        p (start! {:root (root-dir dir) :project project
-                   ;; The session acts on a cancellation itself; it is never a prompt.
-                   :deliver (fn [message]
-                              (when-not (= "cancel" (:kind message))
-                                (locking out
-                                  (println (json/generate-string message))
-                                  (flush))))})]
-    (doseq [line (line-seq (io/reader System/in))]
-      (let [[cmd arg] (str/split line #" " 2)]
-        (try
-          (case cmd
-            "ack" (ack! p arg)
-            "retry" (retry! p arg)
-            "busy" (busy! p (= "true" arg))
-            nil)
-          (catch Exception e
-            (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))))))
-    (stop! p)))

@@ -81,7 +81,7 @@
                          (catch Exception e (println (str "\n" (ex-message e)))))
                     (println)))
         ;; The mailbox is how the website and bbh super reach this session. A
-        ;; message waits for the turn in progress, then runs as a prompt of its own.
+        ;; running turn takes new mail itself, and an idle session is woken.
         poller (promise)
         _ (deliver poller (inbox/start! {:root (inbox/root-dir dir) :project (str (fs/cwd))
                                          :deliver (session/mailbox-handler
@@ -108,8 +108,6 @@
   (case (first args)
     "acp" (let [{:keys [resume id]} (parse-args (rest args))]
             (acp/-main (when (or resume id) (conversation-dir resume id))))
-    "inbox-poll" (let [[_ id project] args]
-                   (inbox/-poll (str (fs/path (super/data-dir) "conversations" id)) project))
     "web" (web/-main (super/data-dir))
     "super" (apply super/-main (rest args))
     "say" (apply voice/-main (rest args))
