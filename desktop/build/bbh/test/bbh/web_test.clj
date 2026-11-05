@@ -212,22 +212,45 @@
 
 ;; ---- the inbox over /api/super -------------------------------------------
 
+(defn- start-super
+  "A controller in a temporary directory whose launch makes plain directories
+  and keeps the open! spec instead of opening Emacs."
+  []
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-web-super"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-web-super-conv"}))
+        opened (atom nil)]
+    (assoc (bbh.super/start! {:dir dir :conversations conversations :scan-ms 10
+                              :launch {:workspace! (fn [_ w] (str (fs/create-dirs (fs/path dir "ws" (:thread w)))))
+                                       :open! (fn [spec] (reset! opened spec) "buf")
+                                       :retire! (constantly nil) :release! (constantly nil)}})
+           ::opened opened)))
+
+(defn- run-worker
+  "Start a Worker on T1 of controller C and take its brief, as its session
+  would. Returns its token."
+  [c]
+  (bbh.super.client/call! (:dir c) {:command :start-worker! :args {:thread "T1" :workflow :investigation :brief "look" :repo (str (fs/home))}})
+  (let [mailbox (fs/path (:conversations c) "super-W1" "mailbox")]
+    (wait-for #(seq (fs/glob mailbox "*.json")))
+    (doseq [f (fs/glob mailbox "*.json")] (fs/delete f))
+    (wait-for #(= :acked (get-in @(:state c) [:outbox "o1" :state])))
+    (:token @(::opened c))))
+
 (defn- with-super
   "A site whose inbox is a controller in a temporary directory, with one thread,
   a Worker and an open ask. Calls F with the site, the controller and the
   Worker's conversation root."
   [f]
-  (let [dir (str (fs/create-temp-dir {:prefix "bbh-web-super"}))
-        conversations (str (fs/create-temp-dir {:prefix "bbh-web-super-conv"}))
-        c (bbh.super/start! {:dir dir :conversations conversations :scan-ms 10})
-        s (assoc (site) :app (web/handler conversations (constantly "owner@example.com") dir))
+  (let [c (start-super)
+        dir (:dir c)
+        s (assoc (site) :app (web/handler (:conversations c) (constantly "owner@example.com") dir))
         call (fn [req] (bbh.super.client/call! dir req))]
     (try (call {:command :thread! :args {:title "Herdr key for the thread picker"}})
-         (let [token (:token (:ok (call {:command :attach-worker! :args {:thread "T1" :conversation "w1"}})))]
+         (let [token (run-worker c)]
            (call {:token token :command :ask! :args {:kind :question :text "Which key should open the inbox pane?"
                                                      :options [{:id "t" :label "Alt+Space t"} {:id "a" :label "Alt+Space a"}]
                                                      :recommended "t" :stopped true}}))
-         (f s c (str (fs/path conversations "w1")))
+         (f s c (str (fs/path (:conversations c) "super-W1")))
          (finally (bbh.super/stop! c)))))
 
 (defn- post-super [{:keys [app]} uri body headers]
@@ -246,7 +269,7 @@
       (let [[status t] (get-json s "/api/super/threads/T1")]
         (is (= 200 status))
         (is (= ["open"] (map :state (:asks t))))
-        (is (= ["thread-created" "worker-attached" "token-issued" "ask-opened"] (map :kind (:events t)))))
+        (is (= "ask-opened" (:kind (last (:events t))))))
       (is (= 404 (first (get-json s "/api/super/threads/T9")))))))
 
 (deftest a-send-from-the-page-lands-in-the-workers-mailbox-once-and-a-stale-one-is-a-conflict
@@ -268,14 +291,13 @@
         (is (= ["archived"] (map :section (:sections (second (get-json s "/api/super/threads"))))))))))
 
 (deftest an-approval-from-the-page-is-accepted-once-and-a-stale-one-is-a-conflict
-  (let [dir (str (fs/create-temp-dir {:prefix "bbh-web-ap"}))
-        conversations (str (fs/create-temp-dir {:prefix "bbh-web-apconv"}))
-        c (bbh.super/start! {:dir dir :conversations conversations :scan-ms 10})
-        s (assoc (site) :app (web/handler conversations (constantly "owner@example.com") dir))
+  (let [c (start-super)
+        dir (:dir c)
+        s (assoc (site) :app (web/handler (:conversations c) (constantly "owner@example.com") dir))
         call (fn [req] (bbh.super.client/call! dir req))]
     (try
       (call {:command :thread! :args {:title "review"}})
-      (let [token (:token (:ok (call {:command :attach-worker! :args {:thread "T1" :conversation "w1"}})))
+      (let [token (run-worker c)
             a (:ok (call {:token token :command :ask! :args {:kind :review :text "Ship?" :revision "c068de11"}}))
             sha (:evidence-sha (first (:asks (second (get-json s "/api/super/threads/T1")))))
             body {:id "ap-1" :ask a :revision "c068de11" :evidence-sha (str sha)}]

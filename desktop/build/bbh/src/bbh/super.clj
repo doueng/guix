@@ -353,11 +353,10 @@
 
 (defn- stop-jobs!
   "Stop the detached jobs of Worker WORKER that are still running, now that it
-  ended, each marked exited 137. Only a Worker the controller launched, one
-  with a workflow, owns its conversation; an attached one is the person's and
-  outlives it. Jobs whose identity cannot be verified are left alone."
+  ended, each marked exited 137. Jobs whose identity cannot be verified are
+  left alone."
   [{:keys [state] :as c} worker]
-  (when-let [conversation (let [w (get-in @state [:workers worker])] (when (:workflow w) (:conversation w)))]
+  (when-let [conversation (get-in @state [:workers worker :conversation])]
     (doseq [j (process/jobs (conversation-root c conversation))
             :when (and (= :running (:state j)) (process/stop-job! j))]
       (spit (str (:base j) ".exit") "137\n"))))
@@ -418,7 +417,7 @@
         {:ok read}
         (let [cmd {:id (or id (new-id)) :command command :args (or args {})}]
           (case command
-            (:attach-worker! :register-router!)
+            :register-router!
             (let [t (new-token)
                   r (run! c principal (assoc cmd :token-hash (sha256 t)))]
               {:ok (cond-> (:result r) (not (:repeat? r)) (assoc :token t))})
@@ -560,13 +559,12 @@
                     (cond (= :queued (:state w)) [:waiting]
                           uncertain? [:needs-human (format "Job %s can no longer be identified as the process that started it; check it before anything kills or reruns it."
                                                            (:id (first (filter #(#{:unknown :lost} (:state %)) jobs))))]
-                          (and (:workflow w) (= :missing (:status wf))) [:needs-human (format "Its wf run %s is missing, so it cannot be restarted." (:wf-run w))]
+                          (= :missing (:status wf)) [:needs-human (format "Its wf run %s is missing, so it cannot be restarted." (:wf-run w))]
                           (and agent (not repl-ok?)) [:needs-human (format "Its session (pid %s) is alive but its REPL does not answer." (:pid agent))]
                           stale [:needs-human (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
                                                       (:id stale) (quot (waited-ms stale) 60000))]
                           agent [(if (= :waiting (:state w)) :waiting :running)]
-                          (:workflow w) [:recoverable]
-                          :else [:needs-human "Its session is gone and it has no workflow to restart it from."])
+                          :else [:recoverable])
                     since (if (and (= :needs-human classification) (= problem (get-in w [:health :problem])))
                             (or (get-in w [:health :since]) now)
                             now)

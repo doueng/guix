@@ -79,14 +79,6 @@ StartWorker(w, t, ls) ==
           /\ launched' = [launched EXCEPT ![w] = TRUE]
   /\ UNCHANGED <<tworker, resolved, asks, replies>>
 
-\* decide* :attach-worker!, fold* :worker-attached
-AttachWorker(w, t) ==
-  /\ NextWorker(w) /\ ~resolved[t] /\ ThreadWorkers(t) = {}
-  /\ wstate' = [wstate EXCEPT ![w] = "working"]
-  /\ wthread' = [wthread EXCEPT ![w] = t]
-  /\ tworker' = [tworker EXCEPT ![t] = w]
-  /\ UNCHANGED <<wlocks, launched, holder, resolved, asks, replies>>
-
 \* decide* :promote-worker! (next-queued), fold* :worker-promoted
 PromoteWorker ==
   LET ready == {w \in Workers : wstate[w] = "queued" /\ ~Blocked(w, wlocks[w])} IN
@@ -187,7 +179,7 @@ Answered(w, r) ==
   /\ UNCHANGED <<wthread, wlocks, launched, holder, tworker, resolved>>
 
 Next ==
-  \/ \E w \in Workers, t \in Threads : AttachWorker(w, t) \/ \E ls \in SUBSET Locks : StartWorker(w, t, ls)
+  \/ \E w \in Workers, t \in Threads : \E ls \in SUBSET Locks : StartWorker(w, t, ls)
   \/ PromoteWorker
   \/ \E w \in Workers : WorkerRunning(w) \/ Cancel(w) \/ CancelDelivered(w)
                          \/ \E o \in {"done", "failed"} : FinishWorker(w, o)
@@ -200,8 +192,8 @@ Spec == Init /\ [][Next]_vars
 
 \* ---- rules ----
 
-\* The cap counts launched Workers on live threads; an attached conversation
-\* has no process, and holds-slot? frees the slot of an archived thread.
+\* The cap counts launched Workers on live threads; holds-slot? frees the slot
+\* of an archived thread.
 CapRespected == Cardinality({w \in SlotWorkers : launched[w]}) <= Cap
 \* A launched Worker holds every lock it asked for until it finishes.
 LocksHeld == \A w \in Workers : launched[w] /\ wstate[w] \in Active => \A l \in wlocks[w] : holder[l] = w

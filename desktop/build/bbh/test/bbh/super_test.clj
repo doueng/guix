@@ -20,21 +20,49 @@
           (> n 300) false
           :else (do (Thread/sleep 10) (recur (inc n))))))
 
+(def ^:private opened
+  "Controller dir to the open! specs its stub launch saw, each with the token."
+  (atom {}))
+
+(def ^:private controllers "Controller dir to the controller." (atom {}))
+
+(defn- stub-launch
+  "A launch that makes plain directories under WORKSPACES and records each
+  open! for DIR, so a Worker runs on a real wf run with no jj or Emacs."
+  [dir workspaces]
+  {:workspace! (fn [_ w] (str (fs/create-dirs (fs/path workspaces (str (:thread w) "-" (:generation w))))))
+   :open! (fn [spec] (swap! opened update dir (fnil conj []) spec) (str "buf-" (:conversation spec)))
+   :land! (fn [_] {:landed nil}) :retire! (constantly nil) :release! (constantly nil)})
+
 (defn- with-controller [f]
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-conv"}))
-        c (super/start! {:dir dir :conversations conversations :scan-ms 10})]
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10
+                         :launch (stub-launch dir (str (fs/create-temp-dir {:prefix "bbh-super-ws"})))})]
+    (swap! controllers assoc dir c)
     (try (f c dir conversations)
-         (finally (super/stop! c)))))
+         (finally (super/stop! c) (swap! opened dissoc dir) (swap! controllers dissoc dir)))))
 
 (defn- call [dir request] (client/call! dir request))
+
+(defn- run-worker
+  "Start a Worker on THREAD under a controller from with-controller and take
+  its brief from the mailbox, as its session would. Returns its token."
+  [dir thread]
+  (let [c (get @controllers dir)
+        w (:id (:ok (call dir {:command :start-worker! :args {:thread thread :workflow :investigation :brief "look" :repo (str (fs/home))}})))
+        mailbox (fs/path (:conversations c) (str "super-" w) "mailbox")]
+    (wait-for #(seq (fs/glob mailbox "*.json")))
+    (doseq [f (fs/glob mailbox "*.json")] (fs/delete f))
+    (wait-for #(every? (fn [o] (= :acked (:state o))) (vals (:outbox @(:state c)))))
+    (:token (last (get @opened dir)))))
 
 (defn- thread-with-ask
   "A thread, a Worker on it and one open ask. Returns the Worker's token and
   the thread's asks-version."
   [dir]
   (call dir {:command :thread! :args {:title "Alt+W closes windows everywhere"}})
-  (let [token (:token (:ok (call dir {:command :attach-worker! :args {:thread "T1" :conversation "conv-1"}})))]
+  (let [token (run-worker dir "T1")]
     (call dir {:token token :command :ask! :args {:kind :question :text "Keep Ctrl+Alt+W as an alias?"
                                                      :options [{:id "no" :label "No"} {:id "week" :label "Yes, for a week"}]
                                                      :stopped true}})
@@ -47,7 +75,7 @@
             reply {:id "c-9f2" :command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "no"}}}]
         (is (= {:ok "c-9f2"} (call dir reply)))
         (is (= {:ok "c-9f2"} (call dir reply)) "the second send is the same reply, not a stale conflict")
-        (is (= 1 (count (:outbox @(:state c)))))
+        (is (= ["o1" "o2"] (sort (keys (:outbox @(:state c))))) "the brief and one reply")
         (is (= [:sent] (map :state (:replies (:ok (call dir {:command :thread :args {:id "T1"}}))))))))))
 
 (deftest a-send-with-a-stale-version-is-rejected-with-the-current-asks
@@ -78,7 +106,7 @@
         (call dir {:command :link! :args {:thread "T1" :resource "repo:engstrand/guix"}})
         (call dir {:token token :command :note! :args {:text "looking at kanata"}})
         (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "week"} :note "and say why"}})
-        (is (wait-for #(= #{:sent} (set (map :state (vals (:outbox @(:state c))))))))
+        (is (wait-for #(= #{:acked :sent} (set (map :state (vals (:outbox @(:state c))))))))
         (let [db (:db c)]
           (locking db
             (is (= (store/replay db) (store/load db) @(:state c)))))))))
@@ -94,14 +122,14 @@
     (fn [c dir conversations]
       (let [{:keys [version]} (thread-with-ask dir)]
         (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "no"}}})
-        (is (wait-for #(seq (fs/glob conversations "conv-1/mailbox/*.json"))))
-        (let [files (fs/glob conversations "conv-1/mailbox/*.json")
+        (is (wait-for #(seq (fs/glob conversations "super-W1/mailbox/*.json"))))
+        (let [files (fs/glob conversations "super-W1/mailbox/*.json")
               text (slurp (str (first files)))]
           (is (= 1 (count files)))
           (is (re-find #"Keep Ctrl\+Alt\+W as an alias\?: No" text))
-          (is (wait-for #(= [:sent] (map :state (vals (:outbox @(:state c)))))) "the send is recorded after the file lands")
+          (is (wait-for #(= :sent (get-in @(:state c) [:outbox "o2" :state]))) "the send is recorded after the file lands")
           (doseq [f files] (fs/delete f))
-          (is (wait-for #(= [:acked] (map :state (vals (:outbox @(:state c)))))))
+          (is (wait-for #(= :acked (get-in @(:state c) [:outbox "o2" :state]))))
           (is (= [:delivered] (map :state (vals (:asks @(:state c)))))))))))
 
 (deftest a-second-controller-on-the-same-store-is-refused
@@ -136,11 +164,11 @@
       (thread-with-ask dir)
       (is (= {:ok "T1"} (call dir {:command :dismiss! :args {:thread "T1"}})))
       (is (= [:dismissed] (map :state (:asks (:ok (call dir {:command :thread :args {:id "T1"}}))))))
-      (is (wait-for #(seq (fs/glob conversations "conv-1/mailbox/*.json"))))
-      (is (re-find #"Not answered, do not wait: a1" (slurp (str (first (fs/glob conversations "conv-1/mailbox/*.json"))))))
+      (is (wait-for #(seq (fs/glob conversations "super-W1/mailbox/*.json"))))
+      (is (re-find #"Not answered, do not wait: a1" (slurp (str (first (fs/glob conversations "super-W1/mailbox/*.json"))))))
       (is (= :working (get-in @(:state c) [:threads "T1" :execution])) "the Worker is told, so the thread is no longer waiting")
       (is (= {:ok "T1"} (call dir {:command :dismiss! :args {:thread "T1"}})) "nothing open: no second message")
-      (is (= 1 (count (:outbox @(:state c))))))))
+      (is (= 2 (count (:outbox @(:state c)))) "the brief and one dismissal"))))
 
 (deftest archive-resolves-the-thread-and-a-milestone-shows-it-came-back
   (with-controller
@@ -157,7 +185,6 @@
         (is (= [:stopped true] (section-of)) "an ask opened after archiving needs you")
         (call dir {:command :thread! :args {:title "done"}})
         (call dir {:command :archive! :args {:thread "T2"}})
-        (is (= :archived (:error (call dir {:command :attach-worker! :args {:thread "T2" :conversation "c2"}}))))
         (is (= :archived (:error (call dir {:command :start-worker! :args {:thread "T2" :workflow :investigation :brief "b" :repo "/tmp"}}))))
         (is (nil? (:worker (:ok (call dir {:command :thread :args {:id "T2"}})))))))))
 
@@ -433,10 +460,13 @@
   (let [root (fs/create-temp-dir {:prefix "super-job-recovery"})
         dir (str (fs/path root "controller"))
         conversations (str (fs/path root "conversations"))
-        opts {:dir dir :conversations conversations :scan-ms 10}
+        opts {:dir dir :conversations conversations :scan-ms 10
+              :launch (stub-launch dir (str (fs/path root "workspaces")))}
         c (super/start! opts)
-        jobs (fs/create-dirs (fs/path conversations "conv-1" "jobs"))
-        base (str (fs/path jobs "build-1"))]
+        jobs (fs/create-dirs (fs/path conversations "super-W1" "jobs"))
+        base (str (fs/path jobs "build-1"))
+        job-rows (fn [c] (filter #(clojure.string/starts-with? (:text %) "[Job") (vals (:outbox @(:state c)))))]
+    (swap! controllers assoc dir c)
     (try
       (thread-with-ask dir)
       (spit (str base ".cmd") "build command")
@@ -450,29 +480,29 @@
              "echo compiler-failed >> " (pr-str (str base ".log"))
              "; echo 17 > " (pr-str (str base ".exit"))))
       (super/observe-jobs! c)
-      (is (= {} (:outbox @(:state c))) "a running job does not wake the Worker")
+      (is (empty? (job-rows c)) "a running job does not wake the Worker")
       (super/stop! c)
       (let [c2 (super/start! opts)]
         (try
           (super/observe-jobs! c2)
-          (is (= {} (:outbox @(:state c2))) "restart does not manufacture an exit")
+          (is (empty? (job-rows c2)) "restart does not manufacture an exit")
           (spit (str base ".release") "go")
-          (is (wait-for #(seq (fs/glob conversations "conv-1/mailbox/*.json"))))
+          (is (wait-for #(seq (fs/glob conversations "super-W1/mailbox/*.json"))))
           (dotimes [_ 3] (super/observe-jobs! c2))
           (is (= [{:id "build-1" :exit 17 :log (str base ".log")}]
                  (vec (vals (get-in @(:state c2) [:workers "W1" :jobs])))))
           (is (= 1 (count (filter #(= :job-exited (:kind %)) (store/events (:db c2))))))
-          (is (= 1 (count (:outbox @(:state c2)))))
+          (is (= 1 (count (job-rows c2))))
           (is (re-find #"Job build-1 exited with status 17"
                        (:text (cheshire.core/parse-string
-                                (slurp (str (first (fs/glob conversations "conv-1/mailbox/*.json")))) true))))
+                                (slurp (str (first (fs/glob conversations "super-W1/mailbox/*.json")))) true))))
           (locking (:db c2) (is (= (store/replay (:db c2)) (store/load (:db c2)) @(:state c2))))
           (finally (super/stop! c2))))
       (let [c3 (super/start! opts)]
         (try
           (super/observe-jobs! c3)
-          (is (= 1 (count (:outbox @(:state c3)))))
-          (is (= 1 (count (fs/glob conversations "conv-1/mailbox/*.json"))))
+          (is (= 1 (count (job-rows c3))))
+          (is (= 1 (count (fs/glob conversations "super-W1/mailbox/*.json"))))
           (is (= "compiler-failed\n" (slurp (str base ".log"))) "the command executed once")
           (finally (super/stop! c3))))
       (finally
@@ -484,12 +514,12 @@
   (with-controller
     (fn [c dir conversations]
       (let [{:keys [token]} (thread-with-ask dir)
-            jobs (fs/create-dirs (fs/path conversations "conv-1" "jobs"))]
+            jobs (fs/create-dirs (fs/path conversations "super-W1" "jobs"))]
         (spit (str (fs/path jobs "partial.cmd")) "test")
         (spit (str (fs/path jobs "partial.exit")) "")
         (spit (str (fs/path jobs "orphan.exit")) "0")
         (super/observe-jobs! c)
-        (is (= {} (:outbox @(:state c))))
+        (is (= ["o1"] (keys (:outbox @(:state c)))) "only the brief")
         (is (= :forbidden (:error (call dir {:token token :command :job-exited!
                                             :args {:job "fake" :exit 0 :log "fake.log"}}))))
         (spit (str (fs/path jobs "partial.exit")) "0")
@@ -502,9 +532,9 @@
             command {:id "steer-once" :command :steer! :args {:worker "W1" :text "use the small build"}}]
         (is (= {:ok "W1"} (call dir command)))
         (is (= {:ok "W1"} (call dir command)))
-        (is (wait-for #(seq (fs/glob conversations "conv-1/mailbox/*.json"))))
+        (is (wait-for #(seq (fs/glob conversations "super-W1/mailbox/*.json"))))
         (is (= [{:kind "steer" :text "[Steering] use the small build"}]
-               (mapv #(select-keys % [:kind :text]) (bbh.inbox/pending (str (fs/path conversations "conv-1"))))))
+               (mapv #(select-keys % [:kind :text]) (bbh.inbox/pending (str (fs/path conversations "super-W1"))))))
         (is (= 1 (count (filter #(= :worker-steered (:kind %)) (store/events (:db c))))))
         (is (= :forbidden (:error (call dir {:token token :command :steer! :args {:worker "W1" :text "worker says"}}))))
         (is (= :invalid (:error (call dir {:command :steer! :args {:worker "W1" :text " "}}))))
@@ -514,7 +544,7 @@
   (with-controller
     (fn [c dir conversations]
       (thread-with-ask dir)
-      (let [root (fs/path conversations "conv-1")
+      (let [root (fs/path conversations "super-W1")
             jobs (fs/create-dirs (fs/path root "jobs"))
             base (str (fs/path jobs "cancel-job"))]
         (spit (str base ".cmd") "sleep 60")
@@ -568,18 +598,6 @@
               (is (nil? (bbh.super.process/identity-of (:pid after))) "a health pass stops one an ended Worker still has")
               (finally (when (bbh.super.process/matches? after) (bbh.super.process/stop-job! after)))))
           (finally (when (bbh.super.process/matches? during) (bbh.super.process/stop-job! during))))))))
-
-(deftest an-attached-workers-conversation-keeps-its-jobs
-  ;; An attached conversation is the person's: it was there before the Worker and outlives it.
-  (with-controller
-    (fn [c dir conversations]
-      (let [{:keys [token]} (thread-with-ask dir)
-            job (running-job! (fs/path conversations "conv-1") "mine")]
-        (try
-          (is (= {:ok "W1"} (call dir {:token token :command :finish-worker! :args {:worker "W1" :state-after :failed :reason "gave up"}})))
-          (super/reconcile! c)
-          (is (bbh.super.process/matches? job) "its job still runs after the finish and a health pass")
-          (finally (when (bbh.super.process/matches? job) (bbh.super.process/stop-job! job))))))))
 
 (deftest dead-workers-retry-three-times-with-the-same-conversation-and-workflow
   (with-workers
@@ -693,11 +711,15 @@
         proc (babashka.process/process
                {:out :string :err :string}
                "bb" "-cp" "src" "-e"
-                (str "(require '[bbh.super :as s]) (s/start! " (pr-str opts) ") @(promise)"))
-        base (str (fs/path conversations "conv-1" "jobs" "survivor"))]
+                (str "(require '[bbh.super :as s] '[babashka.fs :as fs]) (s/start! (assoc " (pr-str opts)
+                     " :launch {:workspace! (fn [_ w] (str (fs/create-dirs (fs/path " (pr-str (str root)) " (:thread w)))))"
+                     " :open! (fn [{:keys [token]}] (spit " (pr-str (str root "/token")) " token) \"buf\")})) @(promise)"))
+        base (str (fs/path conversations "super-W1" "jobs" "survivor"))]
     (try
       (is (wait-for #(fs/exists? (fs/path dir "port"))))
-      (thread-with-ask dir)
+      (call dir {:command :thread! :args {:title "survivor"}})
+      (call dir {:command :start-worker! :args {:thread "T1" :workflow :investigation :brief "look" :repo (str (fs/home))}})
+      (is (wait-for #(fs/exists? (fs/path root "token"))))
       (fs/create-dirs (fs/parent base))
       (spit (str base ".cmd") "one execution")
       (babashka.process/shell {:out :discard :err :discard} "setsid" "-f" "bash" "-c"
@@ -712,9 +734,9 @@
         (try
           (super/reconcile! c)
           (is (= :running (get-in @(:state c) [:workers "W1" :health :jobs 0 :state])))
-          (is (= {} (:outbox @(:state c))))
+          (is (= ["o1"] (keys (:outbox @(:state c)))) "only the brief")
           (spit (str base ".release") "go")
-          (is (wait-for #(seq (bbh.inbox/pending (str (fs/path conversations "conv-1"))))))
+          (is (wait-for #(some (fn [m] (clojure.string/starts-with? (:text m) "[Job")) (bbh.inbox/pending (str (fs/path conversations "super-W1"))))))
           (is (= "ran\n" (slurp (str base ".log"))))
           (is (= 1 (count (filter #(= :job-exited (:kind %)) (store/events (:db c))))))
           (finally (super/stop! c))))
@@ -750,7 +772,7 @@
             (let [{:keys [token]} (thread-with-ask dir)]
               (call dir {:command :register-router! :args {:conversation "router"}})
               (call dir {:command :thread! :args {:title "second"}})
-              (call dir {:command :attach-worker! :args {:thread "T2" :conversation "conv-2"}})
+              (run-worker dir "T2")
               (pane/select! "T2")
               (is (= {:thread "T1" :draft true :option 2} (voice/submit! "tee one, option two")))
               (call dir {:token token :command :ask! :args {:kind :question :text "A new question" :options []}})
@@ -772,7 +794,7 @@
             (call dir {:command :register-router! :args {:conversation "router"}})
             (pane/select! "T1")
             (is (= {:to :router} (voice/stop!)))
-            (is (= ["[voice] (spoken) Hey, look at my commit history"] (mapv :text (vals (:outbox @(:state c))))))
+            (is (= ["[voice] (spoken) Hey, look at my commit history"] (mapv :text (filter #(= "router" (:conversation %)) (vals (:outbox @(:state c)))))))
             (is (= {} (:picks (pane/client-state) {})) "no draft was made on the selected thread")
             (testing "a spoken handle still names its thread"
               (is (= {:thread "T1" :draft true :option 2} (voice/submit! "tee one, option two"))))
@@ -786,7 +808,7 @@
       (is (= [["dictation" "stop" "--print"]] (mapv vec @calls))))))
 
 (deftest handle-input-does-not-target-undeliverable-workers
-  (doseq [[worker-state conversation] [[:queued nil] [:starting nil] [:cancelling "conv-1"]]]
+  (doseq [[worker-state conversation] [[:queued nil] [:starting nil] [:cancelling "super-W1"]]]
     (let [state (-> model/empty-state
                     (assoc-in [:threads "T1"] {:id "T1" :worker "W1"})
                     (assoc-in [:workers "W1"] {:id "W1" :thread "T1" :state worker-state :conversation conversation}))]
@@ -821,29 +843,28 @@
   (with-controller
     (fn [c dir conversations]
       (call dir {:command :thread! :args {:title "stuck mailbox"}})
-      (call dir {:command :attach-worker! :args {:thread "T1" :conversation "conv-1"}})
-      (let [root (str (fs/path conversations "conv-1"))
+      (run-worker dir "T1")
+      (let [root (str (fs/path conversations "super-W1"))
             poller (bbh.inbox/start! {:root root :project root :scan-ms 5 :deliver (fn [_])})
             server (fake-nrepl! root)
             health #(get-in @(:state c) [:workers "W1" :health])
             row #(first (:threads (first (filter (fn [s] (= :needs-attention (:section s))) (model/sections @(:state c) {})))))]
         (try
           (call dir {:command :steer! :args {:worker "W1" :text "use plan B"}})
-          (is (wait-for #(= :sent (:state (first (vals (:outbox @(:state c))))))))
+          (is (wait-for #(= :sent (get-in @(:state c) [:outbox "o2" :state]))))
           (super/reconcile! c)
           (is (= [:running nil] [(:classification (health)) (:problem (health))]) "a fresh delivery is not an anomaly")
           (super/reconcile! (assoc c :policy {:stale-delivery-minutes 0}))
-          (let [id (:id (first (vals (:outbox @(:state c)))))
-                problem (str "Delivery " id " has waited 0 min in its mailbox while the Worker runs; it is not taking messages.")]
+          (let [problem (str "Delivery o2" " has waited 0 min in its mailbox while the Worker runs; it is not taking messages.")]
             (is (= [:needs-human problem] [(:classification (health)) (:problem (health))]))
             (is (= ["T1" problem] [(:id (row)) (:line (row))]) "the row says why it needs you"))
           (doseq [m (bbh.inbox/pending root)] (bbh.inbox/ack! {:root root} (:id m)))
-          (is (wait-for #(= :acked (:state (first (vals (:outbox @(:state c))))))))
+          (is (wait-for #(= :acked (get-in @(:state c) [:outbox "o2" :state]))))
           (super/reconcile! (assoc c :policy {:stale-delivery-minutes 0}))
           (is (= [:running nil] [(:classification (health)) (:problem (health))]) "it clears once the Worker takes it")
           (bbh.inbox/stop! poller)
           (super/reconcile! c)
-          (is (= ["T1" "Its session is gone and it has no workflow to restart it from."] [(:id (row)) (:line (row))]))
+          (is (= :recoverable (:classification (health))) "a session gone with its wf run kept can be restarted")
           (finally (bbh.inbox/stop! poller) (.close server)))))))
 
 (deftest a-worker-whose-launch-fails-is-failed-with-the-reason-and-frees-its-slot
@@ -890,9 +911,9 @@
   (with-controller
     (fn [c dir _]
       (call dir {:command :register-router! :args {:conversation "router"}})
-      (doseq [[title conv res] [["Alt+W" "conv-1" "pr:engstrand/guix#12"] ["Fish" "conv-2" "repo:engstrand/dotfish"] ["Also fish" "conv-3" "repo:engstrand/dotfish"]]]
+      (doseq [[title conv res] [["Alt+W" "super-W1" "pr:engstrand/guix#12"] ["Fish" "super-W2" "repo:engstrand/dotfish"] ["Also fish" "conv-3" "repo:engstrand/dotfish"]]]
         (let [t (:ok (call dir {:command :thread! :args {:title title}}))]
-          (call dir {:command :attach-worker! :args {:thread t :conversation conv}})
+          (run-worker dir t)
           (call dir {:command :link! :args {:thread t :resource res}})))
       (is (= {:thread "T1" :to "W1" :via :resource}
              (:ok (call dir {:command :say! :args {:origin :herdr :text "the review on engstrand/guix#12 wants tests"}}))))
@@ -910,16 +931,16 @@
     (fn [c dir conversations]
       (call dir {:command :register-router! :args {:conversation "router"}})
       (call dir {:command :thread! :args {:title "Alt+W"}})
-      (call dir {:command :attach-worker! :args {:thread "T1" :conversation "conv-1"}})
+      (run-worker dir "T1")
       (let [router (fs/path conversations "router")
             prompts #(mapv (fn [f] (:text (cheshire.core/parse-string (slurp (str f)) true))) (fs/glob router "mailbox/*.json"))]
         (call dir {:command :say! :args {:text "T1 keep the alias" :origin :herdr}})
-        (is (wait-for #(seq (fs/glob (fs/path conversations "conv-1") "mailbox/*.json"))) "the Worker got it")
+        (is (wait-for #(seq (fs/glob (fs/path conversations "super-W1") "mailbox/*.json"))) "the Worker got it")
         (Thread/sleep 100)
         (is (= [] (prompts)) "a routed message alone wakes no Router")
         (call dir {:command :say! :args {:text "what is running" :origin :phone}})
         (is (wait-for #(seq (prompts))))
-        (is (= ["[routed to T1 W1 from herdr] keep the alias\n\no3 [phone] what is running"] (prompts)))))))
+        (is (= ["[routed to T1 W1 from herdr] keep the alias\n\no4 [phone] what is running"] (prompts)))))))
 
 (deftest a-workers-capabilities-come-from-the-authenticated-origin-not-the-router
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-cap"}))
@@ -986,10 +1007,10 @@
         (let [original client/call!]
           (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
             (call dir {:command :thread! :args {:title "review"}})
-            (let [token (:token (:ok (call dir {:command :attach-worker! :args {:thread "T1" :conversation "conv-1"}})))]
+            (let [token (run-worker dir "T1")]
               (call dir {:token token :command :ask! :args {:kind :review :text "Ship it?" :revision "c068de11" :stopped true}})
               (is (clojure.string/includes? (pane/preview (:ok (call dir {:command :thread :args {:id "T1"}})) {})
-                                            "REVIEW revision c068de11 evidence none      A approve")
+                                            "REVIEW revision c068de11 evidence e3b0c442  A approve")
                   "the preview shows what A approves")
               (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "tee one approve")))
               (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "tee one option one")))
@@ -1044,6 +1065,12 @@
             {:db db :state (store/load db) :results []}
             steps)))
 
+(defn- running
+  "The controller's step that has Worker W running, as launch does."
+  [w]
+  [:controller {:id (str "run-" w) :command :worker-running!
+                :args {:worker w :conversation (str "super-" w) :wf-run "run" :workspace "/w" :buffer "b" :started-at 0}}])
+
 (defn- start-cmd [id thread & {:as args}]
   [:owner {:id id :command :start-worker! :token-hash (str "h-" id) :requires []
            :policy {:workers 2 :locks ["guix-build"]}
@@ -1051,7 +1078,7 @@
 
 (deftest a-worker-that-supersedes-its-stopped-ask-with-an-open-one-is-working
   (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                                       [:owner {:id "at" :command :attach-worker! :token-hash "h" :args {:thread "T1" :conversation "c1"}}]
+                                       (start-cmd "at" "T1") (running "W1")
                                        [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "Which?" :stopped true}}]
                                        [[:worker "W1"] {:id "k2" :command :ask! :args {:kind :question :text "FYI" :supersedes ["a1"]}}]])]
     (is (= :working (get-in state [:workers "W1" :state])))
@@ -1059,7 +1086,7 @@
 
 (deftest a-worker-on-an-archived-thread-resumes-when-its-stopped-ask-is-answered
   (let [asking [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                [:owner {:id "at" :command :attach-worker! :token-hash "h" :args {:thread "T1" :conversation "c1"}}]
+                (start-cmd "at" "T1") (running "W1")
                 [:owner {:id "ar" :command :archive! :args {:thread "T1"}}]
                 [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "Which?" :options [{:id "y" :label "Y"}] :stopped true}}]]
         version (get-in (run-commands asking) [:state :threads "T1" :asks-version])
@@ -1097,25 +1124,29 @@
     (is (= [:queued "guix-build held by W1"] ((juxt :state :reason) (nth results 3))))
     (is (= {"guix-build" "W1"} (:locks state)))))
 
-(deftest a-thread-with-a-queued-or-starting-worker-takes-no-second-one
+(deftest a-thread-with-a-starting-worker-takes-no-second-one
   (let [{:keys [results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
                                          (start-cmd "s1" "T1")
-                                         (start-cmd "s2" "T1")
-                                         [:owner {:id "a1" :command :attach-worker! :token-hash "ha" :args {:thread "T1" :conversation "c"}}]])]
-    (is (= [:thread-has-worker :thread-has-worker] (map :error (drop 2 results))))))
+                                         (start-cmd "s2" "T1")])]
+    (is (= [:thread-has-worker] (map :error (drop 2 results))))))
+
+(deftest attach-worker-is-gone
+  (is (= [:unknown-command]
+         (map :error (drop 1 (:results (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                                                      [:owner {:id "a1" :command :attach-worker! :args {:thread "T1" :conversation "c"}}]])))))))
 
 (deftest a-stopped-ask-does-not-undo-a-cancel
   (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                                               [:owner {:id "a1" :command :attach-worker! :token-hash "ha" :args {:thread "T1" :conversation "c"}}]
+                                               (start-cmd "a1" "T1") (running "W1")
                                                [:owner {:id "c1" :command :cancel! :args {:worker "W1" :reason "stop"}}]
                                                [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "q?" :stopped true}}]
                                                [:controller {:id "cd" :command :cancel-delivered! :args {:worker "W1"}}]])]
-    (is (= :cancelling (:error (nth results 3))))
+    (is (= :cancelling (:error (nth results 4))))
     (is (= :cancelled (get-in state [:workers "W1" :state])))))
 
 (deftest a-finished-workers-open-asks-are-superseded
   (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                                               [:owner {:id "a1" :command :attach-worker! :token-hash "ha" :args {:thread "T1" :conversation "c"}}]
+                                               (start-cmd "a1" "T1") (running "W1")
                                                [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :review :text "ok?" :revision "abc" :evidence-sha "none"}}]
                                                [[:worker "W1"] {:id "f1" :command :finish-worker! :args {:state-after :failed}}]])]
     (is (= :superseded (get-in state [:asks "a1" :state])))
@@ -1123,16 +1154,16 @@
 
 (deftest a-late-ack-does-not-move-an-answered-reply-back
   (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                                       [:owner {:id "a1" :command :attach-worker! :token-hash "ha" :args {:thread "T1" :conversation "c"}}]
+                                       (start-cmd "a1" "T1") (running "W1")
                                        [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "q?" :options [{:id "y" :label "Y"}]}}]
-                                       [:owner {:id "r1" :command :reply! :args {:thread "T1" :asks-version 4 :picks {"a1" "y"}}}]
-                                       [:controller {:id "s1" :command :outbox-sent! :args {:outbox "o1" :message "m1"}}]
+                                       [:owner {:id "r1" :command :reply! :args {:thread "T1" :asks-version 5 :picks {"a1" "y"}}}]
+                                       [:controller {:id "s1" :command :outbox-sent! :args {:outbox "o2" :message "m1"}}]
                                        [[:worker "W1"] {:id "n1" :command :answered! :args {:reply "r1"}}]
-                                       [:controller {:id "ack" :command :outbox-acked! :args {:outbox "o1"}}]
-                                       [:controller {:id "s2" :command :outbox-sent! :args {:outbox "o1" :message "m1"}}]])]
+                                       [:controller {:id "ack" :command :outbox-acked! :args {:outbox "o2"}}]
+                                       [:controller {:id "s2" :command :outbox-sent! :args {:outbox "o2" :message "m1"}}]])]
     (is (= :answered (get-in state [:replies "r1" :state])))
     (is (= :answered (get-in state [:asks "a1" :state])))
-    (is (= :processed (get-in state [:outbox "o1" :state])))))
+    (is (= :processed (get-in state [:outbox "o2" :state])))))
 
 (deftest controller-commands-refuse-a-missing-or-ended-worker
   (let [{:keys [results]} (run-commands [[:controller {:id "p" :command :worker-prepared! :args {:worker "W9"}}]
@@ -1157,28 +1188,21 @@
     (is (= [:worker "W2"] (get-in state [:tokens "hp1" :principal])))))
 
 
-(deftest a-worker-that-is-gone-or-archived-holds-no-slot
+(deftest a-worker-on-an-archived-thread-holds-no-slot
   (let [policy {:workers 1}
         {:keys [results state]}
-        (run-commands [[:owner {:id "t1" :command :thread! :args {:title "gone"}}]
-                       [:owner {:id "t2" :command :thread! :args {:title "archived"}}]
-                       [:owner {:id "t3" :command :thread! :args {:title "next"}}]
-                       [:owner {:id "t4" :command :thread! :args {:title "after"}}]
-                       ;; W1's session is gone and it has no workflow to restart it from.
-                       [:owner {:id "a1" :command :attach-worker! :token-hash "h1" :args {:thread "T1" :conversation "c1"}}]
-                       [:controller {:id "h1" :command :health! :args {:worker "W1" :at 1
-                                                                          :health {:classification :needs-human :process {} :workflow nil
-                                                                                   :problem "Its session is gone and it has no workflow to restart it from."}}}]
-                       ;; W2 is still running, but its thread is archived.
-                       [:owner {:id "a2" :command :attach-worker! :token-hash "h2" :args {:thread "T2" :conversation "c2"}}]
-                       [:owner {:id "r2" :command :archive! :args {:thread "T2"}}]
+        (run-commands [[:owner {:id "t1" :command :thread! :args {:title "archived"}}]
+                       [:owner {:id "t2" :command :thread! :args {:title "next"}}]
+                       [:owner {:id "t3" :command :thread! :args {:title "after"}}]
+                       (start-cmd "a1" "T1") (running "W1")
+                       [:owner {:id "r1" :command :archive! :args {:thread "T1"}}]
+                       [:owner {:id "s2" :command :start-worker! :token-hash "h2" :requires [] :policy policy
+                                :args {:thread "T2" :workflow :change :brief "b" :repo "/r"}}]
                        [:owner {:id "s3" :command :start-worker! :token-hash "h3" :requires [] :policy policy
-                                :args {:thread "T3" :workflow :change :brief "b" :repo "/r"}}]
-                       [:owner {:id "s4" :command :start-worker! :token-hash "h4" :requires [] :policy policy
-                                :args {:thread "T4" :workflow :change :brief "b" :repo "/r"}}]])]
-    (is (= :starting (:state (nth results 8))) "neither W1 nor W2 holds the only slot")
-    (is (= [:queued "1 Workers already running"] ((juxt :state :reason) (nth results 9))) "W3 does hold it")
-    (is (= :working (get-in state [:workers "W2" :state])) "archiving leaves the Worker itself alone")))
+                                :args {:thread "T3" :workflow :change :brief "b" :repo "/r"}}]])]
+    (is (= :starting (:state (nth results 6))) "W1 on the archived thread holds no slot")
+    (is (= [:queued "1 Workers already running"] ((juxt :state :reason) (nth results 7))) "W2 does hold it")
+    (is (= :working (get-in state [:workers "W1" :state])) "archiving leaves the Worker itself alone")))
 
 (deftest the-inbox-cancels-a-worker-on-an-archived-thread
   (with-controller
@@ -1187,7 +1211,7 @@
         (let [original client/call!]
           (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
             (call dir {:command :thread! :args {:title "a"}})
-            (call dir {:command :attach-worker! :args {:thread "T1" :conversation "gone-conv"}})
+            (run-worker dir "T1")
             (call dir {:command :archive! :args {:thread "T1"}})
             (pane/-main "cancel" "T1")
             (is (wait-for #(= :cancelled (get-in @(:state c) [:workers "W1" :state]))) "the inbox cancels W1 though T1 is archived")
