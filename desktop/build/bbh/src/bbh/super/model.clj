@@ -728,10 +728,10 @@
 (defmethod fold* :milestone [state {{:keys [text]} :data :keys [thread seq]}]
   (-> state (assoc-in [:threads thread :summary] text) (assoc-in [:threads thread :milestone-seq] seq)))
 
-(defmethod fold* :outbox-sent [state {{:keys [id message]} :data :keys [at]}]
+(defmethod fold* :outbox-sent [state {{:keys [id message]} :data}]
   ;; Only a pending row becomes sent; a late repeat never moves one back.
   (cond-> state
-    (= :pending (get-in state [:outbox id :state])) (update-in [:outbox id] assoc :state :sent :message message :sent-at at)))
+    (= :pending (get-in state [:outbox id :state])) (update-in [:outbox id] assoc :state :sent :message message)))
 
 (defmethod fold* :outbox-dropped [state {{:keys [id]} :data}]
   (cond-> state
@@ -740,12 +740,12 @@
 (defmethod fold* :outbox-acked [state {{:keys [id]} :data}]
   ;; Only the row moves. A reply stays :sent until the Worker answers it.
   (cond-> state
-    (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :acked)))
+    (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :done)))
 
 (defmethod fold* :reply-answered [state {{:keys [id]} :data :keys [thread]}]
   (let [reply (get-in state [:replies id])]
     (-> state (assoc-in [:replies id :state] :answered)
-        (assoc-in [:outbox (:outbox reply) :state] :processed)
+        (assoc-in [:outbox (:outbox reply) :state] :done)
         (set-states :asks (concat (keys (:picks reply)) (keys (:approved reply))) :answered)
         (resume thread))))
 

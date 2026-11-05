@@ -233,7 +233,7 @@
   (let [mailbox (fs/path (:conversations c) "super-W1" "mailbox")]
     (wait-for #(seq (fs/glob mailbox "*.json")))
     (doseq [f (fs/glob mailbox "*.json")] (fs/delete f))
-    (wait-for #(= :acked (get-in @(:state c) [:outbox "o1" :state])))
+    (wait-for #(= :done (get-in @(:state c) [:outbox "o1" :state])))
     (:token @(::opened c))))
 
 (defn- with-super

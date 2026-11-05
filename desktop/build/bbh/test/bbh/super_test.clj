@@ -54,7 +54,7 @@
         mailbox (fs/path (:conversations c) (str "super-" w) "mailbox")]
     (wait-for #(seq (fs/glob mailbox "*.json")))
     (doseq [f (fs/glob mailbox "*.json")] (fs/delete f))
-    (wait-for #(every? (fn [o] (= :acked (:state o))) (vals (:outbox @(:state c)))))
+    (wait-for #(every? (fn [o] (= :done (:state o))) (vals (:outbox @(:state c)))))
     (:token (last (get @opened dir)))))
 
 (defn- thread-with-ask
@@ -105,7 +105,7 @@
       (let [{:keys [token version]} (thread-with-ask dir)]
         (call dir {:token token :command :note! :args {:text "looking at kanata"}})
         (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "week"} :note "and say why"}})
-        (is (wait-for #(= #{:acked :sent} (set (map :state (vals (:outbox @(:state c))))))))
+        (is (wait-for #(= #{:done :sent} (set (map :state (vals (:outbox @(:state c))))))))
         (let [db (:db c)]
           (locking db
             (is (= (store/replay db) (store/load db) @(:state c)))))))))
@@ -116,7 +116,7 @@
     (is (= :unknown-event (:error (ex-data (try (model/fold state {:seq 3 :at "t" :kind :no-such-kind :data {}})
                                                 (catch Exception e e))))))))
 
-(deftest an-outbox-row-is-acked-when-its-mailbox-file-is-removed
+(deftest an-outbox-row-is-done-when-its-mailbox-file-is-removed
   (with-controller
     (fn [c dir conversations]
       (let [{:keys [version token]} (thread-with-ask dir)]
@@ -128,7 +128,8 @@
           (is (re-find #"Keep Ctrl\+Alt\+W as an alias\?: No" text))
           (is (wait-for #(= :sent (get-in @(:state c) [:outbox "o2" :state]))) "the send is recorded after the file lands")
           (doseq [f files] (fs/delete f))
-          (is (wait-for #(= :acked (get-in @(:state c) [:outbox "o2" :state]))))
+          (is (wait-for #(= :done (get-in @(:state c) [:outbox "o2" :state]))))
+          (is (not-any? #{:acked :processed} (map :state (vals (:outbox @(:state c))))))
           (is (= [:sent] (map :state (vals (:asks @(:state c))))) "an ack moves only the row")
           (is (= [:sent] (map :state (vals (:replies @(:state c))))))
           (call dir {:token token :command :answered! :args {:reply (ffirst (:replies @(:state c)))}})
@@ -390,7 +391,7 @@
           (is (clojure.string/includes? text (str "Work only in your jj workspace " (fs/path dir "workspaces" "T1-1"))) "it says where to work")
           (is (clojure.string/includes? text (str repo " is the main checkout"))))
         (doseq [f (fs/glob root "mailbox/*.json")] (fs/delete f))
-        (is (wait-for #(= [:acked] (map :state (vals (:outbox @(:state c)))))))
+        (is (wait-for #(= [:done] (map :state (vals (:outbox @(:state c)))))))
         (is (= {} (:replies @(:state c))) "a brief is not a reply")
         (locking (:db c) (is (= (store/replay (:db c)) (store/load (:db c)) @(:state c))))))))
 
@@ -904,7 +905,7 @@
             (is (= [:needs-human problem] [(:classification (health)) (:problem (health))]))
             (is (= ["T1" problem] [(:id (row)) (:line (row))]) "the row says why it needs you"))
           (doseq [m (bbh.inbox/pending root)] (bbh.inbox/ack! {:root root} (:id m)))
-          (is (wait-for #(= :acked (get-in @(:state c) [:outbox "o2" :state]))))
+          (is (wait-for #(= :done (get-in @(:state c) [:outbox "o2" :state]))))
           (super/reconcile! (assoc c :policy {:stale-delivery-minutes 0}))
           (is (= [:running nil] [(:classification (health)) (:problem (health))]) "it clears once the Worker takes it")
           (bbh.inbox/stop! poller)
@@ -1192,7 +1193,7 @@
                                        [:controller {:id "s2" :command :outbox-sent! :args {:outbox "o2" :message "m1"}}]])]
     (is (= :answered (get-in state [:replies "r1" :state])))
     (is (= :answered (get-in state [:asks "a1" :state])))
-    (is (= :processed (get-in state [:outbox "o2" :state])))))
+    (is (= :done (get-in state [:outbox "o2" :state])))))
 
 (deftest controller-commands-refuse-a-missing-or-ended-worker
   (let [{:keys [results]} (run-commands [[:controller {:id "p" :command :worker-prepared! :args {:worker "W9"}}]

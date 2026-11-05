@@ -548,12 +548,15 @@
                     wf (when (:wf-run w) (try (select-keys (workflow/status (:wf-run w)) [:status :phase]) (catch Exception _ {:status :missing})))
                     repl-ok? (boolean (and agent (repl-answering? root)))
                     limit-ms (* 60000 (:stale-delivery-minutes (policy c)))
-                    waited-ms #(- now (inst-ms (java.time.Instant/parse (:sent-at %))))
+                    ;; How long a sent row's file has waited in the mailbox, or nil once the session took it.
+                    waited-ms (fn [o] (let [f (fs/path root "mailbox" (str (:message o) ".json"))]
+                                        (try (- now (.toMillis (fs/last-modified-time f)))
+                                             (catch java.io.IOException _ nil))))
                     stale (when repl-ok?
-                            (some->> (vals (:outbox @state))
-                                     (filter #(and (= :sent (:state %)) (= (:conversation w) (:conversation %)) (:sent-at %)
-                                                   (>= (waited-ms %) limit-ms)))
-                                     (sort-by :sent-at) first))
+                            (->> (vals (:outbox @state))
+                                 (filter #(and (= :sent (:state %)) (= (:conversation w) (:conversation %))))
+                                 (keep #(when-let [ms (waited-ms %)] (when (>= ms limit-ms) (assoc % :waited ms))))
+                                 (sort-by :waited >) first))
                     [classification problem]
                     (cond (= :queued (:state w)) [:waiting]
                           uncertain? [:needs-human (format "Job %s can no longer be identified as the process that started it; check it before anything kills or reruns it."
@@ -561,7 +564,7 @@
                           (= :missing (:status wf)) [:needs-human (format "Its wf run %s is missing, so it cannot be restarted." (:wf-run w))]
                           (and agent (not repl-ok?)) [:needs-human (format "Its session (pid %s) is alive but its REPL does not answer." (:pid agent))]
                           stale [:needs-human (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
-                                                      (:id stale) (quot (waited-ms stale) 60000))]
+                                                      (:id stale) (quot (:waited stale) 60000))]
                           agent [(if (= :waiting (:state w)) :waiting :running)]
                           :else [:recoverable])
                     since (if (= [classification problem] [(get-in w [:health :classification]) (get-in w [:health :problem])])
@@ -644,7 +647,7 @@
 
 (defn dispatch!
   "One pass: send each pending outbox row to its Worker's mailbox, mark a sent
-  row acked once its mailbox file is gone, and drop a row whose Worker has
+  row done once its mailbox file is gone, and drop a row whose Worker has
   finished, deleting its file. Each step is a command with a fixed id, so a
   pass repeated after a crash changes nothing twice."
   [{:keys [state] :as c}]
