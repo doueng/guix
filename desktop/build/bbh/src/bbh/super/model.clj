@@ -18,7 +18,7 @@
 (def ^:private grants
   {:router #{:thread! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:promote-worker! :restart-failed! :issue-token! :register-router! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered!}})
+   :controller #{:promote-worker! :restart-failed! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, and how long a live
@@ -253,16 +253,17 @@
                       :conversation (:conversation w) :mailbox-text (str "[Steering] " text)}}]
      :result worker}))
 
-(defmethod decide* :job-exited! [state {{:keys [worker job exit log]} :args}]
+(defmethod decide* :job-exited! [state {{:keys [worker job exit log seen]} :args}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
     (when-not (and (string? job) (not (str/blank? job)) (integer? exit) (string? log) (:conversation w))
       (refuse :invalid :field :job))
     (if (get-in w [:jobs job])
       {:events [] :result job}
+      ;; An exit the Worker already read through job-status needs no message.
       {:events [{:kind :job-exited :thread (:thread w)
-                 :data {:worker worker :job job :exit exit :log log
-                        :outbox (next-id state :outbox "o") :conversation (:conversation w)
-                        :text (str "[Job " job " exited with status " exit ". Log: " log "]")}}]
+                 :data (cond-> {:worker worker :job job :exit exit :log log}
+                         (not seen) (assoc :outbox (next-id state :outbox "o") :conversation (:conversation w)
+                                           :text (str "[Job " job " exited with status " exit ". Log: " log "]")))}]
        :result job})))
 
 (defmethod decide* :ask! [state {{:keys [thread worker kind text options recommended stopped holds-up supersedes revision evidence-sha]} :args}]
@@ -437,6 +438,20 @@
   (let [o (or (get-in state [:outbox outbox]) (refuse :no-such-outbox :outbox outbox))]
     {:events [{:kind :outbox-acked :thread (:thread o) :data {:id outbox}}] :result outbox}))
 
+(defn dead-letter?
+  "Whether outbox row O waits for a conversation whose Worker has finished, so
+  nobody will ever read it."
+  [state o]
+  (and (#{:pending :sent} (:state o))
+       (let [ws (filter #(= (:conversation o) (:conversation %)) (vals (:workers state)))]
+         (and (seq ws) (every? #(#{:done :failed :cancelled} (:state %)) ws)))))
+
+(defmethod decide* :outbox-dropped! [state {{:keys [outbox]} :args}]
+  (let [o (or (get-in state [:outbox outbox]) (refuse :no-such-outbox :outbox outbox))]
+    (if (dead-letter? state o)
+      {:events [{:kind :outbox-dropped :thread (:thread o) :data {:id outbox}}] :result outbox}
+      {:events [] :result outbox})))
+
 (defn decide
   "Authorize and decide COMMAND for PRINCIPAL on STATE. Returns {:events :result}
   without :seq or :at on the events; the store assigns them. Throws ex-info
@@ -543,10 +558,10 @@
                                  :text text :state :pending :message nil})))
 
 (defmethod fold* :job-exited [state {{:keys [worker job exit log outbox conversation text]} :data :keys [thread]}]
-  (-> state (bump :outbox)
-      (assoc-in [:workers worker :jobs job] {:id job :exit exit :log log})
-      (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
-                                 :text text :state :pending :message nil})))
+  (cond-> (assoc-in state [:workers worker :jobs job] {:id job :exit exit :log log})
+    outbox (-> (bump :outbox)
+               (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
+                                           :text text :state :pending :message nil}))))
 
 (defmethod fold* :token-issued [state {{:keys [hash principal]} :data}]
   (assoc-in state [:tokens hash] {:id hash :principal principal :revoked false}))
@@ -703,6 +718,10 @@
   ;; Only a pending row becomes sent; a late repeat never moves one back.
   (cond-> state
     (= :pending (get-in state [:outbox id :state])) (update-in [:outbox id] assoc :state :sent :message message :sent-at at)))
+
+(defmethod fold* :outbox-dropped [state {{:keys [id]} :data}]
+  (cond-> state
+    (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :dropped)))
 
 (defmethod fold* :outbox-acked [state {{:keys [id]} :data}]
   ;; An ack that arrives after the Worker answered must not undo the answer.

@@ -534,6 +534,8 @@ You are the Router of bbh super: one long-lived conversation that reads what the
   (when-not (fs/exists? (job-file id ".cmd")) (throw (ex-info (str "no job " id) {:id id})))
   (let [end #(str/join "\n" (take-last lines (str/split-lines %)))
         exit (job-exit id)]
+    ;; The exit is now read, so bbh super sends no [Job ... exited] message for it.
+    (when (some? exit) (spit (job-file id ".seen") ""))
     (cond-> {:id id :cmd (slurp (job-file id ".cmd")) :done? (some? exit) :exit exit :log (job-file id ".log")
              :tail (when (fs/exists? (job-file id ".log")) (end (slurp (job-file id ".log"))))}
       (fs/exists? (job-file id ".err")) (assoc :err (end (slurp (job-file id ".err")))))))
@@ -562,6 +564,8 @@ You are the Router of bbh super: one long-lived conversation that reads what the
         move? (and (deadline-file) before (> before now))
         end (+ now (if move? ms (min ms (bbh.env/budget-ms))))]
     (when move? (move-deadline! (max before (+ end margin))))
+    ;; Until END this wait reports the exit, so bbh super holds its message back.
+    (spit (job-file id ".waiting") (str end))
     (try
       (loop []
         (let [st (job-status id :lines lines)]
@@ -569,6 +573,7 @@ You are the Router of bbh super: one long-lived conversation that reads what the
             st
             (do (Thread/sleep 250) (recur)))))
       (finally
+        (fs/delete-if-exists (job-file id ".waiting"))
         (when move? (move-deadline! (max before (+ (System/currentTimeMillis) margin))))))))
 
 (defn- shell-quote [s]

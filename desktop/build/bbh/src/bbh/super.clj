@@ -510,10 +510,13 @@
                 base (fs/path (fs/parent f) job)]
           :when (and (not (get-in w [:jobs job])) (fs/exists? (str base ".cmd")))
           :let [exit (try (parse-long (str/trim (slurp (str f))))
-                          (catch java.io.IOException _ nil))]
-          :when (some? exit)]
+                          (catch java.io.IOException _ nil))
+                waiting-until (some-> (process/read-text (str base ".waiting")) parse-long)]
+          ;; A job-wait that is still running reports this exit itself.
+          :when (and (some? exit) (not (and waiting-until (< (System/currentTimeMillis) waiting-until))))]
     (run! c :controller {:id (str "job-exited-" (pr-str [(:id w) job])) :command :job-exited!
-                         :args {:worker (:id w) :job job :exit exit :log (str base ".log")}})))
+                         :args {:worker (:id w) :job job :exit exit :log (str base ".log")
+                                :seen (fs/exists? (str base ".seen"))}})))
 
 (defn- repl-answering? [root]
   (try
@@ -640,9 +643,10 @@
           ((:open-router! launch) {:conversation conversation :token t}))))))
 
 (defn dispatch!
-  "One pass: send each pending outbox row to its Worker's mailbox, and mark a
-  sent row acked once its mailbox file is gone. Each step is a command with a
-  fixed id, so a pass repeated after a crash changes nothing twice."
+  "One pass: send each pending outbox row to its Worker's mailbox, mark a sent
+  row acked once its mailbox file is gone, and drop a row whose Worker has
+  finished, deleting its file. Each step is a command with a fixed id, so a
+  pass repeated after a crash changes nothing twice."
   [{:keys [state] :as c}]
   (let [router (get-in @state [:router :router :conversation])
         rows (sort-by (comp model/id-order :id) (vals (:outbox @state)))
@@ -658,13 +662,17 @@
           (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))))
   (doseq [{:keys [id conversation text message] :as o} rows
           :when (not (and (= :pending (:state o)) (= router conversation)))]
-    (case (:state o)
-      :pending (let [root (conversation-root c conversation)
-                     m (inbox/send! root text nil (when (= :steer (:delivery o)) {:kind :steer}))]
-                 (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))
-      :sent (when-not (fs/exists? (fs/path (conversation-root c conversation) "mailbox" (str message ".json")))
-              (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
-      nil))))
+    (if (model/dead-letter? @state o)
+      ;; Its Worker has finished, so the row is dropped and its file deleted unread.
+      (do (run! c :controller {:id (str "dropped-" id) :command :outbox-dropped! :args {:outbox id}})
+          (when message (fs/delete-if-exists (fs/path (conversation-root c conversation) "mailbox" (str message ".json")))))
+      (case (:state o)
+        :pending (let [root (conversation-root c conversation)
+                       m (inbox/send! root text nil (when (= :steer (:delivery o)) {:kind :steer}))]
+                   (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))
+        :sent (when-not (fs/exists? (fs/path (conversation-root c conversation) "mailbox" (str message ".json")))
+                (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
+        nil)))))
 
 (defn start!
   "Open the store under DIR, listen on a loopback port written to <dir>/port,

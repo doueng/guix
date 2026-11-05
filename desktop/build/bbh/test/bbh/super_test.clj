@@ -520,6 +520,43 @@
         (spit (str (fs/path jobs "partial.exit")) "0")
         (is (wait-for #(= 0 (get-in @(:state c) [:workers "W1" :jobs "partial" :exit]))))))))
 
+(deftest a-job-exit-the-worker-already-read-sends-no-message
+  (with-controller
+    (fn [c dir conversations]
+      (thread-with-ask dir)
+      (let [jobs (fs/create-dirs (fs/path conversations "super-W1" "jobs"))
+            base #(str (fs/path jobs %))
+            job-rows #(filter (fn [o] (clojure.string/starts-with? (:text o) "[Job")) (vals (:outbox @(:state c))))]
+        ;; job-status read the exit, so it left a .seen marker.
+        (spit (str (base "seen") ".cmd") "test")
+        (spit (str (base "seen") ".seen") "")
+        (spit (str (base "seen") ".exit") "0")
+        ;; A job-wait still running holds the exit back; it reports it itself.
+        (spit (str (base "waited") ".cmd") "test")
+        (spit (str (base "waited") ".waiting") (str (+ (System/currentTimeMillis) 60000)))
+        (spit (str (base "waited") ".exit") "3")
+        (super/observe-jobs! c)
+        (is (= 0 (get-in @(:state c) [:workers "W1" :jobs "seen" :exit])) "the exit is recorded")
+        (is (nil? (get-in @(:state c) [:workers "W1" :jobs "waited"])))
+        (is (empty? (job-rows)) "neither sends a message")
+        (fs/delete (str (base "waited") ".waiting"))
+        (super/observe-jobs! c)
+        (is (= 1 (count (job-rows))) "an exit nobody read once the wait ended sends one")
+        (locking (:db c) (is (= (store/replay (:db c)) (store/load (:db c)) @(:state c))))))))
+
+(deftest mail-to-a-finished-worker-is-dropped-and-its-file-deleted
+  (with-controller
+    (fn [c dir conversations]
+      (let [{:keys [version]} (thread-with-ask dir)]
+        (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "no"}}})
+        (is (wait-for #(= :sent (get-in @(:state c) [:outbox "o2" :state]))))
+        (is (= 1 (count (fs/glob conversations "super-W1/mailbox/*.json"))))
+        (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :failed :reason "x"}})))
+        (is (wait-for #(= :dropped (get-in @(:state c) [:outbox "o2" :state]))))
+        (is (empty? (fs/glob conversations "super-W1/mailbox/*.json")) "the unread file is deleted")
+        (is (empty? (filter #(#{:pending :sent} (:state %)) (vals (:outbox @(:state c))))))
+        (locking (:db c) (is (= (store/replay (:db c)) (store/load (:db c)) @(:state c))))))))
+
 (deftest steering-is-durable-typed-and-idempotent
   (with-controller
     (fn [c dir conversations]
