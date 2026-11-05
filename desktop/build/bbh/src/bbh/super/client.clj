@@ -87,7 +87,7 @@
                                "       bbh super list"
                                "       bbh super start-router"
                                "       bbh super COMMAND [EDN-ARGS] [--id ID]"
-                               "commands: thread! link! start-worker! finish-worker! steer! cancel! health say! ask! reply! dismiss! archive! sweep! note! milestone! answered! threads thread events sections"
+                               "commands: thread! start-worker! finish-worker! steer! cancel! health say! ask! reply! dismiss! archive! sweep! note! milestone! answered! threads thread events sections"
                                "example: bbh super thread! '{:title \"Alt+W closes windows\"}'"]))
     (let [[edn-args & more] (if (= "list" command) (cons nil args) args)
           id (second (drop-while #(not= "--id" %) more))

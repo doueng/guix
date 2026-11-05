@@ -16,7 +16,7 @@
 ;; ---- authorization ------------------------------------------------------
 
 (def ^:private grants
-  {:router #{:thread! :link! :start-worker! :steer! :cancel! :note! :milestone!}
+  {:router #{:thread! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
    :controller #{:promote-worker! :restart-failed! :issue-token! :register-router! :outbox-sent! :outbox-acked! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered!}})
 
@@ -77,11 +77,6 @@
   (when (str/blank? title) (refuse :invalid :field :title))
   (let [id (next-id state :threads "T")]
     {:events [{:kind :thread-created :thread id :data {:id id :title title}}] :result id}))
-
-(defmethod decide* :link! [state {{:keys [thread resource]} :args}]
-  (thread-of state thread)
-  (when (str/blank? resource) (refuse :invalid :field :resource))
-  {:events [{:kind :thread-linked :thread thread :data {:resource resource}}] :result thread})
 
 (defn- open-asks [state thread]
   (into {} (filter (fn [[_ a]] (and (= thread (:thread a)) (= :open (:state a)))) (:asks state))))
@@ -384,29 +379,13 @@
   (let [conversation (or (get-in state [:router :router :conversation]) (refuse :no-router))]
     {:outbox (next-id state :outbox "o") :conversation conversation :text text}))
 
-(defn resource-thread
-  "The one unresolved thread of STATE whose linked resource TEXT names, by its
-  key (`repo:engstrand/guix`) or the part after its kind (`engstrand/guix`), or
-  nil when none or more than one does."
-  [state text]
-  (let [text (str/lower-case text)
-        names? (fn [r] (some #(re-find (re-pattern (str "(?<![\\w/.-])" (java.util.regex.Pattern/quote (str/lower-case %)) "(?![\\w/-])")) text)
-                             (distinct [r (str/replace r #"^[a-z]+:" "")])))
-        hits (filter #(and (not (:resolved-at %)) (some names? (:resources %))) (vals (:threads state)))]
-    (when (= 1 (count hits)) (:id (first hits)))))
-
 (defmethod decide* :say! [state {{:keys [text origin]} :args :keys [id]}]
   (when (str/blank? text) (refuse :invalid :field :text))
   (when-not (#{:phone :emacs :herdr :voice} origin) (refuse :invalid :field :origin))
-  (let [;; A typed or spoken handle names the thread and is stripped from the
-        ;; message; a linked resource names it and the message stays whole.
-        {:keys [thread message via]} (if-let [[handle rest] (parse-handle text)]
-                                       {:thread handle :message rest :via :handle}
-                                       {:thread (resource-thread state text) :message text :via :resource})
+  (let [;; A typed or spoken handle names the thread and is stripped from the message.
+        [thread message] (parse-handle text)
         t (when thread (or (get-in state [:threads thread]) (refuse :no-such-thread :thread thread)))
-        w (when t (get-in state [:workers (:worker t)]))
-        _ (when (and w (= :handle via)) (deliverable-worker! w))
-        w (when (and w (deliverable? w)) w)]
+        w (some-> (get-in state [:workers (:worker t)]) deliverable-worker!)]
     (if w
       {:events [{:kind :worker-steered :thread thread
                  :data (cond-> {:id id :origin origin :text message :worker (:id w) :outbox (next-id state :outbox "o")
@@ -416,8 +395,8 @@
                          (assoc :summary {:outbox (next-id (update-in state [:counters :outbox] (fnil inc 0)) :outbox "o")
                                           :conversation (get-in state [:router :router :conversation])
                                           :text (format "[routed to %s %s from %s] %s" thread (:id w) (name origin) message)}))}]
-       :result (cond-> {:thread thread :to (:id w)} (= :resource via) (assoc :via :resource))}
-      (let [said (str (when (= :voice origin) "(spoken) ") (if (= :handle via) (str thread ": " message) text))]
+       :result {:thread thread :to (:id w)}}
+      (let [said (str (when (= :voice origin) "(spoken) ") (if thread (str thread ": " message) text))]
         {:events [{:kind :router-queued :thread thread
                    :data (assoc (router-row state (format "[%s] %s" (name origin) said)) :id id :origin origin :said text)}]
          :result (cond-> {:to :router} thread (assoc :thread thread))}))))
@@ -493,6 +472,7 @@
                                :execution :none :asks-version seq :resolved-at nil :summary nil
                                :milestone-seq seq})))
 
+;; Only old logs hold this event.
 (defmethod fold* :thread-linked [state {{:keys [resource]} :data :keys [thread]}]
   (update-in state [:threads thread :resources] conj resource))
 

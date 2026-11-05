@@ -103,7 +103,6 @@
   (with-controller
     (fn [c dir _]
       (let [{:keys [token version]} (thread-with-ask dir)]
-        (call dir {:command :link! :args {:thread "T1" :resource "repo:engstrand/guix"}})
         (call dir {:token token :command :note! :args {:text "looking at kanata"}})
         (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "week"} :note "and say why"}})
         (is (wait-for #(= #{:acked :sent} (set (map :state (vals (:outbox @(:state c))))))))
@@ -903,25 +902,15 @@
         (is (= ["a1"] (:asks r)))
         (is (= reply (-> (call dir {:command :thread :args {:id "T1"}}) :ok :asks first :reply)))))))
 
-(deftest a-message-naming-a-linked-resource-reaches-that-threads-worker
+(deftest only-a-handle-routes-a-message-to-a-worker
   (with-controller
-    (fn [c dir _]
+    (fn [_ dir _]
       (call dir {:command :register-router! :args {:conversation "router"}})
-      (doseq [[title conv res] [["Alt+W" "super-W1" "pr:engstrand/guix#12"] ["Fish" "super-W2" "repo:engstrand/dotfish"] ["Also fish" "conv-3" "repo:engstrand/dotfish"]]]
-        (let [t (:ok (call dir {:command :thread! :args {:title title}}))]
-          (run-worker dir t)
-          (call dir {:command :link! :args {:thread t :resource res}})))
-      (is (= {:thread "T1" :to "W1" :via :resource}
-             (:ok (call dir {:command :say! :args {:origin :herdr :text "the review on engstrand/guix#12 wants tests"}}))))
-      (is (= {:to :router} (:ok (call dir {:command :say! :args {:origin :herdr :text "bump engstrand/dotfish"}}))) "two threads match")
-      (is (= {:to :router} (:ok (call dir {:command :say! :args {:origin :herdr :text "see engstrand/guix#123"}}))) "a longer name is not this one")
-      (call dir {:command :thread! :args {:title "No worker yet"}})
-      (call dir {:command :link! :args {:thread "T4" :resource "repo:engstrand/hex"}})
-      (is (= {:to :router :thread "T4"} (:ok (call dir {:command :say! :args {:origin :herdr :text "engstrand/hex is slow"}})))
-          "a matched thread without a session goes to the Router, tagged")
-      (call dir {:command :archive! :args {:thread "T1"}})
-      (is (= {:to :router} (:ok (call dir {:command :say! :args {:origin :herdr :text "engstrand/guix#12 again"}}))) "archived threads do not match"))))
-
+      (call dir {:command :thread! :args {:title "Alt+W"}})
+      (run-worker dir "T1")
+      (is (= :unknown-command (:error (call dir {:command :link! :args {:thread "T1" :resource "repo:engstrand/guix"}}))))
+      (is (= {:to :router} (:ok (call dir {:command :say! :args {:origin :herdr :text "the review on engstrand/guix#12 wants tests"}}))))
+      (is (= {:thread "T1" :to "W1"} (:ok (call dir {:command :say! :args {:origin :herdr :text "T1 the review wants tests"}})))))))
 (deftest routed-messages-ride-along-in-the-routers-next-batch-but-never-wake-it
   (with-controller
     (fn [c dir conversations]

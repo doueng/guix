@@ -21,7 +21,6 @@
    'super-worker (fn super-worker [id] (call! :worker {:id id}))
    'super-events (fn super-events [{:keys [thread after]}] (call! :events {:thread thread :after after}))
    'super-thread! (fn super-thread! [title] (call! :thread! {:title title}))
-   'super-link! (fn super-link! [id resource] (call! :link! {:thread id :resource resource}))
    'super-start-worker! (fn super-start-worker! [spec] (call! :start-worker! spec))
    'super-steer! (fn super-steer! [worker text] (call! :steer! {:worker worker :text text}))
    'super-cancel! (fn super-cancel! [worker reason] (call! :cancel! {:worker worker :reason reason}))
