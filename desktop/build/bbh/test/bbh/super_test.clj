@@ -338,19 +338,15 @@
         (is (= :working (:state (get-in @(:state c) [:workers "W2"]))))
         (is (= :failed (:execution (:ok (call dir {:command :thread :args {:id "T1"}})))))))))
 
-(deftest takeover-moves-the-lease-to-you-and-handback-returns-it
+(deftest there-is-no-lease-so-the-router-steers-any-worker
   (with-workers
     (fn [c dir repo launches]
       (call dir {:command :thread! :args {:title "a"}})
       (start-worker dir "T1" :repo repo)
       (let [token (:token (first @launches))
-            lease #(get-in @(:state c) [:workers "W1" :lease])]
-        (is (= :router (lease)))
-        (is (= {:ok "W1"} (call dir {:command :takeover! :args {:worker "W1"}})))
-        (is (= :you (lease)))
-        (is (= :forbidden (:error (call dir {:token token :command :handback! :args {:worker "W1"}}))) "a Worker cannot move its own lease")
-        (is (= {:ok "W1"} (call dir {:command :handback! :args {:worker "W1"}})))
-        (is (= :router (lease)))
+            router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))]
+        (is (= :unknown-command (:error (call dir {:command :takeover! :args {:worker "W1"}}))))
+        (is (= {:ok "W1"} (call dir {:token router :command :steer! :args {:worker "W1" :text "router says"}})))
         (is (= {:ok "W1"} (call dir {:token token :command :finish-worker! :args {:state-after :done}})) "the Worker ends itself")
         (is (= :working (:state (:ok (start-worker dir "T1" :repo repo)))))
         (is (= (str (fs/path dir "workspaces" "T1-2")) (get-in @(:state c) [:workers "W2" :workspace])) "the next generation has its own workspace")))))
@@ -499,11 +495,10 @@
         (spit (str (fs/path jobs "partial.exit")) "0")
         (is (wait-for #(= 0 (get-in @(:state c) [:workers "W1" :jobs "partial" :exit]))))))))
 
-(deftest steering-is-durable-typed-idempotent-and-respects-router-lease
+(deftest steering-is-durable-typed-and-idempotent
   (with-controller
     (fn [c dir conversations]
       (let [{:keys [token]} (thread-with-ask dir)
-            router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
             command {:id "steer-once" :command :steer! :args {:worker "W1" :text "use the small build"}}]
         (is (= {:ok "W1"} (call dir command)))
         (is (= {:ok "W1"} (call dir command)))
@@ -511,8 +506,6 @@
         (is (= [{:kind "steer" :text "[Steering] use the small build"}]
                (mapv #(select-keys % [:kind :text]) (bbh.inbox/pending (str (fs/path conversations "conv-1"))))))
         (is (= 1 (count (filter #(= :worker-steered (:kind %)) (store/events (:db c))))))
-        (call dir {:command :takeover! :args {:worker "W1"}})
-        (is (= :human-lease (:error (call dir {:token router :command :steer! :args {:worker "W1" :text "router says"}}))))
         (is (= :forbidden (:error (call dir {:token token :command :steer! :args {:worker "W1" :text "worker says"}}))))
         (is (= :invalid (:error (call dir {:command :steer! :args {:worker "W1" :text " "}}))))
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))

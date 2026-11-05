@@ -46,11 +46,7 @@
             (when (not= asked thread) (refuse :forbidden :command command :thread asked))
             (when (and (:worker args) (not= (:worker args) id)) (refuse :forbidden :command command :worker (:worker args)))
             (-> cmd (assoc-in [:args :thread] thread) (assoc-in [:args :worker] id)))
-          :else (do
-                  (when (and (= :router kind) (#{:steer! :cancel!} command)
-                             (not= :router (get-in state [:workers (:worker args) :lease])))
-                    (refuse :human-lease :worker (:worker args)))
-                  cmd))))
+          :else cmd)))
 
 ;; ---- decide -------------------------------------------------------------
 
@@ -307,15 +303,6 @@
                         :text (str "[Job " job " exited with status " exit ". Log: " log "]")}}]
        :result job})))
 
-(defmethod decide* :takeover! [state {{:keys [worker]} :args}]
-  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
-    (when-not (active-states (:state w)) (refuse :not-active :worker worker))
-    {:events [{:kind :lease-moved :thread (:thread w) :data {:id worker :lease :you}}] :result worker}))
-
-(defmethod decide* :handback! [state {{:keys [worker]} :args}]
-  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
-    {:events [{:kind :lease-moved :thread (:thread w) :data {:id worker :lease :router}}] :result worker}))
-
 (defmethod decide* :ask! [state {{:keys [thread worker kind text options recommended stopped holds-up supersedes revision evidence-sha]} :args}]
   (let [t (thread-of state thread)
         worker (or worker (:worker t))
@@ -525,7 +512,7 @@
 (def retired-events
   "Event kinds no command emits any more. An old log still holds them, so they
   fold to nothing; store/load keeps whatever they once wrote."
-  #{:message-routed :router-triaged})
+  #{:message-routed :router-triaged :lease-moved})
 
 (defmethod fold* :default [state {:keys [kind]}]
   (if (retired-events kind)
@@ -552,7 +539,7 @@
 (defmethod fold* :worker-attached [state {{:keys [id conversation generation]} :data :keys [thread]}]
   (-> state (bump :workers)
       (assoc-in [:workers id] {:id id :thread thread :generation generation :conversation conversation
-                               :state :working :lease :router})
+                               :state :working})
       (assoc-in [:threads thread :worker] id)
       (assoc-in [:threads thread :execution] :working)))
 
@@ -564,7 +551,7 @@
 
 (defmethod fold* :worker-started [state {{:keys [id] :as worker} :data :keys [thread]}]
   (-> state (bump :workers)
-      (assoc-in [:workers id] (assoc worker :thread thread :lease :router :conversation nil :wf-run nil :workspace nil :buffer nil))
+      (assoc-in [:workers id] (assoc worker :thread thread :conversation nil :wf-run nil :workspace nil :buffer nil))
       (cond-> (= :queued (:state worker)) (assoc-in [:threads thread :execution] :queued)
               (= :starting (:state worker)) (take-locks id))))
 
@@ -623,9 +610,6 @@
       (assoc-in [:workers worker :jobs job] {:id job :exit exit :log log})
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
                                  :text text :state :pending :message nil})))
-
-(defmethod fold* :lease-moved [state {{:keys [id lease]} :data}]
-  (assoc-in state [:workers id :lease] lease))
 
 (defmethod fold* :token-issued [state {{:keys [hash principal]} :data}]
   (assoc-in state [:tokens hash] {:id hash :principal principal :revoked false}))
