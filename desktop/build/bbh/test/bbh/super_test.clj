@@ -834,6 +834,16 @@
       (.setDaemon true) (.start))
     server))
 
+(deftest a-steady-worker-writes-its-health-once
+  (with-controller
+    (fn [c dir _]
+      (call dir {:command :thread! :args {:title "steady"}})
+      (run-worker dir "T1")
+      (let [before (count (store/events (:db c)))]
+        (dotimes [_ 10] (super/reconcile! c))
+        (is (= [:health-observed] (map :kind (drop before (store/events (:db c))))) "one observation, then nothing new")
+        (is (= :recoverable (get-in @(:state c) [:workers "W1" :health :classification])))))))
+
 (deftest a-delivery-left-in-a-live-workers-mailbox-past-the-policy-age-needs-you
   (with-controller
     (fn [c dir conversations]
@@ -1141,8 +1151,7 @@
                                          [:controller {:id "h" :command :health! :args {:worker "W9" :health {} :at 1}}]
                                          [:controller {:id "r" :command :worker-restarted! :args {:worker "W9" :buffer "p"}}]
                                          [:controller {:id "h0" :command :health! :args {:at 1}}]])]
-    (is (= [:no-such-worker :no-such-worker :no-such-worker] (map :error (take 3 results))))
-    (is (nil? (:error (last results))) "a heartbeat names no Worker")))
+    (is (= [:no-such-worker :no-such-worker :no-such-worker :no-such-worker] (map :error results)) "health names its Worker")))
 
 (deftest promotion-is-one-commit-so-a-queued-worker-starts-once
   (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]

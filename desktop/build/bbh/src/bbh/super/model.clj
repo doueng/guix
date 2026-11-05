@@ -208,8 +208,14 @@
     {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state :cancelled :reason (:cancel-reason w)}}]
      :result worker}))
 
+(defn health-changed?
+  "Whether HEALTH, a new observation of Worker W, says anything W's stored
+  health does not. Its :at alone is no change."
+  [w health]
+  (not= (dissoc health :at) (dissoc (:health w) :at)))
+
 (defmethod decide* :health! [state {{:keys [worker health at]} :args}]
-  (when worker (worker-of state worker))
+  (worker-of state worker)
   {:events [{:kind :health-observed :data {:worker worker :health health :at at}}] :result worker})
 
 (defmethod decide* :restart-worker! [state {{:keys [worker at]} :args :keys [token-hash]}]
@@ -520,9 +526,8 @@
 (defmethod fold* :cancel-requested [state {{:keys [id reason]} :data}]
   (update-in state [:workers id] assoc :state :cancelling :cancel-reason reason))
 
-(defmethod fold* :health-observed [state {{:keys [worker health at]} :data}]
-  (cond-> (assoc-in state [:router :heartbeat] {:id :heartbeat :at at})
-    worker (assoc-in [:workers worker :health] health)))
+(defmethod fold* :health-observed [state {{:keys [worker health]} :data}]
+  (cond-> state worker (assoc-in [:workers worker :health] health)))
 
 (defmethod fold* :restart-attempted [state {{:keys [id at]} :data}]
   (-> state (update-in [:workers id :restarts] (fnil inc 0))

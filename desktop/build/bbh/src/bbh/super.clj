@@ -45,12 +45,9 @@
          (catch java.io.IOException _ (fs/delete-if-exists f)))))
 
 (defn- shown
-  "STATE without what changes on every health pass and no view shows: the
-  heartbeat and when each health was observed."
+  "STATE without what no view shows: when each health was observed."
   [state]
-  (-> state
-      (update :router dissoc :heartbeat)
-      (update :workers update-vals #(cond-> % (:health %) (update :health dissoc :at :since)))))
+  (update state :workers update-vals #(cond-> % (:health %) (update :health dissoc :at :since))))
 
 (defn- run!
   "Commit COMMAND for PRINCIPAL on controller C. Serialized: the controller is
@@ -539,7 +536,6 @@
           grace (or (:restart-grace-ms c) 30000)
           ;; Asked once a pass, and only when a Worker needs its buffer opened.
           emacs-up? (delay ((get-in c [:launch :emacs-up?])))]
-      (run! c :controller {:id (new-id) :command :health! :args {:at now}})
       (doseq [w (vals (:workers @state))
               :when (or (model/active-states (:state w)) (= :queued (:state w)))
               :let [root (when (:conversation w) (conversation-root c (:conversation w)))
@@ -565,7 +561,7 @@
                                                       (:id stale) (quot (waited-ms stale) 60000))]
                           agent [(if (= :waiting (:state w)) :waiting :running)]
                           :else [:recoverable])
-                    since (if (and (= :needs-human classification) (= problem (get-in w [:health :problem])))
+                    since (if (= [classification problem] [(get-in w [:health :classification]) (get-in w [:health :problem])])
                             (or (get-in w [:health :since]) now)
                             now)
                     health {:at now :process (select-keys agent [:pid :start]) :repl repl-ok?
@@ -575,7 +571,8 @@
                                                     (sort-by (comp model/id-order :id)) first :id)
                             :oldest-stopped-ask (some->> (vals (:asks @state)) (filter #(and (= (:thread w) (:thread %)) (= :open (:state %)) (:stopped %))) (sort-by :seq) first :seq)
                             :jobs (mapv #(select-keys % [:id :state :pid :start]) jobs)}]]
-        (run! c :controller {:id (new-id) :command :health! :args {:worker (:id w) :health health :at now}})
+        (when (model/health-changed? w health)
+          (run! c :controller {:id (new-id) :command :health! :args {:worker (:id w) :health health :at now}}))
         (cond
           (and agent (= :starting (:state w)) (:wf-run w))
           (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
