@@ -110,7 +110,13 @@
         (is (nil? (session/restart-repl! s)))
         (is (= "[true 7 \"done\"]"
                (:value (repl/eval! (:repl @s) (str "((juxt :done? :exit :tail) (job-wait " id " :ms 20000))") 30000))))
-        (is (= "1" (:value (repl/eval! (:repl @s) "(count (jobs))" 30000)))))
+        (is (= "1" (:value (repl/eval! (:repl @s) "(count (jobs))" 30000))))
+        (is (= "true" (:value (repl/eval! (:repl @s) (str "(= (str/trim (slurp (job-file " id " \".boot\"))) (str/trim (slurp \"/proc/sys/kernel/random/boot_id\")))") 30000)))
+            "a job records the boot it started in")
+        (is (= "[true false true]"
+               (:value (repl/eval! (:repl @s) (str "(do (spit (job-file \"lost\" \".cmd\") \"sleep 9\") (spit (job-file \"lost\" \".boot\") \"an-earlier-boot\")"
+                                                   " (let [t (System/currentTimeMillis) st (job-wait \"lost\" :ms 20000)] [(:lost? st) (:done? st) (< (- (System/currentTimeMillis) t) 5000)]))") 30000)))
+            "job-wait does not wait on a job the machine rebooted under"))
       (is (= "true" (:value (repl/eval! (:repl @s) "(let [t (:system (bbh.env/manifest))] (boolean (and (str/includes? t \"job-wait\") (str/includes? t \"120 s\"))))" 30000)))
           "the prompt should name the deadline and the job helpers")
       (finally (session/close! s)))))

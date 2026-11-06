@@ -106,6 +106,28 @@ FinishWorker(w, outcome) ==
   /\ wstate[w] \notin {"none", "cancelling"} \cup Finished
   /\ WorkerFinished(w, outcome)
 
+\* decide* :start-worker! with :replaces (replacement), the person's message
+\* lease aside: fold* :worker-finished ends Worker old, whose session ended,
+\* as failed, then the new Worker w starts on its thread against the state
+\* after that.
+ReplaceWorker(old, w) ==
+  LET t == wthread[old]
+      ws == [wstate EXCEPT ![old] = "failed"]
+      slots == {v \in Workers : ws[v] \in Active /\ ~(ended[v] /\ ws[v] \in {"working", "waiting", "cancelling"})
+                                /\ ~resolved[wthread[v]]}
+  IN
+  /\ Ended(old) /\ NextWorker(w) /\ ~resolved[t]
+  /\ {v \in ThreadWorkers(t) : v /= old} = {}
+  /\ wthread' = [wthread EXCEPT ![w] = t]
+  /\ asks' = [a \in AskIds |-> IF asks[a].worker = old /\ asks[a].st = "open"
+                                THEN [asks[a] EXCEPT !.st = "superseded"] ELSE asks[a]]
+  /\ tworker' = IF tworker[t] \in {old, None} THEN [tworker EXCEPT ![t] = None] ELSE tworker
+  /\ IF Cardinality(slots \ {w}) >= Cap
+     THEN /\ wstate' = [ws EXCEPT ![w] = "queued"] /\ UNCHANGED launched
+     ELSE /\ wstate' = [ws EXCEPT ![w] = "starting"]
+          /\ launched' = [launched EXCEPT ![w] = TRUE]
+  /\ UNCHANGED <<resolved, replies>>
+
 \* decide* :cancel!, fold* :cancel-requested
 Cancel(w) ==
   /\ wstate[w] \in Running \cup {"queued"}
@@ -179,6 +201,7 @@ ResumeWorker(w) ==
 Commands ==
   \/ \E w \in Workers, t \in Threads : StartWorker(w, t)
   \/ PromoteWorker
+  \/ \E old, w \in Workers : ReplaceWorker(old, w)
   \/ \E w \in Workers : WorkerRunning(w) \/ Cancel(w) \/ CancelDelivered(w)
                          \/ \E o \in {"done", "failed"} : FinishWorker(w, o)
   \/ \E w \in Workers, a \in AskIds, s \in BOOLEAN, sup \in SUBSET AskIds : Ask(w, a, s, sup)

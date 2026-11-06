@@ -22,8 +22,8 @@
    'super-events (fn super-events [{:keys [thread after]}] (call! :events {:thread thread :after after}))
    'super-thread! (fn super-thread! [title] (call! :thread! {:title title}))
    'super-start-worker! (fn super-start-worker! [spec] (call! :start-worker! spec))
-   'super-steer! (fn super-steer! [worker text] (call! :steer! {:worker worker :text text}))
-   'super-cancel! (fn super-cancel! [worker reason] (call! :cancel! {:worker worker :reason reason}))
+   'super-steer! (fn super-steer! ([worker text] (super-steer! worker text {})) ([worker text opts] (call! :steer! (merge (select-keys opts [:for]) {:worker worker :text text}))))
+   'super-cancel! (fn super-cancel! ([worker reason] (super-cancel! worker reason {})) ([worker reason opts] (call! :cancel! (merge (select-keys opts [:for]) {:worker worker :reason reason}))))
    'super-note! (fn super-note! [id text] (call! :note! {:thread id :text text}))
    'super-milestone! (fn super-milestone! [id text] (call! :milestone! {:thread id :text text}))})
 

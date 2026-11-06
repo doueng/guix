@@ -428,7 +428,7 @@
           read (read-command c {:command command :args args})]
       (if (not= ::unknown read)
         {:ok read}
-        (let [cmd {:id (or id (new-id)) :command command :args (or args {})}]
+        (let [cmd {:id (or id (new-id)) :command command :args (or args {}) :policy (policy c)}]
           (case command
             :register-router!
             (let [t (new-token)

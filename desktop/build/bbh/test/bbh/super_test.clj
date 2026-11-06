@@ -4,6 +4,7 @@
             [bbh.super :as super]
             [bbh.super.client :as client]
             [bbh.super.pane :as pane]
+            [bbh.super.process :as process]
             [bbh.super.sandbox :as sandbox]
             [bbh.super.voice :as voice]
             [babashka.process]
@@ -1620,3 +1621,188 @@
   (let [{:keys [results]} (run-commands [[:controller {:id "r" :command :restart-worker! :args {:worker "W1" :at 1}}]
                                          [:controller {:id "w" :command :worker-restarted! :args {:worker "W1" :buffer "p"}}]])]
     (is (= [:forbidden :forbidden] (map :error results)))))
+
+;; ---- leases a person's message grants the Router, and jobs a reboot lost ----
+
+(defn- apply-cmd
+  "[state error events] after PRINCIPAL's CMD on STATE; a refusal leaves STATE."
+  [state principal cmd]
+  (try (let [{:keys [events]} (model/decide state principal cmd)]
+         [(reduce model/fold state (map-indexed #(assoc %2 :seq (+ 1000 %1) :at "t") events)) nil events])
+       (catch clojure.lang.ExceptionInfo e [state (:error (ex-data e)) nil])))
+
+(def ^:private lease-policy {:lease-origins [:emacs]})
+
+(defn- lease-world
+  "A Router, threads T1..T3, and two messages to the Router: o1 from emacs,
+  an origin that grants leases under lease-policy, and o2 from phone, which does not."
+  []
+  (reduce (fn [st [p cmd]] (first (apply-cmd st p cmd)))
+          model/empty-state
+          (concat [[:controller {:command :register-router! :args {:conversation "router"} :token-hash "r"}]]
+                  (for [t ["a" "b" "c"]] [:owner {:command :thread! :args {:title t}}])
+                  [[:owner {:id "m1" :command :say! :args {:text "restart them" :origin :emacs}}]
+                   [:owner {:id "m2" :command :say! :args {:text "kill W1" :origin :phone}}]])))
+
+(def ^:private live #{:queued :starting :working :waiting})
+
+(defn- walk-command
+  "The command of KIND on Worker W (record WREC) naming message F; a new Worker
+  goes on THREAD and a new message comes from ORIGIN."
+  [kind {:keys [w wrec f thread origin n]}]
+  (case kind
+    :start [:owner {:command :start-worker! :token-hash "h" :args {:thread thread :workflow :change :brief "b" :repo "/r"}}]
+    :running [:controller {:command :worker-running! :args {:worker w :conversation (str "super-" w) :wf-run "run" :workspace "/ws"}}]
+    :dead [:controller {:command :health! :args {:worker w :health {:classification :session-ended :process {} :jobs [{:id "j" :state :rebooted}]}}}]
+    :alive [:controller {:command :health! :args {:worker w :health {:classification :running :process {:pid 1 :start "1"}}}}]
+    :say [:owner {:id (str "say-" n) :command :say! :args {:text "do it" :origin origin}}]
+    :cancel [:router {:command :cancel! :policy lease-policy :args (cond-> {:worker w :reason "asked"} f (assoc :for f))}]
+    :steer [:router {:command :steer! :policy lease-policy :args (cond-> {:worker w :text "go on"} f (assoc :for f))}]
+    :replace [:router {:command :start-worker! :token-hash "h" :policy lease-policy
+                       :args (cond-> {:thread (:thread wrec) :replaces w :workflow :change :brief "resume" :repo "/r"} f (assoc :for f))}]))
+
+(defn- possible?
+  "Whether the Router's command of KIND may run on Worker record WREC, its lease aside."
+  [kind wrec]
+  (case kind
+    :cancel (boolean (live (:state wrec)))
+    :steer (boolean (and (#{:working :waiting} (:state wrec)) (:conversation wrec)))
+    :replace (boolean (and (#{:working :waiting :cancelling} (:state wrec))
+                           (= :session-ended (get-in wrec [:health :classification]))))))
+
+(defn- walk-failures
+  "The lease rules a Router command of KIND on Worker W (record WREC before)
+  naming message F broke, going to ST' with error ERR, given the ORIGINS of the
+  Router's messages and the [message command worker] grants USED so far."
+  [{:keys [kind w wrec f err st' origins used]}]
+  (let [grant [f (if (= kind :replace) :start-worker! ({:cancel :cancel! :steer :steer!} kind)) w]
+        leased? (and f (= :emacs (origins f)) (not (used grant)))]
+    (cond-> []
+      (and (nil? err) f (not leased?)) (conj "accepted without a valid unused lease")
+      (and (nil? err) (nil? f) (= kind :replace)) (conj "replaced a Worker without a message")
+      (and leased? (possible? kind wrec) err) (conj (str "refused " err " though leased and possible"))
+      (and (nil? err) (= kind :replace)
+           (not (and (= :failed (get-in st' [:workers w :state]))
+                     (some #(and (= (:thread wrec) (:thread %)) (live (:state %))) (vals (:workers st'))))))
+      (conj "a replacement did not end the old Worker and start one on its thread")
+      (some (fn [[_ ws]] (> (count ws) 1))
+            (group-by :thread (filter #(or (live (:state %)) (= :cancelling (:state %))) (vals (:workers st')))))
+      (conj "a thread has two queued or active Workers"))))
+
+(defn- lease-walk
+  "A random walk of STEPS commands from SEED over Workers, their health, the
+  person's messages, and the Router's cancels, steers and
+  replacements. Returns [failures outcomes], outcomes the [kind error] pairs
+  the Router's commands met."
+  [seed steps]
+  (let [rnd (java.util.Random. seed)
+        pick (fn [xs] (when (seq xs) (nth (vec xs) (.nextInt rnd (count xs)))))]
+    (loop [st (lease-world) n 0 used #{} fails [] seen #{}]
+      (if (= n steps)
+        [fails seen]
+        (let [w (pick (keys (:workers st)))
+              kind (pick [:start :running :dead :alive :say :cancel :steer :replace])
+              ctx {:w w :wrec (get-in st [:workers w]) :f (pick (concat [nil nil "o404"] (keys (:outbox st))))
+                   :thread (pick ["T1" "T2" "T3"]) :origin (pick [:emacs :phone]) :n n}
+              router? (#{:cancel :steer :replace} kind)]
+          (if (and (not (#{:start :say} kind)) (nil? w))
+            (recur st (inc n) used fails seen)
+            (let [[p cmd] (walk-command kind ctx)
+                  [st' err] (apply-cmd st p cmd)
+                  origins (into {} (keep (fn [[id o]] (when (= "router" (:conversation o)) [id (:origin o)])) (:outbox st)))
+                  found (when router? (walk-failures (assoc ctx :kind kind :err err :st' st' :origins origins :used used)))]
+              (recur st' (inc n)
+                     (cond-> used (and router? (nil? err) (:f ctx)) (conj [(:f ctx) (:command cmd) w]))
+                     (into fails (map #(str "seed " seed " step " n " " kind " " w " for " (:f ctx) ": " % ", " err) found))
+                     (cond-> seen router? (conj [kind (or err :ok)]))))))))))
+
+(deftest the-router-acts-on-the-persons-lease-only-under-an-unused-message-from-an-allowed-origin
+  (let [runs (map #(lease-walk % 40) (range 300))]
+    (is (= [] (vec (take 5 (mapcat first runs)))))
+    (is (every? (reduce into #{} (map second runs))
+                [[:cancel :ok] [:cancel :human-lease] [:steer :ok] [:steer :lease-used] [:replace :ok] [:replace :alive] [:replace :human-lease]])
+        "the walk reaches each outcome it checks")))
+
+(deftest a-persons-message-replaces-a-worker-whose-session-ended-and-the-log-names-it
+  (let [st (reduce (fn [s [p c]] (first (apply-cmd s p c))) (lease-world)
+                   [[:owner {:command :start-worker! :token-hash "h1" :args {:thread "T1" :workflow :change :brief "b" :repo "/r"}}]
+                    [:controller {:command :worker-running! :args {:worker "W1" :conversation "super-W1" :wf-run "run1" :workspace "/ws/T1-1"}}]
+                    [:controller {:command :health! :args {:worker "W1" :health {:classification :session-ended :process {} :jobs []}}}]])
+        replace #(apply-cmd st :router {:command :start-worker! :policy lease-policy :token-hash "h2"
+                                        :args (merge {:thread "T1" :replaces "W1" :workflow :change :brief "resume" :repo "/r"} %)})
+        [st' err events] (replace {:for "o1"})]
+    (is (= :thread-has-worker (second (apply-cmd st :router {:command :start-worker! :token-hash "h2"
+                                                             :args {:thread "T1" :for "o1" :workflow :change :brief "x" :repo "/r"}}))))
+    (is (= [nil [:lease-granted :worker-finished :worker-started :token-issued]] [err (mapv :kind events)]))
+    (is (= {:for "o1" :origin :emacs :command :start-worker! :worker "W1"} (:data (first events))))
+    (is (= [:failed "Replaced by W2 as o1 asked"] ((juxt :state :reason) (get-in st' [:workers "W1"]))))
+    (is (= ["T1" :starting 2 :emacs] ((juxt :thread :state :generation :origin) (get-in st' [:workers "W2"])))
+        "the new Worker is the thread's next generation, so its workspace is new")
+    (is (= [:invalid :human-lease] [(second (replace {})) (second (replace {:for "o2"}))]))
+    (let [alive (first (apply-cmd st :controller {:command :health! :args {:worker "W1" :health {:classification :needs-human :process {:pid 7 :start "9"}}}}))]
+      (is (= :alive (second (apply-cmd alive :router {:command :start-worker! :policy lease-policy :token-hash "h2"
+                                                      :args {:thread "T1" :replaces "W1" :for "o1" :workflow :change :brief "r" :repo "/r"}})))
+          "a Worker whose session still runs is cancelled, not replaced"))))
+
+(defn- job-files!
+  "A job ID under ROOT that never wrote an exit, its pid long gone, with the boot id BOOT when given."
+  [root id boot]
+  (let [base (str (fs/path root "jobs" id))]
+    (fs/create-dirs (fs/path root "jobs"))
+    (spit (str base ".cmd") "sleep 1000")
+    (spit (str base ".pid") "999999")
+    (spit (str base ".start") "1")
+    (when boot (spit (str base ".boot") boot))
+    base))
+
+(deftest a-job-from-before-the-last-boot-is-rebooted-not-lost
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-super-boot"}))
+        boot {:id "this-boot" :at-ms (- (System/currentTimeMillis) 60000)}
+        state #(into {} (map (juxt :id :state)) (process/jobs root boot))]
+    (job-files! root "other-boot" "an-earlier-boot")
+    (job-files! root "this-boot" "this-boot")
+    (job-files! root "no-boot-id" nil)
+    (is (= {"other-boot" :rebooted "this-boot" :lost "no-boot-id" :lost} (state)))
+    (fs/set-last-modified-time (fs/path root "jobs" "no-boot-id.cmd") (fs/millis->file-time (- (:at-ms boot) 1000)))
+    (is (= :rebooted (get (state) "no-boot-id")) "a job from before .boot was written, launched before the boot")))
+
+(deftest a-worker-whose-jobs-died-in-a-reboot-is-told-when-resumed
+  (with-workers
+    (fn [c dir repo launches]
+      (call dir {:command :thread! :args {:title "recover me"}})
+      (start-worker dir "T1" :repo repo)
+      (let [c (assoc c :restart-grace-ms -1)
+            root (#'super/conversation-root c "super-W1")
+            base (job-files! root "build" nil)]
+        (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
+          (super/reconcile! c)
+          (is (= [1 :needs-human] [(count @launches) (get-in @(:state c) [:workers "W1" :health :classification])])
+              "a job that may still run elsewhere needs you")
+          (spit (str base ".boot") "an-earlier-boot")
+          (super/reconcile! c)
+          (is (= [1 :session-ended] [(count @launches) (get-in @(:state c) [:workers "W1" :health :classification])])
+              "nothing restarts it behind the person's back")
+          (is (= "W1" (:ok (call dir {:command :resume! :args {:thread "T1"}}))))
+          (is (some #(re-find #"jobs build died unfinished" (str (:text %))) (vals (:outbox @(:state c)))))
+          (locking (:db c) (is (= (store/replay (:db c)) @(:state c)))))))))
+
+(deftest this-boots-time-is-read-so-an-old-job-without-a-boot-id-is-rebooted
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-super-boot"}))]
+    (job-files! root "ancient" nil)
+    (fs/set-last-modified-time (fs/path root "jobs" "ancient.cmd") (fs/millis->file-time 1000))
+    (is (= [:rebooted] (mapv :state (process/jobs root))))))
+
+(deftest the-routers-sandbox-cancels-a-worker-under-your-message-and-logs-it
+  (with-controller
+    (fn [c dir _]
+      (thread-with-ask dir)
+      (let [router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
+            _ (call dir {:command :say! :args {:text "stop W1, it is stuck" :origin :emacs}})
+            for (some (fn [[id o]] (when (= "router" (:conversation o)) id)) (:outbox @(:state c)))]
+        (with-redefs [bbh.sysenv/getenv (let [getenv bbh.sysenv/getenv] (fn [k] (if (= "BBH_SUPER_TOKEN" k) router (getenv k))))
+                      client/call! (let [call! client/call!] (fn [req] (call! dir req)))]
+          (is (= "W1" (sandbox/eval-in (sandbox/context sandbox/bindings) (format "(super-cancel! \"W1\" \"stuck\" {:for %s})" (pr-str for))))))
+        (is (= [{:for for :origin :emacs :command :cancel! :worker "W1"}]
+               (mapv :data (filter #(= :lease-granted (:kind %)) (store/events (:db c))))))
+        (is (#{:cancelling :cancelled} (get-in @(:state c) [:workers "W1" :state])))
+        (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))

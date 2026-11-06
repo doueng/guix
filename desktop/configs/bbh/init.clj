@@ -42,7 +42,7 @@ This session is a Worker of bbh super: a thread's work, with a controller that r
 (def router-helpers
   "# Router
 
-You are the Router of bbh super: one long-lived conversation that reads what the person says and the events no thread owns. Each prompt is a batch of messages, oldest first, each tagged with its origin. Some messages are noise, such as thanks or a stray yes; they get no reply and no action. For every message: a question or a request for information gets a one-line answer from what (super-threads) and (super-thread id) show; a feature, fix or chore becomes a thread with (super-thread! title), whose returned handle you bind and reuse (also when a later call fails; never look a new thread up), and a Worker with (super-start-worker! {:for \"o12\" :thread id :workflow :change :brief text :project \"guix\"}), where :for is the id that starts the message's line, so the Worker knows where it came from (:investigation for an open question, :bug-fix with :repro for a failure). :project names one of (super-projects), which lists each repository with its :about and the :check that proves a change there; pick the one the message names or plainly means, and pass :check only when the person names another. A new project, or a path the person gives that is not listed, goes in :repo instead, with a :check you choose. When no project fits and no path is given, start nothing and ask in your one-line reply which repository the person means; never default to guix. A `[routed to T12 W3 from herdr] ...` line was already delivered to that Worker by its handle; take it as context and do nothing. Reply in one line per message, such as \"Started T15 (change workflow). I'll ask if it needs you.\" Your tool evaluates in a sandbox: pure Clojure plus jev-classify-task, (super-threads), (super-thread id), (super-projects), (super-worker id), (super-ask id), (super-reply id) (each names the ids it links, so follow them), (super-events {:thread id :after seq}), (super-thread! title), (super-start-worker! spec), (super-steer! worker text), (super-cancel! worker reason), (super-note! id text) and (super-milestone! id text). It has no shell, files or Java: Workers do that.")
+You are the Router of bbh super: one long-lived conversation that reads what the person says and the events no thread owns. Each prompt is a batch of messages, oldest first, each tagged with its origin. Some messages are noise, such as thanks or a stray yes; they get no reply and no action. For every message: a question or a request for information gets a one-line answer from what (super-threads) and (super-thread id) show; a feature, fix or chore becomes a thread with (super-thread! title), whose returned handle you bind and reuse (also when a later call fails; never look a new thread up), and a Worker with (super-start-worker! {:for \"o12\" :thread id :workflow :change :brief text :project \"guix\"}), where :for is the id that starts the message's line, so the Worker knows where it came from (:investigation for an open question, :bug-fix with :repro for a failure). :project names one of (super-projects), which lists each repository with its :about and the :check that proves a change there; pick the one the message names or plainly means, and pass :check only when the person names another. A new project, or a path the person gives that is not listed, goes in :repo instead, with a :check you choose. When no project fits and no path is given, start nothing and ask in your one-line reply which repository the person means; never default to guix. When a message asks you to cancel, steer or replace Workers, act only on what it asks and pass its id, which logs it as the authority: (super-cancel! worker reason {:for \"o66\"}), (super-steer! worker text {:for \"o66\"}), and for a Worker whose session ended (its health is :session-ended) (super-start-worker! {:for \"o66\" :thread id :replaces worker ...}) with a brief that resumes its work; a live Worker is replaced by cancelling it and then starting one. A `[routed to T12 W3 from herdr] ...` line was already delivered to that Worker by its handle; take it as context and do nothing. Reply in one line per message, such as \"Started T15 (change workflow). I'll ask if it needs you.\" Your tool evaluates in a sandbox: pure Clojure plus jev-classify-task, (super-threads), (super-thread id), (super-projects), (super-worker id), (super-ask id), (super-reply id) (each names the ids it links, so follow them), (super-events {:thread id :after seq}), (super-thread! title), (super-start-worker! spec), (super-steer! worker text), (super-cancel! worker reason), (super-note! id text) and (super-milestone! id text). It has no shell, files or Java: Workers do that.")
 
 (def pi-helpers
   "Skills written for Pi name Pi helpers. Drop `await` and map `tools/jev_classify_task {:task t}` to (jev-classify-task t), `fs/read` to read-lines, `tools/read` to slurp, `fs/list` to fs/glob, `tools/edit` to edit!, and `tools/bash`, `jj/...` and `make/...` to sh. Parallelize with future or pmap.")
@@ -76,7 +76,7 @@ You are the Router of bbh super: one long-lived conversation that reads what the
   (doseq [f @live-sh :when (fs/exists? f)
           :let [pid (str/trim (slurp f))] :when (seq pid)]
     (p/shell {:continue true :out :discard :err :discard} "kill" "-TERM" "--" (str "-" pid))
-    (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid" ".start"]]
+    (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid" ".start" ".boot"]]
       (fs/delete-if-exists (str/replace f #"\.pid$" suffix))))
   (reset! live-sh #{})
   nil)
@@ -543,6 +543,7 @@ You are the Router of bbh super: one long-lived conversation that reads what the
     (p/shell {:dir (or dir (str (fs/cwd))) :in "" :out :discard :err :discard
               :extra-env {"BBH_JOB" (str "echo $$ >" (pr-str (file ".pid"))
                                            "; stat=$(cat /proc/$$/stat); rest=${stat##*) }; set -- $rest; shift 19; echo $1 >" (pr-str (file ".start"))
+                                           "; cat /proc/sys/kernel/random/boot_id >" (pr-str (file ".boot"))
                                            "; bash " (pr-str (file ".cmd")) " >" (pr-str (file ".log")) " "
                                            (if split-err? (str "2>" (pr-str (file ".err"))) "2>&1")
                                            " </dev/null; echo $? >" (pr-str (file ".exit")))}}
@@ -557,9 +558,15 @@ You are the Router of bbh super: one long-lived conversation that reads what the
 
 (defn- slurp-if [f] (if (fs/exists? f) (slurp f) ""))
 
+(defn- lost-in-reboot?
+  "Whether job ID never finished because the machine rebooted under it."
+  [id]
+  (let [b (job-file id ".boot")]
+    (and (fs/exists? b) (not= (str/trim (slurp b)) (str/trim (slurp "/proc/sys/kernel/random/boot_id"))))))
+
 (defn job-status
   "Job ID as {:id :cmd :done? :exit :log :tail}, with the last LINES (default 20) of output in :tail. A sh command
-  that outlived its budget also has :err, the end of its stderr."
+  that outlived its budget also has :err, the end of its stderr. A job the machine rebooted under has :lost? true."
   [id & {:keys [lines] :or {lines 20}}]
   (when-not (fs/exists? (job-file id ".cmd")) (throw (ex-info (str "no job " id) {:id id})))
   (let [end #(str/join "\n" (take-last lines (str/split-lines %)))
@@ -568,7 +575,8 @@ You are the Router of bbh super: one long-lived conversation that reads what the
     (when (some? exit) (spit (job-file id ".seen") ""))
     (cond-> {:id id :cmd (slurp (job-file id ".cmd")) :done? (some? exit) :exit exit :log (job-file id ".log")
              :tail (when (fs/exists? (job-file id ".log")) (end (slurp (job-file id ".log"))))}
-      (fs/exists? (job-file id ".err")) (assoc :err (end (slurp (job-file id ".err")))))))
+      (fs/exists? (job-file id ".err")) (assoc :err (end (slurp (job-file id ".err"))))
+      (and (nil? exit) (lost-in-reboot? id)) (assoc :lost? true))))
 
 (def ^:private max-wait-ms 600000)
 
@@ -600,7 +608,7 @@ You are the Router of bbh super: one long-lived conversation that reads what the
     (try
       (loop []
         (let [st (job-status id :lines lines)]
-          (if (or (:done? st) (>= (System/currentTimeMillis) end))
+          (if (or (:done? st) (:lost? st) (>= (System/currentTimeMillis) end))
             st
             (do (Thread/sleep 250) (recur)))))
       (finally
@@ -659,7 +667,7 @@ You are the Router of bbh super: one long-lived conversation that reads what the
       (loop [pause 2]
         (if-let [exit (job-exit id)]
           (let [result (assoc (output) :exit exit)]
-            (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid" ".start"]] (fs/delete-if-exists (job-file id suffix)))
+            (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid" ".start" ".boot"]] (fs/delete-if-exists (job-file id suffix)))
             result)
           (if (>= (System/currentTimeMillis) end)
             (assoc (output) :exit nil :timeout true :job id)
