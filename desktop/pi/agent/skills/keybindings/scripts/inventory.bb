@@ -121,16 +121,17 @@
  bbh!
  []
  (doseq
-  [[ln l] (numbered (path "desktop/configs/doom/agent-shell.el"))]
+  [file ["agent-shell.el" "bbh-super.el"]
+   [ln l] (numbered (path (str "desktop/configs/doom/" file)))]
   (when-let
    [[_ chord action] (re-find #"\(\"([^\"]+)\" \. ([^)]+)\)" l)]
-   (emit! "bbh composer" chord action "agent-shell.el" ln))
+   (emit! "bbh composer" chord action file ln))
   (when-let
    [[_ chord action]
     (re-find
      #"\(kbd \"([^\"]+)\"\) #'([^)\s]+)"
      l)]
-   (emit! "bbh transcript" chord action "agent-shell.el" ln))))
+   (emit! "bbh transcript" chord action file ln))))
 (defn
  bbh-terminal!
  []

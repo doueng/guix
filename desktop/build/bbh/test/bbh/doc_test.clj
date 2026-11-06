@@ -13,6 +13,7 @@
   "The file a citation's short name means, as the page's own key says."
   [file]
   (get {"agent-shell.el" (str repo "/desktop/configs/doom/agent-shell.el")
+        "bbh-super.el" (str repo "/desktop/configs/doom/bbh-super.el")
         "init.clj" (str repo "/desktop/configs/bbh/init.clj")
         "bbh-web.scm" (str repo "/modules/engstrand/features/bbh-web.scm")
         "model.clj" (str bbh "/src/bbh/super/model.clj")
