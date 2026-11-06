@@ -197,7 +197,7 @@ run is done</pre>
 <p>The test <code>routes-match-the-jev-classifiers</code> fails when the two classifier lists differ from the workflow routes plus the manual list. The manual routes are <code>pr_workflow</code>, <code>skill_work</code>, and <code>other</code>. <code>pr_workflow</code> stays manual on purpose, since there are no pull requests. A manual route has no workflow, so the agent does the work directly and says so.</p>
 
 <h2 id='panel'>Emacs panel</h2>
-<p>Opening a bbh conversation in Doom's agent-shell also opens a <code>*bbh workflow*</code> buffer (<code>desktop/configs/doom/agent-shell.el</code>). It reads <code>wf status --json</code> for that conversation's run and lists the phases in run order with their briefs, visits and gates. <kbd>j</kbd> and <kbd>k</kbd> move the selection and <kbd>g</kbd> refreshes. The panel is read-only. Moving the selection changes only what it shows. The composer status line also shows the run as <code>workflow: phase</code>.</p>
+<p>In Doom's agent-shell (<code>desktop/configs/doom/agent-shell.el</code>), the composer status line of a bbh conversation that has started a run shows it as <code>workflow: phase</code>, or blocked or done. It reads <code>wf status --json</code> for that conversation's run when a prompt is sent, a tool call finishes and a turn ends.</p>
 
 <h2 id='tests'>Tests</h2>
 <p>Run with <code>cd desktop/build/bbh &amp;&amp; bb test:workflow</code>. The suite has 22 tests and 78 assertions. They cover:</p>

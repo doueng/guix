@@ -87,7 +87,7 @@
 (defun bbh-visit--check ()
   (cl-letf (((symbol-function 'agent-shell-viewport--buffer)
              (lambda (&rest args) (bbh-visit--composer (plist-get args :shell-buffer))))
-            ((symbol-function 'eng/bbh-workflow-show) #'ignore))
+            ((symbol-function 'eng/bbh-workflow-refresh) #'ignore))
     (let ((worker (bbh-visit--session "Worker" 200))
           (router (bbh-visit--session "Router" 200)))
       ;; The Inbox's RET: bbh names the buffer, and its sentinel shows it.

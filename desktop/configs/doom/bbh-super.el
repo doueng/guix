@@ -105,7 +105,7 @@ reload port from the bbh-super daemon."
 
 (defun eng/bbh-super--clear-frame ()
   "Leave the selected frame one window, so a view starts from nothing.
-Side windows, the Inbox preview and a Worker's workflow panel, survive
+Side windows, such as the Inbox preview, survive
 `delete-other-windows', so they go first."
   (dolist (window (window-list nil 'nomini))
     (when (and (window-live-p window) (window-parameter window 'window-side))
@@ -186,11 +186,7 @@ Returns the shell's name, or nil when no session runs CONVERSATION."
                             (and (featurep 'agent-shell-viewport)
                                  (agent-shell-viewport--buffer :shell-buffer shell :existing-only t))))
         (when (buffer-live-p buffer)
-          (with-current-buffer buffer (setq default-directory dir))))
-      (when-let* ((panel (get-buffer eng/bbh-workflow-buffer)))
-        (with-current-buffer panel
-          (when (equal eng/bbh-workflow--session (eng/bbh--session-id shell))
-            (setq eng/bbh-workflow--dir dir)))))
+          (with-current-buffer buffer (setq default-directory dir)))))
     (buffer-name shell)))
 
 (defun eng/bbh-super-visit (name)

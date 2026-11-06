@@ -741,7 +741,7 @@ and took ELAPSED, such as 12s.  Cache misses and cost appear only when present."
         (when (or (memq (map-elt event :event) '(input-submitted turn-complete))
                   (and (eq (map-elt event :event) 'tool-call-update)
                        (equal (map-nested-elt data '(:tool-call :status)) "completed")))
-          (eng/bbh-workflow-refresh-if-shown eng/bbh-transcript-shell))))))
+          (eng/bbh-workflow-refresh eng/bbh-transcript-shell))))))
 
 (defun eng/bbh--result-label (status lines)
   (concat (propertize (pcase status ("done" "✓") ("failed" "✗") (_ "…"))
@@ -865,12 +865,10 @@ A provider prefix the model name repeats, as in claude/claude-opus, is dropped."
     (if (string-match "\\`\\([^/]+\\)/\\(\\1.*\\)\\'" model) (match-string 2 model) model)))
 
 (defun eng/bbh--workflow-label (shell)
-  "SHELL's workflow run as WORKFLOW: PHASE from the panel's last read, or nil.
+  "SHELL's workflow run as WORKFLOW: PHASE from its last read, or nil.
 This reads no process, so it is cheap enough for the status line."
-  (when-let* ((buffer (get-buffer eng/bbh-workflow-buffer))
-              (session (eng/bbh--session-id shell))
-              ((equal session (buffer-local-value 'eng/bbh-workflow--session buffer)))
-              (data (buffer-local-value 'eng/bbh-workflow--data buffer))
+  (when-let* (((buffer-live-p shell))
+              (data (buffer-local-value 'eng/bbh-workflow--data shell))
               ((not (alist-get 'error data))))
     (let ((status (alist-get 'status data)))
       (concat (alist-get 'workflow data) ": "
@@ -1027,12 +1025,12 @@ called interactively, restore this layout for the current session."
     (with-current-buffer composer
       (setq-local eng/bbh-composer t)
       (eng/bbh-setup-composer))
-    (eng/bbh-workflow-show shell)
+    (eng/bbh-workflow-refresh shell)
     ;; `set-window-buffer' brings back the start the transcript had when it
     ;; was last shown, above output that arrived since.  Left to redisplay,
     ;; that would recentre on point and leave blank rows until the next
     ;; command's clamp, so a transcript following its end shows its latest
-    ;; output now.  This runs after the panel, which narrows the window.
+    ;; output now.
     (when (= (window-point output) (with-current-buffer transcript (point-max)))
       (set-window-start output (eng/bbh-transcript--latest-start output)))
     (select-window input)
@@ -1043,46 +1041,11 @@ called interactively, restore this layout for the current session."
     (when (fboundp 'etcc--set-cursor) (etcc--set-cursor))
     composer))
 
-;;; Workflow panel
-
-(defconst eng/bbh-workflow-buffer "*bbh workflow*")
+;;; Workflow phase
 
 (defvar-local eng/bbh-workflow--data nil
-  "The last `wf status --json' answer, as an alist.")
-
-(defvar-local eng/bbh-workflow--dir nil
-  "The directory the panel runs `wf' in.")
-
-(defvar-local eng/bbh-workflow--session nil
-  "The bbh conversation whose workflow run the panel shows.")
-
-(defvar-local eng/bbh-workflow--selected 0
-  "Index of the phase whose brief and gates the panel describes.")
-
-(defvar-local eng/bbh-workflow--run nil
-  "(RUN . PHASE) last applied, so a new run or phase selects the current phase.")
-
-(define-derived-mode eng/bbh-workflow-mode special-mode "bbh-workflow"
-  "Read-only view of the pstack workflow run in a bbh session.
-Moving the selection changes only what this panel shows. Only `wf' advances a phase."
-  (setq buffer-read-only t)
-  (setq-local mode-line-format nil)
-  (visual-line-mode 1))
-
-(define-key eng/bbh-workflow-mode-map (kbd "j") #'eng/bbh-workflow-next)
-(define-key eng/bbh-workflow-mode-map (kbd "k") #'eng/bbh-workflow-previous)
-(define-key eng/bbh-workflow-mode-map (kbd "<down>") #'eng/bbh-workflow-next)
-(define-key eng/bbh-workflow-mode-map (kbd "<up>") #'eng/bbh-workflow-previous)
-;; g is a prefix here, as in evil; special-mode's g would make gr undefinable.
-(define-key eng/bbh-workflow-mode-map (kbd "g") (make-sparse-keymap))
-(define-key eng/bbh-workflow-mode-map (kbd "gr") #'eng/bbh-workflow-refresh)
-
-(with-eval-after-load 'evil
-  (dolist (state '(normal motion))
-    (evil-define-key state eng/bbh-workflow-mode-map
-      (kbd "j") #'eng/bbh-workflow-next
-      (kbd "k") #'eng/bbh-workflow-previous
-      (kbd "gr") #'eng/bbh-workflow-refresh)))
+  "The last `wf status --json' answer for this shell's run, as an alist, or nil.
+The composer header shows its phase.")
 
 (defun eng/bbh-workflow--parse (json)
   "JSON from `wf status --json' as an alist, with null as nil."
@@ -1099,7 +1062,7 @@ Moving the selection changes only what this panel shows. Only `wf' advances a ph
 
 (defun eng/bbh-workflow--fetch (dir session)
   "The run SESSION started, from `wf status --json' in DIR, or an alist with `error'.
-Other runs in the repository are never shown, so the panel matches the session's own wf."
+Other runs in the repository are never read, so the header matches the session's own wf."
   (let ((run (eng/bbh-workflow--session-run session)))
     (if (null run)
         (list (cons 'error "This session has no workflow run yet."))
@@ -1116,112 +1079,23 @@ Other runs in the repository are never shown, so the panel matches the session's
               (error (list (cons 'error (let ((msg (string-trim text)))
                                           (if (string-empty-p msg) "wf status failed" msg))))))))))))
 
-(defun eng/bbh-workflow--current-index (data)
-  (or (seq-position (alist-get 'phases data) (alist-get 'phase data)
-                    (lambda (phase name) (equal name (alist-get 'name phase))))
-      0))
+(defun eng/bbh-workflow-refresh (shell)
+  "Read SHELL's workflow run again for the composer header, when its session has one."
+  (when (buffer-live-p shell)
+    (let ((session (eng/bbh--session-id shell)))
+      (when (eng/bbh-workflow--session-run session)
+        (let ((data (eng/bbh-workflow--fetch (buffer-local-value 'default-directory shell) session)))
+          (with-current-buffer shell (setq eng/bbh-workflow--data data))
+          (force-mode-line-update t))))))
 
-(defun eng/bbh-workflow--render ()
-  "Draw the run and the selected phase in the current buffer."
-  (let ((inhibit-read-only t)
-        (data eng/bbh-workflow--data)
-        (phases (alist-get 'phases eng/bbh-workflow--data)))
-    (erase-buffer)
-    (cond
-     ((alist-get 'error data)
-      (insert (alist-get 'error data) "\n"))
-     (t
-      (insert (format "%s  %s\n" (alist-get 'workflow data) (alist-get 'status data)))
-      (when-let* ((reason (alist-get 'block_reason data)))
-        (insert (propertize (format "blocked: %s\n" reason) 'face 'error)))
-      (insert "\n")
-      (seq-do-indexed
-       (lambda (phase i)
-         (let* ((name (alist-get 'name phase))
-                (current (equal name (alist-get 'phase data)))
-                (mark (cond ((and current (equal (alist-get 'status data) "done")) "✓")
-                            (current "▶")
-                            ((> (alist-get 'visits phase 0) 0) "✓")
-                            (t " ")))
-                (line (format "%s %s\n" mark name)))
-           (insert (if (= i eng/bbh-workflow--selected) (propertize line 'face 'highlight) line))))
-       phases)
-      (when-let* ((phase (nth eng/bbh-workflow--selected phases)))
-        (insert "\n" (propertize (alist-get 'name phase) 'face 'bold) "\n")
-        (insert (or (alist-get 'brief phase) "") "\n")
-        (dolist (gate (alist-get 'gates phase))
-          (insert "  - " gate "\n")))))
-    (goto-char (point-min))))
-
-(defun eng/bbh-workflow--apply (data)
-  "Show DATA, a `wf status --json' answer, in the panel buffer."
-  (with-current-buffer (get-buffer-create eng/bbh-workflow-buffer)
-    (unless (derived-mode-p 'eng/bbh-workflow-mode) (eng/bbh-workflow-mode))
-    (setq eng/bbh-workflow--data data)
-    (let ((key (cons (alist-get 'run data) (alist-get 'phase data))))
-      (unless (equal key eng/bbh-workflow--run)
-        (setq eng/bbh-workflow--run key
-              eng/bbh-workflow--selected (eng/bbh-workflow--current-index data))))
-    (setq eng/bbh-workflow--selected
-          (min (max 0 eng/bbh-workflow--selected)
-               (max 0 (1- (length (alist-get 'phases data))))))
-    (eng/bbh-workflow--render)))
-
-(defun eng/bbh-workflow-refresh ()
-  "Read the newest workflow run for the panel's directory again."
-  (interactive)
-  (with-current-buffer (get-buffer-create eng/bbh-workflow-buffer)
-    (unless (derived-mode-p 'eng/bbh-workflow-mode) (eng/bbh-workflow-mode))
-    (eng/bbh-workflow--apply
-     (eng/bbh-workflow--fetch (or eng/bbh-workflow--dir default-directory)
-                              eng/bbh-workflow--session))))
-
-(defun eng/bbh-workflow--move (delta)
-  (with-current-buffer (get-buffer-create eng/bbh-workflow-buffer)
-    (let ((count (length (alist-get 'phases eng/bbh-workflow--data))))
-      (when (> count 0)
-        (setq eng/bbh-workflow--selected
-              (max 0 (min (1- count) (+ eng/bbh-workflow--selected delta))))
-        (eng/bbh-workflow--render)))))
-
-(defun eng/bbh-workflow-next ()
-  "Select the next phase in the panel. This does not change the run."
-  (interactive)
-  (eng/bbh-workflow--move 1))
-
-(defun eng/bbh-workflow-previous ()
-  "Select the previous phase in the panel. This does not change the run."
-  (interactive)
-  (eng/bbh-workflow--move -1))
-
-(defun eng/bbh-workflow-show (shell)
-  "Show the workflow panel for SHELL's session in a side window on the right.
-The panel appears only when the session has started a run.  Return the window, or nil."
-  (let ((dir (or (buffer-local-value 'default-directory shell) default-directory))
-        (buffer (get-buffer-create eng/bbh-workflow-buffer)))
-    (with-current-buffer buffer
-      (unless (derived-mode-p 'eng/bbh-workflow-mode) (eng/bbh-workflow-mode))
-      (setq eng/bbh-workflow--dir dir
-            eng/bbh-workflow--session (eng/bbh--session-id shell)))
-    (eng/bbh-workflow-refresh)
-    (if (eng/bbh-workflow--session-run (buffer-local-value 'eng/bbh-workflow--session buffer))
-        (display-buffer-in-side-window buffer '((side . right) (window-width . 40)))
-      (when-let* ((window (get-buffer-window buffer t))) (delete-window window))
-      nil)))
-
-(defun eng/bbh-workflow-toggle ()
-  "Hide the workflow panel, or show it for the current bbh session."
-  (interactive)
-  (if-let* ((window (get-buffer-window eng/bbh-workflow-buffer)))
-      (delete-window window)
-    (unless (eng/bbh-workflow-show (or (eng/bbh--shell) (user-error "No bbh session in this buffer")))
-      (message "This session has no workflow run yet."))))
-
-(defun eng/bbh-workflow-refresh-if-shown (&optional shell)
-  "Refresh the panel after a transcript event.  Show it when SHELL starts a run."
-  (cond ((get-buffer-window eng/bbh-workflow-buffer t) (eng/bbh-workflow-refresh))
-        ((and shell (eng/bbh-workflow--session-run (eng/bbh--session-id shell)))
-         (eng/bbh-workflow-show shell))))
+;; A side panel once listed the run's phases.  Loading this file again, as a
+;; Doom reload does, closes it in live frames and drops its commands.
+(when-let* ((panel (get-buffer "*bbh workflow*"))) (kill-buffer panel))
+(dolist (fn '(eng/bbh-workflow-show eng/bbh-workflow-toggle eng/bbh-workflow-refresh-if-shown
+              eng/bbh-workflow-next eng/bbh-workflow-previous eng/bbh-workflow-mode
+              eng/bbh-workflow--apply eng/bbh-workflow--render eng/bbh-workflow--move
+              eng/bbh-workflow--current-index))
+  (fmakunbound fn))
 
 (defun eng/bbh-cider-connect ()
   "Connect CIDER to the REPL of the bbh session in the current buffer."

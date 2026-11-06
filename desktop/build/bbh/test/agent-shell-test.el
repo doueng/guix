@@ -95,7 +95,7 @@
       out)))
 
 (defun bbh-test--main-windows ()
-  "Windows of the transcript and composer, leaving out the workflow side panel."
+  "Windows of the transcript and composer, leaving out side windows."
   (cl-remove-if (lambda (w) (window-parameter w 'window-side)) (window-list)))
 
 (defun bbh-test--tool-folded-p (transcript)
@@ -551,38 +551,35 @@
 (defconst bbh-test-workflow-json
   "{\"run\":\"r1\",\"workflow\":\"change\",\"status\":\"active\",\"phase\":\"implement\",\"visit\":1,\"block_reason\":null,\"phases\":[{\"name\":\"shape\",\"brief\":\"Shape it.\",\"visits\":1,\"gates\":[\"artifact shape.md\"]},{\"name\":\"implement\",\"brief\":\"Change it.\",\"visits\":1,\"gates\":[\"command check\"]},{\"name\":\"verify\",\"brief\":\"Check it.\",\"visits\":0,\"gates\":[]}]}")
 
-(ert-deftest bbh-workflow-panel-shows-current-phase-and-moves-selection-only ()
-  (let ((data (eng/bbh-workflow--parse bbh-test-workflow-json)))
-    (should-not (alist-get 'block_reason data))
-    (with-current-buffer (get-buffer-create eng/bbh-workflow-buffer)
-      (eng/bbh-workflow-mode)
-      (eng/bbh-workflow--apply data)
-      (should buffer-read-only)
-      (should (string-match-p "▶ implement" (buffer-string)))
-      (should (= eng/bbh-workflow--selected 1))
-      (should (string-match-p "command check" (buffer-string)))
-      (eng/bbh-workflow-next)
-      (should (= eng/bbh-workflow--selected 2))
-      (should (string-match-p "Check it." (buffer-string)))
-      (eng/bbh-workflow-next)
-      (should (= eng/bbh-workflow--selected 2))
-      (eng/bbh-workflow-previous)
-      (eng/bbh-workflow-previous)
-      (eng/bbh-workflow-previous)
-      (should (= eng/bbh-workflow--selected 0))
-      (should (string-match-p "Shape it." (buffer-string)))
-      (should (equal data eng/bbh-workflow--data)))))
-
-(ert-deftest bbh-workflow-panel-reports-a-missing-run ()
-  (with-current-buffer (get-buffer-create eng/bbh-workflow-buffer)
-    (eng/bbh-workflow-mode)
-    (eng/bbh-workflow--apply '((error . "no runs for this directory")))
-    (should (string-match-p "no runs for this directory" (buffer-string)))))
-
-(ert-deftest bbh-workflow-panel-stays-hidden-without-a-run ()
+(ert-deftest bbh-workflow-phase-shows-in-the-header-without-a-panel ()
   (let ((shell (generate-new-buffer " bbh-test-shell")))
     (unwind-protect
-        (should-not (eng/bbh-workflow-show shell))
+        (progn
+          (should-not (eng/bbh--workflow-label shell))
+          (with-current-buffer shell
+            (setq eng/bbh-workflow--data (eng/bbh-workflow--parse bbh-test-workflow-json)))
+          (should (equal (eng/bbh--workflow-label shell) "change: implement"))
+          (with-current-buffer shell
+            (setq eng/bbh-workflow--data '((error . "wf status failed"))))
+          (should-not (eng/bbh--workflow-label shell))
+          (should-not (get-buffer "*bbh workflow*"))
+          (should-not (fboundp 'eng/bbh-workflow-show)))
+      (kill-buffer shell))))
+
+(ert-deftest bbh-reload-closes-an-old-workflow-panel ()
+  (let ((panel (get-buffer-create "*bbh workflow*")))
+    (display-buffer-in-side-window panel '((side . right) (window-width . 40)))
+    (should (get-buffer-window panel))
+    (load (getenv "BBH_DOOM_AGENT_SHELL") nil 'nomessage)
+    (should-not (buffer-live-p panel))
+    (should-not (cl-some (lambda (w) (window-parameter w 'window-side)) (window-list)))))
+
+(ert-deftest bbh-workflow-refresh-reads-nothing-without-a-run ()
+  (let ((shell (generate-new-buffer " bbh-test-shell")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'call-process) (lambda (&rest _) (error "no wf without a run"))))
+          (eng/bbh-workflow-refresh shell)
+          (should-not (buffer-local-value 'eng/bbh-workflow--data shell)))
       (kill-buffer shell))))
 
 (ert-deftest bbh-status-reports-osc-7501 ()
