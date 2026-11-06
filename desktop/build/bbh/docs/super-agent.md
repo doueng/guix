@@ -2,6 +2,8 @@
 
 Status: stages 0 through 5 implemented, including the Router sandbox, with offline integration coverage and a live Herdr pane replacement (before the move to Emacs on 2026-11-03, which was checked live with a Worker ask, pick, send and finish); suspend acceptance remains to be exercised. Stage 6 voice input and shortcut are implemented; recorded-clip acoustic acceptance remains pending. Written 2026-11-02.
 
+Simplified 2026-11-06 (T39). Removed: Jev triage, Worker leases (`takeover!`, `handback!`), the Watchdog, `attach-worker!`, locks and capabilities, resource linking, the `inbox-poll` mailbox poller, automatic restarts, the reply `:delivered` state, the stored thread execution and the `bbh-web` service. Now: each session takes its own mail from its mailbox and Emacs only wakes it; outbox rows are pending, sent, done or dropped; a Worker whose session ended frees its slot and waits for you to resume it; picks and notes are a per-thread draft in the controller; the controller serves the website. Sections below that describe the removed parts are kept as the original design and marked superseded. `doc/super-state-machine.html` describes the code as it is.
+
 This document describes how bbh could grow from separate conversations into one agent that you talk to from Herdr and the iPhone, by typing or by voice, and that works on several tasks at once. It adapts the Super-agent architecture from DeepSeek Harness (a Router, isolated Workers, event triggers, asynchronous tools, a watchdog) and the attention model of [Plannotator Inbox](https://github.com/backnotprop/plannotator#plannotator-inbox) (threads grouped by what they need from you, replies that wake the session that asked).
 
 The shortest description is a small durable workflow controller with agents attached. The controller owns truth: work identity, events, lifecycle, delivery, permissions and resource ownership. The Router owns interpretation. Workers own execution. The surfaces own attention. Prompts never enforce correctness; code does.
@@ -72,7 +74,7 @@ Three identities are kept apart.
 
 **Reply.** Your disposition of one or more asks on a thread: picks and notes, or an explicit dismissal. Replies are batched into one message per Worker and carry a stable reply id, so a repeated Send is one logical reply.
 
-**Lease.** Who may send instructions to a Worker right now: the Router, or you after `takeover!`. Typing in a pane never changes the lease by itself. A message of yours lends the Router your lease for what it asks: the Router names it with `:for "o66"` on `steer!`, `cancel!` or a `start-worker!` that `:replaces` a dead Worker on the same thread. The controller accepts the message only if it recorded it for the Router from an origin in policy `:lease-origins`, grants each command on each Worker once per message, and logs a `:lease-granted` event that names the message.
+**Message lease.** Worker leases and `takeover!` are gone (T39). A message of yours authorizes the Router for what it asks: the Router names it with `:for "o66"` on `steer!`, `cancel!` or a `start-worker!` that `:replaces` a Worker whose session ended, on the same thread. The controller accepts the message only if it recorded it for the Router from an origin in policy `:lease-origins`, grants each command on each Worker once per message, and logs a `:lease-granted` event that names the message.
 
 ## 5. Data model
 
@@ -230,7 +232,7 @@ The badge counts the first three. Progress notes update the thread's summary lin
 
 **Jobs.** `job` reports exit through the controller, so a Worker can start long work, end its turn and be woken with the result. Job records survive a controller restart, and recovery rediscovers a running job by pid and start time rather than launching it again.
 
-**Watchdog and recovery.** Deterministic, with a model only when an anomaly needs interpretation.
+**Watchdog and recovery.** Superseded by T39: there is no Watchdog and no automatic restart. Health is stored only when it changes; a Worker whose session ended is `:session-ended`, frees its slot, and waits until you resume it (`u` in the Inbox or `bbh inbox resume T`) on the same conversation and `wf` run. The resume text names jobs a reboot killed. The original design follows.
 
 - Shepherd supervises the controller. The controller writes a heartbeat row.
 - A health check every few minutes compares desired state (Worker records) with reality: process alive, REPL answering, `wf` journal advancing, job state, oldest unacked outbox record, oldest open stopped ask. Silence alone is not an anomaly; a Worker waiting on you or holding a build lock is expected to be quiet.
@@ -274,7 +276,7 @@ Each view takes the whole frame: opening the Router, a Worker or the Inbox first
 Each Worker gets one buffer, named after its thread (`T12 keybindings`). The buffer runs `bbh acp --id super-W<n>` in the Worker's jj workspace with its token and `WF_RUN`. It opens in the background and never takes focus. A restarted Worker replaces its old buffer.
 
 - **Toasts.** Only Stopped and Waiting asks raise a Herdr system toast. Progress never does.
-- **Taking over.** `/takeover` in a Worker's buffer runs `takeover!`, which moves the Worker's lease to you. The Router stops relaying to it until `/handback`. Typing in a buffer without the lease still works, but it is a plain prompt and does not change who the Router thinks is steering.
+- **Taking over** (superseded by T39, which removed leases). `/takeover` in a Worker's buffer ran `takeover!`, which moves the Worker's lease to you. The Router stops relaying to it until `/handback`. Typing in a buffer without the lease still works, but it is a plain prompt and does not change who the Router thinks is steering.
 
 ### iPhone: triage and answers away from the desk
 
@@ -328,13 +330,13 @@ Dictation is a way of talking to the agent, not only a way of typing into a wind
 2. **iPhone.** On Tuesday, on the phone, you write "T16 actually plan B, A breaks the Asahi build".
 3. **System.** The message goes to T16's Worker as a new turn. The Worker reads its `wf` evidence, sees it is in `implement`, and either adjusts or calls `ask!` if plan B changes the shape. If so, its `wf` run goes back to `shape`, which `wf` already supports.
 
-### J5. Taking over and handing back
+### J5. Taking over and handing back (superseded by T39)
 
 1. **Herdr.** T15 is drifting. In the Inbox you press RET on T15 and type `/takeover` in its buffer, which runs `takeover!`.
 2. **Herdr.** You type directly to the Worker for a few turns. The lease is yours, so the Router queues anything for T15 instead of relaying it.
 3. **Herdr.** You type `/handback` in the Worker's buffer. The Router gets the queued items and resumes normal routing.
 
-### J6. The laptop sleeps
+### J6. The laptop sleeps (restarts superseded by T39: a dead session waits for you to resume it)
 
 1. **System.** You close the lid during a run. Every process stops, and nothing happens until you open it: no page, no Workers.
 2. **System.** On wake the controller opens the database, SQLite recovers the WAL, and the dispatcher resumes unacked outbox rows. The `bbh-super` daemon starts again, and the health check restarts each Worker whose session died in a new buffer on the same conversation.
