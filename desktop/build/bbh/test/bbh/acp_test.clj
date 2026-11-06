@@ -5,6 +5,7 @@
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]])
   (:import [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
@@ -113,6 +114,27 @@
         (is (= -32602 (get-in (response! c 5) [:error :code])))
         (send! c 6 "session/prompt" {:sessionId sid :prompt [{:type "text" :text "/port"}]})
         (is (= "end_turn" (get-in (response! c 6) [:result :stopReason]))))
+      (finally (stop! c)))))
+
+(deftest a-session-whose-directory-is-gone-runs-nothing
+  ;; bbh super deletes a finished Worker's workspace, the session's cwd. The
+  ;; next prompt would start claude there and fail on exec, so bbh refuses it
+  ;; and says why.
+  (let [c (client ["ran anyway"])]
+    (try
+      (send! c 1 "initialize" {:protocolVersion 1})
+      (response! c 1)
+      (let [ws (str (fs/create-dirs (fs/path (:dir c) "workspaces" "T9-1")))
+            _ (send! c 2 "session/new" {:cwd ws})
+            sid (get-in (response! c 2) [:result :sessionId])]
+        (fs/delete-tree ws)
+        (send! c 3 "session/prompt" {:sessionId sid :prompt [{:type "text" :text "are you there"}]})
+        (let [events (until! c #(= 3 (:id %)))
+              message (get-in (last events) [:error :message])]
+          (is (not-any? #(= "ran anyway" (get-in % [:params :update :content :text])) events))
+          (is (string? message))
+          (is (str/includes? (str message) ws))
+          (is (str/includes? (str message) "Router"))))
       (finally (stop! c)))))
 
 (deftest the-model-config-option-switches-engines

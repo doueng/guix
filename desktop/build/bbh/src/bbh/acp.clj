@@ -163,6 +163,12 @@
 
       "session/prompt"
       (let [text (prompt-text (:prompt params))]
+        ;; bbh super deletes a finished Worker's workspace, which is this
+        ;; session's cwd: claude and the REPL could only fail on exec there.
+        (when-not (fs/directory? (:cwd @s))
+          (throw (ex-info (str "This session's directory " (:cwd @s) " is gone, so bbh runs nothing in it. "
+                               "If it was a bbh super Worker's workspace, that Worker is finished: ask the Router (SPC m r) to reopen its thread.")
+                          {:rpc-code -32000})))
         (swap! s assoc :busy true)
         (announce! s true)
         (future

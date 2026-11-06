@@ -759,11 +759,11 @@
                                     (buffer-list))))))
       (when-let* ((s (eng/bbh-super--shell "super-W7"))) (eng/bbh-super--kill s)))))
 
-(ert-deftest bbh-super-session-takes-mail-after-its-workspace-is-deleted ()
+(ert-deftest bbh-super-finished-session-runs-nothing-after-its-workspace-is-deleted ()
   ;; super-done! deletes the Worker's workspace, the shell's directory, in the
   ;; middle of its last turn, after the controller released the session. The
-  ;; shell must still go idle and run what the controller or the person sends
-  ;; it next.
+  ;; shell must still go idle, and then run nothing in the deleted directory:
+  ;; mail does not wake it, and what the person types goes to the Router.
   (let* ((ws (make-temp-file "bbh-super-ws" t))
          (repo (make-temp-file "bbh-super-repo" t))
          (shell (get-buffer (eng/bbh-super-open "super-W9" ws "T9 test" nil))))
@@ -772,7 +772,7 @@
           (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
           (bbh-test--submit shell (concat "/model script/"
                                           (make-temp-file "bbh-inbox" nil ".edn"
-                                                          "[{:code \"(Thread/sleep 1500)\"} \"landed\" \"woken\" \"typed\"]")))
+                                                          "[{:code \"(Thread/sleep 1500)\"} \"landed\" \"ran-a-wake\" \"ran-a-typed-prompt\"]")))
           (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
           (bbh-test--submit shell "finish")
           (should (bbh-test--wait (lambda () (string-match-p "Thread/sleep" (bbh-test--text shell))) 30))
@@ -782,14 +782,20 @@
           (delete-directory ws t)
           (should (bbh-test--wait (lambda () (string-match-p "landed" (bbh-test--text shell))) 30))
           (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
-          ;; Mail to the now idle Worker runs at once.
+          ;; Mail to the finished Worker wakes nothing, so it stays unread.
           (let ((file (bbh-test--mail "super-W9" "9-m9" "job exited")))
-            (should (bbh-test--wait (lambda () (string-match-p "woken" (bbh-test--text shell))) 30))
-            (should (bbh-test--wait (lambda () (not (file-exists-p file))) 30)))
-          (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
-          ;; So does what the person types.
-          (bbh-test--submit shell "are you there")
-          (should (bbh-test--wait (lambda () (string-match-p "typed" (bbh-test--text shell))) 30)))
+            (sleep-for 2)
+            (should (file-exists-p file)))
+          ;; What the person types goes to the Router, naming the thread.
+          (let* ((said nil)
+                 (this-command 'shell-maker-submit))
+            (cl-letf (((symbol-function 'eng/bbh-super-say)
+                       (lambda (text on-done) (setq said text) (funcall on-done))))
+              (bbh-test--submit shell "are you there"))
+            (should (equal "About T9, whose Worker is finished: are you there" said)))
+          (sleep-for 2)
+          (should (bbh-test--idle-p shell))
+          (should-not (string-match-p "ran-a-" (bbh-test--text shell))))
       (when-let* ((s (eng/bbh-super--shell "super-W9"))) (eng/bbh-super--kill s))
       (delete-directory repo t))))
 

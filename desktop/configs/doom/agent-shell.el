@@ -62,9 +62,10 @@ conversation."
            (setq eng/bbh-conversation id
                  eng/bbh-usage-last nil))
          (eng/bbh-inbox-switch (eng/bbh--shell)))
-       (if (equal "router" (buffer-local-value 'eng/bbh-super-conversation (eng/bbh--shell)))
+       (if (eng/bbh-super--to-router-p (eng/bbh--shell))
            (let ((composer (current-buffer)))
-             (eng/bbh-super-say draft (lambda () (when (buffer-live-p composer)
+             (eng/bbh-super--say-from (eng/bbh--shell) draft
+                                      (lambda () (when (buffer-live-p composer)
                                                    (with-current-buffer composer (erase-buffer))))))
          (agent-shell-viewport-compose-send t))))))
 
@@ -226,10 +227,12 @@ bbh acts on it without a turn."
 
 (defun eng/bbh-mail-wake (shell)
   "Send SHELL the prompt `[mail]' when its mailbox has mail and it is idle.
-A running turn takes the mail itself."
+A running turn takes the mail itself.  A finished Worker's shell is never
+woken: its workspace is gone, so it runs nothing."
   (when (buffer-live-p shell)
     (with-current-buffer shell
       (when-let* ((conversation (eng/bbh--conversation shell))
+                  ((not (bound-and-true-p eng/bbh-super-finished)))
                   ((not (shell-maker-busy)))
                   ((not (map-elt agent-shell--state :pending-prompts)))
                   ((eng/bbh-mail-waiting-p (eng/bbh-mail-dir conversation))))
@@ -1254,17 +1257,41 @@ and stop the daemon serving anyone, the controller included."
   (dolist (f '(y-or-n-p yes-or-no-p read-from-minibuffer))
     (advice-add f :around #'eng/bbh-super--refuse-prompt)))
 
+(defvar-local eng/bbh-super-finished nil
+  "Non-nil in a Worker's shell once `eng/bbh-super-release' moved it out of its workspace.
+Its Worker is finished, so the shell runs no more prompts.")
+
+(defun eng/bbh-super--to-router-p (shell)
+  "Whether what you type in SHELL goes to the Router: SHELL is the Router or a finished Worker."
+  (with-current-buffer shell
+    (or (equal "router" eng/bbh-super-conversation) eng/bbh-super-finished)))
+
+(defun eng/bbh-super--say-from (shell text on-done)
+  "Give TEXT, typed in SHELL, to the Router, then call ON-DONE.
+From a finished Worker it names the thread, so the Router can reopen it."
+  (if (not (buffer-local-value 'eng/bbh-super-finished shell))
+      (eng/bbh-super-say text on-done)
+    (let ((thread (car (split-string (buffer-name shell)))))
+      (eng/bbh-super-say (format "About %s, whose Worker is finished: %s" thread text)
+                         (lambda ()
+                           (funcall on-done)
+                           (message "%s's Worker is finished, so this went to the Router, which can reopen %s"
+                                    thread thread))))))
+
 (defun eng/bbh-super--router-submit (submit &rest args)
-  "Send what you typed at the Router's prompt through the controller.
+  "Send what you typed at the Router's or a finished Worker's prompt through the controller.
 Mailbox prompts, which arrive outside a command, still SUBMIT directly."
-  (if (and this-command (not args) (equal "router" eng/bbh-super-conversation))
-      (let* ((start (process-mark (get-buffer-process (current-buffer))))
+  (if (and this-command (not args) (eng/bbh-super--to-router-p (current-buffer)))
+      (let* ((shell (current-buffer))
+             (start (process-mark (get-buffer-process shell)))
              (text (string-trim (buffer-substring-no-properties start (point-max)))))
         (unless (string-empty-p text)
-          (eng/bbh-super-say text (lambda ()
-                                    (with-current-buffer (eng/bbh-super--shell "router")
-                                      (delete-region (process-mark (get-buffer-process (current-buffer)))
-                                                     (point-max)))))))
+          (eng/bbh-super--say-from shell text
+                                   (lambda ()
+                                     (when (buffer-live-p shell)
+                                       (with-current-buffer shell
+                                         (delete-region (process-mark (get-buffer-process shell))
+                                                        (point-max))))))))
     (apply submit args)))
 
 (advice-add 'shell-maker-submit :around #'eng/bbh-super--router-submit)
@@ -1382,9 +1409,12 @@ The controller calls this before it deletes a finished Worker's workspace.
 Each submit starts processes in the shell's directory, and shell-maker
 marks the shell busy before the first of them.  In a deleted directory
 that process fails, so busy is never cleared and every later prompt and
-mailbox wake waits for a turn end that never comes.  Returns the shell's
-name, or nil when no session runs CONVERSATION."
+mailbox wake waits for a turn end that never comes.  The shell is marked
+finished too: its bbh session still has the deleted workspace as its cwd,
+so it runs no more prompts, and what you type there goes to the Router.
+Returns the shell's name, or nil when no session runs CONVERSATION."
   (when-let* ((shell (eng/bbh-super--shell conversation)))
+    (with-current-buffer shell (setq eng/bbh-super-finished t))
     (let ((dir (file-name-as-directory (expand-file-name dir))))
       (dolist (buffer (list shell
                             (buffer-local-value 'eng/bbh-transcript shell)
