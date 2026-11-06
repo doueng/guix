@@ -197,10 +197,20 @@ Answered(w, r) ==
   /\ wstate' = Resume(t, as, wstate)
   /\ UNCHANGED <<wthread, launched, tworker, resolved>>
 
-\* reconcile!: health finds a working, waiting or cancelling Worker's session gone.
+\* reconcile! on an active Worker: health classifies it :session-ended, and
+\* decide* :health! with fold* :health-observed stores it.
 SessionEnds(w) ==
   /\ wstate[w] \in {"working", "waiting", "cancelling"} /\ ~ended[w]
   /\ ended' = [ended EXCEPT ![w] = TRUE]
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies>>
+
+\* reconcile! on an active Worker whose session ended: health classifies it
+\* anything but :session-ended, such as :needs-human for a job it can no longer
+\* identify or a missing wf run, which its cond checks before the session, and
+\* decide* :health! stores it. Nothing resumed it.
+SessionSeen(w) ==
+  /\ Ended(w)
+  /\ ended' = [ended EXCEPT ![w] = FALSE]
   /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies>>
 
 \* decide* :resume! by the person, fold* :worker-resumed: only with a free slot.
@@ -222,7 +232,7 @@ Commands ==
 
 Next ==
   \/ Commands /\ UNCHANGED ended
-  \/ \E w \in Workers : SessionEnds(w) \/ ResumeWorker(w)
+  \/ \E w \in Workers : SessionEnds(w) \/ SessionSeen(w) \/ ResumeWorker(w)
   \/ \E w \in Workers, r \in ReplyIds : Take(w, r)
 
 Spec == Init /\ [][Next]_vars
