@@ -38,6 +38,7 @@ Workflows are defined in `desktop/build/bbh/src/bbh/workflows/`. Run them with `
 
 ## Reply
 
+- Open your first message and the final report with the user's goal and problem, in your own words.
 - Say what changed and how it was verified. Say what you could not verify.
 - Label each claim measured, inferred, or guess.
 - Write without em dashes or mid-sentence colons.

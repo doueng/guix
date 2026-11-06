@@ -379,7 +379,8 @@
                    "Evidence directory: " (evidence-dir id) "\n\n"
                    (when-let [ps (seq (get-in wf [:phases phase :principles]))]
                      (str "Judge against these principles too:\n\n" (principles-text ps) "\n\n"))
-                   "Read the evidence and the repo as needed. Finish with one line, VERDICT: pass or VERDICT: fail, then a short reason.")
+                   "Read the evidence and the repo as needed. Fail only for a problem you can show: a command you ran and its output, or a quoted line of the evidence or the repo that breaks the criteria. "
+                   "Finish with one line, VERDICT: pass or VERDICT: fail, then a short reason that names that proof.")
         s (session/new-session {:dir dir :init nil :cwd (:cwd st)
                                 :model (or model (sysenv/getenv "WF_REVIEW_MODEL") default-review-model)
                                 :make-engine models/engine :emit (fn [_])})]

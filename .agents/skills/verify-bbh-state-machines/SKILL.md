@@ -31,7 +31,7 @@ Left out. The `:for` record on Router commands (`ReplaceWorker` models a `:repla
 
 Each action in a `.tla` names the code it stands for in a comment: `Super.tla` points to the `decide*` and `fold*` methods of `src/bbh/super/model.clj`, and `Workflow.tla` points to `attest!`, `decide`, `enter`, `fold-event` and `abandon!` in `src/bbh/workflow.clj` and the phase graph of `src/bbh/workflows/change.edn`. One `Super` action is one command, because `bbh.super.store` commits a command's events in one transaction. `attest!` is two actions, because it reads the journal, runs the gates and only then appends.
 
-Sync change: `yyrynmqunksn` (a jj change id, which survives rebases). Run `jj diff --from yyrynmqunksn --stat -- desktop/build/bbh/src/bbh/super/model.clj desktop/build/bbh/src/bbh/workflow.clj desktop/build/bbh/src/bbh/workflows/change.edn` to see what changed since. Move the sync change forward only after you have read those changes and confirmed that the models still describe them.
+Sync change: `yyrynmqunksn` (a jj change id, which survives rebases). Run `jj diff --from yyrynmqunksn --stat -- desktop/build/bbh/src/bbh/super/model.clj desktop/build/bbh/src/bbh/workflow.clj desktop/build/bbh/src/bbh/workflows/change.edn` to see what changed since. Move the sync change forward only after you have read those changes and confirmed that the models still describe them. For drift across many changes, follow /home/engstrand/guix/desktop/pi/agent/skills/pstack/maintain-formal-verification-skill/SKILL.md
 
 ## When you change covered code
 

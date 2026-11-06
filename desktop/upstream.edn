@@ -20,6 +20,6 @@
  "pi/agent/skills/librarian"
  {:repo "mitsuhiko/agent-stuff" :path "skills/librarian" :commit "0ad04e3302f30198bf31d4c8b4ba7b5d1d5f6714"}
  "pi/agent/skills/pstack"
- {:repo "cursor/plugins" :path "pstack" :commit "2cbf58508f40de470d7490b55c51d71241928fa2" :manual true}
+ {:repo "cursor/plugins" :path "pstack" :commit "c742dd61706fbacc1b95f1a20b7b988cf096ce6c" :manual true}
  "pi/agent/skills/retro"
  {:repo "mattpocock/skills" :path "skills/engineering/retro" :commit "a7d038f6bf7f01b516408e95e2fb56e0b338fa6f"}}

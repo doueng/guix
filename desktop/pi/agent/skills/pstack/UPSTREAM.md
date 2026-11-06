@@ -6,23 +6,22 @@ New sessions start in poteto-mode: the `jev-pstack.ts` extension rewrites the fi
 
 ## Provenance
 
-Upstream repository is https://github.com/cursor/plugins. The current baseline is pstack 0.15.13 at `2cbf58508f40de470d7490b55c51d71241928fa2`, in the `pstack` plugin directory. The previous baseline was 0.15.5 at `ecc249f1e306fc64ddf83c7bed16cacf7c2239db`. The original import did not record its exact revision.
+Upstream repository is https://github.com/cursor/plugins. The current baseline is pstack 0.15.36 at `c742dd61706fbacc1b95f1a20b7b988cf096ce6c`, in the `pstack` plugin directory. The previous baseline was 0.15.13 at `2cbf58508f40de470d7490b55c51d71241928fa2`. The original import did not record its exact revision.
 
-The 0.15.5 to 0.15.13 delta was applied with these adaptations.
+The 0.15.13 to 0.15.36 delta was applied with these adaptations.
 
-- Imported `benchmark-checklist`, `correct`, and `principle-explain-the-number` unchanged.
-- Applied upstream text unchanged to the `architect` red-flag screening line, `design-red-flags.md`, `hillclimb.md` steps 2 and 4, `perf-issue.md` steps 1 and 2, the `opening-a-pr.md` description and PR-tool rules, `technical-writing`, and `typescript-best-practices/references/patterns.md`.
-- Adapted the fresh-agent rule into poteto-mode's Delegation section and `poteto-agent.md`. Adapted push-after-every-unit and the pre-merge drift checks into the Pi autopilot playbooks.
-- Adapted the hourly audit cadence into `multi-phase-plan.md` and `check-plan.mjs` without `/loop` or `/goal`.
+- Took upstream text unchanged for every `principle-*` skill and for `benchmark-checklist`, `blast-radius`, `correct`, `technical-writing`, `typescript-best-practices`, and `unslop`. `figure-it-out` drops its pointer to poteto-mode's Subagents section, which the local poteto-mode lacks.
+- Rewrote `interrogate` to upstream's run-proven findings and deleted its references. Adversaries run through bbh `delegate` or play in turn when no delegation exists.
+- Imported `ketchup` as text only, and `maintain-formal-verification-skill` with jj change ids as sync points.
+- Mapped the restate-the-goal trigger, the proof-backed blocking rule, and ketchup's decidable action items onto bbh super: the Worker and Router prompts in `desktop/configs/bbh/init.clj`, the reviewer brief in `bbh.workflow/review!`, and the Reply section of poteto-mode.
 
 Omitted changes, with reasons.
 
-- `poteto-help` and `docs/guide/`. They document the upstream host's installation, custom modes, `/setup-pstack`, and model rules, none of which exist in Pi.
-- `swarm` "respawn" wording. The Pi swarm skill was rewritten without the retry sentence it edits.
-- `/goal` and `/loop 1h` arming in the autopilot and multi-phase playbooks. They are upstream host commands. The Pi playbooks keep their session-bound monitoring rule.
-- Host-specific PR tooling stays generic. `opening-a-pr.md` names a run's built-in PR tool only when one exists.
-
-`create-formal-verification-skill` was imported on its own from pstack 0.15.36 at `bb68f2365eceafa0cb2d253112f675acf5f144cc`, without moving the baseline. Its generated skill goes in `.agents/skills/`. Its references to `/statechart` and `/maintain-formal-verification-skill` were dropped because neither skill is in this bundle.
+- `statechart`, about 20k lines of TypeScript that need Java and TLC through mise. The project-local TLA+ check already covers bbh.
+- `ketchup-video`, `sharpen`, `in-your-own-words` as a file, `poteto-help`, `setup-pstack`, `make-bot-ui`, `docs/`, and the plugin manifests. They are host-specific, render video, or have no bbh hook.
+- Subagent model rules (matching effort to the job, slug fallbacks, background steers). They name upstream host models and the Task tool.
+- The playbooks, including Orchestrate without the orch scripts, autopilot, shipping, babysit, opening-a-pr, multi-phase, watch-pr, and worktree-audit. The local poteto-mode has no playbooks; bbh super and the `wf` workflows replace them.
+- Distillations of `how`, `why`, `arena`, `swarm`, `reflect`, `architect`, `recall`, and `show-me-your-work`. The local copies are Pi rewrites.
 
 Local changes include Pi entry commands, Jev routing with a manual fallback, the route map, mode persistence, conditional delegation, read-only self-review, session-directory resolution, GNU-system audit support, codemode-based MCP discovery and calls, batched read-only evidence gathering, port validation, and `show-me-your-work/scripts/log.bb`, a babashka port of upstream `log.sh` because this repository allows no shell scripts. Keep the MIT license with the bundle.
 
