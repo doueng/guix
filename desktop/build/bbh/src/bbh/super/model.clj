@@ -241,6 +241,42 @@
     {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state :cancelled :reason (:cancel-reason w)}}]
      :result worker}))
 
+(defn health
+  "Worker W's health at NOW from OBS, what the controller just read from the
+  world: :agent ({:pid :start} of its live session, or nil), :jobs, :wf
+  ({:status :phase} of its wf run, or nil), :repl? (whether its REPL answers)
+  and :waits, the milliseconds each sent row's file has waited in its mailbox,
+  by row id; a row the session took has none. A row sent to a live Worker that
+  waits LIMIT-MS or longer is stuck."
+  [state w {:keys [agent jobs wf repl? waits]} now limit-ms]
+  (let [unidentified (first (filter #(#{:unknown :lost} (:state %)) jobs))
+        stale (when repl?
+                (->> (vals (:outbox state))
+                     (filter #(and (= :sent (:state %)) (= (:conversation w) (:conversation %))))
+                     (keep #(when-let [ms (get waits (:id %))] (when (>= ms limit-ms) (assoc % :waited ms))))
+                     (sort-by :waited >) first))
+        [classification problem]
+        (cond (= :queued (:state w)) [:waiting]
+              unidentified [:needs-human (format "Job %s can no longer be identified as the process that started it; check it before anything kills or reruns it."
+                                                 (:id unidentified))]
+              (= :missing (:status wf)) [:needs-human (format "Its wf run %s is missing, so it cannot be resumed." (:wf-run w))]
+              (and agent (not repl?)) [:needs-human (format "Its session (pid %s) is alive but its REPL does not answer." (:pid agent))]
+              stale [:needs-human (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
+                                          (:id stale) (quot (:waited stale) 60000))]
+              agent [(if (= :waiting (:state w)) :waiting :running)]
+              (#{:working :waiting :cancelling} (:state w))
+              [:session-ended (format "Its session ended. Resume it with u in the Inbox or bbh inbox resume %s." (:thread w))]
+              :else [:starting])
+        same? (= [classification problem] [(get-in w [:health :classification]) (get-in w [:health :problem])])]
+    {:at now :process (select-keys agent [:pid :start]) :repl (boolean repl?)
+     :workflow wf :classification classification :problem problem
+     :since (if same? (or (get-in w [:health :since]) now) now)
+     :oldest-unacked (some->> (vals (:outbox state))
+                              (filter #(and (= (:thread w) (:thread %)) (#{:pending :sent} (:state %))))
+                              (sort-by (comp id-order :id)) first :id)
+     :oldest-stopped-ask (some->> (vals (:asks state)) (filter #(and (= (:thread w) (:thread %)) (= :open (:state %)) (:stopped %))) (sort-by :seq) first :seq)
+     :jobs (mapv #(select-keys % [:id :state :pid :start]) jobs)}))
+
 (defn health-changed?
   "Whether HEALTH, a new observation of Worker W, says anything W's stored
   health does not. Its :at alone is no change."

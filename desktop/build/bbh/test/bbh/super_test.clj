@@ -932,6 +932,27 @@
       (.setDaemon true) (.start))
     server))
 
+(deftest health-is-decided-from-what-the-controller-observed
+  (let [w {:id "W1" :thread "T1" :state :working :conversation "super-W1" :wf-run "run1"}
+        state {:outbox {"o1" {:id "o1" :thread "T1" :state :sent :conversation "super-W1"}}}
+        alive {:agent {:pid 7 :start "9"} :jobs [] :wf {:status :active} :repl? true :waits {}}
+        judge (fn [w obs] ((juxt :classification :problem) (model/health state w obs 1000 60000)))]
+    (is (= [:running nil] (judge w alive)))
+    (is (= [:waiting nil] (judge (assoc w :state :waiting) alive)))
+    (is (= [:waiting nil] (judge (assoc w :state :queued) {})))
+    (is (= [:needs-human "Its session (pid 7) is alive but its REPL does not answer."] (judge w (assoc alive :repl? false))))
+    (is (= [:needs-human "Delivery o1 has waited 2 min in its mailbox while the Worker runs; it is not taking messages."]
+           (judge w (assoc alive :waits {"o1" 120000}))))
+    (is (= [:running nil] (judge w (assoc alive :waits {"o1" 59999}))) "younger than the limit")
+    (is (= [:needs-human "Job j1 can no longer be identified as the process that started it; check it before anything kills or reruns it."]
+           (judge w (assoc alive :jobs [{:id "j1" :state :lost}]))))
+    (is (= [:needs-human "Its wf run run1 is missing, so it cannot be resumed."] (judge w (assoc alive :wf {:status :missing}))))
+    (is (= [:session-ended "Its session ended. Resume it with u in the Inbox or bbh inbox resume T1."] (judge w {:jobs [] :waits {}})))
+    (is (= [:starting nil] (judge (assoc w :state :starting) {:jobs [] :waits {}})))
+    (is (= "o1" (:oldest-unacked (model/health state w alive 1000 60000))))
+    (is (= [500 1000] (mapv #(:since (model/health state (assoc w :health {:classification % :since 500}) alive 1000 60000)) [:running :waiting]))
+        "since holds while the classification holds")))
+
 (deftest a-steady-worker-writes-its-health-once
   (with-controller
     (fn [c dir _]

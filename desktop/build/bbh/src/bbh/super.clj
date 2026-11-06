@@ -574,41 +574,20 @@
               :let [root (when (:conversation w) (conversation-root c (:conversation w)))
                     agent (when root (inbox/agent root))
                     jobs (if root (conversation-jobs c (:conversation w)) [])
-                    uncertain? (some #(#{:unknown :lost} (:state %)) jobs)
-                    wf (when (:wf-run w) (try (select-keys (workflow/status (:wf-run w)) [:status :phase]) (catch Exception _ {:status :missing})))
-                    repl-ok? (boolean (and agent (some repl-answering? (repl-dirs c (:conversation w)))))
-                    limit-ms (* 60000 (:stale-delivery-minutes (policy c)))
-                    ;; How long a sent row's file has waited in the mailbox, or nil once the session took it.
-                    waited-ms (fn [o] (let [f (fs/path root "mailbox" (str (:message o) ".json"))]
-                                        (try (- now (.toMillis (fs/last-modified-time f)))
-                                             (catch java.io.IOException _ nil))))
-                    stale (when repl-ok?
-                            (->> (vals (:outbox @state))
-                                 (filter #(and (= :sent (:state %)) (= (:conversation w) (:conversation %))))
-                                 (keep #(when-let [ms (waited-ms %)] (when (>= ms limit-ms) (assoc % :waited ms))))
-                                 (sort-by :waited >) first))
-                    [classification problem]
-                    (cond (= :queued (:state w)) [:waiting]
-                          uncertain? [:needs-human (format "Job %s can no longer be identified as the process that started it; check it before anything kills or reruns it."
-                                                           (:id (first (filter #(#{:unknown :lost} (:state %)) jobs))))]
-                          (= :missing (:status wf)) [:needs-human (format "Its wf run %s is missing, so it cannot be resumed." (:wf-run w))]
-                          (and agent (not repl-ok?)) [:needs-human (format "Its session (pid %s) is alive but its REPL does not answer." (:pid agent))]
-                          stale [:needs-human (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
-                                                      (:id stale) (quot (:waited stale) 60000))]
-                          agent [(if (= :waiting (:state w)) :waiting :running)]
-                          (#{:working :waiting :cancelling} (:state w))
-                          [:session-ended (format "Its session ended. Resume it with u in the Inbox or bbh inbox resume %s." (:thread w))]
-                          :else [:starting])
-                    since (if (= [classification problem] [(get-in w [:health :classification]) (get-in w [:health :problem])])
-                            (or (get-in w [:health :since]) now)
-                            now)
-                    health {:at now :process (select-keys agent [:pid :start]) :repl repl-ok?
-                            :workflow wf :classification classification :problem problem :since since
-                            :oldest-unacked (some->> (vals (:outbox @state))
-                                                    (filter #(and (= (:thread w) (:thread %)) (#{:pending :sent} (:state %))))
-                                                    (sort-by (comp model/id-order :id)) first :id)
-                            :oldest-stopped-ask (some->> (vals (:asks @state)) (filter #(and (= (:thread w) (:thread %)) (= :open (:state %)) (:stopped %))) (sort-by :seq) first :seq)
-                            :jobs (mapv #(select-keys % [:id :state :pid :start]) jobs)}]]
+                    health (model/health
+                            @state w
+                            {:agent agent :jobs jobs
+                             :wf (when (:wf-run w) (try (select-keys (workflow/status (:wf-run w)) [:status :phase]) (catch Exception _ {:status :missing})))
+                             :repl? (boolean (and agent (some repl-answering? (repl-dirs c (:conversation w)))))
+                             :waits (into {}
+                                          (for [o (vals (:outbox @state))
+                                                :when (and root (= :sent (:state o)) (= (:conversation w) (:conversation o)))
+                                                :let [f (fs/path root "mailbox" (str (:message o) ".json"))
+                                                      ms (try (- now (.toMillis (fs/last-modified-time f)))
+                                                              (catch java.io.IOException _ nil))]
+                                                :when ms]
+                                            [(:id o) ms]))}
+                            now (* 60000 (:stale-delivery-minutes (policy c))))]]
         (when (model/health-changed? w health)
           (run! c :controller {:id (new-id) :command :health! :args {:worker (:id w) :health health :at now}}))
         (cond
