@@ -1,6 +1,7 @@
 (ns bbh.workflow-test
   (:require [bbh.hermetic :as hermetic]
             [babashka.fs :as fs]
+            [babashka.process :as p]
             [bbh.workflow :as wf]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -136,6 +137,15 @@
           "the reviewer is briefed with the phase's principles"))))
 
 (defn- cli [& args] (with-out-str (with-redefs [wf/default-id (constantly nil)] (apply wf/-main args))))
+
+(def ^:private bbh-dir (str (fs/parent (fs/parent (fs/parent (fs/absolutize *file*))))))
+
+(deftest help-prints-usage-and-start-without-a-workflow-says-what-it-needs
+  (is (str/starts-with? (cli "start" "--help") "usage:"))
+  (is (str/starts-with? (cli "status" "-h") "usage:"))
+  (let [{:keys [exit err]} (p/shell {:dir bbh-dir :out :string :err :string :continue true} "bb" "-m" "bbh.workflow" "start")]
+    (is (= 1 exit))
+    (is (str/starts-with? err "wf start needs a workflow, such as change or bug-fix\nusage:"))))
 
 (deftest a-phase-brief-carries-its-principles-in-full
   (let [id (wf/start! :bug-fix {:cwd (buggy-repo) :repro repro})

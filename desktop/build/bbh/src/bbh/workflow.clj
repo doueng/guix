@@ -556,10 +556,11 @@ RUN defaults to $WF_RUN, else the newest run started for this directory or one c
         {:keys [pos flags]} (parse-args more)
         run-id (fn [] (or (first pos) (default-id) (throw (ex-info "no runs for this directory; pass RUN or set WF_RUN" {}))))]
     (try
-      (case cmd
-        "start" (print-status (status (start! (keyword (first pos))
-                                              (select-keys flags [:cwd :task :repro :check :bench])))
-                              :full? true)
+      (case (if (some #{"--help" "-h"} argv) "--help" cmd)
+        "--help" (println usage)
+        "start" (let [wf-name (or (first pos) (throw (ex-info (str "wf start needs a workflow, such as change or bug-fix\n" usage) {})))]
+                  (print-status (status (start! (keyword wf-name) (select-keys flags [:cwd :task :repro :check :bench])))
+                                :full? true))
         "status" (if json?
                     (println (json/generate-string (status-json (status (run-id)))))
                     (print-status (status (run-id))))
