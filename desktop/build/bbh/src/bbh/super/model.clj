@@ -23,9 +23,8 @@
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, how long a live
   Worker may leave a delivery in its mailbox before it needs you (a reply waits
-  for the current turn, which can include a 10 minute job-wait), and the origins
-  whose messages grant the Router a lease (see message-lease)."
-  {:workers 10 :stale-delivery-minutes 30 :lease-origins [:owner :emacs :herdr :phone :voice]})
+  for the current turn, which can include a 10 minute job-wait)."
+  {:workers 10 :stale-delivery-minutes 30})
 
 (defn authorize
   "Throw unless PRINCIPAL may run COMMAND on STATE. A Worker acts on its own
@@ -130,43 +129,32 @@
     :owner :owner
     :router (let [o (get-in state [:outbox for])]
               (when-not (and o (some? (:origin o)) (= (:conversation o) (get-in state [:router :router :conversation])))
-                (refuse :invalid :field :for :message "name the Router message this Worker is for, such as :for \"o12\""))
+                (refuse :invalid :field :for :message "name a message the controller recorded for the Router, such as :for \"o12\""))
               (:origin o))
     (refuse :forbidden :command :start-worker!)))
 
-(defn- message-lease
-  "The events that let the Router run COMMAND on WORKER because the person
-  asked for it in message FOR: none when the Router names no message, else a
-  :lease-granted event, the audit record of which message authorized it. The
-  message must be one the controller recorded for the Router, from an origin
-  in the policy's :lease-origins, and grants each command on each Worker once."
-  [state {:keys [principal policy]} for command worker]
-  (when (and for (= :router principal))
-    (let [origin (request-origin state :router for)]
-      (when-not (some #{origin} (:lease-origins (merge default-policy policy)))
-        (refuse :human-lease :worker worker :for for :origin origin
-                :message (str "a message from " (name origin) " grants no lease")))
-      (when (contains? (get-in state [:outbox for :granted]) [command worker])
-        (refuse :lease-used :worker worker :for for :message (str for " already authorized " (name command) " on " worker)))
-      [{:kind :lease-granted :thread (get-in state [:workers worker :thread])
-        :data {:for for :origin origin :command command :worker worker}}])))
+(defn- authority
+  "{:for :origin} for the log: the person's message FOR that PRINCIPAL acts
+  on, or nil when it names none. The Router may name only a message the
+  controller recorded for it."
+  [state principal for]
+  (when for {:for for :origin (request-origin state principal for)}))
 
 (declare fold* worker-of)
 
 (defn- replacement
   "The events that end Worker REPLACES of THREAD so a new Worker NEW can take
-  its place: the lease the person's message grants, and the old Worker failed.
-  Only a Worker whose session ended is replaced; a live one is cancelled instead."
-  [state {:keys [principal] :as cmd} thread replaces for new]
+  its place: the old Worker failed. Only a Worker whose session ended is
+  replaced; a live one is cancelled instead."
+  [state {:keys [principal]} thread replaces for new]
   (when replaces
     (let [old (worker-of state replaces)]
       (when (= :controller principal) (refuse :forbidden :field :replaces))
-      (when (and (= :router principal) (not for)) (refuse :invalid :field :for :message "replacing a Worker needs the message that asks for it, such as :for \"o12\""))
       (when (not= thread (:thread old)) (refuse :invalid :field :replaces :message (str replaces " is not " thread "'s Worker")))
       (when-not (session-ended? old) (refuse :alive :worker replaces :message (str replaces "'s session has not ended; cancel it instead")))
-      (conj (vec (message-lease state cmd for :start-worker! replaces))
-            {:kind :worker-finished :thread thread
-             :data {:id replaces :state :failed :reason (str "Replaced by " new (when for (str " as " for " asked")))}}))))
+      [{:kind :worker-finished :thread thread
+        :data (merge {:id replaces :state :failed :reason (str "Replaced by " new (when for (str " as " for " asked")))}
+                     (authority state principal for))}])))
 
 (defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo check bench repro for replaces] :as args} :args :keys [token-hash policy requires principal] :as cmd}]
   (let [id (next-id state :workers "W")
@@ -239,12 +227,12 @@
     {:events [{:kind :worker-finished :thread (:thread w) :data (cond-> {:id worker :state state-after :reason reason} (and landed (= :done state-after)) (assoc :landed landed))}]
      :result worker}))
 
-(defmethod decide* :cancel! [state {{:keys [worker reason for]} :args :as cmd}]
+(defmethod decide* :cancel! [state {{:keys [worker reason for]} :args :keys [principal]}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
     (when-not (or (#{:starting :working :waiting} (:state w)) (= :queued (:state w))) (refuse :not-running :worker worker))
     (when (str/blank? reason) (refuse :invalid :field :reason))
-    {:events (conj (vec (message-lease state cmd for :cancel! worker))
-                   {:kind :cancel-requested :thread (:thread w) :data {:id worker :reason reason}})
+    {:events [{:kind :cancel-requested :thread (:thread w)
+               :data (merge {:id worker :reason reason} (authority state principal for))}]
      :result worker}))
 
 (defmethod decide* :cancel-delivered! [state {{:keys [worker]} :args}]
@@ -295,14 +283,14 @@
   (when-not (deliverable? w) (refuse :not-running :worker (:id w)))
   w)
 
-(defmethod decide* :steer! [state {{:keys [worker text for]} :args :as cmd}]
+(defmethod decide* :steer! [state {{:keys [worker text for]} :args :keys [principal]}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
     (deliverable-worker! w)
     (when (str/blank? text) (refuse :invalid :field :text))
-    {:events (conj (vec (message-lease state cmd for :steer! worker))
-                   {:kind :worker-steered :thread (:thread w)
-                    :data {:worker worker :text text :outbox (next-id state :outbox "o")
-                           :conversation (:conversation w) :mailbox-text (str "[Steering] " text)}})
+    {:events [{:kind :worker-steered :thread (:thread w)
+               :data (merge {:worker worker :text text :outbox (next-id state :outbox "o")
+                             :conversation (:conversation w) :mailbox-text (str "[Steering] " text)}
+                            (authority state principal for))}]
      :result worker}))
 
 (defmethod decide* :job-exited! [state {{:keys [worker job exit log seen]} :args}]
@@ -547,7 +535,7 @@
 (def retired-events
   "Event kinds no command emits any more. An old log still holds them, so they
   fold to nothing; store/load keeps whatever they once wrote."
-  #{:message-routed :router-triaged :lease-moved :restart-attempted :restart-failed :worker-restarted})
+  #{:message-routed :router-triaged :lease-moved :lease-granted :restart-attempted :restart-failed :worker-restarted})
 
 (defmethod fold* :default [state {:keys [kind]}]
   (if (retired-events kind)
@@ -627,9 +615,6 @@
     outbox (-> (bump :outbox)
                (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
                                            :text text :state :pending :message nil}))))
-
-(defmethod fold* :lease-granted [state {{:keys [for command worker]} :data}]
-  (update-in state [:outbox for :granted] (fnil conj #{}) [command worker]))
 
 (defmethod fold* :token-issued [state {{:keys [hash principal]} :data}]
   (assoc-in state [:tokens hash] {:id hash :principal principal :revoked false}))

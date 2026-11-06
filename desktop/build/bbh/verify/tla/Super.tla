@@ -106,8 +106,8 @@ FinishWorker(w, outcome) ==
   /\ wstate[w] \notin {"none", "cancelling"} \cup Finished
   /\ WorkerFinished(w, outcome)
 
-\* decide* :start-worker! with :replaces (replacement), the person's message
-\* lease aside: fold* :worker-finished ends Worker old, whose session ended,
+\* decide* :start-worker! with :replaces (replacement): fold* :worker-finished
+\* ends Worker old, whose session ended,
 \* as failed, then the new Worker w starts on its thread against the state
 \* after that.
 ReplaceWorker(old, w) ==
