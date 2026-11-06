@@ -29,7 +29,7 @@ VARIABLES
 vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended>>
 
 NoAsk == [st |-> "none", worker |-> None, thread |-> NoThread, stopped |-> FALSE]
-NoReply == [st |-> "none", thread |-> NoThread, picks |-> {}]
+NoReply == [st |-> "none", thread |-> NoThread, picks |-> {}, to |-> None, taken |-> FALSE]
 
 Init ==
   /\ wstate = [w \in Workers |-> "none"]
@@ -152,7 +152,7 @@ Ask(w, a, stopped, sup) ==
 \* fold* :reply-sent, from decide* :reply!, :approve!, :dismiss! and :archive!
 ReplySent(t, r, picks, dismiss, then(_)) ==
   LET as == SetAsks(SetAsks(asks, picks, "sent"), dismiss, "dismissed") IN
-  /\ replies' = [replies EXCEPT ![r] = [st |-> "sent", thread |-> t, picks |-> picks]]
+  /\ replies' = [replies EXCEPT ![r] = [st |-> "sent", thread |-> t, picks |-> picks, to |-> tworker[t], taken |-> FALSE]]
   /\ asks' = as
   /\ wstate' = then(Resume(t, as, wstate))
 
@@ -176,11 +176,22 @@ Archive(t) ==
      ELSE /\ wstate' = cancel(wstate) /\ UNCHANGED <<asks, replies>>
   /\ UNCHANGED <<wthread, launched, tworker>>
 
+\* bbh acp takes the reply's mailbox file into a turn and deletes it; reconcile!
+\* then marks its outbox row :done. The file is in the conversation of the
+\* Worker the reply went to, so only that Worker's live session takes it. The
+\* Worker learns the reply id only from it, which Answered assumes: decide*
+\* :answered! itself checks the thread only.
+Take(w, r) ==
+  /\ replies[r].st = "sent" /\ ~replies[r].taken
+  /\ replies[r].to = w /\ wstate[w] \in Running /\ ~Ended(w)
+  /\ replies' = [replies EXCEPT ![r].taken = TRUE]
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, ended>>
+
 \* decide* :answered! by a live Worker of the reply's thread, fold* :reply-answered
 Answered(w, r) ==
   LET t == replies[r].thread
       as == SetAsks(asks, replies[r].picks, "answered") IN
-  /\ replies[r].st /= "none" /\ wstate[w] \in Active /\ wthread[w] = t
+  /\ replies[r].st /= "none" /\ replies[r].taken /\ wstate[w] \in Active /\ wthread[w] = t
   /\ replies' = [replies EXCEPT ![r].st = "answered"]
   /\ asks' = as
   /\ wstate' = Resume(t, as, wstate)
@@ -212,6 +223,7 @@ Commands ==
 Next ==
   \/ Commands /\ UNCHANGED ended
   \/ \E w \in Workers : SessionEnds(w) \/ ResumeWorker(w)
+  \/ \E w \in Workers, r \in ReplyIds : Take(w, r)
 
 Spec == Init /\ [][Next]_vars
 
@@ -229,6 +241,8 @@ WaitingMeansStopped == \A w \in Workers : wstate[w] = "waiting" =>
 \* An open stopped ask keeps its Worker waiting.
 StoppedAskWaits == \A a \in AskIds : asks[a].st = "open" /\ asks[a].stopped =>
   wstate[asks[a].worker] \in {"waiting", "cancelling"}
+\* A reply is answered only after its session took it from the mailbox.
+AnsweredAfterTaken == \A r \in ReplyIds : replies[r].st = "answered" => replies[r].taken
 \* No Worker is launched for a thread the person archived.
 NoLaunchOnArchived == [][\A w \in Workers :
   (wstate[w] /= "starting" /\ wstate'[w] = "starting") => ~resolved[wthread'[w]]]_vars
