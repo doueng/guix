@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>MCP, read off one wire</title>
+<style>
+:root{--ink:#111;--soft:#5a5a5a;--rule:#bbb;--accent:#a00000;--paper:#fffff8}
+html{font-size:15px}
+body{width:87.5%;margin-left:auto;margin-right:auto;padding-left:12.5%;font-family:'Palatino Linotype',Palatino,'Book Antiqua','TeX Gyre Pagella',Georgia,serif;background:var(--paper);color:var(--ink);max-width:1400px;counter-reset:sidenote-counter;font-variant-numeric:oldstyle-nums proportional-nums}
+h1{font-weight:400;margin-top:4rem;margin-bottom:1.2rem;font-size:3.2rem;line-height:1}
+h2{font-style:italic;font-weight:400;margin-top:2.6rem;margin-bottom:1.2rem;font-size:2.1rem;line-height:1}
+h3{font-style:italic;font-weight:400;font-size:1.6rem;margin-top:2rem;margin-bottom:.8rem;line-height:1}
+p.subtitle{font-style:italic;margin-top:1rem;margin-bottom:1rem;font-size:1.6rem;display:block;line-height:1.1}
+article{padding:2rem 0}
+section{padding-top:.5rem;padding-bottom:.5rem}
+p,ol,ul,dl{font-size:1.25rem;line-height:1.75rem}
+p{margin-top:1.3rem;margin-bottom:1.3rem;padding-right:0;vertical-align:baseline}
+section>p,section>footer,section>table,section>ol,section>ul,section>dl{width:55%}
+section>ol,section>ul{-webkit-padding-start:5%}
+li{margin:.3rem 0}
+dt{font-style:italic;margin-top:.6rem}dd{margin-left:1.5rem}
+figure{padding:0;border:0;font-size:100%;font:inherit;vertical-align:baseline;max-width:55%;margin:0 0 3em 0}
+figure.fullwidth{max-width:90%}
+figcaption{float:right;clear:right;margin-top:0;margin-bottom:0;font-size:1.05rem;line-height:1.6;vertical-align:baseline;position:relative;max-width:40%}
+figure.fullwidth figcaption{float:none;max-width:55%;margin-top:.4rem;margin-right:0}
+a:link,a:visited{color:inherit;text-underline-offset:.1em;text-decoration-thickness:.05em}
+.sidenote,.marginnote{float:right;clear:right;margin-right:-60%;width:50%;margin-top:.3rem;margin-bottom:0;font-size:1.05rem;line-height:1.35;vertical-align:baseline;position:relative}
+.sidenote-number{counter-increment:sidenote-counter}
+.sidenote-number:after,.sidenote:before{position:relative;vertical-align:baseline}
+.sidenote-number:after{content:counter(sidenote-counter);font-size:1rem;top:-.5rem;left:.1rem}
+.sidenote:before{content:counter(sidenote-counter) ' ';font-size:1rem;top:-.5rem}
+blockquote .sidenote,blockquote .marginnote{margin-right:-82%;min-width:59%;text-align:left}
+input.margin-toggle{display:none}
+label.sidenote-number{display:inline-block;max-height:2rem}
+label.margin-toggle:not(.sidenote-number){display:none}
+code,pre>code{font-family:Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:1.0rem;line-height:1.42}
+.sidenote code,.marginnote code,figcaption code{font-size:.9rem}
+pre.code{font-size:.86rem;width:52.5%;margin-left:2.5%;overflow-x:auto;line-height:1.38}
+pre.code code{font-size:inherit}
+pre.code.wide{width:80%}
+.sc{font-variant:small-caps;letter-spacing:.04em;font-variant-numeric:lining-nums}
+.num{font-variant-numeric:lining-nums tabular-nums}
+.newthought{font-variant:small-caps;font-size:1.2em;letter-spacing:.03em}
+.dim{color:var(--soft)}
+.red{color:var(--accent)}
+svg{display:block;overflow:visible}
+svg text{font-family:'Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif;fill:#111}
+svg .mono{font-family:Consolas,'Liberation Mono',Menlo,monospace}
+svg.spark{display:inline-block;vertical-align:-.15em}
+table.data{border-collapse:collapse;font-size:1.05rem;line-height:1.45;margin:1.2rem 0}
+table.data th{font-weight:400;font-style:italic;text-align:left;border-bottom:1px solid #111;padding:.15rem .9rem .15rem 0}
+table.data td{padding:.18rem .9rem .18rem 0;vertical-align:top;border:0}
+table.data tr.rule td{border-top:1px solid var(--rule)}
+table.data td.r,table.data th.r{text-align:right}
+table.data.trace{width:80%}
+.multiples{display:flex;flex-wrap:wrap;gap:1.6rem 2.2rem;max-width:90%}
+.multiples>div{flex:1 1 13rem;min-width:13rem}
+.multiples pre{font-size:.82rem;line-height:1.35;margin:.3rem 0 0 0;white-space:pre}
+.multiples h4{font-weight:400;font-style:italic;font-size:1.1rem;margin:0}
+.multiples p{font-size:1rem;line-height:1.4;margin:.3rem 0;width:auto}
+.epigraph{width:55%;margin:1.5rem 0}
+.epigraph p{font-style:italic}
+footer.colophon{font-size:1rem;line-height:1.45;color:var(--soft)}
+@media (max-width:760px){
+ body{width:84%;padding-left:8%;padding-right:8%}
+ section>p,section>footer,section>table,section>ol,section>ul,section>dl,.epigraph{width:100%}
+ pre.code,pre.code.wide{width:97%}
+ figure,figure.fullwidth{max-width:100%}
+ figcaption,figure.fullwidth figcaption{margin-right:0;max-width:none}
+ table.data.trace{width:100%}
+ label.margin-toggle:not(.sidenote-number){display:inline}
+ .sidenote,.marginnote{display:none}
+ .margin-toggle:checked+.sidenote,.margin-toggle:checked+.marginnote{display:block;float:left;left:1rem;clear:both;width:95%;margin:1rem 2.5%;vertical-align:baseline;position:relative}
+ label{cursor:pointer}
+ .multiples{max-width:100%}
+}
+
+.multiples pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.multiples.shapes>div{flex:1 1 40%}
+table.data th{white-space:nowrap}
+section>ol{width:50%}
+pre.code{width:80%;margin-left:0;white-space:pre-wrap;overflow-wrap:anywhere}
+
+pre.code{width:55%;white-space:pre-wrap;overflow-wrap:break-word}
+.multiples pre{white-space:pre-wrap;overflow-wrap:break-word}
+p code,li code,.sidenote code{overflow-wrap:break-word}
+figure.narrowfig{max-width:55%}
+pre.code.wide{width:55%}
+pre.code,pre.code.wide,.multiples pre{white-space:pre;overflow-x:auto}
+.scroll{overflow-x:auto}
+.multiples.transports{max-width:62%}
+@media (max-width:760px){
+ section>ol,section>ul{width:100%}
+ pre.code,pre.code.wide{width:100%;font-size:.72rem}
+ figure.narrowfig{max-width:100%}
+ .scroll svg{min-width:640px}
+ table.data{font-size:.85rem}
+ table.data{display:block;overflow-x:auto}
+ table.data td code{white-space:nowrap}
+ pre.code,pre.code.wide,.multiples pre{white-space:pre;overflow-x:auto}
+ .multiples pre{font-size:.75rem}
+ .multiples.transports{max-width:100%}
+}
+</style>
+</head>
+<body>
+<svg width='0' height='0' style='position:absolute' aria-hidden='true'><defs><marker id='ah' viewBox='0 0 8 8' refX='7' refY='4' markerWidth='7' markerHeight='7' orient='auto'><path d='M0,0.8 L7,4 L0,7.2' fill='none' stroke='#111' stroke-width='1'/></marker><marker id='ahr' viewBox='0 0 8 8' refX='7' refY='4' markerWidth='7' markerHeight='7' orient='auto'><path d='M0,0.8 L7,4 L0,7.2' fill='none' stroke='#a00000' stroke-width='1'/></marker></defs></svg>
+<article>
+<h1>MCP, read off one wire</h1>
+<p class='subtitle'>The Model Context Protocol, revision 2026-07-28, traced through Claude Code, <code>bbh.mcp</code> and a babashka REPL</p>
+
+<section>
+<p><span class='newthought'>A language model can only act</span> through the tools its host program hands it. Before MCP every host wired every tool by hand. Three hosts and four tool providers meant twelve adapters, each with its own idea of how to list a capability, call it and report failure.<label for='sn-mxn' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-mxn' class='margin-toggle'/><span class='sidenote'>Left, three hosts (squares) and four servers (circles) integrated pairwise, twelve adapters. Right, the same seven parties through one protocol, seven implementations. The cost grows as <em>M&#215;N</em> on the left and <em>M+N</em> on the right.<br/><svg viewBox='0 0 150 100' width='150' height='100' style='display:inline-block;margin-right:14px'><rect x='6' y='16' width='8' height='8' fill='#111'/><rect x='6' y='46' width='8' height='8' fill='#111'/><rect x='6' y='76' width='8' height='8' fill='#111'/><circle cx='138' cy='15' r='4' fill='none' stroke='#111'/><circle cx='138' cy='37' r='4' fill='none' stroke='#111'/><circle cx='138' cy='59' r='4' fill='none' stroke='#111'/><circle cx='138' cy='81' r='4' fill='none' stroke='#111'/><line x1='14' y1='20' x2='134' y2='15' stroke='#111' stroke-width='.7'/><line x1='14' y1='20' x2='134' y2='37' stroke='#111' stroke-width='.7'/><line x1='14' y1='20' x2='134' y2='59' stroke='#111' stroke-width='.7'/><line x1='14' y1='20' x2='134' y2='81' stroke='#111' stroke-width='.7'/><line x1='14' y1='50' x2='134' y2='15' stroke='#111' stroke-width='.7'/><line x1='14' y1='50' x2='134' y2='37' stroke='#111' stroke-width='.7'/><line x1='14' y1='50' x2='134' y2='59' stroke='#111' stroke-width='.7'/><line x1='14' y1='50' x2='134' y2='81' stroke='#111' stroke-width='.7'/><line x1='14' y1='80' x2='134' y2='15' stroke='#111' stroke-width='.7'/><line x1='14' y1='80' x2='134' y2='37' stroke='#111' stroke-width='.7'/><line x1='14' y1='80' x2='134' y2='59' stroke='#111' stroke-width='.7'/><line x1='14' y1='80' x2='134' y2='81' stroke='#111' stroke-width='.7'/></svg><svg viewBox='0 0 150 100' width='150' height='100' style='display:inline-block;margin-right:14px'><rect x='6' y='16' width='8' height='8' fill='#111'/><rect x='6' y='46' width='8' height='8' fill='#111'/><rect x='6' y='76' width='8' height='8' fill='#111'/><circle cx='138' cy='15' r='4' fill='none' stroke='#111'/><circle cx='138' cy='37' r='4' fill='none' stroke='#111'/><circle cx='138' cy='59' r='4' fill='none' stroke='#111'/><circle cx='138' cy='81' r='4' fill='none' stroke='#111'/><line x1='75' y1='10' x2='75' y2='90' stroke='#a00000' stroke-width='2'/><line x1='14' y1='20' x2='75' y2='20' stroke='#111' stroke-width='.7'/><line x1='14' y1='50' x2='75' y2='50' stroke='#111' stroke-width='.7'/><line x1='14' y1='80' x2='75' y2='80' stroke='#111' stroke-width='.7'/><line x1='75' y1='15' x2='134' y2='15' stroke='#111' stroke-width='.7'/><line x1='75' y1='37' x2='134' y2='37' stroke='#111' stroke-width='.7'/><line x1='75' y1='59' x2='134' y2='59' stroke='#111' stroke-width='.7'/><line x1='75' y1='81' x2='134' y2='81' stroke='#111' stroke-width='.7'/></svg></span> MCP replaces the pairs with one contract. A host implements the client side once, a tool provider implements the server side once, and any client talks to any server.</p>
+
+<p>The idea is borrowed openly from the Language Server Protocol, which did the same for editors and programming languages.<label for='sn-lsp' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-lsp' class='margin-toggle'/><span class='sidenote'>The specification says so in its overview, <em>docs/specification/2026-07-28/index.mdx</em>. LSP also supplied the wire format, JSON-RPC 2.0, and the habit of negotiating capabilities instead of assuming them.</span> The protocol has moved quickly. Five dated revisions have shipped in twenty months <svg class='spark' viewBox='0 0 110 14' width='110' height='14' aria-label='five spec revisions, 2024-11-05 to 2026-07-28'><line x1='2' y1='10' x2='108' y2='10' stroke='#999' stroke-width='.6'/><circle cx='3' cy='7' r='2.4' fill='#111'><title>2024-11-05</title></circle><circle cx='26.5' cy='7' r='2.4' fill='#111'><title>2025-03-26</title></circle><circle cx='40.0' cy='7' r='2.4' fill='#111'><title>2025-06-18</title></circle><circle cx='66.5' cy='7' r='2.4' fill='#111'><title>2025-11-25</title></circle><circle cx='107.0' cy='7' r='2.4' fill='#a00000'><title>2026-07-28</title></circle></svg> (2024-11-05 to 2026-07-28, the current one in red), and the latest is the largest break so far. It removes the opening handshake that the four before it required.<label for='sn-rev' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-rev' class='margin-toggle'/><span class='sidenote'>Every statement about the protocol on this page is checked against revision <span class='num'>2026-07-28</span>, read from the spec repository <code>modelcontextprotocol/modelcontextprotocol</code> at commit <code>3c4d91b</code> (2 November 2026). Where the older, stateful behavior matters, the page cites <span class='num'>2025-11-25</span>, which is what the worked example actually speaks.</span></p>
+
+<p>This page explains the protocol from one concrete deployment, the one running on this machine. bbh is a babashka program that starts Claude Code as its agent loop and gives the model a single tool, a Clojure REPL. The tool reaches the model through MCP. Every claim about that deployment comes either from its source, <code>desktop/build/bbh/src/bbh/mcp.clj</code> and <code>claude.clj</code>, or from a trace of real messages captured on 5 November 2026 and dissected in the last section.</p>
+</section>
+
+<section>
+<h2 id='roles'>Hosts, clients and servers</h2>
+<p>MCP names three roles. The <em>host</em> is the application the person uses, here Claude Code. It owns the model, the conversation and the permission prompts. Inside the host sit one or more <em>clients</em>, each holding exactly one connection to one <em>server</em>.<label for='sn-oneone' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-oneone' class='margin-toggle'/><span class='sidenote'>The one-to-one rule keeps servers isolated. A server sees only its own connection, never the conversation or the other servers. The host decides what crosses between them.</span> A server is a program that offers capabilities, and it may run as a local child process or as a remote web service.</p>
+</section>
+<figure class='fullwidth'>
+
+
+<div class='scroll'><svg viewBox='0 0 880 250' width='100%' role='img' aria-label='Claude Code hosts one MCP client per server. The bbh client talks to bbh.mcp over stdio, and bbh.mcp forwards calls to the bbh session over a loopback socket.'>
+ 
+ <rect x='4' y='18' width='300' height='214' fill='none' stroke='#111' stroke-width='.8'/>
+ <text x='14' y='12' font-size='13' font-style='italic'>host</text>
+ <text x='18' y='42' font-size='15'>Claude Code 2.1.309</text>
+ <text x='18' y='60' font-size='12' class='dim' fill='#5a5a5a'>model, agent loop, permissions, UI</text>
+ <rect x='18' y='150' width='150' height='54' fill='none' stroke='#a00000' stroke-width='1'/>
+ <text x='28' y='172' font-size='14' fill='#a00000'>MCP client</text>
+ <text x='28' y='191' font-size='12' class='mono'>server bbh</text>
+ <rect x='196' y='76' width='100' height='46' fill='none' stroke='#999' stroke-width='.7' stroke-dasharray='3 3'/>
+ <text x='204' y='95' font-size='12' fill='#777'>a second client</text>
+ <text x='204' y='111' font-size='12' fill='#777'>per extra server</text>
+ <text x='18' y='88' font-size='12' fill='#5a5a5a'>The model sees one tool,</text>
+ <text x='18' y='104' font-size='12' class='mono'>mcp__bbh__clojure</text>
+ <text x='18' y='120' font-size='12' fill='#5a5a5a'><tspan class='mono'>--tools ''</tspan> hides built-ins</text>
+ <line x1='168' y1='166' x2='398' y2='166' stroke='#a00000' stroke-width='1' marker-end='url(#ahr)'/>
+ <line x1='398' y1='188' x2='170' y2='188' stroke='#a00000' stroke-width='1' marker-end='url(#ahr)'/>
+ <text x='196' y='158' font-size='12' class='mono'>stdin</text><text x='236' y='158' font-size='12' fill='#5a5a5a'>requests, notifications</text>
+ <text x='196' y='204' font-size='12' class='mono'>stdout</text><text x='242' y='204' font-size='12' fill='#5a5a5a'>responses</text>
+ <text x='310' y='228' font-size='12' fill='#a00000' font-style='italic'>MCP: JSON-RPC 2.0, one message per line</text>
+ <rect x='400' y='140' width='180' height='72' fill='none' stroke='#111' stroke-width='.8'/>
+ <text x='412' y='162' font-size='15' class='mono'>bb -m bbh.mcp</text>
+ <text x='412' y='181' font-size='12' fill='#5a5a5a'>MCP server, 45 lines,</text>
+ <text x='412' y='197' font-size='12' fill='#5a5a5a'>a child process of the host</text>
+ <text x='400' y='132' font-size='13' font-style='italic'>server</text>
+ <line x1='580' y1='166' x2='690' y2='166' stroke='#111' stroke-width='.8' marker-end='url(#ah)'/>
+ <line x1='690' y1='188' x2='582' y2='188' stroke='#111' stroke-width='.8' marker-end='url(#ah)'/>
+ <text x='590' y='158' font-size='12' fill='#5a5a5a'>describe, call</text>
+ <text x='590' y='204' font-size='12' fill='#5a5a5a'>text or error</text>
+ <text x='586' y='228' font-size='12' fill='#5a5a5a' font-style='italic'>loopback TCP + token, not MCP</text>
+ <rect x='692' y='140' width='182' height='72' fill='none' stroke='#111' stroke-width='.8'/>
+ <text x='704' y='162' font-size='15'>bbh session</text>
+ <text x='704' y='181' font-size='12' fill='#5a5a5a'>persistent babashka REPL,</text>
+ <text x='704' y='197' font-size='12' class='mono'>session/run-code!</text>
+ <line x1='783' y1='140' x2='783' y2='60' stroke='#111' stroke-width='.8' marker-end='url(#ah)'/>
+ <text x='692' y='30' font-size='12' fill='#5a5a5a'>bbh starts Claude Code with</text>
+ <text x='692' y='46' font-size='12' class='mono'>claude -p --mcp-config</text>
+ <line x1='690' y1='54' x2='310' y2='54' stroke='#111' stroke-width='.6' stroke-dasharray='2 3' marker-end='url(#ah)'/>
+</svg></div></div>
+<figcaption><em>Figure 1.</em> The deployment on this machine. Red marks the MCP connection. bbh starts Claude Code with an inline <code>--mcp-config</code> naming one server, <code>bbh</code>, launched as <code>bb -m bbh.mcp</code>. Claude Code spawns it, and the server forwards each tool call to the bbh session over a private loopback socket guarded by a token. That last hop is a bbh detail, not MCP.</figcaption>
+</figure>
+<section>
+<p>Three flags in <code>claude.clj</code> make this server the model's whole world. <code>--tools ''</code> removes Claude Code's built-in tools, <code>--strict-mcp-config</code> ignores any other MCP configuration on disk, and <code>--allowedTools mcp__bbh__clojure</code> pre-approves the one tool that remains. The name shows the host's convention. Claude Code exposes a server's tool <code>clojure</code> from the server it calls <code>bbh</code> as <code>mcp__bbh__clojure</code>.<label for='sn-timeout' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-timeout' class='margin-toggle'/><span class='sidenote'>bbh also sets <code>MCP_TOOL_TIMEOUT=1800000</code>, thirty minutes, because one REPL call may legitimately wait ten minutes on a background job. Timeouts are a host policy. The protocol only says that a sender should cancel a request it has given up on.</span></p>
+</section>
+
+<section>
+<h2 id='transports'>Transports</h2>
+<p>The protocol defines two standard transports and leaves room for custom ones. Both carry the same JSON-RPC messages, so a server's logic does not change with its transport.</p>
+</section>
+<figure class='fullwidth'><div class='multiples transports'><div><h4>stdio</h4><svg viewBox='0 0 280 200' width='100%' style='max-width:300px'><text x='30' y='14' font-size='12' text-anchor='middle' font-style='italic'>client</text><text x='250' y='14' font-size='12' text-anchor='middle' font-style='italic'>server</text><line x1='30' y1='20' x2='30' y2='194' stroke='#bbb' stroke-width='.7'/><line x1='250' y1='20' x2='250' y2='194' stroke='#bbb' stroke-width='.7'/><line x1='30' y1='42' x2='248' y2='42' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='38' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>spawn: bb -m bbh.mcp</text><line x1='30' y1='69' x2='248' y2='69' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='65' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>request (stdin line)</text><line x1='250' y1='96' x2='32' y2='96' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='92' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>progress (stdout line)</text><line x1='250' y1='123' x2='32' y2='123' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='119' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>response (stdout line)</text><line x1='30' y1='150' x2='248' y2='150' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='146' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>notifications/cancelled</text><line x1='30' y1='177' x2='248' y2='177' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='173' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>EOF on stdin</text></svg><p>The host spawns the server. One JSON-RPC message per line in each direction; stderr is free for logs. The server must never write a request to stdout.</p></div><div><h4>Streamable HTTP</h4><svg viewBox='0 0 280 200' width='100%' style='max-width:300px'><text x='30' y='14' font-size='12' text-anchor='middle' font-style='italic'>client</text><text x='250' y='14' font-size='12' text-anchor='middle' font-style='italic'>server</text><line x1='30' y1='20' x2='30' y2='194' stroke='#bbb' stroke-width='.7'/><line x1='250' y1='20' x2='250' y2='194' stroke='#bbb' stroke-width='.7'/><line x1='30' y1='42' x2='248' y2='42' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='38' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>POST tools/call</text><line x1='250' y1='69' x2='32' y2='69' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='65' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>200 text/event-stream</text><line x1='250' y1='96' x2='32' y2='96' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='92' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>event: progress</text><line x1='250' y1='123' x2='32' y2='123' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='119' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>event: result, stream ends</text><line x1='30' y1='150' x2='248' y2='150' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='146' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>POST subscriptions/listen</text><line x1='250' y1='177' x2='32' y2='177' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='173' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>event: tools list_changed</text></svg><p>One endpoint. Every client message is its own POST with MCP-Protocol-Version, Mcp-Method and Mcp-Name headers. The reply is application/json or an SSE stream for that request.</p></div></div>
+<figcaption><em>Figure 2.</em> The two standard transports drawn on the same scale. Solid arrows are requests and responses, dashed arrows are notifications. bbh uses stdio. HTTP carries remote servers.</figcaption>
+</figure>
+<section>
+<p><em>stdio</em> is the local transport. The client launches the server as a subprocess, writes messages to its standard input and reads messages from its standard output, one JSON object per line, with no embedded newlines. Anything else the server wants to say goes to standard error, which the client may show, log or ignore. Standard output must carry nothing but valid MCP messages.<label for='sn-lock' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-lock' class='margin-toggle'/><span class='sidenote'><code>bbh.mcp</code> answers <code>tools/call</code> on a <code>future</code>, so two calls can finish at once. Its <code>send!</code> takes a lock around <code>println</code> and <code>flush</code>, which keeps two replies from interleaving within a line. Without it the newline framing would break under load.</span> Shutdown is equally plain. The client closes the server's input, waits, and escalates to <code>SIGTERM</code> and then <code>SIGKILL</code> if the process lingers.</p>
+
+<p><em>Streamable HTTP</em> serves remote servers from a single endpoint. Each client message is its own <code>POST</code>, and the server answers either with one <code>application/json</code> body or with a <code>text/event-stream</code> that carries progress notifications before the final result. Revision 2026-07-28 simplified this transport sharply. It dropped the <code>Mcp-Session-Id</code> header and protocol-level sessions, the standing <code>GET</code> stream, and stream resumption by <code>Last-Event-ID</code>. It added required <code>MCP-Protocol-Version</code>, <code>Mcp-Method</code> and <code>Mcp-Name</code> headers so that proxies can route a request without parsing its body.<label for='sn-sse' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-sse' class='margin-toggle'/><span class='sidenote'>The original HTTP+SSE transport, two endpoints and a long-lived event stream, was replaced in 2025-03-26 and is formally Deprecated in 2026-07-28 (SEP-2596).</span> Change notifications that used to ride the <code>GET</code> stream now flow on an explicit <code>subscriptions/listen</code> request.</p>
+</section>
+
+<section>
+<h2 id='messages'>JSON-RPC messages</h2>
+<p>Every MCP message is a JSON-RPC 2.0 object with <code>"jsonrpc": "2.0"</code>. There are only four shapes, and a reader who can tell them apart can follow any MCP exchange.</p>
+</section>
+<figure class='fullwidth'><div class='multiples shapes'><div><h4>Request</h4><pre><code>{"jsonrpc":"2.0","id":1,"method":"tools/list"}</code></pre><p>Has an id and a method. Expects exactly one response with the same id. The id is a string or integer and never null.</p></div><div><h4>Result</h4><pre><code>{"jsonrpc":"2.0","id":1,"result":{"tools":["…"]}}</code></pre><p>Answers a request. Carries the request's id and a result object.</p></div><div><h4>Error</h4><pre><code>{
+  "jsonrpc": "2.0",
+  "id": "server-discover-probe-1",
+  "error": {"code":-32601,"message":"Method not found"}
+}</code></pre><p>Answers a request that failed. A result and an error never appear together.</p></div><div><h4>Notification</h4><pre><code>{"jsonrpc":"2.0","method":"notifications/initialized"}</code></pre><p>Has a method and no id. Nobody replies, so the sender never learns whether it arrived.</p></div></div>
+<figcaption><em>Figure 3.</em> The four message shapes. The error is the one <code>bbh.mcp</code> could have sent to Claude Code's discovery probe in the trace below. It sent an empty result instead.</figcaption>
+</figure>
+<section>
+<p>Errors use the JSON-RPC codes for parse failures (<span class='num'>&#8722;32700</span>), invalid requests (<span class='num'>&#8722;32600</span>), unknown methods (<span class='num'>&#8722;32601</span>), bad parameters (<span class='num'>&#8722;32602</span>) and internal faults (<span class='num'>&#8722;32603</span>). Revision 2026-07-28 reserves <span class='num'>&#8722;32020</span> to <span class='num'>&#8722;32099</span> for the specification itself, for example <span class='num'>&#8722;32022</span> for an unsupported protocol version, and leaves <span class='num'>&#8722;32000</span> to <span class='num'>&#8722;32019</span> to implementations.</p>
+
+<p>A failing tool is not a protocol error. When the code a tool runs throws, the server still returns a normal result, with the message in its content and <code>isError: true</code>, so that the model can read the failure and try again. <code>bbh.mcp</code> follows this rule. Its <code>call</code> catches every exception and reports it as content prefixed <code>bbh bridge:</code>.</p>
+
+<p>Any params or result object may also carry <code>_meta</code>, a map for data about the message rather than its payload. Keys under <code>io.modelcontextprotocol/</code> belong to the specification; other prefixes belong to whoever defines them. The trace shows both kinds.</p>
+</section>
+
+<section>
+<h2 id='lifecycle'>Lifecycle</h2>
+<p>Here the revisions part ways, and the figure below draws them side by side on the same scale.</p>
+</section>
+<figure class='fullwidth'><div class='multiples'><div><h4>2025-11-25 and earlier</h4><svg viewBox='0 0 280 330' width='100%' style='max-width:300px'><text x='30' y='14' font-size='12' text-anchor='middle' font-style='italic'>client</text><text x='250' y='14' font-size='12' text-anchor='middle' font-style='italic'>server</text><line x1='30' y1='20' x2='30' y2='324' stroke='#bbb' stroke-width='.7'/><line x1='250' y1='20' x2='250' y2='324' stroke='#bbb' stroke-width='.7'/><line x1='30' y1='42' x2='248' y2='42' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='38' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>initialize</text><line x1='250' y1='69' x2='32' y2='69' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='65' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>InitializeResult</text><line x1='30' y1='96' x2='248' y2='96' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='92' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>notifications/initialized</text><text x='140' y='127' font-size='11.5' text-anchor='middle' fill='#5a5a5a' font-style='italic'>operation</text><line x1='30' y1='150' x2='248' y2='150' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='146' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>tools/list</text><line x1='250' y1='177' x2='32' y2='177' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='173' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>ListToolsResult</text><line x1='30' y1='204' x2='248' y2='204' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='200' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>tools/call</text><line x1='250' y1='231' x2='32' y2='231' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='227' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>notifications/progress</text><line x1='250' y1='258' x2='32' y2='258' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='254' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>CallToolResult</text><text x='140' y='289' font-size='11.5' text-anchor='middle' fill='#5a5a5a' font-style='italic'>shutdown</text><line x1='30' y1='312' x2='248' y2='312' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='308' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>close stdin, then SIGTERM</text></svg><p>Stateful. The handshake must come first and fixes one version and one capability set for the whole connection.</p></div><div><h4>2026-07-28</h4><svg viewBox='0 0 280 330' width='100%' style='max-width:300px'><text x='30' y='14' font-size='12' text-anchor='middle' font-style='italic'>client</text><text x='250' y='14' font-size='12' text-anchor='middle' font-style='italic'>server</text><line x1='30' y1='20' x2='30' y2='324' stroke='#bbb' stroke-width='.7'/><line x1='250' y1='20' x2='250' y2='324' stroke='#bbb' stroke-width='.7'/><line x1='30' y1='42' x2='248' y2='42' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='38' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>server/discover (optional)</text><line x1='250' y1='69' x2='32' y2='69' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='65' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>DiscoverResult</text><text x='140' y='100' font-size='11.5' text-anchor='middle' fill='#5a5a5a' font-style='italic'>operation</text><line x1='30' y1='123' x2='248' y2='123' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='119' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>tools/list + _meta</text><line x1='250' y1='150' x2='32' y2='150' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='146' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>result, ttlMs, cacheScope</text><line x1='30' y1='177' x2='248' y2='177' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='173' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>tools/call + _meta</text><line x1='250' y1='204' x2='32' y2='204' stroke='#a00000' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ahr)'/><text x='140' y='200' font-size='11.5' text-anchor='middle' class='mono' fill='#a00000'>resultType: input_required</text><line x1='30' y1='231' x2='248' y2='231' stroke='#a00000' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ahr)'/><text x='140' y='227' font-size='11.5' text-anchor='middle' class='mono' fill='#a00000'>tools/call + inputResponses</text><line x1='250' y1='258' x2='32' y2='258' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='254' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>resultType: complete</text><text x='140' y='289' font-size='11.5' text-anchor='middle' fill='#5a5a5a' font-style='italic'>shutdown</text><line x1='30' y1='312' x2='248' y2='312' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='308' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>close stdin, then SIGTERM</text></svg><p>Stateless. No handshake. Every request carries its version and capabilities in _meta, and server/discover is an optional probe.</p></div><div><h4>Claude Code and bbh.mcp, measured</h4><svg viewBox='0 0 280 330' width='100%' style='max-width:300px'><text x='30' y='14' font-size='12' text-anchor='middle' font-style='italic'>client</text><text x='250' y='14' font-size='12' text-anchor='middle' font-style='italic'>server</text><line x1='30' y1='20' x2='30' y2='324' stroke='#bbb' stroke-width='.7'/><line x1='250' y1='20' x2='250' y2='324' stroke='#bbb' stroke-width='.7'/><line x1='30' y1='42' x2='248' y2='42' stroke='#a00000' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ahr)'/><text x='140' y='38' font-size='11.5' text-anchor='middle' class='mono' fill='#a00000'>server/discover</text><line x1='250' y1='69' x2='32' y2='69' stroke='#a00000' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ahr)'/><text x='140' y='65' font-size='11.5' text-anchor='middle' class='mono' fill='#a00000'>{} (not a DiscoverResult)</text><line x1='30' y1='96' x2='248' y2='96' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='92' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>initialize 2025-11-25</text><line x1='250' y1='123' x2='32' y2='123' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='119' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>InitializeResult 2025-11-25</text><line x1='30' y1='150' x2='248' y2='150' stroke='#111' stroke-width='.9' stroke-dasharray='4 3' marker-end='url(#ah)'/><text x='140' y='146' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>notifications/initialized</text><text x='140' y='181' font-size='11.5' text-anchor='middle' fill='#5a5a5a' font-style='italic'>operation</text><line x1='30' y1='204' x2='248' y2='204' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='200' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>tools/list</text><line x1='250' y1='231' x2='32' y2='231' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='227' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>1 tool: clojure</text><line x1='30' y1='258' x2='248' y2='258' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='254' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>tools/call (+ 1 2)</text><line x1='250' y1='285' x2='32' y2='285' stroke='#111' stroke-width='.9' stroke-dasharray='none' marker-end='url(#ah)'/><text x='140' y='281' font-size='11.5' text-anchor='middle' class='mono' fill='#111'>content: =&gt; 3</text><text x='140' y='316' font-size='11.5' text-anchor='middle' fill='#5a5a5a' font-style='italic'>shutdown</text></svg><p>A dual-era client meets a legacy server. The probe gets an empty result, so Claude Code falls back to the handshake.</p></div></div>
+<figcaption><em>Figure 4.</em> Three lifecycles, one row per message. Solid lines are requests and responses, dashed lines notifications, red the points where the two eras differ. The third panel is measured, not specified. bbh's server never sends a notification, so its operation phase is pure request and response.</figcaption>
+</figure>
+<section>
+<p><span class='newthought'>Up to 2025-11-25</span> a connection is stateful. The client's first message must be <code>initialize</code>, carrying the newest protocol version it supports, its capabilities and its identity. The server replies with the same version if it supports it, or with another it does support, together with its own capabilities. The client then sends the notification <code>notifications/initialized</code>, and only then does ordinary traffic begin.<label for='sn-neg' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-neg' class='margin-toggle'/><span class='sidenote'>Capabilities are declarations of what each side will handle. A server that declares <code>tools</code> promises <code>tools/list</code> and <code>tools/call</code>. Adding <code>listChanged: true</code> promises a <code>notifications/tools/list_changed</code> whenever the list changes. Neither side may use a feature the other did not declare.</span> Everything negotiated holds until the connection ends.</p>
+
+<p>Notifications fill the operation phase. A server reports progress on a long request with <code>notifications/progress</code>, keyed by the <code>progressToken</code> the client supplied. Either side withdraws a request with <code>notifications/cancelled</code>. A server whose tool list changes says so with <code>notifications/tools/list_changed</code>. Shutdown has no message of its own; the transport's end is the end.</p>
+
+<p><span class='newthought'>Revision 2026-07-28</span> deletes the handshake, along with <code>ping</code> and <code>logging/setLevel</code> (SEP-2575). Every request now carries its protocol version and the client's capabilities in <code>_meta</code>, under <code>io.modelcontextprotocol/protocolVersion</code> and <code>io.modelcontextprotocol/clientCapabilities</code>. A server that cannot honor the version answers <code>UnsupportedProtocolVersionError</code>. A new method, <code>server/discover</code>, which every modern server must implement, returns the supported versions, capabilities and identity in one reply.<label for='sn-state' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-state' class='margin-toggle'/><span class='sidenote'>Statelessness is what lets a remote server sit behind an ordinary load balancer. Any replica can answer any request, because nothing was negotiated on a connection that a different replica never saw.</span> Every result also gains a <code>resultType</code>, which is <code>"complete"</code> for ordinary results. List results gain <code>ttlMs</code> and <code>cacheScope</code>, so clients can cache tool lists instead of polling.</p>
+
+<p>Old and new must coexist for a while, and the specification says how. On stdio a client that speaks both eras should probe with <code>server/discover</code> first. A <code>DiscoverResult</code> means a modern server. A recognized modern error means a modern server that wants another version. Any other error, or silence, means a legacy server, and the client falls back to <code>initialize</code>. Claude Code 2.1.309 does exactly this, as the trace shows.</p>
+</section>
+
+<section>
+<h2 id='primitives'>Primitives</h2>
+<p>A server offers three kinds of things, and a client offers three in return. They differ most in who decides when they are used.</p>
+
+<table class='data' style='width:90%'>
+<thead><tr><th>primitive</th><th>offered by</th><th>who decides to use it</th><th>methods</th><th>status in 2026-07-28</th><th>in this setup</th></tr></thead>
+<tbody>
+<tr><td><em>tools</em></td><td>server</td><td>the model</td><td><code>tools/list</code>, <code>tools/call</code></td><td>active</td><td class='red'>bbh.mcp offers one, <code>clojure</code></td></tr>
+<tr><td><em>resources</em></td><td>server</td><td>the application</td><td><code>resources/list</code>, <code>resources/read</code>, <code>resources/templates/list</code></td><td>active</td><td>not offered</td></tr>
+<tr><td><em>prompts</em></td><td>server</td><td>the user</td><td><code>prompts/list</code>, <code>prompts/get</code></td><td>active</td><td>not offered</td></tr>
+<tr class='rule'><td><em>sampling</em></td><td>client</td><td>server asks, user approves</td><td><code>sampling/createMessage</code></td><td>deprecated</td><td>Claude Code does not advertise it</td></tr>
+<tr><td><em>roots</em></td><td>client</td><td>the application</td><td><code>roots/list</code></td><td>deprecated</td><td>advertised, <code>listChanged: true</code></td></tr>
+<tr><td><em>elicitation</em></td><td>client</td><td>server asks, user answers</td><td><code>elicitation/create</code>, form or url mode</td><td>active, via MRTR</td><td>advertised, both modes</td></tr>
+</tbody></table>
+<p><em>Tools</em> are functions the model may call, each described by a name, a description and a JSON Schema for its input.<label for='sn-schema' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-schema' class='margin-toggle'/><span class='sidenote'>bbh's schema, as it crossed the wire, is <code>{type: object, properties: {code: {type: string}}, required: [code]}</code>. Revision 2026-07-28 allows any JSON Schema 2020-12 keyword here (SEP-2106).</span> <em>Resources</em> are data addressed by URI, a file, a database row, a log, that the application chooses to put in front of the model. <em>Prompts</em> are templates the user picks on purpose, which many hosts surface as slash commands.</p>
+
+<p>The client-side features let a server ask for something back. <em>Sampling</em> asks the host's model for a completion, <em>roots</em> asks which directories the server may work in, and <em>elicitation</em> asks the person for input, through a schema-checked form or, for anything sensitive such as a credential, a URL the person opens outside the client. In 2025-11-25 these were requests the server sent to the client. Revision 2026-07-28 replaces that with <em>multi round-trip requests</em> (MRTR, SEP-2322). The server answers the original request with <code>resultType: "input_required"</code> and a set of <code>inputRequests</code>, and the client retries the original request with <code>inputResponses</code> attached.<label for='sn-dep' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-dep' class='margin-toggle'/><span class='sidenote'>The same revision deprecates sampling, roots and logging (SEP-2577). The suggested replacements are tool parameters or server configuration for roots, direct provider APIs for sampling, and stderr or OpenTelemetry for logs. Deprecated features keep working for at least twelve months.</span> Nothing in that exchange needs state on the server.</p>
+</section>
+
+<section>
+<h2 id='trace'>One exchange, message by message</h2>
+<p>To see the protocol rather than its description, a small script sat between Claude Code and the real <code>bbh.mcp</code> and copied every line to a log with a millisecond timestamp. Claude Code 2.1.309 ran with bbh's own flags and the prompt “Use the clojure tool once to evaluate <code>(+ 1 2)</code>, then reply with just the number.” It answered <code>3</code>.<label for='sn-method' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-method' class='margin-toggle'/><span class='sidenote'>Two parts were substituted, and both sit outside MCP. The model was Haiku, to keep the run short, and the bbh session behind the loopback socket was a stub that evaluated the code with <code>load-string</code>. The server process, its configuration and every MCP byte are the real ones. The log is kept with this page's workflow evidence as <code>trace.ndjson</code>.</span> Nine messages crossed the pipe.</p>
+</section>
+<figure class='fullwidth narrowfig'><div class='scroll'><svg viewBox='0 0 640 150' width='100%' role='img' aria-label='Timeline of the nine messages. Eight fall in the first 64 ms, then the model thinks for 1.1 s before tools/call.'><line x1='40' y1='70' x2='466' y2='70' stroke='#111' stroke-width='.7'/><line x1='510' y1='70' x2='610' y2='70' stroke='#111' stroke-width='.7'/><path d='M470,75 l8,-10 M484,75 l8,-10' stroke='#111' stroke-width='.7'/><text x='488' y='96' font-size='11' text-anchor='middle' fill='#5a5a5a' font-style='italic'>1.1 s of model time</text><line x1='40' y1='70' x2='40' y2='73' stroke='#111' stroke-width='.6'/><text x='40' y='84' font-size='10.5' text-anchor='middle' class='num'>0</text><line x1='100' y1='70' x2='100' y2='73' stroke='#111' stroke-width='.6'/><text x='100' y='84' font-size='10.5' text-anchor='middle' class='num'>10</text><line x1='160' y1='70' x2='160' y2='73' stroke='#111' stroke-width='.6'/><text x='160' y='84' font-size='10.5' text-anchor='middle' class='num'>20</text><line x1='220' y1='70' x2='220' y2='73' stroke='#111' stroke-width='.6'/><text x='220' y='84' font-size='10.5' text-anchor='middle' class='num'>30</text><line x1='280' y1='70' x2='280' y2='73' stroke='#111' stroke-width='.6'/><text x='280' y='84' font-size='10.5' text-anchor='middle' class='num'>40</text><line x1='340' y1='70' x2='340' y2='73' stroke='#111' stroke-width='.6'/><text x='340' y='84' font-size='10.5' text-anchor='middle' class='num'>50</text><line x1='400' y1='70' x2='400' y2='73' stroke='#111' stroke-width='.6'/><text x='400' y='84' font-size='10.5' text-anchor='middle' class='num'>60</text><line x1='460' y1='70' x2='460' y2='73' stroke='#111' stroke-width='.6'/><text x='460' y='84' font-size='10.5' text-anchor='middle' class='num'>70</text><line x1='520' y1='70' x2='520' y2='73' stroke='#111' stroke-width='.6'/><text x='520' y='84' font-size='10.5' text-anchor='middle' class='num'>1185</text><line x1='550' y1='70' x2='550' y2='73' stroke='#111' stroke-width='.6'/><text x='550' y='84' font-size='10.5' text-anchor='middle' class='num'>1190</text><line x1='580' y1='70' x2='580' y2='73' stroke='#111' stroke-width='.6'/><text x='580' y='84' font-size='10.5' text-anchor='middle' class='num'>1195</text><text x='620' y='84' font-size='10.5' font-style='italic'>ms</text><text x='0' y='40' font-size='11' font-style='italic'>client</text><text x='0' y='52' font-size='11' font-style='italic'>to server</text><text x='0' y='112' font-size='11' font-style='italic'>server</text><text x='0' y='124' font-size='11' font-style='italic'>to client</text><rect x='69' y='22.0' width='2' height='46.0' fill='#a00000'/><rect x='327' y='88' width='2' height='5.433070866141732' fill='#a00000'/><rect x='393' y='32.59448818897638' width='2' height='35.40551181102362' fill='#111'/><rect x='399' y='88' width='2' height='12.314960629921261' fill='#111'/><rect x='417' y='63.110236220472444' width='2' height='4.889763779527559' fill='#111'/><rect x='419.5' y='63.83464566929134' width='2' height='4.165354330708662' fill='#111'/><rect x='423' y='88' width='2' height='27.980314960629922' fill='#111'/><rect x='549' y='50.88582677165354' width='2' height='17.114173228346456' fill='#111'/><rect x='579' y='88' width='2' height='8.421259842519685' fill='#111'/><text x='75' y='30' font-size='10.5' class='mono' fill='#a00000'>discover 508 B</text><text x='390' y='34' font-size='10.5' class='mono' text-anchor='end'>initialize 391</text><text x='429' y='110' font-size='10.5' class='mono' dx='6'>tools 309</text><text x='546' y='48' font-size='10.5' class='mono' text-anchor='end'>call 189</text></svg></div>
+<figcaption><em>Figure 5.</em> The nine messages in time. Tick height is message size, with the largest, the 508-byte probe, at full height. The axis breaks across the 1.1 seconds the model spent deciding to call the tool. Protocol overhead is the cluster on the left. Red marks the discovery probe and its reply.</figcaption>
+</figure>
+<section>
+<table class='data trace'><thead><tr><th class='r'>#</th><th class='r'>t, ms</th><th></th><th>message</th><th class='r'>bytes</th><th></th></tr></thead><tbody><tr><td class='r num'>1</td><td class='r num'>5</td><td>&#8594;</td><td><code>server/discover</code></td><td class='r num'>508</td><td><svg class='spark' viewBox='0 0 102 10' width='102' height='10'><rect x='0' y='2' width='100' height='6' fill='#111'/></svg></td></tr><tr><td class='r num'>2</td><td class='r num'>48</td><td>&#8592;</td><td><code>result for id "server-discover-probe-1"</code></td><td class='r num'>60</td><td><svg class='spark' viewBox='0 0 102 10' width='102' height='10'><rect x='0' y='2' width='11' height='6' fill='#111'/></svg></td></tr><tr class='rule'><td class='r num'>3</td><td class='r num'>59</td><td>&#8594;</td><td><code>initialize</code></td><td class='r num'>391</td><td><svg class='spark' viewBox='0 0 102 10' width='102' height='10'><rect x='0' y='2' width='76' height='6' fill='#111'/></svg></td></tr><tr><td class='r num'>4</td><td class='r num'>60</td><td>&#8592;</td><td><code>result for id 0</code></td><td class='r num'>136</td><td><svg class='spark' viewBox='0 0 102 10' width='102' height='10'><rect x='0' y='2' width='26' height='6' fill='#111'/></svg></td></tr><tr><td class='r num'>5</td><td class='r num'>63</td><td>&#8594;</td><td><code>notifications/initialized</code></td><td class='r num'>54</td><td><svg class='spark' viewBox='0 0 102 10' width='102' height='10'><rect x='0' y='2' width='10' height='6' fill='#111'/></svg></td></tr><tr><td class='r num'>6</td><td class='r num'>63</td><td>&#8594;</td><td><code>tools/list</code></td><td class='r num'>46</td><td><svg class='spark' viewBox='0 0 102 10' width='102' height='10'><rect x='0' y='2' width='9' height='6' fill='#111'/></svg></td></tr><tr><td class='r num'>7</td><td class='r num'>64</td><td>&#8592;</td><td><code>result for id 1</code></td><td class='r num'>309</td><td><svg class='spark' viewBox='0 0 102 10' width='102' height='10'><rect x='0' y='2' width='60' height='6' fill='#111'/></svg></td></tr><tr class='rule'><td class='r num'>8</td><td class='r num'>1190</td><td>&#8594;</td><td><code>tools/call</code></td><td class='r num'>189</td><td><svg class='spark' viewBox='0 0 102 10' width='102' height='10'><rect x='0' y='2' width='37' height='6' fill='#111'/></svg></td></tr><tr><td class='r num'>9</td><td class='r num'>1195</td><td>&#8592;</td><td><code>result for id 2</code></td><td class='r num'>93</td><td><svg class='spark' viewBox='0 0 102 10' width='102' height='10'><rect x='0' y='2' width='18' height='6' fill='#111'/></svg></td></tr><tr class='rule'><td></td><td></td><td></td><td><em>client to server, 5 messages</em></td><td class='r num'>1188</td><td></td></tr><tr><td></td><td></td><td></td><td><em>server to client, 4 messages</em></td><td class='r num'>598</td><td></td></tr></tbody></table>
+<h3>Probe</h3>
+<p><span class='newthought'>Message 1, at 5 ms.</span> Claude Code opens with the 2026-07-28 probe. The version, its identity and its capabilities all ride in <code>_meta</code>, because modern requests carry their own context. The capabilities say what this host will handle, roots with change notifications, elicitation in both modes and the official tasks extension. Sampling is absent; this host will not lend its model to a server.<label for='sn-id' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-id' class='margin-toggle'/><span class='sidenote'>The id is the string <code>server-discover-probe-1</code>. JSON-RPC permits string or integer ids, and Claude Code switches to integers from 0 once it has picked an era.</span></p>
+<pre class='code wide'><code>{
+  "jsonrpc": "2.0",
+  "id": "server-discover-probe-1",
+  "method": "server/discover",
+  "params": {
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "version": "2.1.309",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code"
+      },
+      "io.modelcontextprotocol/clientCapabilities": {
+        "roots": {"listChanged":true},
+        "elicitation": {"form":{},"url":{}},
+        "extensions": {"io.modelcontextprotocol/tasks":{}}
+      }
+    }
+  }
+}</code></pre>
+<p><span class='newthought'>Message 2, at 48 ms.</span> The reply took 43 ms because the line waited in the pipe while babashka started.<label for='sn-startup' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-startup' class='margin-toggle'/><span class='sidenote'>Inferred, not measured. The tee logged the request when it wrote it to the pipe, and every later reply took at most 5 ms.</span> <code>bbh.mcp</code> knows nothing of <code>server/discover</code>, and its catch-all answers any unknown request with an empty result. That reply is neither a <code>DiscoverResult</code>, since it has no <code>supportedVersions</code>, nor the error the specification expects from a legacy server. Claude Code read it as legacy anyway and fell back, which is the outcome bbh needs, though the specification does not promise it.<label for='sn-fix' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-fix' class='margin-toggle'/><span class='sidenote'>A one-line change would make the probe unambiguous. The catch-all could return the error in Figure 3, <span class='num'>&#8722;32601</span> Method not found, for any unknown request. Being a legacy server is legal. Answering the probe with an empty success is the questionable part.</span></p>
+<pre class='code wide'><code>{"id":"server-discover-probe-1","result":{},"jsonrpc":"2.0"}</code></pre>
+<h3>Handshake</h3>
+<p><span class='newthought'>Message 3, at 59 ms.</span> The legacy <code>initialize</code>, proposing 2025-11-25. The capabilities are the same as in the probe, moved from <code>_meta</code> into <code>params.capabilities</code>.</p>
+<pre class='code wide'><code>{
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {
+      "roots": {"listChanged":true},
+      "elicitation": {"form":{},"url":{}},
+      "extensions": {"io.modelcontextprotocol/tasks":{}}
+    },
+    "clientInfo": {
+      "name": "claude-code",
+      "title": "Claude Code",
+      "version": "2.1.309",
+      "description": "Anthropic's agentic coding tool",
+      "websiteUrl": "https://claude.com/claude-code"
+    }
+  },
+  "jsonrpc": "2.0",
+  "id": 0
+}</code></pre>
+<p><span class='newthought'>Message 4, at 60 ms.</span> <code>bbh.mcp</code> echoes whatever version it was offered and declares a single capability, <code>tools</code>, with no <code>listChanged</code>.<label for='sn-echo' class='margin-toggle sidenote-number'></label><input type='checkbox' id='sn-echo' class='margin-toggle'/><span class='sidenote'>Echoing works because this server's three methods are the same in every legacy revision. A server whose behavior differs by version would compare the offer against its own list.</span> The client therefore expects a fixed tool list and no change notifications.</p>
+<pre class='code wide'><code>{
+  "id": 0,
+  "result": {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {"tools":{}},
+    "serverInfo": {"name":"bbh","version":"1"}
+  },
+  "jsonrpc": "2.0"
+}</code></pre>
+<p><span class='newthought'>Messages 5 and 6, both at 63 ms.</span> The notification that closes the handshake, which has no id and gets no reply, and straight behind it the first real request.</p>
+<pre class='code wide'><code>{"jsonrpc":"2.0","method":"notifications/initialized"}</code></pre><pre class='code wide'><code>{"method":"tools/list","jsonrpc":"2.0","id":1}</code></pre>
+<h3>Operation</h3>
+<p><span class='newthought'>Message 7, at 64 ms.</span> The tool list. The description is not compiled into <code>bbh.mcp</code>. The server asks the bbh session for it over the socket at this moment, so the text the model reads is the session's <code>:tool-description</code>, which the person can change in <code>bbh.env/manifest</code>.</p>
+<pre class='code wide'><code>{
+  "id": 1,
+  "result": {
+    "tools": [
+      {
+        "name": "clojure",
+        "description": "Evaluate Clojure in the persistent babashka REPL. Returns printed output and the last value.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "Clojure source to evaluate."
+            }
+          },
+          "required": ["code"]
+        }
+      }
+    ]
+  },
+  "jsonrpc": "2.0"
+}</code></pre>
+<p><span class='newthought'>Message 8, at 1190 ms.</span> After 1.1 seconds of model time the call arrives. Two keys ride in <code>_meta</code>. <code>progressToken</code> invites progress notifications, which <code>bbh.mcp</code> never sends. <code>claudecode/toolUseId</code> is a vendor key, outside the <code>io.modelcontextprotocol/</code> namespace, carrying the id of the model's tool-use block. <code>bbh.mcp</code> passes it on as the call's id inside the session, which is how a REPL evaluation is matched to its line in the conversation transcript.</p>
+<pre class='code wide'><code>{
+  "method": "tools/call",
+  "params": {
+    "name": "clojure",
+    "arguments": {"code":"(+ 1 2)"},
+    "_meta": {
+      "claudecode/toolUseId": "toolu_01GfTKDFL9GZZGyfQC6jcjGy",
+      "progressToken": 2
+    }
+  },
+  "jsonrpc": "2.0",
+  "id": 2
+}</code></pre>
+<p><span class='newthought'>Message 9, at 1195 ms.</span> The result, a single text block and <code>isError: false</code>. The round trip took 5 ms, including the hop to the session and back. Claude Code hands the text to the model, which replies <code>3</code>.</p>
+<pre class='code wide'><code>{
+  "id": 2,
+  "result": {"content":[{"type":"text","text":"=&gt; 3"}],"isError":false},
+  "jsonrpc": "2.0"
+}</code></pre>
+<h3>Shutdown</h3>
+<p>Nothing more crossed the pipe. When <code>claude -p</code> finished it closed the server's standard input. <code>line-seq</code> in <code>bbh.mcp</code> ran out, <code>-main</code> returned and the process exited, which is the graceful path the stdio section prescribes.</p>
+
+<p>The whole server is the dispatch below, plus a few helpers that forward calls to the session. Set against the trace, each branch accounts for one message, and the last branch is the one that answered the probe.</p>
+<pre class='code'><code>(defn -main [&amp; _]
+  (doseq [line (line-seq (io/reader System/in))]
+    (let [{:keys [id method params]} (json/parse-string line true)]
+      (case method
+        "initialize" (send! {:id id :result {:protocolVersion (:protocolVersion params)
+                                             :capabilities {:tools {}}
+                                             :serverInfo {:name "bbh" :version "1"}}})
+        "tools/list" (send! {:id id :result {:tools [{:name "clojure" …}]}})
+        "tools/call" (future (call id params))
+        (when id (send! {:id id :result {}}))))))</code></pre>
+</section>
+
+<section>
+<h2 id='summary'>What the wire shows</h2>
+<ol>
+<li>bbh's server speaks the stateful 2025-11-25 dialect. Claude Code 2.1.309 speaks both eras and chose the old one after one probe. Measured.</li>
+<li>The probe works by luck of interpretation. An empty result is not a valid reply to <code>server/discover</code>, and a stricter client could stop there instead of falling back. Inferred from the spec's stdio compatibility rules.</li>
+<li>Seven messages and 64 ms passed before the model could see its tool, most of it spent starting the server process. After that one tool call cost two messages and 282 bytes. Measured on one run.</li>
+<li>Of the six primitives, bbh uses one. The page's table shows what the rest would offer if bbh grew resources or prompts. Not tested here.</li>
+</ol>
+</section>
+
+<section>
+<footer class='colophon'>
+<p>Sources. Model Context Protocol specification, revision 2026-07-28, with 2025-11-25 for the legacy lifecycle, from <code>github.com/modelcontextprotocol/modelcontextprotocol</code> at <code>3c4d91b</code>, files under <code>docs/specification/</code>: <code>basic/transports/stdio.mdx</code>, <code>basic/transports/streamable-http.mdx</code>, <code>basic/versioning.mdx</code>, <code>basic/index.mdx</code>, <code>basic/patterns/mrtr.mdx</code>, <code>server/discover.mdx</code>, <code>server/tools.mdx</code>, <code>client/elicitation.mdx</code>, <code>changelog.mdx</code> and <code>2025-11-25/basic/lifecycle.mdx</code>. bbh source at <code>desktop/build/bbh/src/bbh/mcp.clj</code> and <code>claude.clj</code>. Trace captured 5 November 2026 with Claude Code 2.1.309.</p>
+<p>Set in Palatino or the nearest local serif, with no web fonts, scripts or images beyond inline SVG, after Edward Tufte and <em>tufte-css</em>. On narrow screens, tap a numeral or &#8853; to open its note.</p>
+</footer>
+</section>
+</article>
+</body>
+</html>
