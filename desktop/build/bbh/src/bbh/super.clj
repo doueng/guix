@@ -104,7 +104,7 @@
   "Rebase the revision of the Worker in WORKSPACE, the commits its workspace has
   that the line lacks, onto the tip of the line, so finished work forms one
   line. The line is the user's committed history, `::default@-` (their
-  working-copy change stays in progress and is never moved), and LANDED, the
+  working-copy change stays in progress; advance! moves it after), and LANDED, the
   change ids finished Workers landed. ONTO names the tip when
   the line has more than one head. Runs jj in WORKSPACE, so the user's working
   copy is not even snapshotted. Throws, leaving the Worker to act, when its
@@ -132,6 +132,30 @@
                :todo (str "Landing on " tip " left conflicts in " (str/join "; " c)
                           ". Resolve them now in your workspace (edit the files, or jj resolve), squash the fix into the conflicted commit, then call (super-done!) again.")}
               {:onto tip :landed (jj-out workspace "log" "--no-graph" "-r" (str "heads(" mine ")") "-T" "change_id")}))))))
+
+(defn advance!
+  "Move the user's working-copy change, default@ of REPO, onto TIP, the head a
+  Worker just landed, so their checkout contains the new work. Only an empty
+  change moves, unless MOVE is :always (policy :move-working-copy). Runs one
+  `jj rebase` in REPO, the default workspace, so jj snapshots the user's edits
+  first and the check and the move are a single operation under jj's
+  working-copy lock; a concurrent jj of theirs merges as any concurrent
+  operation does. A stale working copy or any jj failure moves nothing.
+  Returns :moved, :current when default@ already has TIP (it is never moved down), :skipped when REPO
+  is not the default workspace, or {:kept :not-empty} or {:kept :failed
+  :message m}, which the caller tells the user about."
+  [{:keys [repo tip move]}]
+  (try
+    (let [q (fn [rev] (jj-out repo "--ignore-working-copy" "log" "--no-graph" "-r" rev "-T" "commit_id"))]
+      (if (not= (q "present(@)") (q "present(default@)"))
+        :skipped
+        (let [{:keys [exit err]} (p/shell {:dir repo :out :string :err :string :continue true}
+                                          "jj" "rebase" "-r" (str "default@ ~ ::" tip " ~ " tip "::" (when-not (= :always move) " & empty()")) "-d" tip)]
+          (cond (not (zero? exit)) {:kept :failed :message (str/trim err)}
+                (re-find #"(?m)^Rebased " err) :moved
+                (not (str/blank? (q (str "default@ & " tip "::")))) :current
+                :else {:kept :not-empty}))))
+    (catch Exception e {:kept :failed :message (ex-message e)})))
 
 (defn retire!
   "Forget the jj workspace of a finished Worker and delete its directory, so its
@@ -356,6 +380,24 @@
       ((:land! launch) {:workspace (:workspace w) :onto onto
                         :landed (keep #(when (and (= :done (:state %)) (= (:repo w) (:repo %))) (:landed %)) (vals (:workers st)))}))))
 
+(defn- advance-worker!
+  "After Worker WORKER landed TIP, move the user's working copy onto it with
+  advance!. When it stays, the thread gets a milestone saying why and how to
+  take the work, so the user decides. Called under land-lock."
+  [{:keys [state launch] :as c} worker tip]
+  (let [{:keys [repo thread]} (get-in @state [:workers worker])
+        r ((:advance! launch) {:repo repo :tip tip :move (:move-working-copy (policy c))})
+        short (subs tip 0 (min 8 (count tip)))
+        how (str "To take it: jj rebase -r @ -d " short " in " repo ".")]
+    (when (map? r)
+      (run! c :owner {:id (new-id) :command :milestone!
+                      :args {:thread thread
+                             :text (if (= :not-empty (:kept r))
+                                     (str worker " landed " short ". Your working copy has changes, so it was left where it is. " how
+                                          " To always move it, set :move-working-copy :always in policy.edn.")
+                                     (str worker " landed " short ", but moving your working copy failed: " (:message r) " " how))}}))
+    r))
+
 (defn- retirable?
   "Whether Worker W's workspace goes: a done Worker's at once, since its work
   landed; a failed or cancelled one's once its thread is resolved, so it can be
@@ -469,7 +511,10 @@
                         (let [l (land-worker! c principal cmd)]
                           (if (:conflicts l)
                             {:conflicts (select-keys l [:conflicts :todo])}
-                            (run! c principal (assoc-in cmd [:args :landed] (:landed l))))))
+                            (let [r (run! c principal (assoc-in cmd [:args :landed] (:landed l)))]
+                              ;; Only a new landing moves the user's working copy; a repeat already did.
+                              (when (and (:landed l) (not (:repeat? r))) (advance-worker! c (:result r) (:landed l)))
+                              r))))
                       (run! c principal cmd))]
               (if-let [conflicts (:conflicts r)]
                 {:ok conflicts}
@@ -710,7 +755,7 @@
         db (store/open (str (fs/path dir "super.db")))
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
-           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land! :retire! retire! :release! release!
+           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land! :advance! advance! :retire! retire! :release! release!
                            :open-router! client/open-router!
                            ;; Whether open! can work: the daemon's, unless a caller brought its own open!.
                            :emacs-up? (if (:open! launch) (constantly true) emacs/alive?)}

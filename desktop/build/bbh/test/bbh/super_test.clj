@@ -315,19 +315,20 @@
 (defn- with-workers
   "A controller whose Emacs buffer and wf start are recorded instead of run, on a
   temporary jj repo, with a policy of two Workers. Calls F with the controller,
-  its dir, the repo and the atom of launches."
-  [f]
+  its dir, the repo and the atom of launches. POLICY adds to the policy."
+  ([f] (with-workers {} f))
+  ([policy f]
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-w"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-wconv"}))
         repo (jj-repo)
         launches (atom [])
         c (super/start! {:dir dir :conversations conversations :scan-ms 10
-                         :policy {:workers 2}
+                         :policy (merge {:workers 2} policy)
                          :launch {:wf-start! (fn [workspace w] (str "run-" (:id w)))
                                   :open! (fn [spec] (swap! launches conj spec) (str "wC:p" (count @launches)))
                                   :release! (constantly nil)}})]
     (try (f c dir repo launches)
-         (finally (super/stop! c)))))
+         (finally (super/stop! c))))))
 
 (defn- start-worker [dir thread & {:as more}]
   (call dir {:command :start-worker! :args (merge {:thread thread :workflow :change :brief (str "work on " thread) :repo (:repo more) :check "true"} more)}))
@@ -1569,6 +1570,57 @@
             (is (= ["three" "one" "two" "start"] (line-of repo (landed c "W3"))))
             (is (= #{"default"} (workspaces repo)))))))))
 
+(defn- parent-of-default [repo]
+  (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@-" "-T" "change_id"))
+
+(deftest a-landing-moves-the-users-empty-working-copy-and-leaves-one-with-changes
+  (with-workers
+    (fn [c dir repo _]
+      (doseq [t ["one" "two"]] (call dir {:command :thread! :args {:title t}}))
+      (let [w1 (:ok (start-worker dir "T1" :repo repo))]
+        (commit-file (:workspace w1) "one" "1\n" "one")
+        (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})))
+        (is (= (landed c "W1") (parent-of-default repo)) "an empty working copy moves onto the new tip")
+        (is (= "1\n" (slurp (str (fs/path repo "one")))) "and the checkout has the new work")
+        (let [w2 (:ok (start-worker dir "T2" :repo repo))]
+          (commit-file (:workspace w2) "two" "2\n" "two")
+          ;; Edited but not yet seen by jj: advance! must snapshot before it judges.
+          (spit (str (fs/path repo "mine")) "in progress\n")
+          (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
+          (is (= (landed c "W1") (parent-of-default repo)) "a working copy with changes stays")
+          (is (= "in progress\n" (slurp (str (fs/path repo "mine")))) "with its edit")
+          (is (not (fs/exists? (fs/path repo "two"))))
+          (is (re-find #"^W2 landed \w{8}\. Your working copy has changes, so it was left where it is\. To take it: jj rebase -r @ -d \w{8} in "
+                       (get-in @(:state c) [:threads "T2" :summary]))
+              "the thread says so and how to take the work"))))))
+
+(deftest a-user-who-opts-in-has-a-working-copy-with-changes-moved
+  (with-workers {:move-working-copy :always}
+    (fn [c dir repo _]
+      (call dir {:command :thread! :args {:title "one"}})
+      (let [w1 (:ok (start-worker dir "T1" :repo repo))]
+        (commit-file (:workspace w1) "one" "1\n" "one")
+        (spit (str (fs/path repo "mine")) "in progress\n")
+        (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})))
+        (is (= (landed c "W1") (parent-of-default repo)))
+        (is (= ["1\n" "in progress\n"] (map #(slurp (str (fs/path repo %))) ["one" "mine"])))))))
+
+(deftest advance-moves-nothing-it-cannot-judge
+  (let [repo (jj-repo)
+        ws (str (fs/create-temp-dir {:prefix "bbh-super-adv"}) "/w")]
+    (jj-in repo "workspace" "add" "--name" "w" ws)
+    (commit-file ws "x" "x\n" "x")
+    (let [tip (jj-in ws "log" "--no-graph" "-r" "@-" "-T" "commit_id")
+          before (jj-in repo "log" "--no-graph" "-r" "default@" "-T" "commit_id")]
+      (is (= :skipped (super/advance! {:repo ws :tip tip})) "a repo dir that is not the default workspace")
+      (is (= :failed (:kept (super/advance! {:repo repo :tip "nosuchrev"}))))
+      (is (= before (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@" "-T" "commit_id")))
+      (is (= :moved (super/advance! {:repo repo :tip tip})))
+      (is (= :current (super/advance! {:repo repo :tip tip})) "a repeat is a no-op")
+      (jj-in repo "commit" "-m" "mine")
+      (is (= :current (super/advance! {:repo repo :tip tip})) "a working copy above the tip stays above it")
+      (is (= "mine" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@-" "-T" "description.first_line()"))))))
+
 (deftest an-unclear-tip-is-refused-until-the-worker-names-one
   (with-workers
     (fn [c dir repo _]
@@ -1577,8 +1629,10 @@
         (assert (every? :workspace [w1 w2]) "both Workers started")
         (commit-file (:workspace w1) "one" "1\n" "one")
         (commit-file (:workspace w2) "two" "2\n" "two")
+        ;; Work in progress keeps the user's change where it is, so theirs forks from start.
+        (spit (str (fs/path repo "yours")) "y\n")
         (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})
-        (commit-file repo "yours" "y\n" "yours")
+        (jj-in repo "commit" "-m" "yours")
         (let [r (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})]
           (is (= :unclear-tip (:error r)))
           (is (re-find #"2 heads.*one|2 heads.*yours" (:message r)) (:message r)))

@@ -1,6 +1,8 @@
 ;; bbh super's policy: the Worker cap, and how long a live Worker may leave a
 ;; delivery in its mailbox (:stale-delivery-minutes) before its thread shows
 ;; under Needs attention.
+;; A landing moves your empty working copy in the repo onto the new tip. Set
+;; :move-working-copy :always to move it when it has changes too.
 ;; :projects are the repositories the Router starts Workers in, by name, with
 ;; the check that proves a change there; each check passed on 2026-11-03.
 {:workers 10
