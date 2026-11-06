@@ -13,7 +13,7 @@
   "You are a coding agent working in a persistent babashka REPL through the `clojure` tool.
 
 - Each call evaluates Clojure in the `user` namespace and returns printed output and the last value. Batch independent steps into one call, and print or return a vector for intermediate results.
-- Definitions persist across turns. A deadline (120 s by default), an interrupt or /restart kills the REPL; it then reloads init.clj and replays your definitions from a checkpoint, so `defn`s and `def`s of readable values come back, while atoms, open resources and failed forms do not. The tool result says what was restored. The checkpoint is a plain file under the conversation directory, so keep secrets out of `def`s and read them inside functions instead. When you will repeat work, such as parsing the same kind of file each turn, define a `defn` helper once and call it after. The user may share this REPL over nREPL.
+- Definitions persist across turns. A deadline (120 s by default), an interrupt or /restart kills the REPL; it then reloads init.clj and replays your definitions from a checkpoint, so `defn`s and `def`s of readable values come back, while atoms and open resources do not. An evaluation that throws is not checkpointed, so its definitions stay live but are lost at the next restart; put `defn`s in a call of their own. The tool result says what was restored. The checkpoint is a plain file under the conversation directory, so keep secrets out of `def`s and read them inside functions instead. When you will repeat work, such as parsing the same kind of file each turn, define a `defn` helper once and call it after. Slurp a file into a var once and search it in Clojure; read it again only after it changes. The user may share this REPL over nREPL.
 - You own this environment. Redefine `bbh.env/manifest` to change your prompt and limits; `bbh.repl/defaults` lists the keys. Changing :system, :tool-description or :effort misses the prompt cache and restarts Claude Code, so do it rarely. Persist changes in /home/engstrand/.config/bbh/init.clj.
 - Keep replies brief and lead with the outcome.")
 
@@ -22,10 +22,10 @@
 
 `fs`, `p` and `str` are aliased.
 
-- (sh \"cmd string\") returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. (sh \"cmd\" \"arg\" ...) runs one argv, each word quoted.
-- (read-lines path) or (read-lines path start count) prints a line-count header and 1-based numbered lines (200 by default) and returns nil. It refuses binary files. Use slurp when code needs the text.
-- (edit! path old new) replaces exactly one occurrence, or every one with `:all true`, else throws. It tolerates whitespace and indentation drift in old, keeps BOM and CRLF, and returns a summary with a diff.
-- (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits for it to finish, up to 10 min or :ms, and returns {:done? :exit :tail :log}. Waiting does not count against the evaluation's budget, so one call covers a long command. p/shell, http and Thread/sleep do count, so use a job for anything that may approach the deadline. Also job-status and jobs.
+- (sh \"cmd string\") runs the string with bash, so it needs no `bash -c` wrapper, and returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. (sh \"cmd\" \"arg\" ...) runs one argv, each word quoted. ($ \"cmd\") prints stdout, stderr and a nonzero exit, and returns nil; use it when you only want to see the result.
+- (read-lines path) or (read-lines path start count) prints a line-count header and 1-based numbered lines (200 by default, fewer when they would pass about 7000 characters, ending with the `next:` call) and returns nil. It refuses binary files. Use slurp when code needs the text.
+- (edit! path old new) replaces exactly one occurrence, or every one with `:all true`, else throws. (edit! path [[old new] ...]) applies several in order and writes only if all match. It tolerates whitespace and indentation drift in old, keeps BOM and CRLF, and returns a summary with a diff.
+- (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits for it to finish, up to 10 min or :ms, and returns {:done? :exit :tail :log}; pass options as (job-wait id :ms 600000) or a map. Run `wf attest` and `wf review` as (job-wait (job \"wf attest ...\")), since they can outlast sh's budget. Waiting does not count against the evaluation's budget, so one call covers a long command. p/shell, http and Thread/sleep do count, so use a job for anything that may approach the deadline. Also job-status and jobs.
 - (shot url) saves a headless Chrome screenshot and returns its path. (look question & paths) has a Claude delegate describe images, since tool results carry text only. (delegate brief) runs a fresh agent, for an independent check.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
 
@@ -366,8 +366,13 @@ You are the Router of bbh super: one long-lived conversation that reads what the
     (throw (ex-info (str "File not found: " path (some->> (nearby-path path) (format ". Did you mean `%s`?"))) {})))
   (fs/read-all-bytes path))
 
+(def ^:private read-lines-chars
+  "How much read-lines prints, under the session's 8000-character output cap so one call is never cut short."
+  7000)
+
 (defn read-lines
-  "Print N lines of PATH from line START, numbered, under a header with the file's line count."
+  "Print N lines of PATH from line START, numbered, under a header with the file's line count. It stops early
+  rather than print more than read-lines-chars, and then ends with the call that shows the next line."
   ([path] (read-lines path 1 200))
   ([path start n]
    (let [bs (read-bytes path)
@@ -375,15 +380,20 @@ You are the Router of bbh super: one long-lived conversation that reads what the
          lines (text-lines (str/replace-first (String. ^bytes bs "UTF-8") #"^\uFEFF" ""))
          total (count lines)
          offset (dec (max 1 start))
-         end (min (+ offset n) total)
          width (count (str total))
-         clip #(if (> (count %) 16384) (str (subs % 0 16384) " …[line truncated]") %)]
+         clip #(if (> (count %) 3000) (str (subs % 0 3000) " …[line truncated]") %)
+         numbered (loop [acc [] chars 0 [i & is] (range offset (min (+ offset n) total))]
+                    (let [l (some->> i lines clip (format (str "%" width "d: %s") (inc i)))]
+                      (if (or (nil? l) (and (seq acc) (> (+ chars (count l)) read-lines-chars)))
+                        acc
+                        (recur (conj acc l) (+ chars (count l) 1) is))))
+         end (+ offset (count numbered))]
      (println
       (cond (zero? total) "(empty file)"
             (>= offset total) (format "(%d lines total; offset %d is past end of file — nothing to show)" total (inc offset))
             :else (str (format "(%d lines total, showing lines %d-%d)\n\n" total (inc offset) end)
-                       (str/join "\n" (for [i (range offset end)]
-                                         (format (str "%" width "d: %s") (inc i) (clip (lines i)))))))))))
+                       (str/join "\n" numbered)
+                       (when (< end total) (format "\n\nnext: (read-lines %s %d)" (pr-str (str path)) (inc end)))))))))
 
 (defn- decode-for-edit
   "PATH's text with any BOM removed and CRLF turned into LF, plus what restores both on write."
@@ -456,13 +466,11 @@ You are the Router of bbh super: one long-lived conversation that reads what the
                            (map #(str "+" % "\n") (text-lines new))
                            (map #(str " " % "\n") (subvec lines after until)))))))
 
-(defn edit!
-  "Replace OLD with NEW in PATH and return a summary with a diff. OLD must match once, or pass :all true.
-  Whitespace and indentation drift in OLD is tolerated, and the summary says when it was."
-  [path old new & {:keys [all]}]
+(defn- apply-edit
+  "CONTENT with OLD replaced by NEW, as {:content :summary}, or an exception that names PATH."
+  [path content old new all]
   (when (empty? old) (throw (ex-info "OLD must not be empty. Provide the exact text to replace." {})))
-  (let [{:keys [content] :as src} (decode-for-edit path)
-        old (str/replace old "\r\n" "\n")
+  (let [old (str/replace old "\r\n" "\n")
         new (str/replace new "\r\n" "\n")
         [found fallback] (find-matches content old)
         ranges (disjoint found)
@@ -479,21 +487,40 @@ You are the Router of bbh super: one long-lived conversation that reads what the
                              (let [more (- (count ranges) 20)] (str "\n  ... and " more " more match" (when (> more 1) "es"))))
                            "\n\nPass :all true to replace every occurrence, or include more surrounding context in OLD.") {})))
     (let [ranges (if all ranges [(first ranges)])
-          result (reduce (fn [s [b e]] (str (subs s 0 b) new (subs s e))) content (reverse ranges))
-          {:keys [text note]} (reencode src result)
-          tmp (fs/create-temp-file {:dir (fs/parent (fs/absolutize path)) :prefix ".edit-"})
           [b e] (first ranges)
           matched (subs content b e)
           delta (reduce + (for [[b e] ranges] (- (line-count new) (line-count (subs content b e)))))]
-      (spit (str tmp) text)
-      (fs/set-posix-file-permissions tmp (fs/posix-file-permissions path))
-      (fs/move tmp path {:replace-existing true :atomic-move true})
-      (str "Applied edit" (when all (str " (" (count ranges) " replacements)"))
-           (when fallback (str " (matched via " fallback " fallback — exact text not found; whitespace/indent tolerated)"))
-           (when note (str "\n" note))
-           (when-not (zero? delta) (format " (%+d lines)" delta))
-           (when (and (<= (line-count matched) 200) (<= (line-count new) 200))
-             (show-diff path content b matched new))))))
+      {:content (reduce (fn [s [b e]] (str (subs s 0 b) new (subs s e))) content (reverse ranges))
+       :summary (str "Applied edit" (when all (str " (" (count ranges) " replacements)"))
+                     (when fallback (str " (matched via " fallback " fallback — exact text not found; whitespace/indent tolerated)"))
+                     (when-not (zero? delta) (format " (%+d lines)" delta))
+                     (when (and (<= (line-count matched) 200) (<= (line-count new) 200))
+                       (show-diff path content b matched new)))})))
+
+(defn edit!
+  "Replace OLD with NEW in PATH and return a summary with a diff. OLD must match once, or pass :all true.
+  Whitespace and indentation drift in OLD is tolerated, and the summary says when it was. (edit! path [[old new] ...])
+  applies each pair in order and writes the file only when every pair matched."
+  [path old & more]
+  (let [[edits {:keys [all]}] (if (string? old)
+                                [[[old (first more)]] (apply hash-map (rest more))]
+                                [old (apply hash-map more)])
+        {:keys [content] :as src} (decode-for-edit path)
+        [result summaries] (reduce (fn [[c acc] [i [o n]]]
+                                     (let [{c :content s :summary}
+                                           (try (apply-edit path c o n all)
+                                                (catch clojure.lang.ExceptionInfo e
+                                                  (throw (if (next edits)
+                                                           (ex-info (str "Edit " (inc i) " of " (count edits) " failed, so " path " is unchanged. " (ex-message e)) {})
+                                                           e))))]
+                                       [c (conj acc s)]))
+                                   [content []] (map-indexed vector edits))
+        {:keys [text note]} (reencode src result)
+        tmp (fs/create-temp-file {:dir (fs/parent (fs/absolutize path)) :prefix ".edit-"})]
+    (spit (str tmp) text)
+    (fs/set-posix-file-permissions tmp (fs/posix-file-permissions path))
+    (fs/move tmp path {:replace-existing true :atomic-move true})
+    (str (str/join "\n" summaries) (when note (str "\n" note)))))
 
 ;; Background jobs. State lives in files under the conversation's jobs directory, so a job and its result
 ;; survive the REPL restart that a deadline causes.
@@ -556,10 +583,11 @@ You are the Router of bbh super: one long-lived conversation that reads what the
 
 (defn job-wait
   "Wait for job ID to finish, up to MS (default and most 600000), then return its job-status. Inside a bbh evaluation
-  the wait moves the evaluation's deadline, so it does not count against the budget. (job-wait id ms) also works."
+  the wait moves the evaluation's deadline, so it does not count against the budget. (job-wait id ms) and
+  (job-wait id {:ms ms}) also work."
   [id & args]
   (let [[ms & opts] (if (number? (first args)) args (cons nil args))
-        {:keys [lines] :or {lines 20} :as opts} (apply hash-map opts)
+        {:keys [lines] :or {lines 20} :as opts} (if (map? (first opts)) (first opts) (apply hash-map opts))
         ms (min (or ms (:ms opts) max-wait-ms) max-wait-ms)
         now (System/currentTimeMillis)
         margin @#'bbh.env/deadline-margin-ms
@@ -638,6 +666,17 @@ You are the Router of bbh super: one long-lived conversation that reads what the
             (do (Thread/sleep pause) (recur (min 100 (* 2 pause)))))))
       (finally (swap! bbh.env/live-sh disj pid)))))
 
+(defn $
+  "Run sh and print what it returned: stdout, then stderr, the exit code when it is nonzero, and the job id when
+  the command outlasted the budget. Returns nil."
+  [cmd & args]
+  (let [{:keys [out err exit timeout job]} (apply sh cmd args)]
+    (when (seq out) (print out) (when-not (str/ends-with? out "\n") (println)))
+    (when (seq err) (println "stderr:") (print err) (when-not (str/ends-with? err "\n") (println)))
+    (cond timeout (println (str "[still running as job " job "; (job-wait " (pr-str job) ")]"))
+          (not (zero? exit)) (println (str "[exit " exit "]")))
+    (flush)))
+
 (defn jobs
   "Every job of this conversation, newest first, without output."
   []
@@ -663,17 +702,25 @@ You are the Router of bbh super: one long-lived conversation that reads what the
          ;; One profile per call: Chrome refuses a profile another instance holds,
          ;; and several sessions take screenshots at once.
          profile (str "/tmp/bbh-chrome-" (random-uuid))
-         r (p/shell {:out :string :err :string :continue true :timeout 60000}
-                    "flatpak" "run" (str "--filesystem=" shot-dir) "com.google.Chrome"
-                    "--headless=new" "--disable-gpu" "--no-first-run" "--hide-scrollbars"
-                    (str "--user-data-dir=" profile) (str "--virtual-time-budget=" wait)
-                    (str "--screenshot=" out) (str "--window-size=" w "," h) url)]
+         limit (min 60000 (bbh.env/budget-ms))
+         proc (p/process {:out :string :err :string}
+                         "flatpak" "run" (str "--filesystem=" shot-dir) "com.google.Chrome"
+                         "--headless=new" "--disable-gpu" "--no-first-run" "--hide-scrollbars"
+                         (str "--user-data-dir=" profile) (str "--virtual-time-budget=" wait)
+                         (str "--screenshot=" out) (str "--window-size=" w "," h) url)
+         r (deref proc limit nil)]
+     (when-not r (p/destroy-tree proc))
      (fs/delete-tree profile)
-     (if (fs/exists? out) out (throw (ex-info "screenshot failed" {:err (:err r)}))))))
+     (cond (fs/exists? out) out
+           (nil? r) (throw (ex-info (str "screenshot of " url " timed out after " limit " ms") {}))
+           :else (let [err (str/join "\n" (take-last 5 (str/split-lines (str (:err r)))))]
+                   (throw (ex-info (str "screenshot of " url " failed, exit " (:exit r) (when (seq err) (str ":\n" err))) {})))))))
 
 (defn look
   "Have a Claude delegate view the png PATHS and answer QUESTION in text."
   [question & paths]
+  (when-let [bad (seq (remove #(and (string? %) (fs/exists? %)) paths))]
+    (throw (ex-info (str "look needs existing png paths; not found: " (str/join ", " (map pr-str bad))) {})))
   (:reply (delegate (str "Use the Read tool to view these screenshots of a web app: " (str/join ", " paths)
                          "\n\n" question
                          "\nBe concrete: layout, spacing, alignment, typography, colors, overflow. Under 250 words."))))

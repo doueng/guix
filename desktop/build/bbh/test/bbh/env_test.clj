@@ -49,6 +49,22 @@
                                  [(edit! \"sample.txt\" \"  second\" \"changed\\nmore\") (slurp \"sample.txt\")])" 10000)))
       (is (= {:value ["Applied edit (2 replacements)\n--- a/sample.txt\n+++ b/sample.txt\n@@ -1,2 +1,2 @@\n-a\n+b\n a\n" "b\nb\n"]}
              (repl/call conn "(do (spit \"sample.txt\" \"a\\na\\n\") [(edit! \"sample.txt\" \"a\" \"b\" :all true) (slurp \"sample.txt\")])" 10000)))
+      (is (= {:value ["x\ny\nc\n" "Edit 2 of 2 failed, so sample.txt is unchanged. OLD not found" "x\ny\nc\n"]}
+             (repl/call conn "(do (spit \"sample.txt\" \"a\\nb\\nc\\n\")
+                                 (edit! \"sample.txt\" [[\"a\" \"x\"] [\"b\" \"y\"]])
+                                 [(slurp \"sample.txt\")
+                                  (try (edit! \"sample.txt\" [[\"x\" \"z\"] [\"nope\" \"w\"]]) (catch Exception e (subs (ex-message e) 0 61)))
+                                  (slurp \"sample.txt\")])" 10000))
+          "a multi-edit writes every pair or none")
+      (let [printed (:out (repl/eval! conn "(do (spit \"long.txt\" (apply str (repeat 300 (str (apply str (repeat 99 \"x\")) \"\\n\")))) (read-lines \"long.txt\"))" 10000))]
+        (is (< (count printed) 7200) "read-lines stays under the output cap")
+        (is (str/includes? printed "showing lines 1-66)") printed)
+        (is (str/ends-with? (str/trim printed) "next: (read-lines \"long.txt\" 67)") printed))
+      (is (= {:value [true "0\n" "look needs existing png paths; not found: nil, \"missing.png\""]}
+             (repl/call conn "[(:done? (job-wait (job \"true\") {:ms 10000 :lines 1}))
+                               (with-out-str ($ \"echo $?\"))
+                               (try (look \"q\" nil \"missing.png\") (catch Exception e (ex-message e)))]" 10000)))
+      (is (= "oops\nstderr:\nbad\n[exit 3]\n" (:value (repl/call conn "(with-out-str ($ \"echo oops; echo bad >&2; exit 3\"))" 10000))))
       (finally (repl/kill! conn)))))
 
 (deftest instructions-load-from-the-repository-root-down-to-the-working-directory
