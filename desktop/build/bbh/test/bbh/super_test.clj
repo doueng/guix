@@ -724,6 +724,25 @@
     (is (thrown-with-msg? Exception #"has not ended"
                           (model/decide* state {:command :resume! :args {:thread "T1"}})))))
 
+(deftest an-ended-session-stays-ended-when-health-names-another-problem
+  ;; Found by Super.tla CapRespected: an ended Worker frees its slot, another
+  ;; takes it, and a later pass that sees a lost job must not count it again.
+  (let [w {:id "W1" :thread "T1" :state :working :wf-run "r1"}
+        state {:threads {"T1" {:id "T1" :worker "W1"}} :workers {"W1" w}}
+        observe (fn [obs] (assoc w :health (model/health state w (merge {:agent nil :jobs [] :wf {:status :active} :repl? false :waits {}} obs) 0 60000)))
+        resume (fn [w] (try (:result (model/decide* (assoc-in state [:workers "W1"] w) {:command :resume! :args {:thread "T1"}}))
+                            (catch Exception e (:error (ex-data e)))))]
+    (is (model/session-ended? (observe {})))
+    (let [lost (observe {:jobs [{:id "j1" :state :lost}]})]
+      (is (= :needs-human (get-in lost [:health :classification])))
+      (is (model/session-ended? lost))
+      (is (not (model/holds-slot? state lost)))
+      (is (= "W1" (resume lost))))
+    (let [missing (observe {:wf {:status :missing}})]
+      (is (not (model/holds-slot? state missing)))
+      (is (= :wf-missing (resume missing))))
+    (is (not (model/session-ended? (observe {:agent {:pid 1 :start "s"} :repl? true}))) "a live session has not ended")))
+
 (deftest a-launch-that-meets-emacs-down-waits-instead-of-failing
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-ed"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-edconv"}))

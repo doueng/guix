@@ -85,9 +85,11 @@
 
 (defn session-ended?
   "Whether health found Worker W's session gone while it was working, waiting
-  or cancelling, so it runs nothing until the person resumes or finishes it."
+  or cancelling, so it runs nothing until the person resumes or finishes it.
+  It reads the process health saw, not the classification it shows, which can
+  name a lost job or a missing wf run instead."
   [w]
-  (and (#{:working :waiting :cancelling} (:state w)) (= :session-ended (get-in w [:health :classification]))))
+  (and (#{:working :waiting :cancelling} (:state w)) (some? (:health w)) (empty? (get-in w [:health :process]))))
 
 (defn holds-slot?
   "Whether Worker W counts against the Worker cap: it is active, its session
@@ -299,6 +301,8 @@
         rebooted (rebooted-jobs w)]
     (when-not (and (session-ended? w) (#{:working :waiting} (:state w)))
       (refuse :not-ended :worker (:id w) :message (str (:id w) "'s session has not ended")))
+    (when (= :missing (get-in w [:health :workflow :status]))
+      (refuse :wf-missing :worker (:id w) :message (str (:id w) "'s wf run " (:wf-run w) " is missing, so it cannot be resumed")))
     (when-let [reason (blocked-by state (merge default-policy policy) w)]
       (refuse :cap-full :message (str reason "; resume " thread " when one finishes")))
     {:events [{:kind :worker-resumed :thread thread
