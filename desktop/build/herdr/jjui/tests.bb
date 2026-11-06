@@ -42,6 +42,9 @@
         (recur)))
     seen))
 
+;; The interpreter running these tests, so the script runs without bb on PATH, as in a Guix build.
+(def bb (.. (java.lang.ProcessHandle/current) info command get))
+
 (deftest opens-jjui-in-the-directory-with-or-without-a-popup-open
   (doseq [open? [false true]]
     (let [tmp (fs/create-temp-dir)
@@ -50,7 +53,7 @@
           seen (fake-herdr sock open?)
           {:keys [exit err]} (babashka.process/shell {:continue true :out :string :err :string
                                                       :extra-env {"HERDR_SOCKET_PATH" sock}}
-                                                     "bb" "jjui.bb" dir)]
+                                                     bb "jjui.bb" dir)]
       (is (= 0 exit) (str "popup open: " open? "; " err))
       (is (= ["plugin.pane.open" dir] (last @seen)) (str "popup open: " open?)))))
 

@@ -44,7 +44,8 @@
    :slow ["make clipboard-check"]}
   {:name "herdr jjui popup"
    :paths ["desktop/build/herdr/jjui/**"]
-   :checks ["cd desktop/build/herdr/jjui && bb tests.bb"]}
+   :checks ["cd desktop/build/herdr/jjui && bb tests.bb"]
+   :slow ["guix build -L modules -e '(@ (engstrand packages herdr) herdr-jjui)'"]}
   {:name "bbh"
    :paths ["desktop/build/bbh/**" "desktop/configs/bbh/**" "desktop/bin/{bbh,wf,emacs-bbh}"
            "modules/engstrand/features/bbh-web.scm"]
