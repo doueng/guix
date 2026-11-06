@@ -18,7 +18,7 @@
 (def ^:private grants
   {:router #{:thread! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:promote-worker! :restart-failed! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :restart-worker! :worker-restarted! :cancel-delivered!}})
+   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :cancel-delivered!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, and how long a live
@@ -83,12 +83,18 @@
 
 (def active-states #{:starting :working :waiting :cancelling})
 
+(defn session-ended?
+  "Whether health found Worker W's session gone while it was working, waiting
+  or cancelling, so it runs nothing until the person resumes or finishes it."
+  [w]
+  (and (#{:working :waiting :cancelling} (:state w)) (= :session-ended (get-in w [:health :classification]))))
+
 (defn holds-slot?
-  "Whether Worker W counts against the Worker cap: it is active and its thread
-  is not archived. One on an archived thread keeps its state until cancelled
-  but runs nothing the cap protects."
+  "Whether Worker W counts against the Worker cap: it is active, its session
+  has not ended and its thread is not archived. One on an archived thread keeps
+  its state until cancelled but runs nothing the cap protects."
   [state w]
-  (and (active-states (:state w)) (not (get-in state [:threads (:thread w) :resolved-at]))))
+  (and (active-states (:state w)) (not (session-ended? w)) (not (get-in state [:threads (:thread w) :resolved-at]))))
 
 (defn- active-workers [state]
   (filter #(holds-slot? state %) (vals (:workers state))))
@@ -218,22 +224,19 @@
   (worker-of state worker)
   {:events [{:kind :health-observed :data {:worker worker :health health :at at}}] :result worker})
 
-(defmethod decide* :restart-worker! [state {{:keys [worker at]} :args :keys [token-hash]}]
-  (let [w (get-in state [:workers worker])]
-    (when-not (and (#{:working :waiting :starting} (:state w)) (< (or (:restarts w) 0) 3)) (refuse :restart-limit))
-    {:events [{:kind :restart-attempted :thread (:thread w) :data {:id worker :at at}}
-              {:kind :token-issued :thread (:thread w) :data {:hash token-hash :principal [:worker worker]}}]
-     :result worker}))
-
-(defmethod decide* :restart-failed! [state {{:keys [worker reason]} :args}]
-  (let [w (worker-of state worker)]
-    {:events [{:kind :restart-failed :thread (:thread w) :data {:id worker :reason (str reason)}}] :result worker}))
-
-(defmethod decide* :worker-restarted! [state {{:keys [worker buffer]} :args}]
-  (let [w (worker-of state worker active-states)]
-    {:events [{:kind :worker-restarted :thread (:thread w)
-               :data {:id worker :buffer buffer :outbox (next-id state :outbox "o") :conversation (:conversation w)
-                      :text (str "[Recovery] Resume the existing wf run " (:wf-run w) " and conversation. Inspect existing jobs before acting; do not relaunch surviving jobs.")}}] :result worker}))
+(defmethod decide* :resume! [state {{:keys [thread]} :args :keys [token-hash policy]}]
+  (let [t (thread-of state thread)
+        w (or (get-in state [:workers (:worker t)]) (refuse :no-worker :thread thread))]
+    (when-not (and (session-ended? w) (#{:working :waiting} (:state w)))
+      (refuse :not-ended :worker (:id w) :message (str (:id w) "'s session has not ended")))
+    (when-let [reason (blocked-by state (merge default-policy policy) w)]
+      (refuse :cap-full :message (str reason "; resume " thread " when one finishes")))
+    {:events [{:kind :worker-resumed :thread thread
+               :data {:id (:id w) :outbox (next-id state :outbox "o") :conversation (:conversation w)
+                      :text (str "[Recovery] Your session ended and the person resumed it. Continue the existing wf run " (:wf-run w)
+                                 " and conversation. Inspect existing jobs before acting; do not relaunch surviving jobs.")}}
+              {:kind :token-issued :thread thread :data {:hash token-hash :principal [:worker (:id w)]}}]
+     :result (:id w)}))
 
 (defn- deliverable?
   "Whether Worker W has a session that takes mailbox messages now."
@@ -473,7 +476,7 @@
 (def retired-events
   "Event kinds no command emits any more. An old log still holds them, so they
   fold to nothing; store/load keeps whatever they once wrote."
-  #{:message-routed :router-triaged :lease-moved})
+  #{:message-routed :router-triaged :lease-moved :restart-attempted :restart-failed :worker-restarted})
 
 (defmethod fold* :default [state {:keys [kind]}]
   (if (retired-events kind)
@@ -540,16 +543,11 @@
 (defmethod fold* :health-observed [state {{:keys [worker health]} :data}]
   (cond-> state worker (assoc-in [:workers worker :health] health)))
 
-(defmethod fold* :restart-attempted [state {{:keys [id at]} :data}]
-  (-> state (update-in [:workers id :restarts] (fnil inc 0))
-      (assoc-in [:workers id :restart-at] at)
-      (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))))
-
-(defmethod fold* :restart-failed [state {{:keys [id reason]} :data}]
-  (assoc-in state [:workers id :restart-error] reason))
-
-(defmethod fold* :worker-restarted [state {{:keys [id buffer outbox conversation text]} :data :keys [thread]}]
-  (-> state (bump :outbox) (assoc-in [:workers id :buffer] buffer)
+(defmethod fold* :worker-resumed [state {{:keys [id outbox conversation text]} :data :keys [thread]}]
+  ;; Health observes the new session; until then the Worker holds its slot again.
+  (-> state (bump :outbox)
+      (update-in [:workers id] dissoc :health)
+      (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
                                  :text text :state :pending :message nil})))
 
@@ -645,7 +643,7 @@
           (some :holds-up open) :holding-up
           (seq open) :waiting
           resolved-at :archived
-          (and (or (= :failed execution) (= :needs-human (get-in state [:workers (:worker (get-in state [:threads id])) :health :classification]))) (empty? open)) :needs-attention
+          (and (or (= :failed execution) (#{:needs-human :session-ended} (get-in state [:workers (:worker (get-in state [:threads id])) :health :classification]))) (empty? open)) :needs-attention
           (some #(= :sent (:state %)) replies) :sent
           (> (or milestone-seq 0) (or cursor 0)) :new
           (#{:working :queued} execution) :working

@@ -281,6 +281,22 @@
       (launch! c w t))
     (merge (:result r) (select-keys (get-in @(:state c) [:workers (:id (:result r))]) [:state :workspace :buffer :conversation :wf-run]))))
 
+(defn- resume*
+  "Commit resume! CMD for PRINCIPAL, then reopen the Worker's buffer on its
+  conversation and wf run with the new token. Returns the Worker's id. A
+  buffer that does not open is an error, and the Worker shows as ended again
+  on the next health pass."
+  [{:keys [state launch] :as c} principal cmd]
+  (let [t (new-token)
+        r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c)))
+        w (get-in @state [:workers (:result r)])]
+    (when-not (:repeat? r)
+      (let [buffer ((:open! launch) {:repo (:repo w) :workspace (:workspace w) :thread (:thread w)
+                                     :title (get-in @state [:threads (:thread w) :title])
+                                     :conversation (:conversation w) :token t :wf-run (:wf-run w)})]
+        (run! c :controller {:id (str "resumed-" (:id cmd)) :command :worker-prepared! :args {:worker (:id w) :buffer buffer}})))
+    (:id w)))
+
 (defn- principal-of [state token]
   (when (string? token)
     (let [t (get-in state [:tokens (sha256 token)])]
@@ -419,6 +435,7 @@
                   r (run! c principal (assoc cmd :token-hash (sha256 t)))]
               {:ok (cond-> (:result r) (not (:repeat? r)) (assoc :token t))})
             :start-worker! {:ok (start-worker* c principal cmd)}
+            :resume! {:ok (resume* c principal cmd)}
             :cancel!
             (let [r (run! c principal cmd)]
               (reconcile! c)
@@ -531,8 +548,9 @@
     (catch Exception _ false)))
 
 (defn reconcile!
-  "Observe before acting, including after sleep/restart. Persist every restart
-  attempt before launching; never relaunch a surviving process or its jobs."
+  "Observe before acting, including after sleep/restart. A Worker whose
+  session ended waits for the person to resume it; nothing here relaunches a
+  session or its jobs."
   [{:keys [state] :as c}]
   (locking (:recovery-lock c)
     (let [now (System/currentTimeMillis)
@@ -561,12 +579,14 @@
                     (cond (= :queued (:state w)) [:waiting]
                           uncertain? [:needs-human (format "Job %s can no longer be identified as the process that started it; check it before anything kills or reruns it."
                                                            (:id (first (filter #(#{:unknown :lost} (:state %)) jobs))))]
-                          (= :missing (:status wf)) [:needs-human (format "Its wf run %s is missing, so it cannot be restarted." (:wf-run w))]
+                          (= :missing (:status wf)) [:needs-human (format "Its wf run %s is missing, so it cannot be resumed." (:wf-run w))]
                           (and agent (not repl-ok?)) [:needs-human (format "Its session (pid %s) is alive but its REPL does not answer." (:pid agent))]
                           stale [:needs-human (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
                                                       (:id stale) (quot (:waited stale) 60000))]
                           agent [(if (= :waiting (:state w)) :waiting :running)]
-                          :else [:recoverable])
+                          (#{:working :waiting :cancelling} (:state w))
+                          [:session-ended (format "Its session ended. Resume it with u in the Inbox or bbh inbox resume %s." (:thread w))]
+                          :else [:starting])
                     since (if (= [classification problem] [(get-in w [:health :classification]) (get-in w [:health :problem])])
                             (or (get-in w [:health :since]) now)
                             now)
@@ -597,33 +617,25 @@
                 (run! c :controller {:id (str "cancelled-" (:id w)) :command :cancel-delivered! :args {:worker (:id w)}})
                 (promote! c))))
 
-          (and (not agent) (:workflow w) (:workspace w) (:conversation w)
-               (not= :missing (:status wf)) (not uncertain?) (not= :queued (:state w))
-               (> (- now (or (:restart-at w) (:started-at w) (:boot-at c))) grace)
-               ;; While Emacs is down a restart could only fail, so none is tried or counted.
+          ;; A launch that met Emacs down: open its buffer once Emacs is back.
+          ;; Its token was issued at promotion, so open! needs a new one.
+          (and (not agent) (= :starting (:state w)) (:workspace w) (:conversation w)
+               (> (- now (or (:started-at w) (:boot-at c))) grace)
                @emacs-up?)
-          (if (>= (or (:restarts w) 0) 3)
-            (do (run! c :controller {:id (str "restarts-exhausted-" (:id w)) :command :finish-worker!
-                                    :args {:worker (:id w) :state-after :failed
-                                           :reason (str "Worker failed three restart attempts; needs human"
-                                                        (when-let [e (:restart-error w)] (str ". Last error: " e)))}})
-                (promote! c))
-            (let [token (new-token)]
-              (run! c :controller {:id (new-id) :command :restart-worker! :token-hash (sha256 token) :args {:worker (:id w) :at now}})
-              (try
-                (let [buffer ((get-in c [:launch :open!])
+          (let [token (new-token)]
+            (run! c :controller {:id (new-id) :command :issue-token! :token-hash (sha256 token) :args {:principal [:worker (:id w)]}})
+            (try
+              (let [buffer ((get-in c [:launch :open!])
                             {:repo (:repo w) :workspace (:workspace w) :thread (:thread w)
                              :title (get-in @state [:threads (:thread w) :title])
                              :conversation (:conversation w) :token token :wf-run (:wf-run w)})]
-                  (if (= :starting (:state w))
-                    (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
-                                         :args (merge (select-keys w [:conversation :wf-run :workspace :started-at]) {:worker (:id w) :buffer buffer})})
-                    (run! c :controller {:id (new-id) :command :worker-restarted! :args {:worker (:id w) :buffer buffer}})))
-                (catch Exception e
-                  ;; The attempt is already counted; say why it failed so the end state names it.
-                  (binding [*out* *err*] (println "bbh super: restart of" (:id w) "failed:" (ex-message e)))
-                  (run! c :controller {:id (new-id) :command :restart-failed! :args {:worker (:id w) :reason (ex-message e)}})))))))
-      ;; Jobs outlive a Worker that ended elsewhere: restarts exhausted, a failed launch, a controller that was down.
+                (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
+                                     :args (merge (select-keys w [:conversation :wf-run :workspace :started-at]) {:worker (:id w) :buffer buffer})}))
+              (catch Exception e
+                (run! c :controller {:id (str "launch-failed-" (:id w)) :command :finish-worker!
+                                     :args {:worker (:id w) :state-after :failed :reason (str "Launch failed: " (ex-message e))}})
+                (promote! c))))))
+      ;; Jobs outlive a Worker that ended elsewhere: a failed launch, a controller that was down.
       (doseq [w (vals (:workers @state)) :when (#{:done :failed} (:state w))]
         (stop-jobs! c (:id w)))
       (try (ensure-router! c)

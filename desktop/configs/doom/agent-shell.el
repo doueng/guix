@@ -1644,6 +1644,7 @@ on failure, and keeps your place in it while it shows the same thread."
 (defun eng/bbh-inbox-approve () "Approve the thread's review." (interactive) (eng/bbh-inbox--act "approve"))
 (defun eng/bbh-inbox-dismiss () "Mark the thread read." (interactive) (eng/bbh-inbox--act "dismiss"))
 (defun eng/bbh-inbox-archive () "Archive the thread." (interactive) (eng/bbh-inbox--act "archive"))
+(defun eng/bbh-inbox-resume () "Reopen the session of the thread's Worker after it ended." (interactive) (eng/bbh-inbox--act "resume"))
 (defun eng/bbh-inbox-cancel ()
   "Cancel the thread's Worker, archived or not, after asking."
   (interactive)
@@ -1700,6 +1701,7 @@ it replaces a terminal Inbox, which comes back when jjui quits."
     ("m" eng/bbh-inbox-dismiss "Mark read")
     ("a" eng/bbh-inbox-archive "Archive")
     ("x" eng/bbh-inbox-cancel "Cancel the Worker")
+    ("u" eng/bbh-inbox-resume "Resume a Worker whose session ended")
     ("R" eng/bbh-inbox-router "Open the Router")
     ("J" eng/bbh-inbox-jjui "jjui on the thread's workspace")
     ("gr" eng/bbh-inbox-refresh "Reload now; pushed changes reload by themselves")
@@ -1748,6 +1750,7 @@ file runs it again in a live Inbox, so a Doom reload reaches it."
         :desc "Mark read"     "m" #'eng/bbh-inbox-dismiss
         :desc "Archive"       "a" #'eng/bbh-inbox-archive
         :desc "Cancel Worker" "x" #'eng/bbh-inbox-cancel
+        :desc "Resume Worker" "u" #'eng/bbh-inbox-resume
         :desc "Reload"        "g" #'eng/bbh-inbox-refresh))
 
 (defun eng/bbh-inbox--on-push (connection _)

@@ -651,38 +651,49 @@
               (finally (when (bbh.super.process/matches? after) (bbh.super.process/stop-job! after)))))
           (finally (when (bbh.super.process/matches? during) (bbh.super.process/stop-job! during))))))))
 
-(deftest dead-workers-retry-three-times-with-the-same-conversation-and-workflow
+(deftest a-dead-session-waits-for-resume-holding-no-slot
   (with-workers
     (fn [c dir repo launches]
       (call dir {:command :thread! :args {:title "recover me"}})
-      (let [w (:ok (start-worker dir "T1" :repo repo))
-            c (assoc c :restart-grace-ms -1)]
+      (call dir {:command :thread! :args {:title "b"}})
+      (call dir {:command :thread! :args {:title "c"}})
+      (call dir {:command :thread! :args {:title "d"}})
+      (start-worker dir "T1" :repo repo)
+      (start-worker dir "T2" :repo repo)
+      (let [c (assoc c :restart-grace-ms -1)
+            health #(get-in @(:state c) [:workers % :health :classification])]
         (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
-          (dotimes [_ 4] (super/reconcile! c)))
-        (is (= 4 (count @launches)) "original launch plus three persisted attempts")
-        (is (= ["super-W1" "super-W1" "super-W1" "super-W1"] (mapv :conversation @launches)))
-        (is (= ["run-W1" "run-W1" "run-W1" "run-W1"] (mapv :wf-run @launches)))
-        (is (= 3 (get-in @(:state c) [:workers "W1" :restarts])))
-        (is (= :failed (get-in @(:state c) [:workers "W1" :state])))
-        (is (= :needs-attention (model/section @(:state c) (get-in @(:state c) [:threads "T1"]) 0)))
-        (is (= "Worker failed three restart attempts; needs human"
-               (:line (first (:threads (first (model/sections @(:state c) {})))))))
+          ;; Both sessions are dead: no agent.json was ever written.
+          (dotimes [_ 2] (super/reconcile! c))
+          (is (= 2 (count @launches)) "nothing is relaunched")
+          (is (= [:session-ended :working] [(health "W1") (get-in @(:state c) [:workers "W1" :state])]))
+          (is (= :needs-attention (model/section @(:state c) (get-in @(:state c) [:threads "T1"]) 0)))
+          (is (re-find #"Resume it" (:line (first (:threads (first (model/sections @(:state c) {})))))))
+          (is (not (model/holds-slot? @(:state c) (get-in @(:state c) [:workers "W1"]))) "an ended session holds no slot")
+          (is (= :working (:state (:ok (start-worker dir "T3" :repo repo)))) "so a third Worker starts under a cap of two")
+          (is (= :working (:state (:ok (start-worker dir "T4" :repo repo)))) "and a fourth")
+          (is (= :cap-full (:error (call dir {:command :resume! :args {:thread "T1"}}))) "a resume waits for a free slot")
+          (call dir {:command :finish-worker! :args {:worker "W3" :state-after :failed :reason "x"}})
+          (let [old-token (:token (first @launches))]
+            (is (= {:ok "W1"} (call dir {:command :resume! :args {:thread "T1"}})))
+            (is (= 5 (count @launches)))
+            (is (= ["super-W1" "run-W1"] ((juxt :conversation :wf-run) (last @launches))) "the same conversation and wf run")
+            (is (not= old-token (:token (last @launches))) "with a fresh token")
+            (is (= :unauthorized (:error (call dir {:token old-token :command :note! :args {:text "x"}}))) "the old token is revoked"))
+          (is (some #(re-find #"^\[Recovery\]" (:text %)) (vals (:outbox @(:state c)))))
+          (is (model/holds-slot? @(:state c) (get-in @(:state c) [:workers "W1"])) "it holds its slot again")
+          (is (= :not-ended (:error (call dir {:command :resume! :args {:thread "T1"}})))))
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
 
-(deftest a-dead-worker-waits-for-emacs-without-spending-a-restart
-  (with-workers
-    (fn [c dir repo launches]
-      (call dir {:command :thread! :args {:title "recover me"}})
-      (start-worker dir "T1" :repo repo)
-      (let [up (atom false)
-            c (-> c (assoc :restart-grace-ms -1) (assoc-in [:launch :emacs-up?] #(deref up)))]
-        (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
-          (dotimes [_ 4] (super/reconcile! c))
-          (is (= [1 nil :working] [(count @launches) (get-in @(:state c) [:workers "W1" :restarts]) (get-in @(:state c) [:workers "W1" :state])])
-              "Emacs down: no restart tried, none counted")
-          (reset! up true)
-          (super/reconcile! c)
-          (is (= [2 1] [(count @launches) (get-in @(:state c) [:workers "W1" :restarts])])))))))
+(deftest cancelling-an-ended-session-keeps-its-slot-free
+  ;; Found by Super.tla CapRespected: an ended Worker frees its slot, another
+  ;; takes it, and cancelling the first must not count it again.
+  (let [w {:id "W1" :thread "T1" :state :cancelling :health {:classification :session-ended}}
+        state {:threads {"T1" {:id "T1" :worker "W1"}} :workers {"W1" w}}]
+    (is (model/session-ended? w))
+    (is (not (model/holds-slot? state w)))
+    (is (thrown-with-msg? Exception #"has not ended"
+                          (model/decide* state {:command :resume! :args {:thread "T1"}})))))
 
 (deftest a-launch-that-meets-emacs-down-waits-instead-of-failing
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-ed"}))
@@ -899,7 +910,7 @@
       (let [before (count (store/events (:db c)))]
         (dotimes [_ 10] (super/reconcile! c))
         (is (= [:health-observed] (map :kind (drop before (store/events (:db c))))) "one observation, then nothing new")
-        (is (= :recoverable (get-in @(:state c) [:workers "W1" :health :classification])))))))
+        (is (= :session-ended (get-in @(:state c) [:workers "W1" :health :classification])))))))
 
 (deftest a-delivery-left-in-a-live-workers-mailbox-past-the-policy-age-needs-you
   (with-controller
@@ -926,7 +937,7 @@
           (is (= [:running nil] [(:classification (health)) (:problem (health))]) "it clears once the Worker takes it")
           (bbh.inbox/stop! poller)
           (super/reconcile! c)
-          (is (= :recoverable (:classification (health))) "a session gone with its wf run kept can be restarted")
+          (is (= :session-ended (:classification (health))) "a session gone with its wf run kept waits to be resumed")
           (finally (bbh.inbox/stop! poller) (.close server)))))))
 
 (deftest a-worker-whose-launch-fails-is-failed-with-the-reason-and-frees-its-slot
@@ -1214,9 +1225,8 @@
 (deftest controller-commands-refuse-a-missing-or-ended-worker
   (let [{:keys [results]} (run-commands [[:controller {:id "p" :command :worker-prepared! :args {:worker "W9"}}]
                                          [:controller {:id "h" :command :health! :args {:worker "W9" :health {} :at 1}}]
-                                         [:controller {:id "r" :command :worker-restarted! :args {:worker "W9" :buffer "p"}}]
                                          [:controller {:id "h0" :command :health! :args {:at 1}}]])]
-    (is (= [:no-such-worker :no-such-worker :no-such-worker :no-such-worker] (map :error results)) "health names its Worker")))
+    (is (= [:no-such-worker :no-such-worker :no-such-worker] (map :error results)) "health names its Worker")))
 
 (deftest promotion-is-one-commit-so-a-queued-worker-starts-once
   (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
@@ -1268,25 +1278,6 @@
     (fn [_ dir _]
       (with-open [_ (java.net.Socket. "127.0.0.1" (int (parse-long (clojure.string/trim (slurp (str (fs/path dir "port")))))))]
         (is (= {:ok []} (deref (future (call dir {:command :threads})) 3000 :blocked)))))))
-
-(deftest a-failed-restart-is-recorded-and-named-when-restarts-run-out
-  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-rf"}))
-        conversations (str (fs/create-temp-dir {:prefix "bbh-super-rfconv"}))
-        repo (jj-repo)
-        panes (atom 0)
-        c (super/start! {:dir dir :conversations conversations :scan-ms 10 :policy {:workers 2}
-                         :launch {:wf-start! (fn [_ w] (str "run-" (:id w)))
-                                  :open! (fn [_] (if (= 1 (swap! panes inc)) "wC:p1" (throw (ex-info "emacs is down" {}))))}})]
-    (try
-      (call dir {:command :thread! :args {:title "recover me"}})
-      (start-worker dir "T1" :repo repo)
-      (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
-        (dotimes [_ 4] (super/reconcile! (assoc c :restart-grace-ms -1))))
-      (let [w (get-in @(:state c) [:workers "W1"])]
-        (is (= :failed (:state w)))
-        (is (= "emacs is down" (:restart-error w)))
-        (is (clojure.string/includes? (str (:reason w)) "emacs is down")))
-      (finally (super/stop! c)))))
 
 (deftest the-owner-token-file-is-never-readable-by-others
   (with-controller
@@ -1595,3 +1586,8 @@
       (is (= "T1 a" (super/release! {:conversation "super-W1" :dir "/repo"})))
       (is (= ["-s" (bbh.super.emacs/server) "--timeout=30" "--eval" "(eng/bbh-super-release \"super-W1\" \"/repo\")"]
              (args))))))
+
+(deftest restarts-are-gone
+  (let [{:keys [results]} (run-commands [[:controller {:id "r" :command :restart-worker! :args {:worker "W1" :at 1}}]
+                                         [:controller {:id "w" :command :worker-restarted! :args {:worker "W1" :buffer "p"}}]])]
+    (is (= [:forbidden :forbidden] (map :error results)))))

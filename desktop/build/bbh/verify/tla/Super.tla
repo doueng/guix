@@ -23,9 +23,10 @@ VARIABLES
   tworker,   \* :worker of each thread
   resolved,  \* :resolved-at of each thread is set
   asks,      \* :asks, by id
-  replies    \* :replies, by id
+  replies,   \* :replies, by id
+  ended      \* session-ended?: health found the Worker's session gone
 
-vars == <<wstate, wthread, launched, tworker, resolved, asks, replies>>
+vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended>>
 
 NoAsk == [st |-> "none", worker |-> None, thread |-> NoThread, stopped |-> FALSE]
 NoReply == [st |-> "none", thread |-> NoThread, picks |-> {}]
@@ -38,6 +39,7 @@ Init ==
   /\ resolved = [t \in Threads |-> FALSE]
   /\ asks = [a \in AskIds |-> NoAsk]
   /\ replies = [r \in ReplyIds |-> NoReply]
+  /\ ended = [w \in Workers |-> FALSE]
 
 \* next-id: ids are handed out in order, so Worker w exists only after w-1.
 NextWorker(w) == wstate[w] = "none" /\ \A v \in Workers : v < w => wstate[v] /= "none"
@@ -46,8 +48,10 @@ NextReply(r) == replies[r].st = "none" /\ \A q \in ReplyIds : q < r => replies[q
 
 \* thread-worker: the queued or active Worker of thread t.
 ThreadWorkers(t) == {w \in Workers : wthread[w] = t /\ wstate[w] \in Active \cup {"queued"}}
+\* session-ended?
+Ended(w) == ended[w] /\ wstate[w] \in {"working", "waiting", "cancelling"}
 \* holds-slot?
-SlotWorkers == {w \in Workers : wstate[w] \in Active /\ ~resolved[wthread[w]]}
+SlotWorkers == {w \in Workers : wstate[w] \in Active /\ ~Ended(w) /\ ~resolved[wthread[w]]}
 \* blocked-by
 Blocked(w) == Cardinality(SlotWorkers \ {w}) >= Cap
 OpenAsks(t) == {a \in AskIds : asks[a].st = "open" /\ asks[a].thread = t}
@@ -97,7 +101,7 @@ WorkerFinished(w, outcome) ==
   /\ UNCHANGED <<wthread, launched, resolved, replies>>
 
 \* decide* :finish-worker!: a Worker's super-done! or super-failed!, a failed
-\* launch, exhausted restarts, or the person.
+\* launch, or the person.
 FinishWorker(w, outcome) ==
   /\ wstate[w] \notin {"none", "cancelling"} \cup Finished
   /\ WorkerFinished(w, outcome)
@@ -160,7 +164,19 @@ Answered(w, r) ==
   /\ wstate' = Resume(t, as, wstate)
   /\ UNCHANGED <<wthread, launched, tworker, resolved>>
 
-Next ==
+\* reconcile!: health finds a working, waiting or cancelling Worker's session gone.
+SessionEnds(w) ==
+  /\ wstate[w] \in {"working", "waiting", "cancelling"} /\ ~ended[w]
+  /\ ended' = [ended EXCEPT ![w] = TRUE]
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies>>
+
+\* decide* :resume! by the person, fold* :worker-resumed: only with a free slot.
+ResumeWorker(w) ==
+  /\ Ended(w) /\ wstate[w] \in {"working", "waiting"} /\ ~Blocked(w)
+  /\ ended' = [ended EXCEPT ![w] = FALSE]
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies>>
+
+Commands ==
   \/ \E w \in Workers, t \in Threads : StartWorker(w, t)
   \/ PromoteWorker
   \/ \E w \in Workers : WorkerRunning(w) \/ Cancel(w) \/ CancelDelivered(w)
@@ -169,6 +185,10 @@ Next ==
   \/ \E t \in Threads, r \in ReplyIds, p \in SUBSET AskIds, d \in SUBSET AskIds : Reply(t, r, p, d)
   \/ \E t \in Threads : Archive(t)
   \/ \E r \in ReplyIds, w \in Workers : Answered(w, r)
+
+Next ==
+  \/ Commands /\ UNCHANGED ended
+  \/ \E w \in Workers : SessionEnds(w) \/ ResumeWorker(w)
 
 Spec == Init /\ [][Next]_vars
 
