@@ -970,6 +970,32 @@
           (is (= :session-ended (:classification (health))) "a session gone with its wf run kept waits to be resumed")
           (finally (bbh.inbox/stop! poller) (.close server)))))))
 
+(deftest a-continued-workers-repl-is-probed-where-it-runs
+  (with-controller
+    (fn [c dir conversations]
+      (call dir {:command :thread! :args {:title "continued"}})
+      (run-worker dir "T1")
+      (let [root (str (fs/path conversations "super-W1"))
+            next-root (str (fs/create-dirs (fs/path conversations "conv-2")))
+            poller (bbh.inbox/start! {:root root :project root :scan-ms 5 :deliver (fn [_])})
+            dead (doto (java.net.ServerSocket. 0 50 (java.net.InetAddress/getLoopbackAddress)) .close)
+            _ (spit (str (fs/path root "repl.port")) (str (.getLocalPort dead)))
+            _ (spit (str (fs/path root "continued-in")) "conv-2")
+            _ (fs/create-dirs (fs/path conversations "conv-3"))
+            _ (spit (str (fs/path next-root "continued-in")) "conv-3")
+            server (fake-nrepl! next-root)
+            jobs (str (fs/create-dirs (fs/path next-root "jobs")))]
+        (spit (str (fs/path jobs "j1.cmd")) "true")
+        (spit (str (fs/path jobs "j1.exit")) "3\n")
+        (try
+          (is (wait-for #(bbh.inbox/agent root)))
+          (super/observe-jobs! c)
+          (is (= 3 (get-in @(:state c) [:workers "W1" :jobs "j1" :exit])) "a job the REPL started in conv-2 is seen")
+          (super/reconcile! c)
+          (is (= [true nil] ((juxt :repl :problem) (get-in @(:state c) [:workers "W1" :health])))
+              "the REPL started in conv-2 keeps running after conv-3 continues it")
+          (finally (bbh.inbox/stop! poller) (.close server)))))))
+
 (deftest a-worker-whose-launch-fails-is-failed-with-the-reason-and-frees-its-slot
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-lf"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-lfconv"}))

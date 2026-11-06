@@ -6,6 +6,7 @@
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [bbh.inbox :as inbox]
+            [bbh.transcript :as transcript]
             [bbh.super.client :as client :refer [call! data-dir new-id super-dir]]
             [bbh.super.emacs :as emacs]
             [bbh.super.model :as model]
@@ -338,7 +339,7 @@
                    :order (model/order sections) :fresh (or fresh 0)})
       ::unknown)))
 
-(declare reconcile! ensure-router! conversation-root)
+(declare reconcile! ensure-router! conversation-root conversation-jobs)
 
 (def ^:private land-lock (Object.))
 
@@ -370,7 +371,7 @@
   left alone."
   [{:keys [state] :as c} worker]
   (when-let [conversation (get-in @state [:workers worker :conversation])]
-    (doseq [j (process/jobs (conversation-root c conversation))
+    (doseq [j (conversation-jobs c conversation)
             :when (and (= :running (:state j)) (process/stop-job! j))]
       (spit (str (:base j) ".exit") "137\n"))))
 
@@ -515,6 +516,16 @@
   (let [dir (str (fs/path conversations id))]
     (if (fs/exists? dir) (inbox/root-dir dir) dir)))
 
+(defn- repl-dirs
+  "Where conversation ID's REPL may keep repl.port and jobs/. A REPL writes
+  them where it started and keeps running when its session continues, so
+  that can be any conversation in the chain."
+  [c id]
+  (transcript/chain (conversation-root c id)))
+
+(defn- conversation-jobs [c id]
+  (into [] (mapcat process/jobs) (repl-dirs c id)))
+
 (defn observe-jobs!
   "Rediscover completed detached jobs from their durable exit markers. Running
   jobs are left alone. No execution is launched here, including after restart.
@@ -522,7 +533,8 @@
   [{:keys [state] :as c}]
   (doseq [w (vals (:workers @state))
           :when (and (:conversation w) (#{:working :waiting} (:state w)))
-          f (fs/glob (fs/path (conversation-root c (:conversation w)) "jobs") "*.exit")
+          dir (repl-dirs c (:conversation w))
+          f (fs/glob (fs/path dir "jobs") "*.exit")
           :let [job (str/replace (fs/file-name f) #"\.exit$" "")
                 base (fs/path (fs/parent f) job)]
           :when (and (not (get-in w [:jobs job])) (fs/exists? (str base ".cmd")))
@@ -535,9 +547,9 @@
                          :args {:worker (:id w) :job job :exit exit :log (str base ".log")
                                 :seen (fs/exists? (str base ".seen"))}})))
 
-(defn- repl-answering? [root]
+(defn- repl-answering? [dir]
   (try
-    (let [port (some-> (process/read-text (fs/path root "repl.port")) parse-long)]
+    (let [port (some-> (process/read-text (fs/path dir "repl.port")) parse-long)]
       (when port
         (with-open [s (Socket.)]
           (.connect s (java.net.InetSocketAddress. "127.0.0.1" (int port)) 300)
@@ -561,10 +573,10 @@
               :when (or (model/active-states (:state w)) (= :queued (:state w)))
               :let [root (when (:conversation w) (conversation-root c (:conversation w)))
                     agent (when root (inbox/agent root))
-                    jobs (if root (process/jobs root) [])
+                    jobs (if root (conversation-jobs c (:conversation w)) [])
                     uncertain? (some #(#{:unknown :lost} (:state %)) jobs)
                     wf (when (:wf-run w) (try (select-keys (workflow/status (:wf-run w)) [:status :phase]) (catch Exception _ {:status :missing})))
-                    repl-ok? (boolean (and agent (repl-answering? root)))
+                    repl-ok? (boolean (and agent (some repl-answering? (repl-dirs c (:conversation w)))))
                     limit-ms (* 60000 (:stale-delivery-minutes (policy c)))
                     ;; How long a sent row's file has waited in the mailbox, or nil once the session took it.
                     waited-ms (fn [o] (let [f (fs/path root "mailbox" (str (:message o) ".json"))]

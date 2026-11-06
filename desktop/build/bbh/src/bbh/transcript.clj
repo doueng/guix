@@ -47,6 +47,16 @@
       (recur (str (fs/path (fs/parent dir) (str/trim (slurp (str f))))))
       dir)))
 
+(defn chain
+  "Conversation DIR and every conversation it continued into, oldest first."
+  [dir]
+  (loop [dir dir dirs [dir]]
+    (let [f (fs/path dir "continued-in")]
+      (if (fs/exists? f)
+        (let [next-dir (str (fs/path (fs/parent dir) (str/trim (slurp (str f)))))]
+          (recur next-dir (conj dirs next-dir)))
+        dirs))))
+
 (defn- prompts-file [dir]
   (str (fs/path dir "prompts.jsonl")))
 

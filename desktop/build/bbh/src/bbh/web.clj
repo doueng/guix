@@ -59,18 +59,8 @@
         (catch Exception _
           (:messages entry))))))
 
-(defn- chain
-  "ROOT's conversation and every conversation it rolled into, oldest first."
-  [root]
-  (loop [dir root dirs [root]]
-    (let [f (fs/path dir "continued-in")]
-      (if (fs/exists? f)
-        (let [next-dir (str (fs/path (fs/parent dir) (str/trim (slurp (str f)))))]
-          (recur next-dir (conj dirs next-dir)))
-        dirs))))
-
 (defn- conversation [root]
-  (into [] (mapcat messages-of) (chain root)))
+  (into [] (mapcat messages-of) (transcript/chain root)))
 
 (defn- title [messages]
   (let [text (some #(when (= "user" (:role %))
