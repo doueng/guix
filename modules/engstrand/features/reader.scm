@@ -9,6 +9,8 @@
 ;; The reader checkout is mutable and the service follows it. `make serve'
 ;; publishes port 8787 on the tailnet and runs the reader with its suggester,
 ;; so one service owns both. Stopping kills the whole process group.
+;; At boot tailscaled can still be in NoState, where `tailscale serve' fails
+;; and quick respawns make Shepherd disable the service, so start waits for it.
 (define %reader-service
   (simple-service 'familiar-reader home-shepherd-service-type
     (list (shepherd-service
@@ -21,7 +23,10 @@
                           ;; `kill 0' takes the group down whenever make exits,
                           ;; so a respawn never meets a stale wrangler on 8787.
                           (list (string-append home "/.guix-home/profile/bin/bash")
-                                "-c" "make -C \"$0\" serve; kill 0"
+                                "-c" (string-append
+                                       "until tailscale status --json --peers=false"
+                                       " | grep -q '\"BackendState\": \"Running\"'; do sleep 2; done; "
+                                       "make -C \"$0\" serve; kill 0")
                                 (string-append home "/projects/langchain/reader"))
                           #:environment-variables
                           (cons* (string-append "PATH=" home "/.config/guix/current/bin"
