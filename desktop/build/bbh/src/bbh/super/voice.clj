@@ -26,12 +26,12 @@
           :else (some (fn [[i o]] (when (= words (plain (:label o))) (inc i))) options))))
 
 (defn- send-draft!
-  "Send thread THREAD's saved draft, refusing a pick on an action ask."
-  [thread t]
-  (let [{:keys [picks notes]} (pane/client-state)]
-    (when (some #(and (= :action (:kind %)) (contains? (get picks thread {}) (:id %))) (:asks t))
+  "Send thread THREAD's draft, refusing a pick on an action ask."
+  [thread]
+  (let [{:keys [draft asks]} (call! {:command :thread :args {:id thread}})]
+    (when (some #(and (= :action (:kind %)) (contains? (:picks draft) (:id %))) asks)
       (throw (ex-info "Action asks require keyboard confirmation" {:thread thread})))
-    (when-not (or (seq (get picks thread)) (get notes thread))
+    (when-not draft
       (throw (ex-info "No draft to send" {:thread thread})))
     (pane/send! thread)))
 
@@ -66,11 +66,11 @@
               (when (or (nil? ask) (#{:action :review} (:kind ask))) (throw (ex-info "Voice cannot approve action or review asks" {:thread thread})))
               (when-not (<= 1 n (count (:options ask))) (throw (ex-info "No such option" {:thread thread})))
               (pane/pick! thread n :ask (:id ask))
-              (when send? (send-draft! thread t))
+              (when send? (send-draft! thread))
               (cond-> {:thread thread :draft true :option n} send? (assoc :sent true)))
 
             (and thread send? (str/blank? pick-words))
-            (do (send-draft! thread t) {:thread thread :sent true})
+            (do (send-draft! thread) {:thread thread :sent true})
 
             :else (call! {:command :say! :args {:origin :voice :text (if (and thread (not handle)) (str thread " " text) text)}})))))))
 

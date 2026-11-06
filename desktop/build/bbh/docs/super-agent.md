@@ -128,12 +128,12 @@ Binding: `babashka.sqlite`, which calls `libsqlite3` through `babashka.ffi`. bb 
  :picks {"a1" "no"} :note "" :dismiss #{}}
 ```
 
-Picks, drafts and read cursors are per client, not in the thread record. A client's Send carries `:asks-version`, the `seq` of the asks it saw. If another device answered since, the controller rejects the Send with the current state and the client shows the conflict rather than creating a second reply.
+Picks and the note are the thread's `:draft` in the controller (`draft!`, `discard-draft!`), so the Inbox, voice and the phone show the same one, and the reply that sends it removes it. Read cursors are per client. A Send carries `:asks-version`, the `seq` of the asks it saw. If another device answered since, the controller rejects the Send with the current state and the client shows the conflict rather than creating a second reply.
 
 ### Ask lifecycle
 
 ```
-open ──pick (client only)──> picked ──send──> sent ──worker turn──> answered
+open ──pick (draft)──> picked ──send──> sent ──worker turn──> answered
  │                                                                                        
  ├──dismiss (mark read / skip)──> dismissed   (delivered to the Worker as "do not wait", never as an answer)
  └──newer ask supersedes──────> superseded  (shown as replaced)
@@ -158,7 +158,7 @@ Execution state, attention state and read state are independent facts. The secti
 |---|---|
 | Execution (from the Worker) | queued, working, waiting, done, failed, none |
 | Attention (from open asks) | stopped, holds-up, waiting, review, none |
-| Read (per client) | unseen events after the client's cursor, unsent picks or draft |
+| Read | unseen events after the client's cursor (per client), the thread's draft |
 
 | Section | Rule, first match wins |
 |---|---|

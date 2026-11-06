@@ -250,8 +250,8 @@
            (clojure.string/split-lines
             (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
                                      :asks [{:id "a1" :state :open :seq 3 :text "Keep?" :stopped true :recommended "no"
-                                             :options [{:id "no" :label "No"} {:id "yes" :label "Yes"}]}]}
-                                    {:picks {"T1" {"a1" "yes"}} :notes {"T1" "and why"}}))))))
+                                             :options [{:id "no" :label "No"} {:id "yes" :label "Yes"}]}]
+                                     :draft {:picks {"a1" "yes"} :note "and why" :asks-version 3}}))))))
 
 (deftest jjui-opens-in-the-worker-workspace-until-it-is-gone-then-the-repo
   (let [dir (fs/create-temp-dir {:prefix "bbh-inbox-dir"})
@@ -808,6 +808,35 @@
         (when (babashka.process/alive? proc) (.destroyForcibly (:proc proc)))
         (fs/delete-tree root)))))
 
+(deftest a-draft-lives-in-the-controller-until-a-reply-takes-it
+  (with-controller
+    (fn [c dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!
+              draft #(get-in @(:state c) [:threads "T1" :draft])]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (let [{:keys [token version]} (thread-with-ask dir)
+                  updated (get-in @(:state c) [:threads "T1" :updated-at])]
+              (pane/pick! "T1" 2)
+              (pane/note! "T1" "only for a week")
+              (is (= {:picks {"a1" "week"} :note "only for a week" :asks-version version} (draft)))
+              (is (= updated (get-in @(:state c) [:threads "T1" :updated-at])) "a draft does not move the thread in the Inbox")
+              (fs/delete-if-exists pane/*state-file*)
+              (is (re-find #"2\. Yes, for a week  <- picked" (pane/preview (:ok (call dir {:command :thread :args {:id "T1"}}))))
+                  "the pick outlives this client's state, as across an Emacs restart")
+              (pane/send! "T1")
+              (is (= [[{"a1" "week"} "only for a week"]] (mapv (juxt :picks :note) (vals (:replies @(:state c))))))
+              (is (nil? (draft)) "the reply takes the draft")
+              (call dir {:token token :command :ask! :args {:kind :question :text "Again?" :options [{:id "y" :label "Y"}]}})
+              (pane/note! "T1" "hm")
+              (call dir {:token token :command :ask! :args {:kind :question :text "And?" :options [{:id "z" :label "Z"}]}})
+              (is (thrown-with-msg? Exception #"stale" (pane/pick! "T1" 1)) "a draft from before a new ask refuses a pick")
+              (pane/-main "clear" "T1")
+              (is (nil? (draft)))
+              (pane/pick! "T1" 1)
+              (is (= {"a3" "z"} (:picks (draft))))
+              (locking (:db c) (is (= (store/replay (:db c)) @(:state c)))))))))))
+
 (deftest voice-drafts-need-send-and-action-asks-require-keyboard
   (with-controller
     (fn [c dir _]
@@ -817,13 +846,13 @@
             (let [{:keys [token]} (thread-with-ask dir)]
               (pane/select! "T1")
               (is (= {:thread "T1" :draft true :option 2} (voice/submit! "option two" :target :selected)))
-              (is (= {"T1" {"a1" "week"}} (:picks (pane/client-state))))
+              (is (= {"a1" "week"} (get-in @(:state c) [:threads "T1" :draft :picks])) "the pick is the thread's draft in the controller")
               (is (= {} (:replies @(:state c))))
               (is (= {:thread "T1" :sent true} (voice/submit! "send" :target :selected)))
               (is (= [{"a1" "week"}] (mapv :picks (vals (:replies @(:state c))))))
               (call dir {:token token :command :ask! :args {:kind :action :text "Switch system?" :options [{:id "yes" :label "Yes"}]}})
               (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "option one" :target :selected)))
-              (pane/with-state-lock! #(pane/pick! "T1" 1))
+              (pane/pick! "T1" 1)
               (is (thrown-with-msg? Exception #"keyboard" (voice/submit! "send" :target :selected))))))))))
 
 (deftest voice-expiry-handle-precedence-and-stale-drafts
@@ -858,7 +887,7 @@
             (pane/select! "T1")
             (is (= {:to :router} (voice/stop!)))
             (is (= ["[voice] (spoken) Hey, look at my commit history"] (mapv :text (filter #(= "router" (:conversation %)) (vals (:outbox @(:state c)))))))
-            (is (= {} (:picks (pane/client-state) {})) "no draft was made on the selected thread")
+            (is (nil? (get-in @(:state c) [:threads "T1" :draft])) "no draft was made on the selected thread")
             (testing "a spoken handle still names its thread"
               (is (= {:thread "T1" :draft true :option 2} (voice/submit! "tee one, option two"))))
             (testing "the selected-thread mode keeps acting on the selection"
@@ -1066,7 +1095,7 @@
             (call dir {:command :thread! :args {:title "review"}})
             (let [token (run-worker dir "T1")]
               (call dir {:token token :command :ask! :args {:kind :review :text "Ship it?" :revision "c068de11" :stopped true}})
-              (is (clojure.string/includes? (pane/preview (:ok (call dir {:command :thread :args {:id "T1"}})) {})
+              (is (clojure.string/includes? (pane/preview (:ok (call dir {:command :thread :args {:id "T1"}})))
                                             "REVIEW revision c068de11 evidence e3b0c442  A approve")
                   "the preview shows what A approves")
               (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "tee one approve")))
@@ -1316,8 +1345,8 @@
           (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
             (let [{:keys [token]} (thread-with-ask dir)]
               (call dir {:token token :command :ask! :args {:kind :action :text "Switch?" :options [{:id "yes" :label "Yes"}]}})
-              (is (thrown-with-msg? Exception #"changed" (pane/with-state-lock! #(pane/pick! "T1" 1 :ask "a1"))))
-              (is (= {} (:picks (pane/client-state) {}))))))))))
+              (is (thrown-with-msg? Exception #"changed" (pane/pick! "T1" 1 :ask "a1")))
+              (is (nil? (:draft (:ok (call dir {:command :thread :args {:id "T1"}}))))))))))))
 
 
 (deftest a-quick-tap-stops-hex-only-after-it-started

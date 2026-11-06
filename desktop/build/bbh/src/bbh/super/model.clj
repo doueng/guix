@@ -341,6 +341,28 @@
                       :conversation (get-in state [:workers (:worker t) :conversation])
                       :text (reply-text state reply))}))))
 
+(defmethod decide* :draft! [state {{:keys [thread pick note]} :args}]
+  (let [t (thread-of state thread)
+        current (:asks-version t)
+        draft (or (:draft t) {:picks {} :note "" :asks-version current})]
+    (when-let [[ask option] pick]
+      (when (not= current (:asks-version draft))
+        (refuse :stale :message "Draft is stale; clear it before choosing again" :current current))
+      (let [a (or (get (open-asks state thread) ask) (refuse :no-such-ask :ask ask))]
+        (when-not (some #(= option (:id %)) (:options a)) (refuse :no-such-option :ask ask :option option))))
+    (let [draft (cond-> draft
+                  pick (assoc-in [:picks (first pick)] (second pick))
+                  note (assoc :note (str/trim (str note))))]
+      ;; The thread rides in :data, so a draft does not stamp :updated-at.
+      {:events [(if (and (empty? (:picks draft)) (str/blank? (:note draft)))
+                  {:kind :draft-discarded :data {:thread thread}}
+                  {:kind :draft-saved :data {:thread thread :draft draft}})]
+       :result draft})))
+
+(defmethod decide* :discard-draft! [state {{:keys [thread]} :args}]
+  (thread-of state thread)
+  {:events [{:kind :draft-discarded :data {:thread thread}}] :result thread})
+
 (defmethod decide* :dismiss! [state {{:keys [thread]} :args :keys [id]}]
   {:events (filterv some? [(dismissal state thread id)]) :result thread})
 
@@ -587,6 +609,7 @@
       (set-states :asks (concat (keys picks) (keys (:approved reply))) :sent)
       (set-states :asks dismiss :dismissed)
       (assoc-in [:threads thread :asks-version] seq)
+      (update-in [:threads thread] dissoc :draft)
       (resume thread)))
 
 (defn linked
@@ -739,6 +762,12 @@
   ;; Only the row moves. A reply stays :sent until the Worker answers it.
   (cond-> state
     (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :done)))
+
+(defmethod fold* :draft-saved [state {{:keys [thread draft]} :data}]
+  (assoc-in state [:threads thread :draft] draft))
+
+(defmethod fold* :draft-discarded [state {{:keys [thread]} :data}]
+  (update-in state [:threads thread] dissoc :draft))
 
 (defmethod fold* :reply-answered [state {{:keys [id]} :data :keys [thread]}]
   (let [reply (get-in state [:replies id])]

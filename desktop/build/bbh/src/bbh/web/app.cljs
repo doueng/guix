@@ -9,7 +9,7 @@
 (def image-quality 0.85)
 
 (defonce state (atom {:agents nil :current nil :conversations {} :error nil
-                      :view nil :inbox nil :inbox-at nil :inbox-error nil :threads {} :picks {} :conflicts {} :busy-super #{}}))
+                      :view nil :inbox nil :inbox-at nil :inbox-error nil :threads {} :conflicts {} :busy-super #{}}))
 
 (def stale-ms (* 3 60 1000))
 
@@ -368,13 +368,26 @@
         [:h2 {:class (when (#{"stopped" "holding-up" "waiting"} section) "needs-you")} title]
         (into [:div] (map row-view) threads)])]))
 
-(defn- picks! [picks]
-  (local! "super-picks" picks)
-  (swap! state assoc :picks picks))
+(defn- post-super! [thread verb body]
+  (swap! state update :busy-super conj thread)
+  (-> (request (str "/api/super/threads/" thread "/" verb)
+               {:method "POST" :headers {"Content-Type" "application/json"}
+                :body (js/JSON.stringify (clj->js body))})
+      (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))
+      (.finally (fn []
+                  (swap! state update :busy-super disj thread)
+                  (sync-inbox!)))))
+
+(defn- draft-picks
+  "THREAD's draft picks in the controller, which the Inbox in Emacs shares."
+  [t]
+  (get-in t [:draft :picks] {}))
 
 (defn- pick! [thread ask option]
-  (picks! (assoc-in (:picks @state) [thread ask] option))
-  (swap! state update :conflicts dissoc thread))
+  ;; Shown at once, then saved to the thread's draft, which the next sync reads back.
+  (swap! state assoc-in [:threads thread :draft :picks (keyword ask)] option)
+  (swap! state update :conflicts dissoc thread)
+  (post-super! thread "draft" {:ask ask :option option}))
 
 (defn- option-label [{:keys [options]} option]
   (or (some #(when (= option (:id %)) (:label %)) options) option))
@@ -388,7 +401,7 @@
 (defn- ask-card [thread picks replies {:keys [id text options recommended state stopped kind]}]
   (let [open? (= "open" state)
         picked (if open?
-                 (get-in picks [thread id])
+                 (get picks (keyword id))
                  (some #(get-in % [:picks (keyword id)]) (reverse replies)))]
     [:div.ask {:replicant/key id :class (when stopped "stopped")}
      [:div.ask-label (str (name kind) (when stopped " · stopped") (when-not open? (str " · " state)))]
@@ -419,25 +432,17 @@
       "thread-resolved" [:div.ev {:replicant/key n} [:span.ev-who "Archived"]]
       nil)))
 
-(defn- post-super! [thread verb body]
-  (swap! state update :busy-super conj thread)
-  (-> (request (str "/api/super/threads/" thread "/" verb)
-               {:method "POST" :headers {"Content-Type" "application/json"}
-                :body (js/JSON.stringify (clj->js body))})
-      (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))
-      (.finally (fn []
-                  (swap! state update :busy-super disj thread)
-                  (sync-inbox!)))))
-
 (defn- send-reply!
-  "Send the saved picks and note on THREAD as one reply, with an id kept until
-  the controller has it, so a retry is the same reply."
+  "Send THREAD's draft picks and the note as one reply, with an id kept until
+  the controller has it, so a retry is the same reply. The reply removes the
+  draft in the controller."
   [thread]
   (let [t (get-in @state [:threads thread])
-        picks (get (:picks @state) thread {})
-        note (get @drafts [:note thread] "")
+        picks (draft-picks t)
+        note (get @drafts [:note thread] (get-in t [:draft :note] ""))
+        version (get-in t [:draft :asks-version] (:asks-version t))
         pending (local "super-pending" {})
-        draft (js/JSON.stringify (clj->js {:picks picks :note note :asks-version (:asks-version t)}))
+        draft (js/JSON.stringify (clj->js {:picks picks :note note :asks-version version}))
         ;; A retry of the same draft keeps its id, so the controller sees one reply.
         ;; A changed draft is a new reply; reusing the id would return the old one.
         id (or (when (= draft (get-in pending [thread "draft"])) (get-in pending [thread "id"]))
@@ -446,18 +451,17 @@
     (swap! state update :busy-super conj thread)
     (-> (js/fetch (str "/api/super/threads/" thread "/reply")
                   (clj->js {:method "POST" :headers {"Content-Type" "application/json"}
-                            :body (js/JSON.stringify (clj->js {:id id :asks-version (:asks-version t) :picks picks :note note}))}))
+                            :body (js/JSON.stringify (clj->js {:id id :asks-version version :picks picks :note note}))}))
         (.then (fn [response]
                  (-> (.json response)
                      (.then (fn [body]
                               (let [body (js->clj body :keywordize-keys true)]
                                 (cond (.-ok response)
                                       (do (local! "super-pending" (dissoc (local "super-pending" {}) thread))
-                                          (picks! (dissoc (:picks @state) thread))
                                           (swap! drafts dissoc [:note thread]))
                                       (= 409 (.-status response))
                                       (do (local! "super-pending" (dissoc (local "super-pending" {}) thread))
-                                          (picks! (dissoc (:picks @state) thread))
+                                          (post-super! thread "discard-draft" {:id (str "dd-" (random-uuid))})
                                           (swap! state assoc-in [:conflicts thread] body))
                                       :else (swap! state assoc :inbox-error (:error body)))))))))
         (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))
@@ -475,8 +479,10 @@
               (when reply (str ": " (label {:options (:options a) :picks (:picks reply)})))))
           (when (empty? asks) ". Nothing is open."))]))
 
-(defn- super-thread-view [{:keys [threads picks conflicts busy-super inbox-error]} id]
+(defn- super-thread-view [{:keys [threads conflicts busy-super inbox-error]} id]
   (let [t (get threads id)
+        picks (draft-picks t)
+        note #(get @drafts [:note id] (get-in t [:draft :note] ""))
         busy (contains? busy-super id)
         open (filter #(= "open" (:state %)) (:asks t))
         archived (:resolved-at t)]
@@ -493,8 +499,10 @@
      (when (and t (not archived))
        [:div.bar
         [:textarea.note-box {:placeholder "Note to the Worker" :aria-label "Note"
-                             :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) (get @drafts [:note id] "")))
-                             :on {:input (fn [e] (swap! drafts assoc [:note id] (.. e -target -value)))}}]
+                             :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) (note)))
+                             ;; Typing stays local; leaving the box saves the note to the draft.
+                             :on {:input (fn [e] (swap! drafts assoc [:note id] (.. e -target -value)))
+                                  :change (fn [e] (post-super! id "draft" {:note (.. e -target -value)}))}}]
         [:div.bar-actions
          (when-let [r (last (filter #(= "review" (:kind %)) open))]
            [:button.send {:type "button" :disabled busy
@@ -503,7 +511,7 @@
             (str "Approve " (subs (str (:revision r)) 0 (min 8 (count (str (:revision r))))))])
          [:button.quiet {:type "button" :disabled (or busy (empty? open)) :on {:click #(post-super! id "dismiss" {:id (str "d-" (random-uuid))})}} "Mark read"]
          [:button.quiet {:type "button" :disabled busy :on {:click #(post-super! id "archive" {:id (str "a-" (random-uuid))})}} "Archive"]
-         [:button.send {:type "button" :disabled (or busy (and (empty? (get picks id)) (str/blank? (get @drafts [:note id] ""))))
+         [:button.send {:type "button" :disabled (or busy (and (empty? picks) (str/blank? (note))))
                         :on {:click #(send-reply! id)}} (if busy "Sending" "Send")]]])]))
 
 (defn- app-view [{:keys [agents current conversations error attachments sending view inbox] :as s}]
@@ -595,7 +603,6 @@
 
 (defonce started
   (do
-    (swap! state assoc :picks (local "super-picks" {}))
     (let [hash (subs (.. js/location -hash) 1)]
       (cond (= "inbox" hash) (swap! state assoc :view :inbox)
             (re-matches #"T\d+" hash) (swap! state assoc :view [:thread hash])))

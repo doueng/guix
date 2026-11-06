@@ -1,10 +1,11 @@
 (ns bbh.super.pane
   "`bbh inbox`: the verbs behind the Inbox buffer in the super-agent's Emacs,
   which shows `view` and `preview` and calls the rest from its keys.
-  The controller reloads it through the port `register` records. Picks, notes
-  and read cursors are this client's and live in ~/.local/state/bbh/inbox.edn
-  until `send` turns them into one reply. Bare `bbh inbox` opens a terminal
-  frame on that buffer."
+  The controller reloads it through the port `register` records. Picks and
+  notes are the thread's draft in the controller, which the phone shows too,
+  until `send` turns it into one reply. Read cursors and the selection are this
+  client's and live in ~/.local/state/bbh/inbox.edn. Bare `bbh inbox` opens a
+  terminal frame on that buffer."
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [bbh.super.client :as client]
@@ -20,7 +21,7 @@
 
 (defn client-state []
   (let [f (state-file)]
-    (if (fs/exists? f) (edn/read-string (slurp f)) {:picks {} :notes {} :cursors {}})))
+    (if (fs/exists? f) (edn/read-string (slurp f)) {:cursors {}})))
 
 (defn- save-client-state! [s]
   (fs/create-dirs (fs/parent (state-file)))
@@ -76,11 +77,11 @@
           (if (seq stale) (str " · old code: " (str/join ", " stale)) "")))
 
 (defn preview
-  "What the selected thread needs: its open ask with numbered options and the
-  saved picks, or its summary."
-  [{:keys [id title asks summary workers execution]} {:keys [picks notes]}]
+  "What the selected thread needs: its open ask with numbered options and its
+  draft's picks, or its summary."
+  [{:keys [id title asks summary workers execution draft]}]
   (let [open (sort-by :seq (filter #(= :open (:state %)) asks))
-        pick (get picks id {})]
+        pick (:picks draft {})]
     (str/join "\n"
               (concat [(str id "  " title) (str "execution " (name (or execution :none))
                                                  (when-let [w (last workers)] (str ", " (:id w) " " (name (:state w)))))
@@ -98,7 +99,7 @@
                                           [""]))
                                 open)
                         [(or summary "Nothing open.")])
-                      (when-let [n (get notes id)] ["note:" n])))))
+                      (when-let [n (not-empty (:note draft))] ["note:" n])))))
 
 (defn- sections
   "The controller's sections in the current order, with this pane's read cursors."
@@ -112,28 +113,20 @@
   when that is still the newest open ask, so a caller that judged one ask never
   picks on another that opened since."
   [id n & {expected :ask}]
-  (let [{:keys [asks asks-version]} (thread id)
+  (let [{:keys [asks]} (thread id)
         ask (last (sort-by :seq (filter #(= :open (:state %)) asks)))
         option (nth (:options ask) (dec n) nil)]
     (when (and expected (not= expected (:id ask)))
       (throw (ex-info (str "The ask on " id " changed; look again") {:error :stale})))
     (when (and ask option)
-      (when-let [version (get-in (client-state) [:versions id])]
-        (when (not= version asks-version) (throw (ex-info "Draft is stale; clear it before choosing again" {:error :stale}))))
-      (save-client-state! (-> (client-state) (assoc-in [:picks id (:id ask)] (:id option))
-                               (assoc-in [:versions id] asks-version))))))
+      (call! {:command :draft! :args {:thread id :pick [(:id ask) (:id option)]}}))))
 
 (defn send!
-  "Send the saved picks and note on thread ID as one reply. A stale version is
-  reported, not resent."
+  "Send thread ID's draft as one reply, which removes the draft. A stale
+  draft is reported, not resent."
   [id]
-  (let [{:keys [picks notes versions]} (client-state)
-        {:keys [asks-version]} (thread id)
-        asks-version (or (get versions id) asks-version)]
-    (when (or (seq (get picks id)) (get notes id))
-      (call! {:command :reply! :args {:thread id :asks-version asks-version
-                                      :picks (get picks id {}) :note (get notes id "")}})
-      (save-client-state! (-> (client-state) (update :picks dissoc id) (update :notes dissoc id) (update :versions dissoc id))))))
+  (when-let [{:keys [picks note asks-version]} (:draft (thread id))]
+    (call! {:command :reply! :args {:thread id :asks-version asks-version :picks picks :note note}})))
 
 (defn approve!
   "Approve the newest open review ask on thread ID at the revision and evidence
@@ -144,11 +137,9 @@
       (call! {:command :approve! :args {:thread id :ask (:id a) :revision (:revision a) :evidence-sha (:evidence-sha a)}}))))
 
 (defn note!
-  "Save LINE as the note for thread ID."
+  "Save LINE as the note of thread ID's draft."
   [id line]
-  (let [version (:asks-version (thread id))]
-    (save-client-state! (-> (client-state) (assoc-in [:notes id] line)
-                             (update-in [:versions id] #(or % version))))))
+  (call! {:command :draft! :args {:thread id :note line}}))
 
 (defn cancel!
   "Cancel thread ID's Worker, archived or not: the way to stop one whose
@@ -187,14 +178,14 @@
       ;; The Inbox buffer's reload: the header, then the rows, from one read.
       ;; The buffer keeps your place across reloads.
       "view" (let [s (sections)] (println (header s (version/stale (client/data-dir)))) (println (rows s)))
-      "preview" (println (preview (thread id) (client-state)))
+      "preview" (println (preview (thread id)))
       "select" (select! id)
-      "clear" (with-state-lock! #(save-client-state! (-> (client-state) (update :picks dissoc id) (update :notes dissoc id) (update :versions dissoc id))))
-      "pick" (with-state-lock! #(pick! id (parse-long n)))
-      "send" (with-state-lock! #(send! id))
+      "clear" (call! {:command :discard-draft! :args {:thread id}})
+      "pick" (pick! id (parse-long n))
+      "send" (send! id)
       "note" (let [line (str/trim (str/join " " (remove nil? (cons n more))))]
                (when (str/blank? line) (throw (ex-info "A note needs text" {:error :invalid})))
-               (with-state-lock! #(note! id line)))
+               (note! id line))
       "approve" (approve! id)
       "dismiss" (call! {:command :dismiss! :args {:thread id}})
       "resume" (call! {:command :resume! :args {:thread id}})

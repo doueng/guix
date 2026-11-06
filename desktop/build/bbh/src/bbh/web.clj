@@ -235,7 +235,7 @@
 (defn- super-api
   "/api/super: the inbox for the phone, over the controller under DIR."
   [dir {:keys [uri request-method] :as request}]
-  (let [[_ id verb] (re-matches #"/api/super/threads/(T\d+)(?:/(reply|approve|dismiss|archive))?" uri)
+  (let [[_ id verb] (re-matches #"/api/super/threads/(T\d+)(?:/(reply|approve|dismiss|archive|draft|discard-draft))?" uri)
         body (when (= :post request-method)
                (try (json/parse-string (slurp (:body request)) true) (catch Exception _ ::bad)))]
     (cond (and (= uri "/api/super/threads") (= :get request-method))
@@ -268,6 +268,13 @@
                                                 :picks (into {} (map (fn [[k v]] [(name k) v])) picks)
                                                 :note (str/trim (str note))}}
                                     202)))
+          ;; A draft is the same whatever retries it, so it needs no id.
+          (= "draft" verb)
+          (let [{:keys [ask option note]} body]
+            (cond (> (count (str note)) max-text) (json-response 413 {:error "Note too long"})
+                  (and (some? ask) (not (and (string? ask) (string? option)))) (json-response 400 {:error "A pick names its ask and option"})
+                  (and (nil? ask) (not (string? note))) (json-response 400 {:error "A draft change is a pick or a note"})
+                  :else (super-call dir {:command :draft! :args (cond-> {:thread id} ask (assoc :pick [ask option]) (string? note) (assoc :note note))} 200)))
           (= "approve" verb)
           (if (and (string? (:id body)) (every? (comp string? body) [:ask :revision :evidence-sha]))
             (super-call dir {:command :approve! :id (:id body)

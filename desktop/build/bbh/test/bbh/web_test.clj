@@ -290,6 +290,22 @@
         (is (= [202 "T1"] (post-super s "/api/super/threads/T1/archive" {:id "a-1"} from-page)))
         (is (= ["archived"] (map :section (:sections (second (get-json s "/api/super/threads"))))))))))
 
+(deftest the-page-and-the-inbox-share-one-draft-per-thread
+  (with-super
+    (fn [s c _]
+      (let [dir (:dir c)
+            call (fn [req] (bbh.super.client/call! dir req))]
+        (is (= [200 {:picks {:a1 "t"} :note "" :asks-version (:asks-version (second (get-json s "/api/super/threads/T1")))}]
+               (post-super s "/api/super/threads/T1/draft" {:ask "a1" :option "t"} from-page)))
+        (is (= 400 (first (post-super s "/api/super/threads/T1/draft" {:ask "a1" :option "zz"} from-page))) "an option the ask lacks")
+        (is (= 400 (first (post-super s "/api/super/threads/T1/draft" {} from-page))) "neither a pick nor a note")
+        (is (= 403 (first (post-super s "/api/super/threads/T1/draft" {:note "x"} {}))) "a cross-origin POST is refused")
+        ;; The Inbox in Emacs adds a note through the controller, and the page reads both.
+        (call {:command :draft! :args {:thread "T1" :note "from emacs"}})
+        (is (= {:picks {:a1 "t"} :note "from emacs"} (select-keys (:draft (second (get-json s "/api/super/threads/T1"))) [:picks :note])))
+        (is (= 202 (first (post-super s "/api/super/threads/T1/discard-draft" {:id "dd-1"} from-page))))
+        (is (nil? (:draft (second (get-json s "/api/super/threads/T1")))))))))
+
 (deftest an-approval-from-the-page-is-accepted-once-and-a-stale-one-is-a-conflict
   (let [c (start-super)
         dir (:dir c)
