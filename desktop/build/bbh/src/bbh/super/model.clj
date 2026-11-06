@@ -188,7 +188,7 @@
                        (format "Requested from %s." (some-> origin name))
                        (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
                                id thread wf-run (name workflow))
-                       (format "Work only in your jj workspace %s, your current directory. %s is the main checkout: read it if you need to, but do not edit it. Commit your work there: (super-done!) lands it on the tip of the person's line and removes the workspace. When it returns :conflicts instead, resolve them in your workspace and call it again."
+                       (format "Work only in your jj workspace %s, your current directory. %s is the main checkout: read it if you need to, but do not edit it. Its working-copy change is described wip(<thread> <worker>) so jj log shows whose it is; commit your work there with a real description (jj commit -m): (super-done!) lands it on the tip of the person's line and removes the workspace. When it returns :conflicts instead, resolve them in your workspace and call it again."
                                workspace repo)]))
 
 (defn- worker-of

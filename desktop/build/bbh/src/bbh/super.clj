@@ -78,11 +78,19 @@
   (let [{:keys [exit out err]} (apply p/shell {:dir dir :out :string :err :string :continue true} "jj" args)]
     (if (zero? exit) (str/trim out) (throw (ex-info (str "jj " (str/join " " args) ": " (str/trim err)) {:error :jj})))))
 
+(defn wip
+  "The description a new Worker workspace's working-copy change gets, so jj log
+  and jjui show whose it is. The Worker replaces it when it commits; land!
+  refuses to land it."
+  [{:keys [thread id title]}]
+  (str "wip(" thread " " id ")" (when-not (str/blank? title) (str ": " title))))
+
 (defn workspace!
-  "A jj workspace of REPO for WORKER under DIR, named <thread>-<generation>.
-  Returns its path; an existing one is reused. A REPO that does not exist yet
-  is a new project, made with `jj git init`."
-  [dir {:keys [repo thread generation]}]
+  "A jj workspace of REPO for WORKER under DIR, named <thread>-<generation>,
+  its working-copy change described with (wip WORKER). Returns its path; an
+  existing one is reused. A REPO that does not exist yet is a new project, made
+  with `jj git init`."
+  [dir {:keys [repo thread generation] :as worker}]
   (let [name (str thread "-" generation)
         path (str (fs/path dir "workspaces" name))]
     (when-not (fs/exists? repo)
@@ -90,7 +98,8 @@
       (jj-out repo "git" "init"))
     (when-not (fs/exists? path)
       (fs/create-dirs (fs/parent path))
-      (jj-out repo "workspace" "add" "--name" name path))
+      (jj-out repo "workspace" "add" "--name" name path)
+      (jj-out path "describe" "-m" (wip worker)))
     path))
 
 (defn- revs
@@ -98,7 +107,10 @@
   [dir revset]
   (remove str/blank? (str/split-lines (jj-out dir "log" "--no-graph" "-r" revset "-T" "commit_id.short() ++ \" \" ++ description.first_line() ++ \"\\n\""))))
 
-(def ^:private placeholder "(empty() & description(exact:\"\"))")
+(def ^:private wip-description "description(regex:\"^wip[(]\")")
+
+;; A Worker's working-copy change before it has work: empty, undescribed or still described by wip.
+(def ^:private placeholder (str "(empty() & (description(exact:\"\") | " wip-description "))"))
 
 (defn land!
   "Rebase the revision of the Worker in WORKSPACE, the commits its workspace has
@@ -115,15 +127,18 @@
   are resolved lands."
   [{:keys [workspace landed onto]}]
   (let [refuse (fn [error message] (throw (ex-info message {:error error})))]
-    (when (seq (revs workspace "@ & ~empty() & description(exact:\"\")"))
-      (refuse :in-progress "your working copy has uncommitted changes: commit them, or discard them, before super-done!"))
+    (when (seq (revs workspace (str "@ & ~empty() & (description(exact:\"\") | " wip-description ")")))
+      (refuse :in-progress "your working copy has uncommitted changes: commit them with a real description (jj commit -m), or discard them, before super-done!"))
     (let [line (str "(::default@-" (apply str (for [id landed] (str " | ::present(" id ")"))) ") ~ " placeholder)
           heads (if onto (revs workspace (str "exactly(" onto ", 1)")) (revs workspace (str "heads(" line ")")))
           _ (when (not= 1 (count heads))
               (refuse :unclear-tip (str "the line has " (count heads) " heads, so its tip is unclear: " (str/join "; " heads)
                                         ". Ask the person which one your revision goes on, then (super-done! {:onto \"<commit id>\"}).")))
           tip (first (str/split (first heads) #" "))
-          mine (str "(" tip "..@) ~ " placeholder)]
+          mine (str "(" tip "..@) ~ " placeholder)
+          _ (when-let [w (seq (revs workspace (str "(" mine ") & " wip-description)))]
+              (refuse :wip (str "these commits still have the wip placeholder description: " (str/join "; " w)
+                                ". Describe them (jj describe -r <id> -m ...), then (super-done!) again.")))]
       (if (empty? (revs workspace mine))
         {:onto tip :landed nil}
         (do (jj-out workspace "rebase" "-s" (str "roots(" tip "..@)") "-d" tip)
@@ -177,6 +192,8 @@
                        (let [b (str "super/" name)]
                          (jj-out repo "--ignore-working-copy" "bookmark" "set" "--allow-backwards" b "-r" (str "latest(" work ")"))
                          b))))]
+    ;; jj discards only an undescribed empty working copy on forget, so a wip one goes explicitly.
+    (when known? (jj-out repo "--ignore-working-copy" "abandon" "-r" (str name "@ & " placeholder " & ~::default@")))
     (when known? (jj-out repo "--ignore-working-copy" "workspace" "forget" name))
     (when (fs/exists? workspace) (fs/delete-tree workspace))
     bookmark))
@@ -206,7 +223,7 @@
 (defn- launch-steps! [{:keys [dir state launch] :as c} w token]
   (let [{:keys [workspace! wf-start! open!]} launch
         t (get-in @state [:threads (:thread w)])
-        workspace (workspace! dir w)
+        workspace (workspace! dir (assoc w :title (:title t)))
         conversation (str (fs/path (:conversations c) (str "super-" (:id w))))
         _ (fs/create-dirs conversation)
         wf-run (or (:wf-run w) (wf-start! workspace w))

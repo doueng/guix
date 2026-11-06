@@ -1570,6 +1570,41 @@
             (is (= ["three" "one" "two" "start"] (line-of repo (landed c "W3"))))
             (is (= #{"default"} (workspaces repo)))))))))
 
+(defn- wip-changes [repo]
+  (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "description(regex:\"^wip\")" "-T" "description.first_line() ++ \"\\n\""))
+
+(deftest a-workers-change-is-described-wip-until-it-commits-and-wip-never-lands
+  (with-workers
+    (fn [c dir repo _]
+      (doseq [t ["idle" "busy"]] (call dir {:command :thread! :args {:title t}}))
+      (let [[w1 w2] (map #(:ok (start-worker dir % :repo repo)) ["T1" "T2"])]
+        (assert (every? :workspace [w1 w2]) "both Workers started")
+        (is (= "wip(T1 W1): idle" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "T1-1@" "-T" "description.first_line()"))
+            "the user's jj log names the Worker and its thread")
+        (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})) "an idle Worker finishes")
+        (is (nil? (landed c "W1")) "landing nothing")
+        (is (= "wip(T2 W2): busy" (wip-changes repo)) "and its empty wip change is abandoned with its workspace")
+        (spit (str (fs/path (:workspace w2) "two")) "2\n")
+        (is (= :in-progress (:error (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
+            "edits under the wip description are uncommitted work")
+        (jj-in (:workspace w2) "new")
+        (is (= :wip (:error (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
+            "a commit still described wip does not land")
+        (jj-in (:workspace w2) "describe" "-r" "@-" "-m" "two")
+        (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
+        (is (= ["two" "start"] (line-of repo (landed c "W2"))))
+        (is (= "" (wip-changes repo)) "no wip change is left anywhere")))))
+
+(deftest retiring-unlanded-work-keeps-it-but-not-an-empty-wip-change
+  (let [repo (jj-repo)
+        dir (str (fs/create-temp-dir {:prefix "bbh-super-ws"}))
+        idle (super/workspace! dir {:repo repo :thread "T1" :id "W1" :title "idle" :generation 1})
+        busy (super/workspace! dir {:repo repo :thread "T2" :id "W2" :title "busy" :generation 1})]
+    (is (nil? (super/retire! {:repo repo :workspace idle :keep? true})) "an empty wip change is no work to keep")
+    (spit (str (fs/path busy "x")) "x\n")
+    (is (= "super/T2-1" (super/retire! {:repo repo :workspace busy :keep? true})))
+    (is (= "wip(T2 W2): busy" (wip-changes repo)) "the kept work stays, under its bookmark, still marked wip")))
+
 (defn- parent-of-default [repo]
   (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@-" "-T" "change_id"))
 
