@@ -388,7 +388,6 @@
       (start-worker dir "T1" :repo repo)
       (let [token (:token (first @launches))
             router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))]
-        (is (= :unknown-command (:error (call dir {:command :takeover! :args {:worker "W1"}}))))
         (is (= {:ok "W1"} (call dir {:token router :command :steer! :args {:worker "W1" :text "router says"}})))
         (is (= {:ok "W1"} (call dir {:token token :command :finish-worker! :args {:state-after :done}})) "the Worker ends itself")
         (is (= :working (:state (:ok (start-worker dir "T1" :repo repo)))))
@@ -1063,7 +1062,6 @@
       (call dir {:command :register-router! :args {:conversation "router"}})
       (call dir {:command :thread! :args {:title "Alt+W"}})
       (run-worker dir "T1")
-      (is (= :unknown-command (:error (call dir {:command :link! :args {:thread "T1" :resource "repo:engstrand/guix"}}))))
       (is (= {:to :router} (:ok (call dir {:command :say! :args {:origin :herdr :text "the review on engstrand/guix#12 wants tests"}}))))
       (is (= {:thread "T1" :to "W1"} (:ok (call dir {:command :say! :args {:origin :herdr :text "T1 the review wants tests"}})))))))
 (deftest routed-messages-ride-along-in-the-routers-next-batch-but-never-wake-it
@@ -1256,10 +1254,10 @@
                                          (start-cmd "s2" "T1")])]
     (is (= [:thread-has-worker] (map :error (drop 2 results))))))
 
-(deftest attach-worker-is-gone
-  (is (= [:unknown-command]
-         (map :error (drop 1 (:results (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                                                      [:owner {:id "a1" :command :attach-worker! :args {:thread "T1" :conversation "c"}}]])))))))
+(deftest removed-commands-are-unknown
+  (let [removed [:attach-worker! :link! :takeover! :handback! :restart-worker! :restart-failed! :worker-restarted!]
+        error #(:error (first (:results (run-commands [[:owner {:id "c1" :command % :args {:thread "T1" :worker "W1"}}]]))))]
+    (is (= (zipmap removed (repeat :unknown-command)) (zipmap removed (map error removed))))))
 
 (deftest a-stopped-ask-does-not-undo-a-cancel
   (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
@@ -1663,11 +1661,6 @@
       (is (= "T1 a" (super/release! {:conversation "super-W1" :dir "/repo"})))
       (is (= ["-s" (bbh.super.emacs/server) "--timeout=30" "--eval" "(eng/bbh-super-release \"super-W1\" \"/repo\")"]
              (args))))))
-
-(deftest restarts-are-gone
-  (let [{:keys [results]} (run-commands [[:controller {:id "r" :command :restart-worker! :args {:worker "W1" :at 1}}]
-                                         [:controller {:id "w" :command :worker-restarted! :args {:worker "W1" :buffer "p"}}]])]
-    (is (= [:forbidden :forbidden] (map :error results)))))
 
 ;; ---- the person's message a Router command names, and jobs a reboot lost ----
 
