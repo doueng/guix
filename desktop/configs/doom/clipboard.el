@@ -1,5 +1,8 @@
 ;;; clipboard.el --- Share the kill ring with the Wayland clipboard -*- lexical-binding: t; -*-
 
+;; Pasting over a visual selection keeps what was copied on the clipboard.
+(setq evil-kill-on-visual-paste nil)
+
 (setq select-enable-clipboard t
       select-enable-primary t
       save-interprogram-paste-before-kill t

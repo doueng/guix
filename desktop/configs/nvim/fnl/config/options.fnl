@@ -77,23 +77,6 @@
 (set vim.opt.splitright true)
 (set vim.opt.splitbelow true)
 
-(fn command-copy [script register]
-  (fn [lines regtype]
-    (let [text (table.concat lines "\n")]
-      (vim.fn.system [script register]
-                     (if (= regtype :V)
-                         (.. text "\n")
-                         text)))))
-
-(fn command-paste [script register]
-  (fn []
-    (let [text (vim.fn.system [script register])
-          regtype (if (= (text:sub -1) "\n") :V :v)
-          lines (vim.split text "\n" {:plain true})]
-      (when (and (= regtype :V) (= (. lines (length lines)) ""))
-        (table.remove lines (length lines)))
-      (values lines regtype))))
-
 ;; Neovim started outside Hyprland, e.g. by a shepherd service or a bbh agent,
 ;; lacks WAYLAND_DISPLAY, so wl-copy would miss the compositor. Use its socket.
 (let [dir (or vim.env.XDG_RUNTIME_DIR (.. "/run/user/" (vim.uv.getuid)))

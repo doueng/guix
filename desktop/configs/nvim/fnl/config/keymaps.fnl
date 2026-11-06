@@ -40,7 +40,10 @@
 (vim.keymap.set :n "<A-,>" :<cmd>BufferLineCyclePrev<cr> {:desc "Previous buffer"})
 (vim.keymap.set :n :<A-.> :<cmd>BufferLineCycleNext<cr> {:desc "Next buffer"})
 
-(vim.keymap.set [:n :v] :<C-v> "\"+p" {:desc "Paste from clipboard"})
+(vim.keymap.set :n :<C-v> "\"+p" {:desc "Paste from clipboard"})
+;; Pasting over a selection keeps what was copied: visual P does not yank.
+(vim.keymap.set :x :<C-v> "\"+P" {:desc "Paste from clipboard"})
+(vim.keymap.set :x :p :P {:desc "Paste without yanking the selection"})
 (vim.keymap.set :i :<C-v> :<C-r>+ {:desc "Paste from clipboard"})
 (vim.keymap.set :c :<C-v> :<C-r>+
                 {:desc "Paste from clipboard in command mode"})

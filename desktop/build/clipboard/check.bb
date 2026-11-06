@@ -74,7 +74,15 @@
     (check! (str "emacsclient -s " d " yank -> wl-paste") t wl-paste)
     (let [t (token "wl")]
       (wl-copy t)
-      (check! (str "wl-copy -> emacsclient -s " d " paste") (pr-str t) (ec "(current-kill 0)")))))
+      (check! (str "wl-copy -> emacsclient -s " d " paste") (pr-str t) (ec "(current-kill 0)")))
+    ;; Pasting over a visual selection must leave the copied text on the clipboard.
+    (let [t (token "visual")]
+      (wl-copy t)
+      (ec (str "(if (fboundp 'evil-visual-paste) "
+               "(with-temp-buffer (evil-local-mode 1) (insert \"old\") "
+               "(evil-visual-select 1 3) (evil-visual-paste 1)) "
+               "(kill-new \"no evil\"))"))
+      (check! (str "emacsclient -s " d " visual paste keeps the clipboard") t wl-paste))))
 
 ;; Neovim reads this checkout's config, not the stowed one.
 (def nvim-config-home
@@ -102,6 +110,12 @@
     (wl-copy t)
     (check! (str "wl-copy -> nvim paste (" label ")") t
             (nvim-tty env "vim.cmd('tabnew') vim.cmd('normal! p') return vim.fn.getline(1)"))))
+
+(let [t (token "visual")]
+  (wl-copy t)
+  (check! "nvim visual paste pastes the clipboard" t
+          (nvim-tty wl-env "vim.cmd('tabnew') vim.fn.setline(1, 'old') vim.cmd('normal 0viwp') return vim.fn.getline(1)"))
+  (check! "nvim visual paste keeps the clipboard" t wl-paste))
 
 (when (seq saved) (wl-copy saved))
 (let [rs @results]
