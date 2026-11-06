@@ -52,7 +52,7 @@ Switching models mid-conversation keeps the transcript. A Claude Code session th
 - `bbh.env/manifest`, read before every model request: the system prompt, the skill index and project instructions: `~/.config/bbh/AGENTS.md`, then `AGENTS.md` (or `CLAUDE.md`) in each directory from the repository root down to the working directory, nearest last. `bbh.repl/defaults` lists its other keys. `:effort` defaults to `medium` and `:max-tokens` to the model's limit, capped at 128,000. Changing `:system`, `:tool-description` or `:effort` mid-conversation costs one cache miss.
 - `bbh.env/expand-prompt`, which rewrites user input. It expands `/skill:NAME`, starts new conversations in poteto-mode, and answers `/poteto-mode-off` without the model.
 - `bbh.env/commands`, which agent-shell offers for completion.
-- `jev-classify-task`, the TypeSafe Jev router poteto-mode calls, plus the `sh`, `read-lines` and `edit!` helpers.
+- `jev-classify-task`, the TypeSafe Jev router poteto-mode calls, plus the `sh`, `read-lines`, `grep`, `ls` and `edit!` helpers.
 
 Skills come from Pi's directories, so the pstack pack and project skills load as they do in Pi.
 

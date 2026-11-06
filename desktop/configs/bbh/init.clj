@@ -23,6 +23,7 @@
 `fs`, `p` and `str` are aliased.
 
 - (sh \"cmd string\") runs the string with bash, so it needs no `bash -c` wrapper, and returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. (sh \"cmd\" \"arg\" ...) runs one argv, each word quoted. ($ \"cmd\") prints stdout, stderr and a nonzero exit, and returns nil; use it when you only want to see the result.
+- (grep pattern & paths) prints `path:line:text` hits for an rg regex (smart case, alternation a|b), skipping gitignored and binary files. Paths are files, directories or shell-style globs (`*` stays in one directory, `**` recurses). End with {:context n}, {:files true}, {:fixed true} or {:max n}. (ls & paths) prints a directory's entries, a glob's files or a file, with line counts.
 - (read-lines path) or (read-lines path start count) prints a line-count header and 1-based numbered lines (200 by default, fewer when they would pass about 7000 characters, ending with the `next:` call) and returns nil. It refuses binary files. Use slurp when code needs the text.
 - (edit! path old new) replaces exactly one occurrence, or every one with `:all true`, else throws. (edit! path [[old new] ...]) applies several in order and writes only if all match. It tolerates whitespace and indentation drift in old, keeps BOM and CRLF, and returns a summary with a diff.
 - (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits for it to finish, up to 10 min or :ms, and returns {:done? :exit :tail :log}; pass options as (job-wait id :ms 600000) or a map. Run `wf attest` and `wf review` as (job-wait (job \"wf attest ...\")), since they can outlast sh's budget. Waiting does not count against the evaluation's budget, so one call covers a long command. p/shell, http and Thread/sleep do count, so use a job for anything that may approach the deadline. Also job-status and jobs.
@@ -226,8 +227,18 @@ You are the Router of bbh super: one long-lived conversation that reads what the
       1 (slurp (str (first files)))
       (str/join "\n\n" (for [f files] (str "## " f "\n\n" (str/trim (slurp (str f)))))))))
 
+(def tool-description
+  "Evaluate Clojure in the persistent babashka REPL. Returns printed output and the last value.
+Prefer these helpers to shell commands for files: their output is capped and paged, lines are numbered, and arguments need no shell quoting.
+- Read a file: (read-lines path) or (read-lines path start count), not cat, head, tail or sed -n.
+- Search contents: (grep pattern & paths), not grep or rg. Paths may be globs such as \"src/**/*.clj\".
+- List files or count lines: (ls & paths-or-globs), not ls, find or wc -l.
+- Change a file: (edit! path old new); spit writes a new one.
+- For data in code, use slurp and fs/glob.
+- Everything else, such as jj, wf, builds and tests: ($ \"cmd\") to see the result, (sh \"cmd\") when code needs {:exit :out :err}, (job-wait (job \"cmd\")) when it may be slow.")
+
 (defn manifest []
-  {:system (if (= "router" (System/getenv "BBH_ROLE"))
+  (cond-> {:system (if (= "router" (System/getenv "BBH_ROLE"))
              (str router-helpers "\n\n" copyable-refs)
              (str base-prompt "\n- " copyable-refs
                   "\n\n" helper-reference
@@ -236,7 +247,8 @@ You are the Router of bbh super: one long-lived conversation that reads what the
                   "\n\nWorking directory: " (fs/cwd)
                   (some->> (skill-index) (str "\n\n"))
                   (when-let [p (project-instructions)]
-                    (str "\n\n# Project instructions\n\n" p))))})
+                    (str "\n\n# Project instructions\n\n" p))))}
+    (not= "router" (System/getenv "BBH_ROLE")) (assoc :tool-description tool-description)))
 
 (defn commands
   "Slash commands expand-prompt handles, for agent-shell's completion."
@@ -684,6 +696,96 @@ You are the Router of bbh super: one long-lived conversation that reads what the
     (cond timeout (println (str "[still running as job " job "; (job-wait " (pr-str job) ")]"))
           (not (zero? exit)) (println (str "[exit " exit "]")))
     (flush)))
+
+(defn- plural [n one many] (str n " " (if (= 1 n) one many)))
+
+(defn- glob? [s] (boolean (re-find #"[*?\[{]" (str s))))
+
+(defn- glob-parts
+  "[base glob] for a shell-style glob: its literal leading directories, and the rest anchored to them for rg."
+  [g]
+  (let [segs (str/split g #"/" -1)
+        lit (take-while (complement glob?) (butlast segs))
+        base (str/join "/" lit)]
+    [(cond (= [""] lit) "/" (seq lit) base :else ".")
+     (str "/" (str/join "/" (drop (count lit) segs)))]))
+
+(defn- rg-in
+  "Run rg with ARGV, whose last word is `.`, inside DIR. Returns sh's map plus :lines, its output lines with
+  paths as seen from the working directory."
+  [dir argv]
+  (let [r (sh (str (when (not= dir ".") (str "cd " (shell-quote dir) " && "))
+                   (str/join " " (map shell-quote (cons "rg" argv)))))
+        prefix (if (= dir ".") "" (str (str/replace dir #"/$" "") "/"))]
+    (assoc r :lines (vec (for [l (str/split-lines (:out r)) :when (seq l)]
+                           (if (= "--" l) l (str prefix (str/replace l #"^\./" ""))))))))
+
+(defn- print-capped
+  "Print LINES, a lazy seq of TOTAL lines, up to MAX lines and about 6000 characters, then what was left out."
+  [lines total max hint]
+  (loop [[l & more :as ls] lines shown 0 chars 0]
+    (if (and (seq ls) (< shown max) (< (+ chars (count l)) 6000))
+      (do (println l) (recur more (inc shown) (+ chars 1 (count l))))
+      (when (< shown total) (println (str "[" (- total shown) " more; " hint "]"))))))
+
+(defn grep
+  "Search file contents for the rg regex PATTERN and print `path:line:text` hits, capped. ARGS are files,
+  directories or shell-style globs (default `.`), then an optional map {:context n :files true :fixed true :max n}."
+  [pattern & args]
+  (let [[opts paths] (if (map? (last args)) [(last args) (butlast args)] [{} args])
+        {:keys [context files fixed max] :or {max 100}} opts
+        flags (concat ["--no-heading" "--with-filename" "--line-number" "--color" "never" "--smart-case" "--sort" "path"
+                       "--max-columns" "300" "--max-columns-preview"]
+                      (when files ["--files-with-matches"])
+                      (when fixed ["--fixed-strings"])
+                      (when context ["--context" (str context)]))
+        plain (remove glob? paths)
+        runs (concat (when (or (seq plain) (empty? paths))
+                       [["." (concat flags ["-e" pattern "--"] (or (seq plain) ["."]))]])
+                     (for [g (filter glob? paths) :let [[base gl] (glob-parts g)]]
+                       [base (concat flags ["--glob" gl "-e" pattern "--" "."])]))
+        results (mapv (fn [[dir argv]] (rg-in dir argv)) runs)
+        lines (vec (mapcat :lines results))
+        hits (if files lines (keep #(second (re-find #"^(.+?):\d+:" %)) lines))]
+    (when-let [bad (first (filter #(and (= 2 (:exit %)) (empty? (:lines %))) results))]
+      (throw (ex-info (str "grep: " (str/trim (:err bad)) "\nEscape regex characters, or pass {:fixed true} to match the text literally.")
+                      {:pattern pattern :paths paths})))
+    (if (empty? lines)
+      (println (str "No matches for " (pr-str pattern) " in " (str/join " " (or (seq paths) ["."]))
+                    (when (str/includes? pattern "\\|") ". rg writes alternation as a|b, not a\\|b.")))
+      (do (println (if files (plural (count hits) "file" "files") (str (plural (count hits) "match" "matches") " in " (plural (count (distinct hits)) "file" "files"))))
+          (print-capped lines (count lines) max "narrow the pattern or paths, or pass {:max n}")))
+    (doseq [r results :when (seq (:err r))] (println (str "stderr: " (first (str/split-lines (:err r))))))
+    (flush)))
+
+(defn- file-note [f]
+  (let [n (fs/size f)]
+    (if (> n 1000000)
+      (format "%.1f MB" (/ n 1e6))
+      (let [bs (fs/read-all-bytes f)]
+        (if (binary? f bs)
+          (plural n "byte" "bytes")
+          (plural (line-count (String. ^bytes bs "UTF-8")) "line" "lines"))))))
+
+(defn ls
+  "Print each PATH (default `.`): a directory's entries one level deep, the files matching a shell-style glob
+  (gitignored files left out), or a file, each with its line count. Capped at 200 entries per path."
+  [& paths]
+  (doseq [p (or (seq paths) ["."])]
+    (let [[names render]
+          (cond (glob? p)
+                (let [[base g] (glob-parts p)]
+                  [(sort (:lines (rg-in base ["--files" "--color" "never" "--glob" g "."]))) #(str % "  (" (file-note %) ")")])
+                (fs/directory? p)
+                [(sort-by (juxt (complement fs/directory?) #(str (fs/file-name %)))
+                          (remove #(str/starts-with? (str (fs/file-name %)) ".") (fs/list-dir p)))
+                 #(let [n (str (fs/file-name %))]
+                    (if (fs/directory? %) (str n "/  (" (plural (count (fs/list-dir %)) "entry" "entries") ")") (str n "  (" (file-note %) ")")))]
+                (fs/exists? p) [[p] #(str % "  (" (file-note %) ")")]
+                :else (throw (ex-info (str "Not found: " p (some->> (nearby-path p) (format ". Did you mean `%s`?"))) {})))]
+      (when (next paths) (println (str p ":")))
+      (if (empty? names) (println "(none)") (print-capped (map render names) (count names) 200 "pass a narrower path or glob"))))
+  (flush))
 
 (defn jobs
   "Every job of this conversation, newest first, without output."

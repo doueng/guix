@@ -65,6 +65,25 @@
                                (with-out-str ($ \"echo $?\"))
                                (try (look \"q\" nil \"missing.png\") (catch Exception e (ex-message e)))]" 10000)))
       (is (= "oops\nstderr:\nbad\n[exit 3]\n" (:value (repl/call conn "(with-out-str ($ \"echo oops; echo bad >&2; exit 3\"))" 10000))))
+      (is (= {:value ["2 matches in 2 files\nnested/child.txt:1:child\nsample.txt:2:child (x)\n"
+                      "No matches for \"CHILD\" in .\n"
+                      "1 match in 1 file\nsample.txt:2:child (x)\n"
+                      "2 matches in 2 files\nnested/child.txt:1:child\n[1 more; narrow the pattern or paths, or pass {:max n}]\n"
+                      "1 file\nnested/child.txt\n"
+                      true]}
+             (repl/call conn "(do (spit \"sample.txt\" \"first\\nchild (x)\\n\")
+                                 [(with-out-str (grep \"child\"))
+                                  (with-out-str (grep \"CHILD\"))
+                                  (with-out-str (grep \"(x)\" {:fixed true}))
+                                  (with-out-str (grep \"child\" {:max 1}))
+                                  (with-out-str (grep \"child\" \"nested/*.txt\" {:files true}))
+                                  (str/includes? (try (grep \"(x\") (catch Exception e (ex-message e))) \"{:fixed true}\")])" 10000))
+          "grep searches with smart case, globs, caps and literal text")
+      (is (= {:value ["nested/  (1 entry)\nimage.png  (1 byte)\nlong.txt  (300 lines)\nsample.txt  (2 lines)\n"
+                      "long.txt  (300 lines)\nnested/child.txt  (1 line)\nsample.txt  (2 lines)\n"
+                      "Not found: sample.tx. Did you mean `sample.txt`?"]}
+             (repl/call conn "[(with-out-str (ls)) (with-out-str (ls \"**/*.txt\")) (try (ls \"sample.tx\") (catch Exception e (ex-message e)))]" 10000))
+          "ls lists one level, a glob recursively, and suggests a near name")
       (finally (repl/kill! conn)))))
 
 (deftest instructions-load-from-the-repository-root-down-to-the-working-directory
