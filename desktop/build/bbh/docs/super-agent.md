@@ -173,7 +173,7 @@ Execution state, attention state and read state are independent facts. The secti
 | Quiet | nothing above and not resolved |
 | Archived | resolved, unless a row above matches. An ask opened after archiving needs you (archiving dismissed the asks open then); other new events show it as "came back" without unresolving. |
 
-The badge counts the first three. Progress notes update the thread's summary line without making it New; only milestones (a `wf` phase change, a push, an ask) do. The list order holds while you look, and new rows wait behind an "N new" line.
+The badge counts the first three. Progress notes update the thread's summary line without making it New; only milestones (a `wf` phase change, a push, an ask) do. When a Worker finishes, the controller replaces the summary with how it ended (`W3 done, landed abcd1234. Last note: …`, or `failed:` or `cancelled:` with the reason), and a new Worker starts with no summary, so a row never shows an old note as current. Each row also shows the thread's execution (queued, working, waiting, done, failed, cancelled), which the controller derives from its latest Worker. The list order holds while you look, and new rows wait behind an "N new" line.
 
 ## 6. Architecture
 

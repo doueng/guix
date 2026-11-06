@@ -240,11 +240,11 @@
   (let [sections {:badge 1
                   :sections [{:section :stopped :title "Stopped on you"
                               :threads [{:id "T1" :title "Alt+W closes windows" :updated-at (str (java.time.Instant/now))
-                                         :line "Keep the alias?\nSecond line"}]}
+                                         :execution :waiting :line "Keep the alias?\nSecond line"}]}
                              {:section :archived :title "Archived" :threads [{:id "T3" :title "old" :came-back true}]}]}
         [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
-    (is (re-matches #"T1\tSTOPPED ON YOU   T1   Alt\+W closes windows  Keep the alias\?  now" row1))
-    (is (re-matches #"T3\tARCHIVED         T3   old \(came back\)    " row3))
+    (is (re-matches #"T1\tSTOPPED ON YOU   T1   waiting   Alt\+W closes windows  Keep the alias\?  now" row1))
+    (is (re-matches #"T3\tARCHIVED         T3             old \(came back\)    " row3))
     (is (= "bbh inbox · 1 need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" (bbh.super.pane/header sections [])))
     (is (clojure.string/starts-with? (bbh.super.pane/header sections ["controller" "web"]) "bbh inbox · 1 need you · old code: controller, web   RET open"))
     (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
@@ -253,6 +253,34 @@
                                      :asks [{:id "a1" :state :open :seq 3 :text "Keep?" :stopped true :recommended "no"
                                              :options [{:id "no" :label "No"} {:id "yes" :label "Yes"}]}]
                                      :draft {:picks {"a1" "yes"} :note "and why" :asks-version 3}}))))))
+
+(deftest a-finished-worker-s-row-shows-how-it-ended-not-its-last-note
+  (let [base [{:seq 1 :kind :thread-created :thread "T1" :data {:id "T1" :title "Fix it"}}
+              {:seq 2 :kind :worker-started :thread "T1" :data {:id "W1" :state :starting :generation 1}}
+              {:seq 3 :kind :worker-running :thread "T1" :data {:id "W1" :conversation "super-W1" :outbox "o1" :text "brief"}}
+              {:seq 4 :kind :milestone :thread "T1" :data {:text "Writing failing test"}}]
+        finish (fn [data] {:seq 5 :kind :worker-finished :thread "T1" :data (assoc data :id "W1")})
+        row (fn [events]
+              (let [state (reduce model/fold model/empty-state events)]
+                [(get-in state [:threads "T1" :summary])
+                 (pane/rows {:sections (model/sections state {"T1" 5})})]))]
+    (testing "a running thread shows its execution and its latest note"
+      (is (re-find #"^T1\tWORKING +T1   working +Fix it  Writing failing test  " (second (row base)))))
+    (testing "finishing replaces the summary, and the row shows the outcome"
+      (let [[summary r] (row (conj base (finish {:state :done :landed "abcdef1234567890"})))]
+        (is (= "W1 done, landed abcdef12. Last note: Writing failing test" summary))
+        (is (re-find #"^T1\tQUIET +T1   done +Fix it  W1 done, landed abcdef12\. Last note: Writing failing test  " r)))
+      (is (= "W1 failed: REPL died. Last note: Writing failing test" (first (row (conj base (finish {:state :failed :reason "REPL died"}))))))
+      (is (= "W1 cancelled: Cancelled from the inbox. Last note: Writing failing test"
+             (first (row (conj base (finish {:state :cancelled :reason "Cancelled from the inbox"})))))))
+    (testing "a Worker that never wrote a note still gets a summary"
+      (is (= "W1 done" (first (row (conj (pop base) (finish {:state :done})))))))
+    (testing "the next generation does not show the last one's note as its own"
+      (let [events (conj base (finish {:state :done})
+                         {:seq 6 :kind :worker-started :thread "T1" :data {:id "W2" :state :starting :generation 2}}
+                         {:seq 7 :kind :worker-running :thread "T1" :data {:id "W2" :conversation "super-W2" :outbox "o2" :text "brief"}}
+                         {:seq 8 :kind :worker-finished :thread "T1" :data {:id "W2" :state :done}})]
+        (is (= "W2 done" (first (row events))))))))
 
 (deftest jjui-opens-in-the-worker-workspace-until-it-is-gone-then-the-repo
   (let [dir (fs/create-temp-dir {:prefix "bbh-inbox-dir"})

@@ -58,14 +58,16 @@
 (defn- first-line [s] (first (str/split-lines (str s))))
 
 (defn rows
-  "The Inbox rows: one `id<TAB>display` line per thread, grouped in section order.
-  Each display starts with its section's title in capitals; the Emacs Inbox reads
+  "The Inbox rows: one `id<TAB>display` line per thread, grouped in section order:
+  section, id, what its work is doing (the controller's derived execution), title,
+  line and age. Each display starts with its section's title in capitals; the Emacs Inbox reads
   ARCHIVED there to move the cursor off a thread you just archived."
   [{:keys [sections]}]
   (str/join "\n"
             (for [{section :title :keys [threads]} sections
-                  {:keys [id title line came-back updated-at]} threads]
-              (str id "\t" (format "%-16s %-4s %s%s  %s  %s" (str/upper-case section) id title
+                  {:keys [id title line came-back updated-at execution]} threads]
+              (str id "\t" (format "%-16s %-4s %-9s %s%s  %s  %s" (str/upper-case section) id
+                                     (if (contains? #{nil :none} execution) "" (name execution)) title
                                      (if came-back " (came back)" "")
                                      (or (some-> line first-line) "")
                                      (or (age updated-at) ""))))))

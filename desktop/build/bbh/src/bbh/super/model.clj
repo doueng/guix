@@ -616,12 +616,25 @@
   (let [w (get-in state [:workers id])]
     (-> state (bump :outbox)
         (update-in [:workers id] merge (dissoc running :id :outbox :text) {:state :working :queued-reason nil})
+        ;; The last Worker's note is not this one's.
+        (assoc-in [:threads thread :summary] nil)
         (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
                                     :state :pending :message nil})
         (assoc-in [:threads thread :worker] id))))
 
+(defn- finish-line
+  "Thread T's summary once Worker W ends with OUTCOME: how it ended, then the
+  last note W wrote, if any. A queued Worker never ran, so the note is not its."
+  [t w id outcome reason landed]
+  (let [note (when (:conversation w) (:summary t))]
+    (str id " " (name outcome)
+         (when landed (str ", landed " (subs landed 0 (min 8 (count landed)))))
+         (when-not (str/blank? reason) (str ": " reason))
+         (when note (str ". Last note: " note)))))
+
 (defmethod fold* :worker-finished [state {{:keys [id reason landed] outcome :state} :data :keys [thread seq]}]
-  (let [t (get-in state [:threads thread])]
+  (let [t (get-in state [:threads thread])
+        w (get-in state [:workers id])]
     (-> state
         (update-in [:workers id] #(cond-> (assoc % :state outcome :reason reason) landed (assoc :landed landed)))
         (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
@@ -630,7 +643,8 @@
         (cond-> (contains? #{id nil} (:worker t))
           (-> (assoc-in [:threads thread :worker] nil)
               (update-in [:threads thread :history] conj id)
-              (assoc-in [:threads thread :milestone-seq] seq))))))
+              (assoc-in [:threads thread :milestone-seq] seq)
+              (assoc-in [:threads thread :summary] (finish-line t w id outcome reason landed)))))))
 
 (defmethod fold* :cancel-requested [state {{:keys [id reason]} :data}]
   (update-in state [:workers id] assoc :state :cancelling :cancel-reason reason))
