@@ -86,6 +86,9 @@
                                :args {:worker worker :at i
                                       :health {:classification (if alive? :running :session-ended)
                                                :process (if alive? {:pid 7 :start "s"} {})
+                                               ;; In a turn, and one the person typed, as agent.json says.
+                                               :busy (boolean (and alive? (zero? (mod b 3))))
+                                               :prompted-at (when (and alive? (zero? (mod c 2))) (System/currentTimeMillis))
                                                :jobs (if (zero? (mod c 3)) [{:id "j1" :state :rebooted}] [])}}}])
       :resume! (let [ended (keep #(when (model/session-ended? %) (:thread %)) (vals (:workers state)))]
                  [:owner {:id id :command :resume! :token-hash (str "h" i) :policy policy
@@ -163,6 +166,11 @@
        [:two-workers-on-a-thread t])
      (for [a open :when (not (model/active-states (get-in state [:workers (:worker a) :state])))]
        [:open-ask-without-a-live-worker (:id a)])
+     ;; A Worker seen mid-turn is never shown as waiting.
+     (for [t (vals (:threads state))
+           :let [w (->> workers (filter #(= (:id t) (:thread %))) (sort-by (comp model/id-order :id)) last)]
+           :when (and (get-in w [:health :busy]) (= :waiting (model/execution state (:id t))))]
+       [:mid-turn-shown-waiting (:id t)])
      (for [w workers :when (= :waiting (:state w))
            :when (not-any? #(and (:stopped %) (= (:id w) (:worker %))) open)]
        [:waiting-without-a-stopped-ask (:id w)])
@@ -252,6 +260,14 @@
                (when (not= :forbidden (:error refused)) (bad :foreign-thread-not-forbidden))
                :else (when (= :forbidden (:error refused)) (bad :own-command-forbidden)))))
      (case (when-not (and (vector? principal) (= :forbidden (:error refused))) command)
+       :health!
+       ;; A prompt the person typed answers every ask the Worker opened before it.
+       (when-let [p (and (not refused) (get-in args [:health :prompted-at]))]
+         (let [w (get-in after [:workers (:worker args)])]
+           (when (and (#{:working :waiting} (get-in before [:workers (:worker args) :state]))
+                      (some #(and (= (:id w) (:worker %)) (= :open (:state %)) (< (:opened-at %) p)) (vals (:asks after))))
+             (bad :typed-answer-left-asks-open))))
+
        :start-worker!
        (cond (and t (= :router principal) (not (get-in before [:outbox (:for args) :origin])))
              (when (not= :invalid (:error refused)) (bad :router-start-without-a-message refused))

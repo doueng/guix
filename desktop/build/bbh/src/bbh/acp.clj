@@ -82,13 +82,14 @@
 
 (defn- announce!
   "Mark session S live, and BUSY or not, in the agent.json of the conversation
-  it is on now, and withdraw it from one it left through /resume."
+  it is on now, with when the person last typed a prompt into it, and withdraw
+  it from one it left through /resume."
   [s busy]
   (let [root (session/mail-root s)]
     (when-let [old (:announced @s)]
       (when (not= old root) (inbox/withdraw! old)))
     (swap! s assoc :announced root)
-    (inbox/announce! {:root root :project (:cwd @s)} busy)))
+    (inbox/announce! {:root root :project (:cwd @s) :prompted-at (:prompted-at @s)} busy)))
 
 (defn- new-session [{:keys [cwd]}]
   (let [[resume] (reset-vals! resume-dir nil)
@@ -169,7 +170,9 @@
           (throw (ex-info (str "This session's directory " (:cwd @s) " is gone, so bbh runs nothing in it. "
                                "If it was a bbh super Worker's workspace, that Worker is finished: ask the Router (SPC m r) to reopen its thread.")
                           {:rpc-code -32000})))
-        (swap! s assoc :busy true)
+        ;; Any prompt but the mail wake is the person typing, which answers open asks.
+        (swap! s #(cond-> (assoc % :busy true)
+                    (not= session/mail-wake (str/trim text)) (assoc :prompted-at (System/currentTimeMillis))))
         (announce! s true)
         (future
           (let [response (try

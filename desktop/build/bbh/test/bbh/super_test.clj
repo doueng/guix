@@ -850,6 +850,7 @@
         judge (fn [w obs] ((juxt :classification :problem) (model/health state w obs 1000 60000)))]
     (is (= [:running nil] (judge w alive)))
     (is (= [:waiting nil] (judge (assoc w :state :waiting) alive)))
+    (is (= [:running nil] (judge (assoc w :state :waiting) (assoc-in alive [:agent :busy] true))) "a turn wins over a stopped ask")
     (is (= [:waiting nil] (judge (assoc w :state :queued) {})))
     (is (= [:needs-human "Its session (pid 7) is alive but its REPL does not answer."] (judge w (assoc alive :repl? false))))
     (is (= [:needs-human "Delivery o1 has waited 2 min in its mailbox while the Worker runs; it is not taking messages."]
@@ -1085,6 +1086,23 @@
                                        [[:worker "W1"] {:id "k2" :command :ask! :args {:kind :question :text "FYI" :supersedes ["a1"]}}]])]
     (is (= :working (get-in state [:workers "W1" :state])))
     (is (= :working (model/execution state "T1")))))
+
+(deftest a-worker-answered-in-its-chat-is-working-and-its-asks-close
+  ;; T72: the person typed the answer into W69's buffer, so no reply closed its
+  ;; stopped asks and the Inbox showed it waiting while it worked.
+  (let [health (fn [id h] [:controller {:id id :command :health!
+                                         :args {:worker "W1" :at 0 :health (merge {:classification :running :process {:pid 7 :start "s"}} h)}}])
+        asking [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+                (start-cmd "at" "T1") (running "W1")
+                [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "Which?" :stopped true}}]]
+        busy (:state (run-commands (conj asking (health "h1" {:busy true :prompted-at 0}))))
+        typed (:state (run-commands (conj asking (health "h1" {:busy true :prompted-at (+ (System/currentTimeMillis) 1000)}))))]
+    (is (= :waiting (get-in busy [:workers "W1" :state])) "a prompt older than the ask answers nothing")
+    (is (= :open (get-in busy [:asks "a1" :state])))
+    (is (= :working (model/execution busy "T1")) "a session in a turn shows working")
+    (is (= :superseded (get-in typed [:asks "a1" :state])))
+    (is (= :working (get-in typed [:workers "W1" :state])))
+    (is (not= :stopped (model/section typed (get-in typed [:threads "T1"]) 0)))))
 
 (deftest a-worker-on-an-archived-thread-resumes-when-its-stopped-ask-is-answered
   (let [asking [[:owner {:id "t1" :command :thread! :args {:title "a"}}]

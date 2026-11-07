@@ -265,12 +265,14 @@
               (and agent (not repl?)) [:needs-human (format "Its session (pid %s) is alive but its REPL does not answer." (:pid agent))]
               stale [:needs-human (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
                                           (:id stale) (quot (:waited stale) 60000))]
-              agent [(if (= :waiting (:state w)) :waiting :running)]
+              ;; A session in a turn is working, whatever asks are open.
+              agent [(if (and (= :waiting (:state w)) (not (:busy agent))) :waiting :running)]
               (#{:working :waiting :cancelling} (:state w))
               [:session-ended (format "Its session ended. Resume it with u in the Inbox or bbh inbox resume %s." (:thread w))]
               :else [:starting])
         same? (= [classification problem] [(get-in w [:health :classification]) (get-in w [:health :problem])])]
     {:at now :process (select-keys agent [:pid :start]) :repl (boolean repl?)
+     :busy (boolean (:busy agent)) :prompted-at (:prompted-at agent)
      :workflow wf :classification classification :problem problem
      :since (if same? (or (get-in w [:health :since]) now) now)
      :oldest-unacked (some->> (vals (:outbox state))
@@ -285,9 +287,30 @@
   [w health]
   (not= (dissoc health :at) (dissoc (:health w) :at)))
 
+(defn- event-ms
+  "Epoch milliseconds of an event's :at, an ISO instant or a number, or nil."
+  [at]
+  (cond (number? at) (long at)
+        (string? at) (try (.toEpochMilli (java.time.Instant/parse at)) (catch Exception _ nil))))
+
+(defn answered-in-chat
+  "The ids of Worker W's open asks that the person answered in its chat: asks
+  opened before PROMPTED-AT, the epoch ms of the last prompt the person typed
+  into W's session. Such a turn answers them, though no reply was sent."
+  [state w prompted-at]
+  (when (and prompted-at (#{:working :waiting} (:state w)))
+    (->> (vals (:asks state))
+         (filter #(and (= (:id w) (:worker %)) (= :open (:state %))
+                       (some-> (:opened-at %) (< prompted-at))))
+         (sort-by :seq) (mapv :id) not-empty)))
+
 (defmethod decide* :health! [state {{:keys [worker health at]} :args}]
-  (worker-of state worker)
-  {:events [{:kind :health-observed :data {:worker worker :health health :at at}}] :result worker})
+  (let [w (worker-of state worker)
+        answered (answered-in-chat state w (:prompted-at health))]
+    {:events (cond-> [{:kind :health-observed :data {:worker worker :health health :at at}}]
+               answered (conj {:kind :asks-answered-in-chat :thread (:thread w)
+                               :data {:worker worker :asks answered :prompted-at (:prompted-at health)}}))
+     :result worker}))
 
 (defn- rebooted-jobs
   "The ids of Worker W's jobs that an earlier boot killed, as its last health
@@ -683,14 +706,17 @@
       (and (:worker t) (not stopped?) (not= :cancelling (get-in state [:workers (:worker t) :state])))
       (assoc-in [:workers (:worker t) :state] :working))))
 
-(defmethod fold* :ask-opened [state {{:keys [id stopped supersedes] :as ask} :data :keys [thread seq]}]
+(defmethod fold* :ask-opened [state {{:keys [id stopped supersedes] :as ask} :data :keys [thread seq at]}]
   (-> state (bump :asks)
       (set-states :asks supersedes :superseded)
-      (assoc-in [:asks id] (assoc ask :thread thread :seq seq :state :open))
+      (assoc-in [:asks id] (assoc ask :thread thread :seq seq :state :open :opened-at (event-ms at)))
       (assoc-in [:threads thread :asks-version] seq)
       (assoc-in [:threads thread :milestone-seq] seq)
       (cond-> stopped (assoc-in [:workers (:worker ask) :state] :waiting)
               (not stopped) (resume thread))))
+
+(defmethod fold* :asks-answered-in-chat [state {{:keys [asks]} :data :keys [thread]}]
+  (-> state (set-states :asks asks :superseded) (resume thread)))
 
 (defmethod fold* :reply-sent [state {{:keys [id picks dismiss outbox conversation text] :as reply} :data :keys [thread seq]}]
   (-> state (bump :outbox)
@@ -737,7 +763,8 @@
   [state thread]
   (let [t (get-in state [:threads thread])
         w (->> (vals (:workers state)) (filter #(= thread (:thread %))) (sort-by (comp id-order :id)) last)
-        e (get execution-of (:state w) :none)]
+        ;; A session seen in a turn is working, though a stale ask keeps it :waiting.
+        e (if (and (= :waiting (:state w)) (get-in w [:health :busy])) :working (get execution-of (:state w) :none))]
     (if (and (:resolved-at t) (not (#{:queued :starting :working :waiting} (:state w)))) :none e)))
 
 (defn thread-view

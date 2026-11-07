@@ -427,6 +427,7 @@
                                                         (when (seq (:dismiss data)) "marked read")
                                                         (:note data)]))]
       "reply-answered" [:div.ev {:replicant/key n} [:span.ev-who "Worker"] "read your reply"]
+      "asks-answered-in-chat" [:div.ev.you {:replicant/key n} [:span.ev-who "You"] "answered in the Worker's chat"]
       "note" [:div.ev {:replicant/key n} [:span.ev-who "Progress"] (:text data)]
       "milestone" [:div.ev.milestone {:replicant/key n} [:span.ev-who "Milestone"] (:text data)]
       "thread-resolved" [:div.ev {:replicant/key n} [:span.ev-who "Archived"]]

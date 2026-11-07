@@ -5,7 +5,7 @@
 \* which bbh.super.store commits in one transaction. Each action names them.
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS NW, Threads, Cap, MaxAsks, MaxReplies
+CONSTANTS NW, Threads, Cap, MaxAsks, MaxReplies, Chat  \* Chat: model turns and health passes
 
 Workers == 1..NW
 None == 0
@@ -24,11 +24,17 @@ VARIABLES
   resolved,  \* :resolved-at of each thread is set
   asks,      \* :asks, by id
   replies,   \* :replies, by id
-  ended      \* session-ended?: health found the Worker's session gone
+  ended,     \* session-ended?: health found the Worker's session gone
+  busy,      \* the Worker's session is in a turn, as agent.json :busy says
+  hbusy,     \* :busy of the Worker's stored health, the last pass's view of busy
+  fresh      \* a health pass ran on the Worker since the person last typed to it
 
-vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended>>
+chat == <<busy, hbusy, fresh>>
+vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, busy, hbusy, fresh>>
 
-NoAsk == [st |-> "none", worker |-> None, thread |-> NoThread, stopped |-> FALSE]
+\* typed: the person typed a prompt into the Worker's session after the ask
+\* opened (:prompted-at after :opened-at), which answers it.
+NoAsk == [st |-> "none", worker |-> None, thread |-> NoThread, stopped |-> FALSE, typed |-> FALSE]
 NoReply == [st |-> "none", thread |-> NoThread, picks |-> {}, to |-> None, taken |-> FALSE]
 
 Init ==
@@ -40,6 +46,9 @@ Init ==
   /\ asks = [a \in AskIds |-> NoAsk]
   /\ replies = [r \in ReplyIds |-> NoReply]
   /\ ended = [w \in Workers |-> FALSE]
+  /\ busy = [w \in Workers |-> FALSE]
+  /\ hbusy = [w \in Workers |-> FALSE]
+  /\ fresh = [w \in Workers |-> FALSE]
 
 \* next-id: ids are handed out in order, so Worker w exists only after w-1.
 NextWorker(w) == wstate[w] = "none" /\ \A v \in Workers : v < w => wstate[v] /= "none"
@@ -144,7 +153,7 @@ Ask(w, a, stopped, sup) ==
   /\ wstate[w] \in Running /\ tworker[t] = w
   /\ sup \subseteq OpenAsks(t)
   /\ LET as == [SetAsks(asks, sup, "superseded") EXCEPT ![a] =
-                   [st |-> "open", worker |-> w, thread |-> t, stopped |-> stopped]]
+                   [st |-> "open", worker |-> w, thread |-> t, stopped |-> stopped, typed |-> FALSE]]
      IN /\ asks' = as
         /\ wstate' = IF stopped THEN [wstate EXCEPT ![w] = "waiting"] ELSE Resume(t, as, wstate)
   /\ UNCHANGED <<wthread, launched, tworker, resolved, replies>>
@@ -185,7 +194,7 @@ Take(w, r) ==
   /\ replies[r].st = "sent" /\ ~replies[r].taken
   /\ replies[r].to = w /\ wstate[w] \in Running /\ ~Ended(w)
   /\ replies' = [replies EXCEPT ![r].taken = TRUE]
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, ended>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, ended, chat>>
 
 \* decide* :answered! by a live Worker of the reply's thread, fold* :reply-answered
 Answered(w, r) ==
@@ -204,13 +213,45 @@ Answered(w, r) ==
 SessionEnds(w) ==
   /\ wstate[w] \in {"working", "waiting", "cancelling"} /\ ~ended[w]
   /\ ended' = [ended EXCEPT ![w] = TRUE]
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies>>
+  /\ busy' = [busy EXCEPT ![w] = FALSE] /\ hbusy' = [hbusy EXCEPT ![w] = FALSE]
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, fresh>>
+
+\* bbh acp session/prompt: a live session starts a turn. A prompt other than
+\* the mail wake [mail] is the person typing, so agent.json :prompted-at moves
+\* past every open ask of the Worker.
+TurnStarts(w, typed) ==
+  /\ wstate[w] \in {"working", "waiting"} /\ ~Ended(w) /\ ~busy[w]
+  /\ busy' = [busy EXCEPT ![w] = TRUE]
+  /\ IF typed
+     THEN /\ asks' = [a \in AskIds |-> IF asks[a].st = "open" /\ asks[a].worker = w
+                                         THEN [asks[a] EXCEPT !.typed = TRUE] ELSE asks[a]]
+          /\ fresh' = [fresh EXCEPT ![w] = FALSE]
+     ELSE UNCHANGED <<asks, fresh>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, replies, ended, hbusy>>
+
+TurnEnds(w) ==
+  /\ busy[w] /\ busy' = [busy EXCEPT ![w] = FALSE]
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, hbusy, fresh>>
+
+\* reconcile! on a live Worker: decide* :health! stores what it saw of the turn,
+\* and answered-in-chat with fold* :asks-answered-in-chat supersedes the asks
+\* the person typed over and resumes the Worker.
+Health(w) ==
+  LET t == wthread[w]
+      as == [a \in AskIds |-> IF asks[a].st = "open" /\ asks[a].worker = w /\ asks[a].typed
+                              THEN [asks[a] EXCEPT !.st = "superseded"] ELSE asks[a]] IN
+  /\ wstate[w] \in {"working", "waiting"} /\ ~Ended(w)
+  /\ hbusy' = [hbusy EXCEPT ![w] = busy[w]]
+  /\ fresh' = [fresh EXCEPT ![w] = TRUE]
+  /\ asks' = as
+  /\ wstate' = Resume(t, as, wstate)
+  /\ UNCHANGED <<wthread, launched, tworker, resolved, replies, ended, busy>>
 
 \* decide* :resume! by the person, fold* :worker-resumed: only with a free slot.
 ResumeWorker(w) ==
   /\ Ended(w) /\ wstate[w] \in {"working", "waiting"} /\ ~Blocked(w)
   /\ ended' = [ended EXCEPT ![w] = FALSE]
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, chat>>
 
 Commands ==
   \/ \E w \in Workers, t \in Threads : StartWorker(w, t)
@@ -224,8 +265,9 @@ Commands ==
   \/ \E r \in ReplyIds, w \in Workers : Answered(w, r)
 
 Next ==
-  \/ Commands /\ UNCHANGED ended
+  \/ Commands /\ UNCHANGED <<ended, chat>>
   \/ \E w \in Workers : SessionEnds(w) \/ ResumeWorker(w)
+  \/ Chat /\ \E w \in Workers : Health(w) \/ TurnEnds(w) \/ \E typed \in BOOLEAN : TurnStarts(w, typed)
   \/ \E w \in Workers, r \in ReplyIds : Take(w, r)
 
 Spec == Init /\ [][Next]_vars
@@ -244,6 +286,14 @@ WaitingMeansStopped == \A w \in Workers : wstate[w] = "waiting" =>
 \* An open stopped ask keeps its Worker waiting.
 StoppedAskWaits == \A a \in AskIds : asks[a].st = "open" /\ asks[a].stopped =>
   wstate[asks[a].worker] \in {"waiting", "cancelling"}
+\* execution: a Worker the last health pass saw in a turn shows :working.
+Shown(w) == IF wstate[w] = "waiting" /\ hbusy[w] THEN "working" ELSE wstate[w]
+\* A Worker seen mid-turn is never shown as waiting.
+MidTurnNotShownWaiting == \A w \in Workers : hbusy[w] => Shown(w) /= "waiting"
+\* Once a health pass has seen that the person typed to a Worker, no ask they
+\* typed over is still open, so the Worker is not left waiting on it.
+TypedAnswerCloses == \A a \in AskIds :
+  asks[a].st = "open" /\ asks[a].typed => ~fresh[asks[a].worker]
 \* A reply is answered only after its session took it from the mailbox.
 AnsweredAfterTaken == \A r \in ReplyIds : replies[r].st = "answered" => replies[r].taken
 \* No Worker is launched for a thread the person archived.

@@ -17,15 +17,17 @@ description: Model-check the bbh super Worker, ask and reply lifecycles and the 
 | `OpenAskHasWorker` | An open ask has a live Worker. | The person answers into the void. |
 | `WaitingMeansStopped` | A Worker is `:waiting` only while one of its stopped asks is open. | The thread says it waits for the person while it does not. |
 | `StoppedAskWaits` | An open stopped ask keeps its Worker waiting. | The Worker runs on without the answer it stopped for. |
+| `MidTurnNotShownWaiting` | A Worker the last health pass saw in a turn shows `:working`, not `:waiting`. | The Inbox says it waits on the person while it works. |
+| `TypedAnswerCloses` | Once a health pass saw the person type to a Worker, no ask opened before that prompt is open. | Asks answered in the chat keep the Worker waiting forever. |
 | `AnsweredAfterTaken` | A reply is answered only after its addressee's live session took it from the mailbox. | A Worker marks a reply answered that it never read. |
 | `VisitsWithinCap` | No phase is visited more than `max-visits` times. | A run loops past its retry budget. |
 | `Settled` | A done or abandoned run stays so; a blocked run can only be abandoned. | An abandoned run comes back as blocked or done. |
 | `FollowsWorkflow` | The phase moves only to the current phase's `:next` or `:on-fail`. | A run skips or repeats phases whose gates never ran on the current code. |
 | `VisitsGrow` | A phase's visit count never goes back. | `verdict-for` matches a verdict given for an earlier visit. |
 
-Bounds. `Super.workers.cfg` has 3 Workers, 3 threads, a cap of 2 and no asks. `Super.asks.cfg` has 2 Worker generations on 1 thread, 2 asks and 2 replies. `Workflow.change.cfg` has two overlapping `wf attest` calls and `Workflow.serial.cfg` has one. A pass covers these bounds only.
+Bounds. `Super.workers.cfg` has 3 Workers, 3 threads, a cap of 2 and no asks. `Super.asks.cfg` has 2 Worker generations on 1 thread, 2 asks and 2 replies. `Super.chat.cfg` adds turns, typed prompts and health passes (`Chat = TRUE`) on 1 Worker, 2 asks and 1 reply. `Workflow.change.cfg` has two overlapping `wf attest` calls and `Workflow.serial.cfg` has one. A pass covers these bounds only.
 
-Left out. The `:for` record on Router commands (`ReplaceWorker` models a `:replaces` start with a session-ended Worker as the replaced one), the resume text, steering, job exits, what `health` reports beyond whether it saw a live session, a session the person reopens outside bbh, the Router's routing, outbox rows other than a reply's, tokens, `asks-version` staleness (the model's person always replies to the current version), and the SQL store. Gate results are chosen freely, so the wf model covers every pass, fail and pending order but not what a gate checks.
+Left out. The `:for` record on Router commands (`ReplaceWorker` models a `:replaces` start with a session-ended Worker as the replaced one), the resume text, steering, job exits, what `health` reports beyond the live session, its turn and the person's prompts, a session the person reopens outside bbh, the Router's routing, outbox rows other than a reply's, tokens, `asks-version` staleness (the model's person always replies to the current version), and the SQL store. Gate results are chosen freely, so the wf model covers every pass, fail and pending order but not what a gate checks.
 
 ## Coverage
 

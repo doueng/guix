@@ -64,6 +64,22 @@
           (is (= "end_turn" (get-in (last events) [:result :stopReason])))))
       (finally (stop! c)))))
 
+(deftest agent-json-says-when-the-person-last-typed-a-prompt
+  ;; The controller reads it to close asks answered in the chat; a mail wake is no answer.
+  (let [c (client ["a" "b"])
+        agent #(some-> (first (fs/glob (:dir c) "**/agent.json")) str slurp (json/parse-string true))]
+    (try
+      (let [sid (start! c)]
+        (send! c 3 "session/prompt" {:sessionId sid :prompt [{:type "text" :text "[mail]"}]})
+        (response! c 3)
+        (is (nil? (:prompted-at (agent))))
+        (let [before (System/currentTimeMillis)]
+          (send! c 4 "session/prompt" {:sessionId sid :prompt [{:type "text" :text "go for it"}]})
+          (response! c 4)
+          (is (<= before (:prompted-at (agent))))
+          (is (false? (:busy (agent))))))
+      (finally (stop! c)))))
+
 (deftest resume-continues-a-saved-conversation-under-the-same-session
   (let [c (client ["continued"])
         root (fs/path (:dir c) "bbh" "conversations")
