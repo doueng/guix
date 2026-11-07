@@ -108,18 +108,35 @@ exec unshare --user --map-user=\"$uid\" --map-group=\"$gid\" -- \"$@\"")
         (catch java.net.SocketException _ nil)))
     server))
 
+(defn- prepare!
+  "Inside the sandbox: recreate the workspace at BASE when it is gone, and start a fresh wf run like the recorded
+  one. Returns the new run id, or nil."
+  [cwd {:keys [repo workspace base wf]}]
+  (when (and repo (not (fs/exists? cwd)))
+    (p/shell {:out :string :err :string} "jj" "-R" repo "workspace" "add" "--name" workspace "-r" base cwd))
+  (when-let [{:keys [workflow task check repro bench]} wf]
+    (let [r (apply p/shell {:dir cwd :out :string :err :string :continue true :extra-env {"WF_RUN" ""}}
+                   "wf" "start" workflow "--task" task
+                   (concat (when check ["--check" check]) (when repro ["--repro" repro]) (when bench ["--bench" bench])))]
+      (or (second (re-find #"workflows/([^/\s]+)/evidence" (str (:out r) (:err r))))
+          (throw (ex-info (str "wf start failed: " (:err r)) {}))))))
+
 (defn drive!
-  "Inside the sandbox: run one bbh session on PROMPT and write OUT/result.edn."
-  [{:keys [out init cwd model prompt]}]
+  "Inside the sandbox: prepare, run one bbh session on PROMPT, and write OUT/result.edn. OLD-RUN in the prompt
+  becomes the fresh wf run."
+  [{:keys [out init cwd model prompt prepare old-run]}]
   (fs/create-dirs out)
   (let [server (super-stub! out)
+        run (prepare! cwd prepare)
         s (session/new-session {:dir (str out "/conversation") :init init :cwd cwd :model model
-                                :make-engine models/engine :emit (fn [_]) :env {"BBH_SUPER_TOKEN" "replay"}})]
+                                :make-engine models/engine :emit (fn [_])
+                                :env (cond-> {"BBH_SUPER_TOKEN" "replay"} run (assoc "WF_RUN" run))})
+        prompt (cond-> prompt (and run old-run) (str/replace old-run run))]
     (try
       (session/start-repl! s)
       (let [end (session/prompt! s prompt)
             f (fs/file out "conversation" "claude-session")]
-        (spit (str out "/result.edn") (pr-str {:end end :claude-session (when (fs/exists? f) (str/trim (slurp f)))})))
+        (spit (str out "/result.edn") (pr-str {:end end :run run :claude-session (when (fs/exists? f) (str/trim (slurp f)))})))
       (finally (session/close! s) (.close server)))))
 
 (defn- jsonl [f] (if (fs/exists? f) (mapv #(json/parse-string % true) (str/split-lines (slurp f))) []))
@@ -127,22 +144,28 @@ exec unshare --user --map-user=\"$uid\" --map-group=\"$gid\" -- \"$@\"")
 (defn run!
   "Run drive! for SPEC {:init :cwd :model :prompt} contained in SCRATCH. Returns what came out:
   {:out :result :blocked :super :changed}, where :changed lists the paths written under home."
-  [scratch spec]
+  [scratch spec & {:keys [timeout-ms] :or {timeout-ms (* 30 60 1000)}}]
   (let [home (System/getProperty "user.home")
         up (str scratch "/up")
         bin (write-shims! up)
         out (str (replay-dir home) "/run")
-        r (apply p/shell {:out :string :err :string :continue true
-                          :extra-env {"PATH" (str (str/replace bin up home) ":" (System/getenv "PATH"))}}
+        ;; This session's own bbh variables, such as its super token, stay outside.
+        env (-> (into {} (remove (fn [[k _]] (re-find #"^(BBH_|WF_)" k))) (System/getenv))
+                (assoc "PATH" (str (str/replace bin up home) ":" (System/getenv "PATH"))))
+        proc (apply p/process {:out :string :err :string :env env}
                  (argv {:scratch scratch :home home}
                        ["bb" "--config" (System/getProperty "babashka.config") "-e"
                         (str "(require 'bbh.sandbox) (bbh.sandbox/drive! " (pr-str (assoc spec :out out)) ")")]))
+        r (deref proc timeout-ms nil)
+        _ (when-not r (p/destroy-tree proc) @proc)
+        r (or r (assoc @proc :timed-out true))
         seen (str/replace out home up)
         result (let [f (str seen "/result.edn")] (when (fs/exists? f) (edn/read-string (slurp f))))]
     ;; ~/.claude is the real one, for credentials, so the replay's Claude Code session is removed from it.
     (when-let [id (:claude-session result)]
       (doseq [f (fs/glob (str home "/.claude/projects") (str "*/" id ".jsonl"))] (fs/delete f)))
     {:out seen
+     :timed-out (boolean (:timed-out r))
      :exit (:exit r)
      :err (:err r)
      :result result

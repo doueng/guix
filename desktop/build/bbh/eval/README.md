@@ -66,6 +66,12 @@ A session's own earlier calls prime its later ones (inferred from the 2026-11-07
 
 The network stays open for the model API. These are namespaces, not a security boundary.
 
+### Replay batches
+
+`bb eval:replay OUT --arm NAME=INIT... [--retry] CONVERSATION...` replays each recorded Worker conversation under each arm. `eval/bbh/replay.clj` keeps one journal, `OUT/journal.edn`, with one line per state change. An item goes selected, prepared, running, then finished, failed or timed-out, and later graded. `transitions` refuses any other move. An item that was left running when its process died becomes failed with `:lost`, and `--retry` sends failed and timed-out items back to prepared.
+
+Preparing an item reads the brief (the first user message), the working directory from agent.json, and the recorded wf run's workflow, task and check. For a removed super workspace it also finds the base revision: the parent of the workspace's first working-copy commit at the jj operation that created it. Inside the sandbox, `jj workspace add` recreates the workspace at that base, and `wf start` makes a fresh run whose id replaces the old one in the brief. Both write only to the overlay. A sandbox that outlasts the deadline (30 min) is killed.
+
 ## Runs and metrics
 
 Every conversation also writes `runs.jsonl`, a local run tree in the style of LangSmith. A trace is one user turn. The `turn` run's id is the trace id, and that turn's `llm` and `tool` runs name it as `parent`. A turn that rolls over mid turn writes its `turn` run in the new conversation, so its earlier child runs stay behind in the old one. Each run has `:start`, `:ms`, `:status` (`ok`, `error` or `interrupted`), `:model` and `:effort`. `llm` runs add `:usage`, `:tool-calls` and `:truncated`. `tool` runs add `:tool-call-id`, `:chars` and `:restart`, and a failed evaluation has status `error`. A `turn` run adds `:usage`, its summed tokens and cost, and `:messages`, the `[from to)` range it wrote in `messages.jsonl`. Runs reference content instead of copying it, so join on the message range or `:tool-call-id` to get prompts and outputs.

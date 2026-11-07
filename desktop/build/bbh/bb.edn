@@ -14,6 +14,9 @@
          eval:fork {:doc "Resample recorded tool calls under other prompts without running them. Spends Claude quota. Args: OUT [--n N] [--per-trace K | --first K] [--samples S] [--arm NAME=INIT|recorded]... ROOT..."
                     :requires ([bbh.fork])
                     :task (apply bbh.fork/-main *command-line-args*)}
+         eval:replay {:doc "Replay recorded Worker conversations contained, one item per arm, resuming OUT/journal.edn. Spends Claude quota. Args: OUT --arm NAME=INIT... [--retry] CONVERSATION..."
+                      :requires ([bbh.replay])
+                      :task (apply bbh.replay/-main *command-line-args*)}
          eval:show {:doc "Render one conversation directory as Markdown with assertion hits."
                     :requires ([bbh.traces])
                     :task (bbh.traces/show! (first *command-line-args*))}
