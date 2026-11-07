@@ -20,12 +20,6 @@
          eval:agreement {:doc "Judge precision and recall against human labels, with disagreements."
                          :requires ([bbh.labels])
                          :task (bbh.labels/agreement!)}
-         eval:swe-report {:doc "Markdown summary of Harbor SWE-rebench trials. Args: [--expected N] ROOT..."
-                          :requires ([bbh.swe-report])
-                          :task (apply bbh.swe-report/-main *command-line-args*)}
-         eval:harbor-check {:doc "Offline check of harbor/bbh_agent.py: Harbor's ACP runner drives bbh with a scripted model. Needs uv."
-                            :requires ([bbh.harbor-check])
-                            :task (bbh.harbor-check/-main)}
          eval:graders {:doc "Reject untouched fixtures and accept reference solutions."
                        :requires ([bbh.tasks])
                        :task (bbh.tasks/verify-graders!)}

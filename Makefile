@@ -16,7 +16,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify pi-sci pi-sci-test \
-        doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check swe-rebench-check updates-check clipboard-check
+        doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check updates-check clipboard-check
 
 help:
 	@echo 'lint          fast checks for every change: Scheme compiles, scripts parse, docs agree'
@@ -44,7 +44,6 @@ help:
 	@echo 'bbh-runs      write the newest $(BBH_RUNS) bbh conversations, prompts, tool calls and workflows to $(BBH_RUNS_OUT)'
 	@echo 'bbh-tla-check model-check the bbh super and wf state machines with TLA+ (desktop/build/bbh/verify/tla)'
 	@echo 'skill-diet-check check the skill-diet links and the bbh eval adapter'
-	@echo 'swe-rebench-check offline check of the bbh Harbor agent and the SWE-rebench workflow'
 	@echo 'pierre-diff-ansi install the highlighter behind jjui diff previews'
 	@echo 'bbh-web-highlights bundle that highlighter for the bbh website'
 	@echo 'dusk          build the dusk shell (desktop/build/dusk)'
@@ -150,10 +149,6 @@ pi-sci: $(PI_SCI_OUTPUTS)
 
 pi-sci-test:
 	desktop/build/pi-sci/verify.bb
-
-swe-rebench-check:
-	cd desktop/build/bbh && bb eval:harbor-check
-	uvx --from actionlint-py actionlint .github/workflows/swe-rebench.yml
 
 BBH_RUNS ?= 10
 BBH_RUNS_OUT ?= $(HOME)/.cache/bbh/runs.html

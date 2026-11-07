@@ -68,10 +68,6 @@
            "desktop/build/bbh/test/bbh/inbox_*.clj" "desktop/build/bbh/test/agent-shell-test.el"
            "desktop/build/bbh/bb.edn" "desktop/configs/bbh/init.clj" "desktop/configs/doom/{agent-shell,bbh-super}.el"]
    :checks ["cd desktop/build/bbh && bb test:emacs"]}
-  {:name "swe-rebench"
-   :paths [".github/workflows/swe-rebench.yml" "desktop/build/bbh/harbor/**"
-           "desktop/build/bbh/eval/bbh/{harbor_check,swe_report}.clj" "desktop/build/bbh/src/bbh/acp.clj"]
-   :checks ["make swe-rebench-check"]}
   {:name "pi-sci"
    :paths ["desktop/build/pi-sci/**" "desktop/pi/agent/extensions/**"]
    :checks ["make pi-sci-test"]}
