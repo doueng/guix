@@ -56,6 +56,30 @@
                                   (try (edit! \"sample.txt\" [[\"x\" \"z\"] [\"nope\" \"w\"]]) (catch Exception e (subs (ex-message e) 0 61)))
                                   (slurp \"sample.txt\")])" 10000))
           "a multi-edit writes every pair or none")
+      (is (= {:value "Applied edit\n--- a/mid.txt\n+++ b/mid.txt\n@@ -1,2 +1,2 @@\n-alpha beta\n+alpha BETA\n gamma\n"}
+             (repl/call conn (pr-str '(do (spit "mid.txt" "alpha beta\ngamma\n") (let [r (edit! "mid.txt" "beta" "BETA")] (fs/delete "mid.txt") r))) 10000))
+          "a match inside a line shows the whole line in the diff")
+      (let [{[refused kept forced broken] :value :as r}
+            (repl/call conn (pr-str '(do (spit "a.clj" "(ns a)\n(defn f [] 1)\n")
+                                         [(try (edit! "a.clj" "1)" "1") (catch Exception e (ex-message e)))
+                                          (slurp "a.clj")
+                                          (do (edit! "a.clj" "1)" "1" :force true) (slurp "a.clj"))
+                                          (edit! "a.clj" "f []" "g []")
+                                          (fs/delete "a.clj")])) 10000)]
+        (is (str/starts-with? (str refused) "Refusing to write a.clj: the result would not read: EOF while reading") (pr-str r))
+        (is (str/includes? refused "at [2,1]") refused)
+        (is (= "(ns a)\n(defn f [] 1)\n" kept) "a refused edit leaves the file unchanged")
+        (is (= "(ns a)\n(defn f [] 1\n" forced) ":force true writes it anyway")
+        (is (str/starts-with? broken "Applied edit") "the gate stands down when the file already failed to read"))
+      (let [{[created changed refused] :value}
+            (repl/call conn (pr-str '[(write! "w/d/new.edn" "{:a 1}\n")
+                                      (write! "w/d/new.edn" "{:a 2}\n")
+                                      (try (write! "w/d/new.edn" "{:a") (catch Exception e (ex-message e)))
+                                      (do (fs/delete-tree "w") nil)]) 10000)]
+        (is (= "Wrote w/d/new.edn (1 lines, new file)" created))
+        (is (str/includes? changed "Wrote w/d/new.edn (1 lines, was 1)\n--- a/w/d/new.edn\n+++ b/w/d/new.edn") changed)
+        (is (str/includes? changed "-{:a 1}\n+{:a 2}") changed)
+        (is (str/starts-with? refused "Refusing to write w/d/new.edn") refused))
       (let [printed (:out (repl/eval! conn "(do (spit \"long.txt\" (apply str (repeat 300 (str (apply str (repeat 99 \"x\")) \"\\n\")))) (read-lines \"long.txt\"))" 10000))]
         (is (< (count printed) 7200) "read-lines stays under the output cap")
         (is (str/includes? printed "showing lines 1-66)") printed)

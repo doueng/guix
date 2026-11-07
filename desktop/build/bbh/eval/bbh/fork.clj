@@ -152,7 +152,7 @@ exec \"$@\"")
         :let [code (:code (try (json/parse-string (get-in c [:function :arguments]) true) (catch Exception _ nil)))
               ch (choice code)]
         :when (#{:shell :helper} (:choice ch))]
-    (merge {:trace dir :id (:id c)} ch)))
+    (merge {:trace dir :id (:id c) :code code} ch)))
 
 (defn- pick
   "Up to N steps: the FIRST eligible steps of each trace when given, since a session's own earlier calls prime its
@@ -170,8 +170,8 @@ exec \"$@\"")
 
 (defn run!
   "Fork each picked step once per arm and sample, appending results to OUT/forks.jsonl and skipping those already
-  there. ARMS maps a name to :recorded or an init file."
-  [out {:keys [roots n per-trace first samples arms claude repo claude-dir]
+  there. ARMS maps a name to :recorded or an init file. MATCH, a regex, keeps only steps whose recorded code matches."
+  [out {:keys [roots n per-trace first samples arms claude repo claude-dir match]
          :or {n 10 per-trace 2 samples 1 repo "/home/engstrand/guix" claude-dir default-claude-dir}}]
   (fs/create-dirs out)
   (let [file (str (fs/path out "forks.jsonl"))
@@ -184,7 +184,8 @@ exec \"$@\"")
         steps (pick (for [t (traces/find-traces roots)
                           :let [cwd (some-> (fs/file (:dir t) "agent.json") str (#(when (fs/exists? %) (:project (json/parse-string (slurp %) true)))))]
                           :when cwd
-                          s (eligible-steps t)]
+                          s (eligible-steps t)
+                          :when (or (nil? match) (re-find (re-pattern match) (str (:code s))))]
                       (assoc s :cwd cwd))
                     n per-trace first)]
     (doseq [{:keys [id cwd] :as step} steps
@@ -239,6 +240,7 @@ exec \"$@\"")
           (= "--first" a) (recur more (assoc opts :first (parse-long v)))
           (= "--samples" a) (recur more (assoc opts :samples (parse-long v)))
           (= "--repo" a) (recur more (assoc opts :repo v))
+          (= "--match" a) (recur more (assoc opts :match v))
           (= "--arm" a) (let [[k init] (str/split v #"=" 2)]
                           (recur more (assoc-in opts [:arms (keyword k)] (if (= "recorded" init) :recorded init))))
           :else (recur (rest as) (update opts :roots conj a)))))

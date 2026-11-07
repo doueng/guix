@@ -112,7 +112,7 @@
 (defn report
   "A Markdown table per cohort of shell against helper file operations, then the leading shell words."
   [summaries]
-  (let [sum #(reduce add (map (fn [s] (select-keys s [:calls :shell-commands :shell :helpers :primary :bash-c])) %))
+  (let [sum #(reduce add {} (map (fn [s] (select-keys s [:calls :shell-commands :shell :helpers :primary :bash-c])) %))
         cell (fn [m k] (get m k 0))
         rows (for [[cohort ss] (sort-by key (group-by :cohort summaries)) :let [s (sum ss)]] [cohort (count ss) s])
         total (sum summaries)]

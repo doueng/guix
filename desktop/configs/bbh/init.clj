@@ -26,6 +26,7 @@
 - (grep pattern & paths) prints `path:line:text` hits for an rg regex (smart case, alternation a|b), skipping gitignored and binary files. Paths are files, directories or shell-style globs (`*` stays in one directory, `**` recurses). End with {:context n}, {:files true}, {:fixed true} or {:max n}. (ls & paths) prints a directory's entries, a glob's files or a file, with line counts.
 - (read-lines path) or (read-lines path start count) prints a line-count header and 1-based numbered lines (200 by default, fewer when they would pass about 7000 characters, ending with the `next:` call) and returns nil. It refuses binary files. Use slurp when code needs the text.
 - (edit! path old new) replaces exactly one occurrence, or every one with `:all true`, else throws. (edit! path [[old new] ...]) applies several in order and writes only if all match. It tolerates whitespace and indentation drift in old, keeps BOM and CRLF, and returns a summary with a diff.
+- (write! path text) writes a whole file, creating directories, and returns line counts and a diff. Both refuse a .clj, .bb or .edn result that would not read, unless the file already failed or you pass :force true.
 - (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits for it to finish, up to 10 min or :ms, and returns {:done? :exit :tail :log}; pass options as (job-wait id :ms 600000) or a map. Run `wf attest` and `wf review` as (job-wait (job \"wf attest ...\")), since they can outlast sh's budget. Waiting does not count against the evaluation's budget, so one call covers a long command. p/shell, http and Thread/sleep do count, so use a job for anything that may approach the deadline. Also job-status and jobs.
 - (shot url) saves a headless Chrome screenshot and returns its path. (look question & paths) has a Claude delegate describe images, since tool results carry text only. (delegate brief) runs a fresh agent, for an independent check.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
@@ -233,7 +234,7 @@ Prefer these helpers to shell commands for files: their output is capped and pag
 - Read a file: (read-lines path) or (read-lines path start count), not cat, head, tail or sed -n.
 - Search contents: (grep pattern & paths), not grep or rg. Paths may be globs such as \"src/**/*.clj\".
 - List files or count lines: (ls & paths-or-globs), not ls, find or wc -l.
-- Change a file: (edit! path old new); spit writes a new one.
+- Change a file: (edit! path old new). Write a whole file: (write! path text), not spit; it creates directories and returns a diff. Both refuse Clojure or EDN that would not read.
 - For data in code, use slurp and fs/glob.
 - Everything else, such as jj, wf, builds and tests: ($ \"cmd\") to see the result, (sh \"cmd\") when code needs {:exit :out :err}, (job-wait (job \"cmd\")) when it may be slow.")
 
@@ -506,15 +507,68 @@ Prefer these helpers to shell commands for files: their output is capped and pag
        :summary (str "Applied edit" (when all (str " (" (count ranges) " replacements)"))
                      (when fallback (str " (matched via " fallback " fallback — exact text not found; whitespace/indent tolerated)"))
                      (when-not (zero? delta) (format " (%+d lines)" delta))
-                     (when (and (<= (line-count matched) 200) (<= (line-count new) 200))
-                       (show-diff path content b matched new)))})))
+                     (let [ls (inc (or (str/last-index-of content "\n" (dec b)) -1))
+                           nl-end? (and (> e b) (= \newline (.charAt content (dec e))))
+                           le (if nl-end? (dec e) (or (str/index-of content "\n" e) (count content)))
+                           old-lines (subs content ls le)
+                           new-lines (str (subs content ls b)
+                                          (if (and nl-end? (str/ends-with? new "\n")) (subs new 0 (dec (count new))) new)
+                                          (when-not nl-end? (subs content e le)))]
+                       (when (and (<= (line-count old-lines) 200) (<= (line-count new-lines) 200))
+                         (show-diff path content ls old-lines new-lines))))})))
+
+(defn- parse-error
+  "Why TEXT does not read as Clojure or EDN, with its position, when PATH has such an extension; else nil."
+  [path text]
+  (when (re-find #"\.(clj|cljc|cljs|bb|edn)$" (str path))
+    (try (edamame.core/parse-string-all text {:all true :auto-resolve (fn [_] 'x) :readers (fn [_] identity)
+                                               :features #{:clj :bb} :read-cond :allow})
+         nil
+         (catch Exception e
+           (let [m (ex-message e) {:keys [row col]} (ex-data e)]
+             (if (and row (not (str/includes? m " at ["))) (str m " at [" row "," col "]") m))))))
+
+(defn- syntax-gate!
+  "Throw when NEW-TEXT fails to read for PATH while OLD-TEXT (nil for a new file) did not."
+  [path old-text new-text force]
+  (when-not force
+    (when-let [err (parse-error path new-text)]
+      (when (or (nil? old-text) (nil? (parse-error path old-text)))
+        (throw (ex-info (str "Refusing to write " path ": the result would not read: " err
+                             ". The file is unchanged. Fix the text, or pass :force true to write it anyway.") {}))))))
+
+(defn- replace-file! [path text]
+  (let [tmp (fs/create-temp-file {:dir (fs/parent (fs/absolutize path)) :prefix ".edit-"})]
+    (spit (str tmp) text)
+    (when (fs/exists? path) (fs/set-posix-file-permissions tmp (fs/posix-file-permissions path)))
+    (fs/move tmp path {:replace-existing true :atomic-move true})))
+
+(defn write!
+  "Write TEXT to PATH, creating parent directories, and return a summary with a diff against the old file (capped at
+  60 lines). A .clj, .cljc, .cljs, .bb or .edn result that would not read is refused unless the old file already failed,
+  or :force true."
+  [path text & {:keys [force]}]
+  (let [text (str text)
+        old (when (fs/exists? path) (slurp (str path)))]
+    (syntax-gate! path old text force)
+    (fs/create-dirs (fs/parent (fs/absolutize path)))
+    (replace-file! path text)
+    (str "Wrote " path " (" (line-count text) " lines"
+         (if old (str ", was " (line-count old) ")") ", new file)")
+         (when (and old (not= old text))
+           (let [d (:out (p/shell {:out :string :err :string :continue true :in old}
+                                  "diff" "-u" "--label" (str "a/" path) "--label" (str "b/" path) "-" (str path)))
+                 ls (str/split-lines d)]
+             (str "\n" (str/join "\n" (take 60 ls))
+                  (when (> (count ls) 60) (str "\n... " (- (count ls) 60) " more diff lines"))))))))
 
 (defn edit!
   "Replace OLD with NEW in PATH and return a summary with a diff. OLD must match once, or pass :all true.
   Whitespace and indentation drift in OLD is tolerated, and the summary says when it was. (edit! path [[old new] ...])
-  applies each pair in order and writes the file only when every pair matched."
+  applies each pair in order and writes the file only when every pair matched. A Clojure or EDN file that would stop
+  reading is left unchanged unless :force true."
   [path old & more]
-  (let [[edits {:keys [all]}] (if (string? old)
+  (let [[edits {:keys [all force]}] (if (string? old)
                                 [[[old (first more)]] (apply hash-map (rest more))]
                                 [old (apply hash-map more)])
         {:keys [content] :as src} (decode-for-edit path)
@@ -527,11 +581,9 @@ Prefer these helpers to shell commands for files: their output is capped and pag
                                                            e))))]
                                        [c (conj acc s)]))
                                    [content []] (map-indexed vector edits))
-        {:keys [text note]} (reencode src result)
-        tmp (fs/create-temp-file {:dir (fs/parent (fs/absolutize path)) :prefix ".edit-"})]
-    (spit (str tmp) text)
-    (fs/set-posix-file-permissions tmp (fs/posix-file-permissions path))
-    (fs/move tmp path {:replace-existing true :atomic-move true})
+        _ (syntax-gate! path content result force)
+        {:keys [text note]} (reencode src result)]
+    (replace-file! path text)
     (str (str/join "\n" summaries) (when note (str "\n" note)))))
 
 ;; Background jobs. State lives in files under the conversation's jobs directory, so a job and its result

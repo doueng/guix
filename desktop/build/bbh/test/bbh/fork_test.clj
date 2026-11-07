@@ -86,4 +86,7 @@
       (fork/run! (str tmp "/out") opts)
       (is (= 2 (count (str/split-lines (slurp file)))) "a rerun skips forks already recorded")
       (is (str/includes? (fork/report results) "| recorded | 2 | 2 | 2 | 100% (2/2) | $0.02 |"))
-      (is (str/includes? (fork/report results) "| conv | t2 | shell search | helper search |") "a row per step"))))
+      (is (str/includes? (fork/report results) "| conv | t2 | shell search | helper search |") "a row per step"))
+    (let [file (fork/run! (str tmp "/only-grep") {:roots [conv] :arms {:recorded :recorded} :claude ["bb" fake] :repo repo
+                                                  :claude-dir claude-dir :per-trace 5 :match "grep -n"})]
+      (is (= ["t2"] (mapv #(:id (json/parse-string % true)) (str/split-lines (slurp file)))) ":match keeps only steps whose code matches"))))
