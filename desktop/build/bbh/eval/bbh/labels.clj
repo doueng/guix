@@ -60,7 +60,7 @@
 
 ;; LLM judge
 
-(defn- sha8 [s]
+(defn sha8 [s]
   (subs (format "%064x" (java.math.BigInteger.
                           1 (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes s "UTF-8"))))
         0 8))

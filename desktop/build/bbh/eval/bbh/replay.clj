@@ -3,6 +3,7 @@
   state is the fold of its entries in OUT/journal.edn, so an interrupted batch resumes. See eval/README.md."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
+            [bbh.grade :as grade]
             [bbh.sandbox :as sandbox]
             [bbh.transcript :as transcript]
             [clojure.edn :as edn]
@@ -79,7 +80,9 @@
 (defn- run-item
   "Run one prepared item in a fresh sandbox under OUT/scratch. Returns [state data]."
   [out item {:keys [init cwd prompt repo workspace base wf old-run]} {:keys [model timeout-ms]}]
-  (let [scratch (str (fs/create-dirs (fs/path out "scratch" (str/replace item "/" "-"))))
+  (let [dir (fs/path out "scratch" (str/replace item "/" "-"))
+        _ (when (fs/exists? dir) (p/shell "chmod" "-R" "u+rwx" (str dir)) (fs/delete-tree dir))
+        scratch (str (fs/create-dirs dir))
         r (sandbox/run! scratch {:init init :cwd cwd :model model :prompt prompt :old-run old-run
                                  :prepare {:repo repo :workspace workspace :base base :wf wf}}
                         :timeout-ms timeout-ms)]
@@ -89,11 +92,7 @@
      (merge (select-keys r [:out :blocked :super :changed :exit]) {:result (:result r) :scratch scratch}
             (when-not (:result r) {:err (subs (str (:err r)) 0 (min 2000 (count (str (:err r)))))}))]))
 
-(defn run-batch!
-  "Replay each conversation in DIRS under each arm in ARMS ({name init}), one item at a time, resuming OUT's journal.
-  RUN-ITEM is injectable for tests. Returns the final states."
-  [out dirs arms {:keys [retry repo model run-item] :or {repo "/home/engstrand/guix" model "claude/claude-opus-5-5" run-item run-item}
-                  :as opts}]
+(defn- run-locked! [out dirs arms retry repo model run-item grade opts]
   (doseq [[item {:keys [state]}] (states out) :when (= :running state)]
     (transition! out item :failed {:reason :lost}))
   (doseq [dir dirs [arm init] arms
@@ -106,9 +105,24 @@
           (:failed :timed-out) (when retry (transition! out item :prepared {:reason nil}) (recur))
           :prepared (do (transition! out item :running {:started (str (java.time.Instant/now))})
                         (let [[to d] (run-item out item data (assoc opts :model model))]
-                          (transition! out item to d)))
+                          (transition! out item to d)
+                          (recur)))
+          :finished (transition! out item :graded (grade data opts))
           nil))))
   (states out))
+
+(defn run-batch!
+  "Replay each conversation in DIRS under each arm in ARMS ({name init}), one item at a time, resuming OUT's journal.
+  RUN-ITEM is injectable for tests. Returns the final states."
+  [out dirs arms {:keys [retry repo model run-item grade] :or {repo "/home/engstrand/guix" model "claude/claude-opus-5-5"
+                                                                    run-item run-item grade grade/grade}
+                  :as opts}]
+  (fs/create-dirs out)
+  (with-open [ch (java.nio.channels.FileChannel/open (fs/path out "lock")
+                   (into-array java.nio.file.OpenOption [java.nio.file.StandardOpenOption/CREATE java.nio.file.StandardOpenOption/WRITE]))]
+    (when-not (try (.tryLock ch) (catch IllegalStateException _ nil))
+      (throw (ex-info (str "replay: another batch holds " out) {:out out})))
+    (run-locked! out dirs arms retry repo model run-item grade opts)))
 
 (defn -main [out & args]
   (let [{:keys [arms dirs retry]}
@@ -117,5 +131,6 @@
                 (= "--arm" a) (let [[k init] (str/split v #"=" 2)] (recur more (assoc-in o [:arms k] (str (fs/absolutize init)))))
                 (= "--retry" a) (recur (rest as) (assoc o :retry true))
                 :else (recur (rest as) (update o :dirs conj a))))]
-    (doseq [[item {:keys [state data]}] (sort-by key (run-batch! out dirs arms {:retry retry}))]
-      (println item state (or (get-in data [:result :end]) (:reason data) "")))))
+    (let [md (grade/report (run-batch! out dirs arms {:retry retry}))]
+      (spit (str (fs/path out "report.md")) md)
+      (println md))))

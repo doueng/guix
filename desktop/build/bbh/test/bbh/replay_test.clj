@@ -26,20 +26,35 @@
         whole (str root "/whole")
         cut (str root "/cut")
         calls (atom 0)]
-    (replay/run-batch! whole dirs arms {:run-item finish})
-    (is (= {"W1/a" :finished "W1/b" :finished "W2/a" :finished "W2/b" :finished} (final whole)))
+    (replay/run-batch! whole dirs arms {:run-item finish :grade (fn [_ _] {:graded true})})
+    (is (= {"W1/a" :graded "W1/b" :graded "W2/a" :graded "W2/b" :graded} (final whole)))
     (is (= "brief for W2" (get-in (replay/states whole) ["W2/b" :data :prompt-seen])))
     (is (thrown? Exception
-                 (replay/run-batch! cut dirs arms {:run-item (fn [& args] (if (= 2 (swap! calls inc)) (throw (ex-info "killed" {})) (apply finish args)))}))
+                 (replay/run-batch! cut dirs arms {:run-item (fn [& args] (if (= 2 (swap! calls inc)) (throw (ex-info "killed" {})) (apply finish args))) :grade (fn [_ _] {})}))
         "the process dies during the second item")
     (is (= :running (get-in (replay/states cut) ["W1/b" :state])))
-    (replay/run-batch! cut dirs arms {:run-item finish})
+    (replay/run-batch! cut dirs arms {:run-item finish :grade (fn [_ _] {:graded true})})
     (is (= {:state :failed :reason :lost} (-> (replay/states cut) (get "W1/b") (#(hash-map :state (:state %) :reason (:reason (:data %)))))))
-    (replay/run-batch! cut dirs arms {:run-item finish :retry true})
+    (replay/run-batch! cut dirs arms {:run-item finish :grade (fn [_ _] {:graded true}) :retry true})
     (is (= (final whole) (final cut)) "after a retry the interrupted batch ends where the whole one did")
-    (is (= [:selected :prepared :running :failed :prepared :running :finished]
+    (is (= [:selected :prepared :running :failed :prepared :running :finished :graded]
            (mapv :to (filter #(= "W1/b" (:item %)) (replay/entries cut)))))
     (is (thrown-with-msg? Exception #"cannot go from nil to :finished" (replay/transition! (str root "/x") "W9/a" :finished {})))))
+
+(deftest a-second-batch-on-the-same-out-is-refused-while-the-first-runs
+  (let [root (str (fs/create-temp-dir {:prefix "bbh-replay-lock"}))
+        cwd (str (fs/create-dirs (fs/path root "ws")))
+        dirs [(conversation! root "W1" cwd)]
+        out (str root "/out")
+        inner (atom nil)]
+    (replay/run-batch! out dirs {"a" "/i.clj"}
+                       {:grade (fn [_ _] {})
+                        :run-item (fn [& args]
+                                    (reset! inner (try (replay/run-batch! out dirs {"a" "/i.clj"} {:run-item finish :grade (fn [_ _] {})})
+                                                       (catch Exception e (ex-message e))))
+                                    (apply finish args))})
+    (is (re-find #"another batch holds" (str @inner)))
+    (is (= [:selected :prepared :running :finished :graded] (mapv :to (replay/entries out))))))
 
 (deftest the-base-revision-and-recorded-run-come-from-the-op-log-and-the-brief
   (let [root (str (fs/create-temp-dir {:prefix "bbh-replay-base"}))

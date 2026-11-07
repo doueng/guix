@@ -144,8 +144,10 @@ exec unshare --user --map-user=\"$uid\" --map-group=\"$gid\" -- \"$@\"")
 (defn run!
   "Run drive! for SPEC {:init :cwd :model :prompt} contained in SCRATCH. Returns what came out:
   {:out :result :blocked :super :changed}, where :changed lists the paths written under home."
-  [scratch spec & {:keys [timeout-ms] :or {timeout-ms (* 30 60 1000)}}]
+  [scratch spec & {:keys [timeout-ms]}]
   (let [home (System/getProperty "user.home")
+        _ (when (fs/starts-with? (fs/absolutize scratch) home)
+            (throw (ex-info (str "sandbox: scratch " scratch " is under home, which the overlay covers; use /tmp or /var/tmp") {})))
         up (str scratch "/up")
         bin (write-shims! up)
         out (str (replay-dir home) "/run")
@@ -156,7 +158,7 @@ exec unshare --user --map-user=\"$uid\" --map-group=\"$gid\" -- \"$@\"")
                  (argv {:scratch scratch :home home}
                        ["bb" "--config" (System/getProperty "babashka.config") "-e"
                         (str "(require 'bbh.sandbox) (bbh.sandbox/drive! " (pr-str (assoc spec :out out)) ")")]))
-        r (deref proc timeout-ms nil)
+        r (deref proc (or timeout-ms (* 30 60 1000)) nil)
         _ (when-not r (p/destroy-tree proc) @proc)
         r (or r (assoc @proc :timed-out true))
         seen (str/replace out home up)

@@ -70,7 +70,16 @@ The network stays open for the model API. These are namespaces, not a security b
 
 `bb eval:replay OUT --arm NAME=INIT... [--retry] CONVERSATION...` replays each recorded Worker conversation under each arm. `eval/bbh/replay.clj` keeps one journal, `OUT/journal.edn`, with one line per state change. An item goes selected, prepared, running, then finished, failed or timed-out, and later graded. `transitions` refuses any other move. An item that was left running when its process died becomes failed with `:lost`, and `--retry` sends failed and timed-out items back to prepared.
 
-Preparing an item reads the brief (the first user message), the working directory from agent.json, and the recorded wf run's workflow, task and check. For a removed super workspace it also finds the base revision: the parent of the workspace's first working-copy commit at the jj operation that created it. Inside the sandbox, `jj workspace add` recreates the workspace at that base, and `wf start` makes a fresh run whose id replaces the old one in the brief. Both write only to the overlay. A sandbox that outlasts the deadline (30 min) is killed.
+Preparing an item reads the brief (the first user message), the working directory from agent.json, and the recorded wf run's workflow, task and check. For a removed super workspace it also finds the base revision: the parent of the workspace's first working-copy commit at the jj operation that created it. Inside the sandbox, `jj workspace add` recreates the workspace at that base, and `wf start` makes a fresh run whose id replaces the old one in the brief. Both write only to the overlay. A sandbox that outlasts the deadline (30 min) is killed. Keep OUT outside home (for example under /var/tmp), because the scratch directory cannot sit inside the overlay it backs, and keep init files where the sandbox can see them: home or /var/tmp, not /tmp.
+
+After running, an item is graded against its original:
+- Metrics: calls, sh commands, shell share, tool errors, tokens and minutes.
+- The wf outcome of both runs.
+- A pairwise judge: Claude Code without tools, with `eval/replay-judge.md`, answering better, same or worse for the replay.
+
+`OUT/report.md` has a row per original and per item, then a per-arm summary. Only the brief is replayed; later mailbox replies are not, so pick single-prompt Workers. A batch locks `OUT/lock`, so a second batch on the same OUT is refused, and a retried item gets a fresh scratch directory.
+
+The replay starts at the base revision, but the overlay still shows the repo's later history and the later conversations, so a replay can find that its task was already done. In the 2026-11-07 batch (W56, W62, W64, W65 and W66), the baseline replays of W62 and W66 did that and were judged worse for it. Read verdicts with that in mind.
 
 ## Runs and metrics
 
