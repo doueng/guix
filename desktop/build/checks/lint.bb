@@ -55,11 +55,29 @@
         :when (not-any? (c/matcher glob) files)]
     (str "checks.edn rule " name ": " glob " matches no tracked file")))
 
+(defn sha256 [& parts]
+  (let [md (java.security.MessageDigest/getInstance "SHA-256")]
+    (doseq [p parts] (.update md (if (string? p) (.getBytes ^String p "UTF-8") ^bytes p)))
+    (format "%064x" (BigInteger. 1 (.digest md)))))
+
+;; Compiling every .scm file takes about 9 s. The result depends only on those
+;; files, the data modules/ reads at load time (such as nixpkgs/lock.sexp), the
+;; checker and the Guix build, so a pass is remembered under a key made from all
+;; of them, and any change recompiles everything.
+(defn scheme-problems []
+  (let [scm (sort (filter #(str/ends-with? % ".scm") files))
+        key (apply sha256 (str (fs/real-path guix)) (slurp (str c/root "/desktop/build/checks/scheme.scm"))
+                   (mapcat (fn [f] [f (sha256 (fs/read-all-bytes (str c/root "/" f)))])
+                           (sort (distinct (concat scm (filter #(str/starts-with? % "modules/") files))))))
+        stamp (fs/path (or (System/getenv "XDG_CACHE_HOME") (str (fs/home) "/.cache")) "guix-lint" key)]
+    (when-not (fs/exists? stamp)
+      (let [{:keys [exit out err]} (apply c/sh guix "repl" "-L" "modules" "--" "desktop/build/checks/scheme.scm" scm)]
+        (if (zero? exit)
+          (do (fs/create-dirs (fs/parent stamp)) (spit (str stamp) "") nil)
+          [(str/trim (str err out))])))))
+
 (def steps
-  [["scheme" #(let [{:keys [exit out err]}
-                     (apply c/sh guix "repl" "-L" "modules" "--" "desktop/build/checks/scheme.scm"
-                           (filter (fn [f] (str/ends-with? f ".scm")) files))]
-                 (when-not (zero? exit) [(str/trim (str err out))]))]
+  [["scheme" scheme-problems]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
    ;; Scripts are babashka: `#!/usr/bin/env bb`, with babashka.process/exec for wrappers.
    ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))
