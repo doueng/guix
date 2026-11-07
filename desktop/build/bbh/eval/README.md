@@ -55,6 +55,17 @@ It spends Claude quota. A fork costs about $0.02 at list price when its prefix i
 
 A session's own earlier calls prime its later ones (inferred from the 2026-11-07 smoke runs). On random steps the treatment init's helper share was 25% (2/8) against the baseline's 22% (2/9). On each session's first file-work step it was 100% (8/8) against 43% (3/7). A description change therefore shows mostly in new sessions, so use `--first` to measure one.
 
+## Full replay containment
+
+`eval/bbh/sandbox.clj` runs a whole bbh session so that its side effects stay in a scratch directory. `(sandbox/run! scratch {:init :cwd :model :prompt})` starts the session under `unshare -rm` and returns the result, the blocked commands, the super-* calls and the paths it wrote.
+- **Overlay on $HOME.** Every write under home goes to `SCRATCH/up`: repositories and their jj and git state, wf runs, bbh conversations and super.db. The real ~/.claude and ~/.claude.json are bound back in, so a credential refresh is kept. The replay's Claude Code session file is deleted from it afterwards.
+- **Hidden.** ~/.ssh, ~/.gnupg, ~/.password-store, ~/.config/gh, ~/.git-credentials and ~/.netrc are hidden. /tmp and /run/user/UID get fresh tmpfs mounts, so the Emacs, Hyprland, ydotool and ssh-agent sockets are gone.
+- **Uid.** A nested user namespace maps back to your uid, so tools find your home again.
+- **Blocked.** A PATH shim blocks sudo, herd, systemctl, loginctl, reboot, shutdown, hyprctl, ydotool, emacsclient, notify-send, gh, `guix system|home`, `git push`, `jj git push` and `make switch|home`. Each block is logged with exit 126.
+- **super-\*.** A stub controller records each call. Asks get ids; nothing reaches the real controller.
+
+The network stays open for the model API. These are namespaces, not a security boundary.
+
 ## Runs and metrics
 
 Every conversation also writes `runs.jsonl`, a local run tree in the style of LangSmith. A trace is one user turn. The `turn` run's id is the trace id, and that turn's `llm` and `tool` runs name it as `parent`. A turn that rolls over mid turn writes its `turn` run in the new conversation, so its earlier child runs stay behind in the old one. Each run has `:start`, `:ms`, `:status` (`ok`, `error` or `interrupted`), `:model` and `:effort`. `llm` runs add `:usage`, `:tool-calls` and `:truncated`. `tool` runs add `:tool-call-id`, `:chars` and `:restart`, and a failed evaluation has status `error`. A `turn` run adds `:usage`, its summed tokens and cost, and `:messages`, the `[from to)` range it wrote in `messages.jsonl`. Runs reference content instead of copying it, so join on the message range or `:tool-call-id` to get prompts and outputs.
