@@ -11,13 +11,17 @@
 ;; The super-agent controller: the store, the command socket, the dispatcher
 ;; that feeds bbh mailboxes, and the website.  It publishes the website with
 ;; `tailscale serve', which the operator setting in tailscaled lets this user
-;; do without root.
+;; do without root.  tailscaled also keeps that mapping in its state, and the
+;; site listens on loopback, so a publish that fails while tailscaled is still
+;; starting is only logged and the service needs nothing from Tailscale.
 (define %bbh-super-service
   (simple-service 'familiar-bbh-super home-shepherd-service-type
     (list (shepherd-service
            (provision '(bbh-super))
            (documentation "The bbh super-agent controller, its SQLite store and the website.")
            (respawn? #t)
+           (respawn-limit #~'(5 . 60))
+           (respawn-delay 2)
            (start #~(lambda ()
                       (let ((home (getenv "HOME")))
                         ((make-forkexec-constructor
