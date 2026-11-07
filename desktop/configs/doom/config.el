@@ -482,65 +482,12 @@ ultimately to plain `find-file' when the current directory is not a project."
               (when envrc-mode
                 (envrc-mode -1)))))))))
 
-;; Notebooks: code-cells opens .ipynb through `jupytext --to auto:percent` as a
-;; `# %%` script and sends cells to the major mode's REPL. Jupytext comes from
-;; the Guix home profile. Localleader keys mirror the Neovim molten setup.
 (add-hook 'inferior-python-mode-hook #'visual-line-mode)
 
 ;; Keep REPL windows pinned to the newest output and prompt.
 (after! comint
   (setq comint-scroll-to-bottom-on-output t
         comint-scroll-to-bottom-on-input t))
-
-;; Notebooks enable `code-cells-mode' after `python-mode', and evil has already
-;; computed the buffer's keymaps by then. Recompute them so the `SPC m' cell keys
-;; work at once instead of after the first state change.
-(add-hook 'code-cells-mode-hook #'evil-normalize-keymaps)
-
-(use-package! code-cells
-  :defer t
-  :config
-  ;; Upstream saves with plain `jupytext --to ipynb`, which drops every output.
-  ;; `--update` merges the script into the notebook on disk and keeps them.
-  (defadvice! eng/code-cells-write-ipynb-a (&optional file)
-    "Write the buffer to FILE as a notebook, keeping outputs already there."
-    :override #'code-cells-write-ipynb
-    (let ((file (expand-file-name (or file buffer-file-name)))
-          (log (get-buffer-create " *jupytext*")))
-      (with-current-buffer log (erase-buffer))
-      (save-restriction
-        (widen)
-        (unless (eq 0 (call-process-region nil nil "jupytext" nil log nil
-                                           "--to" "ipynb" "--update" "--quiet"
-                                           "--output" file "-"))
-          (error "jupytext failed: %s"
-                 (with-current-buffer log (string-trim (buffer-string))))))
-      (when (equal file buffer-file-name)
-        (set-buffer-modified-p nil)
-        (set-visited-file-modtime))
-      'job-done))
-  (defun eng/code-cells-python-send-region (start end)
-    "Send START..END to the buffer's Python REPL, starting it if needed."
-    (let ((proc (or (python-shell-get-process)
-                    (run-python nil nil nil))))
-      ;; A new REPL defines python.el's eval helpers on its first prompt.
-      (with-current-buffer (process-buffer proc)
-        (with-timeout (15 (user-error "Python REPL did not start"))
-          (while (not python-shell--first-prompt-received)
-            (accept-process-output proc 0.1))))
-      (python-shell-send-region start end)))
-  (dolist (mode '(python-mode python-ts-mode))
-    (setf (alist-get mode code-cells-eval-region-commands)
-          #'eng/code-cells-python-send-region))
-  (map! :localleader
-        :map code-cells-mode-map
-        :desc "Start Python REPL"   "i" #'run-python
-        :desc "Eval cell/region"    "c" #'code-cells-eval
-        :desc "Eval cell and next"  "n" #'code-cells-eval-and-step
-        :desc "Eval all cells"      "a" #'code-cells-eval-whole-buffer
-        :desc "Eval cells above"    "A" #'code-cells-eval-above
-        :desc "Next cell"           "j" #'code-cells-forward-cell
-        :desc "Previous cell"       "k" #'code-cells-backward-cell))
 
 (defun eng/project-session-resume ()
   "Resume the last session saved for `default-directory'.

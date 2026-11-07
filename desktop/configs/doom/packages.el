@@ -2,4 +2,3 @@
 
 (package! consult-gh)
 (package! agent-shell)
-(package! code-cells)
