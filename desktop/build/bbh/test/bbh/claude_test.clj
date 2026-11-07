@@ -4,6 +4,7 @@
             [babashka.process :as p]
             [bbh.claude]
             [bbh.models :as models]
+            [bbh.repl :as repl]
             [bbh.runs :as runs]
             [bbh.session :as session]
             [bbh.transcript :as transcript]
@@ -77,6 +78,24 @@
             (is (= [["1" false] ["1" false]]
                    (for [{:keys [env args]} @started]
                      [(get env "DISABLE_AUTO_COMPACT") (boolean (some #{"--resume"} args))]))))
+          (finally (session/close! s)))))))
+
+(deftest a-changed-system-prompt-restarts-claude-code-without-the-recorded-snapshot
+  ;; Claude Code reuses a resumed conversation's recorded system prompt unless the snapshot is off.
+  (with-recorded-cli
+    (fn [started]
+      (let [{:keys [s]} (harness)]
+        (try
+          (repl/eval! (:repl @s) "(intern (create-ns 'bbh.env) 'manifest {:system \"Codeword APPLE.\"})" 10000)
+          (is (= :end-turn (session/prompt! s "again")))
+          (repl/eval! (:repl @s) "(intern (create-ns 'bbh.env) 'manifest {:system \"Codeword BANANA.\"})" 10000)
+          (is (= :end-turn (session/prompt! s "again")))
+          (is (= [[false false "off"] [true true "off"]]
+                 (for [{:keys [args]} @started]
+                   [(boolean (some #{"--resume"} args))
+                    (boolean (some #(str/includes? % "BANANA") (when (some #{"--resume"} args) args)) )
+                    (second (drop-while #(not= "--system-prompt-snapshot" %) args))]))
+              "the restart resumes with the new prompt, and Claude Code must not swap the recorded one back in")
           (finally (session/close! s)))))))
 
 (deftest a-claude-overflow-continues-in-a-new-conversation

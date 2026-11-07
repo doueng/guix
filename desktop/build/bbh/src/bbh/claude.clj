@@ -78,7 +78,8 @@
                     "--verbose" "--include-partial-messages"
                     "--tools" "" "--strict-mcp-config" "--mcp-config" (json/generate-string mcp)
                     "--allowedTools" tool-name "--setting-sources" ""
-                    "--system-prompt" system "--model" (:model engine)
+                    ;; Otherwise a resume keeps the recorded prompt and drops a changed one.
+                    "--system-prompt-snapshot" "off" "--system-prompt" system "--model" (:model engine)
                     (concat (when effort ["--effort" effort])
                             (when resume ["--resume" resume])))
         queue (LinkedBlockingQueue.)]
