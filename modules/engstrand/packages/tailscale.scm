@@ -8,14 +8,14 @@
 (define-public tailscale
   (package
     (name "tailscale")
-    (version "1.104.2")
+    (version "1.104.5")
     (source
      (origin
        (method url-fetch)
        (uri (string-append "https://pkgs.tailscale.com/stable/tailscale_"
                            version "_arm64.tgz"))
        (sha256
-        (base32 "0yr3z8765awc789dna4wkhwwv0glp5abprbbwqb1kvxm06lslxjp"))))
+        (base32 "0v1v9630hjbs16hw3y06w0shbsij5b73ghmj0kjs28shwbkb0079"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (arguments

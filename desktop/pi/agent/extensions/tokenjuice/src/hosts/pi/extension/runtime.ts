@@ -1,9 +1,11 @@
-import { readFile, stat } from "node:fs/promises";
+import { readBoundedTextFile } from "../../../core/bounded-text-file.js";
+import {
+  compactBashResult,
+  getOutputAwareInspectionSkipReason,
+  shouldSkipCommand,
+} from "../../../core/integrations/compact-bash-result.js";
 
-import { compactBashResult, getOutputAwareInspectionSkipReason } from "../../../core/integrations/compact-bash-result.js";
-
-import type { Pi, PiContext, PiToolResultEvent } from "./pi-types.js";
-import { isRecord } from "./pi-types.js";
+import { type Pi, type PiContext, type PiToolResultEvent, isRecord } from "./pi-types.js";
 import { getAutoCompactionEnabled } from "./settings.js";
 import { buildTokenjuiceStatusMessage, buildTokenjuiceStatusSnapshot } from "./status.js";
 import { showTokenjuiceStatusPanel } from "./status-panel.js";
@@ -21,6 +23,7 @@ import { formatErrorMessage } from "./utils.js";
 
 export type PiExtensionRuntimeConfig = {
   extensionCommand: string;
+  skipCommandNames?: string[];
 };
 
 const DEFAULT_MAX_INLINE_CHARS = 1200;
@@ -41,19 +44,8 @@ export function createTokenjuicePiExtension(config: PiExtensionRuntimeConfig) {
     }
 
     async function loadFullOutputText(fullOutputPath: string): Promise<string | null> {
-      let details;
       try {
-        details = await stat(fullOutputPath);
-      } catch (error) {
-        throw new Error(`tokenjuice failed to stat bash full output file ${fullOutputPath}: ${formatErrorMessage(error)}`);
-      }
-
-      if (details.size > MAX_TRUSTED_FULL_OUTPUT_BYTES) {
-        return null;
-      }
-
-      try {
-        return await readFile(fullOutputPath, "utf8");
+        return await readBoundedTextFile(fullOutputPath, MAX_TRUSTED_FULL_OUTPUT_BYTES);
       } catch (error) {
         throw new Error(`tokenjuice failed to read bash full output file ${fullOutputPath}: ${formatErrorMessage(error)}`);
       }
@@ -156,6 +148,9 @@ export function createTokenjuicePiExtension(config: PiExtensionRuntimeConfig) {
       if (!enabled || !autoCompactEnabled || !command) {
         return undefined;
       }
+      if (shouldSkipCommand(command, config.skipCommandNames)) {
+        return undefined;
+      }
 
       const outputText = extractTextContent(event.content);
       if (!outputText.trim()) {
@@ -187,6 +182,7 @@ export function createTokenjuicePiExtension(config: PiExtensionRuntimeConfig) {
         return undefined;
       }
 
+      const artifactDir = process.env.TOKENJUICE_ARTIFACT_DIR?.trim();
       let outcome;
       try {
         outcome = await compactBashResult({
@@ -202,6 +198,9 @@ export function createTokenjuicePiExtension(config: PiExtensionRuntimeConfig) {
           genericFallbackMinSavedChars: GENERIC_FALLBACK_MIN_SAVED_CHARS,
           genericFallbackMaxRatio: GENERIC_FALLBACK_MAX_RATIO,
           skipGenericFallbackForCompoundCommands: true,
+          storeRaw: true,
+          ...(artifactDir ? { storeDir: artifactDir } : {}),
+          ...(config.skipCommandNames ? { skipCommandNames: config.skipCommandNames } : {}),
           metadata: {
             source: "pi-tool-result",
           },

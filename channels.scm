@@ -3,7 +3,7 @@
   (name 'guix)
   (url "https://codeberg.org/guix/guix")
   (branch "master")
-  (commit "37bb0f08195f8fd09a6c75bff9f07940d817605c")
+  (commit "704ad8ced8ac2a6f94ddaf6edbfa1ae7d154dd44")
   (introduction
    (make-channel-introduction
     "9edb3f66fd807b096b48283debdcddccfea34bad"
@@ -13,7 +13,7 @@
   (name 'asahi)
   (url "https://codeberg.org/asahi-guix/channel")
   (branch "main")
-  (commit "ee2e7465c0137224bcc0ad3b3d0d02109cb3a6c7")
+  (commit "b9132769b361431e999f7d166d715ef4c6e101d2")
   (introduction
    (make-channel-introduction
     "3eeb493b037bea44f225c4314c5556aa25aff36c"

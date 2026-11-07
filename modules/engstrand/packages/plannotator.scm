@@ -10,14 +10,14 @@
 (define-public plannotator
   (package
     (name "plannotator")
-    (version "0.28.38")
+    (version "0.28.51")
     (source
      (origin
        (method url-fetch)
        (uri (string-append "https://github.com/backnotprop/plannotator/releases/download/v"
                            version "/plannotator-linux-arm64"))
        (sha256
-        (base32 "0hs9340qf8g6k2ay0l97lyjl72c8p8yvb41ipbdqxmglp8778rrd"))))
+        (base32 "1px84dfa9ycih1wi6ji160rdm4gi9224izyyaadbfhm11c3x4a2v"))))
     (build-system copy-build-system)
     (supported-systems '("aarch64-linux"))
     (arguments
