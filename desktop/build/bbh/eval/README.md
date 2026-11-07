@@ -41,6 +41,20 @@ The judge runs Claude Code without tools on your subscription. It uses `opus` un
 
 `eval:agreement` treats bad as the positive class. Precision is the share of the judge's bad verdicts that you also marked bad. Recall is the share of your bad labels that the judge caught. The true negative rate is the share of your good labels the judge kept good. Raw agreement misleads when most traces are good, so the command does not report it. The command prints every disagreement with both critiques. Use those critiques to edit `judge.md`, then rerun `eval:judge` and `eval:agreement`. Trust the judge on unlabeled traces only after its precision and recall hold on 25 to 50 of your labels, and keep labeling a sample after that.
 
+## Fork replay
+
+`bb eval:fork OUT [--n N] [--first K | --per-trace K] [--samples S] [--arm NAME=INIT|recorded]... ROOT...` asks how a recorded session would have gone under another system prompt or tool description, without running anything. `eval/bbh/fork.clj` picks steps whose recorded code did file work and finds each step's Claude Code session file through the tool_use id. It cuts the file before that response and resumes the cut copy with `--fork-session --system-prompt-snapshot off --max-turns 1`, using the arm's prompt. The `clojure` tool is a stub MCP server that records the call and runs nothing. The first step of a session has nothing to resume, so its fork is a new session sent the same prompt. Each result is scored with `bbh.tool-use` (shell, helper or other) and appended to `OUT/forks.jsonl`. A rerun skips forks that already succeeded.
+
+Arms:
+- `recorded` uses the system prompt and tool description the session actually had. Its agreement with the recorded choice measures fork fidelity.
+- An init arm renders `bbh.env/manifest` from that init file in `--repo` (default /home/engstrand/guix), as a super Worker when the original was one, with the repo path replaced by the original working directory.
+
+Claude Code tells the model when the working directory or its git state differs from the history. So each fork runs in `unshare -rm`, and when the original directory is gone, an overlay on its parent recreates it as a git worktree. The overlay is invisible outside, and siblings such as this checkout stay readable. The bundled Claude Code runs through the Guix loader, because the ~/.local/bin wrappers resolve home as /root in the namespace. Two differences remain: the fork is told that the date changed, and thinking blocks before the fork point are dropped.
+
+It spends Claude quota. A fork costs about $0.02 at list price when its prefix is short or cached, and up to about $0.35 for the first fork of a long prefix under a new system prompt.
+
+A session's own earlier calls prime its later ones (inferred from the 2026-11-07 smoke runs). On random steps the treatment init's helper share was 25% (2/8) against the baseline's 22% (2/9). On each session's first file-work step it was 100% (8/8) against 43% (3/7). A description change therefore shows mostly in new sessions, so use `--first` to measure one.
+
 ## Runs and metrics
 
 Every conversation also writes `runs.jsonl`, a local run tree in the style of LangSmith. A trace is one user turn. The `turn` run's id is the trace id, and that turn's `llm` and `tool` runs name it as `parent`. A turn that rolls over mid turn writes its `turn` run in the new conversation, so its earlier child runs stay behind in the old one. Each run has `:start`, `:ms`, `:status` (`ok`, `error` or `interrupted`), `:model` and `:effort`. `llm` runs add `:usage`, `:tool-calls` and `:truncated`. `tool` runs add `:tool-call-id`, `:chars` and `:restart`, and a failed evaluation has status `error`. A `turn` run adds `:usage`, its summed tokens and cost, and `:messages`, the `[from to)` range it wrote in `messages.jsonl`. Runs reference content instead of copying it, so join on the message range or `:tool-call-id` to get prompts and outputs.

@@ -70,6 +70,12 @@
 (defn- helper-calls [code]
   (keep #(when (seq? %) (helper-class (first %))) (mapcat #(tree-seq coll? seq %) (forms code))))
 
+(defn file-work
+  "The file operations CODE does: {:shell #{class} :helpers #{class}}, shell counting sh and $ only."
+  [code]
+  {:shell (set (keep #(when (not= 'job (:fn %)) (:class (classify (:cmd %)))) (shell-commands code)))
+   :helpers (set (helper-calls code))})
+
 (defn- first-day [dir]
   (let [f (fs/file dir "runs.jsonl")]
     (when (fs/exists? f)

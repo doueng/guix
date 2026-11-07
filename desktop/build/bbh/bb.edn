@@ -11,6 +11,9 @@
          eval:tools {:doc "Shell commands against REPL helpers for file work, per cohort. Args: ROOT... (default: conversations and ~/.cache/bbh-eval)."
                      :requires ([bbh.tool-use])
                      :task (apply bbh.tool-use/tools! *command-line-args*)}
+         eval:fork {:doc "Resample recorded tool calls under other prompts without running them. Spends Claude quota. Args: OUT [--n N] [--per-trace K | --first K] [--samples S] [--arm NAME=INIT|recorded]... ROOT..."
+                    :requires ([bbh.fork])
+                    :task (apply bbh.fork/-main *command-line-args*)}
          eval:show {:doc "Render one conversation directory as Markdown with assertion hits."
                     :requires ([bbh.traces])
                     :task (bbh.traces/show! (first *command-line-args*))}
