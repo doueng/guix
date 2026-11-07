@@ -105,7 +105,7 @@ reload port from the bbh-super daemon."
 
 (defun eng/bbh-super--clear-frame ()
   "Leave the selected frame one window, so a view starts from nothing.
-Side windows, such as the Inbox preview, survive
+Side windows survive
 `delete-other-windows', so they go first."
   (dolist (window (window-list nil 'nomini))
     (when (and (window-live-p window) (window-parameter window 'window-side))
@@ -199,6 +199,13 @@ Returns the shell's name, or nil when no session runs CONVERSATION."
 
 ;;; Super-agent Inbox
 
+;; The Inbox is an org outline from `bbh inbox org': a heading per thread,
+;; starting with its section and id, then per open ask, starting with its id,
+;; with the options in its body, a folded Details heading and an Answer
+;; heading.  Everything is read-only but the Answer bodies, where you type an
+;; answer in place.  Commands find the thread and ask from the headings above
+;; the cursor, so they act on what you are looking at.
+
 (defvar eng/bbh-inbox-bbh nil
   "The bbh command the Inbox runs, as a list, or nil for bbh on the PATH.")
 
@@ -206,13 +213,24 @@ Returns the shell's name, or nil when no session runs CONVERSATION."
   "The local server the controller connects to when the Inbox should reload.")
 
 (defvar-local eng/bbh-inbox--thread nil
-  "The thread under the cursor when the Inbox last looked.")
+  "The thread and ask under the cursor when the Inbox last looked, as (THREAD . ASK).")
 
 (defvar-local eng/bbh-inbox--timer nil
-  "The pending preview update.")
+  "The pending selection update.")
 
-(defvar-local eng/bbh-inbox--rows nil
-  "The row lines the Inbox shows, so a reload that changed none redraws nothing.")
+(defvar-local eng/bbh-inbox--text nil
+  "The outline the Inbox shows, so a reload that changed nothing redraws nothing.")
+
+(defvar-local eng/bbh-inbox--rendered nil
+  "Each ask's answer as the controller's draft has it, ask id to text, so a
+reload can tell what you typed and have not saved, and keep it.")
+
+(defvar-local eng/bbh-inbox--saved nil
+  "Each ask's answer last sent to the draft, so leaving insert state again
+does not send the same text twice.")
+
+(defvar-local eng/bbh-inbox--deferred nil
+  "A pushed outline that came while you typed, drawn when you stop.")
 
 (defvar eng/bbh-inbox-reload-delay 0.5
   "Seconds of idleness a pushed change waits for before it reloads the Inbox.
@@ -224,6 +242,10 @@ Pushes inside that time make one reload, and none runs while you type.")
 
 (defvar eng/bbh-inbox--stale nil
   "Whether a push came while no window showed the Inbox.")
+
+(defconst eng/bbh-inbox--thread-re "^\\* \\([A-Z-]+\\) \\(T[0-9]+\\)\\_>")
+(defconst eng/bbh-inbox--ask-re "^\\*\\* \\(a[0-9]+\\)\\_>")
+(defconst eng/bbh-inbox--part-re "^\\*\\*\\* \\(Details\\|Answer\\)$")
 
 (defun eng/bbh-inbox--command (&rest args)
   (append (or eng/bbh-inbox-bbh
@@ -255,36 +277,127 @@ A failure calls ON-FAIL with bbh's message, or shows it without ON-FAIL."
 (defun eng/bbh-inbox--buffer ()
   (get-buffer-create "*bbh inbox*"))
 
-(defun eng/bbh-inbox--place (pos)
-  "Where POS is in the Inbox: its line's thread and line number."
-  (cons (get-text-property (save-excursion (goto-char pos) (line-beginning-position)) 'eng/bbh-thread)
-        (line-number-at-pos pos)))
+;;;; Reading the outline
 
-(defun eng/bbh-inbox--find (place)
-  "The start of PLACE's thread's line, else of its line number."
+(defun eng/bbh-inbox--at-point ()
+  "The thread whose heading is at or above the cursor."
+  (save-excursion
+    (end-of-line)
+    (when (re-search-backward eng/bbh-inbox--thread-re nil t) (match-string-no-properties 2))))
+
+(defun eng/bbh-inbox--thread ()
+  (or (eng/bbh-inbox--at-point) (user-error "No thread here")))
+
+(defun eng/bbh-inbox--ask ()
+  "The ask whose heading is at or above the cursor within its thread, or nil."
+  (save-excursion
+    (end-of-line)
+    (when (and (re-search-backward "^\\*\\*? " nil t) (looking-at eng/bbh-inbox--ask-re))
+      (match-string-no-properties 1))))
+
+(defun eng/bbh-inbox--next-heading (pos level)
+  "The start of the first heading after POS's line of LEVEL or shallower, else point-max."
+  (save-excursion
+    (goto-char pos)
+    (forward-line 1)
+    (if (re-search-forward (format "^\\*\\{1,%d\\} " level) nil t) (match-beginning 0) (point-max))))
+
+(defun eng/bbh-inbox--asks (&optional thread)
+  "The ask ids of THREAD, or of every thread, in the order shown."
+  (save-excursion
+    (let* ((start (if thread
+                      (progn (goto-char (point-min))
+                             (and (re-search-forward (concat "^\\* [A-Z-]+ " (regexp-quote thread) "\\_>") nil t)
+                                  (line-beginning-position)))
+                    (point-min)))
+           (end (if thread (and start (eng/bbh-inbox--next-heading start 1)) (point-max)))
+           asks)
+      (when start
+        (goto-char start)
+        (while (re-search-forward eng/bbh-inbox--ask-re end t)
+          (push (match-string-no-properties 1) asks)))
+      (nreverse asks))))
+
+(defun eng/bbh-inbox--answer-region (ask)
+  "(BEG . END) of ASK's Answer body: from the line after its heading to the
+next heading, END after the body's last newline."
   (save-excursion
     (goto-char (point-min))
-    (if (and (car place) (text-property-search-forward 'eng/bbh-thread (car place) t))
-        (line-beginning-position)
-      (forward-line (1- (cdr place)))
-      (line-beginning-position))))
+    (when (re-search-forward (concat "^\\*\\* " (regexp-quote ask) "\\_>") nil t)
+      (let ((end (eng/bbh-inbox--next-heading (point) 2)))
+        (when (re-search-forward "^\\*\\*\\* Answer$" end t)
+          (cons (min (1+ (line-end-position)) (point-max)) (eng/bbh-inbox--next-heading (point) 3)))))))
+
+(defun eng/bbh-inbox--answer-text (ask)
+  "What ASK's Answer body says, each line trimmed."
+  (if-let* ((region (eng/bbh-inbox--answer-region ask)))
+      (string-trim (mapconcat #'string-trim (split-string (buffer-substring-no-properties (car region) (cdr region)) "\n") "\n"))
+    ""))
+
+(defun eng/bbh-inbox--in-answer-p (&optional pos)
+  "Whether POS, or the cursor, is in an Answer body."
+  (let ((pos (or pos (point))))
+    (when-let* ((ask (save-excursion (goto-char pos) (eng/bbh-inbox--ask)))
+                (region (eng/bbh-inbox--answer-region ask)))
+      (and (<= (car region) pos) (or (< pos (cdr region)) (= pos (point-max)))))))
 
 (defun eng/bbh-inbox--threads ()
   "The Inbox's threads in order, each (ID . ARCHIVED)."
   (save-excursion
     (goto-char (point-min))
     (let (threads)
-      (while (not (eobp))
-        (when-let* ((id (get-text-property (point) 'eng/bbh-thread)))
-          (push (cons id (get-text-property (point) 'eng/bbh-archived)) threads))
-        (forward-line 1))
+      (while (re-search-forward eng/bbh-inbox--thread-re nil t)
+        (push (cons (match-string-no-properties 2) (equal "ARCHIVED" (match-string-no-properties 1))) threads))
       (nreverse threads))))
+
+(defun eng/bbh-inbox--key ()
+  "The key of the heading at the start of this line: a thread or ask id, or
+ASK/Details and ASK/Answer."
+  (cond ((looking-at eng/bbh-inbox--thread-re) (match-string-no-properties 2))
+        ((looking-at eng/bbh-inbox--ask-re) (match-string-no-properties 1))
+        ((looking-at eng/bbh-inbox--part-re)
+         (let ((part (match-string-no-properties 1)))
+           (concat (eng/bbh-inbox--ask) "/" part)))))
+
+(defun eng/bbh-inbox--headings ()
+  "Each heading's (KEY . START), in order."
+  (save-excursion
+    (goto-char (point-min))
+    (let (all)
+      (while (re-search-forward "^\\*+ " nil t)
+        (beginning-of-line)
+        (when-let* ((key (eng/bbh-inbox--key))) (push (cons key (point)) all))
+        (forward-line 1))
+      (nreverse all))))
+
+;;;; Drawing it, keeping your place, folds and unsaved answers
+
+(defun eng/bbh-inbox--place (pos)
+  "Where POS is: (THREAD LINE KEY OFFSET), its thread, line number, the heading
+above it and how many lines below that heading."
+  (save-excursion
+    (goto-char pos)
+    (let* ((thread (eng/bbh-inbox--at-point))
+           (line (line-number-at-pos))
+           (heading (save-excursion (end-of-line) (when (re-search-backward "^\\*+ " nil t) (point))))
+           (key (when heading (save-excursion (goto-char heading) (eng/bbh-inbox--key)))))
+      (list thread line key (if heading (count-lines heading (line-beginning-position)) 0)))))
+
+(defun eng/bbh-inbox--find (place)
+  "The start of PLACE's thread's heading, else of its line number."
+  (save-excursion
+    (goto-char (point-min))
+    (if (and (car place) (re-search-forward (concat "^\\* [A-Z-]+ " (regexp-quote (car place)) "\\_>") nil t))
+        (line-beginning-position)
+      (forward-line (1- (if (consp (cdr place)) (cadr place) (cdr place))))
+      (line-beginning-position))))
 
 (defun eng/bbh-inbox--land (place before)
   "Where PLACE lands after a redraw, BEFORE being `eng/bbh-inbox--threads' then.
-On its thread, unless that is gone or has just moved to Archived at the
-bottom, as archiving does; then on the nearest thread below it, else above
-it, that is still live, or still archived if the thread was."
+On its heading and line, while its thread is still there; else on the
+thread, unless that is gone or has just moved to Archived at the bottom, as
+archiving does; then on the nearest thread below it, else above it, that is
+still live, or still archived if the thread was."
   (let* ((now (eng/bbh-inbox--threads))
          (tail (member (assoc (car place) before) before))
          (archived (cdr (car tail)))
@@ -292,45 +405,114 @@ it, that is still live, or still archived if the thread was."
          (id (seq-find like (append (when (car place) (list (car place)))
                                     (mapcar #'car (cdr tail))
                                     (when tail (reverse (mapcar #'car (seq-take before (- (length before) (length tail))))))))))
-    (eng/bbh-inbox--find (cons id (cdr place)))))
+    (or (when-let* (((and id (equal id (car place))))
+                    (key (nth 2 place))
+                    (start (cdr (assoc key (eng/bbh-inbox--headings)))))
+          (save-excursion
+            (goto-char start)
+            (let ((stop (eng/bbh-inbox--next-heading start 9)))
+              (forward-line (nth 3 place))
+              (if (< (point) stop) (point) start))))
+        (eng/bbh-inbox--find (cons id (cdr place))))))
+
+(defun eng/bbh-inbox--folds ()
+  "Each heading's key to whether its body is folded now."
+  (mapcar (lambda (heading)
+            (cons (car heading)
+                  (save-excursion (goto-char (cdr heading)) (end-of-line)
+                                  (and (not (eobp)) (invisible-p (point)) t))))
+          (eng/bbh-inbox--headings)))
+
+(defun eng/bbh-inbox--edited ()
+  "Each ask's answer you typed and have not saved, ask id to text."
+  (seq-keep (lambda (ask)
+              (let ((text (eng/bbh-inbox--answer-text ask)))
+                (unless (equal text (or (cdr (assoc ask eng/bbh-inbox--rendered)) ""))
+                  (cons ask text))))
+            (eng/bbh-inbox--asks)))
+
+(defun eng/bbh-inbox--protect (edited)
+  "Make all but the Answer bodies read-only, record each body's text as
+rendered, and put back the answers in EDITED, typed but unsaved."
+  (setq eng/bbh-inbox--rendered (mapcar (lambda (ask) (cons ask (eng/bbh-inbox--answer-text ask))) (eng/bbh-inbox--asks)))
+  (pcase-dolist (`(,ask . ,text) edited)
+    (when-let* ((region (eng/bbh-inbox--answer-region ask)))
+      (save-excursion
+        (goto-char (car region))
+        (delete-region (car region) (max (car region) (1- (cdr region))))
+        (insert (mapconcat (lambda (line) (concat "    " line)) (split-string text "\n") "\n")))))
+  (put-text-property (point-min) (point-max) 'read-only t)
+  ;; Nothing precedes the first character, so only front-stickiness guards it.
+  (when (< (point-min) (point-max)) (put-text-property (point-min) (1+ (point-min)) 'front-sticky '(read-only)))
+  (dolist (ask (eng/bbh-inbox--asks))
+    (when-let* ((region (eng/bbh-inbox--answer-region ask)))
+      ;; The body's last newline stays read-only, so the next heading never joins it.
+      (remove-text-properties (car region) (max (car region) (1- (cdr region))) '(read-only nil))
+      (when (> (car region) (point-min))
+        (put-text-property (1- (car region)) (car region) 'rear-nonsticky '(read-only))))))
+
+(defun eng/bbh-inbox--fold (before)
+  "Fold the headings that BEFORE, from `eng/bbh-inbox--folds', had folded,
+and new ones by default: Details, archived threads and threads with no ask."
+  (when (fboundp 'org-fold-show-all)
+    (org-fold-show-all)
+    (pcase-dolist (`(,key . ,start) (reverse (eng/bbh-inbox--headings)))
+      (when (if-let* ((cell (assoc key before)))
+                (cdr cell)
+              (save-excursion
+                (goto-char start)
+                (cond ((string-suffix-p "/Details" key) t)
+                      ((looking-at eng/bbh-inbox--thread-re)
+                       (or (equal "ARCHIVED" (match-string 1))
+                           (not (eng/bbh-inbox--asks key)))))))
+        (save-excursion (goto-char start) (org-fold-hide-subtree))))))
+
+(defun eng/bbh-inbox--typing-p ()
+  (and (bound-and-true-p evil-local-mode) (fboundp 'evil-insert-state-p) (evil-insert-state-p)))
 
 (defun eng/bbh-inbox--render (text &optional quiet)
-  "Show TEXT, `bbh inbox view' output: the header line, then id TAB row lines.
-The cursor stays on its thread, or the nearest one when that thread is gone
-or archived, and every window keeps that line where it was on screen.  QUIET, for a pushed reload, leaves a hidden preview hidden."
-  (let ((buffer (eng/bbh-inbox--buffer)))
-    (with-current-buffer buffer
-      (let ((lines (split-string (string-trim-right text) "\n"))
-            (inhibit-read-only t))
+  "Show TEXT, `bbh inbox org' output: the header line, then the outline.
+The cursor stays on its heading, or the nearest thread when that thread is
+gone or archived, every window keeps that line where it was on screen, and
+folds and answers you typed but have not saved stay.  QUIET, for a pushed
+reload, waits while you type in the buffer."
+  (with-current-buffer (eng/bbh-inbox--buffer)
+    (if (and quiet (eng/bbh-inbox--typing-p))
+        (setq eng/bbh-inbox--deferred text)
+      (setq eng/bbh-inbox--deferred nil)
+      (let* ((lines (split-string (string-trim-right text) "\n"))
+             (body (mapconcat #'identity (cdr lines) "\n")))
         (setq header-line-format (car lines))
-        (unless (equal (cdr lines) eng/bbh-inbox--rows)
+        (unless (equal body eng/bbh-inbox--text)
           (let ((here (eng/bbh-inbox--place (point)))
                 (windows (mapcar (lambda (window)
                                    (list window (eng/bbh-inbox--place (window-point window))
                                          (count-lines (window-start window)
                                                       (save-excursion (goto-char (window-point window)) (line-beginning-position)))))
-                                 (get-buffer-window-list buffer nil t)))
-                (before (eng/bbh-inbox--threads)))
-            (setq eng/bbh-inbox--rows (cdr lines))
-            (erase-buffer)
-            (dolist (row (cdr lines))
-              (pcase-let ((`(,id ,shown) (split-string row "\t")))
-                ;; `bbh inbox view' starts a row with its section's title.
-                (insert (propertize (or shown "") 'eng/bbh-thread id
-                                    'eng/bbh-archived (string-prefix-p "ARCHIVED " (or shown "")))
-                        "\n")))
+                                 (get-buffer-window-list (current-buffer) nil t)))
+                (before (eng/bbh-inbox--threads))
+                (edited (eng/bbh-inbox--edited))
+                (folds (eng/bbh-inbox--folds))
+                (inhibit-read-only t))
+            (setq eng/bbh-inbox--text body)
+            (let ((buffer-undo-list t))
+              (erase-buffer)
+              (unless (string-empty-p body) (insert body "\n"))
+              (eng/bbh-inbox--protect (seq-filter (lambda (cell) (member (car cell) (eng/bbh-inbox--asks))) edited)))
+            (setq buffer-undo-list nil)
+            (set-buffer-modified-p nil)
+            (eng/bbh-inbox--fold folds)
             (goto-char (eng/bbh-inbox--land here before))
             (pcase-dolist (`(,window ,place ,row) windows)
               (let ((pos (eng/bbh-inbox--land place before)))
                 (set-window-point window pos)
                 (set-window-start window (save-excursion (goto-char pos) (forward-line (- row)) (point)) t)))
-            (when (bound-and-true-p hl-line-mode) (hl-line-highlight))))))
-    (eng/bbh-inbox--preview quiet)))
+            (when (bound-and-true-p hl-line-mode) (hl-line-highlight))))))))
 
 (defun eng/bbh-inbox-refresh ()
   "Reload the Inbox from the controller."
   (interactive)
-  (eng/bbh-inbox--run '("view") #'eng/bbh-inbox--render))
+  (eng/bbh-inbox--run '("org") #'eng/bbh-inbox--render))
 
 (defun eng/bbh-inbox--shown-p ()
   (when-let* ((buffer (get-buffer "*bbh inbox*"))) (get-buffer-window buffer t)))
@@ -360,7 +542,7 @@ shows the Inbox, else when one does."
                      (setq header-line-format (format "bbh inbox · reload failed: %s   gr retry" problem)))
                    (funcall done))))
       (condition-case err
-          (eng/bbh-inbox--run '("view")
+          (eng/bbh-inbox--run '("org")
                               (lambda (text) (unwind-protect (eng/bbh-inbox--render text t) (funcall done)))
                               fail)
         (error (funcall fail (error-message-string err)))))))
@@ -369,70 +551,146 @@ shows the Inbox, else when one does."
   "A window began to show the Inbox: catch up on what was pushed while hidden."
   (when eng/bbh-inbox--stale (eng/bbh-inbox--changed)))
 
-(defun eng/bbh-inbox--at-point ()
-  (get-text-property (line-beginning-position) 'eng/bbh-thread))
-
-(defun eng/bbh-inbox--thread ()
-  (or (eng/bbh-inbox--at-point) (user-error "No thread on this line")))
-
-(defvar-local eng/bbh-inbox--previewed nil
-  "The thread the preview shows.")
-
-(defun eng/bbh-inbox--preview (&optional quiet)
-  "Show the thread under the cursor in the preview below the list.
-QUIET, for a pushed reload, updates a preview on screen only, says nothing
-on failure, and keeps your place in it while it shows the same thread."
-  (when-let* ((buffer (get-buffer "*bbh inbox*"))
-              (thread (with-current-buffer buffer (eng/bbh-inbox--at-point)))
-              ((or (not quiet) (get-buffer-window "*bbh inbox preview*" t))))
-    (eng/bbh-inbox--run
-     (list "preview" thread)
-     (lambda (text)
-       (with-current-buffer (get-buffer-create "*bbh inbox preview*")
-         (unless (and (equal thread eng/bbh-inbox--previewed) (equal text (buffer-string)))
-           (let ((inhibit-read-only t)
-                 (same (equal thread eng/bbh-inbox--previewed))
-                 (windows (mapcar (lambda (w) (list w (window-start w) (window-point w)))
-                                  (get-buffer-window-list (current-buffer) nil t)))
-                 (here (point)))
-             (unless (derived-mode-p 'special-mode) (special-mode))
-             (erase-buffer)
-             (insert text)
-             (setq eng/bbh-inbox--previewed thread)
-             (goto-char (if same (min here (point-max)) (point-min)))
-             (pcase-dolist (`(,w ,start ,at) windows)
-               (set-window-start w (if same (min start (point-max)) (point-min)) t)
-               (set-window-point w (if same (min at (point-max)) (point-min)))))))
-       (when (and (not quiet) (get-buffer-window buffer))
-         (display-buffer-in-side-window (get-buffer "*bbh inbox preview*")
-                                        '((side . bottom) (window-height . 0.5)))))
-     (when quiet #'ignore))))
-
 (defun eng/bbh-inbox--moved ()
-  "After a command, tell bbh which thread your cursor is on, for voice, and preview it."
-  (let ((thread (eng/bbh-inbox--at-point)))
-    (unless (equal thread eng/bbh-inbox--thread)
-      (setq eng/bbh-inbox--thread thread)
+  "After a command, tell bbh which thread and ask your cursor is on, for voice."
+  (let ((here (cons (eng/bbh-inbox--at-point) (eng/bbh-inbox--ask))))
+    (unless (equal here eng/bbh-inbox--thread)
+      (setq eng/bbh-inbox--thread here)
       (when (timerp eng/bbh-inbox--timer) (cancel-timer eng/bbh-inbox--timer))
-      (when thread
+      (when (car here)
         (setq eng/bbh-inbox--timer
               (run-at-time 0.15 nil (lambda ()
-                                      (eng/bbh-inbox--run (list "select" thread) nil)
-                                      (eng/bbh-inbox--preview))))))))
+                                      (eng/bbh-inbox--run (delq nil (list "select" (car here) (cdr here))) nil))))))))
+
+;;;; Answering
 
 (defun eng/bbh-inbox--act (&rest args)
   "Run `bbh inbox ARGS' on the thread under the cursor, then reload."
   (let ((thread (eng/bbh-inbox--thread)))
-    (eng/bbh-inbox--run (append (list (car args) thread) (cdr args))
+    (eng/bbh-inbox--run (append (list (car args) thread) (delq nil (cdr args)))
                         (lambda (_) (eng/bbh-inbox-refresh)))))
 
-(defun eng/bbh-inbox-pick (n)
-  "Pick option N of the thread's open ask."
-  (interactive (list (- last-command-event ?0)))
-  (eng/bbh-inbox--act "pick" (number-to-string n)))
+(defun eng/bbh-inbox--ask-here ()
+  "The ask under the cursor, else the thread's first, else nil."
+  (or (eng/bbh-inbox--ask) (car (eng/bbh-inbox--asks (eng/bbh-inbox--thread)))))
 
-(defun eng/bbh-inbox-send () "Send the thread's picks and note." (interactive) (eng/bbh-inbox--act "send"))
-(defun eng/bbh-inbox-approve () "Approve the thread's review." (interactive) (eng/bbh-inbox--act "approve"))
+(defun eng/bbh-inbox--option-here ()
+  "The number of the option on this line, or nil."
+  (save-excursion
+    (beginning-of-line)
+    (when (and (eng/bbh-inbox--ask) (not (eng/bbh-inbox--in-answer-p)) (looking-at "^   \\([0-9]+\\)\\. "))
+      (string-to-number (match-string 1)))))
+
+(defun eng/bbh-inbox-pick (n)
+  "Pick option N of the ask under the cursor, else of the thread's newest."
+  (interactive (list (- last-command-event ?0)))
+  (eng/bbh-inbox--act "pick" (number-to-string n) (eng/bbh-inbox--ask)))
+
+(defun eng/bbh-inbox-pick-recommended ()
+  "Pick the recommended option of the ask under the cursor, else the thread's first."
+  (interactive)
+  (let ((ask (or (eng/bbh-inbox--ask-here) (user-error "No open ask here"))))
+    (save-excursion
+      (goto-char (point-min))
+      (re-search-forward (concat "^\\*\\* " (regexp-quote ask) "\\_>"))
+      (if (re-search-forward "^   \\([0-9]+\\)\\. .*  (recommended)" (eng/bbh-inbox--next-heading (point) 3) t)
+          (eng/bbh-inbox--act "pick" (match-string-no-properties 1) ask)
+        (user-error "%s has no recommended option" ask)))))
+
+(defun eng/bbh-inbox-ret ()
+  "Open the link here, pick the option on this line, or open the thread's Worker."
+  (interactive)
+  (cond ((and (fboundp 'org-in-regexp) (boundp 'org-link-bracket-re) (org-in-regexp org-link-bracket-re 1))
+         (org-open-at-point))
+        ((eng/bbh-inbox--option-here) (eng/bbh-inbox-pick (eng/bbh-inbox--option-here)))
+        ((eng/bbh-inbox--in-answer-p) (newline))
+        (t (eng/bbh-inbox-open))))
+
+(defun eng/bbh-inbox-answer ()
+  "Type an answer to the ask under the cursor, or the thread's first, in its Answer."
+  (interactive)
+  (unless (eng/bbh-inbox--in-answer-p)
+    (let* ((ask (or (eng/bbh-inbox--ask-here) (user-error "No open ask here; r writes a note")))
+           (region (eng/bbh-inbox--answer-region ask)))
+      (when (fboundp 'org-fold-show-context) (save-excursion (goto-char (car region)) (org-fold-show-context)))
+      (goto-char (max (car region) (1- (cdr region))))
+      (when (and (bolp) (eolp)) (insert "    "))))
+  (when (fboundp 'evil-insert-state) (evil-insert-state)))
+
+(defun eng/bbh-inbox-reply ()
+  "Answer the ask under the cursor; on a thread with no ask, write its note."
+  (interactive)
+  (if (eng/bbh-inbox--ask-here) (eng/bbh-inbox-answer) (call-interactively #'eng/bbh-inbox-note)))
+
+(defun eng/bbh-inbox--edn (answers)
+  "ANSWERS, ((ASK . TEXT) ...), as an EDN map."
+  (concat "{" (mapconcat (lambda (cell) (format "%S %S" (car cell) (substring-no-properties (cdr cell)))) answers " ") "}"))
+
+(defun eng/bbh-inbox--save (&optional thread)
+  "Save each answer you changed in THREAD, or the thread under the cursor, to its draft.
+The text stays yours until a reload shows the draft has it, so a reload
+already on its way with the older draft does not overwrite it."
+  (when-let* ((thread (or thread (eng/bbh-inbox--at-point))))
+    (dolist (ask (eng/bbh-inbox--asks thread))
+      (let ((text (eng/bbh-inbox--answer-text ask)))
+        (unless (or (equal text (or (cdr (assoc ask eng/bbh-inbox--rendered)) ""))
+                    (equal text (cdr (assoc ask eng/bbh-inbox--saved))))
+          (setf (alist-get ask eng/bbh-inbox--saved nil nil #'equal) text)
+          (eng/bbh-inbox--run (list "answer" thread ask text) nil))))))
+
+(defun eng/bbh-inbox--stopped-typing ()
+  "Leaving insert state saves the answers you changed, then draws a pushed reload."
+  (eng/bbh-inbox--save)
+  (when-let* ((text eng/bbh-inbox--deferred)) (eng/bbh-inbox--render text t)))
+
+(defun eng/bbh-inbox--send-thread (thread on-done)
+  (eng/bbh-inbox--run (list "send" thread
+                            (eng/bbh-inbox--edn (mapcar (lambda (ask) (cons ask (eng/bbh-inbox--answer-text ask)))
+                                                        (eng/bbh-inbox--asks thread))))
+                      on-done))
+
+(defun eng/bbh-inbox-send ()
+  "Send the thread's picks, typed answers and note as one reply."
+  (interactive)
+  (let ((thread (eng/bbh-inbox--thread)))
+    (when (eng/bbh-inbox--typing-p) (evil-normal-state))
+    (eng/bbh-inbox--send-thread thread (lambda (_) (message "Sent %s" thread) (eng/bbh-inbox-refresh)))))
+
+(defun eng/bbh-inbox--has-draft-p (thread)
+  "Whether THREAD shows a pick, a note or a typed answer."
+  (or (seq-some (lambda (ask) (not (string-empty-p (eng/bbh-inbox--answer-text ask)))) (eng/bbh-inbox--asks thread))
+      (save-excursion
+        (goto-char (eng/bbh-inbox--find (cons thread 1)))
+        (re-search-forward "  <- picked$\\|^  note: " (eng/bbh-inbox--next-heading (point) 1) t))))
+
+(defun eng/bbh-inbox-send-all ()
+  "Send every thread's draft, each as its own reply, after one question."
+  (interactive)
+  (when (eng/bbh-inbox--typing-p) (evil-normal-state))
+  (let ((threads (seq-filter #'eng/bbh-inbox--has-draft-p (mapcar #'car (eng/bbh-inbox--threads)))))
+    (cond ((null threads) (message "Nothing to send"))
+          ((y-or-n-p (format "Send %s? " (string-join threads ", ")))
+           (let ((next nil))
+             (setq next (lambda (left)
+                          (if left
+                              (eng/bbh-inbox--send-thread (car left) (lambda (_) (funcall next (cdr left))))
+                            (message "Sent %s" (string-join threads ", "))
+                            (eng/bbh-inbox-refresh))))
+             (funcall next threads))))))
+
+(defun eng/bbh-inbox-clear ()
+  "Discard the thread's draft: its picks, answers and note."
+  (interactive)
+  (let ((thread (eng/bbh-inbox--thread))
+        (inhibit-read-only t))
+    (when (eng/bbh-inbox--typing-p) (evil-normal-state))
+    (dolist (ask (eng/bbh-inbox--asks thread))
+      (when-let* ((region (eng/bbh-inbox--answer-region ask)))
+        (delete-region (car region) (max (car region) (1- (cdr region))))
+        (setf (alist-get ask eng/bbh-inbox--rendered nil nil #'equal) "")))
+    (eng/bbh-inbox--act "clear")))
+
+(defun eng/bbh-inbox-approve () "Approve the review under the cursor, else the thread's." (interactive) (eng/bbh-inbox--act "approve" (eng/bbh-inbox--ask)))
 (defun eng/bbh-inbox-dismiss () "Mark the thread read." (interactive) (eng/bbh-inbox--act "dismiss"))
 (defun eng/bbh-inbox-archive () "Archive the thread." (interactive) (eng/bbh-inbox--act "archive"))
 (defun eng/bbh-inbox-resume () "Reopen the session of the thread's Worker after it ended." (interactive) (eng/bbh-inbox--act "resume"))
@@ -481,14 +739,17 @@ it replaces a terminal Inbox, which comes back when jjui quits."
                       (kill-buffer err))))))))
 
 (defconst eng/bbh-inbox-keys
-  `(("RET" eng/bbh-inbox-open "Open the thread's Worker")
-    ("1" eng/bbh-inbox-pick "Pick option 1")
-    ("2" eng/bbh-inbox-pick "Pick option 2")
-    ("3" eng/bbh-inbox-pick "Pick option 3")
-    ("4" eng/bbh-inbox-pick "Pick option 4")
-    ("s" eng/bbh-inbox-send "Send picks and note")
+  `(("RET" eng/bbh-inbox-ret "Pick the option here, open a link, or open the thread's Worker")
+    ,@(mapcar (lambda (n) (list (number-to-string n) 'eng/bbh-inbox-pick (format "Pick option %d" n)))
+              (number-sequence 1 9))
+    ("." eng/bbh-inbox-pick-recommended "Pick the recommended option")
+    ("i" eng/bbh-inbox-answer "Answer the ask here in your own words")
+    ("r" eng/bbh-inbox-reply "Answer the ask here, or write the thread's note")
+    ("s" eng/bbh-inbox-send "Send the thread's picks, answers and note")
+    ("S" eng/bbh-inbox-send-all "Send every thread's draft")
+    ("C-c C-c" eng/bbh-inbox-send "Send the thread's picks, answers and note")
+    ("C-c C-k" eng/bbh-inbox-clear "Discard the thread's draft")
     ("A" eng/bbh-inbox-approve "Approve the review")
-    ("r" eng/bbh-inbox-note "Write a note")
     ("m" eng/bbh-inbox-dismiss "Mark read")
     ("a" eng/bbh-inbox-archive "Archive")
     ("x" eng/bbh-inbox-cancel "Cancel the Worker")
@@ -499,18 +760,31 @@ it replaces a terminal Inbox, which comes back when jjui quits."
     ("g?" describe-mode "Help")
     ("q" quit-window "Quit"))
   "The Inbox's evil normal-state keys: (KEYS COMMAND DESCRIPTION).
-Motions stay evil's own, so j, k, gg, G, / and C-j/C-k work as anywhere.
-The single letters replace evil commands that edit text, which this
-read-only list has no use for; s also shadows the global avy jump here.")
+Org's and evil-org's stay: TAB and S-TAB fold, zo, zc and za too, gj, gk,
+gh and gl move by heading, and j, k, gg, G and / move as anywhere.  The
+single letters replace evil commands that edit text, which only an Answer
+body has; i there types as usual.  s also shadows the global avy jump.")
 
-(defvar eng/bbh-inbox-mode-map
-  (let ((map (make-sparse-keymap)))
-    ;; g is a prefix here, as in evil, not special-mode's revert.
-    (define-key map "g" (make-sparse-keymap))
-    (dolist (key eng/bbh-inbox-keys)
-      (define-key map (kbd (car key)) (cadr key)))
-    map)
-  "The Inbox keys, for Emacs without evil.")
+(defun eng/bbh-inbox--outside-answer (command)
+  "COMMAND, unless the cursor is in an Answer body, where keys type."
+  (unless (and (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox--in-answer-p)) command))
+
+(defvar eng/bbh-inbox-mode-map (make-sparse-keymap)
+  "The Inbox keys, for Emacs without evil: outside an Answer body a letter is
+its command, inside it types.")
+
+;; Filled on every load, since `defvar' keeps the map an older load made and
+;; a Doom reload must not leave its keys behind.
+(let ((map eng/bbh-inbox-mode-map)
+      (parent (keymap-parent eng/bbh-inbox-mode-map)))
+  (setcdr map nil)
+  (when parent (set-keymap-parent map parent))
+  (define-key map "g" (make-sparse-keymap))
+  (dolist (key eng/bbh-inbox-keys)
+    (define-key map (kbd (car key))
+                (if (string-prefix-p "C-" (car key))
+                    (cadr key)
+                  `(menu-item "" ,(cadr key) :filter eng/bbh-inbox--outside-answer)))))
 
 (defun eng/bbh-inbox--setup ()
   "The Inbox buffer's settings and hooks. The mode runs it, and loading this
@@ -518,16 +792,21 @@ file runs it again in a live Inbox, so a Doom reload reaches it."
   (setq truncate-lines t)
   (hl-line-mode 1)
   (add-hook 'post-command-hook #'eng/bbh-inbox--moved nil t)
-  (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t))
+  (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t)
+  (add-hook 'evil-insert-state-exit-hook #'eng/bbh-inbox--stopped-typing nil t)
+  ;; Buffer-local keys win over evil-org's, such as its A and I.
+  (when (fboundp 'evil-local-set-key)
+    (dolist (key eng/bbh-inbox-keys)
+      (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
+    (evil-local-set-key 'insert (kbd "C-c C-c") #'eng/bbh-inbox-send)
+    (evil-local-set-key 'insert (kbd "C-c C-k") #'eng/bbh-inbox-clear)))
 
-(define-derived-mode eng/bbh-inbox-mode special-mode "bbh inbox"
-  "The threads that need you, from `bbh super'."
+(define-derived-mode eng/bbh-inbox-mode org-mode "bbh inbox"
+  "The threads that need you, from `bbh super', as an org outline you answer in."
   (eng/bbh-inbox--setup))
 
 (with-eval-after-load 'evil
-  (evil-set-initial-state 'eng/bbh-inbox-mode 'normal)
-  (dolist (key eng/bbh-inbox-keys)
-    (evil-define-key* '(normal motion) eng/bbh-inbox-mode-map (kbd (car key)) (cadr key))))
+  (evil-set-initial-state 'eng/bbh-inbox-mode 'normal))
 
 ;; The same commands under SPC m, where which-key lists them.
 (when (fboundp 'map!)
@@ -536,6 +815,10 @@ file runs it again in a live Inbox, so a Doom reload reaches it."
         :desc "Open Worker"   "o" #'eng/bbh-inbox-open
         :desc "jjui"          "j" #'eng/bbh-inbox-jjui
         :desc "Send"          "s" #'eng/bbh-inbox-send
+        :desc "Send all"      "S" #'eng/bbh-inbox-send-all
+        :desc "Answer"        "i" #'eng/bbh-inbox-answer
+        :desc "Recommended"   "." #'eng/bbh-inbox-pick-recommended
+        :desc "Discard draft" "k" #'eng/bbh-inbox-clear
         :desc "Approve"       "A" #'eng/bbh-inbox-approve
         :desc "Note"          "n" #'eng/bbh-inbox-note
         :desc "Mark read"     "m" #'eng/bbh-inbox-dismiss
@@ -573,7 +856,7 @@ is replaced."
   (buffer-name (eng/bbh-inbox--buffer)))
 
 (defun eng/bbh-inbox ()
-  "Show the super-agent's Inbox alone in this frame, its preview below."
+  "Show the super-agent's Inbox alone in this frame."
   (interactive)
   ;; Make the Inbox before clearing the frame, so a failure leaves the layout.
   (let ((buffer (eng/bbh-inbox-buffer)))
@@ -581,9 +864,14 @@ is replaced."
     (switch-to-buffer buffer)))
 
 ;; Loading this file again, as a Doom reload does, brings a live Inbox up to
-;; the new code: its buffer setup and the listener.
+;; the new code: its buffer setup and the listener.  An Inbox from before it
+;; was an org outline starts the mode again and reloads, and its preview goes.
+(when-let* ((buffer (get-buffer "*bbh inbox preview*"))) (kill-buffer buffer))
 (when-let* ((buffer (get-buffer "*bbh inbox*")))
   (with-current-buffer buffer
     (when (derived-mode-p 'eng/bbh-inbox-mode)
-      (eng/bbh-inbox--setup)
+      (if (derived-mode-p 'org-mode)
+          (eng/bbh-inbox--setup)
+        (eng/bbh-inbox-mode)
+        (eng/bbh-inbox-refresh))
       (eng/bbh-inbox--listen))))

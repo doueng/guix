@@ -398,7 +398,13 @@
   (for [[ask option] picks]
     (option-label (some #(when (= (name ask) (:id %)) %) asks) option)))
 
-(defn- ask-card [thread picks replies {:keys [id text options recommended state stopped kind]}]
+(defn- local-answers
+  "THREAD's answers, {ask text}: the draft's, with what is typed here over them."
+  [thread t]
+  (merge (into {} (map (fn [[k v]] [(name k) v])) (get-in t [:draft :answers]))
+         (into {} (keep (fn [[k v]] (when (and (vector? k) (= :answer (first k)) (= thread (second k))) [(nth k 2) v]))) @drafts)))
+
+(defn- ask-card [thread picks replies {:keys [id text options recommended state stopped kind details evidence]}]
   (let [open? (= "open" state)
         picked (if open?
                  (get picks (keyword id))
@@ -406,6 +412,11 @@
     [:div.ask {:replicant/key id :class (when stopped "stopped")}
      [:div.ask-label (str (name kind) (when stopped " · stopped") (when-not open? (str " · " state)))]
      [:div.ask-text text]
+     ;; The question and options come first; the reasoning waits behind a tap.
+     (when (or details evidence)
+       [:details.ask-details [:summary "Details"]
+        (when details [:p.ask-detail-text details])
+        (when evidence [:p.ask-evidence evidence])])
      (into [:div.choices]
            (map (fn [{oid :id label :label}]
                   [:button.choice {:replicant/key oid :type "button" :disabled (not open?)
@@ -414,7 +425,14 @@
                    label
                    (when (= oid recommended) [:span.rectag "recommended"])
                    (when (= oid picked) [:span.rectag.picked-tag "picked"])]))
-           options)]))
+           options)
+     (when open?
+       [:textarea.answer-box {:placeholder "Or answer in your own words" :aria-label (str "Answer to " id)
+                              :replicant/on-mount (fn [{:replicant/keys [node]}]
+                                                    (set! (.-value node) (get (local-answers thread (get-in @state [:threads thread])) id "")))
+                              ;; Typing stays local; leaving the box saves the answer to the draft.
+                              :on {:input (fn [e] (swap! drafts assoc [:answer thread id] (.. e -target -value)))
+                                   :change (fn [e] (post-super! thread "draft" {:ask id :answer (.. e -target -value)}))}}])]))
 
 (defn- event-view [thread picks asks replies {n :seq :keys [kind data]}]
   (let [ask (when (= "ask-opened" kind) (some #(when (= (:id data) (:id %)) %) asks))]
@@ -424,6 +442,7 @@
       "ask-opened" (when ask (ask-card thread picks replies ask))
       "reply-sent" [:div.ev.you {:replicant/key n} [:span.ev-who "You"]
                     (str/join "; " (remove str/blank? [(when (seq (:picks data)) (str "picked " (str/join ", " (picked-labels asks (:picks data)))))
+                                                        (when (seq (:answers data)) (str/join "; " (vals (:answers data))))
                                                         (when (seq (:dismiss data)) "marked read")
                                                         (:note data)]))]
       "reply-answered" [:div.ev {:replicant/key n} [:span.ev-who "Worker"] "read your reply"]
@@ -441,9 +460,10 @@
   (let [t (get-in @state [:threads thread])
         picks (draft-picks t)
         note (get @drafts [:note thread] (get-in t [:draft :note] ""))
+        answers (into {} (remove (comp str/blank? val)) (local-answers thread t))
         version (get-in t [:draft :asks-version] (:asks-version t))
         pending (local "super-pending" {})
-        draft (js/JSON.stringify (clj->js {:picks picks :note note :asks-version version}))
+        draft (js/JSON.stringify (clj->js {:picks picks :answers answers :note note :asks-version version}))
         ;; A retry of the same draft keeps its id, so the controller sees one reply.
         ;; A changed draft is a new reply; reusing the id would return the old one.
         id (or (when (= draft (get-in pending [thread "draft"])) (get-in pending [thread "id"]))
@@ -452,14 +472,14 @@
     (swap! state update :busy-super conj thread)
     (-> (js/fetch (str "/api/super/threads/" thread "/reply")
                   (clj->js {:method "POST" :headers {"Content-Type" "application/json"}
-                            :body (js/JSON.stringify (clj->js {:id id :asks-version version :picks picks :note note}))}))
+                            :body (js/JSON.stringify (clj->js {:id id :asks-version version :picks picks :answers answers :note note}))}))
         (.then (fn [response]
                  (-> (.json response)
                      (.then (fn [body]
                               (let [body (js->clj body :keywordize-keys true)]
                                 (cond (.-ok response)
                                       (do (local! "super-pending" (dissoc (local "super-pending" {}) thread))
-                                          (swap! drafts dissoc [:note thread]))
+                                          (swap! drafts (fn [d] (into {} (remove (fn [[k _]] (and (vector? k) (= thread (second k))))) d))))
                                       (= 409 (.-status response))
                                       (do (local! "super-pending" (dissoc (local "super-pending" {}) thread))
                                           (post-super! thread "discard-draft" {:id (str "dd-" (random-uuid))})
@@ -512,7 +532,7 @@
             (str "Approve " (subs (str (:revision r)) 0 (min 8 (count (str (:revision r))))))])
          [:button.quiet {:type "button" :disabled (or busy (empty? open)) :on {:click #(post-super! id "dismiss" {:id (str "d-" (random-uuid))})}} "Mark read"]
          [:button.quiet {:type "button" :disabled busy :on {:click #(post-super! id "archive" {:id (str "a-" (random-uuid))})}} "Archive"]
-         [:button.send {:type "button" :disabled (or busy (and (empty? picks) (str/blank? (note))))
+         [:button.send {:type "button" :disabled (or busy (and (empty? picks) (str/blank? (note)) (every? str/blank? (vals (local-answers id t)))))
                         :on {:click #(send-reply! id)}} (if busy "Sending" "Send")]]])]))
 
 (defn- app-view [{:keys [agents current conversations error attachments sending view inbox] :as s}]

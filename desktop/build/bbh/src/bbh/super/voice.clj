@@ -40,7 +40,8 @@
   send the draft, or both in one breath (\"option two, send\"); anything else
   is a message. With no spoken handle the message goes to the Router. Only
   TARGET :selected uses the thread your Inbox cursor selected in the last
-  minute, so a cursor resting on a row cannot redirect what you say."
+  minute, and a pick goes to the ask the cursor is on, so a cursor resting
+  on a row cannot redirect what you say."
   [text & {:keys [target] :or {target :router}}]
   (when-not (str/blank? text)
     (pane/with-state-lock!
@@ -55,7 +56,9 @@
               send? (some? pick-words)
               pick-words (if send? pick-words words)
               t (when thread (call! {:command :thread :args {:id thread}}))
-              ask (last (sort-by :seq (filter #(= :open (:state %)) (:asks t))))
+              open (sort-by :seq (filter #(= :open (:state %)) (:asks t)))
+              ;; The ask your Inbox cursor is on, while it is still open, else the newest.
+              ask (or (when (= thread (:thread selected)) (some #(when (= (:ask selected) (:id %)) %) open)) (last open))
               n (when (and thread (seq pick-words)) (pick-number ask pick-words))]
           (when (and handle (nil? t)) (throw (ex-info "No such thread" {:thread handle})))
           (when (and thread (re-matches #"(?:i )?approved?(?: .*)?" words))

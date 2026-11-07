@@ -19,7 +19,8 @@
     (evil-local-mode 1)
     (should (eq 'normal evil-state))
     (dolist (key '(("gr" . eng/bbh-inbox-refresh) ("s" . eng/bbh-inbox-send) ("2" . eng/bbh-inbox-pick)
-                   ("RET" . eng/bbh-inbox-open) ("R" . eng/bbh-inbox-router) ("J" . eng/bbh-inbox-jjui) ("q" . quit-window)
+                   ("RET" . eng/bbh-inbox-ret) ("R" . eng/bbh-inbox-router)
+                   ("." . eng/bbh-inbox-pick-recommended) ("i" . eng/bbh-inbox-answer) ("A" . eng/bbh-inbox-approve) ("J" . eng/bbh-inbox-jjui) ("q" . quit-window)
                    ("j" . evil-next-line) ("gg" . evil-goto-first-line) ("G" . evil-goto-line)))
       (should (eq (cdr key) (key-binding (kbd (car key))))))))
 
@@ -379,35 +380,98 @@
 (ert-deftest bbh-super-open-refuses-a-missing-directory ()
   (should-error (eng/bbh-super-open "super-W8" "/nonexistent/bbh" "T8" nil)))
 
-(ert-deftest bbh-inbox-shows-the-view-and-its-keys-call-bbh ()
+(defconst bbh-test--outline
+  (concat "* STOPPED T1 first\n"
+          "** a1 Keep the alias?\n"
+          "   1. No  (recommended)\n"
+          "   2. Yes\n"
+          "*** Details\n"
+          "    Because of reasons\n"
+          "*** Answer\n"
+          "\n"
+          "* NEW T2 second\n"
+          "  its summary")
+  "`bbh inbox org' output after its header: a thread with one ask, and one without.")
+
+(defun bbh-test--key (keys)
+  "The command KEYS run in the current buffer."
+  (key-binding (kbd keys)))
+
+(ert-deftest bbh-inbox-shows-the-outline-and-its-keys-call-bbh ()
   (let* ((log (make-temp-file "bbh-inbox-log"))
+         (outline (make-temp-file "bbh-inbox-outline" nil nil (concat "bbh inbox · 1 need you\n" bbh-test--outline)))
          (script (make-temp-file "bbh-fake" nil nil
                                  (concat "#!/bin/sh\necho \"$@\" >> " log "\n"
                                          "case \"$2\" in\n"
-                                         "view) printf 'bbh inbox · 1 need you\\nT1\\tSTOPPED  T1 first\\nT2\\tNEW  T2 second\\n';;\n"
-                                         "preview) echo \"preview of $3\";;\n"
+                                         "org) cat " outline ";;\n"
                                          "esac\n")))
          (eng/bbh-inbox-bbh (list script))
          (logged (lambda (line) (with-temp-buffer (insert-file-contents log)
-                                                  (string-match-p (concat "^" line "$") (buffer-string))))))
+                                                  (string-match-p (concat "^" (regexp-quote line) "$") (buffer-string))))))
     (set-file-modes script #o700)
     (eng/bbh-inbox)
     (with-current-buffer "*bbh inbox*"
       (should (bbh-test--wait (lambda () (string-match-p "T2 second" (buffer-string))) 10))
+      (should (derived-mode-p 'org-mode))
       (should (equal "bbh inbox · 1 need you" header-line-format))
-      (should (bbh-test--wait (lambda () (funcall logged "inbox register [0-9]+")) 0))
+      (should (bbh-test--wait (lambda () (with-temp-buffer (insert-file-contents log) (string-match-p "^inbox register [0-9]+$" (buffer-string)))) 0))
       (goto-char (point-min))
       (should (equal "T1" (eng/bbh-inbox--at-point)))
-      (let ((last-command-event ?2)) (call-interactively (lookup-key eng/bbh-inbox-mode-map "2")))
+      ;; On the thread's heading a digit picks on its newest ask; on the ask, on that ask.
+      (let ((last-command-event ?2)) (call-interactively (bbh-test--key "2")))
       (should (bbh-test--wait (lambda () (funcall logged "inbox pick T1 2")) 10))
-      (call-interactively (lookup-key eng/bbh-inbox-mode-map "s"))
-      (should (bbh-test--wait (lambda () (funcall logged "inbox send T1")) 10))
       (forward-line 1)
+      (should (equal "a1" (eng/bbh-inbox--ask)))
+      (let ((last-command-event ?2)) (call-interactively (bbh-test--key "2")))
+      (should (bbh-test--wait (lambda () (funcall logged "inbox pick T1 2 a1")) 10))
+      (call-interactively (bbh-test--key "."))
+      (should (bbh-test--wait (lambda () (funcall logged "inbox pick T1 1 a1")) 10))
+      ;; RET on an option picks it.
+      (forward-line 2)
+      (call-interactively (bbh-test--key "RET"))
+      (should (bbh-test--wait (lambda () (funcall logged "inbox pick T1 2 a1")) 10))
+      ;; Details start folded; the question and options show.
+      (should (invisible-p (save-excursion (goto-char (point-min)) (search-forward "Because") (point))))
+      (should-not (invisible-p (save-excursion (goto-char (point-min)) (search-forward "2. Yes") (point))))
+      ;; Only the Answer body takes text.
+      (goto-char (point-min))
+      (should-error (insert "x") :type 'text-read-only)
+      (forward-line 1)
+      (call-interactively (bbh-test--key "i"))
+      (should (eng/bbh-inbox--in-answer-p))
+      (insert "call it Zed")
+      ;; Letters type there, as keys do anywhere in an Answer.
+      (should (memq (bbh-test--key "s") '(self-insert-command org-self-insert-command)))
+      (should (equal "call it Zed" (eng/bbh-inbox--answer-text "a1")))
+      (call-interactively (bbh-test--key "C-c C-c"))
+      (should (bbh-test--wait (lambda () (funcall logged "inbox send T1 {\"a1\" \"call it Zed\"}")) 10))
+      (goto-char (point-min))
+      (search-forward "T2 second")
       (eng/bbh-inbox--moved)
-      (should (bbh-test--wait (lambda () (funcall logged "inbox select T2")) 10))
-      (should (bbh-test--wait (lambda () (and (get-buffer "*bbh inbox preview*")
-                                              (string-match-p "preview of T2" (bbh-test--text "*bbh inbox preview*"))))
-                              10)))))
+      (should (bbh-test--wait (lambda () (funcall logged "inbox select T2")) 10)))
+    (kill-buffer "*bbh inbox*")))
+
+(ert-deftest bbh-inbox-reload-keeps-unsaved-answers-and-folds ()
+  (bbh-test--with-fake-inbox (view log)
+    (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
+    (goto-char (car (eng/bbh-inbox--answer-region "a1")))
+    (insert "not saved yet")
+    ;; Show the Details, fold T2's summary open, and reload with something changed.
+    (save-excursion (goto-char (point-min)) (search-forward "*** Details") (org-fold-show-subtree))
+    (eng/bbh-inbox--render (concat "head\n" bbh-test--outline "\n* NEW T3 third") t)
+    (should (equal "not saved yet" (eng/bbh-inbox--answer-text "a1")))
+    (should-not (invisible-p (save-excursion (goto-char (point-min)) (search-forward "Because") (point))))
+    (should (eng/bbh-inbox--in-answer-p))
+    ;; Saving sends it to the draft.  A reload still carrying the older draft
+    ;; keeps your text; once the draft has it, the draft's text is what shows.
+    (eng/bbh-inbox--save "T1")
+    (should (bbh-test--wait (lambda () (member "answer" (bbh-test--inbox-log log))) 10))
+    (eng/bbh-inbox--render (concat "head\n" bbh-test--outline "\n* NEW T4 fourth") t)
+    (should (equal "not saved yet" (eng/bbh-inbox--answer-text "a1")))
+    (let ((with (lambda (text) (concat "head\n" (replace-regexp-in-string "\\*\\*\\* Answer\n\n" (concat "*** Answer\n    " text "\n") bbh-test--outline)))))
+      (eng/bbh-inbox--render (funcall with "not saved yet") t)
+      (eng/bbh-inbox--render (funcall with "from the phone") t)
+      (should (equal "from the phone" (eng/bbh-inbox--answer-text "a1"))))))
 
 (ert-deftest bbh-inbox-opens-from-a-buffer-whose-workspace-is-gone ()
   ;; A finished Worker's workspace is removed while its buffers stay, so SPC m i
@@ -415,7 +479,7 @@
   (let* ((log (make-temp-file "bbh-inbox-log"))
          (script (make-temp-file "bbh-fake" nil nil
                                  (concat "#!/bin/sh\necho \"$@\" >> " log "\n"
-                                         "case \"$2\" in\nview) printf 'bbh inbox · 0 need you\\nT1\\tNEW  T1 first\\n';;\nesac\n")))
+                                         "case \"$2\" in\norg) printf 'bbh inbox · 0 need you\\n* NEW T1 first\\n';;\nesac\n")))
          (eng/bbh-inbox-bbh (list script))
          (gone (make-temp-file "bbh-workspace" t))
          (worker (get-buffer-create "T9 done [viewport]")))
@@ -436,7 +500,7 @@
   (let* ((log (make-temp-file "bbh-inbox-log"))
          (script (make-temp-file "bbh-fake" nil nil
                                  (concat "#!/bin/sh\necho \"$@\" >> " log "\n"
-                                         "case \"$2\" in\nview) printf 'bbh inbox · 0 need you\\nT1\\tNEW  T1 first\\n';;\nesac\n")))
+                                         "case \"$2\" in\norg) printf 'bbh inbox · 0 need you\\n* NEW T1 first\\n';;\nesac\n")))
          (eng/bbh-inbox-bbh (list script))
          (registered (lambda () (with-temp-buffer (insert-file-contents log)
                                   (how-many "^inbox register [0-9]+$" (point-min) (point-max))))))
@@ -470,37 +534,34 @@
   (sort (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list nil 'nomini)) #'string<))
 
 (ert-deftest bbh-super-views-switch-with-their-own-windows ()
-  ;; The Inbox's preview and a session's transcript and composer are each
+  ;; The Inbox and a session's transcript and composer are each
   ;; view's whole frame; nothing of the view you left stays behind.
   (let* ((script (make-temp-file "bbh-fake" nil nil
                                  (concat "#!/bin/sh\ncase \"$2\" in\n"
-                                         "view) printf 'bbh inbox · 0 need you\\nT1\\tNEW  T1 first\\n';;\n"
-                                         "preview) echo \"preview of $3\";;\n"
+                                         "org) printf 'bbh inbox · 0 need you\\n* NEW T1 first\\n';;\n"
                                          "esac\n")))
          (eng/bbh-inbox-bbh (list script))
          (dir (make-temp-file "bbh-super-ws" t))
          (shell (get-buffer (eng/bbh-super-open "router" dir "Router" nil))))
     (set-file-modes script #o700)
-    (dolist (name '("*bbh inbox*" "*bbh inbox preview*"))
-      (when (get-buffer name) (kill-buffer name)))
+    (when (get-buffer "*bbh inbox*") (kill-buffer "*bbh inbox*"))
     (unwind-protect
         (progn
           (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
           (eng/bbh-inbox)
           (with-current-buffer "*bbh inbox*"
             (should (bbh-test--wait (lambda () (string-match-p "T1 first" (buffer-string))) 10)))
-          (should (bbh-test--wait (lambda () (get-buffer-window "*bbh inbox preview*")) 10))
-          (should (equal '("*bbh inbox preview*" "*bbh inbox*") (bbh-test--windows)))
+          (should (equal '("*bbh inbox*") (bbh-test--windows)))
           ;; SPC m r in the Inbox: the Router alone, its composer selected.
           (with-current-buffer "*bbh inbox*" (call-interactively (key-binding (kbd "C-c r"))))
           (let ((composer (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)))
             (should (equal (sort (list "Router transcript" (buffer-name composer)) #'string<) (bbh-test--windows)))
             (should (eq composer (window-buffer (selected-window))))
-            ;; SPC m i in the composer and in the transcript: the Inbox and its preview again.
+            ;; SPC m i in the composer and in the transcript: the Inbox alone again.
             (dolist (from (list composer (buffer-local-value 'eng/bbh-transcript shell)))
               (eng/bbh-super-visit "Router")
               (with-current-buffer from (call-interactively (key-binding (kbd "C-c i"))))
-              (should (bbh-test--wait (lambda () (equal '("*bbh inbox preview*" "*bbh inbox*") (bbh-test--windows))) 10))
+              (should (bbh-test--wait (lambda () (equal '("*bbh inbox*") (bbh-test--windows))) 10))
               (should (equal "*bbh inbox*" (buffer-name (window-buffer (selected-window))))))))
       (eng/bbh-super--kill shell))
     ;; An ordinary session in another Emacs has neither key.
@@ -541,21 +602,21 @@
 ;;; The super-agent Inbox reloads itself
 
 (defun bbh-test--inbox-view (ids)
-  "`bbh inbox view' output listing thread IDS."
-  (mapconcat (lambda (id) (format "%s\t%s row" id id)) (cons "bbh inbox · 0 need you" ids) "\n"))
+  "`bbh inbox org' output listing thread IDS."
+  (mapconcat #'identity (cons "bbh inbox · 0 need you" (mapcar (lambda (id) (format "* NEW %s %s row" id id)) ids)) "\n"))
 
 (defun bbh-test--inbox-ids (from to)
   (mapcar (lambda (n) (format "T%d" n)) (number-sequence from to)))
 
 (defmacro bbh-test--with-fake-inbox (spec &rest body)
-  "Run BODY with the Inbox shown and a fake bbh: `view' prints file VIEW,
-`preview' a line, and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
+  "Run BODY with the Inbox shown and a fake bbh: `org' prints file VIEW,
+and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
   (declare (indent 1))
   (let ((view (car spec)) (log (cadr spec)))
     `(let* ((,view (make-temp-file "bbh-inbox-view"))
             (,log (make-temp-file "bbh-inbox-log"))
             (eng/bbh-inbox-bbh
-             (list "sh" "-c" (format "echo \"$2\" >> %s; case $2 in view) cat %s || exit 1;; preview) echo preview $3;; *) exit 1;; esac"
+             (list "sh" "-c" (format "echo \"$2\" >> %s; case $2 in org) cat %s || exit 1;; answer) ;; *) exit 1;; esac"
                                      (shell-quote-argument ,log) (shell-quote-argument ,view))
                    "sh"))
             (eng/bbh-inbox--reload nil)
@@ -565,7 +626,7 @@
              (delete-other-windows)
              (switch-to-buffer (eng/bbh-inbox--buffer))
              (unless (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox-mode))
-             (setq eng/bbh-inbox--rows nil)
+             (setq eng/bbh-inbox--text nil)
              ,@body)
          (dolist (timer timer-idle-list)
            (when (eq (timer--function timer) #'eng/bbh-inbox--reload) (cancel-timer timer)))
@@ -585,12 +646,12 @@
     ;; Three new threads above, and one gone above the cursor.
     (eng/bbh-inbox--render (bbh-test--inbox-view (append '("T31" "T32" "T33") (delete "T5" (bbh-test--inbox-ids 1 30)))) t)
     (should (equal "T20" (eng/bbh-inbox--at-point)))
-    (should (equal "T31 row" (save-excursion (goto-char (point-min)) (buffer-substring-no-properties (point) (line-end-position)))))
+    (should (equal "* NEW T31 T31 row" (save-excursion (goto-char (point-min)) (buffer-substring-no-properties (point) (line-end-position)))))
     (should (= 4 (count-lines (window-start) (point))))))
 
 (defun bbh-test--inbox-rows (rows)
-  "`bbh inbox view' output for ROWS, each (ID SECTION) as `bbh inbox' formats it."
-  (mapconcat (pcase-lambda (`(,id ,section)) (format "%s\t%-16s %-4s %s row" id (upcase section) id id))
+  "`bbh inbox org' outline for ROWS, each (ID SECTION) as `bbh inbox' heads it."
+  (mapconcat (pcase-lambda (`(,id ,section)) (format "* %s %s %s row" (upcase section) id id))
              rows "\n"))
 
 (ert-deftest bbh-inbox-archiving-leaves-the-cursor-on-the-next-thread ()
@@ -619,7 +680,7 @@
                              t)
       (should (equal "T40" (eng/bbh-inbox--at-point)))
       (goto-char (eng/bbh-inbox--find '("T10" . 1)))
-      (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (cons '("T10" "stopped on you") (bbh-test--inbox-rows-without before "T10" "T20" "T30"))))
+      (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (cons '("T10" "stopped") (bbh-test--inbox-rows-without before "T10" "T20" "T30"))))
                              t)
       (should (equal "T10" (eng/bbh-inbox--at-point)))
       ;; T10, now first, gone from the view leaves the cursor on the one below it.
@@ -641,8 +702,8 @@
       (eng/bbh-inbox--changed)
       (should (eq 'again eng/bbh-inbox--reload))
       (should (bbh-test--wait (lambda () (eq 'pending eng/bbh-inbox--reload)) 10))
-      (should (equal "T1 row\nT2 row\n" (buffer-substring-no-properties (point-min) (point-max))))
-      (should (equal '("view") (seq-filter (lambda (verb) (equal verb "view")) (bbh-test--inbox-log log))))
+      (should (equal "* NEW T1 T1 row\n* NEW T2 T2 row\n" (buffer-substring-no-properties (point-min) (point-max))))
+      (should (equal '("org") (seq-filter (lambda (verb) (equal verb "org")) (bbh-test--inbox-log log))))
       ;; A failed reload says so in the header, not the echo area.
       (mapc #'cancel-timer (bbh-test--inbox-reloads))
       (setq eng/bbh-inbox--reload nil)

@@ -249,22 +249,30 @@
           (not (same-origin? request)) (json-response 403 {:error "Cross-origin request"})
           (= ::bad body) (json-response 400 {:error "Bad JSON"})
           (= "reply" verb)
-          (let [{:keys [picks note asks-version]} body]
+          (let [{:keys [picks answers note asks-version]} body]
             (cond (> (count (str note)) max-text) (json-response 413 {:error "Note too long"})
+                  (not (or (nil? answers) (picks? answers))) (json-response 400 {:error "Answers map an ask id to text"})
+                  (some #(> (count %) max-text) (vals answers)) (json-response 413 {:error "Answer too long"})
                   (not (string? (:id body))) (json-response 400 {:error "A reply needs an id"})
                   (not (or (nil? picks) (picks? picks))) (json-response 400 {:error "Picks map an ask id to an option id"})
-                  :else (super-call dir {:command :reply! :id (:id body)
-                                         :args {:thread id :asks-version asks-version
-                                                :picks (into {} (map (fn [[k v]] [(name k) v])) picks)
-                                                :note (str/trim (str note))}}
-                                    202)))
+                  :else (let [answers (into {} (keep (fn [[k v]] (when-not (str/blank? v) [(name k) (str/trim v)]))) answers)]
+                          (super-call dir {:command :reply! :id (:id body)
+                                           :args (cond-> {:thread id :asks-version asks-version
+                                                          :picks (into {} (map (fn [[k v]] [(name k) v])) picks)
+                                                          :note (str/trim (str note))}
+                                                   (seq answers) (assoc :answers answers))}
+                                      202))))
           ;; A draft is the same whatever retries it, so it needs no id.
           (= "draft" verb)
-          (let [{:keys [ask option note]} body]
+          (let [{:keys [ask option answer note]} body]
             (cond (> (count (str note)) max-text) (json-response 413 {:error "Note too long"})
-                  (and (some? ask) (not (and (string? ask) (string? option)))) (json-response 400 {:error "A pick names its ask and option"})
-                  (and (nil? ask) (not (string? note))) (json-response 400 {:error "A draft change is a pick or a note"})
-                  :else (super-call dir {:command :draft! :args (cond-> {:thread id} ask (assoc :pick [ask option]) (string? note) (assoc :note note))} 200)))
+                  (> (count (str answer)) max-text) (json-response 413 {:error "Answer too long"})
+                  (and (some? ask) (not (and (string? ask) (or (string? option) (string? answer))))) (json-response 400 {:error "A pick names its ask and option, an answer its ask and text"})
+                  (and (nil? ask) (not (string? note))) (json-response 400 {:error "A draft change is a pick, an answer or a note"})
+                  :else (super-call dir {:command :draft! :args (cond-> {:thread id}
+                                                                  (and ask (string? option)) (assoc :pick [ask option])
+                                                                  (and ask (string? answer)) (assoc :answer [ask answer])
+                                                                  (string? note) (assoc :note note))} 200)))
           (= "approve" verb)
           (if (and (string? (:id body)) (every? (comp string? body) [:ask :revision :evidence-sha]))
             (super-call dir {:command :approve! :id (:id body)

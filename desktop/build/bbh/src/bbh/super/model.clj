@@ -51,7 +51,7 @@
 
 (defn- reply-text
   "The mailbox message that carries REPLY to its Worker."
-  [state {:keys [id thread picks note dismiss approved]}]
+  [state {:keys [id thread picks answers note dismiss approved]}]
   (let [ask-line (fn [[ask option]]
                    (let [a (get-in state [:asks ask])
                          label (or (some #(when (= option (:id %)) (:label %)) (:options a)) option)]
@@ -59,6 +59,7 @@
     (str/join "\n" (remove str/blank?
                             [(format "[%s reply %s]" thread id)
                              (when (seq picks) (str/join "\n" (map ask-line picks)))
+                             (when (seq answers) (str/join "\n" (for [[ask text] answers] (format "- %s: %s" (get-in state [:asks ask :text]) text))))
                            (when (seq approved)
                              (str/join "\n" (for [[ask revision] approved]
                                                (format "Approved %s at revision %s (evidence %s)." ask revision
@@ -369,12 +370,19 @@
                                            :text (str "[Job " job " exited with status " exit ". Log: " log "]")))}]
        :result job})))
 
-(defmethod decide* :ask! [state {{:keys [thread worker kind text options recommended stopped holds-up supersedes revision evidence-sha]} :args}]
+(def ask-text-max
+  "The longest ask :text: one line the person can decide from at a glance.
+  Reasoning, evidence and risk go in :details or the :evidence file."
+  160)
+
+(defmethod decide* :ask! [state {{:keys [thread worker kind text options recommended stopped holds-up supersedes revision evidence-sha details evidence]} :args}]
   (let [t (thread-of state thread)
         worker (or worker (:worker t))
         open (open-asks state thread)]
     (when-not (#{:question :action :review} kind) (refuse :invalid :field :kind))
     (when (str/blank? text) (refuse :invalid :field :text))
+    (when (or (str/includes? (str/trim text) "\n") (> (count (str/trim text)) ask-text-max))
+      (refuse :invalid :field :text :message (str "an ask's :text is one line of at most " ask-text-max " characters; put the rest in :details or an :evidence file")))
     (when (and (= :review kind) (str/blank? revision))
       (refuse :invalid :field :revision :message "a review ask names the revision to approve"))
     (when-not (= worker (:worker t)) (refuse :no-active-worker :thread thread))
@@ -384,14 +392,16 @@
     (doseq [a supersedes] (when-not (open a) (refuse :no-such-ask :ask a)))
     (let [id (next-id state :asks "a")]
       {:events [{:kind :ask-opened :thread thread
-                 :data (cond-> {:id id :worker worker :kind kind :text text :options (vec options)
+                 :data (cond-> {:id id :worker worker :kind kind :text (str/trim text) :options (vec options)
                                 :stopped (boolean stopped) :supersedes (vec supersedes)}
                          recommended (assoc :recommended recommended)
+                         (not (str/blank? details)) (assoc :details (str/trim details))
+                         (not (str/blank? evidence)) (assoc :evidence (str/trim evidence))
                          holds-up (assoc :holds-up holds-up)
                          (= :review kind) (assoc :revision revision :evidence-sha evidence-sha))}]
        :result id})))
 
-(defmethod decide* :reply! [state {{:keys [thread asks-version picks note dismiss]} :args :keys [id]}]
+(defmethod decide* :reply! [state {{:keys [thread asks-version picks answers note dismiss]} :args :keys [id]}]
   (let [t (thread-of state thread)
         open (open-asks state thread)]
     (when (not= asks-version (:asks-version t))
@@ -399,11 +409,15 @@
     (doseq [[ask option] picks]
       (let [a (or (open ask) (refuse :no-such-ask :ask ask))]
         (when-not (some #(= option (:id %)) (:options a)) (refuse :no-such-option :ask ask :option option))))
+    (doseq [[ask text] answers]
+      (when-not (open ask) (refuse :no-such-ask :ask ask))
+      (when (str/blank? text) (refuse :invalid :field :answers :ask ask)))
     (doseq [ask dismiss] (when-not (open ask) (refuse :no-such-ask :ask ask)))
-    (when (and (empty? picks) (empty? dismiss) (str/blank? note)) (refuse :invalid :field :picks))
+    (when (and (empty? picks) (empty? answers) (empty? dismiss) (str/blank? note)) (refuse :invalid :field :picks))
     (when-not (:worker t) (refuse :no-active-worker :thread thread))
-    (let [reply {:id id :thread thread :worker (:worker t) :picks (or picks {}) :note (or note "")
-                 :dismiss (set dismiss)}
+    (let [reply (cond-> {:id id :thread thread :worker (:worker t) :picks (or picks {}) :note (or note "")
+                         :dismiss (set dismiss)}
+                  (seq answers) (assoc :answers (into {} (map (fn [[a s]] [a (str/trim s)])) answers)))
           outbox (next-id state :outbox "o")]
       {:events [{:kind :reply-sent :thread thread
                  :data (assoc reply :outbox outbox
@@ -441,10 +455,14 @@
                       :conversation (get-in state [:workers (:worker t) :conversation])
                       :text (reply-text state reply))}))))
 
-(defmethod decide* :draft! [state {{:keys [thread pick note]} :args}]
+(defmethod decide* :draft! [state {{:keys [thread pick answer note]} :args}]
   (let [t (thread-of state thread)
         current (:asks-version t)
         draft (or (:draft t) {:picks {} :note "" :asks-version current})]
+    (when-let [[ask] answer]
+      (when (not= current (:asks-version draft))
+        (refuse :stale :message "Draft is stale; clear it before answering again" :current current))
+      (or (get (open-asks state thread) ask) (refuse :no-such-ask :ask ask)))
     (when-let [[ask option] pick]
       (when (not= current (:asks-version draft))
         (refuse :stale :message "Draft is stale; clear it before choosing again" :current current))
@@ -452,9 +470,13 @@
         (when-not (some #(= option (:id %)) (:options a)) (refuse :no-such-option :ask ask :option option))))
     (let [draft (cond-> draft
                   pick (assoc-in [:picks (first pick)] (second pick))
+                  answer (as-> d (let [[ask text] answer text (str/trim (str text))]
+                                   (if (str/blank? text)
+                                     (let [d (update d :answers dissoc ask)] (if (empty? (:answers d)) (dissoc d :answers) d))
+                                     (assoc-in d [:answers ask] text))))
                   note (assoc :note (str/trim (str note))))]
       ;; The thread rides in :data, so a draft does not stamp :updated-at.
-      {:events [(if (and (empty? (:picks draft)) (str/blank? (:note draft)))
+      {:events [(if (and (empty? (:picks draft)) (empty? (:answers draft)) (str/blank? (:note draft)))
                   {:kind :draft-discarded :data {:thread thread}}
                   {:kind :draft-saved :data {:thread thread :draft draft}})]
        :result draft})))
@@ -723,7 +745,7 @@
       (assoc-in [:replies id] (-> reply (dissoc :outbox :conversation :text) (assoc :state :sent :outbox outbox :seq seq)))
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply id :conversation conversation :text text
                                   :state :pending :message nil})
-      (set-states :asks (concat (keys picks) (keys (:approved reply))) :sent)
+      (set-states :asks (concat (keys picks) (keys (:answers reply)) (keys (:approved reply))) :sent)
       (set-states :asks dismiss :dismissed)
       (assoc-in [:threads thread :asks-version] seq)
       (update-in [:threads thread] dissoc :draft)
@@ -736,9 +758,9 @@
   [state kind id]
   (when-let [r (get-in state [kind id])]
     (case kind
-      :asks (assoc r :reply (some (fn [p] (when (or (contains? (:picks p) id) (contains? (:approved p) id) (contains? (set (:dismiss p)) id)) (:id p)))
+      :asks (assoc r :reply (some (fn [p] (when (or (contains? (:picks p) id) (contains? (:answers p) id) (contains? (:approved p) id) (contains? (set (:dismiss p)) id)) (:id p)))
                                   (sort-by :seq (vals (:replies state)))))
-      :replies (assoc r :asks (vec (sort (distinct (concat (keys (:picks r)) (keys (:approved r)) (:dismiss r))))))
+      :replies (assoc r :asks (vec (sort (distinct (concat (keys (:picks r)) (keys (:answers r)) (keys (:approved r)) (:dismiss r))))))
       :workers (assoc r :asks (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:asks state)))))
                         :replies (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:replies state))))))
       r)))
@@ -798,14 +820,14 @@
        (sort-by :seq) last))
 
 (defn sections
-  "Threads of STATE grouped in the doc's order, each with its open ask and
-  whether an archived one came back. CURSORS maps thread id to the seq the
-  client last saw."
+  "Threads of STATE grouped in the doc's order, each with its newest open ask,
+  all its open :asks and whether an archived one came back. CURSORS maps
+  thread id to the seq the client last saw."
   [state cursors]
   (let [rows (for [t (map #(thread-view state %) (sort-by (comp id-order :id) (vals (:threads state))))
                    :let [s (section state t (get cursors (:id t)))
                          ask (ask-line state (:id t))]]
-               (assoc t :section s :ask ask
+               (assoc t :section s :ask ask :asks (vec (sort-by :seq (vals (open-asks state (:id t)))))
                       :line (or (:text ask)
                                 (get-in state [:workers (:worker t) :health :problem])
                                 (when (= :failed (:execution t)) (get-in state [:workers (peek (:history t)) :reason]))
@@ -891,7 +913,7 @@
   (let [reply (get-in state [:replies id])]
     (-> state (assoc-in [:replies id :state] :answered)
         (assoc-in [:outbox (:outbox reply) :state] :done)
-        (set-states :asks (concat (keys (:picks reply)) (keys (:approved reply))) :answered)
+        (set-states :asks (concat (keys (:picks reply)) (keys (:answers reply)) (keys (:approved reply))) :answered)
         (resume thread))))
 
 (defn changed

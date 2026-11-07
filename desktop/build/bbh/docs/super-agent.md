@@ -119,14 +119,18 @@ Binding: `babashka.sqlite`, which calls `libsqlite3` through `babashka.ffi`. bb 
 {:id "a1" :thread "T12" :worker "W7" :seq 5120 :kind :question
  :text "Keep Ctrl+Alt+W as an alias?"
  :options [{:id "no" :label "No"} {:id "week" :label "Yes, for a week"}]
- :recommended "no" :stopped true :state :open}
+ :recommended "no" :stopped true :state :open
+ :details "Why, the evidence and the risk"   ; optional, folded in the Inbox
+ :evidence "/abs/path/evidence.md"}       ; optional
 
 ;; reply (a command, then an event)
 {:command-id "c-9f2" :thread "T12" :asks-version 5120
- :picks {"a1" "no"} :note "" :dismiss #{}}
+ :picks {"a1" "no"} :answers {} :note "" :dismiss #{}}
 ```
 
-Picks and the note are the thread's `:draft` in the controller (`draft!`, `discard-draft!`), so the Inbox, voice and the phone show the same one, and the reply that sends it removes it. Read cursors are per client. A Send carries `:asks-version`, the `seq` of the asks it saw. If another device answered since, the controller rejects the Send with the current state and the client shows the conflict rather than creating a second reply.
+An ask's `:text` is one line of at most 160 characters, and `ask!` refuses a longer one, so the person can decide from the question and the options at a glance. What they need beyond that goes in `:details` or the `:evidence` file. `:answers` maps an ask to the person's own words, and it closes that ask the way a pick does.
+
+Picks, typed answers and the note are the thread's `:draft` in the controller (`draft!`, `discard-draft!`), so the Inbox, voice and the phone show the same one, and the reply that sends it removes it. Read cursors are per client. A Send carries `:asks-version`, the `seq` of the asks it saw. If another device answered since, the controller rejects the Send with the current state and the client shows the conflict rather than creating a second reply.
 
 ### Ask lifecycle
 
@@ -197,10 +201,10 @@ The badge counts the first three. Progress notes update the thread's summary lin
 ```clojure
 (thread! "Improve bbh web layout")                       ; => "T12"
 (start-worker! {:thread "T12" :workflow :change :brief ... :project "guix" :for "o12"})
-(ask! {:kind :question :text ... :options [...] :stopped true})
+(ask! {:kind :question :text ... :options [...] :details ... :evidence ... :stopped true})
 (note! "progress text")                                    ; summary only
 (milestone! "pushed 3 commits")                           ; makes the thread New
-(reply! "T12" {:asks-version 5120 :picks {...} :note ... :dismiss #{}})
+(reply! "T12" {:asks-version 5120 :picks {...} :answers {...} :note ... :dismiss #{}})
 (steer! "W7" "also handle the phone layout")
 (cancel! "W7" "reason")
 (resume! "T12")                                         ; a Worker whose session ended
@@ -242,19 +246,24 @@ Both surfaces show the same threads, sections and handles. Emacs is the desk, be
 
 The super-agent lives in one Emacs daemon, `bbh-super`, which the `bbh-emacs` Home service runs. You only see it through terminal frames (`emacsclient -s bbh-super -t`), usually in a Herdr pane. The controller talks to the daemon with `emacsclient --eval`. If the daemon is down, starting a Worker fails with an error that says so. There is no fallback to Herdr panes.
 
-- **Inbox buffer, `*bbh inbox*`.** `bbh inbox` (`prefix+t` in Herdr) opens a terminal frame on it. It shows a live list of threads grouped by section, with the badge in the header line. When the buffer is created it opens a local port and registers it with the controller. The controller connects to that port whenever an event changes a thread, so the list reloads without polling. The order holds while you look, and new activity waits behind an "N new" line. A preview window below the list shows the thread under the cursor: the open ask with numbered options, or the Worker's latest state when nothing is open.
+- **Inbox buffer, `*bbh inbox*`.** `bbh inbox` (`prefix+t` in Herdr) opens a terminal frame on it. It shows a live org outline of the threads in section order, with the badge and the keys in the header line. When the buffer is created it opens a local port and registers it with the controller. The controller connects to that port whenever an event changes a thread, so the list reloads without polling. The order holds while you look, and new activity waits behind an "N new" line. Each thread's heading starts with its section and id. Under it is a heading per open ask, starting with the ask's id, with the one-line question and numbered options in its body. A folded Details heading holds the ask's `:details` and a link to its `:evidence` file. An Answer heading's body is the only text you can edit, and you type an answer in your own words there. A thread with no open ask shows its latest state, folded. A reload keeps your heading, your folds and any answer you typed but have not saved.
 - **Router buffer, `Router`.** The Router conversation (`bbh acp --id router` in agent-shell, sandboxed by `BBH_ROLE=router`). `bbh super start-router` opens it and the Inbox. What you send from its composer or type at its prompt goes through `bbh super say!` with origin `:emacs`, so it gets an `oN` id the Router can start Workers for, and a leading handle ("T12 ...") steers that thread instead.
 
-The Inbox is in evil normal state, so motions, search and `C-j`/`C-k` focus work as in any Doom buffer, and SPC m lists the actions. Its keys:
+The Inbox is an org buffer in evil normal state, so motions, search, `C-j`/`C-k` focus and the org and evil-org keys work as in any Doom org buffer, and SPC m lists the actions. The keys act on the ask under the cursor, else on the thread's newest open ask. Its keys:
 
 | Key | Action |
 |---|---|
-| j, k, gg, G, / | Evil motions and search. The preview follows the cursor. |
-| 1 to 4 | Pick an option on the selected thread's ask. The pick is saved at once. |
-| r | Write a note on the selected thread, in the minibuffer. |
-| s | Send every pick and note on the selected thread, as one message per Worker. |
-| A | Approve the review the thread is waiting on. |
-| RET | Open the buffer of the thread's latest Worker, running or finished, and mark the thread seen. |
+| j, k, gg, G, / | Evil motions and search. |
+| TAB, S-TAB, zo, zc, za, gj, gk, gh, gl | Org and evil-org folding and moves by heading. TAB on an ask shows its Details. |
+| 1 to 9 | Pick an option. The pick is saved at once. |
+| . | Pick the recommended option. |
+| i | Go to the ask's Answer and type in insert state. Leaving insert state saves what you typed to the draft, which the phone shows too. |
+| r | Answer the ask, or on a thread with no open ask, write its note in the minibuffer. |
+| s, C-c C-c | Send the thread's picks, typed answers and note as one reply. C-c C-c works in insert state too. A typed answer closes its ask like a pick. |
+| S | Send every thread's draft, after one question listing them. |
+| C-c C-k | Discard the thread's draft. |
+| A | Approve the review under the cursor, else the one the thread is waiting on. |
+| RET | Pick the option on this line, open the link under the cursor, or open the buffer of the thread's latest Worker, running or finished, and mark the thread seen. |
 | m | Mark read, which closes the asks and tells the Worker not to wait. |
 | a | Archive. Open asks become dismissed, which the Worker is told, and a queued Worker is cancelled before it launches. |
 | R | Open the Router. |
@@ -263,7 +272,7 @@ The Inbox is in evil normal state, so motions, search and `C-j`/`C-k` focus work
 | g? | Describe the mode and its keys. |
 | q | Quit the window. |
 
-Each view takes the whole frame: opening the Router, a Worker or the Inbox first closes every other window, side windows included, so the Inbox preview never follows you. In the Router's and Workers' composers, C-n sends (Cmd+N through kanata) and C-c C-k stops the turn. Normal-state `C-d` and `C-u` page the transcript. The transcript uses Doom's evil-org keys: `gj`/`gk` by element, `]h`/`[h` between prompts, `gh` up.
+Each view takes the whole frame: opening the Router, a Worker or the Inbox first closes every other window, side windows included. In the Router's and Workers' composers, C-n sends (Cmd+N through kanata) and C-c C-k stops the turn. Normal-state `C-d` and `C-u` page the transcript. The transcript uses Doom's evil-org keys: `gj`/`gk` by element, `]h`/`[h` between prompts, `gh` up.
 
 Each Worker gets one buffer, named after its thread (`T12 keybindings`). The buffer runs `bbh acp --id super-W<n>` in the Worker's jj workspace with its token and `WF_RUN`. It opens in the background and never takes focus. A resumed Worker replaces its old buffer.
 
@@ -312,7 +321,7 @@ Dictation is a way of talking to the agent, not only a way of typing into a wind
 
 1. **System.** T15's Worker finds two ways to get the cost and calls `ask!` with `:stopped true` and a recommendation, then ends its turn.
 2. **Herdr.** T15 moves to the top of the Inbox under Stopped on you. Herdr shows a toast.
-3. **Herdr.** At the desk you press Alt+Space t, which opens the Inbox with T15 at the top. The preview shows the question with options 1 and 2. You press 1, then s.
+3. **Herdr.** At the desk you press Alt+Space t, which opens the Inbox with T15 at the top. T15's ask shows its question with options 1 and 2. You press 1 on it, then s.
 4. **iPhone.** You could equally answer from the phone. If both you and the phone answered, the second Send carries a stale `:asks-version` and shows "already answered: option 1" instead of sending.
 
 ### J4. Changing your mind in another channel

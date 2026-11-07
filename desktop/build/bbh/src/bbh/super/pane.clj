@@ -1,6 +1,6 @@
 (ns bbh.super.pane
   "`bbh inbox`: the verbs behind the Inbox buffer in the super-agent's Emacs,
-  which shows `view` and `preview` and calls the rest from its keys.
+  which shows `org` and calls the rest from its keys.
   The controller reloads it through the port `register` records. Picks and
   notes are the thread's draft in the controller, which the phone shows too,
   until `send` turns it into one reply. Read cursors and the selection are this
@@ -41,8 +41,10 @@
           (do (Thread/sleep 10) (recur (inc attempts)))
           (throw (ex-info "Inbox state lock unavailable" {:error :busy})))))))
 
-(defn select! [id]
-  (with-state-lock! #(save-client-state! (assoc (client-state) :selected {:thread id :at (System/currentTimeMillis)}))))
+(defn select!
+  "Record that the Inbox cursor is on thread ID, and on ASK when given, for voice."
+  [id & [ask]]
+  (with-state-lock! #(save-client-state! (assoc (client-state) :selected (cond-> {:thread id :at (System/currentTimeMillis)} ask (assoc :ask ask))))))
 
 (defn- call! [request]
   (let [{:keys [ok error message data]} (client/call! request)]
@@ -57,51 +59,58 @@
 
 (defn- first-line [s] (first (str/split-lines (str s))))
 
-(defn rows
-  "The Inbox rows: one `id<TAB>display` line per thread, grouped in section order:
-  section, id, what its work is doing (the controller's derived execution), title,
-  line and age. Each display starts with its section's title in capitals; the Emacs Inbox reads
-  ARCHIVED there to move the cursor off a thread you just archived."
+;; The Inbox is an org outline: a heading per thread, then per open ask with
+;; its options in the body, and under each ask a Details heading (folded by
+;; Emacs) and an Answer heading whose body is the one editable text. Emacs
+;; reads the ids back from the headings, so every heading starts with its id.
+
+(defn- indent [prefix s]
+  (str/join "\n" (map #(str prefix %) (str/split-lines (str s)))))
+
+(defn- org-ask
+  "The org subtree of open ASK, with DRAFT's pick and answer for it."
+  [{:keys [id text options recommended kind revision evidence-sha details evidence]} draft]
+  (let [picked (get-in draft [:picks id])
+        answer (get-in draft [:answers id])]
+    (str/join "\n"
+              (concat [(str "** " id " " text (when (not= :question kind) (str "  [" (name kind) "]")))]
+                      (when (= :review kind)
+                        [(str "   revision " revision "  evidence " (subs (str evidence-sha "        ") 0 8) "  A approve")])
+                      (map-indexed (fn [i {oid :id label :label}]
+                                     (str "   " (inc i) ". " label
+                                          (when (= oid recommended) "  (recommended)")
+                                          (when (= oid picked) "  <- picked")))
+                                   options)
+                      (when (or details evidence)
+                        (concat ["*** Details"]
+                                (when details [(indent "    " details)])
+                                (when evidence [(str "    " (if (str/starts-with? evidence "/") (str "[[file:" evidence "][" evidence "]]") evidence))])))
+                      ["*** Answer"]
+                      ;; An empty line, so a blank Answer has a line to type on.
+                      [(if (str/blank? answer) "" (indent "    " answer))]))))
+
+(defn org-view
+  "The Inbox outline of SECTIONS, in section order: each thread's heading
+  starts with its section and id, then its open asks, else its line."
   [{:keys [sections]}]
   (str/join "\n"
-            (for [{section :title :keys [threads]} sections
-                  {:keys [id title line came-back updated-at execution]} threads]
-              (str id "\t" (format "%-16s %-4s %-9s %s%s  %s  %s" (str/upper-case section) id
-                                     (if (contains? #{nil :none} execution) "" (name execution)) title
-                                     (if came-back " (came back)" "")
-                                     (or (some-> line first-line) "")
-                                     (or (age updated-at) ""))))))
+            (for [{:keys [section threads]} sections
+                  {:keys [id title line came-back updated-at execution asks draft]} threads]
+              (str/join "\n"
+                        (concat [(str "* " (str/upper-case (name section)) " " id " " title
+                                      (if came-back " (came back)" "")
+                                      (let [tail (str/join " · " (remove str/blank? [(when-not (contains? #{nil :none} execution) (name execution)) (age updated-at)]))]
+                                        (when-not (str/blank? tail) (str "  " tail))))]
+                                (if (seq asks)
+                                  (map #(org-ask % draft) asks)
+                                  (when-let [l (some-> line first-line not-empty)] [(str "  " l)]))
+                                (when-let [n (not-empty (:note draft))] [(str "  note: " n)]))))))
 
 (defn header
   "The Inbox's first line: what needs you, the processes on older code, then the keys."
   [{:keys [badge]} stale]
-  (format "bbh inbox · %d need you%s   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" badge
+  (format "bbh inbox · %d need you%s   1-9 pick  . recommended  i answer  C-c C-c send  S send all  TAB fold  RET open  A approve  r note  m read  a archive  x cancel  R router  J jjui  gr reload  g? help" badge
           (if (seq stale) (str " · old code: " (str/join ", " stale)) "")))
-
-(defn preview
-  "What the selected thread needs: its open ask with numbered options and its
-  draft's picks, or its summary."
-  [{:keys [id title asks summary workers execution draft]}]
-  (let [open (sort-by :seq (filter #(= :open (:state %)) asks))
-        pick (:picks draft {})]
-    (str/join "\n"
-              (concat [(str id "  " title) (str "execution " (name (or execution :none))
-                                                 (when-let [w (last workers)] (str ", " (:id w) " " (name (:state w)))))
-                       ""]
-                      (if (seq open)
-                        (mapcat (fn [{:keys [id text options recommended stopped kind revision evidence-sha]}]
-                                  (concat [(str (if stopped "STOPPED  " "") text)]
-                                          (when (= :review kind)
-                                            [(str "  REVIEW revision " revision " evidence " (subs (str evidence-sha "        ") 0 8) "  A approve")])
-                                          (map-indexed (fn [i {oid :id label :label}]
-                                                         (str "  " (inc i) ". " label
-                                                              (when (= oid recommended) "  (recommended)")
-                                                              (when (= oid (get pick id)) "  <- picked")))
-                                                       options)
-                                          [""]))
-                                open)
-                        [(or summary "Nothing open.")])
-                      (when-let [n (not-empty (:note draft))] ["note:" n])))))
 
 (defn- sections
   "The controller's sections in the current order, with this pane's read cursors."
@@ -110,32 +119,50 @@
 
 (defn- thread [id] (call! {:command :thread :args {:id id}}))
 
+(defn- open-ask
+  "Thread T's open ask ASK, else with no ASK its newest open ask."
+  [{:keys [asks]} ask]
+  (let [open (sort-by :seq (filter #(= :open (:state %)) asks))]
+    (if ask (some #(when (= ask (:id %)) %) open) (last open))))
+
 (defn pick!
-  "Save option N (1-based) of the newest open ask on thread ID. With ASK, only
-  when that is still the newest open ask, so a caller that judged one ask never
-  picks on another that opened since."
+  "Save option N (1-based) of open ask ASK on thread ID, else of its newest
+  open ask. A named ask that is no longer open is refused, so a caller that
+  judged one ask never picks on another."
   [id n & {expected :ask}]
-  (let [{:keys [asks]} (thread id)
-        ask (last (sort-by :seq (filter #(= :open (:state %)) asks)))
+  (let [ask (open-ask (thread id) expected)
         option (nth (:options ask) (dec n) nil)]
-    (when (and expected (not= expected (:id ask)))
+    (when (and expected (nil? ask))
       (throw (ex-info (str "The ask on " id " changed; look again") {:error :stale})))
     (when (and ask option)
       (call! {:command :draft! :args {:thread id :pick [(:id ask) (:id option)]}}))))
 
+(defn answer!
+  "Save TEXT as the free-text answer to ask ASK in thread ID's draft; blank
+  TEXT removes it."
+  [id ask text]
+  (call! {:command :draft! :args {:thread id :answer [ask text]}}))
+
 (defn send!
-  "Send thread ID's draft as one reply, which removes the draft. A stale
+  "Send thread ID's draft as one reply, which removes the draft. ANSWERS,
+  {ask text}, are what the Inbox shows typed under each ask; they replace the
+  draft's, and a blank one drops it. Nothing to send sends nothing. A stale
   draft is reported, not resent."
-  [id]
-  (when-let [{:keys [picks note asks-version]} (:draft (thread id))]
-    (call! {:command :reply! :args {:thread id :asks-version asks-version :picks picks :note note}})))
+  [id & {:keys [answers]}]
+  (let [t (thread id)
+        {:keys [picks note asks-version] :or {asks-version (:asks-version t)}} (:draft t)
+        answers (into {} (remove (comp str/blank? val))
+                      (merge (get-in t [:draft :answers]) (update-vals (or answers {}) str/trim)))]
+    (when (or (seq picks) (seq answers) (not (str/blank? note)))
+      (call! {:command :reply! :args (cond-> {:thread id :asks-version asks-version :picks (or picks {}) :note note}
+                                       (seq answers) (assoc :answers answers))}))))
 
 (defn approve!
-  "Approve the newest open review ask on thread ID at the revision and evidence
-  it shows. The controller refuses it as stale if either moved."
-  [id]
+  "Approve open review ask ASK on thread ID, else its newest, at the revision
+  and evidence it shows. The controller refuses it as stale if either moved."
+  [id & [ask]]
   (let [{:keys [asks]} (thread id)]
-    (when-let [a (last (sort-by :seq (filter #(and (= :open (:state %)) (= :review (:kind %))) asks)))]
+    (when-let [a (last (sort-by :seq (filter #(and (= :open (:state %)) (= :review (:kind %)) (or (nil? ask) (= ask (:id %)))) asks)))]
       (call! {:command :approve! :args {:thread id :ask (:id a) :revision (:revision a) :evidence-sha (:evidence-sha a)}}))))
 
 (defn note!
@@ -177,18 +204,19 @@
   (try
     (case verb
       nil (emacs/attach! "(eng/bbh-inbox)")
-      ;; The Inbox buffer's reload: the header, then the rows, from one read.
-      ;; The buffer keeps your place across reloads.
-      "view" (let [s (sections)] (println (header s (version/stale (client/data-dir)))) (println (rows s)))
-      "preview" (println (preview (thread id)))
-      "select" (select! id)
+      ;; The Inbox buffer's reload: the header, then the outline, from one read.
+      ;; The buffer keeps your place, folds and unsent answers across reloads.
+      "org" (let [s (sections)] (println (header s (version/stale (client/data-dir)))) (println (org-view s)))
+      "select" (select! id n)
       "clear" (call! {:command :discard-draft! :args {:thread id}})
-      "pick" (pick! id (parse-long n))
-      "send" (send! id)
+      "pick" (pick! id (parse-long n) :ask (first more))
+      "answer" (answer! id n (str/join " " more))
+      ;; ANSWERS is an EDN map {ask text}, so text keeps its newlines.
+      "send" (send! id :answers (some-> n edn/read-string))
       "note" (let [line (str/trim (str/join " " (remove nil? (cons n more))))]
                (when (str/blank? line) (throw (ex-info "A note needs text" {:error :invalid})))
                (note! id line))
-      "approve" (approve! id)
+      "approve" (approve! id n)
       "dismiss" (call! {:command :dismiss! :args {:thread id}})
       "resume" (call! {:command :resume! :args {:thread id}})
       "archive" (call! {:command :archive! :args {:thread id}})
@@ -197,7 +225,7 @@
       "buffer" (println (buffer id))
       "dir" (println (workdir (thread id)))
       "register" (client/register-view! (client/super-dir) (parse-long id))
-      (println "usage: bbh inbox [view|preview T|pick T N|send T|approve T|note T TEXT|dismiss T|resume T|archive T|cancel T|seen T|buffer T|dir T|register PORT]"))
+      (println "usage: bbh inbox [org|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|seen T|buffer T|dir T|register PORT]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))

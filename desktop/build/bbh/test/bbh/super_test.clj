@@ -160,23 +160,71 @@
     (is (= :archived (section (conj base {:seq 3 :kind :thread-resolved :thread "T1" :data {}}) 3)))
     (is (= 2 (model/badge [{:section :stopped :threads [1]} {:section :waiting :threads [2]} {:section :working :threads [3 4]}])))))
 
-(deftest the-pane-rows-carry-the-section-and-the-preview-numbers-the-options
+(deftest the-inbox-outline-heads-each-thread-and-ask-with-its-id
   (let [sections {:badge 1
                   :sections [{:section :stopped :title "Stopped on you"
                               :threads [{:id "T1" :title "Alt+W closes windows" :updated-at (str (java.time.Instant/now))
-                                         :execution :waiting :line "Keep the alias?\nSecond line"}]}
-                             {:section :archived :title "Archived" :threads [{:id "T3" :title "old" :came-back true}]}]}
-        [row1 row3] (clojure.string/split-lines (bbh.super.pane/rows sections))]
-    (is (re-matches #"T1\tSTOPPED ON YOU   T1   waiting   Alt\+W closes windows  Keep the alias\?  now" row1))
-    (is (re-matches #"T3\tARCHIVED         T3             old \(came back\)    " row3))
-    (is (= "bbh inbox · 1 need you   RET open  1-4 pick  s send  A approve  r note  m mark read  a archive  x cancel Worker  R router  J jjui  gr reload  g? help" (bbh.super.pane/header sections [])))
-    (is (clojure.string/starts-with? (bbh.super.pane/header sections ["controller" "web"]) "bbh inbox · 1 need you · old code: controller, web   RET open"))
-    (is (= ["T1  Alt+W" "execution waiting, W1 waiting" "" "STOPPED  Keep?" "  1. No  (recommended)" "  2. Yes  <- picked" "" "note:" "and why"]
-           (clojure.string/split-lines
-            (bbh.super.pane/preview {:id "T1" :title "Alt+W" :execution :waiting :workers [{:id "W1" :state :waiting}]
-                                     :asks [{:id "a1" :state :open :seq 3 :text "Keep?" :stopped true :recommended "no"
-                                             :options [{:id "no" :label "No"} {:id "yes" :label "Yes"}]}]
-                                     :draft {:picks {"a1" "yes"} :note "and why" :asks-version 3}}))))))
+                                         :execution :waiting :line "Keep?"
+                                         :asks [{:id "a1" :kind :question :text "Keep?" :stopped true :recommended "no"
+                                                 :options [{:id "no" :label "No"} {:id "yes" :label "Yes"}]
+                                                 :details "Because\nof reasons" :evidence "/tmp/e.md"}
+                                                {:id "a2" :kind :review :text "Approve?" :revision "abc" :evidence-sha "0123456789" :options []}]
+                                         :draft {:picks {"a1" "yes"} :answers {"a2" "looks good\nship it"} :note "and why" :asks-version 3}}]}
+                             {:section :archived :title "Archived" :threads [{:id "T3" :title "old" :came-back true}]}]}]
+    (is (= ["* STOPPED T1 Alt+W closes windows  waiting · now"
+            "** a1 Keep?"
+            "   1. No  (recommended)"
+            "   2. Yes  <- picked"
+            "*** Details"
+            "    Because"
+            "    of reasons"
+            "    [[file:/tmp/e.md][/tmp/e.md]]"
+            "*** Answer"
+            ""
+            "** a2 Approve?  [review]"
+            "   revision abc  evidence 01234567  A approve"
+            "*** Answer"
+            "    looks good"
+            "    ship it"
+            "  note: and why"
+            "* ARCHIVED T3 old (came back)"]
+           (clojure.string/split-lines (pane/org-view sections))))
+    (is (clojure.string/starts-with? (pane/header sections []) "bbh inbox · 1 need you   1-9 pick  . recommended  i answer  C-c C-c send"))
+    (is (clojure.string/starts-with? (pane/header sections ["controller" "web"]) "bbh inbox · 1 need you · old code: controller, web   1-9 pick"))))
+
+(deftest an-ask-is-one-line-and-its-details-ride-along
+  (with-controller
+    (fn [c dir _]
+      (let [{:keys [token]} (thread-with-ask dir)
+            ask (fn [args] (call dir {:token token :command :ask! :args (merge {:kind :question :options [{:id "y" :label "Y"}]} args)}))]
+        (is (= :invalid (:error (ask {:text "Keep it?\nBecause the old one..."}))))
+        (is (= :invalid (:error (ask {:text (apply str (repeat 161 "x"))}))))
+        (let [id (:ok (ask {:text "Keep it?" :details "Because." :evidence "/tmp/e.md"}))]
+          (is (= ["Keep it?" "Because." "/tmp/e.md"] ((juxt :text :details :evidence) (get-in @(:state c) [:asks id])))))))))
+
+(deftest a-typed-answer-closes-its-ask-and-reaches-the-worker
+  (with-controller
+    (fn [c dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (let [{:keys [token]} (thread-with-ask dir)
+                  a2 (:ok (call dir {:token token :command :ask! :args {:kind :question :text "Which name?" :options [{:id "x" :label "X"} {:id "y" :label "Y"}]}}))]
+              (testing "a pick lands on the ask you name, not only the newest"
+                (pane/pick! "T1" 2 :ask "a1")
+                (is (= {"a1" "week"} (get-in @(:state c) [:threads "T1" :draft :picks]))))
+              (testing "an answer saved to the draft shows in the outline"
+                (pane/answer! "T1" a2 "call it Zed")
+                (is (re-find #"\*\*\* Answer\n    call it Zed" (pane/org-view (:ok (call dir {:command :sections :args {}}))))))
+              (pane/send! "T1" :answers {a2 "call it Zed, please"})
+              (let [reply (first (vals (:replies @(:state c))))
+                    outbox (get-in @(:state c) [:outbox (:outbox reply)])]
+                (is (= {a2 "call it Zed, please"} (:answers reply)))
+                (is (= #{:sent} (set (map #(get-in @(:state c) [:asks % :state]) ["a1" a2]))) "the pick and the answer both close their asks")
+                (is (clojure.string/includes? (:text outbox) "- Which name?: call it Zed, please"))
+                (is (clojure.string/includes? (:text outbox) (str "(super-answered! \"" (:id reply) "\")"))))
+              (is (nil? (pane/send! "T1")) "nothing left to send sends nothing")
+              (locking (:db c) (is (= (store/replay (:db c)) @(:state c)))))))))))
 
 (deftest a-finished-worker-s-row-shows-how-it-ended-not-its-last-note
   (let [base [{:seq 1 :kind :thread-created :thread "T1" :data {:id "T1" :title "Fix it"}}
@@ -187,13 +235,13 @@
         row (fn [events]
               (let [state (reduce model/fold model/empty-state events)]
                 [(get-in state [:threads "T1" :summary])
-                 (pane/rows {:sections (model/sections state {"T1" 5})})]))]
+                 (pane/org-view {:sections (model/sections state {"T1" 5})})]))]
     (testing "a running thread shows its execution and its latest note"
-      (is (re-find #"^T1\tWORKING +T1   working +Fix it  Writing failing test  " (second (row base)))))
+      (is (re-find #"^\* WORKING T1 Fix it  working\n  Writing failing test$" (second (row base)))))
     (testing "finishing replaces the summary, and the row shows the outcome"
       (let [[summary r] (row (conj base (finish {:state :done :landed "abcdef1234567890"})))]
         (is (= "W1 done, landed abcdef12. Last note: Writing failing test" summary))
-        (is (re-find #"^T1\tQUIET +T1   done +Fix it  W1 done, landed abcdef12\. Last note: Writing failing test  " r)))
+        (is (re-find #"^\* QUIET T1 Fix it  done\n  W1 done, landed abcdef12\. Last note: Writing failing test$" r)))
       (is (= "W1 failed: REPL died. Last note: Writing failing test" (first (row (conj base (finish {:state :failed :reason "REPL died"}))))))
       (is (= "W1 cancelled: Cancelled from the inbox. Last note: Writing failing test"
              (first (row (conj base (finish {:state :cancelled :reason "Cancelled from the inbox"})))))))
@@ -734,7 +782,7 @@
               (is (= {:picks {"a1" "week"} :note "only for a week" :asks-version version} (draft)))
               (is (= updated (get-in @(:state c) [:threads "T1" :updated-at])) "a draft does not move the thread in the Inbox")
               (fs/delete-if-exists pane/*state-file*)
-              (is (re-find #"2\. Yes, for a week  <- picked" (pane/preview (:ok (call dir {:command :thread :args {:id "T1"}}))))
+              (is (re-find #"2\. Yes, for a week  <- picked" (pane/org-view (:ok (call dir {:command :sections :args {}}))))
                   "the pick outlives this client's state, as across an Emacs restart")
               (pane/send! "T1")
               (is (= [[{"a1" "week"} "only for a week"]] (mapv (juxt :picks :note) (vals (:replies @(:state c))))))
@@ -1012,9 +1060,9 @@
             (call dir {:command :thread! :args {:title "review"}})
             (let [token (run-worker dir "T1")]
               (call dir {:token token :command :ask! :args {:kind :review :text "Ship it?" :revision "c068de11" :stopped true}})
-              (is (clojure.string/includes? (pane/preview (:ok (call dir {:command :thread :args {:id "T1"}})))
-                                            "REVIEW revision c068de11 evidence e3b0c442  A approve")
-                  "the preview shows what A approves")
+              (is (clojure.string/includes? (pane/org-view (:ok (call dir {:command :sections :args {}})))
+                                            "revision c068de11  evidence e3b0c442  A approve")
+                  "the outline shows what A approves")
               (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "tee one approve")))
               (is (thrown-with-msg? Exception #"Voice cannot approve" (voice/submit! "tee one option one")))
               (is (= :open (get-in @(:state c) [:asks "a1" :state])))
@@ -1264,10 +1312,14 @@
       (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
         (let [original client/call!]
           (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
-            (let [{:keys [token]} (thread-with-ask dir)]
+            (let [{:keys [token]} (thread-with-ask dir)
+                  draft #(:draft (:ok (call dir {:command :thread :args {:id "T1"}})))]
               (call dir {:token token :command :ask! :args {:kind :action :text "Switch?" :options [{:id "yes" :label "Yes"}]}})
-              (is (thrown-with-msg? Exception #"changed" (pane/pick! "T1" 1 :ask "a1")))
-              (is (nil? (:draft (:ok (call dir {:command :thread :args {:id "T1"}}))))))))))))
+              (pane/pick! "T1" 1 :ask "a1")
+              (is (= {"a1" "no"} (:picks (draft))) "an older ask still open takes the pick")
+              (pane/send! "T1")
+              (is (thrown-with-msg? Exception #"changed" (pane/pick! "T1" 1 :ask "a1")) "a closed one refuses it")
+              (is (nil? (draft))))))))))
 
 
 (deftest a-quick-tap-stops-hex-only-after-it-started
