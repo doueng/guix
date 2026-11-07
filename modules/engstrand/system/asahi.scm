@@ -131,4 +131,5 @@
                      (substitute-urls (append '("https://bordeaux.guix.gnu.org")
                                               %asahi-substitute-urls
                                               '("https://ci.guix.gnu.org")))
-                     (extra-options '("--max-jobs=1" "--cores=4")))))))))
+                     ;; Keep build inputs of live items so gc does not force rebuilds.
+                     (extra-options '("--max-jobs=1" "--cores=4" "--gc-keep-outputs")))))))))
