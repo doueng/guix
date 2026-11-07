@@ -86,13 +86,39 @@
            (_ #f)))
        (filter-map (match-lambda (("Sig" . sig) sig) (_ #f)) fields)))
 
-(define (fetch-narinfo path)
+(define (par-map proc items)
+  "Like n-par-map, but re-raise in the caller the first exception a thread
+raised; n-par-map leaves '() in that slot instead."
+  (map (match-lambda
+         (('ok . value) value)
+         (('error . args) (apply throw args)))
+       (n-par-map %jobs
+                  (lambda (item)
+                    (catch #t
+                      (lambda () (cons 'ok (proc item)))
+                      (lambda args (cons 'error args))))
+                  items)))
+
+(define (narinfo-text path)
+  "Return the cache.nixos.org narinfo of PATH, or #f when the cache does not
+have it."
   (let* ((url (string-append %cache "/" (hash-part path) ".narinfo"))
-         (fields (narinfo-fields
-                  (catch #t
-                    (lambda () (command-output "curl" "-fsSL" "--retry" "3" url))
-                    (lambda _
-                      (error "not on cache.nixos.org; Hydra did not build it for this system" path))))))
+         (out (command-output "curl" "-sSL" "--retry" "3" "-w" "\n%{http_code}" url))
+         (end (string-rindex out #\newline))
+         (status (string-drop out (+ end 1))))
+    (cond ((string=? status "200") (string-take out end))
+          ((member status '("403" "404")) #f)
+          (else (error "cache.nixos.org returned HTTP" status url)))))
+
+(define (cached? path)
+  (and (narinfo-text path) #t))
+
+(define (fetch-narinfo path)
+  "Return the item record of PATH, or #f when cache.nixos.org does not have it."
+  (and=> (narinfo-text path) (cut narinfo-item path <>)))
+
+(define (narinfo-item path text)
+  (let ((fields (narinfo-fields text)))
     (unless (nix-signature-valid? fields)
       (error "bad cache.nixos.org signature" path))
     `(item (path ,path)
@@ -103,11 +129,14 @@
            (references ,@(string-tokenize (or (assoc-ref fields "References") ""))))))
 
 (define (closure roots)
-  "Return the item records of the runtime closure of ROOTS."
+  "Return the item records of the runtime closure of ROOTS.  cache.nixos.org
+uploads a path only with its references, so check ROOTS with cached? first."
   (let loop ((frontier (delete-duplicates roots)) (seen '()))
     (if (null? frontier)
         (map cdr (sort seen (lambda (a b) (string<? (car a) (car b)))))
-        (let* ((items (n-par-map %jobs fetch-narinfo frontier))
+        (let* ((items (map (lambda (path item)
+                             (or item (error "not on cache.nixos.org" path)))
+                           frontier (par-map fetch-narinfo frontier)))
                (seen (append (map cons frontier items) seen))
                (refs (append-map (match-lambda
                                    (('item fields ...)
@@ -159,10 +188,60 @@ falls back to the homepage and may be empty."
                    "changelog = toString (d.meta.changelog or d.meta.homepage or \"\"); }")
                   attrs revision system)))
 
+(define (short-revision revision)
+  (string-take revision (min 12 (string-length revision))))
+
+(define (hold-uncached packages revision system old-lock)
+  "Return PACKAGES, as lock entries, with each package whose outputs
+cache.nixos.org lacks replaced by its entry in OLD-LOCK, marked held.  Exit
+when an uncached package has no earlier entry."
+  (let* ((cached (par-map (match-lambda
+                            ((_ _ outputs) (every cached? (map second outputs))))
+                          packages))
+         (uncached (filter-map (lambda (package ok) (and (not ok) package))
+                               packages cached))
+         (old (if old-lock (lock-list old-lock 'packages) '()))
+         (old-revision (and old-lock (lock-ref old-lock 'revision))))
+    (define (old-entry attr)
+      (find (match-lambda (('package fields ...) (equal? attr (lock-ref fields 'attr))))
+            old))
+    (for-each (match-lambda
+                ((attr version _)
+                 (format (current-error-port)
+                         "~a ~a is not cached for ~a at nixpkgs ~a~a~%"
+                         attr version system (short-revision revision)
+                         (match (old-entry attr)
+                           (('package fields ...)
+                            (format #f "; holding ~a" (lock-ref fields 'version)))
+                           (#f "; it has no earlier lock entry to hold")))))
+              uncached)
+    (match (remove (match-lambda ((attr _ _) (old-entry attr))) uncached)
+      (() #t)
+      (((attrs _ _) ...)
+       (format (current-error-port)
+               "nixpkgs-lock: no cached build to lock for ~a; drop it from packages.sexp or retry once Hydra builds it~%"
+               (string-join attrs ", "))
+       (exit 1)))
+    (map (lambda (package ok)
+           (match package
+             ((attr version outputs)
+              (if ok
+                  `(package (attr ,attr) (version ,version) (outputs ,@outputs))
+                  (match (old-entry attr)
+                    (('package fields ...)
+                     `(package ,@(alist-delete 'held fields)
+                               (held ,(or (and=> (assq 'held fields) second)
+                                          old-revision)))))))))
+         packages cached)))
+
 (define (write-lock file attrs revision system)
-  (let* ((packages (evaluate attrs revision system))
+  "Lock ATTRS at nixpkgs REVISION into FILE.  A package that cache.nixos.org
+has not built at REVISION keeps its entry from the existing FILE, with a held
+field naming the revision it came from."
+  (let* ((packages (hold-uncached (evaluate attrs revision system) revision system
+                                  (and (file-exists? file) (read-nixpkgs-lock file))))
          (roots (append-map (match-lambda
-                              ((_ _ outputs) (map second outputs)))
+                              (('package fields ...) (map second (lock-list fields 'outputs))))
                             packages))
          (items (closure roots)))
     (call-with-output-file file
@@ -173,13 +252,12 @@ falls back to the homepage and may be empty."
            (revision ,revision)
            (system ,system)
            (packages
-            ,@(map (match-lambda
-                     ((attr version outputs)
-                      `(package (attr ,attr) (version ,version) (outputs ,@outputs))))
-                   packages))
+            ,@packages)
            (items ,@items))
          port)))
-    (format #t "locked ~a packages, ~a store items~%" (length packages) (length items))))
+    (format #t "locked ~a packages (~a held), ~a store items~%" (length packages)
+            (count (match-lambda (('package fields ...) (assq 'held fields))) packages)
+            (length items))))
 
 (define* (rewrite-port in out #:key (from "/nix/store/") (to "gnu"))
   "Copy IN to OUT, replacing the 3 letters after the slash in every FROM with

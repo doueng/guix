@@ -514,26 +514,41 @@ copy; return the files left with conflict markers."
                   "."))
     (some :error items)))
 
+;; One line for a failed step: the command and exit code when a process failed.
+(defn failure [e]
+  (let [{:keys [cmd exit]} (ex-data e)]
+    (if (and cmd exit)
+      (str (str/join " " cmd) " exited " exit)
+      (or (last-line (ex-message e)) (str e)))))
+
+;; Like refresh, a failed source prints one line and the rest still apply;
+;; apply returns the failed sources so the caller can exit 1.
 (defn apply! [selectors]
   (let [items (filter outdated? (with-latest (read-cache) (inventory selectors)))
         groups (group-by :source items)]
     (if (empty? items)
       (println "Nothing to update; run updates refresh first if the cache is old.")
-      (do
-        (doseq [source source-order :let [group (groups source)] :when group]
-          (println (str "Updating " source ": " (str/join ", " (map :name group))))
-          ((get-in sources [source :apply!]) group))
-        (let [steps (set (mapcat #(get-in sources [% :then]) (keys groups)))]
-          (when (seq steps)
-            (println "Review the repository diff with jj diff, then run:")
-            (doseq [step rebuild-steps :when (steps step)] (println (str "  " step)))))))))
+      (let [failed (doall
+                    (for [source source-order :let [group (groups source)] :when group
+                          :let [_ (println (str "Updating " source ": " (str/join ", " (map :name group))))
+                                error (try ((get-in sources [source :apply!]) group) nil
+                                           (catch Exception e (failure e)))]
+                          :when error]
+                      (do (binding [*out* *err*]
+                            (println (str "updates: " source " apply failed: " error)))
+                          source)))
+            steps (set (mapcat #(get-in sources [% :then]) (remove (set failed) (keys groups))))]
+        (when (seq steps)
+          (println "Review the repository diff with jj diff, then run:")
+          (doseq [step rebuild-steps :when (steps step)] (println (str "  " step))))
+        (seq failed)))))
 
 (let [[command & selectors] *command-line-args*]
   (case (or command "status")
     "status" (when (print-status (with-latest (read-cache) (inventory selectors))) (System/exit 1))
     "list" (print-table (with-latest (read-cache) (inventory selectors)))
     "refresh" (when (print-status (refresh! selectors)) (System/exit 1))
-    "apply" (apply! selectors)
+    "apply" (when (apply! selectors) (System/exit 1))
     (do (println "usage: updates [status|list|refresh|apply] [SOURCE[/NAME] ...]")
         (println (str "sources: " (str/join " " source-order)))
         (System/exit 1))))
