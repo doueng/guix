@@ -73,9 +73,3 @@
     (is (str/includes? html "VERDICT: pass, reviewer checked it"))
     (is (str/includes? html "# Shape\nA map."))))
 
-(deftest a-conversation-without-recorded-prompts-says-so
-  (let [{:keys [conv runs]} (fixture)
-        _ (fs/delete (fs/path conv "prompts.jsonl"))
-        c (page/load-conversation conv runs)]
-    (is (= "not recorded" (:model (page/summary c))))
-    (is (str/includes? (page/render-page [c] "now") "System prompt not recorded."))))

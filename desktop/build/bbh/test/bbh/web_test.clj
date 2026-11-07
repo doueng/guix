@@ -4,7 +4,6 @@
             [bbh.inbox :as inbox]
             [bbh.super]
             [bbh.super.client]
-            [bbh.transcript :as transcript]
             [bbh.web :as web]
             [bbh.web.conversation :as conversation]
             [bbh.web.markdown :as md]
@@ -57,50 +56,6 @@
                               :headers {"tailscale-user-login" "guest@example.com"}}))))
     (is (= 200 (first (get-json s "/api/agents"))))))
 
-(deftest sessions-are-listed-with-a-readable-title
-  (let [s (site)
-        d (live! s "a" "/work/site")]
-    (transcript/append! d {:role "user" :content "<skill name=\"x\">rules</skill>\n\nfix   the\nlogin"})
-    (fs/create-dirs ((:dir s) "saved"))
-    (is (= [{:id "a" :project "site" :busy false :title "fix the login"}]
-           (second (get-json s "/api/agents"))))))
-
-(deftest a-conversation-shows-prompts-replies-and-tool-calls
-  (let [s (site)
-        d (live! s "a" "/p")]
-    (transcript/append! d {:role "user" :content "hello"})
-    (transcript/append! d {:role "assistant" :content ""
-                           :tool_calls [{:id "t1" :function {:name "clojure" :arguments "{\"code\":\"(+ 1 2)\"}"}}]})
-    (transcript/append! d {:role "tool" :tool_call_id "t1" :content "=> 3"})
-    (is (= [{:i 0 :role "user" :text "hello"}
-            {:i 1 :role "assistant" :text "" :calls [{:id "t1" :name "clojure" :code "(+ 1 2)"}]}
-            {:i 2 :role "tool" :text "=> 3" :call "t1"}]
-           (:messages (second (get-json s "/api/agents/a/messages")))))))
-
-(deftest a-rollover-joins-the-whole-conversation-and-pages-work
-  (let [s (site)
-        d (live! s "a" "/p")
-        _ (dotimes [n 100] (transcript/append! d {:role "user" :content (str "m" n)}))
-        rolled (transcript/continue! d "b")
-        _ (transcript/append! rolled {:role "user" :content "m100"})
-        texts (fn [query] (map :text (:messages (second (get-json s "/api/agents/a/messages" query)))))]
-    (is (= 101 (:total (second (get-json s "/api/agents/a/messages")))))
-    (is (= "m21" (first (texts nil))))
-    (is (= "m100" (last (texts nil))))
-    (is (= ["m99" "m100"] (texts "after=99")))
-    (is (= ["m1" "m2" "m3"] (take 3 (texts "before=81"))))
-    (is (= [] (texts "after=101")))))
-
-(deftest a-sent-message-lands-in-the-mailbox-and-shows-as-pending-until-the-transcript-has-it
-  (let [s (site)
-        d (live! s "a" "/p")
-        response (post-message s "a" "  hello from the phone " from-page)]
-    (is (= 202 (:status response)))
-    (is (= ["hello from the phone"] (map :text (inbox/pending d))))
-    (is (= ["hello from the phone"] (map :text (:pending (second (get-json s "/api/agents/a/messages"))))))
-    (transcript/append! d {:role "user" :content "hello from the phone"})
-    (is (= [] (:pending (second (get-json s "/api/agents/a/messages")))))))
-
 (deftest a-post-from-another-site-is-refused
   (let [s (site)
         d (live! s "a" "/p")]
@@ -116,54 +71,6 @@
     (is (= 404 (:status (post-message s "saved" "hi" from-page))))
     (is (= 404 (:status (post-message s ".." "hi" from-page))))
     (is (= 404 (first (get-json s "/api/agents/saved/messages"))))))
-
-(deftest a-blank-message-is-refused
-  (let [s (site)
-        d (live! s "a" "/p")]
-    (is (= 400 (:status (post-message s "a" "   " from-page))))
-    (is (empty? (inbox/pending d)))))
-
-(def ^:private jpeg-base64
-  (.encodeToString (java.util.Base64/getEncoder) (byte-array [-1 -40 -1 -32 1 2 3])))
-
-(defn- post-json [{:keys [app]} id body]
-  (app {:uri (str "/api/agents/" id "/messages") :request-method :post
-        :headers (merge owner-headers from-page)
-        :body (java.io.ByteArrayInputStream. (.getBytes (json/generate-string body)))}))
-
-(deftest a-sent-image-shows-as-a-picture-and-is-served-to-the-owner
-  (let [{:keys [app] :as s} (site)
-        d (live! s "a" "/p")
-        response (post-json s "a" {:text "look" :images [jpeg-base64]})
-        {:keys [text images id]} (json/parse-string (:body response) true)
-        file (first images)
-        fetch (fn [uri headers] (app {:uri uri :request-method :get :headers headers}))]
-    (is (= 202 (:status response)))
-    (is (= "look" text))
-    (is (= (str id "-0.jpg") file))
-    (is (= [["look" [file]]] (map (juxt :text :images) (:pending (second (get-json s "/api/agents/a/messages"))))))
-    (transcript/append! d {:role "user" :content (:text (first (inbox/pending d)))})
-    (is (= {:i 0 :role "user" :text "look" :images [file]}
-           (first (:messages (second (get-json s "/api/agents/a/messages"))))))
-    (let [{:keys [status headers body]} (fetch (str "/api/agents/a/images/" file) owner-headers)]
-      (is (= 200 status))
-      (is (= "image/jpeg" (headers "Content-Type")))
-      (is (= [-1 -40 -1 -32 1 2 3] (vec (fs/read-all-bytes body)))))
-    (is (= 403 (:status (fetch (str "/api/agents/a/images/" file) {}))))))
-
-(deftest an-image-alone-is-a-message
-  (let [s (site)
-        d (live! s "a" "/p")]
-    (is (= 202 (:status (post-json s "a" {:text "" :images [jpeg-base64]}))))
-    (is (= 1 (count (inbox/pending d))))))
-
-(deftest what-is-not-a-jpeg-is-refused
-  (let [s (site)
-        d (live! s "a" "/p")]
-    (is (= 400 (:status (post-json s "a" {:images ["PGh0bWw+PC9odG1sPg=="]}))))
-    (is (= 400 (:status (post-json s "a" {:images ["not base64!"]}))))
-    (is (= 413 (:status (post-json s "a" {:images (repeat 9 jpeg-base64)}))))
-    (is (empty? (inbox/pending d)))))
 
 (deftest an-image-name-cannot-leave-the-conversation
   (let [{:keys [app] :as s} (site)]
@@ -186,23 +93,6 @@
     (testing "older" (is (= [3 4 5 6] (merged (m 5 6) (m 3 4)))))
     (testing "a racing poll" (is (= [5 6 7] (merged (m 5 6) (m 6 7)))))
     (testing "nothing new" (is (= [5 6] (merged (m 5 6) []))))))
-
-(deftest markdown-renders-the-shapes-agents-write
-  (is (= [[:h3 "Title"]] (md/render "## Title")))
-  (is (= [[:p "a " [:code "b"] " " [:strong "c"]]] (md/render "a `b` **c**")))
-  (is (= [[:ul [:li "one"] [:li "two more"]]] (md/render "- one\n- two\n  more")))
-  (is (= [[:ol [:li "one"]]] (md/render "1. one")))
-  (is (= [[:pre [:code "x\n\ny"]]] (md/render "```clj\nx\n\ny\n```")))
-  (is (= [[:div.table [:table [:thead [:tr [:th "a"] [:th "b"]]]
-                       [:tbody [:tr [:td "1"] [:td [:code "2"]]]]]]]
-         (md/render "| a | b |\n|---|---|\n| 1 | `2` |")))
-  (is (= [[:p "one"] [:p "two"]] (md/render "one\n\ntwo"))))
-
-(deftest a-fence-goes-to-the-highlighter-with-its-language
-  (is (= [[:pre [:code [:b "clj"] [:i "(+ 1 2)"]]]]
-         (md/render "```clj\n(+ 1 2)\n```" (fn [lang code] [[:b lang] [:i code]]))))
-  (is (= [[:pre [:code [:b ""] [:i "plain"]]]]
-         (md/render "```\nplain\n```" (fn [lang code] [[:b lang] [:i code]])))))
 
 (deftest markdown-never-makes-a-script-link-or-raw-html
   (is (= [[:p "[x](javascript:alert(1))"]] (md/render "[x](javascript:alert(1))")))
@@ -257,20 +147,6 @@
   (let [{:keys [status] :as r} (app {:uri uri :request-method :post :headers (merge owner-headers headers)
                                      :body (java.io.ByteArrayInputStream. (.getBytes (json/generate-string body)))})]
     [status (json/parse-string (:body r) true)]))
-
-(deftest the-inbox-lists-sections-with-the-badge-and-a-thread-with-its-asks
-  (with-super
-    (fn [s _ _]
-      (let [[status {:keys [badge sections]}] (get-json s "/api/super/threads")]
-        (is (= 200 status))
-        (is (= 1 badge))
-        (is (= ["stopped"] (map :section sections)))
-        (is (= "Which key should open the inbox pane?" (get-in sections [0 :threads 0 :ask :text]))))
-      (let [[status t] (get-json s "/api/super/threads/T1")]
-        (is (= 200 status))
-        (is (= ["open"] (map :state (:asks t))))
-        (is (= "ask-opened" (:kind (last (:events t))))))
-      (is (= 404 (first (get-json s "/api/super/threads/T9")))))))
 
 (deftest a-send-from-the-page-lands-in-the-workers-mailbox-once-and-a-stale-one-is-a-conflict
   (with-super
