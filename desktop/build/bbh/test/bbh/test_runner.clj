@@ -7,7 +7,8 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :as t]))
+            [clojure.test :as t]
+            [bbh.hermetic :as hermetic]))
 
 (def ^:private result-prefix "\u0000bbh-test-result ")
 
@@ -70,6 +71,44 @@
         :when (re-find #"super serve|bbh\.super.*start!" cmd)]
     {:pid (parse-long pid) :cmd cmd}))
 
+(defn- real-dirs
+  "The person's bbh dirs, as this process, outside the hermetic env, sees them."
+  []
+  (let [home (System/getProperty "user.home")
+        xdg (fn [k fallback] (or (System/getenv k) (str (fs/path home fallback))))]
+    (mapv #(str (fs/path % "bbh"))
+          [(xdg "XDG_STATE_HOME" ".local/state") (xdg "XDG_DATA_HOME" ".local/share")
+           (xdg "XDG_CONFIG_HOME" ".config")])))
+
+(defn- entries
+  "Paths up to two levels under the real bbh dirs, such as workflows/<run> and conversations/<id>."
+  []
+  (set (for [d (real-dirs) :when (fs/exists? d), p (fs/glob d "{*,*/*}" {:hidden true})] (str p))))
+
+(defn- mentions? [path s]
+  (some (fn [f] (and (fs/regular-file? f) (< (fs/size f) 4000000)
+                     (try (str/includes? (slurp (str f)) s) (catch Exception _ false))))
+        (if (fs/directory? path) (fs/glob path "**" {:hidden true}) [path])))
+
+(defn leaks
+  "Entries the suite added to the person's bbh dirs. The person's own sessions
+  may write there meanwhile, so an entry counts only if it names ROOT, the
+  suite's temp home, which holds every test's temp dirs."
+  [before root]
+  (sort (filter #(mentions? % root) (remove before (entries)))))
+
+(defn emacs-suite
+  "Run test:emacs under the hermetic env, CMD with EXTRA env, and fail on writes to the real bbh dirs."
+  [extra cmd]
+  (let [root (hermetic/root)
+        tmp (str (fs/create-dirs (fs/path root "tmp")))
+        before (entries)
+        {:keys [exit]} (apply p/shell {:continue true :env (merge (hermetic/env) {"TMPDIR" tmp} extra)} cmd)
+        written (leaks before root)]
+    (doseq [w written] (println (str "ERROR: a test wrote to the real bbh dirs: " w)))
+    (when (empty? written) (fs/delete-tree root))
+    (System/exit (if (and (zero? exit) (empty? written)) 0 1))))
+
 (defn -main
   "Run every test var on BBH_TEST_JOBS workers (default the core count), print failures and the slowest tests,
   and exit nonzero on any failure or error."
@@ -81,11 +120,23 @@
         jobs (or (some-> (System/getenv "BBH_TEST_JOBS") parse-long)
                  (.availableProcessors (Runtime/getRuntime)))
         results (atom [])
+        root (str (fs/create-temp-dir {:prefix "bbh-test-home"}))
+        tmp (str (fs/create-dirs (fs/path root "tmp")))
+        before (entries)
+        sqlite (str (fs/path (System/getProperty "user.home") ".guix-home/profile/lib/libsqlite3.so.0"))
+        worker-env (merge {marker-var marker
+                           ;; No test reaches the Emacs daemon of the person running the suite.
+                           "BBH_EMACS_SERVER" (str "bbh-test-" marker)
+                           hermetic/root-var root
+                           "TMPDIR" tmp}
+                          (hermetic/dirs root)
+                          ;; sqlite looks under user.home, which now names root.
+                          (when (and (not (System/getenv "BBH_SQLITE_LIB")) (fs/exists? sqlite))
+                            {"BBH_SQLITE_LIB" sqlite}))
         run-worker (fn []
-                     (let [proc (p/process {:in :pipe :out :pipe :err :inherit
-                                            ;; No test reaches the Emacs daemon of the person running the suite.
-                                            :extra-env {marker-var marker "BBH_EMACS_SERVER" (str "bbh-test-" marker)}}
-                                           "bb" "-e" "(require 'bbh.test-runner) (bbh.test-runner/worker)")
+                     (let [proc (p/process {:in :pipe :out :pipe :err :inherit :extra-env worker-env}
+                                           ;; Temp dirs and fs/expand-home land under root too.
+                                           "bb" (str "-Djava.io.tmpdir=" tmp) (str "-Duser.home=" root) "-e" "(require 'bbh.test-runner) (bbh.test-runner/worker)")
                            in (io/writer (:in proc))
                            send! #(if-let [v (.poll queue)]
                                     (do (.write in (str v "\n")) (.flush in) v)
@@ -109,7 +160,12 @@
         _ (doseq [{:keys [pid cmd]} leaked]
             (println (str "\nERROR: a test left controller " pid " running: " cmd))
             (p/shell {:continue true :err :discard} "kill" "-KILL" (str pid)))
-        rs (cond-> @results (seq leaked) (conj {:var 'leaked-controllers :ms 0 :counters {:test 1 :error 1}}))
+        written (leaks before root)
+        _ (doseq [w written] (println (str "\nERROR: a test wrote to the real bbh dirs: " w)))
+        _ (when (empty? written) (fs/delete-tree root))
+        rs (cond-> @results
+             (seq leaked) (conj {:var 'leaked-controllers :ms 0 :counters {:test 1 :error 1}})
+             (seq written) (conj {:var 'real-dirs-written :ms 0 :counters {:test 1 :error 1}}))
         total (apply merge-with + (map :counters rs))
         bad (+ (:fail total 0) (:error total 0))]
     (spit (times-file) (pr-str (into times (map (juxt :var :ms)) rs)))
