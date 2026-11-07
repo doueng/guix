@@ -8,6 +8,9 @@
          eval:lint {:doc "Level 1 assertion hits and graded passes per cohort. Args: ROOT... (default: conversations and ~/.cache/bbh-eval)."
                     :requires ([bbh.traces])
                     :task (apply bbh.traces/lint! *command-line-args*)}
+         eval:tools {:doc "Shell commands against REPL helpers for file work, per cohort. Args: ROOT... (default: conversations and ~/.cache/bbh-eval)."
+                     :requires ([bbh.tool-use])
+                     :task (apply bbh.tool-use/tools! *command-line-args*)}
          eval:show {:doc "Render one conversation directory as Markdown with assertion hits."
                     :requires ([bbh.traces])
                     :task (bbh.traces/show! (first *command-line-args*))}

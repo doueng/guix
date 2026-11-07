@@ -12,6 +12,7 @@ bb eval:show DIR              # one trace as Markdown
 bb eval:review [ROOT...]      # label unlabeled traces, newest first
 bb eval:judge [ROOT...]       # LLM judge; with no roots, every trace you labeled
 bb eval:agreement             # judge precision and recall against your labels
+bb eval:tools [ROOT...]       # file work through sh against REPL helpers, per cohort
 ```
 
 `eval:lint` groups traces into cohorts. A cohort is one comparison run and profile, or one day of real conversations. Each cell counts the traces in a cohort with at least one hit, so two cohorts show whether a change made a failure rarer. The report lists example traces for each assertion. A failure does not stop the command. The pass rate you accept is your decision.
@@ -27,6 +28,8 @@ bb eval:agreement             # judge precision and recall against your labels
 | `repl-restart` | An evaluation timed out or died, and the REPL lost its definitions. |
 | `error-streak` | Three or more failed evaluations ran in a row. |
 | `no-final-answer` | A turn ended without assistant text after its last tool call. |
+
+`eval:tools` (`eval/bbh/tool_use.clj`) parses each step's code and counts the `sh` and `$` commands that do file work. Commands are grouped by class: read (cat, head, tail, sed -n), search (grep, rg), list (ls, find, fd), count (wc) and edit (sed -i, perl -i). Against those it counts the helper calls that do the same work: read-lines and slurp, grep, ls, fs/glob and fs/list-dir, edit! and spit. Its shell share is shell commands over all eligible operations, without and with search. A real trace's cohort is the day of its first run. `job` commands are left out because they run builds. A command inside a printed string does not count.
 
 To add an assertion, add an entry to `assertions` after you see the failure in a trace. Add a test in `test/bbh/eval_test.clj` that builds a conversation with the failure.
 

@@ -7,6 +7,7 @@
             [bbh.session :as session]
             [bbh.stats :as stats]
             [bbh.workflow :as wf]
+            [bbh.tool-use :as tool-use]
             [bbh.traces :as traces]
             [bbh.workflow-eval :as workflow-eval]
             [cheshire.core :as json]
@@ -98,6 +99,32 @@
     (let [[trace] (traces/find-traces [dir])]
       (is (= ["clojure.lang.ExceptionInfo" "sci.UnresolvedSymbol"] (mapv :error (:steps trace))))
       (is (= {:unresolved-symbol ["step 2"]} (traces/check trace))))))
+
+(defn- calls-conversation!
+  "A one-turn conversation that makes CALLS, each answered with nil."
+  [calls]
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-tool-use-test"}))]
+    (spit (str (fs/path dir "messages.jsonl"))
+          (str/join (for [m (concat [{:role "user" :content "go"} {:role "assistant" :content "" :tool_calls calls}]
+                                    (for [c calls] {:role "tool" :tool_call_id (:id c) :content "=> nil"})
+                                    [{:role "assistant" :content "Done."}])]
+                      (str (json/generate-string m) "\n"))))
+    (str (fs/canonicalize dir))))
+
+(deftest tool-use-counts-file-work-in-sh-against-helpers
+  (let [dir (calls-conversation! [(call "a" "($ \"cd src && grep -n foo *.clj | head\") (sh \"jj\" \"log\")")
+                            (call "b" "(read-lines \"x.clj\") (println \"(sh \\\"cat y\\\")\")")
+                            (call "c" "(sh (str \"sed -i s/a/b/ \" f)) (job \"ls -la\") (edit! \"x\" \"a\" \"b\") (grep \"foo\")")
+                            (call "d" "(sh \"bash -c 'wc -l a'\") (ls \"src\") (sh \"timeout 5 rg x\")")])
+        s (tool-use/summarize (traces/load-trace dir))]
+    (is (= {:calls 4 :shell-commands 5 :bash-c 1
+            :shell {:search 2 :edit 1}
+            :helpers {:read 1 :edit 1 :search 1 :list 1}
+            :primary {"grep" 1 "jj" 1 "sed" 1 "bash" 1 "rg" 1}}
+           (dissoc s :dir :cohort))
+        "a command inside a printed string is not run; job is not shell; cd, | head and timeout are skipped")
+    (is (= {:without-search [1 4] :with-search [3 7]} (tool-use/shares s)))
+    (is (str/includes? (tool-use/report [s]) "| all | 1 | 4 | 5 | 1 | 0/1 | 2/1 | 0/1 | 0/0 | 1/1 | 25% (1/4) | 43% (3/7) |"))))
 
 (deftest rendering-elides-skills-and-flags-steps
   (let [text (traces/render (traces/load-trace (conversation!)))]
