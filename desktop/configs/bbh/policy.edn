@@ -1,8 +1,9 @@
 ;; bbh super's policy: the Worker cap, and how long a live Worker may leave a
 ;; delivery in its mailbox (:stale-delivery-minutes) before its thread shows
 ;; under Needs attention.
-;; A landing moves your empty working copy in the repo onto the new tip. Set
-;; :move-working-copy :always to move it when it has changes too.
+;; A landing moves your working copy in the repo onto the new tip, changes and
+;; all (:move-working-copy :always); a conflict lands in it as jj conflict
+;; markers. Drop the key to move it only when it is empty.
 ;; :projects are the repositories the Router starts Workers in, by name, with
 ;; the check that proves a change there; each check passed on 2026-11-03.
 {:workers 10
@@ -24,4 +25,5 @@
                         :about "small raw-mode terminal text editor in C"}
             "cljs-platformer" {:repo "~/src/cljs-platformer" :check "./check.sh"
                                :about "Mario-style canvas platformer in ClojureScript and shadow-cljs"}}
- :stale-delivery-minutes 30}
+ :stale-delivery-minutes 30
+ :move-working-copy :always}
