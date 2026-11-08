@@ -44,7 +44,7 @@ The existing inventory command also includes native application bindings.
 2. In `desktop/kanata.kbd`, add an empty `deflayermap` named for the application, like `intellij`. For each Cmd key whose chord differs there, add a `((base-layer <name>))` branch to that key's `switch` in the `cmd` layer, on one line. A separate Cmd layer would be chosen when Cmd goes down and would stay active after focus moves while Cmd is held.
 3. Map the class to the new layer in `desktop/configs/kanata/apps.edn`.
 4. Add a case for each changed chord to `desktop/build/keybindings/kanata-test.bb`, then run `make kanata-check`.
-5. Run `make switch`, then `hyprkan reload` so kanata rereads `/etc/kanata/kanata.kbd`.
+5. Run `make switch`. It ends with `hyprkan reload`, because kanata rereads `/etc/kanata/kanata.kbd` only then or when it restarts.
 
 `hyprkan` rereads `apps.edn` on every focus change, so a class change that reuses an existing layer needs only step 3.
 

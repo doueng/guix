@@ -28,6 +28,8 @@
   ([message until]
    (let [[host port] kanata-address]
      (with-open [socket (java.net.Socket. ^String host ^int port)]
+       ;; A config kanata cannot parse never brings ConfigFileReload.
+       (.setSoTimeout socket 5000)
        (doto (.getOutputStream socket)
          (.write (.getBytes (str (json/generate-string message) "\n")))
          (.flush))
@@ -72,5 +74,7 @@
 (case (first *command-line-args*)
   nil (follow-focus!)
   "layer" (println (:name (send! {:RequestCurrentLayerName {}} (reply :CurrentLayerName))))
-  "reload" (do (send! {:Reload {}} reset-after-reload) (focus! (active-class)))
+  ;; Reload rereads the file kanata last loaded, which ReloadFile may have changed.
+  "reload" (do (send! {:ReloadFile {:path "/etc/kanata/kanata.kbd"}} reset-after-reload)
+               (focus! (active-class)))
   (do (warn "usage: hyprkan [layer|reload]") (System/exit 2)))

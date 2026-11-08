@@ -101,6 +101,8 @@ switch: channels-current system-facts nixpkgs-import
 	  "$(GUIX)" system reconfigure $(RECONFIGURE_FLAGS) \
 	    -L "$(abspath $(MODULES))" \
 	    "$(abspath $(CONFIG))"
+	@# A reconfigure leaves kanata running on the old /etc/kanata/kanata.kbd.
+	-desktop/bin/hyprkan reload
 
 gc:
 	sudo "$(GUIX)" system delete-generations $(GC_AGE)
