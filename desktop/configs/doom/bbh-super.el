@@ -1225,8 +1225,15 @@ its command, inside it types.")
 
 (defun eng/bbh-inbox--setup ()
   "The Inbox buffer's settings and hooks. The mode runs it, and loading this
-file runs it again in a live Inbox, so a Doom reload reaches it."
-  (setq truncate-lines t)
+file runs it again in a live Inbox, so a Doom reload reaches it.  The org
+outline and the split view's right pane are this one buffer, so its text
+wraps at the window in both, and `org-indent-mode' keeps a wrapped line
+under its heading's text or a list item's text.  It sets the wrap prefix
+itself, so `visual-wrap-prefix-mode' and adaptive-wrap would fight it.  The
+thread list, in its own mode, stays one truncated line per thread."
+  (setq truncate-lines nil word-wrap t)
+  (visual-line-mode 1)
+  (org-indent-mode 1)
   (hl-line-mode 1)
   (add-hook 'post-command-hook #'eng/bbh-inbox--moved nil t)
   (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t)

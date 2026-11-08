@@ -24,6 +24,33 @@
                    ("j" . evil-next-line) ("gg" . evil-goto-first-line) ("G" . evil-goto-line)))
       (should (eq (cdr key) (key-binding (kbd (car key))))))))
 
+(ert-deftest bbh-inbox-text-wraps-and-the-thread-list-does-not ()
+  "Questions, details and answers wrap at the window, keeping their indent;
+the split view's thread list keeps one truncated line per thread."
+  (with-current-buffer (eng/bbh-inbox--buffer)
+    (eng/bbh-inbox-mode)
+    (should-not truncate-lines)
+    (should word-wrap)
+    (should visual-line-mode)
+    (should org-indent-mode)
+    ;; A reload runs the setup again, which must not undo it.
+    (eng/bbh-inbox--setup)
+    (should (and visual-line-mode org-indent-mode (not truncate-lines)))
+    (let ((eng/bbh-inbox-view 'outline))
+      (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t))
+    (goto-char (point-min))
+    (search-forward "1. No")
+    ;; A wrapped list item lines up under its text: the level 2 indent, then
+    ;; past "   1. ".
+    (should (equal 4 (length (get-text-property (point) 'line-prefix))))
+    (should (equal 10 (length (get-text-property (point) 'wrap-prefix))))
+    (kill-buffer))
+  (with-current-buffer (get-buffer-create "*bbh-threads-wrap*")
+    (eng/bbh-threads-mode)
+    (should truncate-lines)
+    (should-not (bound-and-true-p visual-line-mode))
+    (kill-buffer)))
+
 (defun bbh-test--wait (pred secs)
   (let ((end (+ (float-time) secs)))
     (while (and (not (funcall pred)) (< (float-time) end))
