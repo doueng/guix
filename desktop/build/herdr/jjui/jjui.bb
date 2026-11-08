@@ -3,9 +3,10 @@
   "herdr-jjui DIR [THEN...]: open jjui on DIR in a Herdr popup. q in jjui closes
   it, and so does `herdr-jjui --close`, which closes whatever popup is open. Herdr shows one
   popup at a time, so this one replaces any open popup, such as the bbh Inbox.
-  When jjui quits the popup runs THEN, a command such as `bbh inbox` that
-  brings back what it replaced, or closes when there is none. The popup lands
-  on the active pane, the only target Herdr allows."
+  Only then, when jjui quits, the popup runs THEN, a command such as `bbh inbox`
+  that brings back what it replaced. With no popup open, q just closes jjui's
+  popup and leaves you where you were. The popup lands on the active pane, the
+  only target Herdr allows."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
             [cheshire.core :as json]
@@ -40,11 +41,20 @@
       (:result reply))))
 
 (defn close-popup!
-  "Close Herdr's open popup. Having none open, as from GUI Emacs, is fine."
+  "Close Herdr's open popup and return true, or false when none was open, as
+  from GUI Emacs or an Inbox in an ordinary pane."
   []
   (try (call! {:id "1" :method "popup.close" :params {}})
+       true
        (catch clojure.lang.ExceptionInfo e
-         (when-not (= "popup_not_open" (:code (ex-data e))) (throw e)))))
+         (if (= "popup_not_open" (:code (ex-data e))) false (throw e)))))
+
+(defn open!
+  "Open jjui on DIR, replacing any open popup. THEN runs after jjui only in
+  place of a popup it replaced: with none, nothing would need bringing back,
+  and THEN would open a second Inbox over the first."
+  [dir then]
+  (call! (request dir (when (close-popup!) then))))
 
 (defn pane-env
   "ENV with ~/.local/bin first on PATH. The Herdr server starts from the desktop
@@ -71,9 +81,7 @@
         (= "--pane" dir) (pane!)
         (= "--close" dir) (close-popup!)
         (nil? dir) (throw (ex-info "usage: herdr-jjui DIR [THEN...]" {}))
-        :else (let [req (request dir then)]
-                (close-popup!)
-                (call! req))))
+        :else (open! dir then)))
     (catch Exception e
       (binding [*out* *err*] (println "herdr-jjui:" (ex-message e)))
       (System/exit 1))))

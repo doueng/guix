@@ -638,6 +638,34 @@ the split view's thread list keeps one truncated line per thread."
 (defun bbh-test--inbox-ids (from to)
   (mapcar (lambda (n) (format "T%d" n)) (number-sequence from to)))
 
+(ert-deftest bbh-inbox-jjui-three-times-leaves-no-buffers-or-processes ()
+  ;; T93: J asks herdr-jjui for jjui in the frame's Herdr, even from the
+  ;; callback after `bbh inbox dir', and three J's leave no buffer or process.
+  (let* ((log (make-temp-file "herdr-jjui-log"))
+         (eng/bbh-inbox-herdr-jjui
+          (make-temp-file "herdr-jjui" nil nil
+                          (format "#!/bin/sh\necho \"$HERDR_SOCKET_PATH $*\" >> %s\n"
+                                  (shell-quote-argument log))))
+         (eng/bbh-inbox-bbh (list "sh" "-c" "echo /tmp/T1-repo" "sh"))
+         (before (buffer-list)))
+    (set-file-modes eng/bbh-inbox-herdr-jjui #o755)
+    (cl-letf (((symbol-function 'eng/bbh-inbox--thread) (lambda () "T1"))
+              ((symbol-function 'getenv)
+               (let ((getenv (symbol-function 'getenv)))
+                 (lambda (var &optional f) (if (equal var "HERDR_SOCKET_PATH") "/run/herdr.sock" (funcall getenv var f))))))
+      (dotimes (_ 3) (eng/bbh-inbox-jjui))
+      (should (bbh-test--wait (lambda () (= 3 (length (bbh-test--inbox-log log)))) 10))
+      (eng/bbh-inbox-jjui-close)
+      (should (bbh-test--wait (lambda () (= 4 (length (bbh-test--inbox-log log)))) 10))
+      (should (bbh-test--wait (lambda () (not (seq-some (lambda (p) (and (process-live-p p) (string-match-p "herdr-jjui\\|bbh-inbox-cmd" (process-name p))))
+                                                        (process-list))))
+                              10)))
+    (let ((lines (bbh-test--inbox-log log)))
+      (should (string-prefix-p "/run/herdr.sock /tmp/T1-repo" (car lines)))
+      (should (equal "/run/herdr.sock --close" (nth 3 lines))))
+    (should-not (seq-some (lambda (b) (string-match-p "herdr-jjui\\|bbh inbox" (buffer-name b)))
+                          (seq-difference (buffer-list) before)))))
+
 (defmacro bbh-test--with-fake-inbox (spec &rest body)
   "Run BODY with the Inbox shown and a fake bbh: `org' prints file VIEW,
 and each verb is appended to file LOG.  SPEC is (VIEW LOG)."

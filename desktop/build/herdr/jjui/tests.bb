@@ -32,7 +32,7 @@
           (let [r (java.io.BufferedReader. (java.io.InputStreamReader. (java.nio.channels.Channels/newInputStream ch) "UTF-8"))
                 w (java.io.OutputStreamWriter. (java.nio.channels.Channels/newOutputStream ch) "UTF-8")
                 {:keys [id method params]} (cheshire.core/parse-string (.readLine r) true)]
-            (swap! seen conj [method (:cwd params)])
+            (swap! seen conj [method (:cwd params) (:env params)])
             (.write w (str (cheshire.core/generate-string
                             (if (and (= method "popup.close") (not open?))
                               {:id id :error {:code "popup_not_open" :message "no popup is open"}}
@@ -46,16 +46,19 @@
 (def bb (.. (java.lang.ProcessHandle/current) info command get))
 
 (deftest opens-jjui-in-the-directory-with-or-without-a-popup-open
+  ;; THEN brings back only a popup jjui replaced, such as the Inbox's. From an
+  ;; Inbox in an ordinary pane it would stack a second Inbox in the popup.
   (doseq [open? [false true]]
     (let [tmp (fs/create-temp-dir)
           sock (str tmp "/herdr.sock")
           dir (str (fs/create-dirs (fs/path tmp "repo")))
           seen (fake-herdr sock open?)
           {:keys [exit err]} (babashka.process/shell {:continue true :out :string :err :string
-                                                      :extra-env {"HERDR_SOCKET_PATH" sock}}
-                                                     bb "jjui.bb" dir)]
+                                                          :extra-env {"HERDR_SOCKET_PATH" sock}}
+                                                         bb "jjui.bb" dir "bbh" "inbox")]
       (is (= 0 exit) (str "popup open: " open? "; " err))
-      (is (= ["plugin.pane.open" dir] (last @seen)) (str "popup open: " open?)))))
+      (is (= ["plugin.pane.open" dir (if open? {:HERDR_JJUI_THEN "[\"bbh\",\"inbox\"]"} {})]
+             (last @seen)) (str "popup open: " open?)))))
 
 (deftest the-popup-puts-local-bin-first-on-path-for-the-preview
   ;; Herdr's server PATH lacks ~/.local/bin, where pierre-diff-ansi lives.
@@ -74,7 +77,7 @@
                                                       :extra-env {"HERDR_SOCKET_PATH" sock}}
                                                      bb "jjui.bb" "--close")]
       (is (= 0 exit) (str "popup open: " open? "; " err))
-      (is (= [["popup.close" nil]] @seen)))))
+      (is (= [["popup.close" nil nil]] @seen)))))
 
 (let [{:keys [fail error]} (run-tests)]
   (when (pos? (+ fail error)) (System/exit 1)))

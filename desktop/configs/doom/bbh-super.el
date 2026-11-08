@@ -735,40 +735,55 @@ already on its way with the older draft does not overwrite it."
   (eng/bbh-inbox--run (list "buffer" thread)
                       (lambda (name) (eng/bbh-super-visit (string-trim name)))))
 
+(defvar eng/bbh-inbox-herdr-jjui "herdr-jjui"
+  "The herdr-jjui command, which opens and closes the jjui popup.")
+
+(defun eng/bbh-inbox--herdr-jjui (args frame)
+  "Run herdr-jjui ARGS against the Herdr that FRAME is in, as told by the
+frame's HERDR_SOCKET_PATH, and show its error if it fails.  Its buffer goes
+when it ends, so repeated calls leave nothing behind."
+  (let* ((out (generate-new-buffer " *herdr-jjui*"))
+         (socket (getenv "HERDR_SOCKET_PATH" frame))
+         (process-environment (if socket
+                                  (cons (concat "HERDR_SOCKET_PATH=" socket) process-environment)
+                                process-environment))
+         (default-directory (expand-file-name "~/")))
+    (make-process
+     :name "herdr-jjui" :noquery t :buffer out :connection-type 'pipe
+     :command (cons eng/bbh-inbox-herdr-jjui args)
+     :sentinel (lambda (process _)
+                 (when (memq (process-status process) '(exit signal))
+                   (let ((text (with-current-buffer out (string-trim (buffer-string)))))
+                     (kill-buffer out)
+                     (unless (zerop (process-exit-status process))
+                       (message "%s" text))))))))
+
 (defun eng/bbh-inbox-jjui ()
   "Open jjui on the thread's Worker workspace, or its repo once that is gone.
-It runs in a Herdr popup, `herdr-jjui', which q in jjui closes, as does
-\[eng/bbh-inbox-jjui-close] here.  Herdr shows one popup at a time, so
-it replaces a terminal Inbox, which comes back when jjui quits."
+It runs in a Herdr popup, `herdr-jjui', which one q in jjui closes, as does
+\[eng/bbh-inbox-jjui-close] here, leaving you where you were.  Herdr shows
+one popup at a time, so jjui replaces an Inbox in a popup, such as Herdr's
+prefix t, and a fresh Inbox frame takes its place when jjui quits.  Over an
+Inbox in an ordinary pane nothing needs bringing back.  J again replaces jjui
+rather than stacking another."
   (interactive)
-  (eng/bbh-inbox--run
-   (list "dir" (eng/bbh-inbox--thread))
-   (lambda (dir)
-     (let ((err (generate-new-buffer " *herdr-jjui*")))
-       (make-process
-        :name "herdr-jjui" :noquery t :buffer err :connection-type 'pipe
-        :command (append (list "herdr-jjui" (string-trim dir))
-                          (unless (display-graphic-p) (eng/bbh-inbox--command)))
-        :sentinel (lambda (process _)
-                    (when (memq (process-status process) '(exit signal))
-                      (unless (zerop (process-exit-status process))
-                        (message "%s" (string-trim (with-current-buffer err (buffer-string)))))
-                      (kill-buffer err))))))))
+  (let ((frame (selected-frame)))
+    (eng/bbh-inbox--run
+     (list "dir" (eng/bbh-inbox--thread))
+     (lambda (dir)
+       (eng/bbh-inbox--herdr-jjui
+        (append (list (string-trim dir))
+                ;; herdr-jjui runs this after jjui only in place of a popup
+                ;; it replaced.  GUI Emacs is never in one.
+                (unless (display-graphic-p frame) (eng/bbh-inbox--command)))
+        frame)))))
 
 (defun eng/bbh-inbox-jjui-close ()
   "Close the jjui popup that `eng/bbh-inbox-jjui' opened, as q in jjui does.
 Herdr closes its open popup and ends jjui.  From the terminal Inbox, which
 jjui replaces, press q in jjui instead."
   (interactive)
-  (let ((err (generate-new-buffer " *herdr-jjui*")))
-    (make-process
-     :name "herdr-jjui-close" :noquery t :buffer err :connection-type 'pipe
-     :command (list "herdr-jjui" "--close")
-     :sentinel (lambda (process _)
-                 (when (memq (process-status process) '(exit signal))
-                   (unless (zerop (process-exit-status process))
-                     (message "%s" (string-trim (with-current-buffer err (buffer-string)))))
-                   (kill-buffer err))))))
+  (eng/bbh-inbox--herdr-jjui (list "--close") (selected-frame)))
 
 ;;;; The split view
 
