@@ -17,6 +17,15 @@
 - You own this environment. Redefine `bbh.env/manifest` to change your prompt and limits; `bbh.repl/defaults` lists the keys. Changing :system, :tool-description or :effort misses the prompt cache and restarts Claude Code, so do it rarely. Persist changes in /home/engstrand/.config/bbh/init.clj.
 - Keep replies brief and lead with the outcome.")
 
+(def advertise-write?
+  "Whether the prompt and tool description offer write!. Off: forking 20 recorded whole-file writes could not tell
+  whether agents would pick it, and a replay of W65 and W66 with and without it split 1 better, 1 worse, with
+  write! used twice against 9 spits (T72). edit! and write! refuse unreadable Clojure either way."
+  false)
+
+(def write-reference
+  "- (write! path text) writes a whole file, creating directories, and returns line counts and a diff. It refuses unreadable Clojure like edit!.")
+
 (def helper-reference
   "# Helpers
 
@@ -25,8 +34,7 @@
 - (sh \"cmd string\") runs the string with bash, so it needs no `bash -c` wrapper, and returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. (sh \"cmd\" \"arg\" ...) runs one argv, each word quoted. ($ \"cmd\") prints stdout, stderr and a nonzero exit, and returns nil; use it when you only want to see the result. Both throw on a command that only reads, searches or lists files, naming the helper call to use instead; end the command with `# confirm` when the shell is really needed, such as for a flag no helper has.
 - (grep pattern & paths) prints `path:line:text` hits for an rg regex (smart case, alternation a|b), skipping gitignored and binary files. Paths are files, directories or shell-style globs (`*` stays in one directory, `**` recurses). End with {:context n}, {:files true}, {:fixed true} or {:max n}. (ls & paths) prints a directory's entries, a glob's files or a file, with line counts.
 - (read-lines path) or (read-lines path start count) prints a line-count header and 1-based numbered lines (200 by default, fewer when they would pass about 7000 characters, ending with the `next:` call) and returns nil. It refuses binary files. Use slurp when code needs the text.
-- (edit! path old new) replaces exactly one occurrence, or every one with `:all true`, else throws. (edit! path [[old new] ...]) applies several in order and writes only if all match. It tolerates whitespace and indentation drift in old, keeps BOM and CRLF, and returns a summary with a diff.
-- (write! path text) writes a whole file, creating directories, and returns line counts and a diff. Both refuse a .clj, .bb or .edn result that would not read, unless the file already failed or you pass :force true.
+- (edit! path old new) replaces exactly one occurrence, or every one with `:all true`, else throws. (edit! path [[old new] ...]) applies several in order and writes only if all match. It tolerates whitespace and indentation drift in old, keeps BOM and CRLF, and returns a summary with a diff. It refuses a .clj, .bb or .edn result that would not read, unless the file already failed or you pass :force true.
 - (job cmd) starts a detached command that survives restarts and returns an id. (job-wait id) waits for it to finish, up to 10 min or :ms, and returns {:done? :exit :tail :log}; pass options as (job-wait id :ms 600000) or a map. Run `wf attest` and `wf review` as (job-wait (job \"wf attest ...\")), since they can outlast sh's budget. Waiting does not count against the evaluation's budget, so one call covers a long command. p/shell, http and Thread/sleep do count, so use a job for anything that may approach the deadline. Also job-status and jobs.
 - (shot url) saves a headless Chrome screenshot and returns its path. (look question & paths) has a Claude delegate describe images, since tool results carry text only. (delegate brief) runs a fresh agent, for an independent check.
 - (fs/glob root pattern) needs both arguments. \"**\" includes root-level files and \"**/*\" does not. Results include directories.")
@@ -229,21 +237,22 @@ You are the Router of bbh super: one long-lived conversation that reads what the
       (str/join "\n\n" (for [f files] (str "## " f "\n\n" (str/trim (slurp (str f)))))))))
 
 (def tool-description
-  "Evaluate Clojure in the persistent babashka REPL. Returns printed output and the last value.
+  (format "Evaluate Clojure in the persistent babashka REPL. Returns printed output and the last value.
 Prefer these helpers to shell commands for files: their output is capped and paged, lines are numbered, and arguments need no shell quoting.
 - Read a file: (read-lines path) or (read-lines path start count), not cat, head, tail or sed -n.
 - Search contents: (grep pattern & paths), not grep or rg. Paths may be globs such as \"src/**/*.clj\".
 - List files or count lines: (ls & paths-or-globs), not ls, find or wc -l.
-- Change a file: (edit! path old new). Write a whole file: (write! path text), not spit; it creates directories and returns a diff. Both refuse Clojure or EDN that would not read.
+- Change a file: (edit! path old new); it refuses Clojure or EDN that would not read.%s
 - For data in code, use slurp and fs/glob.
 - Everything else, such as jj, wf, builds and tests: ($ \"cmd\") to see the result, (sh \"cmd\") when code needs {:exit :out :err}, (job-wait (job \"cmd\")) when it may be slow.
-sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming the helper call instead; end the command with # confirm to run it anyway.")
+sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming the helper call instead; end the command with # confirm to run it anyway."
+          (if advertise-write? " Write a whole file: (write! path text), not spit; it creates directories and returns a diff." "")))
 
 (defn manifest []
   (cond-> {:system (if (= "router" (System/getenv "BBH_ROLE"))
              (str router-helpers "\n\n" copyable-refs)
              (str base-prompt "\n- " copyable-refs
-                  "\n\n" helper-reference
+                  "\n\n" helper-reference (when advertise-write? (str "\n" write-reference))
                   "\n\n" pi-helpers
                   (when (System/getenv "BBH_SUPER_TOKEN") (str "\n\n" super-helpers))
                   "\n\nWorking directory: " (fs/cwd)
