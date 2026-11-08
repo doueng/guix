@@ -9,6 +9,6 @@ platforms = ["linux"]
 # cannot ask for a popup placement, so the launcher calls the socket API.
 [[panes]]
 id = "jjui"
-title = "jjui"
+title = "jjui · q closes"
 placement = "popup"
 command = ["./bin/herdr-jjui", "--pane"]

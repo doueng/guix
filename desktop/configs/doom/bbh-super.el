@@ -721,7 +721,8 @@ already on its way with the older draft does not overwrite it."
 
 (defun eng/bbh-inbox-jjui ()
   "Open jjui on the thread's Worker workspace, or its repo once that is gone.
-It runs in a Herdr popup, `herdr-jjui'.  Herdr shows one popup at a time, so
+It runs in a Herdr popup, `herdr-jjui', which q in jjui closes, as does
+\[eng/bbh-inbox-jjui-close] here.  Herdr shows one popup at a time, so
 it replaces a terminal Inbox, which comes back when jjui quits."
   (interactive)
   (eng/bbh-inbox--run
@@ -737,6 +738,21 @@ it replaces a terminal Inbox, which comes back when jjui quits."
                       (unless (zerop (process-exit-status process))
                         (message "%s" (string-trim (with-current-buffer err (buffer-string)))))
                       (kill-buffer err))))))))
+
+(defun eng/bbh-inbox-jjui-close ()
+  "Close the jjui popup that `eng/bbh-inbox-jjui' opened, as q in jjui does.
+Herdr closes its open popup and ends jjui.  From the terminal Inbox, which
+jjui replaces, press q in jjui instead."
+  (interactive)
+  (let ((err (generate-new-buffer " *herdr-jjui*")))
+    (make-process
+     :name "herdr-jjui-close" :noquery t :buffer err :connection-type 'pipe
+     :command (list "herdr-jjui" "--close")
+     :sentinel (lambda (process _)
+                 (when (memq (process-status process) '(exit signal))
+                   (unless (zerop (process-exit-status process))
+                     (message "%s" (string-trim (with-current-buffer err (buffer-string)))))
+                   (kill-buffer err))))))
 
 (defconst eng/bbh-inbox-keys
   `(("RET" eng/bbh-inbox-ret "Pick the option here, open a link, or open the thread's Worker")
@@ -755,7 +771,8 @@ it replaces a terminal Inbox, which comes back when jjui quits."
     ("x" eng/bbh-inbox-cancel "Cancel the Worker")
     ("u" eng/bbh-inbox-resume "Resume a Worker whose session ended")
     ("R" eng/bbh-inbox-router "Open the Router")
-    ("J" eng/bbh-inbox-jjui "jjui on the thread's workspace")
+    ("J" eng/bbh-inbox-jjui "jjui on the thread's workspace, in a Herdr popup; q in jjui closes it")
+    ("gJ" eng/bbh-inbox-jjui-close "Close the jjui popup")
     ("gr" eng/bbh-inbox-refresh "Reload now; pushed changes reload by themselves")
     ("g?" describe-mode "Help")
     ("q" quit-window "Quit"))
@@ -814,6 +831,7 @@ file runs it again in a live Inbox, so a Doom reload reaches it."
         :localleader
         :desc "Open Worker"   "o" #'eng/bbh-inbox-open
         :desc "jjui"          "j" #'eng/bbh-inbox-jjui
+        :desc "Close jjui"    "J" #'eng/bbh-inbox-jjui-close
         :desc "Send"          "s" #'eng/bbh-inbox-send
         :desc "Send all"      "S" #'eng/bbh-inbox-send-all
         :desc "Answer"        "i" #'eng/bbh-inbox-answer

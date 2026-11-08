@@ -16,7 +16,7 @@
   (let [manifest (slurp "manifest.toml")
         {:keys [plugin_id entrypoint]} (:params (jjui/request "." nil))]
     (is (.contains manifest (str "id = \"" plugin_id "\"")))
-    (is (.contains manifest (str "id = \"" entrypoint "\"\ntitle = \"jjui\"\nplacement = \"popup\"\ncommand = [\"./bin/herdr-jjui\", \"--pane\"]")))))
+    (is (.contains manifest (str "id = \"" entrypoint "\"\ntitle = \"jjui · q closes\"\nplacement = \"popup\"\ncommand = [\"./bin/herdr-jjui\", \"--pane\"]")))))
 
 (defn fake-herdr
   "A Herdr socket at PATH that answers like Herdr: popup.close fails with
@@ -56,6 +56,25 @@
                                                      bb "jjui.bb" dir)]
       (is (= 0 exit) (str "popup open: " open? "; " err))
       (is (= ["plugin.pane.open" dir] (last @seen)) (str "popup open: " open?)))))
+
+(deftest the-popup-puts-local-bin-first-on-path-for-the-preview
+  ;; Herdr's server PATH lacks ~/.local/bin, where pierre-diff-ansi lives.
+  (is (= "/h/.local/bin:/gnu/bin:/usr/bin"
+         (get (jjui/pane-env {"HOME" "/h" "PATH" "/gnu/bin:/usr/bin"}) "PATH")))
+  (is (= "/h/.local/bin:/gnu/bin"
+         (get (jjui/pane-env {"HOME" "/h" "PATH" "/gnu/bin:/h/.local/bin"}) "PATH")) "once")
+  (is (= "/h/.local/bin" (get (jjui/pane-env {"HOME" "/h"}) "PATH"))))
+
+(deftest close-closes-the-open-popup-or-none
+  (doseq [open? [false true]]
+    (let [tmp (fs/create-temp-dir)
+          sock (str tmp "/herdr.sock")
+          seen (fake-herdr sock open?)
+          {:keys [exit err]} (babashka.process/shell {:continue true :out :string :err :string
+                                                      :extra-env {"HERDR_SOCKET_PATH" sock}}
+                                                     bb "jjui.bb" "--close")]
+      (is (= 0 exit) (str "popup open: " open? "; " err))
+      (is (= [["popup.close" nil]] @seen)))))
 
 (let [{:keys [fail error]} (run-tests)]
   (when (pos? (+ fail error)) (System/exit 1)))

@@ -20,7 +20,7 @@
     (should (eq 'normal evil-state))
     (dolist (key '(("gr" . eng/bbh-inbox-refresh) ("s" . eng/bbh-inbox-send) ("2" . eng/bbh-inbox-pick)
                    ("RET" . eng/bbh-inbox-ret) ("R" . eng/bbh-inbox-router)
-                   ("." . eng/bbh-inbox-pick-recommended) ("i" . eng/bbh-inbox-answer) ("A" . eng/bbh-inbox-approve) ("J" . eng/bbh-inbox-jjui) ("q" . quit-window)
+                   ("." . eng/bbh-inbox-pick-recommended) ("i" . eng/bbh-inbox-answer) ("A" . eng/bbh-inbox-approve) ("J" . eng/bbh-inbox-jjui) ("gJ" . eng/bbh-inbox-jjui-close) ("q" . quit-window)
                    ("j" . evil-next-line) ("gg" . evil-goto-first-line) ("G" . evil-goto-line)))
       (should (eq (cdr key) (key-binding (kbd (car key))))))))
 

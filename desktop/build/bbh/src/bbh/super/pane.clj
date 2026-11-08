@@ -109,7 +109,7 @@
 (defn header
   "The Inbox's first line: what needs you, the processes on older code, then the keys."
   [{:keys [badge]} stale]
-  (format "bbh inbox · %d need you%s   1-9 pick  . recommended  i answer  C-c C-c send  S send all  TAB fold  RET open  A approve  r note  m read  a archive  x cancel  R router  J jjui  gr reload  g? help" badge
+  (format "bbh inbox · %d need you%s   1-9 pick  . recommended  i answer  C-c C-c send  S send all  TAB fold  RET open  A approve  r note  m read  a archive  x cancel  R router  J jjui (q closes)  gJ close jjui  gr reload  g? help" badge
           (if (seq stale) (str " · old code: " (str/join ", " stale)) "")))
 
 (defn- sections
