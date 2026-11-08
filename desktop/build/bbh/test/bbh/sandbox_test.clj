@@ -13,11 +13,11 @@
 (defn- git [& args] (apply p/shell {:out :string :err :string} "git" "-c" "user.email=t@t" "-c" "user.name=t" args))
 
 (deftest a-replayed-session-cannot-reach-outside-its-overlay
-  (let [home (System/getProperty "user.home")
+  (let [home (sandbox/home)
         real (str (fs/create-temp-dir {:dir (str (fs/create-dirs (str home "/.cache"))) :prefix "bbh-sandbox-test"}))
         remote (str real "/remote.git")
         clone (str real "/clone")
-        scratch (str (fs/create-temp-dir {:prefix "bbh-sandbox-scratch"}))
+        scratch (str (fs/create-temp-dir {:dir "/var/tmp" :prefix "bbh-sandbox-scratch"})) ; the test tmpdir lies under home
         up (str scratch "/up")
         steps (str home "/.local/share/bbh-replay/steps.edn")
         uid (str/trim (:out (p/shell {:out :string} "id" "-u")))
@@ -31,7 +31,7 @@
                  :shim-push (:exit (sh \"git -C " clone " push -q origin HEAD:refs/heads/viashim\"))
                  :abs-push (:exit (sh \"" abs-git " -C " clone " push -q origin HEAD:refs/heads/probe\"))
                  :run-user (count (fs/list-dir \"/run/user/" uid "\"))
-                 :tmp (count (fs/list-dir \"/tmp\"))
+                 :tmp (mapv str (fs/list-dir \"/tmp\"))
                  :done (super-done!)})))")]
     (git "init" "-q" "--bare" remote)
     (git "clone" "-q" remote clone)
@@ -44,7 +44,7 @@
                                      :cwd (str (fs/absolutize "../..")) :model (str "script/" steps) :prompt "go"})
             probe (edn/read-string (slurp (str (:out r) "/probe.edn")))]
         (is (= :end-turn (:end (:result r))) (:err r))
-        (is (= {:sudo 126 :emacs 126 :shim-push 126 :abs-push 0 :run-user 0 :tmp 0} (dissoc probe :done))
+        (is (= {:sudo 126 :emacs 126 :shim-push 126 :abs-push 0 :run-user 0 :tmp []} (dissoc probe :done))
             "blocked by the shim, or contained: the absolute-path push reached only the overlay's copy of the remote")
         (is (= ["sudo" "emacsclient" "git"] (mapv :cmd (:blocked r))))
         (is (= ["finish-worker!"] (map :command (:super r))) "super-done! reached the stub")

@@ -75,6 +75,14 @@ exec unshare --user --map-user=\"$uid\" --map-group=\"$gid\" -- \"$@\"")
 
 (defn- id-of [flag] (str/trim (:out (p/shell {:out :string} "id" flag))))
 
+(defn home
+  "The account's home from passwd, which the replayed REPLs take as user.home whatever HOME says, so the overlay
+  must cover it. The test suite's user.home is a temp dir instead."
+  []
+  (or (some-> (p/shell {:out :string :continue true} "getent" "passwd" (id-of "-u")) :out str/trim not-empty
+              (str/split #":") (nth 5 nil))
+      (System/getProperty "user.home")))
+
 (defn argv
   "The argv that runs CMD contained, with writes under HOME going to SCRATCH/up."
   [{:keys [scratch home]} cmd]
@@ -145,14 +153,16 @@ exec unshare --user --map-user=\"$uid\" --map-group=\"$gid\" -- \"$@\"")
   "Run drive! for SPEC {:init :cwd :model :prompt} contained in SCRATCH. Returns what came out:
   {:out :result :blocked :super :changed}, where :changed lists the paths written under home."
   [scratch spec & {:keys [timeout-ms]}]
-  (let [home (System/getProperty "user.home")
+  (let [home (home)
         _ (when (fs/starts-with? (fs/absolutize scratch) home)
             (throw (ex-info (str "sandbox: scratch " scratch " is under home, which the overlay covers; use /tmp or /var/tmp") {})))
         up (str scratch "/up")
         bin (write-shims! up)
         out (str (replay-dir home) "/run")
         ;; This session's own bbh variables, such as its super token, stay outside.
-        env (-> (into {} (remove (fn [[k _]] (re-find #"^(BBH_|WF_)" k))) (System/getenv))
+        ;; HOME and the XDG dirs name the overlaid home, also when the caller's point elsewhere.
+        env (-> (into {} (remove (fn [[k _]] (re-find #"^(BBH_|WF_|XDG_(STATE|DATA|CONFIG|CACHE)_HOME$)" k))) (System/getenv))
+                (assoc "HOME" home)
                 (assoc "PATH" (str (str/replace bin up home) ":" (System/getenv "PATH"))))
         proc (apply p/process {:out :string :err :string :env env}
                  (argv {:scratch scratch :home home}
