@@ -13,9 +13,9 @@
             [bbh.super.process :as process]
             [bbh.super.sessions :as sessions]
             [bbh.super.store :as store]
+            [bbh.super.workspace :as workspace]
             [bbh.version :as version]
             [bbh.workflow :as workflow]
-            [babashka.process :as p]
             [bencode.core :as bencode]
             [cheshire.core :as json]
             [clojure.edn :as edn]
@@ -74,149 +74,6 @@
          (or (:policy c)
              (let [f (fs/path (or (sysenv/getenv "XDG_CONFIG_HOME") (fs/expand-home "~/.config")) "bbh" "policy.edn")]
                (when (fs/exists? f) (edn/read-string (slurp (str f))))))))
-
-(defn- jj-out [dir & args]
-  (let [{:keys [exit out err]} (apply p/shell {:dir dir :out :string :err :string :continue true} "jj" args)]
-    (if (zero? exit) (str/trim out) (throw (ex-info (str "jj " (str/join " " args) ": " (str/trim err)) {:error :jj})))))
-
-(defn thread-prefix
-  "What every description of a change a Worker of THREAD lands starts with."
-  [thread]
-  (str "[" thread "] "))
-
-(defn wip
-  "The description a new Worker workspace's working-copy change gets, so jj log
-  and jjui show whose it is. The Worker replaces it when it commits; land!
-  refuses to land it."
-  [{:keys [thread id title]}]
-  (str (thread-prefix thread) "wip(" id ")" (when-not (str/blank? title) (str ": " title))))
-
-(defn workspace!
-  "A jj workspace of REPO for WORKER under DIR, named <thread>-<generation>,
-  its working-copy change described with (wip WORKER). Returns its path; an
-  existing one is reused. A REPO that does not exist yet is a new project, made
-  with `jj git init`."
-  [dir {:keys [repo thread generation] :as worker}]
-  (let [name (str thread "-" generation)
-        path (str (fs/path dir "workspaces" name))]
-    (when-not (fs/exists? repo)
-      (fs/create-dirs repo)
-      (jj-out repo "git" "init"))
-    (when-not (fs/exists? path)
-      (fs/create-dirs (fs/parent path))
-      (jj-out repo "workspace" "add" "--name" name path)
-      (jj-out path "describe" "-m" (wip worker)))
-    path))
-
-(defn- revs
-  "One line per revision of REVSET in DIR: commit id, then the first line of its description."
-  [dir revset]
-  (remove str/blank? (str/split-lines (jj-out dir "log" "--no-graph" "-r" revset "-T" "commit_id.short() ++ \" \" ++ description.first_line() ++ \"\\n\""))))
-
-;; Matches the placeholder (wip) and the older form without the thread prefix, wip(T63 W60).
-(def ^:private wip-description "description(regex:\"^(.T[0-9]+. )?wip[(]\")")
-
-;; A Worker's working-copy change before it has work: empty, undescribed or still described by wip.
-(def ^:private placeholder (str "(empty() & (description(exact:\"\") | " wip-description "))"))
-
-(defn- prefix!
-  "Prefix the description of each commit of REVSET in WORKSPACE that does not
-  start with (thread-prefix THREAD). Only a Worker's own unlanded commits are
-  passed, so landed history is never rewritten."
-  [workspace revset thread]
-  (let [prefix (thread-prefix thread)
-        ids (str/split-lines (jj-out workspace "log" "--no-graph" "-r" revset "-T" "change_id ++ \"\\n\""))]
-    (doseq [id (remove str/blank? ids)
-            :let [d (jj-out workspace "log" "--no-graph" "-r" id "-T" "description")]
-            :when (not (str/starts-with? d prefix))]
-      (jj-out workspace "describe" "-r" id "-m" (str prefix d)))))
-
-(defn land!
-  "Rebase the revision of the Worker in WORKSPACE, the commits its workspace has
-  that the line lacks, onto the tip of the line, so finished work forms one
-  line. The line is the user's committed history, `::default@-` (their
-  working-copy change stays in progress; advance! moves it after), and LANDED, the
-  change ids finished Workers landed. ONTO names the tip when
-  the line has more than one head. Runs jj in WORKSPACE, so the user's working
-  copy is not even snapshotted. Throws, leaving the Worker to act, when its
-  working copy has uncommitted changes and when the tip is unclear. Returns
-  {:onto tip :landed change-id}, the head of what it landed or nil, or, when
-  the rebase leaves conflicts in its commits, {:onto tip :conflicts revs :todo
-  text}: the rebase stands and the Worker resolves them, so a repeat once they
-  are resolved lands."
-  [{:keys [workspace landed onto thread]}]
-  (let [refuse (fn [error message] (throw (ex-info message {:error error})))]
-    (when (seq (revs workspace (str "@ & ~empty() & (description(exact:\"\") | " wip-description ")")))
-      (refuse :in-progress "your working copy has uncommitted changes: commit them with a real description (jj commit -m), or discard them, before super-done!"))
-    (let [line (str "(::default@-" (apply str (for [id landed] (str " | ::present(" id ")"))) ") ~ " placeholder)
-          heads (if onto (revs workspace (str "exactly(" onto ", 1)")) (revs workspace (str "heads(" line ")")))
-          _ (when (not= 1 (count heads))
-              (refuse :unclear-tip (str "the line has " (count heads) " heads, so its tip is unclear: " (str/join "; " heads)
-                                        ". Ask the person which one your revision goes on, then (super-done! {:onto \"<commit id>\"}).")))
-          tip (first (str/split (first heads) #" "))
-          mine (str "(" tip "..@) ~ " placeholder)
-          _ (when-let [w (seq (revs workspace (str "(" mine ") & " wip-description)))]
-              (refuse :wip (str "these commits still have the wip placeholder description: " (str/join "; " w)
-                                ". Describe them (jj describe -r <id> -m ...), then (super-done!) again.")))]
-      (if (empty? (revs workspace mine))
-        {:onto tip :landed nil}
-        (do (when thread (prefix! workspace mine thread))
-            (jj-out workspace "rebase" "-s" (str "roots(" tip "..@)") "-d" tip)
-            (if-let [c (seq (revs workspace (str "(" mine ") & conflicts()")))]
-              {:onto tip :conflicts (vec c)
-               :todo (str "Landing on " tip " left conflicts in " (str/join "; " c)
-                          ". Resolve them now in your workspace (edit the files, or jj resolve), squash the fix into the conflicted commit, then call (super-done!) again.")}
-              {:onto tip :landed (jj-out workspace "log" "--no-graph" "-r" (str "heads(" mine ")") "-T" "change_id")}))))))
-
-(defn advance!
-  "Move the user's working-copy change, default@ of REPO, onto TIP, the head a
-  Worker just landed, so their checkout contains the new work. Only an empty
-  change moves, unless MOVE is :always (policy :move-working-copy). Runs one
-  `jj rebase` in REPO, the default workspace, so jj snapshots the user's edits
-  first and the check and the move are a single operation under jj's
-  working-copy lock; a concurrent jj of theirs merges as any concurrent
-  operation does. A stale working copy or any jj failure moves nothing.
-  Returns :moved, :current when default@ already has TIP (it is never moved down), :skipped when REPO
-  is not the default workspace, or {:kept :not-empty} or {:kept :failed
-  :message m}, which the caller tells the user about."
-  [{:keys [repo tip move]}]
-  (try
-    (let [q (fn [rev] (jj-out repo "--ignore-working-copy" "log" "--no-graph" "-r" rev "-T" "commit_id"))]
-      (if (not= (q "present(@)") (q "present(default@)"))
-        :skipped
-        (let [{:keys [exit err]} (p/shell {:dir repo :out :string :err :string :continue true}
-                                          "jj" "rebase" "-r" (str "default@ ~ ::" tip " ~ " tip "::" (when-not (= :always move) " & empty()")) "-d" tip)]
-          (cond (not (zero? exit)) {:kept :failed :message (str/trim err)}
-                (re-find #"(?m)^Rebased " err) :moved
-                (not (str/blank? (q (str "default@ & " tip "::")))) :current
-                :else {:kept :not-empty}))))
-    (catch Exception e {:kept :failed :message (ex-message e)})))
-
-(defn retire!
-  "Forget the jj workspace of a finished Worker and delete its directory, so its
-  empty working-copy change does not dangle. Idempotent: a workspace jj already
-  forgot, a missing directory and a REPO that is gone are each skipped. With
-  KEEP?, for work that did not land, the workspace is snapshotted first and its
-  commits off the user's line get the bookmark super/<workspace name>, so they
-  stay findable. A done finish was refused while the working copy had
-  uncommitted changes, so it needs no KEEP?. Runs in REPO without a snapshot,
-  so the user's working copy is untouched. Returns the bookmark, or nil."
-  [{:keys [repo workspace keep?]}]
-  (let [name (str (fs/file-name workspace))
-        known? (and repo (fs/directory? (fs/path repo ".jj"))
-                    (contains? (set (str/split-lines (jj-out repo "--ignore-working-copy" "workspace" "list" "-T" "name ++ \"\\n\""))) name))
-        bookmark (when (and known? keep?)
-                   (when (fs/directory? workspace) (jj-out workspace "status"))
-                   (let [work (str "heads((::" name "@ ~ ::default@) ~ " placeholder ")")]
-                     (when-not (str/blank? (jj-out repo "--ignore-working-copy" "log" "--no-graph" "-r" work "-T" "commit_id"))
-                       (let [b (str "super/" name)]
-                         (jj-out repo "--ignore-working-copy" "bookmark" "set" "--allow-backwards" b "-r" (str "latest(" work ")"))
-                         b))))]
-    ;; jj discards only an undescribed empty working copy on forget, so a wip one goes explicitly.
-    (when known? (jj-out repo "--ignore-working-copy" "abandon" "-r" (str name "@ & " placeholder " & ~::default@")))
-    (when known? (jj-out repo "--ignore-working-copy" "workspace" "forget" name))
-    (when (fs/exists? workspace) (fs/delete-tree workspace))
-    bookmark))
 
 (defn wf-start!
   "The wf run for WORKER in WORKSPACE, its brief as the task."
@@ -415,8 +272,7 @@
         {:keys [worker onto]} (:args (model/authorize st principal cmd))
         w (get-in st [:workers worker])]
     (when (and (:workspace w) (fs/exists? (:workspace w)) (not (#{:done :failed :cancelled} (:state w))))
-      ((:land! launch) {:workspace (:workspace w) :onto onto :thread (:thread w)
-                        :landed (keep #(when (and (= :done (:state %)) (= (:repo w) (:repo %))) (:landed %)) (vals (:workers st)))}))))
+      ((:land! launch) {:workspace (:workspace w) :onto onto :thread (:thread w) :landed (workspace/landed-ids st (:repo w))}))))
 
 (defn- advance-worker!
   "After Worker WORKER landed TIP, move the user's working copy onto it with
@@ -424,26 +280,10 @@
   take the work, so the user decides. Called under land-lock."
   [{:keys [state launch] :as c} worker tip]
   (let [{:keys [repo thread]} (get-in @state [:workers worker])
-        r ((:advance! launch) {:repo repo :tip tip :move (:move-working-copy (policy c))})
-        short (subs tip 0 (min 8 (count tip)))
-        how (str "To take it: jj rebase -r @ -d " short " in " repo ".")]
-    (when (map? r)
-      (run! c :owner {:id (new-id) :command :milestone!
-                      :args {:thread thread
-                             :text (if (= :not-empty (:kept r))
-                                     (str worker " landed " short ". Your working copy has changes, so it was left where it is. " how
-                                          " To always move it, set :move-working-copy :always in policy.edn.")
-                                     (str worker " landed " short ", but moving your working copy failed: " (:message r) " " how))}}))
+        r ((:advance! launch) {:repo repo :tip tip :move (:move-working-copy (policy c))})]
+    (when-let [text (workspace/kept-milestone {:worker worker :repo repo :tip tip} r)]
+      (run! c :owner {:id (new-id) :command :milestone! :args {:thread thread :text text}}))
     r))
-
-(defn- retirable?
-  "Whether Worker W's workspace goes: a done Worker's at once, since its work
-  landed; a failed or cancelled one's once its thread is resolved, so it can be
-  inspected until then. No Worker, for a directory nothing owns, also goes."
-  [st w]
-  (or (nil? w)
-      (= :done (:state w))
-      (boolean (and (#{:failed :cancelled} (:state w)) (get-in st [:threads (:thread w) :resolved-at])))))
 
 (defn- stop-jobs!
   "Stop the detached jobs of Worker WORKER that are still running, now that it
@@ -472,33 +312,48 @@
   [{:keys [state launch] :as c} worker]
   (let [st @state
         w (get-in st [:workers worker])]
-    (when (and (:workspace w) (retirable? st w))
+    (when (and (:workspace w) (workspace/retirable? st w))
       (release-session! c w)
       (try ((:retire! launch) (assoc w :keep? (not= :done (:state w))))
            (catch Exception e (binding [*out* *err*] (println "bbh super: retiring" worker "failed:" (ex-message e))))))))
-
-(defn- repo-of
-  "The repository a jj workspace directory DIR belongs to, from its .jj/repo pointer."
-  [dir]
-  (let [ptr (fs/path dir ".jj" "repo")]
-    (when (fs/regular-file? ptr)
-      (str (fs/parent (fs/parent (fs/normalize (fs/path dir ".jj" (str/trim (slurp (str ptr)))))))))))
 
 (defn- sweep!
   "The workspace directories under DIR/workspaces that no live Worker owns, as
   {:workspace :worker :state :repo}. With CONFIRM, each is retired as its
   Worker's finish would have been, work off the line kept under a bookmark."
   [{:keys [dir state launch] :as c} confirm]
-  (let [st @state
-        owner (into {} (keep #(when (:workspace %) [(str (:workspace %)) %]) (vals (:workers st))))]
-    (vec (for [d (when (fs/directory? (fs/path dir "workspaces")) (sort (map str (fs/list-dir (fs/path dir "workspaces")))))
-               :let [w (owner d)]
-               :when (and (fs/directory? d) (retirable? st w))
-               :let [row {:workspace d :worker (:id w) :state (:state w) :repo (or (repo-of d) (:repo w))}]]
+  (let [st @state]
+    (vec (for [{d :workspace :as row} (workspace/orphans dir st)
+               :let [w (get-in st [:workers (:worker row)])]]
            (if confirm
              (do (when w (release-session! c w))
                  (assoc row :bookmark ((:retire! launch) {:repo (:repo row) :workspace d :keep? (not= :done (:state w))})))
              row)))))
+
+(defn- finish*
+  "Finish the Worker that CMD names for PRINCIPAL. A :done finish lands its
+  revision first, under land-lock with the commit, so the next landing sees this
+  one, and moves the user's working copy onto it. A landing that left conflicts
+  commits nothing and returns them, so the Worker resolves them and finishes
+  again. Then its jobs stop, its workspace goes when retirable? and a queued
+  Worker may take its slot."
+  [c principal {:keys [args] :as cmd}]
+  (let [r (if (= :done (keyword (:state-after args)))
+            (locking land-lock
+              (let [l (land-worker! c principal cmd)]
+                (if (:conflicts l)
+                  {:conflicts (select-keys l [:conflicts :todo])}
+                  (let [r (run! c principal (assoc-in cmd [:args :landed] (:landed l)))]
+                    ;; Only a new landing moves the user's working copy; a repeat already did.
+                    (when (and (:landed l) (not (:repeat? r))) (advance-worker! c (:result r) (:landed l)))
+                    r))))
+            (run! c principal cmd))]
+    (if-let [conflicts (:conflicts r)]
+      conflicts
+      (do (stop-jobs! c (:result r))
+          (retire-worker! c (:result r))
+          (when-not (:repeat? r) (promote! c))
+          (:result r)))))
 
 (defn handle
   "The response for one request map on controller C."
@@ -542,24 +397,7 @@
                         (cond-> cmd (= :review (keyword (:kind args))) (assoc-in [:args :evidence-sha] sha))
                         (assoc-in cmd [:args :current-sha] sha))]
               {:ok (:result (run! c principal cmd))})
-            :finish-worker!
-            ;; A landing that left conflicts commits nothing: the Worker resolves them and finishes again.
-            (let [r (if (= :done (keyword (:state-after args)))
-                      (locking land-lock
-                        (let [l (land-worker! c principal cmd)]
-                          (if (:conflicts l)
-                            {:conflicts (select-keys l [:conflicts :todo])}
-                            (let [r (run! c principal (assoc-in cmd [:args :landed] (:landed l)))]
-                              ;; Only a new landing moves the user's working copy; a repeat already did.
-                              (when (and (:landed l) (not (:repeat? r))) (advance-worker! c (:result r) (:landed l)))
-                              r))))
-                      (run! c principal cmd))]
-              (if-let [conflicts (:conflicts r)]
-                {:ok conflicts}
-                (do (stop-jobs! c (:result r))
-                    (retire-worker! c (:result r))
-                    (when-not (:repeat? r) (promote! c))
-                    {:ok (:result r)})))
+            :finish-worker! {:ok (finish* c principal cmd)}
             {:ok (:result (run! c principal cmd))}))))
     (catch clojure.lang.ExceptionInfo e
       {:error (or (:error (ex-data e)) :failed) :message (ex-message e) :data (dissoc (ex-data e) :error)})
@@ -879,7 +717,8 @@
         db (store/open (str (fs/path dir "super.db")))
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
-           :launch (merge {:workspace! workspace! :wf-start! wf-start! :open! open! :land! land! :advance! advance! :retire! retire! :release! release!
+           :launch (merge workspace/impl
+                          {:wf-start! wf-start! :open! open! :release! release!
                            :open-router! client/open-router!
                            ;; Whether open! can work: the daemon's, unless a caller brought its own open!.
                            :emacs-up? (if (:open! launch) (constantly true) emacs/alive?)}

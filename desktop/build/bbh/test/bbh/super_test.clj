@@ -11,6 +11,7 @@
             [cheshire.core]
             [bbh.super.model :as model]
             [bbh.super.store :as store]
+            [bbh.super.workspace :as workspace]
             [clojure.test :refer [deftest is testing use-fixtures]]))
 
 (use-fixtures :once hermetic/fixture)
@@ -319,7 +320,7 @@
 (deftest a-worker-on-a-missing-repository-starts-a-new-project
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-new"}))
         repo (str (fs/path dir "projects" "game"))
-        path (super/workspace! dir {:repo repo :thread "T1" :generation 1})]
+        path (workspace/workspace! dir {:repo repo :thread "T1" :generation 1})]
     (is (fs/exists? (fs/path repo ".jj")))
     (is (fs/exists? (fs/path path ".jj")))))
 
@@ -1549,11 +1550,11 @@
 (deftest retiring-unlanded-work-keeps-it-but-not-an-empty-wip-change
   (let [repo (jj-repo)
         dir (str (fs/create-temp-dir {:prefix "bbh-super-ws"}))
-        idle (super/workspace! dir {:repo repo :thread "T1" :id "W1" :title "idle" :generation 1})
-        busy (super/workspace! dir {:repo repo :thread "T2" :id "W2" :title "busy" :generation 1})]
-    (is (nil? (super/retire! {:repo repo :workspace idle :keep? true})) "an empty wip change is no work to keep")
+        idle (workspace/workspace! dir {:repo repo :thread "T1" :id "W1" :title "idle" :generation 1})
+        busy (workspace/workspace! dir {:repo repo :thread "T2" :id "W2" :title "busy" :generation 1})]
+    (is (nil? (workspace/retire! {:repo repo :workspace idle :keep? true})) "an empty wip change is no work to keep")
     (spit (str (fs/path busy "x")) "x\n")
-    (is (= "super/T2-1" (super/retire! {:repo repo :workspace busy :keep? true})))
+    (is (= "super/T2-1" (workspace/retire! {:repo repo :workspace busy :keep? true})))
     (is (= "[T2] wip(W2): busy" (wip-changes repo)) "the kept work stays, under its bookmark, still marked wip")))
 
 (defn- parent-of-default [repo]
@@ -1598,13 +1599,13 @@
     (commit-file ws "x" "x\n" "x")
     (let [tip (jj-in ws "log" "--no-graph" "-r" "@-" "-T" "commit_id")
           before (jj-in repo "log" "--no-graph" "-r" "default@" "-T" "commit_id")]
-      (is (= :skipped (super/advance! {:repo ws :tip tip})) "a repo dir that is not the default workspace")
-      (is (= :failed (:kept (super/advance! {:repo repo :tip "nosuchrev"}))))
+      (is (= :skipped (workspace/advance! {:repo ws :tip tip})) "a repo dir that is not the default workspace")
+      (is (= :failed (:kept (workspace/advance! {:repo repo :tip "nosuchrev"}))))
       (is (= before (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@" "-T" "commit_id")))
-      (is (= :moved (super/advance! {:repo repo :tip tip})))
-      (is (= :current (super/advance! {:repo repo :tip tip})) "a repeat is a no-op")
+      (is (= :moved (workspace/advance! {:repo repo :tip tip})))
+      (is (= :current (workspace/advance! {:repo repo :tip tip})) "a repeat is a no-op")
       (jj-in repo "commit" "-m" "mine")
-      (is (= :current (super/advance! {:repo repo :tip tip})) "a working copy above the tip stays above it")
+      (is (= :current (workspace/advance! {:repo repo :tip tip})) "a working copy above the tip stays above it")
       (is (= "mine" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@-" "-T" "description.first_line()"))))))
 
 (deftest an-unclear-tip-is-refused-until-the-worker-names-one
@@ -1667,14 +1668,14 @@
   (let [repo (jj-repo)
         ws (str (fs/path (fs/create-temp-dir) "T9-1"))]
     (jj-in repo "workspace" "add" "--name" "T9-1" ws)
-    (is (nil? (super/retire! {:repo repo :workspace ws})))
+    (is (nil? (workspace/retire! {:repo repo :workspace ws})))
     (is (= #{"default"} (workspaces repo)))
     (fs/create-dirs ws)
-    (is (nil? (super/retire! {:repo repo :workspace ws :keep? true})) "a forgotten workspace's directory still goes")
+    (is (nil? (workspace/retire! {:repo repo :workspace ws :keep? true})) "a forgotten workspace's directory still goes")
     (is (not (fs/exists? ws)))
-    (is (nil? (super/retire! {:repo repo :workspace ws})) "a second retire is a no-op")
+    (is (nil? (workspace/retire! {:repo repo :workspace ws})) "a second retire is a no-op")
     (fs/create-dirs ws)
-    (is (nil? (super/retire! {:repo (str repo "-gone") :workspace ws})) "a missing repo is skipped")
+    (is (nil? (workspace/retire! {:repo (str repo "-gone") :workspace ws})) "a missing repo is skipped")
     (is (not (fs/exists? ws)))))
 
 (deftest sweep-lists-orphaned-workspaces-and-retires-them-only-when-confirmed
