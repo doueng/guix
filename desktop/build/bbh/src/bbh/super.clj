@@ -78,12 +78,17 @@
   (let [{:keys [exit out err]} (apply p/shell {:dir dir :out :string :err :string :continue true} "jj" args)]
     (if (zero? exit) (str/trim out) (throw (ex-info (str "jj " (str/join " " args) ": " (str/trim err)) {:error :jj})))))
 
+(defn thread-prefix
+  "What every description of a change a Worker of THREAD lands starts with."
+  [thread]
+  (str "[" thread "] "))
+
 (defn wip
   "The description a new Worker workspace's working-copy change gets, so jj log
   and jjui show whose it is. The Worker replaces it when it commits; land!
   refuses to land it."
   [{:keys [thread id title]}]
-  (str "wip(" thread " " id ")" (when-not (str/blank? title) (str ": " title))))
+  (str (thread-prefix thread) "wip(" id ")" (when-not (str/blank? title) (str ": " title))))
 
 (defn workspace!
   "A jj workspace of REPO for WORKER under DIR, named <thread>-<generation>,
@@ -107,10 +112,23 @@
   [dir revset]
   (remove str/blank? (str/split-lines (jj-out dir "log" "--no-graph" "-r" revset "-T" "commit_id.short() ++ \" \" ++ description.first_line() ++ \"\\n\""))))
 
-(def ^:private wip-description "description(regex:\"^wip[(]\")")
+;; Matches the placeholder (wip) and the older form without the thread prefix, wip(T63 W60).
+(def ^:private wip-description "description(regex:\"^(.T[0-9]+. )?wip[(]\")")
 
 ;; A Worker's working-copy change before it has work: empty, undescribed or still described by wip.
 (def ^:private placeholder (str "(empty() & (description(exact:\"\") | " wip-description "))"))
+
+(defn- prefix!
+  "Prefix the description of each commit of REVSET in WORKSPACE that does not
+  start with (thread-prefix THREAD). Only a Worker's own unlanded commits are
+  passed, so landed history is never rewritten."
+  [workspace revset thread]
+  (let [prefix (thread-prefix thread)
+        ids (str/split-lines (jj-out workspace "log" "--no-graph" "-r" revset "-T" "change_id ++ \"\\n\""))]
+    (doseq [id (remove str/blank? ids)
+            :let [d (jj-out workspace "log" "--no-graph" "-r" id "-T" "description")]
+            :when (not (str/starts-with? d prefix))]
+      (jj-out workspace "describe" "-r" id "-m" (str prefix d)))))
 
 (defn land!
   "Rebase the revision of the Worker in WORKSPACE, the commits its workspace has
@@ -125,7 +143,7 @@
   the rebase leaves conflicts in its commits, {:onto tip :conflicts revs :todo
   text}: the rebase stands and the Worker resolves them, so a repeat once they
   are resolved lands."
-  [{:keys [workspace landed onto]}]
+  [{:keys [workspace landed onto thread]}]
   (let [refuse (fn [error message] (throw (ex-info message {:error error})))]
     (when (seq (revs workspace (str "@ & ~empty() & (description(exact:\"\") | " wip-description ")")))
       (refuse :in-progress "your working copy has uncommitted changes: commit them with a real description (jj commit -m), or discard them, before super-done!"))
@@ -141,7 +159,8 @@
                                 ". Describe them (jj describe -r <id> -m ...), then (super-done!) again.")))]
       (if (empty? (revs workspace mine))
         {:onto tip :landed nil}
-        (do (jj-out workspace "rebase" "-s" (str "roots(" tip "..@)") "-d" tip)
+        (do (when thread (prefix! workspace mine thread))
+            (jj-out workspace "rebase" "-s" (str "roots(" tip "..@)") "-d" tip)
             (if-let [c (seq (revs workspace (str "(" mine ") & conflicts()")))]
               {:onto tip :conflicts (vec c)
                :todo (str "Landing on " tip " left conflicts in " (str/join "; " c)
@@ -394,7 +413,7 @@
         {:keys [worker onto]} (:args (model/authorize st principal cmd))
         w (get-in st [:workers worker])]
     (when (and (:workspace w) (fs/exists? (:workspace w)) (not (#{:done :failed :cancelled} (:state w))))
-      ((:land! launch) {:workspace (:workspace w) :onto onto
+      ((:land! launch) {:workspace (:workspace w) :onto onto :thread (:thread w)
                         :landed (keep #(when (and (= :done (:state %)) (= (:repo w) (:repo %))) (:landed %)) (vals (:workers st)))}))))
 
 (defn- advance-worker!

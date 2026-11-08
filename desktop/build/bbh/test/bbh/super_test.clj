@@ -1462,13 +1462,14 @@
         (spit (str (fs/path repo "mine")) "in progress\n")
         (let [users (jj-in repo "log" "--no-graph" "-r" "@" "-T" "commit_id")]
           (commit-file (:workspace w1) "one" "1\n" "one")
-          (commit-file (:workspace w2) "two" "2\n" "two")
+          (commit-file (:workspace w2) "two" "2\n" "[T2] two")
           (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
           (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})))
-          (is (= ["one" "two" "start"] (line-of repo (landed c "W1"))) "the later finish lands on the earlier one")
+          (is (= ["[T1] one" "[T2] two" "start"] (line-of repo (landed c "W1")))
+              "the later finish lands on the earlier one, each change prefixed with its thread once")
           (is (= #{"default"} (workspaces repo)) "a done Worker's workspace is forgotten")
           (is (not (fs/exists? (:workspace w1))) "and its directory removed")
-          (is (= "one" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "heads(all()) ~ default@" "-T" "description.first_line()"))
+          (is (= "[T1] one" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "heads(all()) ~ default@" "-T" "description.first_line()"))
               "no empty change dangles beside the line")
           (is (= users (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@" "-T" "commit_id"))
               "the user's working-copy change is not rewritten")
@@ -1482,15 +1483,15 @@
               (is (re-find #"Resolve them now in your workspace" (:todo (:ok r))) "it tells the Worker to resolve them"))
             (is (= :working (:state (get-in @(:state c) [:workers "W3"]))) "a conflicted landing leaves the Worker running")
             (is (fs/exists? (:workspace w3)) "and its workspace in place")
-            (is (= ["three" "one" "two" "start"] (line-of repo "T3-1@")) "its commits moved, conflicted, onto the tip")
+            (is (= ["[T3] three" "[T1] one" "[T2] two" "start"] (line-of repo "T3-1@")) "its commits moved, conflicted, onto the tip")
             (spit (str (fs/path (:workspace w3) "one")) "clash\n")
             (jj-in (:workspace w3) "squash")
             (is (= {:ok "W3"} (call dir {:command :finish-worker! :args {:worker "W3" :state-after :done}})) "once resolved it lands")
-            (is (= ["three" "one" "two" "start"] (line-of repo (landed c "W3"))))
+            (is (= ["[T3] three" "[T1] one" "[T2] two" "start"] (line-of repo (landed c "W3"))))
             (is (= #{"default"} (workspaces repo)))))))))
 
 (defn- wip-changes [repo]
-  (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "description(regex:\"^wip\")" "-T" "description.first_line() ++ \"\\n\""))
+  (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "description(regex:\"^(.T[0-9]+. )?wip\")" "-T" "description.first_line() ++ \"\\n\""))
 
 (deftest a-workers-change-is-described-wip-until-it-commits-and-wip-never-lands
   (with-workers
@@ -1498,20 +1499,23 @@
       (doseq [t ["idle" "busy"]] (call dir {:command :thread! :args {:title t}}))
       (let [[w1 w2] (map #(:ok (start-worker dir % :repo repo)) ["T1" "T2"])]
         (assert (every? :workspace [w1 w2]) "both Workers started")
-        (is (= "wip(T1 W1): idle" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "T1-1@" "-T" "description.first_line()"))
+        (is (= "[T1] wip(W1): idle" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "T1-1@" "-T" "description.first_line()"))
             "the user's jj log names the Worker and its thread")
         (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})) "an idle Worker finishes")
         (is (nil? (landed c "W1")) "landing nothing")
-        (is (= "wip(T2 W2): busy" (wip-changes repo)) "and its empty wip change is abandoned with its workspace")
+        (is (= "[T2] wip(W2): busy" (wip-changes repo)) "and its empty wip change is abandoned with its workspace")
         (spit (str (fs/path (:workspace w2) "two")) "2\n")
         (is (= :in-progress (:error (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
             "edits under the wip description are uncommitted work")
         (jj-in (:workspace w2) "new")
         (is (= :wip (:error (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
             "a commit still described wip does not land")
+        (jj-in (:workspace w2) "describe" "-r" "@-" "-m" "wip(T2 W2): busy")
+        (is (= :wip (:error (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
+            "nor one in the older wip form without the prefix")
         (jj-in (:workspace w2) "describe" "-r" "@-" "-m" "two")
         (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
-        (is (= ["two" "start"] (line-of repo (landed c "W2"))))
+        (is (= ["[T2] two" "start"] (line-of repo (landed c "W2"))))
         (is (= "" (wip-changes repo)) "no wip change is left anywhere")))))
 
 (deftest retiring-unlanded-work-keeps-it-but-not-an-empty-wip-change
@@ -1522,7 +1526,7 @@
     (is (nil? (super/retire! {:repo repo :workspace idle :keep? true})) "an empty wip change is no work to keep")
     (spit (str (fs/path busy "x")) "x\n")
     (is (= "super/T2-1" (super/retire! {:repo repo :workspace busy :keep? true})))
-    (is (= "wip(T2 W2): busy" (wip-changes repo)) "the kept work stays, under its bookmark, still marked wip")))
+    (is (= "[T2] wip(W2): busy" (wip-changes repo)) "the kept work stays, under its bookmark, still marked wip")))
 
 (defn- parent-of-default [repo]
   (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@-" "-T" "change_id"))
@@ -1591,7 +1595,7 @@
           (is (= :unclear-tip (:error r)))
           (is (re-find #"2 heads.*one|2 heads.*yours" (:message r)) (:message r)))
         (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done :onto (landed c "W1")}})))
-        (is (= ["two" "one" "start"] (line-of repo (landed c "W2"))))))))
+        (is (= ["[T2] two" "[T1] one" "start"] (line-of repo (landed c "W2"))))))))
 
 (deftest inbox-views-reload-on-a-change-but-not-on-a-health-pass-that-found-nothing-new
   (with-controller
