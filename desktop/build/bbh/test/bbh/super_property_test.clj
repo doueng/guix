@@ -183,14 +183,14 @@
      (for [kind [:threads :workers :asks :outbox] id (keys (kind state))
            :when (> (model/id-order id) (get-in state [:counters kind] 0))]
        [:id-past-its-counter id])
-     ;; The Inbox: every thread once, in number order within a section, and
+     ;; The Inbox: every thread once, newest first within a section, and
      ;; the first matching rule decides the section.
      (let [sections (model/sections state {})
            rows (for [{:keys [section threads]} sections t threads] [section t])]
        (concat
         (when (not= (sort (keys (:threads state))) (sort (map (comp :id second) rows))) [[:sections-lose-a-thread]])
         (for [{:keys [section threads]} sections
-              :when (not= (map :id threads) (sort-by model/id-order (map :id threads)))]
+              :when (not= (map :id threads) (sort-by (comp - model/id-order) (map :id threads)))]
           [:section-out-of-order section])
         (for [[section t] rows
               :let [stopped? (some #(and (:stopped %) (= (:id t) (:thread %))) open)

@@ -820,11 +820,12 @@
        (sort-by :seq) last))
 
 (defn sections
-  "Threads of STATE grouped in the doc's order, each with its newest open ask,
+  "Threads of STATE grouped in the doc's order, newest (highest number) first
+  within a section, each with its newest open ask,
   all its open :asks and whether an archived one came back. CURSORS maps
   thread id to the seq the client last saw."
   [state cursors]
-  (let [rows (for [t (map #(thread-view state %) (sort-by (comp id-order :id) (vals (:threads state))))
+  (let [rows (for [t (map #(thread-view state %) (sort-by (comp - id-order :id) (vals (:threads state))))
                    :let [s (section state t (get cursors (:id t)))
                          ask (ask-line state (:id t))]]
                (assoc t :section s :ask ask :asks (vec (sort-by :seq (vals (open-asks state (:id t)))))

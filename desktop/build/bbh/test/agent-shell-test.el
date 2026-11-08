@@ -828,6 +828,24 @@ SELECTED's PROGRESS lines, then `bbh-test--outline' and a subtree per other row.
       (should (equal "T3" (eng/bbh-inbox--choose "T2" rows (seq-remove (lambda (r) (equal "T2" (plist-get r :id))) rows))))
       (should (equal "T1" (eng/bbh-inbox--choose nil nil rows))))))
 
+(ert-deftest bbh-inbox-split-lists-newest-threads-first-within-a-section ()
+  ;; The controller sends threads newest first in each section (T99), numerically:
+  ;; T100 above T99 above T12, waiting sections still first. The list keeps that order,
+  ;; and a newer thread arriving on top leaves the selection on its thread.
+  (let* ((eng/bbh-inbox--show-archived nil)
+         (rows '(("T98" "stopped" "waiting" 1 nil "asks")
+                 ("T100" "new" "working" 0 nil "newest")
+                 ("T99" "new" "working" 0 nil "newer")
+                 ("T12" "new" "working" 0 nil "old")))
+         (before (plist-get (eng/bbh-inbox--parse-split (bbh-test--split rows)) :rows))
+         (after (plist-get (eng/bbh-inbox--parse-split
+                            (bbh-test--split (append (list (car rows) '("T101" "new" "working" 0 nil "fresh")) (cdr rows))))
+                           :rows))
+         (ids (lambda (text n) (mapcar (lambda (line) (cadr (split-string line))) (seq-take (split-string (substring-no-properties text) "\n") n)))))
+    (should (equal '("T98" "T100" "T99" "T12") (funcall ids (eng/bbh-inbox--list-text before 40) 4)))
+    (should (equal '("T98" "T101" "T100" "T99" "T12") (funcall ids (eng/bbh-inbox--list-text after 40) 5)))
+    (should (equal "T99" (eng/bbh-inbox--choose "T99" before after)))))
+
 (defmacro bbh-test--with-split-inbox (spec &rest body)
   "Run BODY with the split Inbox and a fake bbh: `split' prints file VIEW,
 `org' prints file ORG, and each call's arguments are appended to file LOG.

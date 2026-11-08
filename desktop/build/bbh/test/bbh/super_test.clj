@@ -137,7 +137,7 @@
     (fn [_ dir _]
       (dotimes [n 10] (call dir {:command :thread! :args {:title (str "t" (inc n))}}))
       (is (= "T10" (:id (last (:ok (call dir {:command :threads}))))))
-      (is (= (map #(str "T" %) (range 1 11))
+      (is (= (map #(str "T" %) (range 10 0 -1))
              (map :id (mapcat :threads (:sections (:ok (call dir {:command :sections}))))))))))
 
 (deftest sections-derive-from-a-fixed-event-list-as-the-table-says
