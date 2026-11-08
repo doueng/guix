@@ -119,6 +119,51 @@
 
 (defn- thread [id] (call! {:command :thread :args {:id id}}))
 
+;; The split view (design 4): a compact list of every thread on the left and
+;; the selected thread on the right. `split` prints the list as #+thread lines
+;; and the selected thread's progress as #+progress lines ahead of the same
+;; outline `org` prints, so one run feeds both panes.
+
+(defn- one-line [s] (str/trim (str/replace (str s) #"\s+" " ")))
+
+(defn split-rows
+  "The #+thread lines of SECTIONS, one per thread in section order, with
+  this client's read CURSORS marking unseen changes."
+  [{:keys [sections]} cursors]
+  (for [{:keys [section threads]} sections
+        {:keys [id title execution asks updated-at milestone-seq worker]} threads]
+    (str "#+thread: " (str/join "\t" [id (name section) (name (or execution :none)) (count asks) (or (age updated-at) "")
+                                     (if (> (or milestone-seq 0) (get cursors id 0)) 1 0) (or worker "") (one-line title)]))))
+
+(def ^:private progress-kinds
+  {:milestone "milestone" :note "note" :ask-opened "asked" :reply-sent "replied" :worker-started "started"
+   :worker-finished "finished" :worker-steered "steered" :asks-answered-in-chat "in chat"})
+
+(defn- progress-text [{:keys [kind data]}]
+  (case kind
+    (:milestone :note) (:text data)
+    :ask-opened (str (:id data) " " (:text data))
+    :reply-sent (str (:id data) " " (str/join " " (concat (keys (:picks data)) (keys (:answers data))))
+                     (when-not (str/blank? (:note data)) (str " note: " (:note data))))
+    :worker-started (:id data)
+    :worker-finished (str (:id data) " " (some-> (:state data) name)
+                          (when-let [l (:landed data)] (str ", landed " (subs l 0 (min 8 (count l))))))
+    :worker-steered "by the Router"
+    :asks-answered-in-chat (str/join " " (:asks data))))
+
+(def ^:private progress-time (java.time.format.DateTimeFormatter/ofPattern "MM-dd HH:mm"))
+
+(defn split-progress
+  "The #+progress lines of thread ID from its EVENTS: the newest N that tell
+  how its work went, oldest first, each with its local time."
+  [id events n]
+  (for [{:keys [at kind] :as e} (take-last n (filter (comp progress-kinds :kind) events))]
+    (str "#+progress: " (str/join "\t" [id
+                                       (try (.format progress-time (.atZone (java.time.Instant/parse at) (java.time.ZoneId/systemDefault)))
+                                            (catch Exception _ ""))
+                                       (progress-kinds kind)
+                                       (one-line (progress-text e))]))))
+
 (defn- open-ask
   "Thread T's open ask ASK, else with no ASK its newest open ask."
   [{:keys [asks]} ask]
@@ -207,6 +252,15 @@
       ;; The Inbox buffer's reload: the header, then the outline, from one read.
       ;; The buffer keeps your place, folds and unsent answers across reloads.
       "org" (let [s (sections)] (println (header s (version/stale (client/data-dir)))) (println (org-view s)))
+      "split" (let [s (sections)]
+                (println (header s (version/stale (client/data-dir))))
+                (doseq [l (split-rows s (:cursors (client-state)))] (println l))
+                (when id
+                  (println (str "#+selected: " id))
+                  (doseq [l (split-progress id (call! {:command :events :args {:thread id}}) 8)] (println l)))
+                ;; The list's selection moved there: tell voice, as select does.
+                (when (= "select" n) (select! id))
+                (println (org-view s)))
       "select" (select! id n)
       "clear" (call! {:command :discard-draft! :args {:thread id}})
       "pick" (pick! id (parse-long n) :ask (first more))
@@ -225,7 +279,7 @@
       "buffer" (println (buffer id))
       "dir" (println (workdir (thread id)))
       "register" (client/register-view! (client/super-dir) (parse-long id))
-      (println "usage: bbh inbox [org|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|seen T|buffer T|dir T|register PORT]"))
+      (println "usage: bbh inbox [org|split [T [select]]|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|seen T|buffer T|dir T|register PORT]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))

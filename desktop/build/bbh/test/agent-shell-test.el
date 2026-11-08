@@ -406,6 +406,7 @@
                                          "org) cat " outline ";;\n"
                                          "esac\n")))
          (eng/bbh-inbox-bbh (list script))
+         (eng/bbh-inbox-view 'outline)
          (logged (lambda (line) (with-temp-buffer (insert-file-contents log)
                                                   (string-match-p (concat "^" (regexp-quote line) "$") (buffer-string))))))
     (set-file-modes script #o700)
@@ -481,6 +482,7 @@
                                  (concat "#!/bin/sh\necho \"$@\" >> " log "\n"
                                          "case \"$2\" in\norg) printf 'bbh inbox · 0 need you\\n* NEW T1 first\\n';;\nesac\n")))
          (eng/bbh-inbox-bbh (list script))
+         (eng/bbh-inbox-view 'outline)
          (gone (make-temp-file "bbh-workspace" t))
          (worker (get-buffer-create "T9 done [viewport]")))
     (set-file-modes script #o700)
@@ -541,6 +543,7 @@
                                          "org) printf 'bbh inbox · 0 need you\\n* NEW T1 first\\n';;\n"
                                          "esac\n")))
          (eng/bbh-inbox-bbh (list script))
+         (eng/bbh-inbox-view 'outline)
          (dir (make-temp-file "bbh-super-ws" t))
          (shell (get-buffer (eng/bbh-super-open "router" dir "Router" nil))))
     (set-file-modes script #o700)
@@ -619,6 +622,7 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
              (list "sh" "-c" (format "echo \"$2\" >> %s; case $2 in org) cat %s || exit 1;; answer) ;; *) exit 1;; esac"
                                      (shell-quote-argument ,log) (shell-quote-argument ,view))
                    "sh"))
+            (eng/bbh-inbox-view 'outline)
             (eng/bbh-inbox--reload nil)
             (eng/bbh-inbox--stale nil))
        (unwind-protect
@@ -722,3 +726,178 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
     ;; Redisplay runs this hook; batch Emacs has none.
     (run-hook-with-args 'window-buffer-change-functions (selected-window))
     (should (eq 'pending eng/bbh-inbox--reload))))
+
+;;; The split view: the thread list beside the selected thread
+
+(defun bbh-test--split (rows &optional selected progress)
+  "`bbh inbox split' output: ROWS, each (ID SECTION EXECUTION ASKS UNSEEN TITLE),
+SELECTED's PROGRESS lines, then `bbh-test--outline' and a subtree per other row."
+  (concat "bbh inbox · 2 need you   keys\n"
+          (mapconcat (pcase-lambda (`(,id ,section ,execution ,asks ,unseen ,title))
+                       (format "#+thread: %s\t%s\t%s\t%d\t5m\t%s\tW%s\t%s\n" id section execution asks (if unseen 1 0) (substring id 1) title))
+                     rows "")
+          (if selected (format "#+selected: %s\n" selected) "")
+          (mapconcat (lambda (line) (format "#+progress: %s\t11-08 10:00\tmilestone\t%s\n" selected line)) progress "")
+          bbh-test--outline "\n"
+          "* WAITING T3 third\n** a3 Go?\n   1. Yes\n*** Answer\n\n"
+          "* ARCHIVED T9 old one\n"))
+
+(defconst bbh-test--split-rows
+  '(("T1" "stopped" "waiting" 1 t "first")
+    ("T2" "new" "working" 0 nil "second")
+    ("T3" "waiting" "waiting" 1 nil "third")
+    ("T4" "needs-attention" "failed" 0 nil "fourth")
+    ("T5" "quiet" "done" 0 nil "fifth")
+    ("T9" "archived" "none" 0 nil "old one")))
+
+(ert-deftest bbh-inbox-split-lists-a-line-per-thread-with-its-status ()
+  (let* ((data (eng/bbh-inbox--parse-split (bbh-test--split bbh-test--split-rows "T1" '("half way"))))
+         (eng/bbh-inbox--show-archived nil)
+         (lines (split-string (substring-no-properties (eng/bbh-inbox--list-text (plist-get data :rows) 40)) "\n")))
+    (should (equal "T1" (plist-get data :selected)))
+    (should (equal '(("11-08 10:00" "milestone" "half way")) (plist-get data :progress)))
+    (should (string-prefix-p "* STOPPED T1 first" (plist-get data :outline)))
+    (should (equal "W1" (plist-get (car (plist-get data :rows)) :worker)))
+    ;; Unseen mark, status, id, title, open asks and age, in the controller's order.
+    (should (string-match-p "^•● T1   first +1\\? 5m$" (nth 0 lines)))
+    (should (string-match-p "^ ◐ T2   second +5m$" (nth 1 lines)))
+    (should (string-match-p "^ ● T3 " (nth 2 lines)))
+    (should (string-match-p "^ ✖ T4 " (nth 3 lines)))
+    (should (string-match-p "^ ✓ T5 " (nth 4 lines)))
+    (should (= 40 (string-width (nth 0 lines))))
+    ;; Archived threads fold into one row.
+    (should (equal "  ▸ 1 archived" (nth 5 lines)))
+    (should-not (seq-some (lambda (line) (string-match-p "T9" line)) lines))
+    ;; A selection that leaves the list goes to the row that took its place.
+    (let ((rows (plist-get data :rows)))
+      (should (equal "T3" (eng/bbh-inbox--choose "T2" rows (seq-remove (lambda (r) (equal "T2" (plist-get r :id))) rows))))
+      (should (equal "T1" (eng/bbh-inbox--choose nil nil rows))))))
+
+(defmacro bbh-test--with-split-inbox (spec &rest body)
+  "Run BODY with the split Inbox and a fake bbh: `split' prints file VIEW,
+`org' prints file ORG, and each call's arguments are appended to file LOG.
+SPEC is (VIEW ORG LOG)."
+  (declare (indent 1))
+  (pcase-let ((`(,view ,org ,log) spec))
+    `(let* ((,view (make-temp-file "bbh-split-view"))
+            (,org (make-temp-file "bbh-split-org"))
+            (,log (make-temp-file "bbh-split-log"))
+            (eng/bbh-inbox-bbh
+             (list "sh" "-c" (format "shift; echo \"$*\" >> %s; case $1 in split) cat %s;; org) cat %s;; esac"
+                                     (shell-quote-argument ,log) (shell-quote-argument ,view) (shell-quote-argument ,org))
+                   "sh"))
+            (eng/bbh-inbox-view 'split)
+            (eng/bbh-inbox-split-min-width 0)
+            (eng/bbh-inbox-select-delay 0.05)
+            (eng/bbh-inbox--selected nil)
+            (eng/bbh-inbox--rows nil)
+            (eng/bbh-inbox--progress nil)
+            (eng/bbh-inbox--show-archived nil)
+            (eng/bbh-inbox--reload nil)
+            (eng/bbh-inbox--stale nil))
+       (unwind-protect
+           (progn ,@body)
+         (dolist (name '("*bbh inbox*" "*bbh threads*"))
+           (when (get-buffer name) (kill-buffer name)))))))
+
+(defun bbh-test--logged-p (log line)
+  (with-temp-buffer (insert-file-contents log)
+                    (string-match-p (concat "^" (regexp-quote line) "$") (buffer-string))))
+
+(defun bbh-test--right ()
+  (with-current-buffer "*bbh inbox*" (buffer-substring-no-properties (point-min) (point-max))))
+
+(ert-deftest bbh-inbox-split-shows-the-selected-thread-beside-the-list ()
+  (bbh-test--with-split-inbox (view org log)
+    (with-temp-file view (insert (bbh-test--split bbh-test--split-rows "T1" '("half way"))))
+    (with-temp-file org (insert "bbh inbox · 2 need you\n" bbh-test--outline))
+    (eng/bbh-inbox)
+    (should (bbh-test--wait (lambda () (string-match-p "half way" (bbh-test--right))) 10))
+    ;; The list on the left, selected; the thread on the right.
+    (should (equal '("*bbh inbox*" "*bbh threads*") (bbh-test--windows)))
+    (should (equal "*bbh threads*" (buffer-name (window-buffer (selected-window)))))
+    (should (> (window-left-column (get-buffer-window "*bbh inbox*")) 0))
+    (should (bbh-test--logged-p log "split"))
+    (let ((right (bbh-test--right)))
+      (should (string-match-p "^\\*\\* a1 Keep the alias\\?$" right))
+      (should (string-match-p "^\\*\\* Progress\n   11-08 10:00  milestone +half way$" right))
+      (should (string-match-p "\\[\\[bbh-worker:T1\\]\\[W1's buffer\\]\\]" right))
+      (should-not (string-match-p "T2 second" right)))
+    (with-current-buffer "*bbh inbox*"
+      (should (string-prefix-p "T1 " header-line-format))
+      ;; The cursor starts on the ask, where T82's keys answer it.
+      (should (equal "a1" (eng/bbh-inbox--ask)))
+      (let ((last-command-event ?2)) (call-interactively (bbh-test--key "2")))
+      (should (bbh-test--wait (lambda () (bbh-test--logged-p log "pick T1 2 a1")) 10))
+      (should (eq 'eng/bbh-inbox-pick-recommended (bbh-test--key ".")))
+      (should (eq 'eng/bbh-inbox-answer (bbh-test--key "i")))
+      (should (eq 'eng/bbh-inbox-send (bbh-test--key "C-c C-c")))
+      (should (eq 'eng/bbh-inbox-other-pane (bbh-test--key "o")))
+      ;; i types the answer in place, above the progress.
+      (eng/bbh-inbox-answer)
+      (should (eng/bbh-inbox--in-answer-p))
+      (insert "call it Zed")
+      (should (equal "call it Zed" (eng/bbh-inbox--answer-text "a1")))
+      (should (string-match-p "^    call it Zed\n\\*\\* Progress$" (bbh-test--right))))
+    (with-current-buffer "*bbh threads*"
+      (should (equal "T1" (eng/bbh-inbox--at-point)))
+      (dolist (key '(("j" . eng/bbh-threads-next) ("k" . eng/bbh-threads-previous) ("n" . eng/bbh-threads-next)
+                     ("]t" . eng/bbh-inbox-next-waiting) ("[t" . eng/bbh-inbox-previous-waiting)
+                     ("o" . eng/bbh-inbox-other-pane) ("RET" . eng/bbh-threads-ret) ("gv" . eng/bbh-inbox-toggle-view)
+                     ("J" . eng/bbh-inbox-jjui) ("gr" . eng/bbh-inbox-refresh)))
+        (should (eq (cdr key) (bbh-test--key (car key)))))
+      ;; j moves the selection and the right side follows at once, then fetches it.
+      (eng/bbh-threads-next)
+      (eng/bbh-threads--moved)
+      (should (equal "T2" eng/bbh-inbox--selected))
+      (should (string-match-p "T2 second" (bbh-test--right)))
+      (should-not (string-match-p "a1 Keep" (bbh-test--right)))
+      (should (bbh-test--wait (lambda () (bbh-test--logged-p log "split T2 select")) 10))
+      ;; ]t goes to the next thread waiting on you, and wraps.
+      (eng/bbh-inbox-next-waiting)
+      (should (equal "T3" eng/bbh-inbox--selected))
+      (should (equal "T3" (eng/bbh-inbox--at-point)))
+      (eng/bbh-inbox-next-waiting)
+      (should (equal "T1" eng/bbh-inbox--selected))
+      ;; o goes to the thread and back.
+      (eng/bbh-inbox-other-pane)
+      (should (equal "*bbh inbox*" (buffer-name (window-buffer (selected-window))))))
+    (with-current-buffer "*bbh inbox*" (eng/bbh-inbox-other-pane))
+    (should (equal "*bbh threads*" (buffer-name (window-buffer (selected-window)))))))
+
+(ert-deftest bbh-inbox-split-reload-keeps-the-selection-and-gv-switches-views ()
+  (bbh-test--with-split-inbox (view org log)
+    (with-temp-file view (insert (bbh-test--split bbh-test--split-rows)))
+    (with-temp-file org (insert "bbh inbox · 2 need you\n" bbh-test--outline "\n* WAITING T3 third\n"))
+    (eng/bbh-inbox)
+    (should (bbh-test--wait (lambda () (string-match-p "T1 first" (bbh-test--right))) 10))
+    (eng/bbh-inbox--select "T3")
+    (with-current-buffer "*bbh threads*"
+      (let ((row (count-lines (window-start) (point))))
+        ;; A push with a new thread above: the selection and its screen line stay.
+        (with-temp-file view (insert (bbh-test--split (cons '("T0" "stopped" "waiting" 1 t "zeroth") bbh-test--split-rows))))
+        (eng/bbh-inbox--changed)
+        (mapc #'cancel-timer (bbh-test--inbox-reloads))
+        (eng/bbh-inbox--reload)
+        (should (bbh-test--wait (lambda () (string-match-p "T0" (buffer-string))) 10))
+        (should (equal "T3" eng/bbh-inbox--selected))
+        (should (equal "T3" (eng/bbh-inbox--at-point)))
+        (should (= row (count-lines (window-start) (point))))
+        (should (string-match-p "third" (bbh-test--right)))
+        (should (bbh-test--logged-p log "split T3")))
+      ;; RET on the archived row shows the archived threads.
+      (goto-char (text-property-any (point-min) (point-max) 'bbh-archived t))
+      (eng/bbh-threads-ret)
+      (should (string-match-p "T9" (buffer-string)))
+      (goto-char (eng/bbh-inbox--row-start "T3"))
+      ;; gv: every thread in one buffer, the cursor on the selected one.
+      (eng/bbh-inbox-toggle-view))
+    (should (eq 'outline eng/bbh-inbox-view))
+    (should (bbh-test--wait (lambda () (string-match-p "T2 second" (bbh-test--right))) 10))
+    (should (equal '("*bbh inbox*") (bbh-test--windows)))
+    (with-current-buffer "*bbh inbox*"
+      (should (equal "T3" (eng/bbh-inbox--at-point)))
+      (eng/bbh-inbox-toggle-view))
+    (should (eq 'split eng/bbh-inbox-view))
+    (should (equal '("*bbh inbox*" "*bbh threads*") (bbh-test--windows)))
+    (should (equal "T3" eng/bbh-inbox--selected))))

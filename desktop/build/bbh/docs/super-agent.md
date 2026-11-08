@@ -249,6 +249,17 @@ The super-agent lives in one Emacs daemon, `bbh-super`, which the `bbh-emacs` Ho
 - **Inbox buffer, `*bbh inbox*`.** `bbh inbox` (`prefix+t` in Herdr) opens a terminal frame on it. It shows a live org outline of the threads in section order, with the badge and the keys in the header line. When the buffer is created it opens a local port and registers it with the controller. The controller connects to that port whenever an event changes a thread, so the list reloads without polling. The order holds while you look, and new activity waits behind an "N new" line. Each thread's heading starts with its section and id. Under it is a heading per open ask, starting with the ask's id, with the one-line question and numbered options in its body. A folded Details heading holds the ask's `:details` and a link to its `:evidence` file. An Answer heading's body is the only text you can edit, and you type an answer in your own words there. A thread with no open ask shows its latest state, folded. A reload keeps your heading, your folds and any answer you typed but have not saved.
 - **Router buffer, `Router`.** The Router conversation (`bbh acp --id router` in agent-shell, sandboxed by `BBH_ROLE=router`). `bbh super start-router` opens it and the Inbox. What you send from its composer or type at its prompt goes through `bbh super say!` with origin `:emacs`, so it gets an `oN` id the Router can start Workers for, and a leading handle ("T12 ...") steers that thread instead.
 
+**Split view, the default (design 4 of T85).** `bbh inbox` lays out two windows. On the left is `*bbh threads*`, one line per thread in section order, so threads waiting on you come first. Each line has a `•` for a change you have not opened, a status (● waiting on you, ◐ working, ✖ stuck, ✓ done, from the controller's section and execution), the id, the title, the open-ask count and the age. Archived threads fold into one row. On the right is `*bbh inbox*`, holding only the selected thread: its open asks with the keys below, then its last eight progress events (milestones, notes, asks, replies, starts, finishes and steers), then a link to its Worker's buffer. `bbh inbox split T` feeds both from one controller read. Moving in the list redraws the right side at once from what was loaded, and 0.3 s later one `split T select` fetches that thread's progress and records the selection for voice. A pushed reload keeps the list's selection and screen line, and the right side keeps your place, folds and unsaved answers as before. In a frame narrower than 110 columns the list sits above the thread. `gv` switches to the one-buffer outline of every thread and back.
+
+| List key | Action |
+|---|---|
+| j, k, n, p | Next or previous thread. The right side follows. |
+| ]t, [t | Next or previous thread waiting on you, wrapping. They work on the right side and in the one-buffer view too. |
+| o, TAB | Go to the selected thread. `o` on the right side goes back. C-h and C-l move between the windows too. |
+| RET | Open the thread's Worker and mark it seen, or on the archived row, show or hide the archived threads. |
+| A, m, a, x, u, J, gJ, R, S, gr | As in the thread, on the selected thread. |
+| gv | Switch to the one-buffer view. |
+
 The Inbox is an org buffer in evil normal state, so motions, search, `C-j`/`C-k` focus and the org and evil-org keys work as in any Doom org buffer, and SPC m lists the actions. The keys act on the ask under the cursor, else on the thread's newest open ask. Its keys:
 
 | Key | Action |
@@ -267,12 +278,15 @@ The Inbox is an org buffer in evil normal state, so motions, search, `C-j`/`C-k`
 | m | Mark read, which closes the asks and tells the Worker not to wait. |
 | a | Archive. Open asks become dismissed, which the Worker is told, and a queued Worker is cancelled before it launches. |
 | R | Open the Router. |
+| ]t, [t | Next or previous thread waiting on you. |
+| o | In the split view, go to the thread list. |
+| gv | Switch between the split view and the one buffer of every thread. |
 | SPC m r, SPC m i | Open the Router or the Inbox. These two work in the Router's and Workers' buffers too. |
 | gr | Reload in the current order, new threads included. Opening the Inbox does the same. |
 | g? | Describe the mode and its keys. |
 | q | Quit the window. |
 
-Each view takes the whole frame: opening the Router, a Worker or the Inbox first closes every other window, side windows included. In the Router's and Workers' composers, C-n sends (Cmd+N through kanata) and C-c C-k stops the turn. Normal-state `C-d` and `C-u` page the transcript. The transcript uses Doom's evil-org keys: `gj`/`gk` by element, `]h`/`[h` between prompts, `gh` up.
+Each view takes the whole frame: opening the Router, a Worker or the Inbox first closes every other window, side windows included. The split Inbox's two windows count as one view. In the Router's and Workers' composers, C-n sends (Cmd+N through kanata) and C-c C-k stops the turn. Normal-state `C-d` and `C-u` page the transcript. The transcript uses Doom's evil-org keys: `gj`/`gk` by element, `]h`/`[h` between prompts, `gh` up.
 
 Each Worker gets one buffer, named after its thread (`T12 keybindings`). The buffer runs `bbh acp --id super-W<n>` in the Worker's jj workspace with its token and `WF_RUN`. It opens in the background and never takes focus. A resumed Worker replaces its old buffer.
 

@@ -192,6 +192,27 @@
     (is (clojure.string/starts-with? (pane/header sections []) "bbh inbox · 1 need you   1-9 pick  . recommended  i answer  C-c C-c send"))
     (is (clojure.string/starts-with? (pane/header sections ["controller" "web"]) "bbh inbox · 1 need you · old code: controller, web   1-9 pick"))))
 
+(deftest the-split-view-lists-a-line-per-thread-and-the-selected-threads-progress
+  (let [sections {:sections [{:section :stopped :threads [{:id "T1" :title "Alt+W\tcloses\nwindows" :execution :waiting
+                                                         :updated-at (str (java.time.Instant/now)) :milestone-seq 7 :worker "W1"
+                                                         :asks [{:id "a1"}]}]}
+                             {:section :quiet :threads [{:id "T2" :title "done one" :execution :done :milestone-seq 3 :asks []}]}]}]
+    (is (= ["#+thread: T1\tstopped\twaiting\t1\tnow\t1\tW1\tAlt+W closes windows"
+            "#+thread: T2\tquiet\tdone\t0\t\t0\t\tdone one"]
+           (pane/split-rows sections {"T1" 5 "T2" 3}))
+        "unseen once the thread moved past this client's cursor; tabs and newlines never split a field"))
+  (let [at "2026-11-08T10:00:00Z"
+        events [{:kind :thread-created :at at :data {}}
+                {:kind :milestone :at at :data {:text "half way"}}
+                {:kind :outbox-sent :at at :data {}}
+                {:kind :ask-opened :at at :data {:id "a1" :text "Keep?"}}
+                {:kind :reply-sent :at at :data {:id "r1" :picks {"a1" "no"} :note "why"}}
+                {:kind :worker-finished :at at :data {:id "W1" :state :done :landed "abcdef0123"}}]
+        lines (pane/split-progress "T1" events 3)]
+    (is (= ["asked" "replied" "finished"] (map #(nth (clojure.string/split % #"\t") 2) lines)) "the newest that tell how the work went")
+    (is (= ["a1 Keep?" "r1 a1 note: why" "W1 done, landed abcdef01"] (map #(nth (clojure.string/split % #"\t") 3) lines)))
+    (is (every? #(re-matches #"#\+progress: T1\t\d\d-\d\d \d\d:\d\d\t.*" %) lines))))
+
 (deftest an-ask-is-one-line-and-its-details-ride-along
   (with-controller
     (fn [c dir _]

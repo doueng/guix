@@ -280,10 +280,12 @@ A failure calls ON-FAIL with bbh's message, or shows it without ON-FAIL."
 ;;;; Reading the outline
 
 (defun eng/bbh-inbox--at-point ()
-  "The thread whose heading is at or above the cursor."
-  (save-excursion
-    (end-of-line)
-    (when (re-search-backward eng/bbh-inbox--thread-re nil t) (match-string-no-properties 2))))
+  "The thread whose heading is at or above the cursor, or the thread list's row here."
+  (if (derived-mode-p 'eng/bbh-threads-mode)
+      (get-text-property (line-beginning-position) 'bbh-thread)
+    (save-excursion
+      (end-of-line)
+      (when (re-search-backward eng/bbh-inbox--thread-re nil t) (match-string-no-properties 2)))))
 
 (defun eng/bbh-inbox--thread ()
   (or (eng/bbh-inbox--at-point) (user-error "No thread here")))
@@ -463,8 +465,10 @@ and new ones by default: Details, archived threads and threads with no ask."
                 (goto-char start)
                 (cond ((string-suffix-p "/Details" key) t)
                       ((looking-at eng/bbh-inbox--thread-re)
-                       (or (equal "ARCHIVED" (match-string 1))
-                           (not (eng/bbh-inbox--asks key)))))))
+                       ;; The split view shows one thread, open.
+                       (and (not (eq eng/bbh-inbox-view 'split))
+                            (or (equal "ARCHIVED" (match-string 1))
+                                (not (eng/bbh-inbox--asks key))))))))
         (save-excursion (goto-char start) (org-fold-hide-subtree))))))
 
 (defun eng/bbh-inbox--typing-p ()
@@ -509,13 +513,22 @@ reload, waits while you type in the buffer."
                 (set-window-start window (save-excursion (goto-char pos) (forward-line (- row)) (point)) t)))
             (when (bound-and-true-p hl-line-mode) (hl-line-highlight))))))))
 
+(defun eng/bbh-inbox--load-args ()
+  "The bbh inbox verb that reloads the current view."
+  (if (eq eng/bbh-inbox-view 'split) (delq nil (list "split" eng/bbh-inbox--selected)) '("org")))
+
+(defun eng/bbh-inbox--show (text &optional quiet)
+  "Draw TEXT, the output of `eng/bbh-inbox--load-args', in the current view."
+  (if (eq eng/bbh-inbox-view 'split) (eng/bbh-inbox--render-split text quiet) (eng/bbh-inbox--render text quiet)))
+
 (defun eng/bbh-inbox-refresh ()
   "Reload the Inbox from the controller."
   (interactive)
-  (eng/bbh-inbox--run '("org") #'eng/bbh-inbox--render))
+  (eng/bbh-inbox--run (eng/bbh-inbox--load-args) #'eng/bbh-inbox--show))
 
 (defun eng/bbh-inbox--shown-p ()
-  (when-let* ((buffer (get-buffer "*bbh inbox*"))) (get-buffer-window buffer t)))
+  (seq-some (lambda (name) (when-let* ((buffer (get-buffer name))) (get-buffer-window buffer t)))
+            '("*bbh inbox*" "*bbh threads*")))
 
 (defun eng/bbh-inbox--changed (&rest _)
   "The controller committed a change: reload once Emacs is idle, if a window
@@ -542,8 +555,8 @@ shows the Inbox, else when one does."
                      (setq header-line-format (format "bbh inbox · reload failed: %s   gr retry" problem)))
                    (funcall done))))
       (condition-case err
-          (eng/bbh-inbox--run '("org")
-                              (lambda (text) (unwind-protect (eng/bbh-inbox--render text t) (funcall done)))
+          (eng/bbh-inbox--run (eng/bbh-inbox--load-args)
+                              (lambda (text) (unwind-protect (eng/bbh-inbox--show text t) (funcall done)))
                               fail)
         (error (funcall fail (error-message-string err)))))))
 
@@ -714,10 +727,13 @@ already on its way with the older draft does not overwrite it."
 (defun eng/bbh-inbox-open ()
   "Show the thread's Worker, and mark the thread seen."
   (interactive)
-  (let ((thread (eng/bbh-inbox--thread)))
-    (eng/bbh-inbox--run (list "seen" thread) (lambda (_) (eng/bbh-inbox-refresh)))
-    (eng/bbh-inbox--run (list "buffer" thread)
-                        (lambda (name) (eng/bbh-super-visit (string-trim name))))))
+  (eng/bbh-inbox--open-thread (eng/bbh-inbox--thread)))
+
+(defun eng/bbh-inbox--open-thread (thread)
+  "Show THREAD's Worker, and mark the thread seen."
+  (eng/bbh-inbox--run (list "seen" thread) (lambda (_) (eng/bbh-inbox-refresh)))
+  (eng/bbh-inbox--run (list "buffer" thread)
+                      (lambda (name) (eng/bbh-super-visit (string-trim name)))))
 
 (defun eng/bbh-inbox-jjui ()
   "Open jjui on the thread's Worker workspace, or its repo once that is gone.
@@ -754,6 +770,406 @@ jjui replaces, press q in jjui instead."
                      (message "%s" (string-trim (with-current-buffer err (buffer-string)))))
                    (kill-buffer err))))))
 
+;;;; The split view
+
+;; The default view (design 4 of T85): *bbh threads*, one line per thread,
+;; on the left, and *bbh inbox*, holding only the selected thread, on the
+;; right.  `bbh inbox split SEL' feeds both from one controller read: the
+;; list as #+thread lines, SEL's recent events as #+progress lines, then the
+;; outline `org' prints.  The right side is the outline view's buffer and
+;; mode with one thread's subtree in it, so its keys work unchanged.  gv
+;; switches to the old single-buffer view and back.
+
+(defvar eng/bbh-inbox-view 'split
+  "Which Inbox `eng/bbh-inbox' shows: `split', the thread list beside the
+selected thread, or `outline', every thread in one buffer.")
+
+(defvar eng/bbh-inbox-list-width 46
+  "Columns of the thread list in the split view.")
+
+(defvar eng/bbh-inbox-split-min-width 110
+  "A frame narrower than this stacks the thread list above the thread.")
+
+(defvar eng/bbh-inbox-select-delay 0.3
+  "Seconds after the list's selection stops moving before the thread's progress is fetched.")
+
+(defvar eng/bbh-inbox--rows nil
+  "The thread list from the last `bbh inbox split', each a plist.")
+
+(defvar eng/bbh-inbox--outline ""
+  "The outline from the last `bbh inbox split', every thread's subtree.")
+
+(defvar eng/bbh-inbox--list-header ""
+  "The header line `bbh inbox split' printed.")
+
+(defvar eng/bbh-inbox--progress nil
+  "Each thread's progress lines fetched so far, thread id to a list of (TIME KIND TEXT).")
+
+(defvar eng/bbh-inbox--selected nil
+  "The thread the split view's list has selected.")
+
+(defvar eng/bbh-inbox--show-archived nil
+  "Whether the thread list shows archived threads, rather than one row counting them.")
+
+(defvar eng/bbh-inbox--select-timer nil
+  "The pending fetch of the selected thread.")
+
+(defvar-local eng/bbh-inbox--shown-thread nil
+  "The thread the split view's right side shows.")
+
+(defconst eng/bbh-inbox--waiting-sections '("stopped" "holding-up" "waiting")
+  "The sections of threads waiting on you, which sort first.")
+
+(defun eng/bbh-inbox--list-buffer ()
+  (get-buffer-create "*bbh threads*"))
+
+(defun eng/bbh-inbox--parse-split (text)
+  "TEXT, `bbh inbox split' output, as a plist: :header, :rows (each a plist
+of :id :section :execution :asks :age :unseen :worker :title), :selected,
+the thread whose :progress, a list of (TIME KIND TEXT), it carries, and
+:outline."
+  (let* ((lines (split-string (string-trim-right text) "\n"))
+         rows progress selected outline)
+    (dolist (line (cdr lines))
+      (cond ((string-prefix-p "#+thread: " line)
+             (pcase-let ((`(,id ,section ,execution ,asks ,age ,unseen ,worker . ,title)
+                          (split-string (substring line 10) "\t")))
+               (push (list :id id :section section :execution execution :asks (string-to-number asks)
+                           :age age :unseen (equal unseen "1") :worker (unless (string-empty-p worker) worker)
+                           :title (string-join title " "))
+                     rows)))
+            ((string-prefix-p "#+selected: " line) (setq selected (substring line 12)))
+            ((string-prefix-p "#+progress: " line)
+             (push (cdr (split-string (substring line 12) "\t")) progress))
+            (t (push line outline))))
+    (list :header (car lines) :rows (nreverse rows) :selected selected :progress (nreverse progress)
+          :outline (mapconcat #'identity (nreverse outline) "\n"))))
+
+(defun eng/bbh-inbox--row (id)
+  (seq-find (lambda (row) (equal id (plist-get row :id))) eng/bbh-inbox--rows))
+
+(defun eng/bbh-inbox--waiting-p (row)
+  (member (plist-get row :section) eng/bbh-inbox--waiting-sections))
+
+(defun eng/bbh-inbox--glyph (row)
+  "ROW's status: ● waiting on you, ✖ stuck, ◐ working, ✓ done, from the controller's section and execution."
+  (let ((section (plist-get row :section)) (execution (plist-get row :execution)))
+    (cond ((or (eng/bbh-inbox--waiting-p row) (equal execution "waiting")) (propertize "●" 'face 'warning))
+          ((or (equal section "needs-attention") (equal execution "failed")) (propertize "✖" 'face 'error))
+          ((member execution '("working" "queued")) (propertize "◐" 'face 'success))
+          (t (propertize "✓" 'face 'shadow)))))
+
+(defun eng/bbh-inbox--row-line (row width)
+  "ROW as one list line of WIDTH columns: unseen mark, status, id, title, open asks and age."
+  (let* ((asks (plist-get row :asks))
+         (right (string-trim (concat (if (> asks 0) (format "%d?" asks) "") " " (plist-get row :age))))
+         (title-width (max 8 (- width 9 (max 6 (length right))))))
+    (propertize
+     (concat (if (plist-get row :unseen) (propertize "•" 'face 'bold) " ")
+             (eng/bbh-inbox--glyph row) " "
+             (string-pad (plist-get row :id) 4) " "
+             (truncate-string-to-width (plist-get row :title) title-width nil ?\s "…") " "
+             (string-pad right (max 6 (length right)) nil t))
+     'bbh-thread (plist-get row :id))))
+
+(defun eng/bbh-inbox--visible-rows (rows)
+  "ROWS the list shows: all but the archived, unless they are expanded."
+  (if eng/bbh-inbox--show-archived rows
+    (seq-remove (lambda (row) (equal "archived" (plist-get row :section))) rows)))
+
+(defun eng/bbh-inbox--list-text (rows width)
+  "The thread list of ROWS at WIDTH, with the archived ones as one row unless expanded."
+  (let* ((archived (seq-count (lambda (row) (equal "archived" (plist-get row :section))) rows))
+         (live (seq-remove (lambda (row) (equal "archived" (plist-get row :section))) rows)))
+    (concat (mapconcat (lambda (row) (concat (eng/bbh-inbox--row-line row width) "\n")) live "")
+            (when (> archived 0)
+              (concat (propertize (format "  %s %d archived\n" (if eng/bbh-inbox--show-archived "▾" "▸") archived)
+                                  'bbh-archived t)
+                      (when eng/bbh-inbox--show-archived
+                        (mapconcat (lambda (row) (concat (eng/bbh-inbox--row-line row width) "\n"))
+                                   (seq-filter (lambda (row) (equal "archived" (plist-get row :section))) rows) ""))))
+            (propertize "\n● you  ◐ working  ✖ stuck  ✓ done  • new" 'face 'shadow))))
+
+(defun eng/bbh-inbox--list-width ()
+  (if-let* ((window (get-buffer-window (eng/bbh-inbox--list-buffer))))
+      (1- (window-body-width window))
+    (1- eng/bbh-inbox-list-width)))
+
+(defun eng/bbh-inbox--choose (selected before now)
+  "The thread to select once the list is NOW, ROWS shown, when SELECTED was
+picked among BEFORE: itself while shown, else the row that took its place,
+else the first thread waiting on you, else the first."
+  (let ((ids (mapcar (lambda (row) (plist-get row :id)) now)))
+    (cond ((member selected ids) selected)
+          ((and selected now (seq-position (mapcar (lambda (row) (plist-get row :id)) before) selected))
+           (let ((at (seq-position (mapcar (lambda (row) (plist-get row :id)) before) selected)))
+             (or (seq-find (lambda (id) (member id ids))
+                           (mapcar (lambda (row) (plist-get row :id)) (nthcdr (1+ at) before)))
+                 (car (last ids)))))
+          (t (plist-get (or (seq-find #'eng/bbh-inbox--waiting-p now) (car now)) :id)))))
+
+(defun eng/bbh-inbox--row-start (id)
+  "Where ID's row starts in the list, or nil."
+  (save-excursion
+    (goto-char (point-min))
+    (let (found)
+      (while (and (not found) (not (eobp)))
+        (if (equal id (get-text-property (point) 'bbh-thread)) (setq found (point)) (forward-line 1)))
+      found)))
+
+(defun eng/bbh-inbox--draw-list ()
+  "Draw the thread list, its cursor on the selected thread at the same screen line."
+  (with-current-buffer (eng/bbh-inbox--list-buffer)
+    (unless (derived-mode-p 'eng/bbh-threads-mode) (eng/bbh-threads-mode))
+    (let* ((windows (mapcar (lambda (window)
+                              (list window (count-lines (window-start window)
+                                                        (save-excursion (goto-char (window-point window)) (line-beginning-position)))))
+                            (get-buffer-window-list (current-buffer) nil t)))
+           (on-archived (get-text-property (line-beginning-position) 'bbh-archived))
+           (text (eng/bbh-inbox--list-text eng/bbh-inbox--rows (eng/bbh-inbox--list-width)))
+           (inhibit-read-only t))
+      (setq header-line-format (car (split-string eng/bbh-inbox--list-header "   ")))
+      (unless (equal text (buffer-string))
+        (erase-buffer)
+        (insert text))
+      (let ((pos (or (and on-archived (text-property-any (point-min) (point-max) 'bbh-archived t))
+                     (eng/bbh-inbox--row-start eng/bbh-inbox--selected)
+                     (point-min))))
+        (goto-char pos)
+        (pcase-dolist (`(,window ,row) windows)
+          (set-window-point window pos)
+          (set-window-start window (save-excursion (goto-char pos) (forward-line (- row)) (point)) t)))
+      (when (bound-and-true-p hl-line-mode) (hl-line-highlight)))))
+
+(defun eng/bbh-inbox--subtree (outline id)
+  "Thread ID's subtree in OUTLINE, or nil."
+  (when (string-match (concat "^\\* [A-Z-]+ " (regexp-quote id) "\\_>") outline)
+    (let ((start (match-beginning 0)))
+      (substring outline start (when (string-match "^\\* " outline (1+ start)) (match-beginning 0))))))
+
+(defun eng/bbh-inbox--thread-text (id)
+  "The right side for thread ID: its subtree, its progress, and its Worker."
+  (let ((row (eng/bbh-inbox--row id))
+        (progress (assoc id eng/bbh-inbox--progress)))
+    (concat (let ((subtree (string-trim-right (or (eng/bbh-inbox--subtree eng/bbh-inbox--outline id) (format "* GONE %s" id)) "\n+")))
+              ;; A blank Answer keeps its empty line, the one you type on.
+              (concat subtree "\n" (when (string-match-p "^\\*\\*\\* Answer\\'" subtree) "\n")))
+            "** Progress\n"
+            (cond ((not progress) "   …\n")
+                  ((null (cdr progress)) "   nothing yet\n")
+                  (t (mapconcat (pcase-lambda (`(,time ,kind ,text)) (format "   %s  %-9s %s\n" time kind text))
+                                (cdr progress) "")))
+            "** Worker\n"
+            (format "   [[bbh-worker:%s][%s]]   J jjui" id
+                    (if-let* ((worker (plist-get row :worker))) (format "%s's buffer" worker) "its Worker's buffer")))))
+
+(defun eng/bbh-inbox--thread-header (id)
+  (concat (if id (format "%s   " id) "")
+          "1-9 pick  . recommended  i answer  C-c C-c send  TAB fold  RET open  o list  ]t next waiting  J jjui  gv one buffer  g? help"))
+
+(defun eng/bbh-inbox--draw-thread (&optional quiet)
+  "Show the selected thread on the right. QUIET, for a pushed reload, waits
+while you type there; a new selection does not."
+  (with-current-buffer (eng/bbh-inbox--buffer)
+    (unless (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox-mode))
+    (let* ((id eng/bbh-inbox--selected)
+           (switched (not (equal id eng/bbh-inbox--shown-thread))))
+      (when (and switched eng/bbh-inbox--shown-thread (not (eng/bbh-inbox--typing-p)))
+        (eng/bbh-inbox--save eng/bbh-inbox--shown-thread))
+      (eng/bbh-inbox--render (concat (eng/bbh-inbox--thread-header id) "\n" (if id (eng/bbh-inbox--thread-text id) ""))
+                             (and quiet (not switched)))
+      (when (and switched (not eng/bbh-inbox--deferred))
+        (setq eng/bbh-inbox--shown-thread id)
+        (let ((pos (save-excursion (goto-char (point-min))
+                                   (if (re-search-forward eng/bbh-inbox--ask-re nil t) (line-beginning-position) (point-min)))))
+          (goto-char pos)
+          (dolist (window (get-buffer-window-list (current-buffer) nil t))
+            (set-window-point window pos)
+            (set-window-start window (point-min) t)))))))
+
+(defun eng/bbh-inbox--render-split (text &optional quiet)
+  "Show TEXT, `bbh inbox split' output, in both panes. The selection stays
+on its thread while that is listed. QUIET, for a pushed reload, leaves the
+right side and the selection alone while you type an answer there."
+  (let* ((data (eng/bbh-inbox--parse-split text))
+         (before (eng/bbh-inbox--visible-rows eng/bbh-inbox--rows))
+         (typing (with-current-buffer (eng/bbh-inbox--buffer) (eng/bbh-inbox--typing-p))))
+    (setq eng/bbh-inbox--rows (plist-get data :rows)
+          eng/bbh-inbox--outline (plist-get data :outline)
+          eng/bbh-inbox--list-header (plist-get data :header))
+    (when-let* ((id (plist-get data :selected)))
+      (setf (alist-get id eng/bbh-inbox--progress nil nil #'equal) (plist-get data :progress)))
+    (unless (and quiet typing)
+      (setq eng/bbh-inbox--selected
+            (eng/bbh-inbox--choose eng/bbh-inbox--selected before (eng/bbh-inbox--visible-rows eng/bbh-inbox--rows))))
+    (eng/bbh-inbox--draw-list)
+    (eng/bbh-inbox--draw-thread quiet)
+    (unless (assoc eng/bbh-inbox--selected eng/bbh-inbox--progress) (eng/bbh-inbox--fetch-selected))))
+
+(defun eng/bbh-inbox--fetch-selected ()
+  "Soon fetch the selected thread, with its progress, and tell bbh it is selected, for voice."
+  (when (timerp eng/bbh-inbox--select-timer) (cancel-timer eng/bbh-inbox--select-timer))
+  (setq eng/bbh-inbox--select-timer
+        (run-at-time eng/bbh-inbox-select-delay nil
+                     (lambda ()
+                       (setq eng/bbh-inbox--select-timer nil)
+                       (when-let* ((id eng/bbh-inbox--selected))
+                         (eng/bbh-inbox--run (list "split" id "select")
+                                             (lambda (text) (when (eq eng/bbh-inbox-view 'split)
+                                                              (eng/bbh-inbox--render-split text t)))))))))
+
+(defun eng/bbh-inbox--select (id)
+  "Select thread ID: the list's cursor goes to it and the right side shows it."
+  (unless (equal id eng/bbh-inbox--selected)
+    (setq eng/bbh-inbox--selected id)
+    (with-current-buffer (eng/bbh-inbox--list-buffer)
+      (when-let* ((pos (eng/bbh-inbox--row-start id)))
+        (goto-char pos)
+        (dolist (window (get-buffer-window-list (current-buffer) nil t)) (set-window-point window pos))))
+    (eng/bbh-inbox--draw-thread)
+    (eng/bbh-inbox--fetch-selected)))
+
+(defun eng/bbh-threads--moved ()
+  "After a command in the list, show the thread its cursor is on."
+  (when-let* ((id (get-text-property (line-beginning-position) 'bbh-thread)))
+    (unless (equal id eng/bbh-inbox--selected)
+      (eng/bbh-inbox--select id))))
+
+(defun eng/bbh-threads--step (n)
+  "Move N rows in the list, skipping lines that are not a thread or the archived row."
+  (let ((start (point)) (moved nil))
+    (while (and (not moved) (zerop (forward-line (if (> n 0) 1 -1))) (not (eobp)))
+      (when (or (get-text-property (point) 'bbh-thread) (get-text-property (point) 'bbh-archived))
+        (setq n (if (> n 0) (1- n) (1+ n)))
+        (when (zerop n) (setq moved t))))
+    (unless moved (goto-char start))))
+
+(defun eng/bbh-threads-next () "Next thread." (interactive) (eng/bbh-threads--step 1))
+(defun eng/bbh-threads-previous () "Previous thread." (interactive) (eng/bbh-threads--step -1))
+
+(defun eng/bbh-inbox-next-waiting (&optional back)
+  "Go to the next thread waiting on you, after the selected one or the
+cursor's, wrapping; with BACK, the previous one."
+  (interactive)
+  (if (eq eng/bbh-inbox-view 'split)
+      (let* ((waiting (mapcar (lambda (row) (plist-get row :id))
+                              (seq-filter #'eng/bbh-inbox--waiting-p (eng/bbh-inbox--visible-rows eng/bbh-inbox--rows))))
+             (ids (mapcar (lambda (row) (plist-get row :id)) (eng/bbh-inbox--visible-rows eng/bbh-inbox--rows)))
+             (order (if back (reverse ids) ids))
+             (after (cdr (member eng/bbh-inbox--selected order)))
+             (next (or (seq-find (lambda (id) (member id waiting)) after)
+                       (seq-find (lambda (id) (member id waiting)) order))))
+        (if next (eng/bbh-inbox--select next) (message "Nothing is waiting on you")))
+    (let ((re (concat "^\\* " (regexp-opt (mapcar #'upcase eng/bbh-inbox--waiting-sections)) " ")))
+      (if-let* ((pos (save-excursion
+                       (if back (beginning-of-line) (end-of-line))
+                       (or (if back (re-search-backward re nil t) (re-search-forward re nil t))
+                           (progn (goto-char (if back (point-max) (point-min)))
+                                  (if back (re-search-backward re nil t) (re-search-forward re nil t)))))))
+          (progn (goto-char pos) (beginning-of-line))
+        (message "Nothing is waiting on you")))))
+
+(defun eng/bbh-inbox-previous-waiting ()
+  "Go to the previous thread waiting on you."
+  (interactive)
+  (eng/bbh-inbox-next-waiting t))
+
+(defun eng/bbh-inbox--layout ()
+  "Show the split view alone in the frame: the list on the left, or on top
+in a narrow frame, and the thread beside it. Returns the list's window."
+  (eng/bbh-super--clear-frame)
+  (switch-to-buffer (eng/bbh-inbox--list-buffer))
+  (let ((thread (if (>= (frame-width) eng/bbh-inbox-split-min-width)
+                    (split-window-right (min eng/bbh-inbox-list-width (/ (frame-width) 2)))
+                  (split-window-below (max 6 (min 14 (/ (frame-height) 3)))))))
+    (set-window-buffer thread (eng/bbh-inbox--buffer))
+    (selected-window)))
+
+(defun eng/bbh-inbox-other-pane ()
+  "Move between the thread list and the selected thread."
+  (interactive)
+  (unless (eq eng/bbh-inbox-view 'split) (user-error "gv shows the split view, which has two panes"))
+  (let ((target (if (derived-mode-p 'eng/bbh-threads-mode) (eng/bbh-inbox--buffer) (eng/bbh-inbox--list-buffer))))
+    (unless (get-buffer-window target) (eng/bbh-inbox--layout))
+    (select-window (get-buffer-window target))))
+
+(defun eng/bbh-threads-ret ()
+  "On the archived row show or hide the archived threads, else open the thread's Worker."
+  (interactive)
+  (if (get-text-property (line-beginning-position) 'bbh-archived)
+      (progn (setq eng/bbh-inbox--show-archived (not eng/bbh-inbox--show-archived))
+             (eng/bbh-inbox--draw-list))
+    (eng/bbh-inbox-open)))
+
+(defun eng/bbh-inbox-toggle-view ()
+  "Switch between the split view and the one-buffer outline of every thread."
+  (interactive)
+  (let ((here (eng/bbh-inbox--at-point)))
+    (setq eng/bbh-inbox-view (if (eq eng/bbh-inbox-view 'split) 'outline 'split))
+    (when here (setq eng/bbh-inbox--selected here))
+    (with-current-buffer (eng/bbh-inbox--buffer)
+      (setq eng/bbh-inbox--text nil eng/bbh-inbox--shown-thread nil))
+    (eng/bbh-inbox)
+    (message "Inbox: %s view; gv switches back" (if (eq eng/bbh-inbox-view 'split) "split" "one-buffer"))))
+
+(with-eval-after-load 'org
+  (when (fboundp 'org-link-set-parameters)
+    (org-link-set-parameters "bbh-worker" :follow (lambda (id _) (eng/bbh-inbox--open-thread id)))))
+
+(defconst eng/bbh-threads-keys
+  '(("j" eng/bbh-threads-next "Next thread")
+    ("k" eng/bbh-threads-previous "Previous thread")
+    ("n" eng/bbh-threads-next "Next thread")
+    ("p" eng/bbh-threads-previous "Previous thread")
+    ("]t" eng/bbh-inbox-next-waiting "Next thread waiting on you")
+    ("[t" eng/bbh-inbox-previous-waiting "Previous thread waiting on you")
+    ("o" eng/bbh-inbox-other-pane "Go to the selected thread")
+    ("TAB" eng/bbh-inbox-other-pane "Go to the selected thread")
+    ("RET" eng/bbh-threads-ret "Open the thread's Worker, or show the archived threads")
+    ("A" eng/bbh-inbox-approve "Approve the review")
+    ("m" eng/bbh-inbox-dismiss "Mark read")
+    ("a" eng/bbh-inbox-archive "Archive")
+    ("x" eng/bbh-inbox-cancel "Cancel the Worker")
+    ("u" eng/bbh-inbox-resume "Resume a Worker whose session ended")
+    ("R" eng/bbh-inbox-router "Open the Router")
+    ("J" eng/bbh-inbox-jjui "jjui on the thread's workspace")
+    ("gJ" eng/bbh-inbox-jjui-close "Close the jjui popup")
+    ("S" eng/bbh-inbox-send-all "Send every thread's draft")
+    ("gr" eng/bbh-inbox-refresh "Reload now")
+    ("gv" eng/bbh-inbox-toggle-view "The one-buffer view")
+    ("g?" describe-mode "Help")
+    ("q" quit-window "Quit"))
+  "The thread list's evil normal-state keys: (KEYS COMMAND DESCRIPTION).
+Bare C-h and C-l still move between the panes, as between any windows.")
+
+(defvar eng/bbh-threads-mode-map (make-sparse-keymap)
+  "The thread list's keys, for Emacs without evil.")
+
+(let ((map eng/bbh-threads-mode-map))
+  (setcdr map nil)
+  (set-keymap-parent map special-mode-map)
+  (dolist (prefix '("g" "]" "[")) (define-key map prefix (make-sparse-keymap)))
+  (dolist (key eng/bbh-threads-keys) (define-key map (kbd (car key)) (cadr key))))
+
+(defun eng/bbh-threads--setup ()
+  "The thread list's settings and hooks; loading this file runs it again in a live list."
+  (setq truncate-lines t)
+  (hl-line-mode 1)
+  (add-hook 'post-command-hook #'eng/bbh-threads--moved nil t)
+  (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t)
+  (when (fboundp 'evil-local-set-key)
+    (dolist (key eng/bbh-threads-keys)
+      (evil-local-set-key 'normal (kbd (car key)) (cadr key)))))
+
+(define-derived-mode eng/bbh-threads-mode special-mode "bbh threads"
+  "The super-agent's threads, one per line, beside the selected one.
+● waits on you, ◐ is working, ✖ is stuck, ✓ is done, and • marks a change
+you have not opened."
+  (eng/bbh-threads--setup))
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'eng/bbh-threads-mode 'normal))
+
 (defconst eng/bbh-inbox-keys
   `(("RET" eng/bbh-inbox-ret "Pick the option here, open a link, or open the thread's Worker")
     ,@(mapcar (lambda (n) (list (number-to-string n) 'eng/bbh-inbox-pick (format "Pick option %d" n)))
@@ -771,6 +1187,10 @@ jjui replaces, press q in jjui instead."
     ("x" eng/bbh-inbox-cancel "Cancel the Worker")
     ("u" eng/bbh-inbox-resume "Resume a Worker whose session ended")
     ("R" eng/bbh-inbox-router "Open the Router")
+    ("]t" eng/bbh-inbox-next-waiting "Next thread waiting on you")
+    ("[t" eng/bbh-inbox-previous-waiting "Previous thread waiting on you")
+    ("o" eng/bbh-inbox-other-pane "Go to the thread list, in the split view")
+    ("gv" eng/bbh-inbox-toggle-view "Switch between the split view and one buffer")
     ("J" eng/bbh-inbox-jjui "jjui on the thread's workspace, in a Herdr popup; q in jjui closes it")
     ("gJ" eng/bbh-inbox-jjui-close "Close the jjui popup")
     ("gr" eng/bbh-inbox-refresh "Reload now; pushed changes reload by themselves")
@@ -796,7 +1216,7 @@ its command, inside it types.")
       (parent (keymap-parent eng/bbh-inbox-mode-map)))
   (setcdr map nil)
   (when parent (set-keymap-parent map parent))
-  (define-key map "g" (make-sparse-keymap))
+  (dolist (prefix '("g" "]" "[")) (define-key map prefix (make-sparse-keymap)))
   (dolist (key eng/bbh-inbox-keys)
     (define-key map (kbd (car key))
                 (if (string-prefix-p "C-" (car key))
@@ -869,17 +1289,24 @@ is replaced."
   (with-current-buffer (eng/bbh-inbox--buffer)
     (unless (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox-mode))
     (eng/bbh-super-mode 1))
+  (when (eq eng/bbh-inbox-view 'split)
+    (with-current-buffer (eng/bbh-inbox--list-buffer)
+      (unless (derived-mode-p 'eng/bbh-threads-mode) (eng/bbh-threads-mode))
+      (eng/bbh-super-mode 1)))
   (eng/bbh-inbox--listen)
   (eng/bbh-inbox-refresh)
   (buffer-name (eng/bbh-inbox--buffer)))
 
 (defun eng/bbh-inbox ()
-  "Show the super-agent's Inbox alone in this frame."
+  "Show the super-agent's Inbox alone in this frame: by default the thread
+list beside the selected thread, or with gv every thread in one buffer."
   (interactive)
   ;; Make the Inbox before clearing the frame, so a failure leaves the layout.
   (let ((buffer (eng/bbh-inbox-buffer)))
-    (eng/bbh-super--clear-frame)
-    (switch-to-buffer buffer)))
+    (if (eq eng/bbh-inbox-view 'split)
+        (eng/bbh-inbox--layout)
+      (eng/bbh-super--clear-frame)
+      (switch-to-buffer buffer))))
 
 ;; Loading this file again, as a Doom reload does, brings a live Inbox up to
 ;; the new code: its buffer setup and the listener.  An Inbox from before it
@@ -893,3 +1320,6 @@ is replaced."
         (eng/bbh-inbox-mode)
         (eng/bbh-inbox-refresh))
       (eng/bbh-inbox--listen))))
+(when-let* ((buffer (get-buffer "*bbh threads*")))
+  (with-current-buffer buffer
+    (when (derived-mode-p 'eng/bbh-threads-mode) (eng/bbh-threads--setup))))
