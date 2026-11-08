@@ -22,7 +22,7 @@
 
 `fs`, `p` and `str` are aliased.
 
-- (sh \"cmd string\") runs the string with bash, so it needs no `bash -c` wrapper, and returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. (sh \"cmd\" \"arg\" ...) runs one argv, each word quoted. ($ \"cmd\") prints stdout, stderr and a nonzero exit, and returns nil; use it when you only want to see the result.
+- (sh \"cmd string\") runs the string with bash, so it needs no `bash -c` wrapper, and returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. (sh \"cmd\" \"arg\" ...) runs one argv, each word quoted. ($ \"cmd\") prints stdout, stderr and a nonzero exit, and returns nil; use it when you only want to see the result. Both throw on a command that only reads, searches or lists files, naming the helper call to use instead; end the command with `# confirm` when the shell is really needed, such as for a flag no helper has.
 - (grep pattern & paths) prints `path:line:text` hits for an rg regex (smart case, alternation a|b), skipping gitignored and binary files. Paths are files, directories or shell-style globs (`*` stays in one directory, `**` recurses). End with {:context n}, {:files true}, {:fixed true} or {:max n}. (ls & paths) prints a directory's entries, a glob's files or a file, with line counts.
 - (read-lines path) or (read-lines path start count) prints a line-count header and 1-based numbered lines (200 by default, fewer when they would pass about 7000 characters, ending with the `next:` call) and returns nil. It refuses binary files. Use slurp when code needs the text.
 - (edit! path old new) replaces exactly one occurrence, or every one with `:all true`, else throws. (edit! path [[old new] ...]) applies several in order and writes only if all match. It tolerates whitespace and indentation drift in old, keeps BOM and CRLF, and returns a summary with a diff.
@@ -236,7 +236,8 @@ Prefer these helpers to shell commands for files: their output is capped and pag
 - List files or count lines: (ls & paths-or-globs), not ls, find or wc -l.
 - Change a file: (edit! path old new). Write a whole file: (write! path text), not spit; it creates directories and returns a diff. Both refuse Clojure or EDN that would not read.
 - For data in code, use slurp and fs/glob.
-- Everything else, such as jj, wf, builds and tests: ($ \"cmd\") to see the result, (sh \"cmd\") when code needs {:exit :out :err}, (job-wait (job \"cmd\")) when it may be slow.")
+- Everything else, such as jj, wf, builds and tests: ($ \"cmd\") to see the result, (sh \"cmd\") when code needs {:exit :out :err}, (job-wait (job \"cmd\")) when it may be slow.
+sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming the helper call instead; end the command with # confirm to run it anyway.")
 
 (defn manifest []
   (cond-> {:system (if (= "router" (System/getenv "BBH_ROLE"))
@@ -716,10 +717,152 @@ Prefer these helpers to shell commands for files: their output is capped and pag
 
 (defn pwd "The working directory." [] (str (fs/cwd)))
 
-(defn sh
-  "Run CMD with bash and an empty stdin. Returns {:exit :out :err}. With ARGS, CMD and ARGS are one argv, each word
-  quoted for bash. A command that outlasts the evaluation's budget keeps running as a job, and the result is
-  {:exit nil :timeout true :job id :out :err} with the output so far."
+(defn- shell-tokens
+  "CMD as bash words and the operators ; && || | and newline, with quotes removed, or nil when it has
+  substitutions, redirections, heredocs or backgrounding the guard should not judge."
+  [cmd]
+  (when-not (re-find #"\$\(|`|[<>]|&(?!&)|\\\n" (str/replace cmd #"&&|\|\||\s2>(&1|/dev/null)" " "))
+    (loop [[c & more :as cs] (seq (str/replace cmd #"\s2>(&1|/dev/null)" " ")) word nil quote nil out []]
+      (let [flush #(if word (conj % word) %)]
+        (cond (nil? cs) (when-not quote (flush out))
+              quote (if (= c quote) (recur more (or word "") nil out) (recur more (str word c) quote out))
+              (#{\' \"} c) (recur more (or word "") c out)
+              (= c \\) (recur (rest more) (str word (first more)) nil out)
+              (= c \#) (if word (recur more (str word c) nil out) (flush out))
+              (Character/isWhitespace ^char c) (if (= c \newline) (recur more nil nil (conj (flush out) ";")) (recur more nil nil (flush out)))
+              (and (#{\& \|} c) (= c (first more))) (recur (rest more) nil nil (conj (flush out) (str c c)))
+              (#{\; \|} c) (recur more nil nil (conj (flush out) (str c)))
+              :else (recur more (str word c) nil out))))))
+
+(defn- stages
+  "CMD as a vector of pipelines, each a vector of commands, each a vector of words; nil when shell-tokens is."
+  [cmd]
+  (when-let [ts (shell-tokens cmd)]
+    (->> (partition-by #{";" "&&" "||"} ts) (remove (comp #{";" "&&" "||"} first))
+         (mapv #(->> (partition-by #{"|"} %) (remove (comp #{"|"} first)) (mapv vec))))))
+
+(defn- under [dir path]
+  (let [home #(str/replace % #"^~(?=/|$)" (System/getProperty "user.home"))
+        path (home path)]
+    (cond (or (nil? dir) (str/starts-with? path "/")) path
+          (= "." path) (home dir)
+          :else (str (str/replace (home dir) #"/$" "") "/" (str/replace path #"^\./" "")))))
+
+(defn- bre->ere
+  "grep's basic regex PATTERN as the extended regex rg reads: \\( \\) \\| \\{ \\} \\+ \\? become operators and the bare
+  characters literals."
+  [pattern]
+  (str/replace pattern #"\\.|[(){}|+?]" #(if (= 2 (count %)) (if (re-find #"[(){}|+?]" (subs % 1)) (subs % 1) %) (str "\\" %))))
+
+(defn- flag-value
+  "The numeric value of a short option such as -n 5, -n5 or -5 in WORDS, and WORDS without it."
+  [words letter]
+  (loop [[w & more :as ws] words acc []]
+    (cond (empty? ws) [nil acc]
+          (and (= (str "-" letter) w) (some->> (first more) (re-matches #"\d+"))) [(parse-long (first more)) (into acc (rest more))]
+          (re-matches (re-pattern (str "-" letter "(\\d+)")) w) [(parse-long (subs w 2)) (into acc more)]
+          (re-matches #"-(\d+)" w) [(parse-long (subs w 1)) (into acc more)]
+          :else (recur more (conj acc w)))))
+
+(defn- grep-call [bre? dir args]
+  (loop [[w & more :as ws] args pattern nil paths [] opts {} include nil]
+    (cond
+      (empty? ws)
+      (when pattern
+        (let [pattern (if (and bre? (not (:ere opts)) (not (:fixed opts))) (bre->ere pattern) pattern)
+              opts (dissoc opts :ere)
+              pattern (if (and (:i opts) (re-find #"[A-Z]" pattern)) (str "(?i)" pattern) pattern)
+              opts (dissoc opts :i)
+              paths (map #(under dir %) (if (seq paths) paths (when dir ["."])))
+              paths (if include (map #(str (str/replace % #"/$" "") "/**/" include) (or (seq paths) ["."])) paths)]
+          (str "(grep " (pr-str pattern) (apply str (map #(str " " (pr-str %)) paths))
+               (when (seq opts) (str " " (pr-str opts))) ")")))
+      (#{"-e" "--regexp"} w) (recur (rest more) (first more) paths opts include)
+      (#{"-C" "-A" "-B" "--context"} w) (recur (rest more) pattern paths (assoc opts :context (parse-long (first more))) include)
+      (re-matches #"-[CAB]\d+" w) (recur more pattern paths (assoc opts :context (parse-long (subs w 2))) include)
+      (str/starts-with? w "--include=") (when-not include (recur more pattern paths opts (subs w 10)))
+      (#{"-g" "--glob" "--include"} w) (when-not (or include (str/starts-with? (str (first more)) "!"))
+                                            (recur (rest more) pattern paths opts (first more)))
+      (or (#{"-t" "--type" "-m" "--max-count" "--count" "--files" "--invert-match" "--only-matching" "--files-without-match"} w)
+          (re-find #"^-[a-zA-Z]*[cvoLqPwx]" w)) nil
+      (#{"--max-columns" "-M" "--color" "--colour" "--sort"} w) (recur (rest more) pattern paths opts include)
+      (and (str/starts-with? w "--")
+           (not (#{"--no-heading" "--heading" "--with-filename" "--line-number" "--recursive" "--ignore-case" "--smart-case"
+                   "--fixed-strings" "--files-with-matches" "--extended-regexp" "--hidden" "--no-messages"} w))
+           (not (re-find #"^--(color|colour|sort|max-columns)=" w)))
+      nil
+      (str/starts-with? w "-")
+      (recur more pattern paths (cond-> opts
+                                  (re-find #"^-[a-zA-Z]*l" w) (assoc :files true)
+                                  (or (re-find #"^-[a-zA-Z]*i" w) (= "--ignore-case" w)) (assoc :i true)
+                                  (or (re-find #"^-[a-zA-Z]*E" w) (= "--extended-regexp" w)) (assoc :ere true)
+                                  (or (= "--files-with-matches" w)) (assoc :files true)
+                                  (or (re-find #"^-[a-zA-Z]*F" w) (= "--fixed-strings" w)) (assoc :fixed true))
+             include)
+      (nil? pattern) (recur more w paths opts include)
+      :else (recur more pattern (conj paths w) opts include))))
+
+(defn- helper-call
+  "The helper call that does what the simple command WORDS does, run in DIR, or nil when there is none."
+  [dir [w & args]]
+  (let [files (remove #(str/starts-with? % "-") args)
+        read (fn [f & more] (str "(read-lines " (pr-str (under dir f)) (apply str (map #(str " " %) more)) ")"))]
+    (case w
+      "cat" (when (and (seq files) (every? #(not= "-" %) files) (= files args)) (str/join " " (map read files)))
+      "head" (let [[n ws] (flag-value args "n") fs (remove #(str/starts-with? % "-") ws)]
+               (when (and (= 1 (count fs)) (= fs ws)) (read (first fs) 1 (or n 10))))
+      "tail" (let [[n ws] (flag-value args "n") fs (remove #(str/starts-with? % "-") ws) f (first fs)]
+               (when (and (= 1 (count fs)) (= fs ws) (fs/regular-file? (under dir f)))
+                 (let [total (count (text-lines (slurp (under dir f))))]
+                   (read f (max 1 (inc (- total (or n 10)))) (or n 10)))))
+      "sed" (when-let [[_ a b f] (and (= "-n" (first args)) (= 3 (count args))
+                                       (re-matches #"(\d+)(?:,(\d+))?p (.+)" (str/join " " (rest args))))]
+              (read f a (if b (inc (- (parse-long b) (parse-long a))) 1)))
+      "grep" (grep-call true dir args)
+      ("rg" "egrep") (grep-call false dir args)
+      "ls" (when-not (some #(re-find #"^-[a-zA-Z]*[tSRr]" %) args) (str "(ls" (apply str (map #(str " " (pr-str (under dir %))) (or (seq files) (when dir ["."])))) ")"))
+      "wc" (when (and (#{["-l"]} (vec (filter #(str/starts-with? % "-") args))) (seq files))
+             (str "(ls" (apply str (map #(str " " (pr-str (under dir %))) files)) ")"))
+      ("find" "fd") (let [[root & opts] (if (and (= w "find") (seq args) (not (str/starts-with? (first args) "-"))) args (cons "." args))
+                         opts (vec opts)
+                         nm (some (fn [[k v]] (when (#{"-name" "-iname"} k) v)) (partition 2 1 opts))
+                         others (remove #{"-name" "-iname" nm "-type" "f" "d"} opts)]
+                     (when (and (= w "find") (empty? others))
+                       (str "(ls " (pr-str (str (str/replace (under dir root) #"/$" "") "/**" (when nm (str "/" nm)))) ")")))
+      nil)))
+
+(defn- guard-suggestion
+  "Helper calls that replace CMD when every command in it is a file read, search or listing, each optionally piped
+  into head or tail, or nil when the shell is the right tool."
+  [cmd]
+  (when-not (re-find #"#\s*confirm\s*$" cmd)
+    (when-let [ss (stages cmd)]
+      (loop [[pipeline & more] ss dir nil calls []]
+        (cond (nil? pipeline) (when (seq calls) (str/join " " calls))
+              (= "cd" (ffirst pipeline)) (when (and (= 1 (count pipeline)) (= 2 (count (first pipeline))))
+                                              (recur more (under dir (second (first pipeline))) calls))
+              (and (= 2 (count pipeline)) (= "cat" (ffirst pipeline)) (= 2 (count (first pipeline))) (= "head" (first (second pipeline))))
+              (when-let [c (helper-call dir (conj (second pipeline) (second (first pipeline))))] (recur more dir (conj calls c)))
+              (every? #(#{"head" "tail"} (first %)) (rest pipeline))
+              (when-let [c (helper-call dir (first pipeline))] (recur more dir (conj calls c)))
+              :else nil)))))
+
+(def sh-guard
+  "When true, sh and $ refuse a command that only reads, searches or lists files and name the helper instead."
+  (atom true))
+
+(defn- guard! [cmd]
+  (when @sh-guard
+    (when-let [calls (guard-suggestion cmd)]
+      (when-let [port (System/getenv "BBH_PORT_FILE")]
+        (try (spit (str (fs/path (fs/parent port) "sh-guard.jsonl")) (str (json/generate-string {:at (str (java.time.Instant/now)) :cmd cmd :helper calls}) "\n") :append true)
+             (catch Exception _ nil)))
+      (throw (ex-info (str "sh: use " calls " instead; the helpers cap output, number lines and need no quoting. "
+                           "Append # confirm to the command to run it in the shell anyway.")
+                      {:cmd cmd :helper calls})))))
+
+(defn- run-sh
+  "sh without the guard, for the helpers that call rg themselves."
   [cmd & args]
   (let [cmd (if (seq args) (str/join " " (map (comp shell-quote str) (cons cmd args))) cmd)
         end (+ (System/currentTimeMillis) (bbh.env/budget-ms))
@@ -737,6 +880,15 @@ Prefer these helpers to shell commands for files: their output is capped and pag
             (assoc (output) :exit nil :timeout true :job id)
             (do (Thread/sleep pause) (recur (min 100 (* 2 pause)))))))
       (finally (swap! bbh.env/live-sh disj pid)))))
+
+(defn sh
+  "Run CMD with bash and an empty stdin. Returns {:exit :out :err}. With ARGS, CMD and ARGS are one argv, each word
+  quoted for bash. A command that outlasts the evaluation's budget keeps running as a job, and the result is
+  {:exit nil :timeout true :job id :out :err} with the output so far. A CMD string that only reads, searches or
+  lists files throws with the helper call to use instead, unless it ends with # confirm."
+  [cmd & args]
+  (when (empty? args) (guard! cmd))
+  (apply run-sh cmd args))
 
 (defn $
   "Run sh and print what it returned: stdout, then stderr, the exit code when it is nonzero, and the job id when
@@ -766,7 +918,7 @@ Prefer these helpers to shell commands for files: their output is capped and pag
   "Run rg with ARGV, whose last word is `.`, inside DIR. Returns sh's map plus :lines, its output lines with
   paths as seen from the working directory."
   [dir argv]
-  (let [r (sh (str (when (not= dir ".") (str "cd " (shell-quote dir) " && "))
+  (let [r (run-sh (str (when (not= dir ".") (str "cd " (shell-quote dir) " && "))
                    (str/join " " (map shell-quote (cons "rg" argv)))))
         prefix (if (= dir ".") "" (str (str/replace dir #"/$" "") "/"))]
     (assoc r :lines (vec (for [l (str/split-lines (:out r)) :when (seq l)]

@@ -108,6 +108,20 @@
                       "Not found: sample.tx. Did you mean `sample.txt`?"]}
              (repl/call conn "[(with-out-str (ls)) (with-out-str (ls \"**/*.txt\")) (try (ls \"sample.tx\") (catch Exception e (ex-message e)))]" 10000))
           "ls lists one level, a glob recursively, and suggests a near name")
+      (let [{[cat-msg grep-msg cd-msg confirmed argv piped off] :value :as r}
+            (repl/call conn (pr-str '(do (spit "sample.txt" "first\nchild (x)\n")
+                                         [(try (sh "cat sample.txt") (catch Exception e (ex-message e)))
+                                          (try ($ "grep -rn 'child\\|first' . | head -5; wc -l sample.txt") (catch Exception e (ex-message e)))
+                                          (try (sh "cd nested && sed -n '1,1p' child.txt") (catch Exception e (ex-message e)))
+                                          (:out (sh "cat sample.txt  # confirm"))
+                                          (:out (sh "cat" "sample.txt"))
+                                          (:out (sh "cat sample.txt | grep -c child"))
+                                          (do (reset! sh-guard false) (let [o (:out (sh "cat sample.txt"))] (reset! sh-guard true) o))])) 10000)]
+        (is (= "sh: use (read-lines \"sample.txt\") instead; the helpers cap output, number lines and need no quoting. Append # confirm to the command to run it in the shell anyway." cat-msg) (pr-str r))
+        (is (str/starts-with? (str grep-msg) "sh: use (grep \"child|first\" \".\") (ls \"sample.txt\") instead") "$ is guarded too, a batch gets one call per command, and BRE alternation becomes rg's")
+        (is (str/starts-with? (str cd-msg) "sh: use (read-lines \"nested/child.txt\" 1 1) instead") "a leading cd carries into the paths")
+        (is (= ["first\nchild (x)\n" "first\nchild (x)\n" "1\n" "first\nchild (x)\n"] [confirmed argv piped off])
+            "# confirm, the argv form, pipelines the helpers cannot replace, and a disabled guard all run"))
       (finally (repl/kill! conn)))))
 
 (deftest instructions-load-from-the-repository-root-down-to-the-working-directory
