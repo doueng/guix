@@ -86,13 +86,18 @@
 (defn- local! [key value]
   (.setItem js/localStorage key (js/JSON.stringify (clj->js value))))
 
-(defn- cursor-query []
-  (str/join "," (for [[t n] (local "super-cursors" {})] (str t ":" n))))
+(declare sync-inbox!)
 
-(defn- sync-thread! [id]
+(defn- sync-thread!
+  "Fetch thread ID, which is open, and mark it read in the controller, which
+  every view shares."
+  [id]
   (-> (request (str "/api/super/threads/" id) {})
       (.then (fn [t]
-               (local! "super-cursors" (assoc (local "super-cursors" {}) id (:milestone-seq t)))
+               (when (> (:milestone-seq t 0) (:read-seq t 0))
+                 (-> (request (str "/api/super/threads/" id "/read")
+                              {:method "POST" :headers {"Content-Type" "application/json"} :body "{}"})
+                     (.then sync-inbox!)))
                (swap! state assoc-in [:threads id] t)
                (swap! state assoc :inbox-error nil)))
       (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))))
@@ -101,8 +106,8 @@
   (str/join "," (for [[t s] (local "super-shown" [])] (str t ":" s))))
 
 (defn- sync-inbox! []
-  (-> (request (str "/api/super/threads?cursors=" (cursor-query)
-                    (when (seq (local "super-shown" [])) (str "&shown=" (shown-query)))) {})
+  (-> (request (str "/api/super/threads"
+                    (when (seq (local "super-shown" [])) (str "?shown=" (shown-query)))) {})
       (.then (fn [inbox]
                ;; The list holds the order it first showed until you ask for the new rows.
                (when (empty? (local "super-shown" [])) (local! "super-shown" (:order inbox)))
@@ -443,7 +448,7 @@
       "reply-sent" [:div.ev.you {:replicant/key n} [:span.ev-who "You"]
                     (str/join "; " (remove str/blank? [(when (seq (:picks data)) (str "picked " (str/join ", " (picked-labels asks (:picks data)))))
                                                         (when (seq (:answers data)) (str/join "; " (vals (:answers data))))
-                                                        (when (seq (:dismiss data)) "marked read")
+                                                        (when (seq (:dismiss data)) "dismissed")
                                                         (:note data)]))]
       "reply-answered" [:div.ev {:replicant/key n} [:span.ev-who "Worker"] "read your reply"]
       "asks-answered-in-chat" [:div.ev.you {:replicant/key n} [:span.ev-who "You"] "answered in the Worker's chat"]
@@ -530,7 +535,7 @@
                           :on {:click #(post-super! id "approve" {:id (str "ap-" (random-uuid)) :ask (:id r)
                                                                   :revision (:revision r) :evidence-sha (:evidence-sha r)})}}
             (str "Approve " (subs (str (:revision r)) 0 (min 8 (count (str (:revision r))))))])
-         [:button.quiet {:type "button" :disabled (or busy (empty? open)) :on {:click #(post-super! id "dismiss" {:id (str "d-" (random-uuid))})}} "Mark read"]
+         [:button.quiet {:type "button" :disabled (or busy (empty? open)) :on {:click #(post-super! id "dismiss" {:id (str "d-" (random-uuid))})}} "Dismiss"]
          [:button.quiet {:type "button" :disabled busy :on {:click #(post-super! id "archive" {:id (str "a-" (random-uuid))})}} "Archive"]
          [:button.send {:type "button" :disabled (or busy (and (empty? picks) (str/blank? (note)) (every? str/blank? (vals (local-answers id t)))))
                         :on {:click #(send-reply! id)}} (if busy "Sending" "Send")]]])]))

@@ -146,8 +146,8 @@
         ask (fn [n & {:as more}] {:seq n :kind :ask-opened :thread "T1" :data (merge {:id "a1" :worker "W1" :kind :question :text "?" :options [{:id "y" :label "Y"}] :stopped false} more)})
         reply {:seq 4 :kind :reply-sent :thread "T1" :data {:id "r1" :thread "T1" :worker "W1" :picks {"a1" "y"} :note "" :dismiss #{} :outbox "o1" :conversation "c" :text "m"}}
         section (fn [events cursor]
-                  (let [state (reduce model/fold model/empty-state events)]
-                    (model/section state (get-in state [:threads "T1"]) cursor)))]
+                  (let [state (reduce model/fold model/empty-state (conj events {:seq 99 :kind :thread-read :data {:thread "T1" :seq cursor}}))]
+                    (model/section state (get-in state [:threads "T1"]))))]
     (is (= :working (section base 2)))
     (is (= :new (section base 0)) "the thread's creation is a milestone the client has not seen")
     (is (= :stopped (section (conj base (ask 3 :stopped true)) 3)))
@@ -194,13 +194,13 @@
 
 (deftest the-split-view-lists-a-line-per-thread-and-the-selected-threads-progress
   (let [sections {:sections [{:section :stopped :threads [{:id "T1" :title "Alt+W\tcloses\nwindows" :execution :waiting
-                                                         :updated-at (str (java.time.Instant/now)) :milestone-seq 7 :worker "W1"
+                                                         :updated-at (str (java.time.Instant/now)) :milestone-seq 7 :read-seq 5 :worker "W1"
                                                          :asks [{:id "a1"}]}]}
-                             {:section :quiet :threads [{:id "T2" :title "done one" :execution :done :milestone-seq 3 :asks []}]}]}]
+                             {:section :quiet :threads [{:id "T2" :title "done one" :execution :done :milestone-seq 3 :read-seq 3 :asks []}]}]}]
     (is (= ["#+thread: T1\tstopped\twaiting\t1\tnow\t1\tW1\tAlt+W closes windows"
             "#+thread: T2\tquiet\tdone\t0\t\t0\t\tdone one"]
-           (pane/split-rows sections {"T1" 5 "T2" 3}))
-        "unseen once the thread moved past this client's cursor; tabs and newlines never split a field"))
+           (pane/split-rows sections))
+        "unseen once the thread moved past its read cursor; tabs and newlines never split a field"))
   (let [at "2026-11-08T10:00:00Z"
         events [{:kind :thread-created :at at :data {}}
                 {:kind :milestone :at at :data {:text "half way"}}
@@ -222,6 +222,34 @@
         (is (= :invalid (:error (ask {:text (apply str (repeat 161 "x"))}))))
         (let [id (:ok (ask {:text "Keep it?" :details "Because." :evidence "/tmp/e.md"}))]
           (is (= ["Keep it?" "Because." "/tmp/e.md"] ((juxt :text :details :evidence) (get-in @(:state c) [:asks id])))))))))
+
+(deftest marking-a-thread-read-or-unread-is-shared-and-moves-nothing-else
+  (with-controller
+    (fn [c dir _]
+      (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
+        (let [original client/call!]
+          (with-redefs [client/call! (fn ([r] (original dir r)) ([d r] (original d r)))]
+            (call dir {:command :thread! :args {:title "one"}})
+            (call dir {:command :thread! :args {:title "two"}})
+            (let [section (fn [id] (some (fn [{:keys [section threads]}] (when (some #(= id (:id %)) threads) section))
+                                         (:sections (:ok (call dir {:command :sections})))))
+                  events #(count (store/events (:db c)))
+                  at (get-in @(:state c) [:threads "T1" :updated-at])]
+              (is (= [:new :new] (map section ["T1" "T2"])) "a new thread is unread")
+              (pane/read! ["T1"] true)
+              (is (= [:quiet :new] (map section ["T1" "T2"])) "read leaves the thread's section for :new")
+              (is (= at (get-in @(:state c) [:threads "T1" :updated-at])) "reading does not change the row's age")
+              (let [n (events)]
+                (pane/read! ["T1"] true)
+                (is (= n (events)) "reading a read thread records nothing"))
+              (pane/read! ["T1"] false)
+              (is (= :new (section "T1")) "unread brings it back")
+              (pane/read! ["all"] true)
+              (is (= [:quiet :quiet] (map section ["T1" "T2"])) "all marks every unread thread")
+              (call dir {:command :milestone! :args {:thread "T2" :text "half way"}})
+              (is (= :new (section "T2")) "a later milestone is unread again")
+              (is (= :no-such-thread (:error (call dir {:command :read! :args {:threads ["T9"] :read true}}))))
+              (locking (:db c) (is (= (store/replay (:db c)) @(:state c)))))))))))
 
 (deftest a-typed-answer-closes-its-ask-and-reaches-the-worker
   (with-controller
@@ -256,7 +284,7 @@
         row (fn [events]
               (let [state (reduce model/fold model/empty-state events)]
                 [(get-in state [:threads "T1" :summary])
-                 (pane/org-view {:sections (model/sections state {"T1" 5})})]))]
+                 (pane/org-view {:sections (model/sections (assoc-in state [:threads "T1" :read-seq] 5))})]))]
     (testing "a running thread shows its execution and its latest note"
       (is (re-find #"^\* WORKING T1 Fix it  working\n  Writing failing test$" (second (row base)))))
     (testing "finishing replaces the summary, and the row shows the outcome"
@@ -629,8 +657,8 @@
           (dotimes [_ 2] (super/reconcile! c))
           (is (= 2 (count @launches)) "nothing is relaunched")
           (is (= [:session-ended :working] [(health "W1") (get-in @(:state c) [:workers "W1" :state])]))
-          (is (= :needs-attention (model/section @(:state c) (get-in @(:state c) [:threads "T1"]) 0)))
-          (is (re-find #"Resume it" (:line (first (:threads (first (model/sections @(:state c) {})))))))
+          (is (= :needs-attention (model/section @(:state c) (get-in @(:state c) [:threads "T1"]))))
+          (is (re-find #"Resume it" (:line (first (:threads (first (model/sections @(:state c))))))))
           (is (not (model/holds-slot? @(:state c) (get-in @(:state c) [:workers "W1"]))) "an ended session holds no slot")
           (is (= :working (:state (:ok (start-worker dir "T3" :repo repo)))) "so a third Worker starts under a cap of two")
           (is (= :working (:state (:ok (start-worker dir "T4" :repo repo)))) "and a fourth")
@@ -953,7 +981,7 @@
             poller (bbh.inbox/start! {:root root :project root :scan-ms 5 :deliver (fn [_])})
             server (fake-nrepl! root)
             health #(get-in @(:state c) [:workers "W1" :health])
-            row #(first (:threads (first (filter (fn [s] (= :needs-attention (:section s))) (model/sections @(:state c) {})))))]
+            row #(first (:threads (first (filter (fn [s] (= :needs-attention (:section s))) (model/sections @(:state c))))))]
         (try
           (call dir {:command :steer! :args {:worker "W1" :text "use plan B"}})
           (is (wait-for #(= :sent (get-in @(:state c) [:outbox "o2" :state]))))
@@ -1007,7 +1035,7 @@
       (call dir {:command :thread! :args {:title "bad repo"}})
       (is (= :failed (:error (start-worker dir "T1" :repo "/nonexistent"))))
       (is (= :failed (get-in @(:state c) [:workers "W1" :state])))
-      (let [row (first (:threads (first (model/sections @(:state c) {}))))]
+      (let [row (first (:threads (first (model/sections @(:state c)))))]
         (is (= [:needs-attention "Launch failed: jj workspace add: no repo"] [(:section row) (:line row)])))
       (call dir {:command :thread! :args {:title "next"}})
       (start-worker dir "T2" :repo "/nonexistent")
@@ -1171,7 +1199,7 @@
     (is (= :working (model/execution busy "T1")) "a session in a turn shows working")
     (is (= :superseded (get-in typed [:asks "a1" :state])))
     (is (= :working (get-in typed [:workers "W1" :state])))
-    (is (not= :stopped (model/section typed (get-in typed [:threads "T1"]) 0)))))
+    (is (not= :stopped (model/section typed (get-in typed [:threads "T1"]))))))
 
 (deftest a-worker-on-an-archived-thread-resumes-when-its-stopped-ask-is-answered
   (let [asking [[:owner {:id "t1" :command :thread! :args {:title "a"}}]

@@ -199,13 +199,26 @@
         (is (= 409 (first (post-super s "/api/super/threads/T1/approve" (assoc body :id "ap-2") from-page))) "approved once"))
       (finally (bbh.super/stop! c)))))
 
+(deftest the-page-and-the-inbox-share-what-has-been-read
+  (with-super
+    (fn [s c _]
+      (bbh.super.client/call! (:dir c) {:command :thread! :args {:title "another"}})
+      (let [section #(some (fn [{:keys [section threads]}] (when (some (comp #{"T2"} :id) threads) section))
+                           (:sections (second (get-json s "/api/super/threads"))))]
+        (is (= "new" (section)))
+        (is (= 403 (first (post-super s "/api/super/threads/T2/read" {} {}))) "a cross-origin POST is refused")
+        (is (= [200 ["T2"]] (post-super s "/api/super/threads/T2/read" {} from-page)))
+        (is (= "quiet" (section)) "opening it on the page marks it read")
+        (bbh.super.client/call! (:dir c) {:command :read! :args {:threads ["T2"] :read false}})
+        (is (= "new" (section)) "unread in Emacs shows on the page")))))
+
 (deftest the-inbox-holds-the-order-the-page-showed
   (with-super
     (fn [s c _]
       (let [[_ first-read] (get-json s "/api/super/threads")]
         (is (= [["T1" "stopped"]] (:order first-read)))
         (bbh.super.client/call! (:dir c) {:command :thread! :args {:title "another"}})
-        (let [[_ held] (get-json s "/api/super/threads" "cursors=&shown=T1:stopped")]
+        (let [[_ held] (get-json s "/api/super/threads" "shown=T1:stopped")]
           (is (= 1 (:fresh held)))
           (is (= ["T1"] (mapv :id (mapcat :threads (:sections held))))))
         (is (= 2 (count (mapcat :threads (:sections (second (get-json s "/api/super/threads"))))))

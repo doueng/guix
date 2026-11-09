@@ -130,7 +130,7 @@ Binding: `babashka.sqlite`, which calls `libsqlite3` through `babashka.ffi`. bb 
 
 An ask's `:text` is one line of at most 160 characters, and `ask!` refuses a longer one, so the person can decide from the question and the options at a glance. What they need beyond that goes in `:details` or the `:evidence` file. `:answers` maps an ask to the person's own words, and it closes that ask the way a pick does.
 
-Picks, typed answers and the note are the thread's `:draft` in the controller (`draft!`, `discard-draft!`), so the Inbox, voice and the phone show the same one, and the reply that sends it removes it. Read cursors are per client. A Send carries `:asks-version`, the `seq` of the asks it saw. If another device answered since, the controller rejects the Send with the current state and the client shows the conflict rather than creating a second reply.
+Picks, typed answers and the note are the thread's `:draft` in the controller (`draft!`, `discard-draft!`), so the Inbox, voice and the phone show the same one, and the reply that sends it removes it. What you have read is shared too: each thread's `:read-seq` in the controller (`read!`), which Emacs and the phone both move. A Send carries `:asks-version`, the `seq` of the asks it saw. If another device answered since, the controller rejects the Send with the current state and the client shows the conflict rather than creating a second reply.
 
 ### Ask lifecycle
 
@@ -163,7 +163,7 @@ Execution state, attention state and read state are independent facts. The secti
 |---|---|
 | Execution (from the Worker) | queued, working, waiting, done, failed, none |
 | Attention (from open asks) | stopped, holds-up, waiting, review, none |
-| Read | unseen events after the client's cursor (per client), the thread's draft |
+| Read | unseen events after the thread's `:read-seq`, the thread's draft |
 
 | Section | Rule, first match wins |
 |---|---|
@@ -274,8 +274,9 @@ The Inbox is an org buffer in evil normal state, so motions, search, `C-j`/`C-k`
 | S | Send every thread's draft, after one question listing them. |
 | C-c C-k | Discard the thread's draft. |
 | A | Approve the review under the cursor, else the one the thread is waiting on. |
-| RET | Pick the option on this line, open the link under the cursor, or open the buffer of the thread's latest Worker, running or finished, and mark the thread seen. |
-| m | Mark read, which closes the asks and tells the Worker not to wait. |
+| RET | Pick the option on this line, open the link under the cursor, or open the buffer of the thread's latest Worker, running or finished, and mark the thread read. |
+| m, M, U | Mark the thread read without opening it, mark every thread read, or mark the thread unread. The phone shows the same. |
+| D | Dismiss the thread's asks, which tells the Worker not to wait. |
 | a | Archive. Open asks become dismissed, which the Worker is told, and a queued Worker is cancelled before it launches. |
 | R | Open the Router. |
 | ]t, [t | Next or previous thread waiting on you. |
@@ -297,7 +298,7 @@ Each Worker gets one buffer, named after its thread (`T12 keybindings`). The buf
 The `bbh web` page gains an Inbox view next to the session tabs. It stays loopback-only behind `tailscale serve` and the owner check, and it keeps the page's Financial Times idiom: paper background, a serif masthead, small uppercase sans labels, hairline rules, claret for what needs you and teal for actions, square corners. There are no notifications; you open the page when you want to know.
 
 - **Inbox list.** Sections and badge as in section 5. A row shows handle, title, the open ask's first line and age. Nothing updates while the laptop sleeps; the page says when its data is older than a few minutes.
-- **Thread view.** Events as a chat. Asks show as cards with large option buttons and the recommended option marked. A tap saves the pick at once, and Send at the bottom sends every pick and note on the thread. Archive and "Mark read" (close the asks and tell the Worker not to wait) sit in the bottom bar beside Send.
+- **Thread view.** Events as a chat. Asks show as cards with large option buttons and the recommended option marked. A tap saves the pick at once, and Send at the bottom sends every pick and note on the thread. Archive and Dismiss (close the asks and tell the Worker not to wait) sit in the bottom bar beside Send. Opening a thread marks it read for every view.
 - **Talk to the Router.** A composer at the bottom of the Inbox list sends to the Router. Typing a handle first ("T12 ...") goes to that thread.
 - **Review on the phone.** A review card shows the summary, the gates that passed and the diff stat. Approving is allowed and names the exact revision. Line comments are left for the desk.
 - **Hardening.** Text from Workers and jobs is rendered as text, never as HTML or Markdown links. Mutations carry the command id and the owner's Tailscale identity, requests are size-limited, and the page refuses cross-origin POSTs as `bbh web` does today.

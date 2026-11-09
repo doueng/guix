@@ -723,7 +723,13 @@ already on its way with the older draft does not overwrite it."
     (eng/bbh-inbox--act "clear")))
 
 (defun eng/bbh-inbox-approve () "Approve the review under the cursor, else the thread's." (interactive) (eng/bbh-inbox--act "approve" (eng/bbh-inbox--ask)))
-(defun eng/bbh-inbox-dismiss () "Mark the thread read." (interactive) (eng/bbh-inbox--act "dismiss"))
+(defun eng/bbh-inbox-dismiss () "Close the thread's asks and tell its Worker not to wait." (interactive) (eng/bbh-inbox--act "dismiss"))
+(defun eng/bbh-inbox-read () "Mark the thread read without opening its Worker; every view shares it." (interactive) (eng/bbh-inbox--act "read"))
+(defun eng/bbh-inbox-unread () "Mark the thread unread, so it shows as new again." (interactive) (eng/bbh-inbox--act "unread"))
+(defun eng/bbh-inbox-read-all ()
+  "Mark every unread thread read."
+  (interactive)
+  (eng/bbh-inbox--run '("read" "all") (lambda (_) (eng/bbh-inbox-refresh))))
 (defun eng/bbh-inbox-archive () "Archive the thread." (interactive) (eng/bbh-inbox--act "archive"))
 (defun eng/bbh-inbox-resume () "Reopen the session of the thread's Worker after it ended." (interactive) (eng/bbh-inbox--act "resume"))
 (defun eng/bbh-inbox-cancel ()
@@ -744,13 +750,13 @@ already on its way with the older draft does not overwrite it."
                                         (user-error "The Router is not running; start it with `bbh super start-router'")))))
 
 (defun eng/bbh-inbox-open ()
-  "Show the thread's Worker, and mark the thread seen."
+  "Show the thread's Worker, and mark the thread read."
   (interactive)
   (eng/bbh-inbox--open-thread (eng/bbh-inbox--thread)))
 
 (defun eng/bbh-inbox--open-thread (thread)
-  "Show THREAD's Worker, and mark the thread seen."
-  (eng/bbh-inbox--run (list "seen" thread) (lambda (_) (eng/bbh-inbox-refresh)))
+  "Show THREAD's Worker, and mark the thread read."
+  (eng/bbh-inbox--run (list "read" thread) (lambda (_) (eng/bbh-inbox-refresh)))
   (eng/bbh-inbox--run (list "buffer" thread)
                       (lambda (name) (eng/bbh-super-visit (string-trim name)))))
 
@@ -1161,7 +1167,10 @@ in a narrow frame, and the thread beside it. Returns the list's window."
     ("TAB" eng/bbh-inbox-other-pane "Go to the selected thread")
     ("RET" eng/bbh-threads-ret "Open the thread's Worker, or show the archived threads")
     ("A" eng/bbh-inbox-approve "Approve the review")
-    ("m" eng/bbh-inbox-dismiss "Mark read")
+    ("m" eng/bbh-inbox-read "Mark read, without opening")
+    ("M" eng/bbh-inbox-read-all "Mark every thread read")
+    ("U" eng/bbh-inbox-unread "Mark unread")
+    ("D" eng/bbh-inbox-dismiss "Dismiss the asks: the Worker stops waiting")
     ("a" eng/bbh-inbox-archive "Archive")
     ("x" eng/bbh-inbox-cancel "Cancel the Worker")
     ("u" eng/bbh-inbox-resume "Resume a Worker whose session ended")
@@ -1198,7 +1207,7 @@ Bare C-h and C-l still move between the panes, as between any windows.")
 (define-derived-mode eng/bbh-threads-mode special-mode "bbh threads"
   "The super-agent's threads, one per line, beside the selected one.
 ● waits on you, ◐ is working, ✖ is stuck, ✓ is done, and • marks a change
-you have not opened."
+you have not read; m marks it read without opening it."
   (eng/bbh-threads--setup))
 
 (with-eval-after-load 'evil
@@ -1216,7 +1225,10 @@ you have not opened."
     ("C-c C-c" eng/bbh-inbox-send "Send the thread's picks, answers and note")
     ("C-c C-k" eng/bbh-inbox-clear "Discard the thread's draft")
     ("A" eng/bbh-inbox-approve "Approve the review")
-    ("m" eng/bbh-inbox-dismiss "Mark read")
+    ("m" eng/bbh-inbox-read "Mark read, without opening")
+    ("M" eng/bbh-inbox-read-all "Mark every thread read")
+    ("U" eng/bbh-inbox-unread "Mark unread")
+    ("D" eng/bbh-inbox-dismiss "Dismiss the asks: the Worker stops waiting")
     ("a" eng/bbh-inbox-archive "Archive")
     ("x" eng/bbh-inbox-cancel "Cancel the Worker")
     ("u" eng/bbh-inbox-resume "Resume a Worker whose session ended")
@@ -1313,7 +1325,10 @@ thread list, in its own mode, stays one truncated line per thread."
         :desc "Discard draft" "k" #'eng/bbh-inbox-clear
         :desc "Approve"       "A" #'eng/bbh-inbox-approve
         :desc "Note"          "n" #'eng/bbh-inbox-note
-        :desc "Mark read"     "m" #'eng/bbh-inbox-dismiss
+        :desc "Mark read"     "m" #'eng/bbh-inbox-read
+        :desc "All read"      "M" #'eng/bbh-inbox-read-all
+        :desc "Mark unread"   "U" #'eng/bbh-inbox-unread
+        :desc "Dismiss asks"  "D" #'eng/bbh-inbox-dismiss
         :desc "Archive"       "a" #'eng/bbh-inbox-archive
         :desc "Cancel Worker" "x" #'eng/bbh-inbox-cancel
         :desc "Resume Worker" "u" #'eng/bbh-inbox-resume

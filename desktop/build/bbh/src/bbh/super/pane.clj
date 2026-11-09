@@ -3,13 +3,14 @@
   which shows `org` and calls the rest from its keys.
   The controller reloads it through the port `register` records. Picks and
   notes are the thread's draft in the controller, which the phone shows too,
-  until `send` turns it into one reply. Read cursors and the selection are this
-  client's and live in ~/.local/state/bbh/inbox.edn. Bare `bbh inbox` opens a
-  terminal frame on that buffer."
+  until `send` turns it into one reply, and so is what you have read. The
+  selection is this client's and lives in ~/.local/state/bbh/inbox.edn. Bare
+  `bbh inbox` opens a terminal frame on that buffer."
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [bbh.super.client :as client]
             [bbh.super.emacs :as emacs]
+            [bbh.super.model :as model]
             [bbh.version :as version]
             [clojure.edn :as edn]
             [clojure.string :as str]))
@@ -21,7 +22,7 @@
 
 (defn client-state []
   (let [f (state-file)]
-    (if (fs/exists? f) (edn/read-string (slurp f)) {:cursors {}})))
+    (if (fs/exists? f) (edn/read-string (slurp f)) {})))
 
 (defn- save-client-state! [s]
   (fs/create-dirs (fs/parent (state-file)))
@@ -109,13 +110,13 @@
 (defn header
   "The Inbox's first line: what needs you, the processes on older code, then the keys."
   [{:keys [badge]} stale]
-  (format "bbh inbox · %d need you%s   1-9 pick  . recommended  i answer  C-c C-c send  S send all  TAB fold  RET open  A approve  r note  m read  a archive  x cancel  R router  J jjui (q closes)  gJ close jjui  gr reload  g? help" badge
+  (format "bbh inbox · %d need you%s   1-9 pick  . recommended  i answer  C-c C-c send  S send all  TAB fold  RET open  A approve  r note  m read  M all read  U unread  D dismiss  a archive  x cancel  R router  J jjui (q closes)  gJ close jjui  gr reload  g? help" badge
           (if (seq stale) (str " · old code: " (str/join ", " stale)) "")))
 
 (defn- sections
-  "The controller's sections in the current order, with this pane's read cursors."
+  "The controller's sections in the current order."
   []
-  (call! {:command :sections :args {:cursors (:cursors (client-state))}}))
+  (call! {:command :sections}))
 
 (defn- thread [id] (call! {:command :thread :args {:id id}}))
 
@@ -127,13 +128,13 @@
 (defn- one-line [s] (str/trim (str/replace (str s) #"\s+" " ")))
 
 (defn split-rows
-  "The #+thread lines of SECTIONS, one per thread in section order, with
-  this client's read CURSORS marking unseen changes."
-  [{:keys [sections]} cursors]
+  "The #+thread lines of SECTIONS, one per thread in section order, with a
+  1 marking an unread change."
+  [{:keys [sections]}]
   (for [{:keys [section threads]} sections
-        {:keys [id title execution asks updated-at milestone-seq worker]} threads]
+        {:keys [id title execution asks updated-at worker] :as t} threads]
     (str "#+thread: " (str/join "\t" [id (name section) (name (or execution :none)) (count asks) (or (age updated-at) "")
-                                     (if (> (or milestone-seq 0) (get cursors id 0)) 1 0) (or worker "") (one-line title)]))))
+                                     (if (model/unread? t) 1 0) (or worker "") (one-line title)]))))
 
 (def ^:private progress-kinds
   {:milestone "milestone" :note "note" :ask-opened "asked" :reply-sent "replied" :worker-started "started"
@@ -223,9 +224,14 @@
     (when-not worker (throw (ex-info (str id " has no running Worker") {:error :no-active-worker})))
     (call! {:command :cancel! :args {:worker worker :reason "Cancelled from the inbox"}})))
 
-(defn- seen! [id]
-  (let [{:keys [milestone-seq]} (thread id)]
-    (save-client-state! (assoc-in (client-state) [:cursors id] milestone-seq))))
+(defn read!
+  "Mark threads IDS read, or unread when READ is false; [\"all\"] is every
+  thread now unread."
+  [ids read]
+  (let [ids (if (= ["all"] ids)
+              (for [{:keys [threads]} (:sections (sections)) t threads :when (model/unread? t)] (:id t))
+              ids)]
+    (call! {:command :read! :args {:threads (vec ids) :read read}})))
 
 (defn- buffer
   "The Emacs buffer of thread ID's latest Worker, running or finished, or an
@@ -254,7 +260,7 @@
       "org" (let [s (sections)] (println (header s (version/stale (client/data-dir)))) (println (org-view s)))
       "split" (let [s (sections)]
                 (println (header s (version/stale (client/data-dir))))
-                (doseq [l (split-rows s (:cursors (client-state)))] (println l))
+                (doseq [l (split-rows s)] (println l))
                 (when id
                   (println (str "#+selected: " id))
                   (doseq [l (split-progress id (call! {:command :events :args {:thread id}}) 8)] (println l)))
@@ -275,11 +281,12 @@
       "resume" (call! {:command :resume! :args {:thread id}})
       "archive" (call! {:command :archive! :args {:thread id}})
       "cancel" (println (cancel! id))
-      "seen" (with-state-lock! #(seen! id))
+      "read" (read! (remove nil? (list* id n more)) true)
+      "unread" (read! (remove nil? (list* id n more)) false)
       "buffer" (println (buffer id))
       "dir" (println (workdir (thread id)))
       "register" (client/register-view! (client/super-dir) (parse-long id))
-      (println "usage: bbh inbox [org|split [T [select]]|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|seen T|buffer T|dir T|register PORT]"))
+      (println "usage: bbh inbox [org|split [T [select]]|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|read T...|all|unread T...|buffer T|dir T|register PORT]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))

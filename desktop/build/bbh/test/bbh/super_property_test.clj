@@ -40,7 +40,7 @@
   (vec (mapcat (fn [[k n]] (repeat n k))
                {:thread! 3 :start-worker! 4 :router-start! 1 :promote-worker! 2 :worker-running! 4 :finish-worker! 2
                 :cancel! 1 :cancel-delivered! 1 :health! 3 :resume! 2 :steer! 1 :ask! 5 :foreign-ask! 1 :reply! 5
-                :approve! 2 :draft! 1 :dismiss! 1 :archive! 1 :say! 2 :register-router! 1 :note! 1 :answered! 2
+                :approve! 2 :draft! 1 :read! 1 :dismiss! 1 :archive! 1 :say! 2 :register-router! 1 :note! 1 :answered! 2
                 :outbox! 3 :job-exited! 1 :repeat 2})))
 
 (defn- pick-id
@@ -127,6 +127,7 @@
                 [:owner {:id id :command :draft! :args (cond-> {:thread thread}
                                                          (and a' (odd? b)) (assoc :pick [(:id a') (pick ["y" "n"] c)])
                                                          (even? b) (assoc :note (pick ["" "later"] c)))}])
+      :read! [:owner {:id id :command :read! :args {:threads [thread] :read (odd? b)}}]
       :dismiss! [:owner {:id id :command :dismiss! :args {:thread thread}}]
       :archive! [:owner {:id id :command :archive! :args {:thread thread}}]
       :say! [:owner {:id id :command :say!
@@ -185,7 +186,7 @@
        [:id-past-its-counter id])
      ;; The Inbox: every thread once, newest first within a section, and
      ;; the first matching rule decides the section.
-     (let [sections (model/sections state {})
+     (let [sections (model/sections state)
            rows (for [{:keys [section threads]} sections t threads] [section t])]
        (concat
         (when (not= (sort (keys (:threads state))) (sort (map (comp :id second) rows))) [[:sections-lose-a-thread]])
@@ -318,6 +319,13 @@
        :archive!
        (when-not refused
          (when-not (get-in after [:threads (:thread args) :resolved-at]) (bad :not-archived)))
+       :read!
+       (when-not refused
+         (let [[id] (:threads args)
+               t (get-in before [:threads id])
+               t' (get-in after [:threads id])]
+           (concat (when (= (:read args) (model/unread? t')) (bad :read-not-recorded t'))
+                   (when (not= (dissoc t :read-seq) (dissoc t' :read-seq)) (bad :read-moved-the-thread)))))
        :draft!
        (when (not= (get-in before [:threads (:thread args) :updated-at]) (get-in after [:threads (:thread args) :updated-at]))
          (bad :draft-moved-the-thread))

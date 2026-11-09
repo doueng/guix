@@ -395,7 +395,7 @@
       :worker (model/linked st :workers (:id args))
       :projects (projects c)
       :machine @(:machine c)
-      :sections (let [sections (model/sections st (or (:cursors args) {}))
+      :sections (let [sections (model/sections st)
                       {held :sections fresh :fresh} (when (:shown args) (model/hold (:shown args) sections))]
                   {:sections (or held sections) :badge (model/badge sections) :machine @(:machine c)
                    :order (model/order sections) :fresh (or fresh 0)})

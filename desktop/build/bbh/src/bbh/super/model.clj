@@ -46,6 +46,11 @@
 (defn- next-id [state kind prefix]
   (str prefix (inc (get-in state [:counters kind] 0))))
 
+(defn unread?
+  "Whether thread T has a milestone the owner has not read."
+  [{:keys [milestone-seq read-seq]}]
+  (> (or milestone-seq 0) (or read-seq 0)))
+
 (defn- thread-of [state id]
   (or (get-in state [:threads id]) (refuse :no-such-thread :thread id)))
 
@@ -493,6 +498,14 @@
 (defmethod decide* :dismiss! [state {{:keys [thread]} :args :keys [id]}]
   {:events (filterv some? [(dismissal state thread id)]) :result thread})
 
+(defmethod decide* :read! [state {{:keys [threads read]} :args}]
+  ;; Unread puts the cursor before every milestone. The thread rides in :data,
+  ;; so reading neither stamps :updated-at nor moves the row.
+  (let [ts (mapv #(thread-of state %) threads)]
+    {:events (vec (for [t ts :when (= (boolean read) (unread? t))]
+                    {:kind :thread-read :data {:thread (:id t) :seq (if read (or (:milestone-seq t) 0) 0)}}))
+     :result (mapv :id ts)}))
+
 (defmethod decide* :archive! [state {{:keys [thread]} :args :keys [id]}]
   ;; A queued Worker has no process yet, so it is new work, which an archived
   ;; thread takes none of. A running Worker carries on.
@@ -802,9 +815,9 @@
   (assoc t :execution (execution state (:id t))))
 
 (defn section
-  "THREAD's section in STATE, by the doc's rule, first match wins. CURSOR is
-  the last seq this client has seen on the thread."
-  [state {:keys [id resolved-at milestone-seq]} cursor]
+  "THREAD's section in STATE, by the doc's rule, first match wins. Its
+  :read-seq is the last milestone the owner has read."
+  [state {:keys [id resolved-at] :as t}]
   (let [execution (execution state id)
         asks (filter #(= id (:thread %)) (vals (:asks state)))
         open (filter #(= :open (:state %)) asks)
@@ -815,7 +828,7 @@
           resolved-at :archived
           (and (or (= :failed execution) (#{:needs-human :session-ended} (get-in state [:workers (:worker (get-in state [:threads id])) :health :classification]))) (empty? open)) :needs-attention
           (some #(= :sent (:state %)) replies) :sent
-          (> (or milestone-seq 0) (or cursor 0)) :new
+          (unread? t) :new
           (#{:working :queued} execution) :working
           :else :quiet)))
 
@@ -829,11 +842,10 @@
 (defn sections
   "Threads of STATE grouped in the doc's order, newest (highest number) first
   within a section, each with its newest open ask,
-  all its open :asks and whether an archived one came back. CURSORS maps
-  thread id to the seq the client last saw."
-  [state cursors]
+  all its open :asks and whether an archived one came back."
+  [state]
   (let [rows (for [t (map #(thread-view state %) (sort-by (comp - id-order :id) (vals (:threads state))))
-                   :let [s (section state t (get cursors (:id t)))
+                   :let [s (section state t)
                          ask (ask-line state (:id t))]]
                (assoc t :section s :ask ask :asks (vec (sort-by :seq (vals (open-asks state (:id t)))))
                       :line (or (:text ask)
@@ -910,6 +922,9 @@
   ;; Only the row moves. A reply stays :sent until the Worker answers it.
   (cond-> state
     (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :done)))
+
+(defmethod fold* :thread-read [state {{:keys [thread seq]} :data}]
+  (assoc-in state [:threads thread :read-seq] seq))
 
 (defmethod fold* :draft-saved [state {{:keys [thread draft]} :data}]
   (assoc-in state [:threads thread :draft] draft))

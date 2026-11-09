@@ -212,10 +212,6 @@
   [picks]
   (and (map? picks) (every? (fn [[k v]] (and (keyword? k) (string? v))) picks)))
 
-(defn- cursors [{:keys [query-string]}]
-  (let [[_ q] (re-find #"(?:^|&)cursors=([^&]*)" (str query-string))]
-    (into {} (for [[_ k v] (re-seq #"(T\d+):(\d+)" (str q))] [k (parse-long v)]))))
-
 (defn- shown
   "The order the page last showed, from shown=T1:stopped,T3:working, or nil."
   [{:keys [query-string]}]
@@ -225,11 +221,11 @@
 (defn- super-api
   "/api/super: the inbox for the phone, over the controller under DIR."
   [dir {:keys [uri request-method] :as request}]
-  (let [[_ id verb] (re-matches #"/api/super/threads/(T\d+)(?:/(reply|approve|dismiss|archive|draft|discard-draft))?" uri)
+  (let [[_ id verb] (re-matches #"/api/super/threads/(T\d+)(?:/(reply|approve|dismiss|archive|read|draft|discard-draft))?" uri)
         body (when (= :post request-method)
                (try (json/parse-string (slurp (:body request)) true) (catch Exception _ ::bad)))]
     (cond (and (= uri "/api/super/threads") (= :get request-method))
-          (super-call dir {:command :sections :args (cond-> {:cursors (cursors request)} (shown request) (assoc :shown (shown request)))} 200)
+          (super-call dir {:command :sections :args (cond-> {} (shown request) (assoc :shown (shown request)))} 200)
           (= uri "/api/super/say")
           (cond (not= :post request-method) (json-response 405 {:error "Method not allowed"})
                 (not (same-origin? request)) (json-response 403 {:error "Cross-origin request"})
@@ -273,6 +269,8 @@
                                                                   (and ask (string? option)) (assoc :pick [ask option])
                                                                   (and ask (string? answer)) (assoc :answer [ask answer])
                                                                   (string? note) (assoc :note note))} 200)))
+          (= "read" verb)
+          (super-call dir {:command :read! :args {:threads [id] :read (not (false? (:read body)))}} 200)
           (= "approve" verb)
           (if (and (string? (:id body)) (every? (comp string? body) [:ask :revision :evidence-sha]))
             (super-call dir {:command :approve! :id (:id body)
