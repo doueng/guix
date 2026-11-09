@@ -12,6 +12,9 @@ RECONFIGURE_FLAGS ?= --no-kexec
 GC_AGE ?= 2w
 
 GUIX := $(HOME)/.config/guix/current/bin/guix
+# With the remote builder the daemon runs --max-jobs=0; JOBS=1 builds here once.
+JOBS ?=
+JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))
 COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
@@ -76,7 +79,7 @@ verify:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/checks/affected.bb --run $(if $(SLOW),--slow) $(REV)
 
 pull:
-	"$(GUIX)" pull -C "$(CHANNELS)"
+	"$(GUIX)" pull $(JOBS_FLAG) -C "$(CHANNELS)"
 
 channels-current:
 	@pinned=$$(grep -o '(commit "[0-9a-f]*")' "$(CHANNELS)" | sort); \
@@ -93,7 +96,7 @@ dry-run: channels-current
 
 build: channels-current nixpkgs-import
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
-	  "$(GUIX)" system build $(COMMON) "$(CONFIG)"
+	  "$(GUIX)" system build $(JOBS_FLAG) $(COMMON) "$(CONFIG)"
 
 repro-build: nixpkgs-import
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
@@ -105,7 +108,7 @@ switch: channels-current system-facts nixpkgs-import
 	  /boot/efi/m1n1/boot.bin.old \
 	  /boot/efi/m1n1/boot.bin.new
 	sudo env GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
-	  "$(GUIX)" system reconfigure $(RECONFIGURE_FLAGS) \
+	  "$(GUIX)" system reconfigure $(RECONFIGURE_FLAGS) $(JOBS_FLAG) \
 	    -L "$(abspath $(MODULES))" \
 	    "$(abspath $(CONFIG))"
 	@# A reconfigure leaves kanata running on the old /etc/kanata/kanata.kbd.
@@ -118,7 +121,7 @@ gc:
 	"$(GUIX)" gc
 
 home-build: channels-current nixpkgs-import
-	"$(GUIX)" home build $(COMMON) "$(HOME_CONFIG)"
+	"$(GUIX)" home build $(JOBS_FLAG) $(COMMON) "$(HOME_CONFIG)"
 
 # The remote builder; see docs/remote-builder-plan.md.  The Hetzner token is
 # read only here, and later deploys go over the tailnet without it.
@@ -205,7 +208,7 @@ stow: pi-sci pierre-diff-ansi
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/stow-home
 
 home-apply: channels-current nixpkgs-import
-	"$(GUIX)" home reconfigure $(COMMON) "$(HOME_CONFIG)"
+	"$(GUIX)" home reconfigure $(JOBS_FLAG) $(COMMON) "$(HOME_CONFIG)"
 	$(MAKE) stow
 
 dusk:

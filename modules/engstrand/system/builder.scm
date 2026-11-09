@@ -4,8 +4,10 @@
 (define-module (engstrand system builder)
   #:use-module (asahi guix config)
   #:use-module (engstrand features tailscale)
+  #:use-module (engstrand system builder-keys)
   #:use-module (engstrand packages assets)
   #:use-module (engstrand packages babashka)
+  #:use-module (engstrand packages tailscale)
   #:use-module (gnu)
   #:use-module (gnu machine hetzner)
   #:use-module (gnu packages curl)
@@ -17,29 +19,17 @@
   #:use-module (gnu services networking)
   #:use-module (gnu services ssh)
   #:use-module (guix gexp)
+  #:use-module ((guix utils) #:select (string-replace-substring))
   #:use-module (ice-9 textual-ports)
   #:use-module (srfi srfi-1)
+  #:re-export (%builder-host builder-key-file builder-key-string)
   #:export (%builder-server-type
-            %builder-host
-            builder-key-file
-            builder-key-string
             make-builder-os))
 
-(define %builder-server-type "cax31")
-(define %builder-host "guix-builder.tailbf68ad.ts.net")
+;; CAX21: 4 vCPU, 8 GB, 80 GB, about 10.5 EUR/month (chosen 2026-11-09 over
+;; the CAX31 at 21).  Rescale up with the server off; keep the disk to come back.
+(define %builder-server-type "cax21")
 (define %prebuild-home "/var/lib/prebuild")
-
-(define (builder-key-file name)
-  "Return modules/engstrand/builder/NAME as a file-like object, or #f until
-phase 2 of the plan has put it there."
-  (let ((file (string-append %repo-dir "/modules/engstrand/builder/" name)))
-    (and (file-exists? file) (local-file file name))))
-
-(define (builder-key-string name)
-  "Return the first line of modules/engstrand/builder/NAME, or #f."
-  (let ((file (string-append %repo-dir "/modules/engstrand/builder/" name)))
-    (and (file-exists? file)
-         (string-trim-both (call-with-input-file file get-string-all)))))
 
 (define (authorized users+files)
   (filter-map (lambda (entry)
@@ -80,7 +70,7 @@ phase 2 of the plan has put it there."
                #$(file-append %prebuild-command " nightly")
                #:user "prebuild")
         ;; Prebuild roots keep the last three revisions alive.
-        #~(job "0 5 * * *" "guix gc --free-space=40G")))
+        #~(job "0 5 * * *" "guix gc --free-space=20G")))
 
 (define* (make-builder-os #:key bootstrap?)
   "Return the builder's operating system.  BOOTSTRAP? also admits public ssh,
@@ -103,7 +93,7 @@ to your address."
                      (home-directory %prebuild-home)
                      (shell (file-append git "/bin/git-shell")))
                     %base-user-accounts))
-      (packages (cons* git curl babashka (operating-system-packages base)))
+      (packages (cons* git curl babashka tailscale (operating-system-packages base)))
       (services
        (cons* %tailscale-service
               (service openssh-service-type
@@ -121,12 +111,15 @@ to your address."
                        (nftables-configuration
                         (ruleset
                          (if bootstrap?
+                             ;; In the filter chain itself: an accept in another base chain
+                             ;; does not stop this chain's drop policy.
                              (plain-file "nftables-bootstrap.conf"
-                                         (string-append
+                                         (string-replace-substring
                                           (call-with-input-file
                                               (string-append %repo-dir "/modules/engstrand/builder/nftables.conf")
                                             (lambda (port) (get-string-all port)))
-                                          "table inet bootstrap {\n  chain input {\n    type filter hook input priority -1; policy accept;\n    tcp dport 22 accept\n  }\n}\n"))
+                                          "    udp dport 41641 accept\n"
+                                          "    udp dport 41641 accept\n    tcp dport 22 accept\n"))
                              (package-asset "modules/engstrand/builder/nftables.conf")))))
               (service guix-publish-service-type
                        (guix-publish-configuration
@@ -159,7 +152,8 @@ to your address."
                                      (filter-map builder-key-file
                                                  '("laptop-signing.pub" "nixpkgs-builder.pub"))
                                      (guix-configuration-authorized-keys config)))
-                            (extra-options '("--max-jobs=2" "--cores=4"
+                            ;; One build at a time: two Rust or kernel builds would not fit 8 GB.
+                            (extra-options '("--max-jobs=1" "--cores=4"
                                              "--gc-keep-outputs"
                                              "--timeout=21600"
                                              "--max-silent-time=3600"))))))))))

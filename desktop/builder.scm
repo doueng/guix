@@ -7,7 +7,10 @@
              (gnu machine ssh))
 
 (define bootstrap? (getenv "BUILDER_BOOTSTRAP"))
-(define ssh-key (string-append (getenv "HOME") "/.ssh/guix-builder"))
+;; Unattended: guile-ssh cannot use a passphrase-protected key, and there is
+;; no agent.  deploy.pub also authorizes ~/.ssh/guix-builder for you.
+(define ssh-key (or (getenv "BUILDER_SSH_KEY")
+                    (string-append (getenv "HOME") "/.config/guix-builder/deploy_ed25519")))
 
 (list
  (machine
@@ -17,7 +20,8 @@
    (if bootstrap?
        (hetzner-configuration
         (server-type %builder-server-type)
-        (location "hel1")
+        ;; BUILDER_LOCATION=fsn1 or nbg1 when hel1 has no capacity.
+        (location (or (getenv "BUILDER_LOCATION") "hel1"))
         (ssh-key ssh-key)
         ;; The server builds its own system, not the laptop.
         (build-locally? #f))

@@ -1,0 +1,2 @@
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICoa/rm1jXwYmilIdMzzKZPN82SKyaxSXbTkciadqmHF guix-builder deploy (unattended)
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIPCNJ3qPsrqbPIzPv1vepjp4LDwkdcYZ8nLp9hTcFQN engstrand@asahi-guix

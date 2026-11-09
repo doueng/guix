@@ -7,7 +7,7 @@
   #:use-module (asahi guix systems base)
   #:use-module (asahi guix systems desktop)
   #:use-module (engstrand system bootloader)
-  #:use-module ((engstrand system builder) #:select (builder-key-file))
+  #:use-module (engstrand system builder-keys)
   #:use-module (gnu)
   #:use-module (gnu packages linux)
   #:use-module (gnu packages ncurses)
@@ -46,6 +46,31 @@
                        "-f" key)
               (chmod key #o600)
               (chmod (string-append key ".pub") #o644)))))))
+
+;; The remote builder (docs/remote-builder-plan.md), on once phase 2 has put
+;; its signing key and ssh host key in modules/engstrand/builder/: the daemon
+;; then substitutes from it first and offloads builds to it.
+(define %builder-signing-key (builder-key-file "builder-signing.pub"))
+(define %builder-host-key (builder-key-string "host-key.pub"))
+(define %builder? (and %builder-signing-key %builder-host-key #t))
+
+(define %builder-machines
+  (if %builder?
+      (list #~(build-machine
+               (name #$%builder-host)
+               (systems '("aarch64-linux"))
+               (user "offload")
+               (host-key #$%builder-host-key)
+               (private-key "/etc/guix/offload/id_ed25519")
+               ;; The CAX21 runs one build at a time.
+               (parallel-builds 1)
+               (overload-threshold 0.8)))
+      '()))
+
+;; "0" builds nothing here (phase 5 of the plan); `make switch JOBS=1' then
+;; builds locally once when the builder is down.  Stays "1" until you switch
+;; to it, so offload is tried first and small local-build derivations still run.
+(define %local-max-jobs "1")
 
 (define* (make-base-os #:key root-uuid esp-uuid channels)
   (unless (and (string? root-uuid) (string? esp-uuid) (pair? channels))
@@ -168,11 +193,16 @@
                                               ;; Signs nixpkgs imports; see make nixpkgs-import.
                                               (list (local-file "../nixpkgs/signing-key.pub" "nixpkgs-signing-key.pub"))
                                               ;; The remote builder, once phase 2 has put its key in the repo.
-                                              (filter-map builder-key-file '("builder-signing.pub"))
+                                              (if %builder? (list %builder-signing-key) '())
                                               (guix-configuration-authorized-keys config)))
-                     ;; Prefer the general cache; Asahi and CI are signed fallbacks.
-                     (substitute-urls (append '("https://bordeaux.guix.gnu.org")
+                     ;; The builder has what a prebuild built, including the custom
+                     ;; kernel; then the general cache; Asahi and CI are signed fallbacks.
+                     (substitute-urls (append (if %builder? (list %builder-publish-url) '())
+                                              '("https://bordeaux.guix.gnu.org")
                                               %asahi-substitute-urls
                                               '("https://ci.guix.gnu.org")))
                      ;; Keep build inputs of live items so gc does not force rebuilds.
-                     (extra-options '("--max-jobs=1" "--cores=4" "--gc-keep-outputs")))))))))
+                     (build-machines (append %builder-machines
+                                             (guix-configuration-build-machines config)))
+                     (extra-options (list (string-append "--max-jobs=" %local-max-jobs)
+                                          "--cores=4" "--gc-keep-outputs")))))))))

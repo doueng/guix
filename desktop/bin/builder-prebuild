@@ -14,7 +14,7 @@
 
 (def host (or (System/getenv "BUILDER") "guix-builder.tailbf68ad.ts.net"))
 (def home (System/getProperty "user.home"))
-(def ssh-key (str home "/.ssh/guix-builder"))
+(def ssh-key (or (System/getenv "BUILDER_SSH_KEY") (str home "/.config/guix-builder/deploy_ed25519")))
 (def ssh-cmd (str "ssh -i " ssh-key " -o BatchMode=yes -o ConnectTimeout=10"))
 (def publish (str "http://" host ":8080"))
 
@@ -74,7 +74,7 @@
                   "       (user \"offload\")\n"
                   "       (host-key \"" host-key "\")\n"
                   "       (private-key \"/etc/guix/offload/id_ed25519\")\n"
-                  "       (parallel-builds 2)))"))))
+                  "       (parallel-builds 1)))"))))
 
 ;;; Builder side
 
