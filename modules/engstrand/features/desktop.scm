@@ -45,7 +45,8 @@
 
 ;; oilfm (https://github.com/doueng/oilfm is not published; the source is ~/projects/oilfm)
 ;; is built like dusk: make oilfm, run through desktop/bin/oilfm. Hyprland's PATH lacks
-;; ~/.local/bin, so the entry names the wrapper by its full path. Written by hand because
+;; ~/.local/bin, so the entry names the wrapper by its full path, spelled out because the
+;; system reconfigure evaluates this as root (getenv "HOME" gave /root). Written by hand because
 ;; xdg-desktop-entry would spell MimeType as Mimetype.
 (define %oilfm-desktop-file
   (plain-file "oilfm.desktop"
@@ -54,8 +55,8 @@ Type=Application
 Name=oilfm
 GenericName=File Manager
 Comment=Edit a directory as text, then apply the changes
-Exec=" (getenv "HOME") "/.local/bin/oilfm %U
-Icon=system-file-manager
+Exec=/home/engstrand/.local/bin/oilfm %U
+Icon=folder
 Terminal=false
 Categories=System;FileTools;FileManager;
 MimeType=inode/directory;
