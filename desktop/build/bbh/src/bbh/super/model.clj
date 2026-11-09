@@ -52,7 +52,21 @@
   (> (or milestone-seq 0) (or read-seq 0)))
 
 (defn- thread-of [state id]
-  (or (get-in state [:threads id]) (refuse :no-such-thread :thread id)))
+  (or (get-in state [:threads id]) (refuse :no-such-thread :thread id :message (str "no thread " (pr-str id)))))
+
+(defn- target-thread
+  "The thread a Router command acts on. ARGS name it by :thread, which may
+  also be a Worker's id, or by :worker, the shape a Router REPL loaded before
+  T104 still sends. A Worker id names its thread only while it is the
+  thread's Worker, so an old id cannot reach its successor."
+  [state {:keys [thread worker]}]
+  (let [id (or thread worker)
+        w (get-in state [:workers id])]
+    (cond (get-in state [:threads id]) id
+          w (if (= id (get-in state [:threads (:thread w) :worker]))
+              (:thread w)
+              (refuse :not-running :worker id :message (str id " is no longer " (:thread w) "'s Worker; name the thread")))
+          :else (refuse :no-such-thread :thread id :message (str "no thread or Worker " (pr-str id))))))
 
 (defn- reply-text
   "The mailbox message that carries REPLY to its Worker."
@@ -166,9 +180,12 @@
                  :data (merge {:id (:id old) :state :failed :reason (str "Replaced by " new (when for (str " as " for " asked")))}
                               (authority state principal for))}))))
 
-(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo check bench repro for] :as args} :args :keys [token-hash policy requires principal]}]
+(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo check bench repro for replaces] :as args} :args :keys [token-hash policy requires principal]}]
   (let [id (next-id state :workers "W")
-        _ (thread-of state thread)
+        t (thread-of state thread)
+        ;; :replaces is optional: it only confirms which Worker the caller expects to replace.
+        _ (when (and replaces (not= replaces (:worker t)))
+            (refuse :invalid :field :replaces :message (str replaces " is not " thread "'s Worker")))
         origin (request-origin state principal for)
         cleared (clearing state principal thread for id)
         state (reduce fold* state cleared)
@@ -236,8 +253,8 @@
     {:events [{:kind :worker-finished :thread (:thread w) :data (cond-> {:id worker :state state-after :reason reason} (and landed (= :done state-after)) (assoc :landed landed))}]
      :result worker}))
 
-(defmethod decide* :cancel! [state {{:keys [thread reason for]} :args :keys [principal]}]
-  (let [_ (thread-of state thread)
+(defmethod decide* :cancel! [state {{:keys [reason for] :as args} :args :keys [principal]}]
+  (let [thread (target-thread state args)
         worker (or (thread-worker state thread) (refuse :no-worker :thread thread :message (str thread " has no Worker to cancel")))
         w (get-in state [:workers worker])]
     (when-not (or (#{:starting :working :waiting} (:state w)) (= :queued (:state w))) (refuse :not-running :worker worker))
@@ -360,8 +377,9 @@
   (when-not (deliverable? w) (refuse :not-running :worker (:id w)))
   w)
 
-(defmethod decide* :steer! [state {{:keys [thread text for]} :args :keys [principal] :as cmd}]
-  (let [t (thread-of state thread)
+(defmethod decide* :steer! [state {{:keys [text for] :as args} :args :keys [principal] :as cmd}]
+  (let [thread (target-thread state args)
+        t (thread-of state thread)
         w (or (get-in state [:workers (:worker t)]) (refuse :no-worker :thread thread :message (str thread " has no running Worker; start one")))
         _ (when (str/blank? text) (refuse :invalid :field :text))
         ;; A Worker whose session ended is resumed first, so the text reaches its new session.

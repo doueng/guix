@@ -1863,6 +1863,43 @@
 
 (defn- refuse-or-nil [refused code] (or (refused code) ""))
 
+(deftest the-routers-call-shapes-reach-a-live-worker
+  ;; Each shape the Router has used, new and old, against a scratch super: a
+  ;; Router REPL loaded before a controller change keeps sending the old one.
+  (with-controller
+    (fn [c dir _]
+      (thread-with-ask dir)
+      (let [router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
+            _ (call dir {:command :say! :args {:text "tell W1 to hurry" :origin :emacs}})
+            for (some (fn [[id o]] (when (= "router" (:conversation o)) id)) (:outbox @(:state c)))
+            ctx (sandbox/context sandbox/bindings)
+            run #(sandbox/eval-in ctx %)
+            refused #(try (run %) nil (catch Exception e (ex-message e)))
+            wire #(client/call! {:token router :command %1 :args %2})]
+        (call dir {:command :thread! :args {:title "second"}})
+        (call dir {:command :start-worker! :args {:thread "T2" :workflow :investigation :brief "look" :repo (str (fs/home))}})
+        (with-redefs [bbh.sysenv/getenv (let [getenv bbh.sysenv/getenv] (fn [k] (if (= "BBH_SUPER_TOKEN" k) router (getenv k))))
+                      client/call! (let [call! client/call!] (fn [req] (call! dir req)))]
+          (testing "steer by thread id, by Worker id, and in the pre-T104 wire shape"
+            (is (= {:worker "W1"} (run (format "(super-steer! \"T1\" \"a\" :for %s)" (pr-str for)))))
+            (is (= {:worker "W1"} (run (format "(super-steer! \"W1\" \"b\" {:for %s})" (pr-str for)))))
+            (is (= {:worker "W1"} (:ok (wire :steer! {:worker "W1" :text "c" :for for}))))
+            (is (= [for for for] (mapv (comp :for :data) (filter #(= :worker-steered (:kind %)) (store/events (:db c)))))
+                "{:for} names the person's message each time")
+            (is (re-find #"no thread or Worker \"T9\"" (refuse-or-nil refused "(super-steer! \"T9\" \"x\")"))))
+          (testing "start with :replaces names only the thread's Worker"
+            (is (re-find #"W9 is not T1's Worker" (refuse-or-nil refused (format "(super-start! \"T1\" \"b\" :for %s :replaces \"W9\")" (pr-str for)))))
+            (is (re-find #"thread-has-worker" (refuse-or-nil refused (format "(super-start! \"T1\" \"b\" :for %s :replaces \"W1\")" (pr-str for))))
+                "a live Worker is cancelled, not replaced"))
+          (testing "cancel by Worker id"
+            (is (= "W1" (run (format "(super-cancel! \"W1\" \"stuck\" :for %s)" (pr-str for)))))
+            (is (#{:cancelling :cancelled} (get-in @(:state c) [:workers "W1" :state]))))
+          (testing "start with :replaces replaces a Worker whose session ended"
+            (#'super/run! c :controller {:command :health! :args {:worker "W2" :health {:classification :session-ended :process {} :jobs []}}})
+            (is (= "W3" (:id (run (format "(super-start! \"T2\" \"again\" :for %s :replaces \"W2\")" (pr-str for))))))
+            (is (= :failed (get-in @(:state c) [:workers "W2" :state])))))
+        (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
+
 (deftest the-routers-sandbox-continues-a-thread-with-only-a-brief
   (with-workers
     (fn [c dir repo _]
