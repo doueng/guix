@@ -1,6 +1,7 @@
 #!/usr/bin/env bb
 ;; Usage, on the laptop:
-;;   builder-prebuild build     push @ to the builder, build it there, wait
+;;   builder-prebuild build     push @ to the builder, build system, Home and
+;;                              desktop/build/*/manifest.scm there, wait
 ;;   builder-prebuild check     publish reachable, last prebuild, nothing to build locally
 ;;   builder-prebuild machines  print a machines.scm for `sudo guix offload test FILE'
 ;; On the builder (the prebuild account's git-shell command and mcron job):
@@ -19,7 +20,9 @@
 (def publish (str "http://" host ":8080"))
 
 (defn die [& msg] (binding [*out* *err*] (apply println msg)) (System/exit 1))
-(defn out [& args] (str/trim (:out (apply p/shell {:out :string} args))))
+(defn out [& args]
+  (let [[opts args] (if (map? (first args)) [(first args) (rest args)] [{} args])]
+    (str/trim (:out (apply p/shell (assoc opts :out :string) args)))))
 
 ;;; Laptop side
 
@@ -102,6 +105,11 @@
             root (fs/glob (str state "/roots") (str "*-" old))]
       (fs/delete root))))
 
+(defn manifests [work]
+  (sort (map #(fs/relativize work %) (fs/glob work "desktop/build/*/manifest.scm"))))
+
+(defn manifest-root [m] (str "manifest-" (fs/file-name (fs/parent m))))
+
 (defn run-prebuild [rev]
   (when-not (re-matches #"[0-9a-f]{40}" (str rev)) (die "usage: prebuild run COMMIT"))
   (let [lock (java.nio.channels.FileChannel/open
@@ -131,8 +139,12 @@
                                      "import" "modules/engstrand/nixpkgs/lock.sexp" nix-key])))
         (apply sh! log (concat tm ["system" "build" "-L" "modules" "desktop/system.scm" "-r" (root "system")]))
         (apply sh! log (concat tm ["home" "build" "-L" "modules" "desktop/home.scm" "-r" (root "home")]))
+        ;; Development manifests, such as dusk's Rust toolchain.
+        (doseq [m (manifests work)]
+          (apply sh! log (concat tm ["shell" "-m" (str m) "-r" (root (manifest-root m)) "--" "true"])))
         ;; Ask publish for every item now, so its cache bakes before the laptop asks.
-        (let [items (out (str bin "/guix") "gc" "-R" (root "system") (root "home"))]
+        (let [items (apply out (str bin "/guix") "gc" "-R" (root "system") (root "home")
+                           (map (comp root manifest-root) (manifests work)))]
           (spit (str state "/items") items)
           (doseq [item (str/split-lines items)]
             (p/shell {:continue true :out :string :err :string}

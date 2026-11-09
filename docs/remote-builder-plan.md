@@ -20,6 +20,15 @@ Differences from the sketches below:
 - The publish cache is warmed by fetching each closure item's narinfo, not with guix weather.
 - Still open for phase 2: you need to run `sudo guix archive --authorize < modules/engstrand/builder/nixpkgs-builder.pub` on the builder (or deploy with that file present) before the first prebuild's nixpkgs import. Phase 7 removes the need.
 
+## Phase 2 status (2026-11-09, T118 W120)
+
+- Server: **CAX21** (4 vCPU, 8 GB, 80 GB) in hel1, `guix-builder`, IPv4 2.29.168.61, created with `make builder-create`. You chose it over the CAX31, which Hetzner's live list puts at 20.99 EUR/month net. The CAX21 is 10.49 net plus the primary IPv4 [M: hcloud server-type list]. The first CAX31 attempt failed with 412 resource_unavailable in hel1, and no server was created.
+- Cloud Firewall `guix-builder` is attached and admits only 41641/udp. The temporary 22/tcp rule from the laptop's address is removed. nftables admits 22 and 8080 only on tailscale0 [M: a public connect to 22 and 8080 times out].
+- Tailscale: the node is `guix-builder` (100.123.26.40, guix-builder.tailbf68ad.ts.net), brought up with your auth key. It's owned by your user, not `tag:builder`, so its key expires unless you disable key expiry for it in the admin console.
+- Keys: deploy.pub lists an unattended key, ~/.config/guix-builder/deploy_ed25519, because guile-ssh can't use the passphrase-protected ~/.ssh/guix-builder and no agent runs. deploy.pub also lists yours. offload.pub is T119's /etc/guix/offload key. host-key.pub, builder-signing.pub, laptop-signing.pub and nixpkgs-builder.pub are recorded. The nixpkgs import key's secret sits only in /var/lib/prebuild/nixpkgs-key.sec on the builder.
+- The laptop side (asahi.scm) turns on when builder-signing.pub and host-key.pub exist. It puts the builder URL first in substitute-urls and adds the build machine, and the daemon stays at `--max-jobs=1` until you change `%local-max-jobs` to "0". `make ... JOBS=1` passes `--max-jobs` to the client.
+- Sizing for the CAX21: daemon `--max-jobs=1 --cores=4`, laptop `parallel-builds 1`, nightly gc at 20G free.
+
 ## Goal
 
 Stop the laptop from building. A Hetzner CAX (aarch64) server on the tailnet builds and serves everything that `make pull`, `make home-apply` and `make switch` need, at the same pinned channels, before the laptop asks. The laptop then only evaluates, downloads and activates.
