@@ -11,4 +11,6 @@
                              "RUSTFLAGS" (str "-C link-arg=-Wl,-rpath," profile "/lib")
                              "SSL_CERT_DIR" (str profile "/etc/ssl/certs")
                              "CARGO_NET_GIT_FETCH_WITH_CLI" "true"}}
-         "guix" "shell" "-p" profile "--" "cargo" "build" "--release" *command-line-args*))
+         "guix" "shell" "-p" profile "--" "cargo" "build" "--release"
+         ;; exec keeps the caller's directory despite :dir, so name the manifest.
+         "--manifest-path" (str here "/Cargo.toml") *command-line-args*))
