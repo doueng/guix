@@ -4,6 +4,9 @@
 ;;                              desktop/build/*/manifest.scm there, wait
 ;;   builder-prebuild check     publish reachable, last prebuild, nothing to build locally
 ;;   builder-prebuild machines  print a machines.scm for `sudo guix offload test FILE'
+;;   builder-prebuild alert [--notify]  one line when the last prebuild failed,
+;;                              hangs or the nightly stopped; --notify also sends
+;;                              it as a desktop notification, once per problem
 ;; On the builder (the prebuild account's git-shell command and mcron job):
 ;;   prebuild run REV | nightly | status
 ;; See docs/remote-builder-plan.md.
@@ -58,6 +61,9 @@
       (when-not (zero? exit)
         (die (str "prebuild of " rev " on " host " failed (exit " exit "); its log is above"))))))
 
+(defn local-build? [drv]
+  (and (fs/exists? drv) (str/includes? (slurp drv) "(\"preferLocalBuild\",\"1\")")))
+
 (defn dry-run-builds [kind config]
   ;; --dry-run lists what the daemon would build; with the builder first, that
   ;; should be nothing.
@@ -70,7 +76,10 @@
     (->> (range (count lines))
          (filter #(re-find #"^The following derivations? would be built" (lines %)))
          (mapcat #(take-while (fn [l] (re-find #"^\s+/gnu/store/" l)) (drop (inc %) lines)))
-         (map str/trim))))
+         (map str/trim)
+         ;; Local-build derivations, such as boot, activate, shepherd.conf and the
+         ;; Home with its provenance, run here even at --max-jobs=0 and take seconds.
+         (remove local-build?))))
 
 (defn check []
   (let [ok? (zero? (:exit (p/shell {:continue true :out :string :err :string}
@@ -86,6 +95,57 @@
         (do (println (count missing) "derivations would build:")
             (run! println (take 20 missing))
             (System/exit 1))))))
+
+;; The builder's status.edn, as `prebuild status' prints it: {:rev :state
+;; :ok? :started :finished :checked :error :log}.  :state is :running while a
+;; prebuild runs; :checked is when the nightly last looked.
+(defn parse-status [text]
+  (let [s (try (edn/read-string (str text)) (catch Exception _ nil))]
+    (when (and (map? s) (seq s)) s)))
+
+(def stuck-hours 12)
+(def stale-hours 30)
+
+(defn- hours-since [now t]
+  (when t (/ (.toMinutes (java.time.Duration/between (java.time.Instant/parse t) now)) 60.0)))
+
+(defn alert
+  "One line naming what is wrong with STATUS at the Instant NOW, or nil."
+  [status now]
+  (let [{:keys [rev state ok? started finished checked error log]} status
+        short (some-> rev (subs 0 (min 12 (count rev))))
+        last-run (last (sort (remove nil? [started finished checked])))]
+    (cond
+      (nil? status) "builder prebuild: no status recorded yet; run make prebuild"
+      (= state :running)
+      (when (> (hours-since now started) stuck-hours)
+        (str "builder prebuild: " short " has run since " started "; killed or stuck? log " log))
+      (false? ok?) (str "builder prebuild: " short " failed: " error "; log " log)
+      (> (or (hours-since now last-run) 0) stale-hours)
+      (str "builder prebuild: the nightly has not run since " last-run))))
+
+(defn remote-status []
+  (let [{:keys [exit out]} (apply p/shell {:continue true :out :string :err :string}
+                                  (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "status"]))]
+    (if (zero? exit) {:status (parse-status out)} {:unreachable true})))
+
+;; Exit 0 when fine, 1 on an alert, 2 when the builder doesn't answer.  An
+;; unreachable builder only prints: the laptop is often offline.
+(defn alert-command [args]
+  (let [notify? (some #{"--notify"} args)
+        seen (str home "/.cache/builder-prebuild/notified")
+        {:keys [status unreachable]} (remote-status)
+        line (when-not unreachable (alert status (java.time.Instant/now)))]
+    (cond
+      unreachable (do (println "builder prebuild: builder unreachable at" host) (System/exit 2))
+      line (do (println line)
+               (when (and notify? (not= line (when (fs/exists? seen) (slurp seen))))
+                 (p/shell {:continue true} "notify-send" "-u" "critical" "-a" "builder" "Builder prebuild" line)
+                 (fs/create-dirs (fs/parent seen))
+                 (spit seen line))
+               (System/exit 1))
+      :else (do (fs/delete-if-exists seen)
+                (println "builder prebuild: ok" (:rev status) (:finished status))))))
 
 (defn machines []
   (let [host-key (some-> (str @repo "/modules/engstrand/builder/host-key.pub")
@@ -115,15 +175,18 @@
 
 (defn read-status [] (if (fs/exists? status-file) (edn/read-string (slurp status-file)) {}))
 
-(defn prune-roots []
-  (let [revs (->> (fs/list-dir (str state "/roots"))
-                  (sort-by #(fs/last-modified-time %))
+;; By the links' own times: the store items they point at all date from 1970.
+(defn prune-roots
+  ([] (prune-roots (str state "/roots")))
+  ([dir]
+  (let [revs (->> (fs/list-dir dir)
+                  (sort-by #(fs/last-modified-time % {:nofollow-links true}))
                   reverse
                   (map #(second (re-find #"-([0-9a-f]{40})$" (str (fs/file-name %)))))
                   distinct)]
     (doseq [old (drop keep-revisions revs)
-            root (fs/glob (str state "/roots") (str "*-" old))]
-      (fs/delete root))))
+            root (fs/glob dir (str "*-" old))]
+      (fs/delete root)))))
 
 (defn manifests [work]
   (sort (map #(fs/relativize work %) (fs/glob work "desktop/build/*/manifest.scm"))))
@@ -142,7 +205,10 @@
           channels (str state "/channels.scm")
           tm [(str bin "/guix") "time-machine" "-C" channels "--"]
           root #(str state "/roots/" % "-" rev)
-          started (str (java.time.Instant/now))]
+          started (str (java.time.Instant/now))
+          checked (:checked (read-status))]
+      ;; A prebuild killed mid-run leaves this, which `alert' reports once it is old.
+      (spit status-file (pr-str {:rev rev :state :running :started started :checked checked :log log}))
       (when-not (fs/exists? work)
         (p/shell "git" "clone" "--quiet" (str state "/guix.git") work))
       (try
@@ -170,13 +236,18 @@
                      "curl" "-fsS" "-o" "/dev/null"
                      (str "http://localhost:8080/" (subs (fs/file-name item) 0 32) ".narinfo"))))
         (prune-roots)
-        (spit status-file (pr-str {:rev rev :ok? true :started started :finished (str (java.time.Instant/now)) :log log}))
+        (spit status-file (pr-str {:rev rev :state :ok :ok? true :started started :checked checked
+                                    :finished (str (java.time.Instant/now)) :log log}))
         (println "prebuild ok" rev)
         (catch Exception e
-          (spit status-file (pr-str {:rev rev :ok? false :started started :error (ex-message e) :log log}))
+          (spit status-file (pr-str {:rev rev :state :failed :ok? false :started started :checked checked
+                                    :finished (str (java.time.Instant/now)) :log log
+                                    :error (or (some->> (:cmd (ex-data e)) (str/join " ")) (ex-message e))}))
           (die "prebuild failed:" (or (some->> (:cmd (ex-data e)) (str/join " ")) (ex-message e)) "; log" log))))))
 
 (defn nightly []
+  (when (fs/exists? status-file)
+    (spit status-file (pr-str (assoc (read-status) :checked (str (java.time.Instant/now))))))
   (let [rev (str/trim (:out (p/shell {:out :string :continue true}
                                      "git" (str "--git-dir=" state "/guix.git") "rev-parse" "--verify" "-q" "prebuild")))
         {last-rev :rev ok? :ok?} (read-status)]
@@ -184,12 +255,15 @@
           (and ok? (= rev last-rev)) (println "already built" rev)
           :else (run-prebuild rev))))
 
-(let [[cmd & args] *command-line-args*]
-  (case cmd
-    "build" (push-and-build)
-    "check" (check)
-    "machines" (machines)
-    "run" (run-prebuild (first args))
-    "nightly" (nightly)
-    "status" (prn (read-status))
-    (die "usage: builder-prebuild build|check|machines (laptop) or run REV|nightly|status (builder)")))
+;; Not when test.bb loads this file for its functions.
+(when (= *file* (System/getProperty "babashka.file"))
+  (let [[cmd & args] *command-line-args*]
+    (case cmd
+      "build" (push-and-build)
+      "check" (check)
+      "machines" (machines)
+      "alert" (alert-command args)
+      "run" (run-prebuild (first args))
+      "nightly" (nightly)
+      "status" (prn (read-status))
+      (die "usage: builder-prebuild build|check|machines|alert [--notify] (laptop) or run REV|nightly|status (builder)"))))

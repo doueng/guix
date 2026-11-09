@@ -17,8 +17,9 @@
    :slow ["make home-build"]}
   {:name "remote builder"
    :paths ["modules/engstrand/system/builder.scm" "modules/engstrand/system/builder-keys.scm" "modules/engstrand/builder/**"
-           "desktop/builder.scm" "desktop/bin/builder-prebuild"]
-   :checks ["make lint"]
+           "desktop/builder.scm" "desktop/bin/builder-prebuild" "desktop/build/builder/**"
+           "modules/engstrand/features/builder-alert.scm"]
+   :checks ["make lint" "make builder-test"]
    :slow ["make builder-check"]}
   {:name "apple neural engine"
    :paths ["modules/engstrand/packages/omarchy-ane.scm" "modules/engstrand/system/bootloader.scm"

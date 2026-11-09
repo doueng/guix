@@ -679,6 +679,13 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
                (warn "prebuild failed: " (failure e) "; the new versions don't build, so don't pull or switch yet")
                :failed)))))
 
+;; The builder's last nightly prebuild, one line only when it failed, hangs or
+;; stopped running (builder-prebuild alert); status ignores an unreachable builder.
+(defn prebuild-alert! []
+  (let [{:keys [exit out]} (p/shell {:continue true :out :string :err :string}
+                                    (in-repo "desktop/bin/builder-prebuild") "alert")]
+    (when (= 1 exit) (print out) (flush))))
+
 ;; Like refresh, a failed source prints one line and the rest still apply;
 ;; apply returns the failed sources so the caller can exit 1.
 (defn apply! [selectors]
@@ -710,7 +717,9 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
 
 (let [[command & selectors] *command-line-args*]
   (case (or command "status")
-    "status" (when (print-status (with-latest (read-cache) (inventory selectors))) (System/exit 1))
+    "status" (let [errors (print-status (with-latest (read-cache) (inventory selectors)))]
+               (prebuild-alert!)
+               (when errors (System/exit 1)))
     "list" (print-table (with-latest (read-cache) (inventory selectors)))
     "refresh" (when (print-status (refresh! selectors)) (System/exit 1))
     "apply" (when (apply! selectors) (System/exit 1))
