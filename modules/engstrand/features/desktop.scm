@@ -21,8 +21,7 @@
                                  #:environment
                                  `(("LOCALE_ARCHIVE" ,(nixpkgs-locale-archive)))))
           (map specification->package
-               '("thunar"
-                 "imv"
+               '("imv"
                  "xdg-utils"
                  "xdg-desktop-portal"
                  "xdg-desktop-portal-gtk"
