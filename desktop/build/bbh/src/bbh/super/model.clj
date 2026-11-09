@@ -18,7 +18,7 @@
 (def ^:private grants
   {:router #{:thread! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :finish-worker! :cancel-delivered!}})
+   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :machine-observed! :finish-worker! :cancel-delivered!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, how long a live
@@ -312,6 +312,11 @@
                answered (conj {:kind :asks-answered-in-chat :thread (:thread w)
                                :data {:worker worker :asks answered :prompted-at (:prompted-at health)}}))
      :result worker}))
+
+(defmethod decide* :machine-observed! [_ {:keys [args]}]
+  ;; A log line for the health pass: memory, swap and live sessions against
+  ;; active Workers, so a leak shows in the event log. It changes no record.
+  {:events [{:kind :machine-observed :data args}] :result nil})
 
 (defn- rebooted-jobs
   "The ids of Worker W's jobs that an earlier boot killed, as its last health
@@ -633,6 +638,8 @@
   (let [state (fold* state event)]
     (cond-> state
       (get-in state [:threads thread]) (assoc-in [:threads thread :updated-at] at))))
+
+(defmethod fold* :machine-observed [state _] state)
 
 (defmethod fold* :thread-created [state {{:keys [id title]} :data :keys [seq]}]
   (-> state (bump :threads)

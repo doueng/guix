@@ -121,6 +121,12 @@ Side windows survive
    :shell-prompt "bbh> "
    :shell-prompt-regexp "bbh> "
    :client-maker (lambda (buffer)
+                   ;; A finished Worker's session was ended on purpose; starting
+                   ;; its client again would respawn claude, perhaps in a deleted
+                   ;; workspace (T55).  The Router reopens the thread instead.
+                   (when (and (buffer-live-p buffer)
+                              (buffer-local-value 'eng/bbh-super-finished buffer))
+                     (user-error "This Worker is finished; ask the Router to reopen its thread"))
                    (agent-shell--make-acp-client
                     :command (or (executable-find "bbh") (expand-file-name "~/.local/bin/bbh"))
                     :command-params (list "acp" "--id" conversation)
@@ -187,6 +193,19 @@ Returns the shell's name, or nil when no session runs CONVERSATION."
                                  (agent-shell-viewport--buffer :shell-buffer shell :existing-only t))))
         (when (buffer-live-p buffer)
           (with-current-buffer buffer (setq default-directory dir)))))
+    (buffer-name shell)))
+
+(defun eng/bbh-super-end (conversation)
+  "End CONVERSATION's session because its Worker ended, keeping its buffers.
+The controller calls this to free the session's memory: the shell is marked
+finished, so what you type goes to the Router and its client is never made
+again, then the client and its claude are shut down.  The transcript stays
+readable.  Returns the shell's name, or nil when no session runs CONVERSATION."
+  (when-let* ((shell (eng/bbh-super--shell conversation)))
+    (with-current-buffer shell
+      ;; Finished first: the mailbox watch then wakes it no more.
+      (setq eng/bbh-super-finished t)
+      (ignore-errors (agent-shell--shutdown)))
     (buffer-name shell)))
 
 (defun eng/bbh-super-visit (name)

@@ -52,9 +52,10 @@
                     :requires ([clojure.test :as t] [bbh.init-test])
                     :task (let [{:keys [fail error]} (t/run-tests 'bbh.init-test)]
                             (System/exit (if (zero? (+ fail error)) 0 1)))}
-         test {:doc "Run every test/bbh/*_test.clj in parallel workers and list the slowest tests. BBH_TEST_JOBS sets the worker count."
-               :requires ([bbh.test-runner])
-               :task (bbh.test-runner/-main)}
+         test {:doc "Run every test/bbh/*_test.clj in parallel workers (BBH_TEST_JOBS, default 4) and list the slowest tests. Waits for the machine-wide heavy-job slot first."
+               :requires ([bbh.test-runner] [bbh.heavy])
+               :task (do (bbh.heavy/reexec-held! (concat ["bb"] (some->> (System/getProperty "babashka.config") (vector "--config")) ["test"] *command-line-args*))
+                         (bbh.test-runner/-main))}
          try {:doc "bb try MODEL PROMPT...: run real prompts through agent-shell headlessly."
               :task (let [[model & prompts] *command-line-args*
                           home (System/getProperty "user.home")]

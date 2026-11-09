@@ -404,6 +404,27 @@ the split view's thread list keeps one truncated line per thread."
       (when-let* ((s (eng/bbh-super--shell "super-W9"))) (eng/bbh-super--kill s))
       (delete-directory repo t))))
 
+(ert-deftest bbh-super-end-frees-a-finished-workers-session-and-keeps-its-buffer ()
+  ;; The controller ends a finished Worker's session to free its memory. Its
+  ;; process goes, its buffers stay readable, and no client is made again.
+  (let* ((ws (make-temp-file "bbh-super-ws" t))
+         (shell (get-buffer (eng/bbh-super-open "super-W10" ws "T10 test" nil))))
+    (unwind-protect
+        (progn
+          (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
+          (let ((acp (seq-find (lambda (p) (member "super-W10" (process-command p))) (process-list))))
+            (should (process-live-p acp))
+            (should (equal "T10 test" (eng/bbh-super-end "super-W10")))
+            (should-not (eng/bbh-super-end "super-W404"))
+            (should (bbh-test--wait (lambda () (not (process-live-p acp))) 10)))
+          (should (buffer-live-p shell))
+          (should (buffer-live-p (buffer-local-value 'eng/bbh-transcript shell)))
+          (should (buffer-local-value 'eng/bbh-super-finished shell))
+          (should-error (funcall (map-elt (eng/bbh-super-config "super-W10" nil) :client-maker) shell)
+                        :type 'user-error))
+      (when-let* ((s (eng/bbh-super--shell "super-W10"))) (eng/bbh-super--kill s))
+      (delete-directory ws t))))
+
 (ert-deftest bbh-super-open-refuses-a-missing-directory ()
   (should-error (eng/bbh-super-open "super-W8" "/nonexistent/bbh" "T8" nil)))
 

@@ -47,9 +47,18 @@
        (.flush out)
        (edn/read-string (.readLine in))))))
 
-(defn- print-list! [{:keys [badge sections]}]
+(defn machine-line
+  "One line for `bbh super list` from the last health pass's MACHINE report:
+  memory, swap, and live sessions against active Workers, stale ones named."
+  [{:keys [mem-available-mb swap-used-mb sessions worker-sessions active-workers stale]}]
+  (str (format "%s MB available, %s MB swap used; %d sessions live, %d of them Workers' for %d active Workers"
+               (or mem-available-mb "?") (or swap-used-mb "?") (or sessions 0) (or worker-sessions 0) (or active-workers 0))
+       (when (seq stale) (str "; stale: " (str/join ", " stale)))))
+
+(defn- print-list! [{:keys [badge sections machine]}]
   (println (format "%d need you" badge))
   (println (version/status-line (data-dir)))
+  (when machine (println (machine-line machine)))
   (doseq [{:keys [title threads]} sections]
     (println)
     (println (str/upper-case title))

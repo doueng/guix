@@ -110,15 +110,17 @@
     (System/exit (if (and (zero? exit) (empty? written)) 0 1))))
 
 (defn -main
-  "Run every test var on BBH_TEST_JOBS workers (default the core count), print failures and the slowest tests,
+  "Run every test var on BBH_TEST_JOBS workers (default 4, or fewer cores), print failures and the slowest tests,
   and exit nonzero on any failure or error."
   [& _]
   (let [start (System/currentTimeMillis)
         marker (str (random-uuid))
         times (last-times)
         queue (java.util.concurrent.LinkedBlockingQueue. (sort-by #(- (get times % 0)) (all-vars)))
+        ;; Each worker and the child REPLs its tests start take a few hundred MB, and 8 at once beside running
+        ;; Workers helped freeze the laptop (T108), so the default stays at 4.
         jobs (or (some-> (System/getenv "BBH_TEST_JOBS") parse-long)
-                 (.availableProcessors (Runtime/getRuntime)))
+                 (min 4 (.availableProcessors (Runtime/getRuntime))))
         results (atom [])
         root (str (fs/create-temp-dir {:prefix "bbh-test-home"}))
         tmp (str (fs/create-dirs (fs/path root "tmp")))

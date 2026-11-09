@@ -78,7 +78,7 @@ You are the Router of bbh super: one long-lived conversation that reads what the
   (doseq [f @live-sh :when (fs/exists? f)
           :let [pid (str/trim (slurp f))] :when (seq pid)]
     (p/shell {:continue true :out :discard :err :discard} "kill" "-TERM" "--" (str "-" pid))
-    (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid" ".start" ".boot"]]
+    (doseq [suffix [".cmd" ".run" ".log" ".err" ".exit" ".pid" ".start" ".boot"]]
       (fs/delete-if-exists (str/replace f #"\.pid$" suffix))))
   (reset! live-sh #{})
   nil)
@@ -594,22 +594,33 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
          (fs/path (fs/parent port) "jobs")
          (fs/path (fs/temp-dir) "bbh-jobs"))))
 
+(defn- heavy-command
+  "CMD wrapped in bbh's machine-wide heavy-job slot when it is heavy (a test suite, a build, TLC, a browser, an eval
+  replay), so one runs at a time across Workers. CMD itself without bbh.heavy on the classpath."
+  [cmd & opts]
+  (if-let [command (try (requiring-resolve 'bbh.heavy/command) (catch Exception _ nil))]
+    (apply command cmd opts)
+    cmd))
+
 (defn job
   "Start CMD with bash, detached from the REPL, in DIR (default the current directory). Returns the job id.
-  SPLIT-ERR? keeps stderr in its own file."
+  SPLIT-ERR? keeps stderr in its own file. A heavy CMD, such as bb test, a guix build or a browser, waits for the
+  machine-wide heavy-job slot first and says who holds it."
   [cmd & {:keys [dir split-err?]}]
   (let [d (jobs-dir)
         id (str (System/currentTimeMillis) "-" (rand-int 1000))
-        file #(str (fs/path d (str id %)))]
+        file #(str (fs/path d (str id %)))
+        run (heavy-command cmd)]
     (fs/create-dirs d)
     (spit (file ".cmd") cmd)
+    (when-not (= run cmd) (spit (file ".run") run))
     ;; setsid -f forks and returns, so the job is no longer the REPL's descendant and a restart's kill misses it.
     ;; The command runs from its file because a syntax error in this eval string would lose the exit code.
     (p/shell {:dir (or dir (str (fs/cwd))) :in "" :out :discard :err :discard
               :extra-env {"BBH_JOB" (str "echo $$ >" (pr-str (file ".pid"))
                                            "; stat=$(cat /proc/$$/stat); rest=${stat##*) }; set -- $rest; shift 19; echo $1 >" (pr-str (file ".start"))
                                            "; cat /proc/sys/kernel/random/boot_id >" (pr-str (file ".boot"))
-                                           "; bash " (pr-str (file ".cmd")) " >" (pr-str (file ".log")) " "
+                                           "; bash " (pr-str (file (if (= run cmd) ".cmd" ".run"))) " >" (pr-str (file ".log")) " "
                                            (if split-err? (str "2>" (pr-str (file ".err"))) "2>&1")
                                            " </dev/null; echo $? >" (pr-str (file ".exit")))}}
              "setsid" "-f" "bash" "-c" "eval \"$BBH_JOB\"")
@@ -874,7 +885,7 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
       (loop [pause 2]
         (if-let [exit (job-exit id)]
           (let [result (assoc (output) :exit exit)]
-            (doseq [suffix [".cmd" ".log" ".err" ".exit" ".pid" ".start" ".boot"]] (fs/delete-if-exists (job-file id suffix)))
+            (doseq [suffix [".cmd" ".run" ".log" ".err" ".exit" ".pid" ".start" ".boot"]] (fs/delete-if-exists (job-file id suffix)))
             result)
           (if (>= (System/currentTimeMillis) end)
             (assoc (output) :exit nil :timeout true :job id)
@@ -1017,11 +1028,13 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
          ;; and several sessions take screenshots at once.
          profile (str "/tmp/bbh-chrome-" (random-uuid))
          limit (min 60000 (bbh.env/budget-ms))
+         argv ["flatpak" "run" (str "--filesystem=" shot-dir) "com.google.Chrome"
+               "--headless=new" "--disable-gpu" "--no-first-run" "--hide-scrollbars"
+               (str "--user-data-dir=" profile) (str "--virtual-time-budget=" wait)
+               (str "--screenshot=" out) (str "--window-size=" w "," h) url]
+         ;; Chrome takes the machine-wide heavy-job slot, waiting at most half the limit, so screenshots wait for a running test suite.
          proc (p/process {:out :string :err :string}
-                         "flatpak" "run" (str "--filesystem=" shot-dir) "com.google.Chrome"
-                         "--headless=new" "--disable-gpu" "--no-first-run" "--hide-scrollbars"
-                         (str "--user-data-dir=" profile) (str "--virtual-time-budget=" wait)
-                         (str "--screenshot=" out) (str "--window-size=" w "," h) url)
+                         "bash" "-c" (heavy-command (str/join " " (map shell-quote argv)) :timeout-s (max 1 (quot limit 2000))))
          r (deref proc limit nil)]
      (when-not r (p/destroy-tree proc))
      (fs/delete-tree profile)

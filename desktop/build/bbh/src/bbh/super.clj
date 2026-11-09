@@ -11,6 +11,7 @@
             [bbh.super.emacs :as emacs]
             [bbh.super.model :as model]
             [bbh.super.process :as process]
+            [bbh.super.sessions :as sessions]
             [bbh.super.store :as store]
             [bbh.version :as version]
             [bbh.workflow :as workflow]
@@ -393,9 +394,10 @@
       :reply (model/linked st :replies (:id args))
       :worker (model/linked st :workers (:id args))
       :projects (projects c)
+      :machine @(:machine c)
       :sections (let [sections (model/sections st (or (:cursors args) {}))
                       {held :sections fresh :fresh} (when (:shown args) (model/hold (:shown args) sections))]
-                  {:sections (or held sections) :badge (model/badge sections)
+                  {:sections (or held sections) :badge (model/badge sections) :machine @(:machine c)
                    :order (model/order sections) :fresh (or fresh 0)})
       ::unknown)))
 
@@ -628,6 +630,92 @@
                          :args {:worker (:id w) :job job :exit exit :log (str base ".log")
                                 :seen (fs/exists? (str base ".seen"))}})))
 
+;; ---- reaping the sessions of Workers that ended ---------------------------
+
+(defn end-session!
+  "Tell the super-agent's Emacs that CONVERSATION's Worker ended: its buffer
+  stays readable, sends what you type to the Router, and shuts its client down
+  so it never starts claude again (T55)."
+  [{:keys [conversation]}]
+  (emacs/call! "eng/bbh-super-end" conversation))
+
+(def session-io
+  "How the controller reads and ends sessions; a test passes its own as :sessions."
+  {:live sessions/live :kill! sessions/kill! :end! end-session! :machine sessions/machine})
+
+(defn- session-agents
+  "Each conversation of SESSIONS to its announced session, from agent.json."
+  [c sessions]
+  (into {} (keep #(when-let [a (inbox/agent (conversation-root c (:conversation %)))] [(:conversation %) a])) sessions))
+
+(defn- reap!
+  "End session S of a Worker that ended: Emacs first, so its buffer stays and
+  does not respawn, then its process group. Returns whether it is gone."
+  [{:keys [sessions]} s]
+  (try ((:end! sessions) s)
+       (catch Exception e (binding [*out* *err*] (println "bbh super: Emacs did not end" (:conversation s) "-" (ex-message e)))))
+  (let [gone ((:kill! sessions) s)]
+    (println "bbh super: reaped the session of" (:conversation s) (if gone "" "(still running)"))
+    gone))
+
+(defn- reap-sessions!
+  "Kill the SESSIONS of this controller's Workers that ended, each once it is
+  idle or after the grace. Returns {conversation gone?} for each it tried."
+  [{:keys [state stale-since reap-grace-ms] :as c} sessions & {:keys [all?]}]
+  (let [agents (session-agents c sessions)
+        {:keys [kill since stale]} (sessions/plan @state sessions agents @stale-since
+                                                  (System/currentTimeMillis) (or reap-grace-ms sessions/default-grace-ms))
+        ;; A sweep of ALL? sessions forgets those no longer stale, as a resumed Worker's.
+        _ (swap! stale-since #(merge (if all? (select-keys % (map :conversation stale)) %) since))
+        tried (into {} (map (juxt :conversation #(boolean (reap! c %)))) kill)]
+    (swap! stale-since #(apply dissoc % (keep (fn [[conversation gone]] (when gone conversation)) tried)))
+    tried))
+
+(defn observe-machine!
+  "The health pass's sweep and log line: reap the sessions of Workers that
+  ended, then record MemAvailable, swap used and live sessions against active
+  Workers as a :machine-observed event, kept for bbh super list."
+  [{:keys [state sessions machine] :as c}]
+  (let [live ((:live sessions))
+        tried (reap-sessions! c live :all? true)
+        reaped (keep (fn [[conversation gone]] (when gone conversation)) tried)
+        live (remove (comp (set reaped) :conversation) live)
+        report (merge ((:machine sessions))
+                      (sessions/report @state live (session-agents c live) (sessions/stale @state live) reaped)
+                      {:at (System/currentTimeMillis)})]
+    (reset! machine report)
+    (run! c :controller {:id (new-id) :command :machine-observed! :args report})
+    report))
+
+(defn- reap-when-idle!
+  "Watch the session of Worker WORKER, which just ended, and reap it once its
+  turn ends, as after the Worker's super-done! and report, or after the grace.
+  Stops when the session is gone or the Worker runs again."
+  [{:keys [state stopped] :as c} worker]
+  (doto (Thread. #(loop []
+                    (let [w (get-in @state [:workers worker])
+                          a (some->> (:conversation w) (conversation-root c) inbox/agent)
+                          s (some-> a (select-keys [:pid :start]) (assoc :conversation (:conversation w)))]
+                      ;; One attempt: a session it cannot kill, or an error, is the health pass's to retry.
+                      (when (and s (not @stopped) (not (sessions/holds-session? w))
+                                 (= {} (try (reap-sessions! c [s])
+                                            (catch Exception e (binding [*out* *err*] (println "bbh super: reaping" worker "failed:" (ex-message e)))))))
+                        (Thread/sleep 2000)
+                        (recur))))
+               (str "reap-" worker))
+    (.setDaemon true) (.start)))
+
+(defn- watch-ended!
+  "Start reap-when-idle! for each Worker that left the active states since the
+  last scan. Workers that ended while the controller was down are the health
+  pass's to sweep."
+  [{:keys [state was-active] :as c}]
+  (let [active (set (keep #(when (sessions/holds-session? %) (:id %)) (vals (:workers @state))))
+        ended (remove active @was-active)]
+    (reset! was-active active)
+    (doseq [id ended :when (get-in @state [:workers id :conversation])]
+      (reap-when-idle! c id))))
+
 (defn- repl-answering? [dir]
   (try
     (let [port (some-> (process/read-text (fs/path dir "repl.port")) parse-long)]
@@ -779,7 +867,7 @@
   and run the dispatcher every SCAN-MS. Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router web] :or {scan-ms 500 health-ms 120000}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router web sessions reap-grace-ms] :or {scan-ms 500 health-ms 120000}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -797,6 +885,7 @@
                            :emacs-up? (if (:open! launch) (constantly true) emacs/alive?)}
                           launch)
            :policy policy
+           :sessions (merge session-io sessions) :machine (atom nil) :stale-since (atom {}) :was-active (atom #{}) :last-machine (atom 0) :reap-grace-ms reap-grace-ms
            :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
            :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
            :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :web (atom nil)}]
@@ -822,7 +911,13 @@
                                   (> (- (System/currentTimeMillis) @(:last-health c)) health-ms))
                           ;; A pass can find a Worker gone, which frees its slot.
                           (reconcile! c) (promote-all! c) (reset! (:last-health c) (System/currentTimeMillis)))
-                        (observe-jobs! c) (dispatch! c)
+                        ;; At start and every health interval: reap sessions that outlived their
+                        ;; Worker, and log memory, swap and live sessions.
+                        (when (> (- (System/currentTimeMillis) @(:last-machine c)) health-ms)
+                          (reset! (:last-machine c) (System/currentTimeMillis))
+                          (try (observe-machine! c)
+                               (catch Exception e (binding [*out* *err*] (println "bbh super: observing sessions failed:" (ex-message e))))))
+                        (observe-jobs! c) (dispatch! c) (watch-ended! c)
                            (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))
       (.setDaemon true) (.start)))
