@@ -1020,7 +1020,7 @@ else the first thread waiting on you, else the first."
 
 (defun eng/bbh-inbox--thread-header (id)
   (concat (if id (format "%s   " id) "")
-          "1-9 pick  . recommended  i answer  C-c C-c send  TAB fold  RET open  o list  ]t next waiting  J jjui  gv one buffer  g? help"))
+          "1-9 pick  . recommended  i answer  C-c C-c send (C-n in an Answer)  TAB fold  RET open  o list  ]t next waiting  J jjui  gv one buffer  g? help"))
 
 (defun eng/bbh-inbox--draw-thread (&optional quiet)
   "Show the selected thread on the right. QUIET, for a pushed reload, waits
@@ -1253,6 +1253,12 @@ single letters replace evil commands that edit text, which only an Answer
 body has; i there types as usual.  s also shadows the global avy jump.")
 
 
+(defconst eng/bbh-inbox--send-in-answer
+  '(menu-item "" eng/bbh-inbox-send
+              :filter (lambda (command) (and (eng/bbh-inbox--in-answer-p) command)))
+  "A key binding that sends while the cursor is in an Answer and is absent
+elsewhere, so the key falls through to the next keymap.")
+
 (defun eng/bbh-inbox--setup ()
   "The Inbox buffer's settings and hooks. The mode runs it, and loading this
 file runs it again in a live Inbox, so a Doom reload reaches it.  The org
@@ -1274,6 +1280,9 @@ thread list, in its own mode, stays one truncated line per thread."
     (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
   (evil-local-set-key 'insert (kbd "C-c C-c") #'eng/bbh-inbox-send)
   (evil-local-set-key 'insert (kbd "C-n") #'eng/bbh-inbox-send)
+  ;; After Esc, C-n still sends from an Answer; elsewhere the filter returns
+  ;; nil, so evil's own C-n runs.
+  (evil-local-set-key 'normal (kbd "C-n") eng/bbh-inbox--send-in-answer)
   (evil-local-set-key 'insert (kbd "C-c C-k") #'eng/bbh-inbox-clear))
 
 (define-derived-mode eng/bbh-inbox-mode org-mode "bbh inbox"

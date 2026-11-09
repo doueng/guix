@@ -606,7 +606,7 @@ Inbox's single-key commands, such as g, j, x, digits or ., runs there."
       (should-not (seq-remove (lambda (verb) (equal verb "org")) (bbh-test--inbox-log log))))))
 
 (ert-deftest bbh-inbox-ctrl-n-sends-the-answer ()
-  "C-n sends the thread's reply while you type an Answer; elsewhere it moves lines."
+  "C-n sends the thread's reply while you type an Answer."
   (bbh-test--with-fake-inbox (view log)
     (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
     (should-not (eq 'eng/bbh-inbox-send (key-binding (kbd "C-n"))))
@@ -617,8 +617,24 @@ Inbox's single-key commands, such as g, j, x, digits or ., runs there."
       (setq bbh-test--sent nil)
       (execute-kbd-macro (kbd "C-n"))
       (should (equal '(("T1" . "call it Zed")) bbh-test--sent)))
+    (should (evil-normal-state-p))))
+
+(ert-deftest bbh-inbox-ctrl-n-sends-from-an-answer-in-normal-state ()
+  "After Esc, C-n in an Answer still sends; on any other line it keeps evil's binding."
+  (bbh-test--with-fake-inbox (view log)
+    (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
+    (bbh-test--type-in-answer "call it Zed")
+    (execute-kbd-macro (kbd "<escape>"))
     (should (evil-normal-state-p))
-    (should-not (eq 'eng/bbh-inbox-send (key-binding (kbd "C-n"))))))
+    (should (eng/bbh-inbox--in-answer-p))
+    (cl-letf (((symbol-function 'eng/bbh-inbox--send-thread)
+               (lambda (thread _) (push (cons thread (eng/bbh-inbox--answer-text "a1")) bbh-test--sent))))
+      (setq bbh-test--sent nil)
+      (execute-kbd-macro (kbd "C-n"))
+      (should (equal '(("T1" . "call it Zed")) bbh-test--sent))
+      (goto-char (point-min))
+      (should-not (eng/bbh-inbox--in-answer-p))
+      (should (eq (lookup-key evil-normal-state-map (kbd "C-n")) (key-binding (kbd "C-n")))))))
 
 
 (ert-deftest bbh-inbox-opens-from-a-buffer-whose-workspace-is-gone ()
