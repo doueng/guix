@@ -3,6 +3,9 @@
 ;;
 ;; Every source reads installed versions from the files or profiles that hold
 ;; them, so this keeps no inventory of its own; refresh only caches latest versions.
+;; Source release reports how far Guix and nixpkgs trail GitHub releases; only
+;; `updates apply release/NAME' acts on it, opting NAME in to source latest.
+;; apply builds what it changed on the remote builder before you pull or switch.
 (ns updates
   (:require [babashka.fs :as fs]
             [babashka.http-client :as http]
@@ -93,6 +96,23 @@
 (defn last-line [text]
   (last (remove str/blank? (str/split (str/trim (str text)) #"[\r\n]+"))))
 
+(defn warn [& parts] (binding [*out* *err*] (println (apply str "updates: " parts))))
+
+;; The remote builder (docs/remote-builder-plan.md): heavy builds offload or
+;; prebuild there and the laptop downloads them from its publish server.
+(def builder-publish (or (System/getenv "BUILDER_PUBLISH") "http://guix-builder.tailbf68ad.ts.net:8080"))
+
+(def builder-up?
+  (delay (zero? (:exit (p/shell {:continue true :out :string :err :string}
+                                "curl" "-fsS" "--max-time" "10" (str builder-publish "/nix-cache-info"))))))
+
+(defn builder-flags
+  "Build options that keep builds off the laptop while the builder answers."
+  []
+  (if @builder-up?
+    ["--max-jobs=0" (str "--substitute-urls=" builder-publish " https://bordeaux.guix.gnu.org")]
+    (do (warn "builder unreachable at " builder-publish "; building on the laptop") [])))
+
 ;; Name the failing module and exception from a failed time-machine build log.
 (defn build-failure [message]
   (let [log (second (re-find #"View build log at '([^']+)'" message))
@@ -118,7 +138,8 @@
       (println "guix: evaluating the bumped channels; the first run per bump takes minutes"))
     (try
       (let [now (versions guix "repl" "--" script names)
-            later (try (versions guix "time-machine" "-C" bumped "--" "repl" "--" script names)
+            later (try (apply versions guix "time-machine" "-C" bumped
+                                  (concat (builder-flags) ["--" "repl" "--" script names]))
                        (catch Exception e
                          (throw (ex-info (str "time-machine on the bumped channels failed: "
                                               (build-failure (ex-message e)))
@@ -435,9 +456,163 @@ copy; return the files left with conflict markers."
   (doseq [{:keys [name latest]} items]
     (run! "pi" "install" (str "npm:" name "@" latest))))
 
-;; Rebuild steps run in this order after declarative sources change.
-;; make prebuild first builds the edited tree on the remote builder
-;; (docs/remote-builder-plan.md), so the laptop then only downloads.
+
+(defn version-parts [v] (mapv #(or (parse-long %) %) (re-seq #"\d+|[a-z]+" (str/lower-case v))))
+
+(defn version-compare [a b]
+  (let [[pa pb] (map version-parts [a b])]
+    (or (first (remove zero? (for [i (range (max (count pa) (count pb)))
+                                   :let [x (get pa i 0) y (get pb i 0)]]
+                               (if (and (number? x) (number? y)) (compare x y) (compare (str x) (str y))))))
+        0)))
+
+;; Release tags such as v1.2.3, release-1.2 or pkg-1_2; nil for other tags.
+(defn tag-version [tag]
+  (some-> (re-matches #"(?i)(?:v|version-|release-|[a-z0-9_]+-)?(\d+(?:[._]\d+)*)" (str tag))
+          second (str/replace "_" ".")))
+
+(defn upstream-release
+  "The newest GitHub release of REPO, else its newest version tag.  :latest is
+CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
+  [{:keys [repo current]}]
+  (let [found? #(zero? (:exit %))
+        release (p/shell {:continue true :out :string :err :string} "gh" "api" (str "repos/" repo "/releases/latest"))
+        [version url] (if (found? release)
+                        (let [{:keys [tag_name html_url]} (json/parse-string (:out release) true)]
+                          [(tag-version tag_name) html_url])
+                        (when-let [[version tag] (->> (github (str "repos/" repo "/tags?per_page=100"))
+                                                      (keep #(some-> (tag-version (:name %)) (vector (:name %))))
+                                                      (sort-by first version-compare) last)]
+                          [version (str "https://github.com/" repo "/releases/tag/" tag)]))]
+    {:latest (when version (if (pos? (version-compare version current)) version current))
+     :changelog url}))
+
+(declare latest-items latest-add!)
+
+;; How far each Guix or nixpkgs package you install trails its GitHub release.
+;; The version is the one the bumped channels or nixpkgs revision bring when a
+;; refresh cached it.  apply opts a Guix package in to source latest.
+(def repo-script
+  "(use-modules (gnu packages) (guix packages) (guix diagnostics) (guix git-download) (ice-9 match)
+             (ice-9 rdelim) (ice-9 regex) (srfi srfi-1) (srfi srfi-26))
+(define (github-repo package)
+  (let* ((source (package-source package))
+         (uris (if (origin? source)
+                   (match (origin-uri source)
+                     ((? string? uri) (list uri))
+                     ((? git-reference? ref) (list (git-reference-url ref)))
+                     ((? list? uris) (filter string? uris))
+                     (_ '()))
+                   '()))
+         (found (any (cut string-match \"github\\\\.com/([^/]+/[^/.]+)\" <>)
+                     (append uris (list (or (package-home-page package) \"\"))))))
+    (and found (match:substring found 1))))
+(define (module-map-find package module)
+  (false-if-exception
+   (any (match-lambda ((name . var) (and (eq? (variable-ref var) package) name)))
+        (module-map cons (resolve-interface module)))))
+(call-with-input-file (cadr (command-line))
+  (lambda (port)
+    (let loop ()
+      (match (read-line port)
+        ((? eof-object?) #t)
+        (name
+         (match (find-packages-by-name name)
+           ((package . _)
+            (let* ((repo (github-repo package))
+                   (file (location-file (package-location package)))
+                   (module (map string->symbol (string-split (string-drop-right file 4) #\\/)))
+                   (variable (or (module-map-find package module) '?)))
+              (when repo (format #t \"~a\\t~a\\t~s\\t~a~%\" name repo module variable))))
+           (() #t))
+         (loop))))))")
+
+;; nixpkgs attributes without a Guix package of the same name to find the repo.
+(def nixpkgs-repos (update-vals {"ghostty" "ghostty-org/ghostty" "jujutsu" "jj-vcs/jj" "ty" "astral-sh/ty"
+                                 "uv" "astral-sh/uv" "dasel" "TomWright/dasel"}
+                                #(hash-map :repo %)))
+
+(defn github-repos-of [names]
+  (let [dir (fs/create-temp-dir)
+        [script file] (map #(str (fs/path dir %)) ["repos.scm" "names"])]
+    (spit script repo-script)
+    (spit file (str/join "\n" names))
+    (try (into {} (for [line (str/split-lines (sh {:err :string} guix "repl" "--" script file))
+                        :let [[name repo module variable] (str/split line #"\t")]]
+                    [name {:repo repo :module module :variable variable}]))
+         (finally (fs/delete-tree dir)))))
+
+(defn release-items []
+  (let [cache (:latest (read-cache))
+        channel-version (fn [source {:keys [name current]}]
+                          (let [later (get-in cache [[source name] :latest])]
+                            (if (and later (re-find #"^\d" later) (not (re-matches #"[0-9a-f]{40}" later)))
+                              later
+                              current)))
+        nix (map #(assoc % :via "nixpkgs") (rest (nixpkgs-items)))
+        guix (map #(assoc % :via "guix") (remove (comp (set (map :name nix)) :name) (guix-items)))
+        opted (set (map :name (latest-items)))
+        items (remove (comp opted :name) (concat nix guix))
+        repos (merge (github-repos-of (map :name items)) nixpkgs-repos)]
+    (sort-by :name (for [{:keys [name via] :as item} items :when (repos name)]
+                     (merge (repos name) {:name name :via via :current (channel-version via item)})))))
+
+(defn release-refresh [items] (pmap #(merge % (upstream-release %)) items))
+
+(defn release-apply! [items]
+  (doseq [{:keys [name via]} items :when (= via "nixpkgs")]
+    (throw (ex-info (str name " follows nixpkgs; updates apply nixpkgs moves it") {})))
+  (latest-add! items))
+
+;; Opted-in newer releases of Guix packages, one (latest ...) line each in
+;; modules/engstrand/packages/latest.scm; the builder builds them in the prebuild.
+(def latest-file (in-repo "modules/engstrand/packages/latest.scm"))
+(def latest-re #"\(latest \"([^\"]+)\" \"([^\"]+)\" \"([0-9a-z]+)\" \"([^\"]+)\" (\([^)]+\)) (\S+)\)")
+(def placeholder-hash (apply str (repeat 52 "0")))
+(def latest-anchor "'(;; updates apply release/NAME adds lines here.")
+
+(defn latest-items []
+  (for [[form name version hash repo module variable] (re-seq latest-re (slurp latest-file))]
+    {:name name :current version :hash hash :repo repo :module module :variable variable :form form}))
+
+(defn latest-refresh [items] (pmap #(merge % (upstream-release %)) items))
+
+(defn source-hash
+  "Build NAME's opted-in source with a placeholder hash; the mismatch names the real one."
+  [name]
+  (let [{:keys [exit err]} (p/shell {:dir repo :continue true :out :string :err :string}
+                                    guix "build" "-L" "modules" "--source" "-e"
+                                    (str "(assoc-ref (@ (engstrand packages latest) %latest-packages) \"" name "\")"))]
+    (or (second (re-find #"actual hash:\s+(\S+)" err))
+        (throw (ex-info (str name " source: " (if (zero? exit) "the placeholder hash matched" (last-line err))) {})))))
+
+(defn latest-bump! [{:keys [name form current latest]}]
+  (let [text (slurp latest-file)
+        pending (str/replace form (re-pattern (str "\"" (java.util.regex.Pattern/quote current) "\" \"[0-9a-z]+\""))
+                             (str "\"" latest "\" \"" placeholder-hash "\""))]
+    (spit latest-file (str/replace text form pending))
+    (try (let [hash (source-hash name)]
+           (spit latest-file (str/replace text form (str/replace pending placeholder-hash hash))))
+         (catch Exception e (spit latest-file text) (throw e)))))
+
+(defn latest-apply! [items] (run! latest-bump! items))
+
+(defn latest-add! [items]
+  (doseq [{:keys [name current latest repo module variable]} items
+          :let [form (str "(latest \"" name "\" \"" current "\" \"" placeholder-hash "\" \"" repo "\" "
+                          module " " variable ")")
+                text (slurp latest-file)]]
+    (when (= variable "?")
+      (throw (ex-info (str name " has no public variable in " module "; write a variant by hand") {})))
+    (when (some #(= name (:name %)) (latest-items))
+      (throw (ex-info (str name " is already in " latest-file "; updates apply latest/" name " bumps it") {})))
+    (spit latest-file (str/replace-first text latest-anchor (str latest-anchor "\n    " form)))
+    (try (latest-bump! {:name name :form form :current current :latest latest})
+         (catch Exception e (spit latest-file text) (throw e)))))
+
+;; Rebuild steps run in this order after declarative sources change.  apply
+;; runs make prebuild itself, which builds the edited tree on the remote
+;; builder (docs/remote-builder-plan.md), so the laptop then only downloads.
 (def rebuild-steps ["make prebuild" "make pull" "make home-apply" "make switch" "make doom-check"])
 
 (def sources
@@ -455,9 +630,13 @@ copy; return the files left with conflict markers."
    "flatpak" {:items flatpak-items :refresh flatpak-refresh :apply! flatpak-apply!}
    "doom" {:items doom-items :refresh doom-refresh :apply! doom-apply! :then #{"make doom-check"}}
    "lazy" {:items lazy-items :refresh lazy-refresh :apply! lazy-apply!}
-   "pi" {:items pi-items :refresh pi-refresh :apply! pi-apply!}})
+   "pi" {:items pi-items :refresh pi-refresh :apply! pi-apply!}
+   "release" {:items release-items :refresh release-refresh :apply! release-apply! :opt-in? true
+               :then #{"make prebuild" "make home-apply" "make switch"}}
+   "latest" {:items latest-items :refresh latest-refresh :apply! latest-apply!
+              :then #{"make prebuild" "make home-apply" "make switch"}}})
 
-(def source-order ["channel" "guix" "nixpkgs" "github" "upstream" "skills"
+(def source-order ["channel" "guix" "nixpkgs" "github" "latest" "release" "upstream" "skills"
                    "flatpak" "doom" "lazy" "pi"])
 
 (defn selected? [selectors {:keys [source name]}]
@@ -509,7 +688,7 @@ copy; return the files left with conflict markers."
 
 (defn print-table [items]
   (let [rows (for [{:keys [source name current latest changelog error] :as item} items]
-               [source name (short current)
+               [source name (str (some-> (:via item) (str " ")) (short current))
                 (cond error "error" (nil? latest) "?" (outdated? item) (short latest) :else "=")
                 (or error (when (outdated? item) changelog) "")])
         widths (apply map (fn [& cells] (apply max (map count cells)))
@@ -537,10 +716,27 @@ copy; return the files left with conflict markers."
       (str (str/join " " cmd) " exited " exit)
       (or (last-line (ex-message e)) (str e)))))
 
+;; Build the edited tree, new pins included, on the builder before the laptop
+;; pulls, so make pull and the rebuilds only download.  Return :ok, :skipped
+;; or :failed.
+(defn prebuild! []
+  (if-not @builder-up?
+    (do (warn "prebuild skipped: builder unreachable at " builder-publish
+              "; the steps below build on the laptop with JOBS=1")
+        :skipped)
+    (do (println "Building the new tree on the builder (make prebuild)...")
+        (try (run! "make" "prebuild") :ok
+             (catch Exception e
+               (warn "prebuild failed: " (failure e) "; the new versions don't build, so don't pull or switch yet")
+               :failed)))))
+
 ;; Like refresh, a failed source prints one line and the rest still apply;
 ;; apply returns the failed sources so the caller can exit 1.
 (defn apply! [selectors]
-  (let [items (filter outdated? (with-latest (read-cache) (inventory selectors)))
+  (let [named? (fn [{:keys [source name]}] (some #{(str source "/" name)} selectors))
+        items (->> (with-latest (read-cache) (inventory selectors))
+                   (filter outdated?)
+                   (filter #(or (named? %) (not (get-in sources [(:source %) :opt-in?])))))
         groups (group-by :source items)]
     (if (empty? items)
       (println "Nothing to update; run updates refresh first if the cache is old.")
@@ -553,11 +749,15 @@ copy; return the files left with conflict markers."
                       (do (binding [*out* *err*]
                             (println (str "updates: " source " apply failed: " error)))
                           source)))
-            steps (set (mapcat #(get-in sources [% :then]) (remove (set failed) (keys groups))))]
+            steps (set (mapcat #(get-in sources [% :then]) (remove (set failed) (keys groups))))
+            prebuild (when (steps "make prebuild") (prebuild!))]
         (when (seq steps)
           (println "Review the repository diff with jj diff, then run:")
-          (doseq [step rebuild-steps :when (steps step)] (println (str "  " step))))
-        (seq failed)))))
+          (doseq [step rebuild-steps :when (and (steps step) (not= step "make prebuild"))]
+            ;; The laptop's daemon may run --max-jobs=0; JOBS=1 lets it build.
+            (println (str "  " step (when (and (= prebuild :skipped) (#{"make pull" "make home-apply" "make switch"} step))
+                                      " JOBS=1")))))
+        (seq (cond-> failed (= prebuild :failed) (conj "prebuild")))))))
 
 (let [[command & selectors] *command-line-args*]
   (case (or command "status")

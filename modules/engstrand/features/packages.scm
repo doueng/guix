@@ -2,6 +2,7 @@
   #:use-module (gnu home services)
   #:use-module (gnu services)
   #:use-module (rde features base)
+  #:use-module (engstrand packages latest)
   #:export (feature-package-set))
 
 (define* (feature-package-set name
@@ -21,7 +22,7 @@
                       (string->symbol (string-append (symbol->string name)
                                                      "-home-packages"))
                       home-profile-service-type
-                      home-packages))))
+                      (map latest-package home-packages)))))
    #:system-services
    (append system-services
            (if (null? system-packages)
@@ -30,4 +31,4 @@
                       (string->symbol (string-append (symbol->string name)
                                                      "-system-packages"))
                       profile-service-type
-                      system-packages))))))
+                      (map latest-package system-packages)))))))

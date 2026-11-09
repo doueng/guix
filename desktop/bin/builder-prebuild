@@ -53,7 +53,10 @@
     (doseq [[name path commit] (local-channels (slurp (str @repo "/channels.scm")))]
       (println "channel" name commit "from" path)
       (push (out {:dir path} "jj git root") (str commit ":refs/heads/channel-" name)))
-    (apply p/shell (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "run" rev]))))
+    (let [{:keys [exit]} (apply p/shell {:continue true}
+                                (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "run" rev]))]
+      (when-not (zero? exit)
+        (die (str "prebuild of " rev " on " host " failed (exit " exit "); its log is above"))))))
 
 (defn dry-run-builds [kind config]
   ;; --dry-run lists what the daemon would build; with the builder first, that
@@ -175,7 +178,7 @@
         (println "prebuild ok" rev)
         (catch Exception e
           (spit status-file (pr-str {:rev rev :ok? false :started started :error (ex-message e) :log log}))
-          (die "prebuild failed:" (ex-message e) "; log" log))))))
+          (die "prebuild failed:" (or (some->> (:cmd (ex-data e)) (str/join " ")) (ex-message e)) "; log" log))))))
 
 (defn nightly []
   (let [rev (str/trim (:out (p/shell {:out :string :continue true}

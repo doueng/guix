@@ -1,7 +1,7 @@
 #!/usr/bin/env bb
 ;; Runs desktop/bin/updates apply nixpkgs against a scratch nixpkgs-bridge repo
-;; and channels.scm, with a seeded cache and stub make and jj, and checks what
-;; it locks, commits and pins.
+;; and channels.scm, with a seeded cache and stub make, jj and curl, and checks
+;; what it locks, commits, pins and prebuilds on the builder.
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.string :as str])
@@ -15,9 +15,11 @@
 (defn run-apply
   "Run updates apply SELECTOR.  The stub make logs its arguments and exits
 EXIT, and `make lock' leaves a change in the bridge unless the bridge starts
-DIRTY.  The stub jj logs commits and reports main at `published'.  Return
-the make and jj logs, the pinned commit, the exit code and stderr."
-  [revision selector & {:keys [exit dirty] :or {exit 0}}]
+DIRTY, and `make prebuild' exits PREBUILD.  The stub curl, which probes the
+builder, exits BUILDER.  The stub jj logs commits and reports main at
+`published'.  Return the make and jj logs, the pinned commit, the exit code
+and stderr."
+  [revision selector & {:keys [exit dirty builder prebuild] :or {exit 0 builder 0 prebuild 0}}]
   (let [dir (str (fs/create-temp-dir))
         bin (str dir "/bin")
         log (str dir "/make.log")
@@ -34,12 +36,14 @@ the make and jj logs, the pinned commit, the exit code and stderr."
           (str "(nixpkgs-lock (revision \"" locked "\") (system \"aarch64-linux\")"
                " (packages (package (attr \"ghostty\") (version \"1.0.0\"))) (items))"))
     (spit (str bin "/make") (str "#!/bin/sh\necho \"$@\" >> " log "\n"
-                                 "[ \"$1\" = lock ] && touch " changed "\nexit " exit "\n"))
+                                 "[ \"$1\" = lock ] && touch " changed "\n"
+                                 "[ \"$1\" = prebuild ] && exit " prebuild "\nexit " exit "\n"))
+    (spit (str bin "/curl") (str "#!/bin/sh\nexit " builder "\n"))
     (spit (str bin "/jj") (str "#!/bin/sh\ncase \"$1\" in\n"
                                "  diff) [ -e " changed " ] && echo modules/nixpkgs-bridge/lock.sexp ;;\n"
                                "  commit) echo \"$@\" >> " jj-log "; rm -f " changed " ;;\n"
                                "  log) printf " published " ;;\nesac\nexit 0\n"))
-    (doseq [f ["make" "jj"]] (fs/set-posix-file-permissions (str bin "/" f) "rwxr-xr-x"))
+    (doseq [f ["make" "jj" "curl"]] (fs/set-posix-file-permissions (str bin "/" f) "rwxr-xr-x"))
     (spit (str dir "/updates/latest.edn")
           (pr-str {:latest {["nixpkgs" "nixpkgs"] {:latest revision}
                             ["nixpkgs" "ghostty"] {:latest "99.0.0"}}}))
@@ -50,19 +54,28 @@ the make and jj logs, the pinned commit, the exit code and stderr."
                           "PATH" (str bin ":" (System/getenv "PATH"))}}
              updates "apply" selector)
           slurp? #(if (fs/exists? %) (str/trim (slurp %)) "")]
-      (try {:make (slurp? log) :jj (slurp? jj-log) :pin (second (re-find pin-re (slurp channels)))
+      (try {:out (:out result) :make (slurp? log) :jj (slurp? jj-log) :pin (second (re-find pin-re (slurp channels)))
             :exit (:exit result) :err (str/trim (:err result))}
            (finally (fs/delete-tree dir))))))
 
-(def lock-and-pin {:make "lock NIXPKGS_REV=bbbb\npublish" :jj "commit -m lock: nixpkgs bbbb" :pin published :exit 0})
+(def lock-and-pin {:make "lock NIXPKGS_REV=bbbb\npublish\nprebuild" :jj "commit -m lock: nixpkgs bbbb" :pin published :exit 0})
 
 (def cases
   [["new revision, whole source" (run-apply "bbbb" "nixpkgs") lock-and-pin]
    ["new revision, one package" (run-apply "bbbb" "nixpkgs/ghostty") lock-and-pin]
    ["same revision, whole source" (run-apply locked "nixpkgs")
-    {:make (str "lock NIXPKGS_REV=" locked "\npublish") :jj (str "commit -m lock: nixpkgs " locked) :pin published :exit 0}]
+    {:make (str "lock NIXPKGS_REV=" locked "\npublish\nprebuild") :jj (str "commit -m lock: nixpkgs " locked) :pin published :exit 0}]
    ["uncommitted bridge changes" (run-apply "bbbb" "nixpkgs" :dirty true)
-    {:make "" :jj "" :pin (second (re-find pin-re (slurp channels-src))) :exit 1}]])
+    {:make "" :jj "" :pin (second (re-find pin-re (slurp channels-src))) :exit 1}]
+   ;; Builder down: apply still pins, skips the prebuild and says so in one line.
+   ["builder unreachable" (-> (run-apply "bbbb" "nixpkgs" :builder 7)
+                               (update :err #(count (str/split-lines %)))
+                               (update :out #(str/includes? % "make pull JOBS=1")))
+    {:make "lock NIXPKGS_REV=bbbb\npublish" :pin published :exit 0 :err 1 :out true}]
+   ;; The new tree fails to build on the builder: exit 1 and one line.
+   ["prebuild fails" (update (run-apply "bbbb" "nixpkgs" :prebuild 2)
+                             :err #(and (= 1 (count (str/split-lines %))) (str/includes? % "make prebuild exited 2")))
+    {:make "lock NIXPKGS_REV=bbbb\npublish\nprebuild" :pin published :exit 1 :err true}]])
 
 (let [failures (for [[label actual expected] cases
                      :let [actual (select-keys actual (keys expected))]
@@ -79,4 +92,4 @@ the make and jj logs, the pinned commit, the exit code and stderr."
                     exit " and " (pr-str err)))
       (System/exit 1)))
   (when (seq failures) (System/exit 1))
-  (println "updates apply locks and commits in the bridge repo and pins the published commit"))
+  (println "updates apply locks and commits in the bridge repo, pins the published commit and prebuilds on the builder"))
