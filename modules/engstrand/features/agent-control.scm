@@ -10,8 +10,9 @@
 
 ;;; Everything an agent may do on the desktop without a password.  Root
 ;;; equivalents stay out: reconfigure builds whatever the writable repo
-;;; describes.  guix offload test reads only the root-owned machines.scm and
-;;; offload key, so it is safe without arguments.
+;;; describes.  guix offload test and status may name only the root-owned
+;;; /etc/guix/machines.scm, never a file an agent wrote.  sudoers reads "" as
+;;; "no arguments" only when it is the whole argument list.
 
 (define %ydotool-socket "/run/ydotoold.socket")
 
@@ -50,8 +51,8 @@
            (string-join
             (append (list (string-append %herd " status")
                           (string-append %herd " status *")
-                          (string-append %guix " offload test \"\"")
-                          (string-append %guix " offload status \"\""))
+                          (string-append %guix " offload test /etc/guix/machines.scm")
+                          (string-append %guix " offload status /etc/guix/machines.scm"))
                     (map (lambda (service)
                            (string-append %herd " restart " service))
                          %restartable-services))

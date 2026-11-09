@@ -67,10 +67,10 @@
                (overload-threshold 0.8)))
       '()))
 
-;; "0" builds nothing here (phase 5 of the plan); `make switch JOBS=1' then
-;; builds locally once when the builder is down.  Stays "1" until you switch
-;; to it, so offload is tried first and small local-build derivations still run.
-(define %local-max-jobs "1")
+;; "0" builds nothing here except local-build derivations (profiles, unions),
+;; which the daemon still runs; everything else offloads to the builder.
+;; `make switch JOBS=1' builds locally once when the builder is down.
+(define %local-max-jobs "0")
 
 (define* (make-base-os #:key root-uuid esp-uuid channels)
   (unless (and (string? root-uuid) (string? esp-uuid) (pair? channels))

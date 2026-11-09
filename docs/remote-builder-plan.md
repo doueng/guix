@@ -1,6 +1,6 @@
 # Remote Guix builder: plan
 
-Status: plan only (T116, W118, 2026-11-09). Nothing was created, switched or bought.
+Status: **done** (T118, W133, 2026-11-09). The builder runs, the laptop substitutes from it and offloads to it, and the last step, `--max-jobs=0`, is committed and waits for your switch. See "Final state" below. Phase 6 (updates) is T128's, and phase 7 (the nixpkgs bridge) became T126's move.
 Labels: **[M]** measured here (command or file cited), **[I]** inferred from code or docs, **[G]** guess to confirm.
 
 ## Phase 1 status (done 2026-11-09, approved by you)
@@ -28,6 +28,37 @@ Differences from the sketches below:
 - Keys: deploy.pub lists an unattended key, ~/.config/guix-builder/deploy_ed25519, because guile-ssh can't use the passphrase-protected ~/.ssh/guix-builder and no agent runs. deploy.pub also lists yours. offload.pub is T119's /etc/guix/offload key. host-key.pub, builder-signing.pub, laptop-signing.pub and nixpkgs-builder.pub are recorded. The nixpkgs import key's secret sits only in /var/lib/prebuild/nixpkgs-key.sec on the builder.
 - The laptop side (asahi.scm) turns on when builder-signing.pub and host-key.pub exist. It puts the builder URL first in substitute-urls and adds the build machine, and the daemon stays at `--max-jobs=1` until you change `%local-max-jobs` to "0". `make ... JOBS=1` passes `--max-jobs` to the client.
 - Sizing for the CAX21: daemon `--max-jobs=1 --cores=4`, laptop `parallel-builds 1`, nightly gc at 20G free.
+
+## Final state (2026-11-09, T118 W133)
+
+Audit of each phase against the repo, the builder (ssh over the tailnet) and the laptop.
+
+| Phase / step | State | Evidence |
+|---|---|---|
+| 1. Repo pieces (builder OS, deploy file, builder-prebuild, Makefile targets, checks) | Done | Landed in T116 and T118 (wzpopmqq, swsrwmus). |
+| 2. Server, firewall, tailscale, keys, managed deploy | Done | CAX21 in hel1, `herd status` on it shows guix-daemon, guix-publish, mcron, nftables, tailscaled and ssh-daemon running [M]. |
+| 3.8 Publish reachable on the tailnet only | Done | `curl http://guix-builder.tailbf68ad.ts.net:8080/nix-cache-info` answers. W120 found that public 22 and 8080 time out [M]. |
+| 3.9 `guix offload test` | Done, by a real offload | A `--max-jobs=0` build of a non-local derivation printed "done with offloaded ... from guix-builder" through the running daemon's hook and the root offload key [M]. T119's passwordless `sudo guix offload test` never worked: sudoers reads `""` as "no arguments" only when it is the whole argument list, so `offload test ""` matched nothing and sudo asked for a password [M: sudo -n]. The rule now names `/etc/guix/machines.scm`, which takes effect after your switch. |
+| 4.10 Prebuild, including the custom kernel | Done | /var/lib/prebuild/status.edn shows rev 1a8aa9b ok at 19:52, with roots for system, home and the dusk manifest. The narinfo for asahi-linux-keyd-7.2.15-1, the kernel the laptop runs, is served (HTTP 200) [M]. |
+| 4.11 Laptop trusts the builder key | Done, declaratively (T119) | The key from builder-signing.pub is in /etc/guix/acl [M]. |
+| 4.12 Home and system download instead of building | Done | `guix time-machine -C channels.scm -- home build --dry-run` (and `system build`) at T128's tip, with the builder's URL first: nothing to build, 5.9 MB and 5.8 MB to download [M]. |
+| 4.13 `--max-jobs=0` with local-build derivations | Done, risk retired | Client `--max-jobs=0`: the `local-build? #t` derivation built on the laptop and the other one offloaded [M]. The daemon still runs local builds at 0 slots, so profiles and unions don't fail. |
+| 5.14 Laptop daemon: builder URL first, build machine, `--max-jobs=0` | Committed and waits for your switch | /etc/guix/machines.scm and the current system's guix-daemon service already have the builder. But the running daemon dates from 09:32, before the 17:33 switch, so it still uses bordeaux first and `--max-jobs=1` [M: ps]. This change sets `%local-max-jobs` to "0". After the switch, guix-daemon needs a restart (below). |
+| Nightly prebuild and gc | Done | `herd schedule mcron` on the builder: `prebuild nightly` at 03:00 and `guix gc --free-space=20G` at 05:00 UTC [M]. |
+| 6. `updates` integration, speculative bump | Moved to T128 | T128 landed `updates` building on the builder (ywzmznux, qyuusumy). |
+| 7. Drop the nixpkgs bridge | Obsolete | T126 moved the bridge into its own repo, consumed as the pinned `nixpkgs-bridge` channel (qqyzrrmy). |
+| Revoke the Hetzner token | Remaining (you) | ~/.config/guix-builder/hcloud-token still exists and the API accepts it [M]. Later deploys go over the tailnet and don't need it. Revoke it in the Hetzner console, then delete the file. |
+| Tailscale key expiry | Remaining (you) | The builder node is yours, not `tag:builder`, and its key expires 2027-05-08 [M: tailscale status]. Disable key expiry for it in the admin console. |
+
+To finish, run this from /home/engstrand/guix (you enter your password):
+
+```sh
+make pull && make switch && sudo herd restart guix-daemon
+```
+
+`make pull` is needed because the pulled Guix predates T126's `nixpkgs-bridge` channel, and `make switch` refuses to run until they match. It downloads from the builder. Afterwards, `ps -o args -C guix-daemon` should show the builder URL first and `--max-jobs=0`, and `sudo guix offload test /etc/guix/machines.scm` should run without a password.
+
+Monthly cost [M: Hetzner pricing API, hel1]: CAX21 10.49 EUR net plus primary IPv4 0.50 EUR net, so **10.99 EUR net, 13.30 EUR with 21% VAT**. Traffic is included. The builder disk is 40 of 75 GB used (31 GB free), and nightly gc keeps 20 GB free.
 
 ## Goal
 
@@ -305,7 +336,7 @@ Phase 4 (prebuild and trial)
 Phase 5 (switch the laptop; you run make switch)
 14. Apply the asahi.scm diff, run `make switch`, then `sudo herd status guix-daemon` and `ps` to see `--max-jobs=0` and the builder URL.
 
-Phase 6: the `updates` integration and the nightly speculative bump.
+Phase 6: the `updates` integration and the nightly speculative bump. Moved to T128.
 Phase 7: superseded. T126 moved the nixpkgs bridge into its own channel instead (see (e)), and the prebuild keeps its `nixpkgs-bridge import` line.
 
 ## Verification
