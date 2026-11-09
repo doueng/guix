@@ -7,10 +7,12 @@
   #:use-module (asahi guix systems base)
   #:use-module (asahi guix systems desktop)
   #:use-module (engstrand system bootloader)
+  #:use-module ((engstrand system builder) #:select (builder-key-file))
   #:use-module (gnu)
   #:use-module (gnu packages linux)
   #:use-module (gnu packages ncurses)
   #:use-module (gnu packages package-management)
+  #:use-module (gnu packages ssh)
   #:use-module (gnu packages version-control)
   #:use-module (gnu packages vim)
   #:use-module (gnu services base)
@@ -24,7 +26,26 @@
   #:use-module (rde system services admin)
   #:use-module (gnu services sysctl)
   #:use-module (guix gexp)
+  #:use-module (srfi srfi-1)
   #:export (make-base-os))
+
+;; The daemon's key for offloading to the remote builder
+;; (docs/remote-builder-plan.md).  Only root reads the key; the .pub is
+;; world-readable so an agent can copy it to modules/engstrand/builder/offload.pub.
+(define %offload-key-activation
+  (simple-service 'familiar-offload-key activation-service-type
+    (with-imported-modules '((guix build utils))
+      #~(begin
+        (use-modules (guix build utils))
+          (let ((key "/etc/guix/offload/id_ed25519"))
+            (unless (file-exists? key)
+              (mkdir-p "/etc/guix/offload")
+              (chmod "/etc/guix/offload" #o755)
+              (system* #$(file-append openssh "/bin/ssh-keygen")
+                       "-q" "-t" "ed25519" "-N" "" "-C" "asahi-guix offload"
+                       "-f" key)
+              (chmod key #o600)
+              (chmod (string-append key ".pub") #o644)))))))
 
 (define* (make-base-os #:key root-uuid esp-uuid channels)
   (unless (and (string? root-uuid) (string? esp-uuid) (pair? channels))
@@ -74,6 +95,7 @@
     (services
      (append
       (list %udev-backlight-service
+            %offload-key-activation
             ;; The Neural Engine; Arch leaves this to systemd's 0666 default.
             (udev-rules-service 'ane-accel
                                 (udev-rule "70-ane-accel.rules"
@@ -145,6 +167,8 @@
                      (authorized-keys (append %asahi-substitute-keys
                                               ;; Signs nixpkgs imports; see make nixpkgs-import.
                                               (list (local-file "../nixpkgs/signing-key.pub" "nixpkgs-signing-key.pub"))
+                                              ;; The remote builder, once phase 2 has put its key in the repo.
+                                              (filter-map builder-key-file '("builder-signing.pub"))
                                               (guix-configuration-authorized-keys config)))
                      ;; Prefer the general cache; Asahi and CI are signed fallbacks.
                      (substitute-urls (append '("https://bordeaux.guix.gnu.org")

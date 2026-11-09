@@ -10,7 +10,8 @@
 
 ;;; Everything an agent may do on the desktop without a password.  Root
 ;;; equivalents stay out: reconfigure builds whatever the writable repo
-;;; describes.
+;;; describes.  guix offload test reads only the root-owned machines.scm and
+;;; offload key, so it is safe without arguments.
 
 (define %ydotool-socket "/run/ydotoold.socket")
 
@@ -34,6 +35,7 @@
            (stop #~(make-kill-destructor))))))
 
 (define %herd "/run/current-system/profile/bin/herd")
+(define %guix "/run/current-system/profile/bin/guix")
 
 ;; A restart only applies what a human already switched to.  Services that end
 ;; the session, stop builds, guard the speakers or carry ssh stay out;
@@ -47,7 +49,9 @@
            "engstrand ALL=(root) NOPASSWD: "
            (string-join
             (append (list (string-append %herd " status")
-                          (string-append %herd " status *"))
+                          (string-append %herd " status *")
+                          (string-append %guix " offload test \"\"")
+                          (string-append %guix " offload status \"\""))
                     (map (lambda (service)
                            (string-append %herd " restart " service))
                          %restartable-services))
