@@ -1,0 +1,164 @@
+#!/usr/bin/env bb
+;; Usage, on the laptop:
+;;   builder-prebuild build     push @ to the builder, build it there, wait
+;;   builder-prebuild check     publish reachable, last prebuild, nothing to build locally
+;;   builder-prebuild machines  print a machines.scm for `sudo guix offload test FILE'
+;; On the builder (the prebuild account's git-shell command and mcron job):
+;;   prebuild run REV | nightly | status
+;; See docs/remote-builder-plan.md.
+(ns builder-prebuild
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [clojure.edn :as edn]
+            [clojure.string :as str]))
+
+(def host (or (System/getenv "BUILDER") "guix-builder.tailbf68ad.ts.net"))
+(def home (System/getProperty "user.home"))
+(def ssh-key (str home "/.ssh/guix-builder"))
+(def ssh-cmd (str "ssh -i " ssh-key " -o BatchMode=yes -o ConnectTimeout=10"))
+(def publish (str "http://" host ":8080"))
+
+(defn die [& msg] (binding [*out* *err*] (apply println msg)) (System/exit 1))
+(defn out [& args] (str/trim (:out (apply p/shell {:out :string} args))))
+
+;;; Laptop side
+
+(def repo (delay (-> *file* fs/real-path fs/parent fs/parent fs/parent str)))
+(def guix (str home "/.config/guix/current/bin/guix"))
+
+(defn push-and-build []
+  ;; jj snapshots @ into a commit in its git store; push that commit by id so an
+  ;; undescribed working copy, such as an `updates apply' edit, can be built.
+  (let [rev (out {:dir @repo} "jj log --no-graph -r @ -T commit_id")
+        git-dir (out {:dir @repo} "jj git root")]
+    (println "prebuild" rev "on" host)
+    (p/shell {:extra-env {"GIT_SSH_COMMAND" ssh-cmd}}
+             "git" (str "--git-dir=" git-dir) "push" "--force" "--quiet"
+             (str "prebuild@" host ":guix.git") (str rev ":refs/heads/prebuild"))
+    (apply p/shell (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "run" rev]))))
+
+(defn dry-run-builds [kind config]
+  ;; --dry-run lists what the daemon would build; with the builder first, that
+  ;; should be nothing.
+  (let [{:keys [err]} (p/shell {:dir @repo :err :string :continue true}
+                               guix kind "build" "--dry-run" "-L" "modules" config
+                               (str "--substitute-urls=" publish " https://bordeaux.guix.gnu.org"))
+        lines (str/split-lines (or err ""))
+        start (some #(when (re-find #"would be built" (nth lines %)) %) (range (count lines)))]
+    (if start
+      (take-while #(str/starts-with? % "   ") (drop (inc start) lines))
+      [])))
+
+(defn check []
+  (let [ok? (zero? (:exit (p/shell {:continue true :out :string :err :string}
+                                    "curl" "-fsS" "--max-time" "10" (str publish "/nix-cache-info"))))]
+    (println (if ok? "publish: ok" (str "publish: unreachable at " publish)))
+    (when ok?
+      (apply p/shell {:continue true}
+             (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "status"])))
+    (let [missing (concat (dry-run-builds "system" "desktop/system.scm")
+                          (dry-run-builds "home" "desktop/home.scm"))]
+      (if (empty? missing)
+        (println "local builds: none")
+        (do (println (count missing) "derivations would build:")
+            (run! println (take 20 missing))
+            (System/exit 1))))))
+
+(defn machines []
+  (let [host-key (some-> (str @repo "/modules/engstrand/builder/host-key.pub")
+                         (as-> f (when (fs/exists? f) (str/trim (slurp f)))))]
+    (when-not host-key (die "modules/engstrand/builder/host-key.pub is missing; see phase 2"))
+    (println (str "(list (build-machine\n"
+                  "       (name \"" host "\")\n"
+                  "       (systems '(\"aarch64-linux\"))\n"
+                  "       (user \"offload\")\n"
+                  "       (host-key \"" host-key "\")\n"
+                  "       (private-key \"/etc/guix/offload/id_ed25519\")\n"
+                  "       (parallel-builds 2)))"))))
+
+;;; Builder side
+
+(def state "/var/lib/prebuild")
+(def bin "/run/current-system/profile/bin")
+(def status-file (str state "/status.edn"))
+(def keep-revisions 3)
+
+(defn sh! [log & args]
+  (println "$" (str/join " " args))
+  (spit log (str "$ " (str/join " " args) "\n") :append true)
+  (apply p/shell {:dir (str state "/work")
+                  :extra-env {"PATH" (str bin ":" (System/getenv "PATH"))}
+                  :out :inherit :err :inherit} args))
+
+(defn read-status [] (if (fs/exists? status-file) (edn/read-string (slurp status-file)) {}))
+
+(defn prune-roots []
+  (let [revs (->> (fs/list-dir (str state "/roots"))
+                  (sort-by #(fs/last-modified-time %))
+                  reverse
+                  (map #(second (re-find #"-([0-9a-f]{40})$" (str (fs/file-name %)))))
+                  distinct)]
+    (doseq [old (drop keep-revisions revs)
+            root (fs/glob (str state "/roots") (str "*-" old))]
+      (fs/delete root))))
+
+(defn run-prebuild [rev]
+  (when-not (re-matches #"[0-9a-f]{40}" (str rev)) (die "usage: prebuild run COMMIT"))
+  (let [lock (java.nio.channels.FileChannel/open
+              (fs/path state "lock")
+              (into-array java.nio.file.OpenOption
+                          [java.nio.file.StandardOpenOption/CREATE java.nio.file.StandardOpenOption/WRITE]))]
+    (when-not (.tryLock lock) (die "another prebuild is running"))
+    (let [log (str state "/logs/" rev ".log")
+          work (str state "/work")
+          tm [(str bin "/guix") "time-machine" "-C" "channels.scm" "--"]
+          root #(str state "/roots/" % "-" rev)
+          nix-key (str state "/nixpkgs-key.sec")
+          started (str (java.time.Instant/now))]
+      (when-not (fs/exists? work)
+        (p/shell "git" "clone" "--quiet" (str state "/guix.git") work))
+      (try
+        (sh! log "git" "fetch" "--quiet" "origin" "+refs/heads/*:refs/remotes/origin/*")
+        (sh! log "git" "checkout" "--quiet" "--detach" rev)
+        ;; What `make pull' builds: the channel instances at these commits.
+        (apply sh! log (concat tm ["describe"]))
+        ;; The nixpkgs bridge, until phase 7 drops it.  The daemon must trust
+        ;; nixpkgs-key.pub, which modules/engstrand/builder/nixpkgs-builder.pub holds.
+        (when (fs/exists? "/var/lib/prebuild/work/desktop/build/nixpkgs/bridge.scm")
+          (when-not (fs/exists? nix-key)
+            (apply sh! log (concat tm ["repl" "-L" "modules" "--" "desktop/build/nixpkgs/bridge.scm" "key" nix-key])))
+          (apply sh! log (concat tm ["repl" "-L" "modules" "--" "desktop/build/nixpkgs/bridge.scm"
+                                     "import" "modules/engstrand/nixpkgs/lock.sexp" nix-key])))
+        (apply sh! log (concat tm ["system" "build" "-L" "modules" "desktop/system.scm" "-r" (root "system")]))
+        (apply sh! log (concat tm ["home" "build" "-L" "modules" "desktop/home.scm" "-r" (root "home")]))
+        ;; Ask publish for every item now, so its cache bakes before the laptop asks.
+        (let [items (out (str bin "/guix") "gc" "-R" (root "system") (root "home"))]
+          (spit (str state "/items") items)
+          (doseq [item (str/split-lines items)]
+            (p/shell {:continue true :out :string :err :string}
+                     "curl" "-fsS" "-o" "/dev/null"
+                     (str "http://localhost:8080/" (subs (fs/file-name item) 0 32) ".narinfo"))))
+        (prune-roots)
+        (spit status-file (pr-str {:rev rev :ok? true :started started :finished (str (java.time.Instant/now)) :log log}))
+        (println "prebuild ok" rev)
+        (catch Exception e
+          (spit status-file (pr-str {:rev rev :ok? false :started started :error (ex-message e) :log log}))
+          (die "prebuild failed:" (ex-message e) "; log" log))))))
+
+(defn nightly []
+  (let [rev (str/trim (:out (p/shell {:out :string :continue true}
+                                     "git" (str "--git-dir=" state "/guix.git") "rev-parse" "--verify" "-q" "prebuild")))
+        {last-rev :rev ok? :ok?} (read-status)]
+    (cond (str/blank? rev) (println "nothing pushed yet")
+          (and ok? (= rev last-rev)) (println "already built" rev)
+          :else (run-prebuild rev))))
+
+(let [[cmd & args] *command-line-args*]
+  (case cmd
+    "build" (push-and-build)
+    "check" (check)
+    "machines" (machines)
+    "run" (run-prebuild (first args))
+    "nightly" (nightly)
+    "status" (prn (read-status))
+    (die "usage: builder-prebuild build|check|machines (laptop) or run REV|nightly|status (builder)")))

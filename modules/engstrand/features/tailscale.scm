@@ -6,7 +6,7 @@
   #:use-module (gnu services)
   #:use-module (gnu services shepherd)
   #:use-module (guix gexp)
-  #:export (feature-familiar-tailscale))
+  #:export (feature-familiar-tailscale %tailscale-service))
 
 (define %tailscale-service
   (simple-service 'familiar-tailscale shepherd-root-service-type

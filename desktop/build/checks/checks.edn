@@ -18,6 +18,11 @@
   {:name "updates"
    :paths ["desktop/bin/updates" "desktop/build/updates/**"]
    :checks ["make updates-check"]}
+  {:name "remote builder"
+   :paths ["modules/engstrand/system/builder.scm" "modules/engstrand/builder/**"
+           "desktop/builder.scm" "desktop/bin/builder-prebuild"]
+   :checks ["make lint"]
+   :slow ["make builder-check"]}
   {:name "nixpkgs bridge"
    :paths ["modules/engstrand/nixpkgs/**" "modules/engstrand/nixpkgs.scm" "desktop/build/nixpkgs/**"]
    :slow ["make nixpkgs-verify"]}

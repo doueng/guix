@@ -16,6 +16,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify pi-sci pi-sci-test \
+        builder-create builder-deploy prebuild builder-check \
         doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check updates-check clipboard-check
 
 help:
@@ -31,6 +32,10 @@ help:
 	@echo 'repro-build   build system using the pinned channels via time-machine'
 	@echo 'switch        check system facts, build and activate system (sudo; writes ESP)'
 	@echo 'gc            delete generations older than $(GC_AGE), then collect garbage'
+	@echo 'builder-create once: create the Hetzner builder from desktop/builder.scm (spends money)'
+	@echo 'builder-deploy reconfigure the builder over the tailnet'
+	@echo 'prebuild      push @ to the builder and build system, Home and pull there'
+	@echo 'builder-check builder publish reachable, last prebuild, nothing to build locally'
 	@echo 'nixpkgs-lock  resolve $(NIXPKGS)/packages.sexp against cache.nixos.org (NIXPKGS_REV=...)'
 	@echo 'nixpkgs-key   generate the key that signs nixpkgs imports'
 	@echo 'nixpkgs-authorize let the running daemon trust that key before the first switch (sudo)'
@@ -112,6 +117,24 @@ gc:
 
 home-build: channels-current nixpkgs-import
 	"$(GUIX)" home build $(COMMON) "$(HOME_CONFIG)"
+
+# The remote builder; see docs/remote-builder-plan.md.  The Hetzner token is
+# read only here, and later deploys go over the tailnet without it.
+BUILDER_TOKEN ?= $(HOME)/.config/guix-builder/hcloud-token
+
+builder-create:
+	test -r "$(BUILDER_TOKEN)" || { echo '$(BUILDER_TOKEN) is missing; see the plan, phase 2' >&2; exit 1; }
+	GUIX_HETZNER_API_TOKEN="$$(cat "$(BUILDER_TOKEN)")" BUILDER_BOOTSTRAP=1 \
+	  "$(GUIX)" deploy $(COMMON) desktop/builder.scm
+
+builder-deploy:
+	"$(GUIX)" deploy $(COMMON) desktop/builder.scm
+
+prebuild:
+	desktop/bin/builder-prebuild build
+
+builder-check:
+	desktop/bin/builder-prebuild check
 
 # nixpkgs binaries enter /gnu/store signed by NIXPKGS_KEY; the daemon trusts
 # its public half, $(NIXPKGS)/signing-key.pub, through asahi.scm.

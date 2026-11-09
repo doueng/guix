@@ -3,6 +3,23 @@
 Status: plan only (T116, W118, 2026-11-09). Nothing was created, switched or bought.
 Labels: **[M]** measured here (command or file cited), **[I]** inferred from code or docs, **[G]** guess to confirm.
 
+## Phase 1 status (done 2026-11-09, approved by you)
+
+What landed, without creating a server or switching anything:
+- modules/engstrand/system/builder.scm: `make-builder-os`, with `#:bootstrap?`. That variant adds an nftables table admitting public ssh for the first deploy, before Tailscale is up. It also has `builder-key-file`/`builder-key-string`, which skip missing key files so the module evaluates before phase 2.
+- modules/engstrand/builder/: nftables.conf and a README listing the public keys phase 2 adds (deploy.pub, offload.pub, host-key.pub, builder-signing.pub, laptop-signing.pub, nixpkgs-builder.pub).
+- desktop/builder.scm: the deploy file (Hetzner when `BUILDER_BOOTSTRAP` is set, otherwise a managed host over the tailnet).
+- desktop/bin/builder-prebuild: `build`, `check` and `machines` on the laptop; `run REV`, `nightly` and `status` on the builder, behind git-shell.
+- Makefile: builder-create, builder-deploy, prebuild and builder-check. checks.edn has a "remote builder" rule. features/tailscale.scm exports `%tailscale-service`.
+- Verified: `make lint` passes, and `guix system build -d --no-grafts` evaluates both variants to a system derivation (no build) [M].
+
+Differences from the sketches below:
+- You have no ~/.ssh/*.pub [M]. Phase 2 starts with `ssh-keygen -t ed25519 -f ~/.ssh/guix-builder`, and that key is used for deploy, root and prebuild.
+- The Hetzner environment's default `authorize? #t` already trusts the laptop's signing key on the builder (hetzner.scm line 203) [M]. laptop-signing.pub is only needed for later managed-host deploys.
+- The builder's daemon also gets `--timeout=21600 --max-silent-time=3600`, and sshd gets ClientAlive settings, against offload hangs.
+- The publish cache is warmed by fetching each closure item's narinfo, not with guix weather.
+- Still open for phase 2: you need to run `sudo guix archive --authorize < modules/engstrand/builder/nixpkgs-builder.pub` on the builder (or deploy with that file present) before the first prebuild's nixpkgs import. Phase 7 removes the need.
+
 ## Goal
 
 Stop the laptop from building. A Hetzner CAX (aarch64) server on the tailnet builds and serves everything that `make pull`, `make home-apply` and `make switch` need, at the same pinned channels, before the laptop asks. The laptop then only evaluates, downloads and activates.
