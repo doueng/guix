@@ -15,6 +15,7 @@
 ;; variant below instead.
 (define %latest
   '(;; updates apply release/NAME adds lines here.
+    (latest "neovim" "0.12.6" "0h7y3szk0jrw80l5ib0nninzmqxypfkjjmd51hsn1y0cg2k9py0y" "neovim/neovim" (gnu packages vim) neovim)
     ))
 
 (define (replace-version text old new)

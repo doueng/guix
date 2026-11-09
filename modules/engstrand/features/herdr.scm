@@ -1,7 +1,7 @@
 (define-module (engstrand features herdr)
   #:use-module (engstrand features packages)
-  #:use-module (nixpkgs-bridge packages)
   #:use-module (engstrand packages herdr)
+  #:use-module (engstrand packages jujutsu)
   #:use-module (engstrand packages jjui)
   #:use-module (gnu home services)
   #:use-module (gnu packages)
@@ -14,7 +14,7 @@
 (define %herdr-home-packages
   (append (list herdr)
           %herdr-plugins
-          (list jjui (nixpkgs-package "jujutsu"))))
+          (list jjui jujutsu)))
 
 (define %familiar-herdr-plugins
   (simple-service 'familiar-herdr-plugins home-activation-service-type

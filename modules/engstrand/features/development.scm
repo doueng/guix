@@ -4,18 +4,28 @@
   #:use-module (engstrand packages bun)
   #:use-module (engstrand packages github-cli)
   #:use-module (engstrand packages pi-coding-agent)
-  #:use-module (nixpkgs-bridge packages)
+  #:use-module (engstrand packages dasel)
+  #:use-module (engstrand packages hyperfine)
+  #:use-module (engstrand packages shellcheck)
+  #:use-module (engstrand packages shfmt)
+  #:use-module (engstrand packages tree-sitter)
+  #:use-module (engstrand packages ty)
+  #:use-module (engstrand packages typst)
+  #:use-module (engstrand packages uv)
   #:use-module (gnu packages)
   #:export (feature-familiar-development))
 
 (define %development-home-packages
   (cons* babashka bun github-cli pi-coding-agent
-         (append
-          (map nixpkgs-package
-               '("clojure" "curl" "dasel" "file" "fnlfmt" "gopls" "hyperfine" "nixfmt"
-                 "shellcheck" "shfmt" "tree-sitter" "typst" "uv"))
-          (map specification->package
-              '("python"
+         dasel hyperfine shellcheck shfmt tree-sitter ty typst uv
+         (map specification->package
+              '("clojure-tools"
+                "curl"
+                "file"
+                "fnlfmt"
+                "gopls"
+                "nixfmt"
+                "python"
                 ;; Doom :lang python: LSP server, formatter, test runner.
                 "python-lsp-server"
                 "python-black"
@@ -38,7 +48,7 @@
                 "xxd"
                 "unzip"
                 "zip"
-                "tree")))))
+                "tree"))))
 
 (define (feature-familiar-development)
   (feature-package-set

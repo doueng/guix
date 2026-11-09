@@ -86,10 +86,13 @@
                     [_ name] (re-seq #"(?:\(name|#:name) \"([^\"]+)\"" (slurp (str file)))]
                 name))))
 
+(def installed
+  (delay (->> [(str home "/.guix-home/profile") "/run/current-system/profile"]
+              (mapcat #(str/split-lines (sh guix "package" "-p" % "-I")))
+              (map #(let [[name version] (map str/trim (str/split % #"\t"))] {:name name :current version})))))
+
 (defn guix-items []
-  (->> [(str home "/.guix-home/profile") "/run/current-system/profile"]
-       (mapcat #(str/split-lines (sh guix "package" "-p" % "-I")))
-       (map #(let [[name version] (map str/trim (str/split % #"\t"))] {:name name :current version}))
+  (->> @installed
        (remove #(or (str/starts-with? (:name %) "nixpkgs-") (@custom-package-names (:name %))))
        (group-by :name) vals (map first) (sort-by :name)))
 
@@ -217,7 +220,8 @@
                                    (re-find #"\(version \"([^\"]+)\"\)" text))
         base {:name name :file (str file)
               :package (second (re-find #"\(define-public (\S+)" text))
-              :hash (second (re-find #"\(base32 \"([0-9a-z]+)\"\)" text))}]
+              :hash (second (or (re-find #"\(base32 \"([0-9a-z]+)\"\)" text)
+                                (re-find #"#:hash \"([0-9a-z]+)\"" text)))}]
     (cond
       codeload (assoc base :repo codeload :current commit :form commit-form)
       repo (assoc base :repo repo :prefix prefix :current version :form version-form)
@@ -528,9 +532,7 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
          (loop))))))")
 
 ;; nixpkgs attributes without a Guix package of the same name to find the repo.
-(def nixpkgs-repos (update-vals {"ghostty" "ghostty-org/ghostty" "jujutsu" "jj-vcs/jj" "ty" "astral-sh/ty"
-                                 "uv" "astral-sh/uv" "dasel" "TomWright/dasel"}
-                                #(hash-map :repo %)))
+(def nixpkgs-repos {"ghostty" {:repo "ghostty-org/ghostty"}})
 
 (defn github-repos-of [names]
   (let [dir (fs/create-temp-dir)
@@ -549,7 +551,9 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
                             (if (and later (re-find #"^\d" later) (not (re-matches #"[0-9a-f]{40}" later)))
                               later
                               current)))
-        nix (map #(assoc % :via "nixpkgs") (rest (nixpkgs-items)))
+        nix (->> (rest (nixpkgs-items))
+                 (filter #((set (map :name @installed)) (str "nixpkgs-" (:name %))))
+                 (map #(assoc % :via "nixpkgs")))
         guix (map #(assoc % :via "guix") (remove (comp (set (map :name nix)) :name) (guix-items)))
         opted (set (map :name (latest-items)))
         items (remove (comp opted :name) (concat nix guix))
