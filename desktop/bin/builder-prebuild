@@ -29,8 +29,8 @@
 (def repo (delay (-> *file* fs/real-path fs/parent fs/parent fs/parent str)))
 (def guix (str home "/.config/guix/current/bin/guix"))
 
-;; Channels in channels.scm with a file:// url, such as the nixpkgs-bridge
-;; checkout: [name path commit].  The builder can't reach the laptop's paths,
+;; Channels in channels.scm with a file:// url, such as a local checkout:
+;; [name path commit].  The builder can't reach the laptop's paths,
 ;; so push-and-build pushes each pinned commit into its guix.git as
 ;; refs/heads/channel-NAME and the builder points the url there.
 (defn local-channels [text]
@@ -142,7 +142,6 @@
           channels (str state "/channels.scm")
           tm [(str bin "/guix") "time-machine" "-C" channels "--"]
           root #(str state "/roots/" % "-" rev)
-          nix-key (str state "/nixpkgs-key.sec")
           started (str (java.time.Instant/now))]
       (when-not (fs/exists? work)
         (p/shell "git" "clone" "--quiet" (str state "/guix.git") work))
@@ -156,12 +155,6 @@
                                     (str "(url \"file://" state "/guix.git\")")))
         ;; What `make pull' builds: the channel instances at these commits.
         (apply sh! log (concat tm ["describe"]))
-        ;; The nixpkgs-bridge channel's binaries.  The daemon must trust
-        ;; nixpkgs-key.pub, which modules/engstrand/builder/nixpkgs-builder.pub holds.
-        (when (str/includes? (slurp channels) "(name 'nixpkgs-bridge)")
-          (when-not (fs/exists? nix-key)
-            (apply sh! log (concat tm ["nixpkgs-bridge" "key" nix-key])))
-          (apply sh! log (concat tm ["nixpkgs-bridge" "import" nix-key])))
         (apply sh! log (concat tm ["system" "build" "-L" "modules" "desktop/system.scm" "-r" (root "system")]))
         ;; guix home build has no --root; guix build lowers the home environment the same way.
         (apply sh! log (concat tm ["build" "-L" "modules" "-f" "desktop/home.scm" "-r" (root "home")]))

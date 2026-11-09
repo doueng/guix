@@ -18,9 +18,9 @@ JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))
 COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
-        nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
+        home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check \
-        doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check updates-check clipboard-check
+        doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check
 
 help:
 	@echo 'lint          fast checks for every change: Scheme compiles, scripts parse, docs agree'
@@ -39,10 +39,6 @@ help:
 	@echo 'builder-deploy reconfigure the builder over the tailnet'
 	@echo 'prebuild      push @ to the builder and build system, Home and pull there'
 	@echo 'builder-check builder publish reachable, last prebuild, nothing to build locally'
-	@echo 'nixpkgs-key   generate the key that signs nixpkgs imports'
-	@echo 'nixpkgs-authorize let the running daemon trust that key before the first switch (sudo)'
-	@echo 'nixpkgs-import copy the locked nixpkgs closures into /gnu/store'
-	@echo 'nixpkgs-verify check imported items against cache.nixos.org hashes'
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-apply    activate Home, then stow live configs'
 	@echo 'stow          build SCI and install live config links using GNU Stow'
@@ -61,7 +57,6 @@ help:
 	@echo 'doom-check    fail on doom doctor warnings missing from the baseline'
 	@echo 'doom-baseline accept the current doom doctor warnings'
 	@echo 'kanata-check  run kanata.kbd chord tests in the kanata simulator'
-	@echo 'updates-check test which nixpkgs revision updates apply locks'
 	@echo 'keybindings-check kanata-check plus generated-binding, Hyprland, Emacs and Neovim tests'
 	@echo 'hypr-nested-check test Hyprland keybindings in a nested session'
 	@echo 'clipboard-check yank and paste between Emacs, Neovim and the Wayland clipboard (uses the live clipboard)'
@@ -93,16 +88,16 @@ system-facts: channels-current
 dry-run: channels-current
 	"$(GUIX)" system build --dry-run $(COMMON) "$(CONFIG)"
 
-build: channels-current nixpkgs-import
+build: channels-current
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
 	  "$(GUIX)" system build $(JOBS_FLAG) $(COMMON) "$(CONFIG)"
 
-repro-build: nixpkgs-import
+repro-build:
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
 	  "$(GUIX)" time-machine -C "$(CHANNELS)" -- \
 	  system build $(COMMON) "$(CONFIG)"
 
-switch: channels-current system-facts nixpkgs-import
+switch: channels-current system-facts
 	sudo rm -f \
 	  /boot/efi/m1n1/boot.bin.old \
 	  /boot/efi/m1n1/boot.bin.new
@@ -119,7 +114,7 @@ gc:
 	"$(GUIX)" pull --delete-generations=$(GC_AGE)
 	"$(GUIX)" gc
 
-home-build: channels-current nixpkgs-import
+home-build: channels-current
 	"$(GUIX)" home build $(JOBS_FLAG) $(COMMON) "$(HOME_CONFIG)"
 
 # The remote builder; see docs/remote-builder-plan.md.  The Hetzner token is
@@ -139,30 +134,6 @@ prebuild:
 
 builder-check:
 	desktop/bin/builder-prebuild check
-
-# nixpkgs binaries come from the nixpkgs-bridge channel (channels.scm), whose
-# repo, ~/projects/guix-nixpkgs-bridge, owns the lock; updates bumps the pin.
-# They enter /gnu/store signed by NIXPKGS_KEY; the daemon trusts
-# its public half, $(NIXPKGS_PUB), through asahi.scm.
-NIXPKGS_PUB := modules/engstrand/system/nixpkgs-signing-key.pub
-NIXPKGS_KEY ?= $(HOME)/.config/guix/nixpkgs-bridge/signing-key.sec
-NIXPKGS_BRIDGE := "$(GUIX)" nixpkgs-bridge
-
-nixpkgs-key:
-	test ! -e "$(NIXPKGS_KEY)" || { echo '$(NIXPKGS_KEY) exists' >&2; exit 1; }
-	$(NIXPKGS_BRIDGE) key "$(NIXPKGS_KEY)"
-	cp "$(basename $(NIXPKGS_KEY)).pub" $(NIXPKGS_PUB)
-
-# The first switch imports before it installs the key from asahi.scm, so a new
-# key must be trusted by the running daemon once; the switch then keeps it.
-nixpkgs-authorize:
-	sudo "$(GUIX)" archive --authorize < $(NIXPKGS_PUB)
-
-nixpkgs-import:
-	$(NIXPKGS_BRIDGE) import "$(NIXPKGS_KEY)"
-
-nixpkgs-verify:
-	$(NIXPKGS_BRIDGE) verify
 
 PI_SCI := desktop/build/pi-sci
 PI_SCI_OUTPUTS := $(PI_SCI)/dist/sci.js $(addprefix $(PI_SCI)/dist/pi-,grep.mjs find.mjs read.mjs)
@@ -205,7 +176,7 @@ bbh-web-highlights: $(PIERRE_DIFF)/node_modules
 stow: pi-sci pierre-diff-ansi
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/stow-home
 
-home-apply: channels-current nixpkgs-import
+home-apply: channels-current
 	"$(GUIX)" home reconfigure $(JOBS_FLAG) $(COMMON) "$(HOME_CONFIG)"
 	$(MAKE) stow
 
@@ -251,9 +222,6 @@ $(KANATA_SIM):
 	rm -rf "$(KANATA_SRC)"
 	git clone --quiet --depth 1 --branch v$(KANATA_VERSION) https://github.com/jtroo/kanata "$(KANATA_SRC)"
 	cd "$(KANATA_SRC)" && "$(GUIX)" shell rust rust:cargo gcc-toolchain -- cargo build --release --quiet -p kanata-sim
-
-updates-check:
-	bb desktop/build/updates/test.bb
 
 # Talks to the live compositor and running Emacs daemons, then restores the clipboard text.
 clipboard-check:

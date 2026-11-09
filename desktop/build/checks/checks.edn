@@ -15,17 +15,11 @@
   {:name "guix home"
    :paths ["modules/engstrand/features/**" "desktop/home.scm"]
    :slow ["make home-build"]}
-  {:name "updates"
-   :paths ["desktop/bin/updates" "desktop/build/updates/**"]
-   :checks ["make updates-check"]}
   {:name "remote builder"
    :paths ["modules/engstrand/system/builder.scm" "modules/engstrand/system/builder-keys.scm" "modules/engstrand/builder/**"
            "desktop/builder.scm" "desktop/bin/builder-prebuild"]
    :checks ["make lint"]
    :slow ["make builder-check"]}
-  {:name "nixpkgs bridge"
-   :paths ["channels.scm" "modules/engstrand/system/nixpkgs-signing-key.pub"]
-   :slow ["make nixpkgs-verify"]}
   {:name "apple neural engine"
    :paths ["modules/engstrand/packages/omarchy-ane.scm" "modules/engstrand/system/bootloader.scm"
            "modules/engstrand/system/asahi.scm" "desktop/build/ane/**"]

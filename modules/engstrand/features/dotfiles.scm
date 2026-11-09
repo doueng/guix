@@ -1,6 +1,5 @@
 (define-module (engstrand features dotfiles)
   #:use-module (engstrand features packages)
-  #:use-module (nixpkgs-bridge packages)
   #:use-module (gnu home services)
   #:use-module (gnu packages)
   #:use-module (gnu services)
@@ -15,7 +14,6 @@
       ("XCURSOR_THEME" . "Adwaita")
       ("XCURSOR_SIZE" . "20")
       ("GTK_THEME" . "Adwaita:dark")
-      ("LOCALE_ARCHIVE" . ,(nixpkgs-locale-archive))
       ;; Trust the system nss-certs bundle instead of the roots node and uv
       ;; bundle, which still trusted the compromised eMudhra intermediates.
       ("NODE_OPTIONS" . "--use-openssl-ca")

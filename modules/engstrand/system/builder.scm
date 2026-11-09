@@ -150,7 +150,7 @@ to your address."
                             (authorized-keys
                              (append %asahi-substitute-keys
                                      (filter-map builder-key-file
-                                                 '("laptop-signing.pub" "nixpkgs-builder.pub"))
+                                                 '("laptop-signing.pub"))
                                      (guix-configuration-authorized-keys config)))
                             ;; One build at a time: two Rust or kernel builds would not fit 8 GB.
                             (extra-options '("--max-jobs=1" "--cores=4"

@@ -3,7 +3,7 @@
 ;;
 ;; Every source reads installed versions from the files or profiles that hold
 ;; them, so this keeps no inventory of its own; refresh only caches latest versions.
-;; Source release reports how far Guix and nixpkgs trail GitHub releases; only
+;; Source release reports how far Guix trails GitHub releases; only
 ;; `updates apply release/NAME' acts on it, opting NAME in to source latest.
 ;; apply builds what it changed on the remote builder before you pull or switch.
 (ns updates
@@ -93,7 +93,7 @@
 
 (defn guix-items []
   (->> @installed
-       (remove #(or (str/starts-with? (:name %) "nixpkgs-") (@custom-package-names (:name %))))
+       (remove #(@custom-package-names (:name %)))
        (group-by :name) vals (map first) (sort-by :name)))
 
 (defn last-line [text]
@@ -161,50 +161,6 @@
 (defn guix-apply! [_]
   (channel-apply! (filter outdated? (with-latest (read-cache) (map #(assoc % :source "channel")
                                                                       (channel-items))))))
-
-;; nixpkgs packages share one locked revision; applying any of them relocks all.
-;; The lock lives in the nixpkgs-bridge channel's repo, which channels.scm pins:
-;; apply relocks and commits there, publishes main and bumps the pin here.
-(def bridge-repo (or (System/getenv "NIXPKGS_BRIDGE_REPO") (str home "/projects/guix-nixpkgs-bridge")))
-(def nixpkgs-dir "modules/nixpkgs-bridge")
-(defn in-bridge [path] (str bridge-repo "/" path))
-
-(defn nixpkgs-items []
-  (let [[_ & fields] (edn/read-string (slurp (in-bridge (str nixpkgs-dir "/lock.sexp"))))
-        field (fn [k] (rest (some #(when (= k (first %)) %) fields)))]
-    (cons {:name "nixpkgs" :current (first (field 'revision))}
-          (for [[_ [_ attr] [_ version]] (field 'packages)]
-            {:name attr :current version}))))
-
-(defn nixpkgs-refresh [items]
-  (let [[revision & rows] (str/split-lines
-                           (sh {:dir bridge-repo :err :string} guix "repl" "-L" "modules" "--"
-                               "bin/nixpkgs-bridge.scm" "versions"
-                               (str nixpkgs-dir "/packages.sexp")))
-        latest (into {} (for [row rows :let [[attr version changelog] (str/split row #"\t")]]
-                          [attr {:latest version :changelog (first (str/split (str changelog) #" "))}]))]
-    ;; A selection may omit the revision row, and apply needs it cached.
-    (for [{:keys [name current] :as item} (distinct (cons (assoc (first (nixpkgs-items)) :source "nixpkgs")
-                                                          items))]
-      (merge item
-             (if (= name "nixpkgs")
-               {:latest revision
-                :changelog (compare-url "https://github.com/NixOS/nixpkgs" current revision)}
-               (latest name))))))
-
-(defn nixpkgs-apply! [_]
-  (let [in-bridge! (fn [& args] (apply p/shell {:dir bridge-repo} args))
-        changed? #(not (str/blank? (sh {:dir bridge-repo} "jj" "diff" "--name-only")))
-        revision (get-in (read-cache) [:latest ["nixpkgs" "nixpkgs"] :latest])]
-    (when (changed?)
-      (throw (ex-info (str bridge-repo " has uncommitted changes; commit or restore them first") {})))
-    (in-bridge! "make" "lock" (str "NIXPKGS_REV=" revision))
-    (when (changed?)
-      (in-bridge! "jj" "commit" "-m" (str "lock: nixpkgs " (subs revision 0 (min 12 (count revision))))))
-    (in-bridge! "make" "publish")
-    (let [main (sh {:dir bridge-repo} "jj" "log" "--no-graph" "-r" "main" "-T" "commit_id")]
-      (channel-apply! (for [{:keys [name current]} (channel-items) :when (= name "nixpkgs-bridge")]
-                        {:current current :latest main})))))
 
 ;; Packages built from upstream GitHub releases or commits, one per file.
 ;; Tailscale publishes its binaries elsewhere but tags the same versions here.
@@ -493,8 +449,8 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
 
 (declare latest-items latest-add!)
 
-;; How far each Guix or nixpkgs package you install trails its GitHub release.
-;; The version is the one the bumped channels or nixpkgs revision bring when a
+;; How far each Guix package you install trails its GitHub release.
+;; The version is the one the bumped channels bring when a
 ;; refresh cached it.  apply opts a Guix package in to source latest.
 (def repo-script
   "(use-modules (gnu packages) (guix packages) (guix diagnostics) (guix git-download) (ice-9 match)
@@ -531,9 +487,6 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
            (() #t))
          (loop))))))")
 
-;; nixpkgs attributes without a Guix package of the same name to find the repo.
-(def nixpkgs-repos {"ghostty" {:repo "ghostty-org/ghostty"}})
-
 (defn github-repos-of [names]
   (let [dir (fs/create-temp-dir)
         [script file] (map #(str (fs/path dir %)) ["repos.scm" "names"])]
@@ -551,22 +504,16 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
                             (if (and later (re-find #"^\d" later) (not (re-matches #"[0-9a-f]{40}" later)))
                               later
                               current)))
-        nix (->> (rest (nixpkgs-items))
-                 (filter #((set (map :name @installed)) (str "nixpkgs-" (:name %))))
-                 (map #(assoc % :via "nixpkgs")))
-        guix (map #(assoc % :via "guix") (remove (comp (set (map :name nix)) :name) (guix-items)))
+        guix (map #(assoc % :via "guix") (guix-items))
         opted (set (map :name (latest-items)))
-        items (remove (comp opted :name) (concat nix guix))
-        repos (merge (github-repos-of (map :name items)) nixpkgs-repos)]
+        items (remove (comp opted :name) guix)
+        repos (github-repos-of (map :name items))]
     (sort-by :name (for [{:keys [name via] :as item} items :when (repos name)]
                      (merge (repos name) {:name name :via via :current (channel-version via item)})))))
 
 (defn release-refresh [items] (pmap #(merge % (upstream-release %)) items))
 
-(defn release-apply! [items]
-  (doseq [{:keys [name via]} items :when (= via "nixpkgs")]
-    (throw (ex-info (str name " follows nixpkgs; updates apply nixpkgs moves it") {})))
-  (latest-add! items))
+(defn release-apply! [items] (latest-add! items))
 
 ;; Opted-in newer releases of Guix packages, one (latest ...) line each in
 ;; modules/engstrand/packages/latest.scm; the builder builds them in the prebuild.
@@ -624,8 +571,6 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
               :then #{"make prebuild" "make pull" "make home-apply" "make switch"}}
    "guix" {:items guix-items :refresh guix-refresh :apply! guix-apply!
            :then #{"make prebuild" "make pull" "make home-apply" "make switch"}}
-   "nixpkgs" {:items nixpkgs-items :refresh nixpkgs-refresh :apply! nixpkgs-apply!
-              :then #{"make prebuild" "make pull" "make home-apply" "make switch"}}
    "github" {:items github-items :refresh github-refresh :apply! github-apply!
              :then #{"make prebuild" "make home-apply" "make switch"}}
    "upstream" {:items upstream-items :refresh upstream-refresh :apply! upstream-apply!
@@ -640,7 +585,7 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
    "latest" {:items latest-items :refresh latest-refresh :apply! latest-apply!
               :then #{"make prebuild" "make home-apply" "make switch"}}})
 
-(def source-order ["channel" "guix" "nixpkgs" "github" "latest" "release" "upstream" "skills"
+(def source-order ["channel" "guix" "github" "latest" "release" "upstream" "skills"
                    "flatpak" "doom" "lazy" "pi"])
 
 (defn selected? [selectors {:keys [source name]}]

@@ -2,7 +2,7 @@
 //!
 //! GPUI's Linux text system (cosmic-text/fontdb) reads `/etc/fonts/fonts.conf`
 //! directly, but Guix's fontconfig reads its own store config, so the two can
-//! disagree (the nixpkgs bridge installs an `/etc/fonts` without DejaVu). Before
+//! disagree (an `/etc/fonts`, when one exists, need not list DejaVu). Before
 //! GPUI starts we ask the real fontconfig (`fc-list`) where fonts live and hand
 //! fontdb a small generated config listing those directories. Generic families such as `sans-serif`
 //! are resolved with `fc-match` because GPUI matches family names literally.

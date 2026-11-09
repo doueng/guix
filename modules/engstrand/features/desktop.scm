@@ -1,8 +1,8 @@
 (define-module (engstrand features desktop)
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages bluetui)
+  #:use-module (engstrand packages ghostty)
   #:use-module (engstrand packages hex)
-  #:use-module (nixpkgs-bridge packages)
   #:use-module (asahi guix systems desktop)
   #:use-module (gnu home services)
   #:use-module (gnu home services xdg)
@@ -16,10 +16,7 @@
   (append (list bluetui
                 ;; Dictation on Cmd+M; Hyprland starts it (startup.lua).
                 hex
-                ;; Launchers may not inherit Home's LOCALE_ARCHIVE.
-                (nixpkgs-package "ghostty"
-                                 #:environment
-                                 `(("LOCALE_ARCHIVE" ,(nixpkgs-locale-archive)))))
+                ghostty)
           (map specification->package
                '("imv"
                  "xdg-utils"
@@ -96,9 +93,8 @@ StartupWMClass=oilfm
    'familiar-desktop
    #:home-packages %desktop-home-packages
    #:system-packages %desktop-system-packages
-   #:system-services (cons (service bluetooth-service-type
-                                    (bluetooth-configuration (auto-enable? #t)))
-                           (nixpkgs-system-services))
+   #:system-services (list (service bluetooth-service-type
+                                    (bluetooth-configuration (auto-enable? #t))))
    #:home-services (append %asahi-desktop-home-services
                            (list %home-mime-service
                                  %home-oilfm-service

@@ -28,11 +28,4 @@
    (make-channel-introduction
     "257cebd587b66e4d865b3537a9a88cccd7107c95"
     (openpgp-fingerprint
-     "2841 9AC6 5038 7440 C7E9  2FFA 2208 D209 58C1 DEB0"))))
- ;; nixpkgs binaries as Guix packages; see its README.  A local checkout for
- ;; now: to use a remote, push main there and change url; the commit stays.
- (channel
-  (name 'nixpkgs-bridge)
-  (url "file:///home/engstrand/projects/guix-nixpkgs-bridge")
-  (branch "main")
-  (commit "f0ba99a82520eecbd24035586586e9fa876b25a7")))
+     "2841 9AC6 5038 7440 C7E9  2FFA 2208 D209 58C1 DEB0")))))

@@ -190,8 +190,6 @@
                      (inherit config)
                      (channels channels)
                      (authorized-keys (append %asahi-substitute-keys
-                                              ;; Signs nixpkgs imports; see make nixpkgs-import.
-                                              (list (local-file "nixpkgs-signing-key.pub"))
                                               ;; The remote builder, once phase 2 has put its key in the repo.
                                               (if %builder? (list %builder-signing-key) '())
                                               (guix-configuration-authorized-keys config)))
