@@ -34,9 +34,11 @@
 ;; ---- controller ---------------------------------------------------------
 
 (defn notify-views!
-  "Tell every Inbox view registered under DIR to reload its rows. A port that
-  refuses the connection is forgotten."
+  "Tell every Inbox view registered under DIR to reload its rows, and the hooks
+  of this process, such as the website's stream. A port that refuses the
+  connection is forgotten."
   [dir]
+  (client/changed! dir)
   (doseq [f (when (fs/exists? (client/listeners-dir dir)) (fs/list-dir (client/listeners-dir dir)))
           :let [port (parse-long (str/trim (slurp (str f))))]]
     (try (with-open [sock (Socket. "127.0.0.1" (int port))

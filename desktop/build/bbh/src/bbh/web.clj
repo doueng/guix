@@ -219,13 +219,40 @@
   (when-let [[_ q] (re-find #"(?:^|&)shown=([^&]*)" (str query-string))]
     (vec (for [[_ k v] (re-seq #"(T\d+):([a-z-]+)" q)] [k (keyword v)]))))
 
+(defonce ^:private streams
+  (atom {}))
+
+(def ^:private ping-ms 25000)
+
+(defn- broadcast!
+  "Send MESSAGE to every page streaming the controller under DIR."
+  [dir message]
+  (doseq [ch (get @streams dir)]
+    (server/send! ch message false)))
+
+(defn- stream
+  "/api/super/stream: a server-sent event `changed` after each commit of the
+  controller under DIR that changes what views show, so the page refetches."
+  [dir request]
+  (server/as-channel request
+                     {:on-open (fn [ch]
+                                 (swap! streams update dir (fnil conj #{}) ch)
+                                 (server/send! ch {:status 200
+                                                   :headers {"Content-Type" "text/event-stream"
+                                                             "Cache-Control" "no-store"}
+                                                   :body "retry: 3000\n\n"}
+                                               false))
+                      :on-close (fn [ch _] (swap! streams update dir disj ch))}))
+
 (defn- super-api
   "/api/super: the inbox for the phone, over the controller under DIR."
   [dir {:keys [uri request-method] :as request}]
   (let [[_ id verb] (re-matches #"/api/super/threads/(T\d+)(?:/(reply|approve|dismiss|archive|read|draft|discard-draft))?" uri)
         body (when (= :post request-method)
                (try (json/parse-string (slurp (:body request)) true) (catch Exception _ ::bad)))]
-    (cond (and (= uri "/api/super/threads") (= :get request-method))
+    (cond (= uri "/api/super/stream")
+          (if (= :get request-method) (stream dir request) (json-response 405 {:error "Method not allowed"}))
+          (and (= uri "/api/super/threads") (= :get request-method))
           (super-call dir {:command :sections :args (cond-> {} (shown request) (assoc :shown (shown request)))} 200)
           (= uri "/api/super/say")
           (cond (not= :post request-method) (json-response 405 {:error "Method not allowed"})
@@ -288,6 +315,7 @@
   controller's directory for the inbox."
   ([conversations owner] (handler conversations owner (super/super-dir)))
   ([conversations owner super-dir]
+  (super/on-change! super-dir ::stream #(broadcast! super-dir "event: changed\ndata: 1\n\n"))
   (fn [{:keys [uri headers] :as request}]
     (let [login (headers "tailscale-user-login")]
       (cond (or (nil? login) (not= login (owner))) (json-response 403 {:error "Tailnet owner only"})
@@ -320,16 +348,23 @@
 (defn serve!
   "Serve the site for the conversations under CONVERSATIONS, and the inbox of
   the controller in SUPER-DIR, on loopback PORT, published to the tailnet when
-  PUBLISH?. Returns {:stop :in-flight}, or nil when PORT is taken."
+  PUBLISH?. OWNER, a function, names the tailnet user let in; it defaults to
+  this node's owner. Returns {:stop :in-flight}, or nil when PORT is taken."
   [{:keys [conversations super-dir publish?] :as opts}]
   (let [in-flight (atom 0)
         at (or (:port opts) port)
-        stop (try (server/run-server (counted (handler conversations (remembered owner) super-dir) in-flight)
+        stop (try (server/run-server (counted (handler conversations (or (:owner opts) (remembered owner)) super-dir) in-flight)
                                      {:ip "127.0.0.1" :port at :max-body max-body})
                   (catch java.net.BindException _ nil))]
     (when stop
       (when publish? (publish! at))
-      {:stop stop :in-flight in-flight})))
+      ;; A comment now and then keeps Tailscale's proxy from closing an idle stream.
+      (let [running (atom true)]
+        (doto (Thread. #(while @running
+                          (Thread/sleep ping-ms)
+                          (broadcast! super-dir ": ping\n\n")))
+          (.setDaemon true) (.start))
+        {:stop (fn [& args] (reset! running false) (apply stop args)) :in-flight in-flight}))))
 
 (defn -main
   "Serve the site for the conversations under DATA-DIR on its own, for working

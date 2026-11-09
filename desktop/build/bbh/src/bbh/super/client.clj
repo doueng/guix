@@ -24,6 +24,21 @@
   (fs/create-dirs (listeners-dir dir))
   (spit (str (fs/path (listeners-dir dir) (str port))) (str port)))
 
+(defonce ^:private hooks (atom {}))
+
+(defn on-change!
+  "Call (F) after each commit under DIR that changes what views show, in this
+  process, as notify-views! tells registered ports. KEY names the hook, so a
+  second registration replaces the first."
+  [dir key f]
+  (swap! hooks assoc-in [(str dir) key] f))
+
+(defn changed!
+  "Run the hooks registered for DIR. One that throws does not stop the rest."
+  [dir]
+  (doseq [f (vals (get @hooks (str dir)))]
+    (try (f) (catch Exception _ nil))))
+
 (defn new-id
   "A command id for a caller that has none: unique and never repeated."
   []

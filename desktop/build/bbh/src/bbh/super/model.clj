@@ -885,7 +885,7 @@
   (let [rows (for [t (map #(thread-view state %) (sort-by (comp - id-order :id) (vals (:threads state))))
                    :let [s (section state t)
                          ask (ask-line state (:id t))]]
-               (assoc t :section s :status (status s (:execution t)) :ask ask :asks (vec (sort-by :seq (vals (open-asks state (:id t)))))
+               (assoc t :section s :status (status s (:execution t)) :unread (unread? t) :ask ask :asks (vec (sort-by :seq (vals (open-asks state (:id t)))))
                       :line (or (:text ask)
                                 (get-in state [:workers (:worker t) :health :problem])
                                 (when (= :failed (:execution t)) (get-in state [:workers (peek (:history t)) :reason]))

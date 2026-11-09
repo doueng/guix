@@ -204,11 +204,15 @@
     (fn [s c _]
       (bbh.super.client/call! (:dir c) {:command :thread! :args {:title "another"}})
       (let [section #(some (fn [{:keys [section threads]}] (when (some (comp #{"T2"} :id) threads) section))
-                           (:sections (second (get-json s "/api/super/threads"))))]
+                           (:sections (second (get-json s "/api/super/threads"))))
+            unread (fn [id] (:unread (first (filter #(= id (:id %)) (mapcat :threads (:sections (second (get-json s "/api/super/threads"))))))))]
         (is (= "new" (section)))
+        (is (true? (unread "T2"))
+            "a row says it is unread, so no view works it out")
         (is (= 403 (first (post-super s "/api/super/threads/T2/read" {} {}))) "a cross-origin POST is refused")
         (is (= [200 ["T2"]] (post-super s "/api/super/threads/T2/read" {} from-page)))
         (is (= "quiet" (section)) "opening it on the page marks it read")
+        (is (false? (unread "T2")))
         (bbh.super.client/call! (:dir c) {:command :read! :args {:threads ["T2"] :read false}})
         (is (= "new" (section)) "unread in Emacs shows on the page")))))
 
@@ -224,6 +228,30 @@
         (is (= 2 (count (mapcat :threads (:sections (second (get-json s "/api/super/threads"))))))
             "without shown the page gets everything")))))
 
+(deftest the-page-hears-each-change-of-the-controller-on-its-stream
+  (let [c (start-super)
+        port (+ 20000 (rand-int 20000))
+        {:keys [stop]} (web/serve! {:conversations (:conversations c) :super-dir (:dir c) :port port
+                                    :owner (constantly "owner@example.com")})
+        open (fn [login]
+               (let [sock (doto (java.net.Socket. "127.0.0.1" (int port)) (.setSoTimeout 5000))
+                     out (.getOutputStream sock)]
+                 (.write out (.getBytes (str "GET /api/super/stream HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                                             "tailscale-user-login: " login "\r\n\r\n")))
+                 (.flush out)
+                 (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock)))))
+        head (fn [lines] (vec (take-while seq (repeatedly #(.readLine lines)))))]
+    (try
+      (is (str/includes? (first (head (open "guest@example.com"))) "403") "only the owner may listen")
+      (let [lines (open "owner@example.com")
+            h (head lines)
+            body-lines (fn [] (remove #(re-matches #"[0-9a-f]+" %) (repeatedly #(.readLine lines))))]
+        (is (str/includes? (first h) "200"))
+        (is (some #(re-find #"(?i)content-type: text/event-stream" %) h))
+        (is (= "retry: 3000" (first (body-lines))))
+        (bbh.super.client/call! (:dir c) {:command :thread! :args {:title "heard"}})
+        (is (= "event: changed" (first (remove str/blank? (body-lines)))) "a new thread reaches the page without a reload"))
+      (finally (stop) (bbh.super/stop! c)))))
 
 (deftest bad-inbox-requests-are-refused-and-a-stopped-controller-is-503
   (with-super

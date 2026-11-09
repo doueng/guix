@@ -8,10 +8,9 @@
 (def image-px 2048)
 (def image-quality 0.85)
 
-(defonce state (atom {:agents nil :current nil :conversations {} :error nil
-                      :view nil :inbox nil :inbox-at nil :inbox-error nil :threads {} :conflicts {} :busy-super #{}}))
-
-(def stale-ms (* 3 60 1000))
+(defonce state (atom {:agents nil :current nil :conversations {} :error nil :live false :filter "all"
+                      :view [:inbox] :inbox nil :inbox-at nil :inbox-error nil :threads {} :conflicts {}
+                      :busy-super #{} :outgoing {} :kept-unread {}}))
 
 ;; Typing must not repaint the page, so drafts live outside `state`.
 (defonce drafts (atom {}))
@@ -71,68 +70,8 @@
   "The session to show. It never changes by itself once chosen, so a draft can
   not go to another agent when this one ends."
   [{:keys [current agents]}]
-  (let [hash-id (subs (.. js/location -hash) 1)]
+  (let [hash-id (str/replace (.. js/location -hash) #"^#s/" "")]
     (or current (some #{hash-id} (map :id agents)) (:id (first agents)))))
-
-;; ---- the inbox: what the controller knows, read through /api/super ----------
-
-(defn- local
-  "The JSON under KEY in localStorage as data, or DEFAULT."
-  [key default]
-  (if-let [s (.getItem js/localStorage key)]
-    (js->clj (js/JSON.parse s) :keywordize-keys false)
-    default))
-
-(defn- local! [key value]
-  (.setItem js/localStorage key (js/JSON.stringify (clj->js value))))
-
-(declare sync-inbox!)
-
-(defn- sync-thread!
-  "Fetch thread ID, which is open, and mark it read in the controller, which
-  every view shares."
-  [id]
-  (-> (request (str "/api/super/threads/" id) {})
-      (.then (fn [t]
-               (when (> (:milestone-seq t 0) (:read-seq t 0))
-                 (-> (request (str "/api/super/threads/" id "/read")
-                              {:method "POST" :headers {"Content-Type" "application/json"} :body "{}"})
-                     (.then sync-inbox!)))
-               (swap! state assoc-in [:threads id] t)
-               (swap! state assoc :inbox-error nil)))
-      (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))))
-
-(defn- shown-query []
-  (str/join "," (for [[t s] (local "super-shown" [])] (str t ":" s))))
-
-(defn- sync-inbox! []
-  (-> (request (str "/api/super/threads"
-                    (when (seq (local "super-shown" [])) (str "?shown=" (shown-query)))) {})
-      (.then (fn [inbox]
-               ;; The list holds the order it first showed until you ask for the new rows.
-               (when (empty? (local "super-shown" [])) (local! "super-shown" (:order inbox)))
-               (swap! state assoc :inbox inbox :inbox-at (js/Date.now) :inbox-error nil)
-               (set! (.-title js/document) (if (pos? (:badge inbox 0)) (str "(" (:badge inbox) ") Agents") "Agents"))
-               (when-let [[_ id] (let [v (:view @state)] (when (vector? v) v))]
-                 (sync-thread! id))))
-      (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))))
-
-(defonce syncing (atom false))
-
-(defn- sync!
-  []
-  (when-not (or @syncing (.-hidden js/document))
-    (reset! syncing true)
-    (sync-inbox!)
-    (-> (request "/api/agents" {})
-        (.then (fn [agents]
-                 (swap! state (fn [s] (let [s (assoc s :agents agents :error nil)]
-                                        (assoc s :current (pick-current s)))))
-                 (let [{:keys [current] :as s} @state]
-                   (when (live? s current)
-                     (sync-conversation! current)))))
-        (.catch (fn [e] (swap! state assoc :error (.-message e))))
-        (.finally (fn [] (reset! syncing false))))))
 
 (defn- center-tab!
   "Scroll the strip to the current tab. scrollIntoView would also scroll the page."
@@ -147,8 +86,8 @@
 (defn- select!
   "Show session ID. Replacing the hash keeps tabs out of the browser's history."
   [id]
-  (.replaceState js/history nil "" (str "#" id))
-  (swap! state assoc :current id :view nil)
+  (.replaceState js/history nil "" (str "#s/" id))
+  (swap! state assoc :current id :view [:session id])
   (to-bottom!)
   (center-tab!)
   (sync-conversation! id))
@@ -310,68 +249,41 @@
         (not live) [:div.status "This session ended"]
         busy [:div.status "Working"]))
 
-(defn- show! [view]
-  (.replaceState js/history nil "" (if (vector? view) (str "#" (second view)) "#inbox"))
-  (swap! state assoc :view view)
-  (when (vector? view) (sync-thread! (second view))))
+;; ---- the inbox: what the controller knows, read through /api/super ----------
+;;
+;; The page mirrors the Emacs split view: a list of threads, newest first within
+;; the controller's sections, and the selected thread with its open asks first.
+;; The controller pushes `changed` on /api/super/stream; the page refetches then,
+;; and polls slowly only while the stream is down.
 
-(defn- age-text [iso]
-  (when iso
-    (let [s (quot (- (js/Date.now) (.getTime (js/Date. iso))) 1000)]
-      (cond (< s 60) "now" (< s 3600) (str (quot s 60) "m") (< s 86400) (str (quot s 3600) "h") :else (str (quot s 86400) "d")))))
+(def fallback-ms 30000)
+(def undo-ms 4000)
 
-(defn- first-line [s] (first (str/split-lines (str s))))
+(defn- route
+  "The view a location HASH names: the inbox, a thread or a session."
+  [hash]
+  (let [h (str/replace (str hash) #"^#" "")]
+    (cond (re-matches #"T\d+" h) [:thread h]
+          (str/starts-with? h "s/") [:session (subs h 2)]
+          :else [:inbox])))
 
-(defn- row-view [{:keys [id title line came-back updated-at now]}]
-  [:button.row {:replicant/key id :on {:click #(show! [:thread id])}}
-   [:span.row-head [:span.handle id] [:span.row-title title]
-    (when now [:span.moved (str "→ " (str/replace (str now) "-" " "))])
-    [:span.age (age-text updated-at)]]
-   (when line
-     [:span.row-line (first-line line) (when came-back " · came back")])])
+(defonce depth (atom 0))
 
-(defn- say!
-  "Send the Inbox composer's text to the Router, or to the thread it names."
+(defn- go!
+  "Open HASH as a new history entry, so the phone's back button returns."
+  [hash]
+  (swap! depth inc)
+  (set! (.-hash js/location) hash))
+
+(defn- back!
+  "Back to where the page came from, else to the inbox."
   []
-  (let [text (str/trim (get @drafts :say ""))]
-    (when-not (str/blank? text)
-      (swap! state assoc :saying true)
-      (-> (request "/api/super/say" {:method "POST" :headers {"Content-Type" "application/json"}
-                                     :body (js/JSON.stringify (clj->js {:id (str "s-" (random-uuid)) :text text}))})
-          (.then (fn [r]
-                   (swap! drafts dissoc :say)
-                   (when-let [el (.querySelector js/document ".say textarea")] (set! (.-value el) ""))
-                   (swap! state assoc :said (if (:thread r) (str "Sent to " (:thread r)) "Sent to the Router"))))
-          (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))
-          (.finally (fn [] (swap! state assoc :saying false) (sync-inbox!)))))))
+  (if (pos? @depth)
+    (do (swap! depth dec) (.back js/history))
+    (do (.replaceState js/history nil "" "#inbox")
+        (.dispatchEvent js/window (js/HashChangeEvent. "hashchange")))))
 
-(defn- say-view [{:keys [saying said]}]
-  [:form.composer.say {:on {:submit (fn [e] (.preventDefault e) (say!))}}
-   [:textarea {:placeholder "Tell the Router, or \"T12 ...\" for a thread" :aria-label "Message to the Router"
-               :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) (get @drafts :say "")))
-               :on {:input (fn [e] (swap! drafts assoc :say (.. e -target -value)))
-                    :keydown (fn [e] (when (and (= "Enter" (.-key e)) (or (.-metaKey e) (.-ctrlKey e))) (.preventDefault e) (say!)))}}]
-   [:div.composer-actions
-    [:button {:type "submit" :disabled saying} (if saying "Sending" "Send")]
-    (when said [:span.said said])]])
-
-(defn- reveal! []
-  (local! "super-shown" [])
-  (sync-inbox!))
-
-(defn- inbox-view [{:keys [inbox inbox-at inbox-error]}]
-  (let [old? (and inbox-at (> (- (js/Date.now) inbox-at) stale-ms))]
-    [:main#thread.thread.inbox
-     (cond inbox-error [:p.empty inbox-error]
-           (nil? inbox) [:p.empty "Loading the inbox"]
-           (empty? (:sections inbox)) [:p.empty "Nothing in the inbox. Start a thread from the Router pane."])
-     (when old? [:p.stale (str "Data from " (age-text (.toISOString (js/Date. inbox-at))) " ago")])
-     (when (pos? (:fresh inbox 0))
-       [:button.fresh {:type "button" :on {:click reveal!}} (str (:fresh inbox) " new")])
-     (for [{:keys [section title threads]} (:sections inbox)]
-       [:section.group {:replicant/key section}
-        [:h2 {:class (when (#{"stopped" "holding-up" "waiting"} section) "needs-you")} title]
-        (into [:div] (map row-view) threads)])]))
+(declare sync-inbox! sync-agents!)
 
 (defn- post-super! [thread verb body]
   (swap! state update :busy-super conj thread)
@@ -383,182 +295,331 @@
                   (swap! state update :busy-super disj thread)
                   (sync-inbox!)))))
 
-(defn- draft-picks
-  "THREAD's draft picks in the controller, which the Inbox in Emacs shares."
-  [t]
-  (get-in t [:draft :picks] {}))
+(defn- sync-thread!
+  "Fetch thread ID, which is open, and mark it read in the controller, which
+  every view shares."
+  [id]
+  (-> (request (str "/api/super/threads/" id) {})
+      (.then (fn [t]
+               (swap! state assoc-in [:threads id] t)
+               (swap! state assoc :inbox-error nil)
+               (when (and (> (:milestone-seq t 0) (:read-seq t 0)) (not (get-in @state [:kept-unread id])))
+                 (post-super! id "read" {}))))
+      (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))))
 
-(defn- pick! [thread ask option]
-  ;; Shown at once, then saved to the thread's draft, which the next sync reads back.
-  (swap! state assoc-in [:threads thread :draft :picks (keyword ask)] option)
-  (swap! state update :conflicts dissoc thread)
-  (post-super! thread "draft" {:ask ask :option option}))
+(defn- open-thread [{:keys [view]}]
+  (when (= :thread (first view)) (second view)))
 
-(defn- option-label [{:keys [options]} option]
-  (or (some #(when (= option (:id %)) (:label %)) options) option))
+(defn- sync-inbox! []
+  (-> (request "/api/super/threads" {})
+      (.then (fn [inbox]
+               (swap! state assoc :inbox inbox :inbox-at (js/Date.now) :inbox-error nil)
+               (set! (.-title js/document) (if (pos? (:badge inbox 0)) (str "(" (:badge inbox) ") bbh") "bbh"))))
+      (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))))
 
-(defn- picked-labels
-  "The labels of PICKS, a map of ask id to option id, looked up in ASKS."
-  [asks picks]
-  (for [[ask option] picks]
-    (option-label (some #(when (= (name ask) (:id %)) %) asks) option)))
+(defn- sync-super!
+  "Refetch the list and the open thread."
+  []
+  (sync-inbox!)
+  (when-let [id (open-thread @state)] (sync-thread! id)))
 
-(defn- local-answers
-  "THREAD's answers, {ask text}: the draft's, with what is typed here over them."
-  [thread t]
-  (merge (into {} (map (fn [[k v]] [(name k) v])) (get-in t [:draft :answers]))
-         (into {} (keep (fn [[k v]] (when (and (vector? k) (= :answer (first k)) (= thread (second k))) [(nth k 2) v]))) @drafts)))
+(defonce stream (atom nil))
+(defonce soon (atom nil))
 
-(defn- ask-card [thread picks replies {:keys [id text options recommended state stopped kind details evidence]}]
-  (let [open? (= "open" state)
-        picked (if open?
-                 (get picks (keyword id))
-                 (some #(get-in % [:picks (keyword id)]) (reverse replies)))]
-    [:div.ask {:replicant/key id :class (when stopped "stopped")}
-     [:div.ask-label (str (name kind) (when stopped " · stopped") (when-not open? (str " · " state)))]
-     [:div.ask-text text]
-     ;; The question and options come first; the reasoning waits behind a tap.
-     (when (or details evidence)
-       [:details.ask-details [:summary "Details"]
-        (when details [:p.ask-detail-text details])
-        (when evidence [:p.ask-evidence evidence])])
-     (into [:div.choices]
-           (map (fn [{oid :id label :label}]
-                  [:button.choice {:replicant/key oid :type "button" :disabled (not open?)
-                                   :class [(when (= oid recommended) "rec") (when (= oid picked) "picked")]
-                                   :on {:click #(pick! thread id oid)}}
-                   label
-                   (when (= oid recommended) [:span.rectag "recommended"])
-                   (when (= oid picked) [:span.rectag.picked-tag "picked"])]))
-           options)
-     (when open?
-       [:textarea.answer-box {:placeholder "Or answer in your own words" :aria-label (str "Answer to " id)
-                              :replicant/on-mount (fn [{:replicant/keys [node]}]
-                                                    (set! (.-value node) (get (local-answers thread (get-in @state [:threads thread])) id "")))
-                              ;; Typing stays local; leaving the box saves the answer to the draft.
-                              :on {:input (fn [e] (swap! drafts assoc [:answer thread id] (.. e -target -value)))
-                                   :change (fn [e] (post-super! thread "draft" {:ask id :answer (.. e -target -value)}))}}])]))
+(defn- listen!
+  "Follow the controller's changes. A burst of them refetches once."
+  []
+  (when-not @stream
+    (let [es (js/EventSource. "/api/super/stream")]
+      (reset! stream es)
+      (set! (.-onopen es) (fn [] (swap! state assoc :live true) (sync-super!)))
+      (set! (.-onerror es) (fn [] (swap! state assoc :live false)))
+      (.addEventListener es "changed"
+                         (fn [] (js/clearTimeout @soon)
+                           (reset! soon (js/setTimeout #(do (sync-super!) (sync-agents!)) 250)))))))
 
-(defn- event-view [thread picks asks replies {n :seq :keys [kind data]}]
-  (let [ask (when (= "ask-opened" kind) (some #(when (= (:id data) (:id %)) %) asks))]
-    (case kind
-      "thread-created" [:div.ev {:replicant/key n} [:span.ev-who "Thread"] (:title data)]
-      "worker-attached" [:div.ev {:replicant/key n} [:span.ev-who (:id data)] "Worker attached"]
-      "ask-opened" (when ask (ask-card thread picks replies ask))
-      "reply-sent" [:div.ev.you {:replicant/key n} [:span.ev-who "You"]
-                    (str/join "; " (remove str/blank? [(when (seq (:picks data)) (str "picked " (str/join ", " (picked-labels asks (:picks data)))))
-                                                        (when (seq (:answers data)) (str/join "; " (vals (:answers data))))
-                                                        (when (seq (:dismiss data)) "dismissed")
-                                                        (:note data)]))]
-      "reply-answered" [:div.ev {:replicant/key n} [:span.ev-who "Worker"] "read your reply"]
-      "asks-answered-in-chat" [:div.ev.you {:replicant/key n} [:span.ev-who "You"] "answered in the Worker's chat"]
-      "note" [:div.ev {:replicant/key n} [:span.ev-who "Progress"] (:text data)]
-      "milestone" [:div.ev.milestone {:replicant/key n} [:span.ev-who "Milestone"] (:text data)]
-      "thread-resolved" [:div.ev {:replicant/key n} [:span.ev-who "Archived"]]
-      nil)))
+;; ---- list ----------------------------------------------------------------
+
+(def glyphs {"on-you" "●" "working" "◐" "stuck" "✖" "done" "✓" "archived" "▪" "quiet" "·"})
+
+(def needs-you #{"stopped" "holding-up" "waiting" "needs-attention"})
+
+(defn- age-text [iso]
+  (when iso
+    (let [s (quot (- (js/Date.now) (.getTime (js/Date. iso))) 1000)]
+      (cond (< s 60) "now" (< s 3600) (str (quot s 60) "m") (< s 86400) (str (quot s 3600) "h") :else (str (quot s 86400) "d")))))
+
+
+(defn- row-view [selected {:keys [id title line status unread updated-at came-back]}]
+  [:a.row {:replicant/key id :href (str "#" id)
+           :class [(when unread "unread") (when (= id selected) "sel")]
+           :on {:click (fn [e] (.preventDefault e) (go! (str "#" id)))}}
+   [:span.g {:class status} (glyphs status "·")]
+   [:span.id id]
+   [:span.t title]
+   [:span.age (age-text updated-at)]
+   (when (and line (#{"on-you" "stuck"} status))
+     [:span.ln (first (str/split-lines (str line))) (when came-back " · came back")])])
+
+(defn- filter! [f]
+  (.setItem js/localStorage "inbox-filter" f)
+  (swap! state assoc :filter f))
+
+(defn- chip [current f label]
+  [:button.chip {:type "button" :class (when (= f current) "on") :on {:click #(filter! f)}} label])
+
+(defn- say!
+  "Send the Inbox composer's text to the Router, or to the thread it names."
+  []
+  (let [text (str/trim (get @drafts :say ""))]
+    (when-not (str/blank? text)
+      (swap! state assoc :saying true)
+      (-> (request "/api/super/say" {:method "POST" :headers {"Content-Type" "application/json"}
+                                     :body (js/JSON.stringify (clj->js {:id (str "s-" (random-uuid)) :text text}))})
+          (.then (fn [r]
+                   (swap! drafts dissoc :say)
+                   (when-let [el (.querySelector js/document ".say input")] (set! (.-value el) ""))
+                   (swap! state assoc :said (if (:thread r) (str "Sent to " (:thread r)) "Sent to the Router"))))
+          (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))
+          (.finally (fn [] (swap! state assoc :saying false) (sync-inbox!)))))))
+
+(defn- say-view [{:keys [saying said]}]
+  [:form.say {:on {:submit (fn [e] (.preventDefault e) (say!))}}
+   [:input.txt {:placeholder (or said "Tell the Router…") :aria-label "Message to the Router" :enterkeyhint "send"
+                :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) (get @drafts :say "")))
+                :on {:input (fn [e] (swap! drafts assoc :say (.. e -target -value)))}}]
+   [:button.send {:type "submit" :disabled saying} (if saying "…" "Send")]])
+
+(defn- list-view [{:keys [inbox inbox-error live agents] :as s}]
+  (let [f (:filter s "all")
+        sections (:sections inbox)
+        rows-of (fn [pred] (mapcat :threads (filter #(pred (:section %)) sections)))
+        n-you (count (rows-of needs-you))
+        n-archived (count (rows-of #{"archived"}))
+        shown (case f
+                "you" (filter #(needs-you (:section %)) sections)
+                "archived" (filter #(= "archived" (:section %)) sections)
+                (remove #(= "archived" (:section %)) sections))
+        selected (open-thread s)]
+    [:section.list
+     [:header.lh
+      [:h1 (if (pos? n-you) (str n-you " need you") "bbh")]
+      (when (seq agents)
+        [:a.link {:href (str "#s/" (:id (first agents)))
+                  :on {:click (fn [e] (.preventDefault e) (go! (str "#s/" (or (:current s) (:id (first agents))))))}}
+         "Sessions"])
+      [:span.live {:class (when-not live "off")} (if live "live" "offline")]]
+     [:div.chips (chip f "all" "All") (chip f "you" (str "Needs you " n-you)) (chip f "archived" (str "Archived " n-archived))]
+     (cond inbox-error [:p.empty inbox-error]
+           (nil? inbox) [:p.empty "Loading"]
+           (empty? shown) [:p.empty (if (= f "you") "Nothing needs you" "No threads")])
+     (for [{:keys [section title threads]} shown]
+       [:div {:replicant/key section}
+        [:div.sec {:class (when (needs-you section) "you")} title]
+        (map #(row-view selected %) threads)])
+     (when (and (= f "all") (pos? n-archived))
+       [:button.fold {:type "button" :on {:click #(filter! "archived")}} (str "▸ " n-archived " archived")])
+     (say-view s)]))
+
+;; ---- the selected thread ----------------------------------------------------
+
+(defonce timers (atom {}))
 
 (defn- send-reply!
-  "Send THREAD's draft picks and the note as one reply, with an id kept until
-  the controller has it, so a retry is the same reply. The reply removes the
-  draft in the controller."
-  [thread]
+  "Send BODY as THREAD's reply now. A stale reply is shown as a conflict."
+  [thread body]
+  (swap! state update :busy-super conj thread)
+  (-> (js/fetch (str "/api/super/threads/" thread "/reply")
+                (clj->js {:method "POST" :headers {"Content-Type" "application/json"}
+                          :body (js/JSON.stringify (clj->js body))}))
+      (.then (fn [response]
+               (-> (.json response)
+                   (.then (fn [b]
+                            (let [b (js->clj b :keywordize-keys true)]
+                              (cond (.-ok response) (swap! state update :conflicts dissoc thread)
+                                    (= 409 (.-status response)) (swap! state assoc-in [:conflicts thread] b)
+                                    :else (swap! state assoc :inbox-error (:error b)))))))))
+      (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))
+      (.finally (fn []
+                  (swap! state update :busy-super disj thread)
+                  (sync-super!)))))
+
+(defn- queue-reply!
+  "Send THREAD a reply after undo-ms, unless Undo comes first. LABEL says
+  what is being sent. A second answer replaces the first one still waiting."
+  [thread label body]
   (let [t (get-in @state [:threads thread])
-        picks (draft-picks t)
-        note (get @drafts [:note thread] (get-in t [:draft :note] ""))
-        answers (into {} (remove (comp str/blank? val)) (local-answers thread t))
-        version (get-in t [:draft :asks-version] (:asks-version t))
-        pending (local "super-pending" {})
-        draft (js/JSON.stringify (clj->js {:picks picks :answers answers :note note :asks-version version}))
-        ;; A retry of the same draft keeps its id, so the controller sees one reply.
-        ;; A changed draft is a new reply; reusing the id would return the old one.
-        id (or (when (= draft (get-in pending [thread "draft"])) (get-in pending [thread "id"]))
-               (str "p-" (random-uuid)))]
-    (local! "super-pending" (assoc pending thread {"id" id "draft" draft}))
-    (swap! state update :busy-super conj thread)
-    (-> (js/fetch (str "/api/super/threads/" thread "/reply")
-                  (clj->js {:method "POST" :headers {"Content-Type" "application/json"}
-                            :body (js/JSON.stringify (clj->js {:id id :asks-version version :picks picks :answers answers :note note}))}))
-        (.then (fn [response]
-                 (-> (.json response)
-                     (.then (fn [body]
-                              (let [body (js->clj body :keywordize-keys true)]
-                                (cond (.-ok response)
-                                      (do (local! "super-pending" (dissoc (local "super-pending" {}) thread))
-                                          (swap! drafts (fn [d] (into {} (remove (fn [[k _]] (and (vector? k) (= thread (second k))))) d))))
-                                      (= 409 (.-status response))
-                                      (do (local! "super-pending" (dissoc (local "super-pending" {}) thread))
-                                          (post-super! thread "discard-draft" {:id (str "dd-" (random-uuid))})
-                                          (swap! state assoc-in [:conflicts thread] body))
-                                      :else (swap! state assoc :inbox-error (:error body)))))))))
-        (.catch (fn [e] (swap! state assoc :inbox-error (.-message e))))
-        (.finally (fn []
-                    (swap! state update :busy-super disj thread)
-                    (sync-inbox!))))))
+        body (merge {:id (str "p-" (random-uuid)) :asks-version (:asks-version t) :picks {} :note ""} body)]
+    (js/clearTimeout (get @timers thread))
+    (swap! timers assoc thread
+           (js/setTimeout (fn []
+                            (swap! timers dissoc thread)
+                            (swap! state update :outgoing dissoc thread)
+                            (send-reply! thread body))
+                          undo-ms))
+    (swap! state assoc-in [:outgoing thread] {:label label :body body})))
 
-(defn- conflict-view [thread {:keys [asks]} t]
-  (let [answered (remove #(= "open" (:state %)) (:asks t))
-        label (fn [{:keys [options picks]}] (str/join ", " (map (fn [[_ o]] (or (some #(when (= o (:id %)) (:label %)) options) o)) picks)))]
-    [:p.conflict
-     (str "Already answered"
-          (when-let [a (first (filter #(#{"sent" "answered"} (:state %)) answered))]
-            (let [reply (last (filter #(contains? (:picks %) (:id a)) (:replies t)))]
-              (when reply (str ": " (label {:options (:options a) :picks (:picks reply)})))))
-          (when (empty? asks) ". Nothing is open."))]))
+(defn- undo! [thread]
+  (js/clearTimeout (get @timers thread))
+  (swap! timers dissoc thread)
+  (swap! state update :outgoing dissoc thread))
 
-(defn- super-thread-view [{:keys [threads conflicts busy-super inbox-error]} id]
+(defn- ask-card [thread outgoing busy {:keys [id text options recommended stopped kind details evidence revision evidence-sha]}]
+  (let [waiting (when outgoing (some (fn [[k v]] (when (= (name k) id) v)) (get-in outgoing [:body :picks])))
+        answer-key [:answer thread id]]
+    [:div.ask {:replicant/key id :class (when stopped "stopped")}
+     [:div.kind (str (name kind) (when stopped " · stopped"))]
+     [:div.q text]
+     (when (or details evidence)
+       [:details [:summary "Details"]
+        (when details [:p.detail details])
+        (when evidence [:p.evidence evidence])])
+     (when (= "review" (name kind))
+       [:button.opt.rec {:type "button" :disabled busy
+                         :on {:click #(post-super! thread "approve" {:id (str "ap-" (random-uuid)) :ask id
+                                                                     :revision revision :evidence-sha evidence-sha})}}
+        (str "Approve " (subs (str revision) 0 (min 8 (count (str revision)))))])
+     (into [:div.opts]
+           (map (fn [{oid :id label :label}]
+                  [:button.opt {:replicant/key oid :type "button" :disabled busy
+                                :class [(when (= oid recommended) "rec") (when (= oid waiting) "picked")]
+                                :on {:click #(queue-reply! thread label {:picks {id oid}})}}
+                   [:span label]
+                   (when (= oid recommended) [:span.tag "★ recommended"])]))
+           options)
+     [:form.own {:on {:submit (fn [e]
+                                (.preventDefault e)
+                                (let [v (str/trim (get @drafts answer-key ""))]
+                                  (when-not (str/blank? v)
+                                    (swap! drafts dissoc answer-key)
+                                    (set! (.-value (.querySelector (.-target e) "input")) "")
+                                    (queue-reply! thread v {:answers {id v}}))))}}
+      [:input.txt {:placeholder "Your own answer" :aria-label (str "Answer to " id) :enterkeyhint "send"
+                   :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) (get @drafts answer-key "")))
+                   :on {:input (fn [e] (swap! drafts assoc answer-key (.. e -target -value)))}}]
+      [:button.send {:type "submit" :disabled busy} "Send"]]]))
+
+(def progress-kinds
+  {"milestone" "milestone" "note" "note" "ask-opened" "asked" "reply-sent" "replied" "worker-started" "started"
+   "worker-finished" "finished" "worker-steered" "steered" "asks-answered-in-chat" "in chat"})
+
+(defn- progress-text [asks {:keys [kind data]}]
+  (case kind
+    ("milestone" "note") (:text data)
+    "ask-opened" (:text (some #(when (= (:id data) (:id %)) %) asks) (:text data))
+    "reply-sent" (str/join "; " (remove str/blank? (concat (for [[a o] (:picks data)
+                                                                   :let [ask (some #(when (= (name a) (:id %)) %) asks)]]
+                                                               (or (some #(when (= o (:id %)) (:label %)) (:options ask)) o))
+                                                             (vals (:answers data))
+                                                             [(when (seq (:dismiss data)) "dismissed") (:note data)])))
+    "worker-started" (str (:id data) " started")
+    "worker-finished" (str (:id data) " " (:state data) (when-let [l (:landed data)] (str ", landed " (subs l 0 (min 8 (count l))))))
+    "worker-steered" "by the Router"
+    "asks-answered-in-chat" "answered in the Worker's chat"
+    ""))
+
+(defn- clock [iso]
+  (when iso
+    (let [d (js/Date. iso)
+          pad #(.padStart (str %) 2 "0")]
+      (str (pad (.getHours d)) ":" (pad (.getMinutes d))))))
+
+(defn- progress-view [t]
+  (let [evs (take-last 8 (filter (comp progress-kinds :kind) (:events t)))]
+    (when (seq evs)
+      (list [:h2 "Progress"]
+            (for [{n :seq :keys [kind at] :as e} evs]
+              [:div.ev {:replicant/key n :class (when (= "milestone" kind) "ms")}
+               [:span.w (clock at)]
+               [:span [:span.k (progress-kinds kind)] " " (progress-text (:asks t) e)]])))))
+
+(defn- note-view [id busy]
+  [:form.own.noted {:on {:submit (fn [e]
+                                  (.preventDefault e)
+                                  (let [v (str/trim (get @drafts [:note id] ""))]
+                                    (when-not (str/blank? v)
+                                      (swap! drafts dissoc [:note id])
+                                      (set! (.-value (.querySelector (.-target e) "textarea")) "")
+                                      (queue-reply! id "note" {:note v}))))}}
+   [:textarea {:placeholder "Note to the Worker" :aria-label "Note" :rows 2
+               :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) (get @drafts [:note id] "")))
+               :on {:input (fn [e] (swap! drafts assoc [:note id] (.. e -target -value)))}}]
+   [:button.send {:type "submit" :disabled busy} "Send"]])
+
+(defn- status-text [{:keys [status execution]}]
+  (case status "on-you" "waiting on you" "stuck" "needs attention" (or execution status)))
+
+(defn- detail-view [{:keys [threads conflicts busy-super inbox-error outgoing agents inbox live]} id]
   (let [t (get threads id)
-        picks (draft-picks t)
-        note #(get @drafts [:note id] (get-in t [:draft :note] ""))
+        row (some #(when (= id (:id %)) %) (mapcat :threads (:sections inbox)))
         busy (contains? busy-super id)
-        open (filter #(= "open" (:state %)) (:asks t))
-        archived (:resolved-at t)]
-    [:div.super-thread
-     [:main#thread.thread
-      [:button.crumb {:on {:click #(show! :inbox)}} "‹ Inbox"]
-      (if t
-        (list [:h2.ttitle (str id " · " (:title t))]
-              [:p.tmeta (str "execution " (:execution t) (when-let [w (last (:workers t))] (str " · " (:id w) " " (:state w))))]
-              (when-let [c (get conflicts id)] (conflict-view id c t))
-              (when inbox-error [:p.conflict inbox-error])
-              (into [:div.events] (keep #(event-view id picks (:asks t) (:replies t) %)) (:events t)))
-        [:p.empty (or inbox-error "Loading the thread")])]
-     (when (and t (not archived))
-       [:div.bar
-        [:textarea.note-box {:placeholder "Note to the Worker" :aria-label "Note"
-                             :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) (note)))
-                             ;; Typing stays local; leaving the box saves the note to the draft.
-                             :on {:input (fn [e] (swap! drafts assoc [:note id] (.. e -target -value)))
-                                  :change (fn [e] (post-super! id "draft" {:note (.. e -target -value)}))}}]
-        [:div.bar-actions
-         (when-let [r (last (filter #(= "review" (:kind %)) open))]
-           [:button.send {:type "button" :disabled busy
-                          :on {:click #(post-super! id "approve" {:id (str "ap-" (random-uuid)) :ask (:id r)
-                                                                  :revision (:revision r) :evidence-sha (:evidence-sha r)})}}
-            (str "Approve " (subs (str (:revision r)) 0 (min 8 (count (str (:revision r))))))])
-         [:button.quiet {:type "button" :disabled (or busy (empty? open)) :on {:click #(post-super! id "dismiss" {:id (str "d-" (random-uuid))})}} "Dismiss"]
-         [:button.quiet {:type "button" :disabled busy :on {:click #(post-super! id "archive" {:id (str "a-" (random-uuid))})}} "Archive"]
-         [:button.send {:type "button" :disabled (or busy (and (empty? picks) (str/blank? (note)) (every? str/blank? (vals (local-answers id t)))))
-                        :on {:click #(send-reply! id)}} (if busy "Sending" "Send")]]])]))
+        open (sort-by :seq (filter #(= "open" (:state %)) (:asks t)))
+        w (last (:workers t))
+        session (some #(when (= (:conversation w) (:id %)) (:id %)) agents)]
+    [:section.detail
+     [:header.dh
+      [:div.top
+       [:button.back {:type "button" :on {:click back!}} "‹ Inbox"]
+       [:span.id id]
+       [:span.live {:class (when-not live "off")} (if live "live" "offline")]]
+      [:h1 (or (:title t) (:title row))]
+      [:div.meta
+       [:span.g {:class (:status row)} (glyphs (:status row) "·")] " " (status-text (merge {:execution (:execution t)} row))
+       (when w (str " · " (:id w) " " (name (:state w))))
+       (when session
+         (list " · " [:a {:href (str "#s/" session)
+                         :on {:click (fn [e] (.preventDefault e) (go! (str "#s/" session)))}} "Transcript ›"]))]]
+     [:div.body
+      (cond (nil? t) [:p.empty (or inbox-error "Loading")]
+            :else
+            (list
+             (when-let [c (get conflicts id)]
+               [:p.conflict (str "Already answered elsewhere" (when (empty? (:asks c)) "; nothing is open"))])
+             (when inbox-error [:p.conflict inbox-error])
+             (map #(ask-card id (get outgoing id) busy %) open)
+             (when (and (empty? open) (:summary t)) [:p.summary (:summary t)])
+             (progress-view t)
+             (when-not (:resolved-at t)
+               (list
+                (note-view id busy)
+                [:div.acts
+                 [:button {:type "button" :disabled busy
+                           :on {:click (fn [] (swap! state assoc-in [:kept-unread id] true)
+                                         (post-super! id "read" {:read false}))}} "Unread"]
+                 (when (seq open)
+                   [:button {:type "button" :disabled busy :on {:click #(post-super! id "dismiss" {:id (str "d-" (random-uuid))})}} "Dismiss"])
+                 [:button {:type "button" :disabled busy :on {:click #(post-super! id "archive" {:id (str "a-" (random-uuid))})}} "Archive"]]))))]]))
 
-(defn- app-view [{:keys [agents current conversations error attachments sending view inbox] :as s}]
+(defn- toast-view [{:keys [outgoing]}]
+  (when-let [[thread {:keys [label]}] (first outgoing)]
+    [:div.toast [:span "Sending " [:b label]]
+     [:button {:type "button" :on {:click #(undo! thread)}} "Undo"]]))
+
+(defn- empty-detail [{:keys [inbox]}]
+  [:section.detail.none
+   [:p.empty (if (pos? (:badge inbox 0)) "Pick a thread" (str "Nothing needs you · " (clock (.toISOString (js/Date.)))))]])
+
+(defn- session-view [{:keys [agents current conversations error attachments sending] :as s}]
   (let [conversation (get conversations current)
-        live (live? s current)
-        badge (:badge inbox 0)]
-    (into [:div.shell
-           [:header.masthead [:h1 "Agents"]]
-           (into [:nav.tabs
-                  [:button.tab.inbox-tab {:class (when view "current") :on {:click #(show! :inbox)}}
-                   [:span.tab-project "Inbox" (when (pos? badge) [:span.badge badge])]]]
-                 (map #(tab-view (when-not view current) %)) agents)]
-          (cond (= :inbox view) [(inbox-view s) (say-view s)]
-                (vector? view) [(super-thread-view s (second view))]
-                :else [(cond current (thread-view current conversation)
-                             (nil? agents) [:main#thread.thread (when error [:p.empty error])]
-                             :else [:main#thread.thread
-                                    [:p.empty "No live sessions. Start emacs-bbh and it appears here."]])
-                       (when current (status-view live (:busy conversation) error))
-                       (when live (attachments-view current (get attachments current)))
-                       (when live (composer-view current sending))]))))
+        live (live? s current)]
+    [:div.shell
+     [:header.masthead [:button.back {:type "button" :on {:click back!}} "‹ Inbox"] [:h1 "Sessions"]]
+     (into [:nav.tabs] (map #(tab-view current %)) agents)
+     (cond current (thread-view current conversation)
+           (nil? agents) [:main#thread.thread (when error [:p.empty error])]
+           :else [:main#thread.thread [:p.empty "No live sessions."]])
+     (when current (status-view live (:busy conversation) error))
+     (when live (attachments-view current (get attachments current)))
+     (when live (composer-view current sending))]))
+
+(defn- app-view [{:keys [view] :as s}]
+  (if (= :session (first view))
+    (session-view s)
+    (let [id (open-thread s)]
+      [:div.app {:class (when id "show-detail")}
+       (list-view s)
+       (if id (detail-view s id) (empty-detail s))
+       (toast-view s)])))
 
 ;; Dragging must not repaint the page, so the touch lives outside `state`.
 (defonce touch (atom nil))
@@ -581,7 +642,7 @@
 (defn- neighbour
   "The session STEP tabs from the current one, or nil at either end."
   [{:keys [agents current view]} step]
-  (when-let [i (when-not view (first (keep-indexed (fn [i a] (when (= current (:id a)) i)) agents)))]
+  (when-let [i (when (= :session (first view)) (first (keep-indexed (fn [i a] (when (= current (:id a)) i)) agents)))]
     (:id (get (vec agents) (+ i step)))))
 
 (defn- drag! [dx]
@@ -618,6 +679,41 @@
       (when-let [id (neighbour @state (if (neg? dx) 1 -1))]
         (select! id)))))
 
+(defn- sync-agents! []
+  (-> (request "/api/agents" {})
+      (.then (fn [agents]
+               (swap! state (fn [s] (let [s (assoc s :agents agents :error nil)]
+                                      (cond-> s (= :session (first (:view s))) (assoc :current (pick-current s))))))
+               (let [{:keys [current view] :as s} @state]
+                 (when (and (= :session (first view)) (live? s current))
+                   (sync-conversation! current)))))
+      (.catch (fn [e] (swap! state assoc :error (.-message e))))))
+
+(defonce syncing (atom false))
+
+(defn- tick!
+  "Poll what the stream does not push: a session while one is shown, and
+  everything while the stream is down."
+  []
+  (when-not (or @syncing (.-hidden js/document))
+    (let [{:keys [view live inbox-at]} @state]
+      (when (or (= :session (first view)) (not live))
+        (when (or (= :session (first view)) (> (- (js/Date.now) (or inbox-at 0)) fallback-ms))
+          (reset! syncing true)
+          (when-not live (sync-super!))
+          (-> (sync-agents!) (.finally #(reset! syncing false))))))))
+
+(defn- on-route! []
+  (let [view (route (.. js/location -hash))]
+    (when (= [:inbox] view) (reset! depth 0))
+    (swap! state assoc :view view :kept-unread {})
+    (case (first view)
+      :thread (sync-thread! (second view))
+      :session (do (swap! state assoc :current (second view))
+                   (to-bottom!)
+                   (sync-agents!))
+      nil)))
+
 (defn- near-bottom? []
   (when-let [el (thread)]
     (< (- (.-scrollHeight el) (.-scrollTop el) (.-clientHeight el)) 120)))
@@ -629,15 +725,17 @@
 
 (defonce started
   (do
-    (let [hash (subs (.. js/location -hash) 1)]
-      (cond (= "inbox" hash) (swap! state assoc :view :inbox)
-            (re-matches #"T\d+" hash) (swap! state assoc :view [:thread hash])))
+    (swap! state assoc :filter (or (.getItem js/localStorage "inbox-filter") "all"))
     (add-watch state :paint paint)
-    (paint nil nil nil @state)
-    (.addEventListener js/document "visibilitychange" sync!)
+    (on-route!)
+    (.addEventListener js/window "hashchange" on-route!)
+    (.addEventListener js/document "visibilitychange"
+                       #(when-not (.-hidden js/document) (sync-super!) (sync-agents!)))
     (doseq [[event handler] {"touchstart" touch-start "touchmove" touch-move
                              "touchend" touch-end "touchcancel" touch-cancel}]
       (.addEventListener js/document event handler #js {:passive true}))
-    (js/setInterval sync! poll-ms)
-    (sync!)
+    (js/setInterval tick! poll-ms)
+    (listen!)
+    (sync-super!)
+    (sync-agents!)
     true))
