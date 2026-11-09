@@ -280,7 +280,7 @@ Phase 5 (switch the laptop; you run make switch)
 14. Apply the asahi.scm diff, run `make switch`, then `sudo herd status guix-daemon` and `ps` to see `--max-jobs=0` and the builder URL.
 
 Phase 6: the `updates` integration and the nightly speculative bump.
-Phase 7: the nixpkgs bridge, moved out or dropped (see below).
+Phase 7: drop the nixpkgs bridge (decided 2026-11-09; see below). Until it lands, the prebuild keeps its `nixpkgs import` line.
 
 ## Verification
 
@@ -310,6 +310,8 @@ Phase 7: the nixpkgs bridge, moved out or dropped (see below).
 Not covered: out-of-Guix builds (`make stow` with pi-sci, pierre-diff-ansi and bun, dusk with cargo, kanata-sim, doom sync). They still run on the laptop.
 
 ## (e) The nixpkgs bridge: move it out, or drop it?
+
+**Decision (2026-11-09): drop it (Option B).** Option A stays below for the record.
 
 What it is [M]: modules/engstrand/nixpkgs.scm (175 lines), modules/engstrand/nixpkgs/bridge.scm (431), lock.sexp (4946), packages.sexp (26 attrs), signing-key.pub, desktop/build/nixpkgs/bridge.scm (CLI), docs/nixpkgs-bridge/design.html, the Make targets nixpkgs-lock, -key, -authorize, -import and -verify, and the `nixpkgs` source in updates. `lock` and `versions` run `nix eval` through `guix shell nix` (bridge.scm line 156). `import` copies NARs from cache.nixos.org into /gnu/store, rewriting /nix/store and keeping each hash, and the gexp compiler refuses to evaluate when an item is missing (nixpkgs.scm line 74). Users: shell.scm (fish fzf zoxide ripgrep fd git neovim), development.scm (13 tools), herdr.scm (jujutsu), desktop.scm (ghostty, mesa, locales), dotfiles.scm (LOCALE_ARCHIVE) and hex.scm (Asahi Vulkan ICD from nixpkgs mesa).
 
@@ -343,7 +345,15 @@ What each package becomes [M: `guix repl` find-packages-by-name at guix 704ad8c,
 
 Dropping removes about 5.6k lines, 5 Makefile targets, a signing key, `nix eval` memory spikes and the cache.nixos.org dependency. You lose the versions that lead nixpkgs-unstable, most visibly jj (0.46 vs 0.41) and ty and ghostty, which need custom packages.
 
-My lean: **A** if you value the newest jj, ty and ghostty (the builder makes A cheaper, since it becomes the only importer). **B** if lagging versions are fine, because it's simpler and nothing on the laptop touches Nix. Your call.
+### Drop steps (phase 7)
+
+1. Before switching, add custom packages for ty (a GitHub release binary, copy-build-system like tailscale.scm) and ghostty (built on the builder, or an upstream aarch64 binary if one exists [G]). Decide jj: Guix 0.41, or a release-binary `jujutsu` package. First check herdr, jjui and bbh for features newer than 0.41.
+2. In shell.scm, development.scm, herdr.scm and desktop.scm, replace `(nixpkgs-package "x")` with `specification->package` or the custom packages. Drop `nixpkgs-system-services`, the LOCALE_ARCHIVE in dotfiles.scm, and the nixpkgs key in asahi.scm.
+3. In hex.scm, point VK_DRIVER_FILES at Guix mesa's asahi ICD, after confirming Guix mesa ships it [I].
+4. Delete modules/engstrand/nixpkgs.scm, modules/engstrand/nixpkgs/, desktop/build/nixpkgs/ and docs/nixpkgs-bridge/. Remove the five nixpkgs-* Make targets and the `nixpkgs-import` prerequisites of build, switch, home-build and home-apply. Remove the `nixpkgs` source from desktop/bin/updates and its test in desktop/build/updates/test.bb, and update checks.edn.
+5. Verify: `make prebuild`, then `make home-apply` and `make switch` with nothing built locally. Check that ghostty renders, hex finds Vulkan, and fish, jj and nvim start. Remove ~/.config/guix/nixpkgs-bridge and ~/.cache/nixpkgs-bridge afterwards.
+
+My earlier lean, kept for the record: **A** if you value the newest jj, ty and ghostty (the builder makes A cheaper, since it becomes the only importer). **B** if lagging versions are fine, because it's simpler and nothing on the laptop touches Nix. Your call.
 
 ## Open questions
 
