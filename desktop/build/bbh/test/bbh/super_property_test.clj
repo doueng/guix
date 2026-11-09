@@ -24,6 +24,11 @@
 
 (defn- ids [state kind] (sort-by model/id-order (keys (kind state))))
 
+(defn- thread-of
+  "The thread of Worker WORKER, or T9, a thread nothing has, for a Worker nothing has."
+  [state worker]
+  (or (get-in state [:workers worker :thread]) "T9"))
+
 (defn- live-workers
   "Workers that still hold a token, so their session can call the controller."
   [state]
@@ -76,7 +81,7 @@
                           [:controller {:id id :command :finish-worker! :args (assoc args :worker worker)}]))
       :cancel! (let [archived (keep #(when (and (get-in state [:threads (:thread %) :resolved-at]) (model/active-states (:state %))) (:id %)) (vals (:workers state)))]
                  [(pick [:owner :router] c) {:id id :command :cancel!
-                                             :args {:worker (if (and (seq archived) (odd? b)) (pick archived a) worker) :reason (pick ["stop" "" "stop"] b)}}])
+                                             :args {:thread (thread-of state (if (and (seq archived) (odd? b)) (pick archived a) worker)) :reason (pick ["stop" "" "stop"] b)}}])
       :cancel-delivered! [:controller {:id id :command :cancel-delivered!
                                        :args {:worker (pick-id (keep #(when (= :cancelling (:state %)) (:id %)) (vals (:workers state))) b worker)}}]
       ;; A session that ended stays ended until it is resumed, as in Super.tla.
@@ -94,7 +99,7 @@
                  [:owner {:id id :command :resume! :token-hash (str "h" i) :policy policy
                           :args {:thread (if (and (seq ended) (odd? b)) (pick ended c) thread)}}])
       :steer! [(pick [:owner :router (when live [:worker live])] (if live c (mod c 2)))
-               {:id id :command :steer! :args {:worker worker :text (pick ["go on" " "] b)}}]
+               {:id id :command :steer! :token-hash (str "h" i) :policy policy :args {:thread (thread-of state worker) :text (pick ["go on" " "] b)}}]
       :ask! (when live
               (let [t (get-in state [:workers live :thread])
                     kind (pick [:question :question :action :review] b)]
@@ -272,14 +277,15 @@
        :start-worker!
        (cond (and t (= :router principal) (not (get-in before [:outbox (:for args) :origin])))
              (when (not= :invalid (:error refused)) (bad :router-start-without-a-message refused))
-             (:resolved-at t) (when (not= :archived (:error refused)) (bad :started-on-archived))
+             (and (:resolved-at t) (not refused) (get-in after [:threads (:thread args) :resolved-at])) (bad :archived-not-reopened)
              refused nil
              :else (let [w (get-in after [:workers (:id result)])
                          full? (>= (count (filter #(model/holds-slot? before %) (vals (:workers before)))) cap)]
                      (concat
                       (when (not= (:state w) (if full? :queued :starting)) (bad :cap-decision (:state w)))
                       (when (and full? (not= (str cap " Workers already running") (:reason result))) (bad :queued-reason (:reason result)))
-                      (when (not= (:generation w) (inc (count (:history t)))) (bad :generation))
+                      ;; A Worker it replaced has joined the history.
+                      (when (not= (:generation w) (inc (count (get-in after [:threads (:thread args) :history])))) (bad :generation))
                       (when (not= (:origin w) (if (= :owner principal) :owner (get-in before [:outbox (:for args) :origin])))
                         (bad :origin (:origin w))))))
        :resume!
@@ -329,18 +335,19 @@
        :draft!
        (when (not= (get-in before [:threads (:thread args) :updated-at]) (get-in after [:threads (:thread args) :updated-at]))
          (bad :draft-moved-the-thread))
+       ;; Steering a Worker whose session ended resumes it first, so it is delivered too.
        :steer!
-       (let [w (get-in before [:workers (:worker args)])
-             deliverable? (and (#{:working :waiting} (:state w)) (:conversation w))]
+       (let [w (get-in before [:workers (get-in before [:threads (:thread args) :worker])])
+             deliverable? (and (#{:working :waiting} (:state w)) (:conversation w) (not (model/session-ended? w)))]
          (cond refused (when (and deliverable? (not (vector? principal)))
                          (when (not= (if (str/blank? (:text args)) :invalid ::accepted) (:error refused))
                            (bad :steer-refused refused)))
-               (not (and deliverable? (some #(= (str "[Steering] " (:text args)) (:text %)) (new-rows before after))))
+               (not (some #(= (str "[Steering] " (:text args)) (:text %)) (new-rows before after)))
                (bad :steer-not-delivered)))
        ;; There is no lease: the owner and the Router cancel any Worker that runs
        ;; or waits to, on an archived thread too.
        :cancel!
-       (let [w (get-in before [:workers (:worker args)])]
+       (let [w (get-in before [:workers (get-in before [:threads (:thread args) :worker])])]
          (when (and refused (#{:queued :starting :working :waiting} (:state w)) (not (str/blank? (:reason args))))
            (bad :cancel-refused refused)))
        :say!

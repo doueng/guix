@@ -13,7 +13,7 @@ description: Model-check the bbh super Worker, ask and reply lifecycles and the 
 | --- | --- | --- |
 | `CapRespected` | At most `Cap` launched Workers hold a slot (`holds-slot?`). | More processes than the policy allows. |
 | `OneWorkerPerThread` | A thread has at most one queued or active Worker. | Two Workers act on one thread. |
-| `NoLaunchOnArchived` | No Worker is launched for an archived thread. | A process starts for work the person put away. |
+| `NoLaunchOnArchived` | No Worker is launched for a thread that stays archived; a start reopens it. | A process starts for work the person put away. |
 | `OpenAskHasWorker` | An open ask has a live Worker. | The person answers into the void. |
 | `WaitingMeansStopped` | A Worker is `:waiting` only while one of its stopped asks is open. | The thread says it waits for the person while it does not. |
 | `StoppedAskWaits` | An open stopped ask keeps its Worker waiting. | The Worker runs on without the answer it stopped for. |
@@ -27,7 +27,7 @@ description: Model-check the bbh super Worker, ask and reply lifecycles and the 
 
 Bounds. `Super.workers.cfg` has 3 Workers, 3 threads, a cap of 2 and no asks. `Super.asks.cfg` has 2 Worker generations on 1 thread, 2 asks and 2 replies. `Super.chat.cfg` adds turns, typed prompts and health passes (`Chat = TRUE`) on 1 Worker, 2 asks and 1 reply. `Workflow.change.cfg` has two overlapping `wf attest` calls and `Workflow.serial.cfg` has one. A pass covers these bounds only.
 
-Left out. The `:for` record on Router commands (`ReplaceWorker` models a `:replaces` start with a session-ended Worker as the replaced one), the resume text, steering, job exits, what `health` reports beyond the live session, its turn and the person's prompts, a session the person reopens outside bbh, the Router's routing, outbox rows other than a reply's, tokens, `asks-version` staleness (the model's person always replies to the current version), and the SQL store. Gate results are chosen freely, so the wf model covers every pass, fail and pending order but not what a gate checks.
+Left out. The `:for` record on Router commands (`StartWorker` models the implicit replace of a session-ended Worker and the reopen of an archived thread), the resume text, steering, job exits, what `health` reports beyond the live session, its turn and the person's prompts, a session the person reopens outside bbh, the Router's routing, outbox rows other than a reply's, tokens, `asks-version` staleness (the model's person always replies to the current version), and the SQL store. Gate results are chosen freely, so the wf model covers every pass, fail and pending order but not what a gate checks.
 
 ## Coverage
 

@@ -150,29 +150,30 @@
 
 (declare fold* worker-of)
 
-(defn- replacement
-  "The events that end Worker REPLACES of THREAD so a new Worker NEW can take
-  its place: the old Worker failed. Only a Worker whose session ended is
-  replaced; a live one is cancelled instead."
-  [state {:keys [principal]} thread replaces for new]
-  (when replaces
-    (let [old (worker-of state replaces)]
-      (when (= :controller principal) (refuse :forbidden :field :replaces))
-      (when (not= thread (:thread old)) (refuse :invalid :field :replaces :message (str replaces " is not " thread "'s Worker")))
-      (when-not (session-ended? old) (refuse :alive :worker replaces :message (str replaces "'s session has not ended; cancel it instead")))
-      [{:kind :worker-finished :thread thread
-        :data (merge {:id replaces :state :failed :reason (str "Replaced by " new (when for (str " as " for " asked")))}
-                     (authority state principal for))}])))
+(defn- clearing
+  "The events that clear THREAD for a new Worker NEW: an archived thread is
+  reopened, and a Worker whose session ended fails, replaced. A Worker still
+  running or queued keeps the thread; cancel it first."
+  [state principal thread for new]
+  (let [t (thread-of state thread)
+        old (some->> (thread-worker state thread) (get (:workers state)))]
+    (when (and old (not (session-ended? old)))
+      (refuse :thread-has-worker :thread thread :worker (:id old)
+              :message (str thread " has Worker " (:id old) " running; cancel it first, or steer it")))
+    (cond-> []
+      (:resolved-at t) (conj {:kind :thread-reopened :thread thread :data (or (authority state principal for) {})})
+      old (conj {:kind :worker-finished :thread thread
+                 :data (merge {:id (:id old) :state :failed :reason (str "Replaced by " new (when for (str " as " for " asked")))}
+                              (authority state principal for))}))))
 
-(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo check bench repro for replaces] :as args} :args :keys [token-hash policy requires principal] :as cmd}]
+(defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo check bench repro for] :as args} :args :keys [token-hash policy requires principal]}]
   (let [id (next-id state :workers "W")
-        ended (replacement state cmd thread replaces for id)
-        state (reduce fold* state ended)
+        _ (thread-of state thread)
+        origin (request-origin state principal for)
+        cleared (clearing state principal thread for id)
+        state (reduce fold* state cleared)
         t (thread-of state thread)
-        policy (merge default-policy policy)
-        origin (request-origin state principal for)]
-    (when (:resolved-at t) (refuse :archived :thread thread :message (str thread " is archived; start a new thread")))
-    (when-let [w (thread-worker state thread)] (refuse :thread-has-worker :thread thread :worker w))
+        policy (merge default-policy policy)]
     (when-not (keyword? workflow) (refuse :invalid :field :workflow))
     (when (str/blank? brief) (refuse :invalid :field :brief))
     (when (str/blank? repo) (refuse :invalid :field :repo))
@@ -182,7 +183,7 @@
                           :origin origin}
                    check (assoc :check check) bench (assoc :bench bench) repro (assoc :repro repro))
           reason (blocked-by state policy (assoc worker :thread thread))]
-      {:events (into (vec ended)
+      {:events (into cleared
                      [{:kind :worker-started :thread thread
                        :data (assoc worker :state (if reason :queued :starting) :queued-reason reason)}
                       {:kind :token-issued :thread thread :data {:hash token-hash :principal [:worker id]}}])
@@ -235,8 +236,10 @@
     {:events [{:kind :worker-finished :thread (:thread w) :data (cond-> {:id worker :state state-after :reason reason} (and landed (= :done state-after)) (assoc :landed landed))}]
      :result worker}))
 
-(defmethod decide* :cancel! [state {{:keys [worker reason for]} :args :keys [principal]}]
-  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+(defmethod decide* :cancel! [state {{:keys [thread reason for]} :args :keys [principal]}]
+  (let [_ (thread-of state thread)
+        worker (or (thread-worker state thread) (refuse :no-worker :thread thread :message (str thread " has no Worker to cancel")))
+        w (get-in state [:workers worker])]
     (when-not (or (#{:starting :working :waiting} (:state w)) (= :queued (:state w))) (refuse :not-running :worker worker))
     (when (str/blank? reason) (refuse :invalid :field :reason))
     {:events [{:kind :cancel-requested :thread (:thread w)
@@ -357,15 +360,20 @@
   (when-not (deliverable? w) (refuse :not-running :worker (:id w)))
   w)
 
-(defmethod decide* :steer! [state {{:keys [worker text for]} :args :keys [principal]}]
-  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
-    (deliverable-worker! w)
-    (when (str/blank? text) (refuse :invalid :field :text))
-    {:events [{:kind :worker-steered :thread (:thread w)
-               :data (merge {:worker worker :text text :outbox (next-id state :outbox "o")
-                             :conversation (:conversation w) :mailbox-text (str "[Steering] " text)}
-                            (authority state principal for))}]
-     :result worker}))
+(defmethod decide* :steer! [state {{:keys [thread text for]} :args :keys [principal] :as cmd}]
+  (let [t (thread-of state thread)
+        w (or (get-in state [:workers (:worker t)]) (refuse :no-worker :thread thread :message (str thread " has no running Worker; start one")))
+        _ (when (str/blank? text) (refuse :invalid :field :text))
+        ;; A Worker whose session ended is resumed first, so the text reaches its new session.
+        resumed (when (session-ended? w) (:events (decide* state (assoc cmd :command :resume! :args {:thread thread}))))
+        state (reduce fold* state resumed)
+        w (deliverable-worker! (get-in state [:workers (:id w)]))]
+    {:events (into (vec resumed)
+                   [{:kind :worker-steered :thread thread
+                     :data (merge {:worker (:id w) :text text :outbox (next-id state :outbox "o")
+                                   :conversation (:conversation w) :mailbox-text (str "[Steering] " text)}
+                                  (authority state principal for))}])
+     :result (cond-> {:worker (:id w)} resumed (assoc :resumed true))}))
 
 (defmethod decide* :job-exited! [state {{:keys [worker job exit log seen]} :args}]
   (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
@@ -883,6 +891,9 @@
 
 (defmethod fold* :thread-resolved [state {:keys [thread seq]}]
   (update-in state [:threads thread] assoc :resolved-at seq))
+
+(defmethod fold* :thread-reopened [state {:keys [thread]}]
+  (update-in state [:threads thread] assoc :resolved-at nil))
 
 (defmethod fold* :worker-steered [state {{:keys [summary outbox conversation mailbox-text]} :data :keys [thread] :as event}]
   (let [state (-> state (bump :outbox)

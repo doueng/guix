@@ -73,7 +73,7 @@ Two identities are kept apart.
 
 **Reply.** Your disposition of one or more asks on a thread: picks and notes, or an explicit dismissal. Replies are batched into one message per Worker and carry a stable reply id, so a repeated Send is one logical reply.
 
-**Message record.** The Router may name the message of yours it acts for, with `:for "o66"` on `steer!`, `cancel!` or `start-worker!`, including one that `:replaces` a Worker whose session ended. The controller checks that it recorded that message for the Router and writes it and its origin into the command's event, so the log says who asked. It grants nothing: the Router may act on any Worker without it.
+**Message record.** The Router may name the message of yours it acts for, with `:for "o66"` on `steer!`, `cancel!` or `start-worker!`. Each names a thread, never a Worker: a start on a thread whose Worker's session ended replaces that Worker, a start on an archived thread reopens it (`:thread-reopened`), and a steer of a Worker whose session ended resumes it first. The Router's verbs and a Worker's `super-*` helpers come from one table, `bbh.super.verbs`. The controller checks that it recorded that message for the Router and writes it and its origin into the command's event, so the log says who asked. It grants nothing: the Router may act on any Worker without it.
 
 ## 5. Data model
 
@@ -200,13 +200,14 @@ The badge counts the first three. Progress notes update the thread's summary lin
 
 ```clojure
 (thread! "Improve bbh web layout")                       ; => "T12"
-(start-worker! {:thread "T12" :workflow :change :brief ... :project "guix" :for "o12"})
+(start-worker! {:thread "T12" :workflow :change :brief ... :project "guix" :for "o12"}) ; the Router: (super-start! "T12" brief :for "o12"),
+                                                          ; the rest from the thread's last Worker
 (ask! {:kind :question :text ... :options [...] :details ... :evidence ... :stopped true})
 (note! "progress text")                                    ; summary only
 (milestone! "pushed 3 commits")                           ; makes the thread New
 (reply! "T12" {:asks-version 5120 :picks {...} :answers {...} :note ... :dismiss #{}})
-(steer! "W7" "also handle the phone layout")
-(cancel! "W7" "reason")
+(steer! "T12" "also handle the phone layout")             ; resumes a Worker whose session ended first
+(cancel! "T12" "reason")
 (resume! "T12")                                         ; a Worker whose session ended
 (approve! "T12" {:revision "c068de11" :evidence-sha ...})
 ```

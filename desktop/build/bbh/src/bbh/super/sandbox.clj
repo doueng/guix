@@ -5,6 +5,7 @@
   host namespaces. Commands carry the pane's Router token, never the owner's."
   (:require [bbh.sysenv :as sysenv]
             [bbh.super.client :as client]
+            [bbh.super.verbs :as verbs]
             [sci.core :as sci]))
 
 (defn- call! [command args]
@@ -12,20 +13,7 @@
         {:keys [ok error message data]} (client/call! {:command command :args args :token token})]
     (if error (throw (ex-info (str "bbh super: " (name error) (when message (str ", " message))) (or data {}))) ok)))
 
-(def bindings
-  {'super-threads (fn super-threads [] (call! :threads {}))
-   'super-projects (fn super-projects [] (call! :projects {}))
-   'super-thread (fn super-thread [id] (call! :thread {:id id}))
-   'super-ask (fn super-ask [id] (call! :ask {:id id}))
-   'super-reply (fn super-reply [id] (call! :reply {:id id}))
-   'super-worker (fn super-worker [id] (call! :worker {:id id}))
-   'super-events (fn super-events [{:keys [thread after]}] (call! :events {:thread thread :after after}))
-   'super-thread! (fn super-thread! [title] (call! :thread! {:title title}))
-   'super-start-worker! (fn super-start-worker! [spec] (call! :start-worker! spec))
-   'super-steer! (fn super-steer! ([worker text] (super-steer! worker text {})) ([worker text opts] (call! :steer! (merge (select-keys opts [:for]) {:worker worker :text text}))))
-   'super-cancel! (fn super-cancel! ([worker reason] (super-cancel! worker reason {})) ([worker reason opts] (call! :cancel! (merge (select-keys opts [:for]) {:worker worker :reason reason}))))
-   'super-note! (fn super-note! [id text] (call! :note! {:thread id :text text}))
-   'super-milestone! (fn super-milestone! [id text] (call! :milestone! {:thread id :text text}))})
+(def bindings "The Router's verbs, from the one table in bbh.super.verbs." (verbs/bind call! verbs/router))
 
 (defn context [bindings] (sci/init {:namespaces {'user bindings}}))
 

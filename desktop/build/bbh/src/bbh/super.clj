@@ -172,25 +172,33 @@
                   (into {}))]
     (merge used listed)))
 
-(defn- resolve-project
-  "ARGS of start-worker! with :project replaced by its :repo, and its :check
-  unless ARGS name one. An unknown name is refused with the known ones."
-  [c {:keys [project] :as args}]
-  (if-not project
-    args
-    (let [all (projects c)
-          p (or (get all (name project))
+(defn- resolve-start
+  "ARGS of start-worker! with what they leave out filled in, so a thread and a
+  brief are enough to continue a thread. :project names a project, which brings
+  its :repo and :check; an unknown name is refused with the known ones. Without
+  one, the thread's last Worker brings its :repo, :check and :bench. Its
+  :workflow is the default either way. A :repo that is a known project's
+  brings that project's :check. What ARGS name always wins."
+  [c {:keys [thread project] :as args}]
+  (let [all (projects c)
+        last-w (->> (vals (:workers @(:state c))) (filter #(= thread (:thread %))) (sort-by (comp model/id-order :id)) last)
+        p (when project
+            (or (get all (name project))
                 (throw (ex-info (str "no project " (pr-str (name project)) "; known: " (str/join ", " (sort (keys all))))
-                                {:error :no-such-project :projects (vec (sort (keys all)))})))]
-      (cond-> (-> args (dissoc :project) (assoc :repo (:repo p)))
-        (and (not (:check args)) (:check p)) (assoc :check (:check p))))))
+                                {:error :no-such-project :projects (vec (sort (keys all)))}))))
+        from (cond p (select-keys p [:repo :check])
+                   (and last-w (or (nil? (:repo args)) (= (:repo args) (:repo last-w)))) (select-keys last-w [:repo :check :bench]))
+        args (merge (select-keys last-w [:workflow]) from (dissoc args :project))
+        known (when-let [r (:repo args)] (some #(when (= (str (fs/normalize r)) (str (fs/normalize (:repo %)))) %) (vals all)))]
+    (cond-> args
+      (and (not (:check args)) (:check known)) (assoc :check (:check known)))))
 
 (defn- start-worker*
   "Commit start-worker! CMD for PRINCIPAL with the workflow's requirements and
   the policy, launch the Worker unless it queued or this is a repeat, and return
   its result with where it runs."
   [c principal cmd]
-  (let [{:keys [args] :as cmd} (update cmd :args #(resolve-project c %))
+  (let [{:keys [args] :as cmd} (update cmd :args #(resolve-start c %))
         t (new-token)
         requires (try (:requires (workflow/load-workflow (:workflow args)))
                       (catch Exception _ (throw (ex-info (str "unknown workflow " (pr-str (:workflow args))) {:error :unknown-workflow}))))
@@ -200,21 +208,34 @@
       (launch! c w t))
     (merge (:result r) (select-keys (get-in @(:state c) [:workers (:id (:result r))]) [:state :workspace :buffer :conversation :wf-run]))))
 
+(defn- reopen!
+  "Open resumed Worker WORKER's buffer on its conversation and wf run with
+  its new TOKEN, for the command with id ID. A buffer that does not open is an
+  error, and the Worker shows as ended again on the next health pass."
+  [{:keys [state launch] :as c} worker token id]
+  (let [w (get-in @state [:workers worker])
+        buffer ((:open! launch) {:repo (:repo w) :workspace (:workspace w) :thread (:thread w)
+                                 :title (get-in @state [:threads (:thread w) :title])
+                                 :conversation (:conversation w) :token token :wf-run (:wf-run w)})]
+    (run! c :controller {:id (str "resumed-" id) :command :worker-prepared! :args {:worker worker :buffer buffer}})))
+
 (defn- resume*
-  "Commit resume! CMD for PRINCIPAL, then reopen the Worker's buffer on its
-  conversation and wf run with the new token. Returns the Worker's id. A
-  buffer that does not open is an error, and the Worker shows as ended again
-  on the next health pass."
-  [{:keys [state launch] :as c} principal cmd]
+  "Commit resume! CMD for PRINCIPAL, then reopen the Worker's buffer. Returns
+  the Worker's id."
+  [c principal cmd]
   (let [t (new-token)
-        r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c)))
-        w (get-in @state [:workers (:result r)])]
-    (when-not (:repeat? r)
-      (let [buffer ((:open! launch) {:repo (:repo w) :workspace (:workspace w) :thread (:thread w)
-                                     :title (get-in @state [:threads (:thread w) :title])
-                                     :conversation (:conversation w) :token t :wf-run (:wf-run w)})]
-        (run! c :controller {:id (str "resumed-" (:id cmd)) :command :worker-prepared! :args {:worker (:id w) :buffer buffer}})))
-    (:id w)))
+        r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c)))]
+    (when-not (:repeat? r) (reopen! c (:result r) t (:id cmd)))
+    (:result r)))
+
+(defn- steer*
+  "Commit steer! CMD for PRINCIPAL. When it resumed a Worker whose session
+  ended, reopen its buffer, which then takes the steering text."
+  [c principal cmd]
+  (let [t (new-token)
+        r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c)))]
+    (when (and (:resumed (:result r)) (not (:repeat? r))) (reopen! c (:worker (:result r)) t (:id cmd)))
+    (:result r)))
 
 (defn- principal-of [state token]
   (when (string? token)
@@ -372,6 +393,7 @@
               {:ok (cond-> (:result r) (not (:repeat? r)) (assoc :token t))})
             :start-worker! {:ok (start-worker* c principal cmd)}
             :resume! {:ok (resume* c principal cmd)}
+            :steer! {:ok (steer* c principal cmd)}
             :cancel!
             (let [r (run! c principal cmd)]
               (reconcile! c)

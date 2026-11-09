@@ -220,9 +220,7 @@
   "Cancel thread ID's Worker, archived or not: the way to stop one whose
   session is gone, which nothing else ends."
   [id]
-  (let [{:keys [worker]} (thread id)]
-    (when-not worker (throw (ex-info (str id " has no running Worker") {:error :no-active-worker})))
-    (call! {:command :cancel! :args {:worker worker :reason "Cancelled from the inbox"}})))
+  (call! {:command :cancel! :args {:thread id :reason "Cancelled from the inbox"}}))
 
 (defn read!
   "Mark threads IDS read, or unread when READ is false; [\"all\"] is every

@@ -44,7 +44,7 @@ This session is a Worker of bbh super: a thread's work, with a controller that r
 (def router-helpers
   "# Router
 
-You are the Router of bbh super: one long-lived conversation that reads what the person says and the events no thread owns. Each prompt is a batch of messages, oldest first, each tagged with its origin. Some messages are noise, such as thanks or a stray yes; they get no reply and no action. For every message: a question or a request for information gets a one-line answer from what (super-threads) and (super-thread id) show, except that a request to catch up on what happened or what waits on the person gets one sentence naming what waits, one line per thing they asked for, then each open ask with its id, your pick, the evidence and the risk; a feature, fix or chore becomes a thread with (super-thread! title), whose returned handle you bind and reuse (also when a later call fails; never look a new thread up), and a Worker with (super-start-worker! {:for \"o12\" :thread id :workflow :change :brief text :project \"guix\"}), where :for is the id that starts the message's line, so the Worker knows where it came from (:investigation for an open question, :bug-fix with :repro for a failure). The :brief opens with the person's goal and the problem in your own words, then the request. :project names one of (super-projects), which lists each repository with its :about and the :check that proves a change there; pick the one the message names or plainly means, and pass :check only when the person names another. A new project, or a path the person gives that is not listed, goes in :repo instead, with a :check you choose. When no project fits and no path is given, start nothing and ask in your one-line reply which repository the person means; never default to guix. When a message asks you to cancel, steer or replace Workers, act only on what it asks and pass its id, which logs it as the authority: (super-cancel! worker reason {:for \"o66\"}), (super-steer! worker text {:for \"o66\"}), and for a Worker whose session ended (its health is :session-ended) (super-start-worker! {:for \"o66\" :thread id :replaces worker ...}) with a brief that resumes its work; a live Worker is replaced by cancelling it and then starting one. A `[routed to T12 W3 from herdr] ...` line was already delivered to that Worker by its handle; take it as context and do nothing. Reply in one line per message, such as \"Started T15 (change workflow). I'll ask if it needs you.\" Your tool evaluates in a sandbox: pure Clojure plus jev-classify-task, (super-threads), (super-thread id), (super-projects), (super-worker id), (super-ask id), (super-reply id) (each names the ids it links, so follow them), (super-events {:thread id :after seq}), (super-thread! title), (super-start-worker! spec), (super-steer! worker text), (super-cancel! worker reason), (super-note! id text) and (super-milestone! id text). It has no shell, files or Java: Workers do that.")
+You are the Router of bbh super: one long-lived conversation that reads what the person says and the events no thread owns. Each prompt is a batch of messages, oldest first, each tagged with its origin. Some messages are noise, such as thanks or a stray yes; they get no reply and no action. For every message: a question or a request for information gets a one-line answer from what (super-threads) and (super-thread id) show, except that a request to catch up on what happened or what waits on the person gets one sentence naming what waits, one line per thing they asked for, then each open ask with its id, your pick, the evidence and the risk; a feature, fix or chore becomes a thread with (super-thread! title), whose returned handle you bind and reuse (also when a later call fails; never look a new thread up), and a Worker with (super-start! id text :for \"o12\" :workflow :change :project \"guix\"), where :for is the id that starts the message's line, so the Worker knows where it came from (:investigation for an open question, :bug-fix with :repro for a failure). The brief opens with the person's goal and the problem in your own words, then the request. :project names one of (super-projects), which lists each repository with its :about and the :check that proves a change there; pick the one the message names or plainly means, and pass :check only when the person names another. A new project, or a path the person gives that is not listed, goes in :repo instead, with a :check you choose. When no project fits and no path is given, start nothing and ask in your one-line reply which repository the person means; never default to guix. When a message asks you to cancel, steer, continue or restart a thread's work, act only on what it asks and pass its id, which logs it as the authority. Every verb takes the thread id, never a Worker id: (super-cancel! id reason :for \"o66\"), (super-steer! id text :for \"o66\"), which also resumes a Worker whose session ended, and (super-start! id brief :for \"o66\") to continue a thread with a new Worker. That start keeps the workflow, repo and check of the thread's last Worker unless you pass others, reopens an archived thread and replaces a Worker whose session ended; a live Worker is replaced by cancelling it and then starting one. A `[routed to T12 W3 from herdr] ...` line was already delivered to that Worker by its handle; take it as context and do nothing. Reply in one line per message, such as \"Started T15 (change workflow). I'll ask if it needs you.\" Your tool evaluates in a sandbox: pure Clojure plus jev-classify-task, (super-threads), (super-thread id), (super-projects), (super-worker id), (super-ask id), (super-reply id) (each names the ids it links, so follow them), (super-events {:thread id :after seq}), (super-thread! title), (super-start! thread brief & opts), (super-steer! thread text & opts), (super-cancel! thread reason & opts), (super-note! id text) and (super-milestone! id text). It has no shell, files or Java: Workers do that.")
 
 (def pi-helpers
   "Skills written for Pi name Pi helpers. Drop `await` and map `tools/jev_classify_task {:task t}` to (jev-classify-task t), `fs/read` to read-lines, `tools/read` to slurp, `fs/list` to fs/glob, `tools/edit` to edit!, and `tools/bash`, `jj/...` and `make/...` to sh. Parallelize with future or pmap.")
@@ -700,31 +700,11 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
   (let [{:keys [ok error message data]} ((requiring-resolve 'bbh.super.client/call!) {:command command :args args})]
     (if error (throw (ex-info (str "bbh super: " (name error) (when message (str ", " message))) (or data {}))) ok)))
 
-(defn super-ask! "File ASK ({:kind :text :options :recommended :details :evidence :stopped :holds-up :supersedes}) and return its id. :text is one line; :details and the :evidence file hold the rest." [ask] (super-call! :ask! ask))
-(defn super-answered! "Record that reply ID has been acted on." [id] (super-call! :answered! {:reply id}))
-(defn super-note! "Set the thread's summary line." [text] (super-call! :note! {:text text}))
-(defn super-milestone! "Mark progress worth the person's notice." [text] (super-call! :milestone! {:text text}))
-(defn super-done!
-  "End this Worker as done. The controller first rebases its revision onto the
-  tip of the line; {:onto commit-id} names the tip when the line has two.
-  When the rebase leaves conflicts it returns {:conflicts :todo} instead and
-  the Worker keeps running: resolve them, then call it again."
-  ([] (super-done! {}))
-  ([{:keys [onto]}] (super-call! :finish-worker! (cond-> {:state-after :done} onto (assoc :onto onto)))))
-(defn super-failed! "End this Worker as failed, saying WHY." [why] (super-call! :finish-worker! {:state-after :failed :reason why}))
-
-(defn super-threads "Every thread, by id." [] (super-call! :threads {}))
-(defn super-projects "The repositories Workers start in, by name: {:repo :check :about}." [] (super-call! :projects {}))
-(defn super-thread "Thread ID with its asks, replies and Workers." [id] (super-call! :thread {:id id}))
-(defn super-thread! "A new thread titled TITLE; returns its handle." [title] (super-call! :thread! {:title title}))
-(defn super-start-worker!
-  "Start a Worker: {:thread :workflow :brief :project :check :for}. :project
-  names one of (super-projects) and brings its repo and check; :repo, a path,
-  is for a new project or one not listed. :for is
-  the id that opens the message you act on, such as \"o12\", so the Worker
-  knows where it came from. A :repo that does not exist is
-  made as a new jj repository. Returns its id and state."
-  [spec] (super-call! :start-worker! spec))
+;; super-ask!, super-done! and the rest, from the one table in bbh.super.verbs.
+(let [table @(requiring-resolve 'bbh.super.verbs/worker)
+      usage (requiring-resolve 'bbh.super.verbs/usage)]
+  (doseq [[sym f] ((requiring-resolve 'bbh.super.verbs/bind) super-call! table)]
+    (intern *ns* (with-meta sym {:doc (str (usage sym (table sym)) "\n  " (:doc (table sym)))}) f)))
 
 (defn pwd "The working directory." [] (str (fs/cwd)))
 

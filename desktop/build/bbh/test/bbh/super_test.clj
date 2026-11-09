@@ -12,6 +12,7 @@
             [bbh.super.model :as model]
             [bbh.super.store :as store]
             [bbh.super.workspace :as workspace]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]))
 
 (use-fixtures :once hermetic/fixture)
@@ -106,7 +107,7 @@
           (is (= [:sent] (map :state (vals (:replies @(:state c))))))
           (call dir {:token token :command :answered! :args {:reply (ffirst (:replies @(:state c)))}})
           (is (= [:answered] (map :state (vals (:replies @(:state c))))) "the Worker's answered! does")
-          (call dir {:command :steer! :args {:worker "W1" :text "use the small build"}})
+          (call dir {:command :steer! :args {:thread "T1" :text "use the small build"}})
           (is (wait-for #(seq (bbh.inbox/pending (str (fs/path conversations "super-W1"))))))
           (is (= [{:kind "steer" :text "[Steering] use the small build"}]
                  (mapv #(select-keys % [:kind :text]) (bbh.inbox/pending (str (fs/path conversations "super-W1")))))
@@ -602,8 +603,8 @@
             (is (false? (bbh.super.process/stop-job! {:pid pid :start "wrong-start"})))
             (is (= identity (bbh.super.process/identity-of pid)))
             (spit (str base ".start") (:start identity))
-            (is (= {:ok "W1"} (call dir {:id "cancel-once" :command :cancel! :args {:worker "W1" :reason "stop the build"}})))
-            (is (= {:ok "W1"} (call dir {:id "cancel-once" :command :cancel! :args {:worker "W1" :reason "stop the build"}})))
+            (is (= {:ok "W1"} (call dir {:id "cancel-once" :command :cancel! :args {:thread "T1" :reason "stop the build"}})))
+            (is (= {:ok "W1"} (call dir {:id "cancel-once" :command :cancel! :args {:thread "T1" :reason "stop the build"}})))
             (is (wait-for #(nil? (bbh.super.process/identity-of pid))))
             (is (= "137\n" (slurp (str base ".exit"))))
             (is (= :cancelled (get-in @(:state c) [:workers "W1" :state])))
@@ -765,7 +766,7 @@
           (dotimes [_ 2] (super/reconcile! (assoc c :restart-grace-ms -1)))
           (is (= 1 (count @launches)))
           (is (= (.pid (java.lang.ProcessHandle/current)) (get-in @(:state c) [:workers "W1" :health :process :pid])))
-          (is (= {:ok "W1"} (call dir {:command :cancel! :args {:worker "W1" :reason "stop now"}})))
+          (is (= {:ok "W1"} (call dir {:command :cancel! :args {:thread "T1" :reason "stop now"}})))
           (is (= :cancelling (get-in @(:state c) [:workers "W1" :state])))
           (is (= "W1" (get-in @(:state c) [:threads "T1" :worker])))
           (is (= [{:kind "cancel" :text "[Cancelled] stop now"}]
@@ -984,7 +985,7 @@
             health #(get-in @(:state c) [:workers "W1" :health])
             row #(first (:threads (first (filter (fn [s] (= :needs-attention (:section s))) (model/sections @(:state c))))))]
         (try
-          (call dir {:command :steer! :args {:worker "W1" :text "use plan B"}})
+          (call dir {:command :steer! :args {:thread "T1" :text "use plan B"}})
           (is (wait-for #(= :sent (get-in @(:state c) [:outbox "o2" :state]))))
           (super/reconcile! c)
           (is (= [:running nil] [(:classification (health)) (:problem (health))]) "a fresh delivery is not an anomaly")
@@ -1248,7 +1249,7 @@
 (deftest a-stopped-ask-does-not-undo-a-cancel
   (let [{:keys [state results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
                                                (start-cmd "a1" "T1") (running "W1")
-                                               [:owner {:id "c1" :command :cancel! :args {:worker "W1" :reason "stop"}}]
+                                               [:owner {:id "c1" :command :cancel! :args {:thread "T1" :reason "stop"}}]
                                                [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "q?" :stopped true}}]
                                                [:controller {:id "cd" :command :cancel-delivered! :args {:worker "W1"}}]])]
     (is (= :cancelling (:error (nth results 4))))
@@ -1736,8 +1737,8 @@
 (defn- apply-cmd
   "[state error events] after PRINCIPAL's CMD on STATE; a refusal leaves STATE."
   [state principal cmd]
-  (try (let [{:keys [events]} (model/decide state principal cmd)]
-         [(reduce model/fold state (map-indexed #(assoc %2 :seq (+ 1000 %1) :at "t") events)) nil events])
+  (try (let [{:keys [events result]} (model/decide state principal cmd)]
+         [(reduce model/fold state (map-indexed #(assoc %2 :seq (+ 1000 %1) :at "t") events)) nil events result])
        (catch clojure.lang.ExceptionInfo e [state (:error (ex-data e)) nil])))
 
 (defn- router-world
@@ -1752,28 +1753,50 @@
            [:controller {:command :worker-running! :args {:worker "W1" :conversation "super-W1" :wf-run "run1" :workspace "/ws/T1-1"}}]]))
 
 (deftest a-router-command-logs-the-persons-message-it-names
-  (let [steer #(apply-cmd (router-world) :router {:command :steer! :args (merge {:worker "W1" :text "go on"} %)})
+  (let [steer #(apply-cmd (router-world) :router {:command :steer! :args (merge {:thread "T1" :text "go on"} %)})
         logged #(select-keys (:data (first (nth % 2))) [:for :origin])]
     (is (= {:for "o1" :origin :emacs} (logged (steer {:for "o1"}))))
     (is (= [nil {}] [(second (steer {})) (logged (steer {}))]) "naming no message is allowed and logs none")
     (is (= :invalid (second (steer {:for "o404"}))) "a message the controller never recorded for the Router")))
 
-(deftest a-persons-message-replaces-a-worker-whose-session-ended-and-the-log-names-it
+(deftest starting-on-a-thread-whose-worker-session-ended-replaces-it-and-the-log-names-it
   (let [st (first (apply-cmd (router-world) :controller {:command :health! :args {:worker "W1" :health {:classification :session-ended :process {} :jobs []}}}))
         replace #(apply-cmd st :router {:command :start-worker! :token-hash "h2"
-                                        :args (merge {:thread "T1" :replaces "W1" :workflow :change :brief "resume" :repo "/r"} %)})
+                                        :args (merge {:thread "T1" :workflow :change :brief "resume" :repo "/r"} %)})
         [st' err events] (replace {:for "o1"})]
-    (is (= :thread-has-worker (second (apply-cmd st :router {:command :start-worker! :token-hash "h2"
-                                                             :args {:thread "T1" :for "o1" :workflow :change :brief "x" :repo "/r"}}))))
     (is (= [nil [:worker-finished :worker-started :token-issued]] [err (mapv :kind events)]))
     (is (= {:for "o1" :origin :emacs} (select-keys (:data (first events)) [:for :origin])))
     (is (= [:failed "Replaced by W2 as o1 asked"] ((juxt :state :reason) (get-in st' [:workers "W1"]))))
     (is (= ["T1" :starting 2 :emacs] ((juxt :thread :state :generation :origin) (get-in st' [:workers "W2"])))
         "the new Worker is the thread's next generation, so its workspace is new")
     (let [alive (first (apply-cmd st :controller {:command :health! :args {:worker "W1" :health {:classification :needs-human :process {:pid 7 :start "9"}}}}))]
-      (is (= :alive (second (apply-cmd alive :router {:command :start-worker! :token-hash "h2"
-                                                      :args {:thread "T1" :replaces "W1" :for "o1" :workflow :change :brief "r" :repo "/r"}})))
+      (is (= :thread-has-worker (second (apply-cmd alive :router {:command :start-worker! :token-hash "h2"
+                                                                  :args {:thread "T1" :for "o1" :workflow :change :brief "r" :repo "/r"}})))
           "a Worker whose session still runs is cancelled, not replaced"))))
+
+(deftest starting-on-an-archived-thread-reopens-it
+  (let [st (reduce (fn [st [p cmd]] (first (apply-cmd st p cmd)))
+                   model/empty-state
+                   [[:owner {:command :thread! :args {:title "a"}}]
+                    [:owner {:command :start-worker! :token-hash "h1" :args {:thread "T1" :workflow :change :brief "b" :repo "/r"}}]
+                    [:owner {:command :cancel! :args {:thread "T1" :reason "later"}}]
+                    [:controller {:command :cancel-delivered! :args {:worker "W1"}}]
+                    [:owner {:command :archive! :args {:thread "T1"}}]])
+        [st' err events] (apply-cmd st :owner {:command :start-worker! :token-hash "h2" :args {:thread "T1" :workflow :change :brief "again" :repo "/r"}})]
+    (is (some? (get-in st [:threads "T1" :resolved-at])))
+    (is (= [nil [:thread-reopened :worker-started :token-issued]] [err (mapv :kind events)]))
+    (is (nil? (get-in st' [:threads "T1" :resolved-at])))
+    (is (= :starting (get-in st' [:workers "W2" :state])))))
+
+(deftest steering-a-worker-whose-session-ended-resumes-it-first
+  (let [st (first (apply-cmd (router-world) :controller {:command :health! :args {:worker "W1" :health {:classification :session-ended :process {} :jobs []}}}))
+        [st' err events result] (apply-cmd st :router {:command :steer! :token-hash "h2" :args {:thread "T1" :text "go on" :for "o1"}})]
+    (is (= [nil [:worker-resumed :token-issued :worker-steered]] [err (mapv :kind events)]))
+    (is (= {:worker "W1" :resumed true} result))
+    (is (not (model/session-ended? (get-in st' [:workers "W1"]))))
+    (is (= ["[Steering] go on"] (keep #(when (str/starts-with? (:text %) "[Steering]") (:text %)) (vals (:outbox st')))))
+    (is (= :no-such-thread (second (apply-cmd model/empty-state :owner {:command :steer! :args {:thread "T9" :text "x"}})))
+        "a thread that does not exist")))
 
 (defn- job-files!
   "A job ID under ROOT that never wrote an exit, its pid long gone, with the boot id BOOT when given."
@@ -1832,8 +1855,30 @@
             for (some (fn [[id o]] (when (= "router" (:conversation o)) id)) (:outbox @(:state c)))]
         (with-redefs [bbh.sysenv/getenv (let [getenv bbh.sysenv/getenv] (fn [k] (if (= "BBH_SUPER_TOKEN" k) router (getenv k))))
                       client/call! (let [call! client/call!] (fn [req] (call! dir req)))]
-          (is (= "W1" (sandbox/eval-in (sandbox/context sandbox/bindings) (format "(super-cancel! \"W1\" \"stuck\" {:for %s})" (pr-str for))))))
+          (is (= "W1" (sandbox/eval-in (sandbox/context sandbox/bindings) (format "(super-cancel! \"T1\" \"stuck\" :for %s)" (pr-str for))))))
         (is (= [{:id "W1" :reason "stuck" :for for :origin :emacs}]
                (mapv :data (filter #(= :cancel-requested (:kind %)) (store/events (:db c))))))
         (is (#{:cancelling :cancelled} (get-in @(:state c) [:workers "W1" :state])))
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
+
+(defn- refuse-or-nil [refused code] (or (refused code) ""))
+
+(deftest the-routers-sandbox-continues-a-thread-with-only-a-brief
+  (with-workers
+    (fn [c dir repo _]
+      (call dir {:command :thread! :args {:title "t"}})
+      (start-worker dir "T1" :repo repo :check "make x" :bench "make b")
+      (call dir {:command :finish-worker! :args {:worker "W1" :state-after :failed :reason "stuck"}})
+      (let [router (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
+            _ (call dir {:command :say! :args {:text "T1: try again" :origin :emacs}})
+            for (some (fn [[id o]] (when (= "router" (:conversation o)) id)) (:outbox @(:state c)))
+            ctx (sandbox/context sandbox/bindings)
+            refused #(try (sandbox/eval-in ctx %) nil (catch Exception e (ex-message e)))]
+        (with-redefs [bbh.sysenv/getenv (let [getenv bbh.sysenv/getenv] (fn [k] (if (= "BBH_SUPER_TOKEN" k) router (getenv k))))
+                      client/call! (let [call! client/call!] (fn [req] (call! dir req)))]
+          (is (= "W2" (:id (sandbox/eval-in ctx (format "(super-start! \"T1\" \"try again\" :for %s)" (pr-str for))))))
+          (is (= [:change repo "make x" "make b" 2] ((juxt :workflow :repo :check :bench :generation) (get-in @(:state c) [:workers "W2"])))
+              "what the start leaves out comes from the thread's last Worker")
+          (is (re-find #"has no option :forr" (refuse-or-nil refused "(super-steer! \"T1\" \"x\" :forr \"o1\")")))
+          (is (re-find #"resolve symbol: super-start-worker!" (refuse-or-nil refused "(super-start-worker! {:thread \"T1\" :brief \"b\"})"))
+              "the old spec shape is gone"))))))
