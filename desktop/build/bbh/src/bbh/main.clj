@@ -3,6 +3,7 @@
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [bbh.acp :as acp]
+            [bbh.conversation :as conversation]
             [bbh.inbox :as inbox]
             [bbh.models :as models]
             [bbh.session :as session]
@@ -19,15 +20,13 @@
   "The conversation to run: RESUME names a saved one, ID a new one under that
   name (for a controller that must know the mailbox first), else a fresh one."
   [resume id]
-  (let [root (fs/path (super/data-dir) "conversations")
-        saved (when (fs/exists? root)
-                (->> (fs/list-dir root) (filter #(fs/exists? (fs/path % "messages.jsonl"))) (map str) sort))]
-    (cond (and (nil? resume) id) (if (fs/exists? (fs/path root id "messages.jsonl"))
-                                   (transcript/continuation (str (fs/path root id)))
-                                   (str (fs/path root id)))
-          (nil? resume) (str (fs/path root (transcript/new-id)))
-          (= "last" resume) (transcript/continuation (or (last saved) (throw (ex-info "No conversation to resume" {}))))
-          (some #{(str (fs/path root resume))} saved) (transcript/continuation (str (fs/path root resume)))
+  (let [root (conversation/base)
+        saved (conversation/saved root)]
+    (cond (and (nil? resume) id) (let [dir (conversation/dir root id)]
+                                   (if (conversation/saved? dir) (conversation/continuation dir) dir))
+          (nil? resume) (conversation/dir root (transcript/new-id))
+          (= "last" resume) (conversation/continuation (or (last saved) (throw (ex-info "No conversation to resume" {}))))
+          (some #{(conversation/dir root resume)} saved) (conversation/continuation (conversation/dir root resume))
           :else (throw (ex-info (str "No conversation " resume " under " root) {})))))
 
 (defn- dim [s] (str "\u001b[2m" s "\u001b[0m"))
@@ -83,7 +82,7 @@
         ;; The mailbox is how the website and bbh super reach this session. A
         ;; running turn takes new mail itself, and an idle session is woken.
         poller (promise)
-        _ (deliver poller (inbox/start! {:root (inbox/root-dir dir) :project (str (fs/cwd))
+        _ (deliver poller (inbox/start! {:root (conversation/root dir) :project (str (fs/cwd))
                                          :deliver (session/mailbox-handler
                                                    s {:prompt! prompt!
                                                       :show! #(.printAbove reader (str (dim "[mailbox] ") %))

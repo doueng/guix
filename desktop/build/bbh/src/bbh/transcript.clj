@@ -1,11 +1,11 @@
 (ns bbh.transcript
-  "A conversation's append-only message log, and its links to its continuations."
+  "A conversation's append-only message log and its prompts."
   (:require [babashka.fs :as fs]
+            [bbh.conversation :as conversation]
             [cheshire.core :as json]
             [clojure.string :as str]))
 
-(defn- messages-file [dir]
-  (str (fs/path dir "messages.jsonl")))
+(defn- messages-file [dir] (conversation/file dir :messages))
 
 (defn load-messages [dir]
   (let [f (messages-file dir)]
@@ -23,42 +23,7 @@
   []
   (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss-SSS")))
 
-(defn inbox-id
-  "The root of conversation DIR's rollovers, so a message from the website still
-  finds the session after a rollover."
-  [dir]
-  (let [f (fs/path dir "inbox-session")]
-    (if (fs/exists? f) (str/trim (slurp (str f))) (str (fs/file-name dir)))))
-
-(defn continue!
-  "Point conversation DIR at the conversation ID beside it. Returns ID's directory."
-  [dir id]
-  (let [next-dir (str (fs/path (fs/parent dir) id))]
-    (fs/create-dirs next-dir)
-    (spit (str (fs/path next-dir "inbox-session")) (inbox-id dir))
-    (spit (str (fs/path dir "continued-in")) id)
-    next-dir))
-
-(defn continuation
-  "The newest conversation DIR continued into, or DIR itself."
-  [dir]
-  (let [f (fs/path dir "continued-in")]
-    (if (fs/exists? f)
-      (recur (str (fs/path (fs/parent dir) (str/trim (slurp (str f))))))
-      dir)))
-
-(defn chain
-  "Conversation DIR and every conversation it continued into, oldest first."
-  [dir]
-  (loop [dir dir dirs [dir]]
-    (let [f (fs/path dir "continued-in")]
-      (if (fs/exists? f)
-        (let [next-dir (str (fs/path (fs/parent dir) (str/trim (slurp (str f)))))]
-          (recur next-dir (conj dirs next-dir)))
-        dirs))))
-
-(defn- prompts-file [dir]
-  (str (fs/path dir "prompts.jsonl")))
+(defn- prompts-file [dir] (conversation/file dir :prompts))
 
 (defn load-prompts
   "Every recorded {:at :time :model :effort :system :tool-description}, oldest

@@ -3,6 +3,7 @@
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [babashka.process :as p]
+            [bbh.conversation :as conversation]
             [bencode.core :as b]
             [clojure.edn :as edn]
             [clojure.string :as str])
@@ -81,8 +82,8 @@
   "Start a REPL process in CWD that logs to DIR/repl.log."
   [{:keys [dir cwd env]}]
   (fs/create-dirs dir)
-  (let [port-file (str (fs/path dir "repl.port"))
-        log (fs/file dir "repl.log")
+  (let [port-file (conversation/file dir :repl-port)
+        log (fs/file (conversation/file dir :repl-log))
         _ (fs/delete-if-exists port-file)
         config (System/getProperty "babashka.config")
         ;; Nothing writes the REPL's stdin, and an open pipe there would hang any child that reads it.

@@ -6,6 +6,7 @@
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [bbh.conversation :as conversation]
             [bbh.models :as models]
             [bbh.session :as session]
             [clojure.string :as str]))
@@ -21,7 +22,7 @@
   Nil outside a bbh conversation."
   []
   (when-let [port (sysenv/getenv "BBH_PORT_FILE")]
-    (str (fs/path (fs/parent port) "workflow-run"))))
+    (conversation/file (fs/parent port) :wf-run)))
 
 (defn session-run-id
   "The run this bbh conversation started, or nil when it has none."

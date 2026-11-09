@@ -4,10 +4,11 @@
   runs are its children. Runs point into messages.jsonl by index
   and tool_call_id instead of copying content."
   (:require [babashka.fs :as fs]
+            [bbh.conversation :as conversation]
             [cheshire.core :as json]
             [clojure.string :as str]))
 
-(defn- runs-file [dir] (str (fs/path dir "runs.jsonl")))
+(defn- runs-file [dir] (conversation/file dir :runs))
 
 (def ^:private lock
   "Claude Code's bridge runs tools on other threads, so appends take turns."

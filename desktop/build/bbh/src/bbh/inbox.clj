@@ -7,23 +7,16 @@
   The session takes its own mail and deletes a message once its transcript
   holds it, so delivery is at least once."
   (:require [babashka.fs :as fs]
-            [bbh.transcript :as transcript]
+            [bbh.conversation :as conversation]
             [bbh.super.process :as process]
             [cheshire.core :as json]
             [clojure.string :as str]))
 
 (def ^:private scan-ms 500)
 
-(defn root-dir
-  "The directory of conversation DIR's rollover root."
-  [dir]
-  (str (fs/path (fs/parent dir) (transcript/inbox-id dir))))
+(defn- mailbox [root] (conversation/file root :mailbox))
 
-(defn- mailbox [root]
-  (fs/path root "mailbox"))
-
-(defn- agent-file [root]
-  (str (fs/path root "agent.json")))
+(defn- agent-file [root] (conversation/file root :agent))
 
 (defn- image-line
   "The line that puts the picture at PATH in a prompt. Prompts are text, so it
@@ -41,7 +34,7 @@
 (defn- save-images!
   "Write the JPEG byte arrays IMAGES for message ID. Returns their paths."
   [root id images]
-  (let [dir (fs/create-dirs (fs/path root "images"))]
+  (let [dir (fs/create-dirs (conversation/file root :images))]
     (vec (map-indexed (fn [n image]
                         (let [path (fs/path dir (format "%s-%d.jpg" id n))]
                           (fs/write-bytes path image)
@@ -125,5 +118,22 @@
   (reset! stopped true)
   (withdraw! root))
 
-(defn ack! [{:keys [root]} id]
-  (fs/delete-if-exists (fs/path (mailbox root) (str (fs/file-name id) ".json"))))
+(defn- message-file [root id] (fs/path (mailbox root) (str (fs/file-name id) ".json")))
+
+(defn ack!
+  "Take message ID out of conversation ROOT's mailbox."
+  [{:keys [root]} id]
+  (fs/delete-if-exists (message-file root id)))
+
+(defn receipt!
+  "Leave TEXT as the receipt of control message ID in conversation ROOT's
+  directory, beside its mailbox, for the sender that waits on it."
+  [root id text]
+  (spit (str (fs/path root (str (fs/file-name id) ".received"))) text))
+
+(defn waiting-since
+  "When message ID was left in conversation ROOT's mailbox, as epoch ms, or nil
+  once its session took it."
+  [root id]
+  (try (.toMillis (fs/last-modified-time (message-file root id)))
+       (catch java.io.IOException _ nil)))

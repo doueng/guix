@@ -6,7 +6,7 @@
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [bbh.inbox :as inbox]
-            [bbh.transcript :as transcript]
+            [bbh.conversation :as conversation]
             [bbh.super.client :as client :refer [call! data-dir new-id super-dir]]
             [bbh.super.emacs :as emacs]
             [bbh.super.model :as model]
@@ -101,7 +101,7 @@
   (let [{:keys [workspace! wf-start! open!]} launch
         t (get-in @state [:threads (:thread w)])
         workspace (workspace! dir (assoc w :title (:title t)))
-        conversation (str (fs/path (:conversations c) (str "super-" (:id w))))
+        conversation (conversation/dir (:conversations c) (str "super-" (:id w)))
         _ (fs/create-dirs conversation)
         wf-run (or (:wf-run w) (wf-start! workspace w))
         _ (run! c :controller {:id (str "prepared-" (:id w)) :command :worker-prepared!
@@ -456,15 +456,15 @@
 ;; ---- dispatcher ---------------------------------------------------------
 
 (defn- conversation-root [{:keys [conversations]} id]
-  (let [dir (str (fs/path conversations id))]
-    (if (fs/exists? dir) (inbox/root-dir dir) dir)))
+  (let [dir (conversation/dir conversations id)]
+    (if (fs/exists? dir) (conversation/root dir) dir)))
 
 (defn- repl-dirs
   "Where conversation ID's REPL may keep repl.port and jobs/. A REPL writes
   them where it started and keeps running when its session continues, so
   that can be any conversation in the chain."
   [c id]
-  (transcript/chain (conversation-root c id)))
+  (conversation/chain (conversation-root c id)))
 
 (defn- conversation-jobs [c id]
   (into [] (mapcat process/jobs) (repl-dirs c id)))
@@ -477,7 +477,7 @@
   (doseq [w (vals (:workers @state))
           :when (and (:conversation w) (#{:working :waiting} (:state w)))
           dir (repl-dirs c (:conversation w))
-          f (fs/glob (fs/path dir "jobs") "*.exit")
+          f (fs/glob (conversation/file dir :jobs) "*.exit")
           :let [job (str/replace (fs/file-name f) #"\.exit$" "")
                 base (fs/path (fs/parent f) job)]
           :when (and (not (get-in w [:jobs job])) (fs/exists? (str base ".cmd")))
@@ -578,7 +578,7 @@
 
 (defn- repl-answering? [dir]
   (try
-    (let [port (some-> (process/read-text (fs/path dir "repl.port")) parse-long)]
+    (let [port (some-> (process/read-text (conversation/file dir :repl-port)) parse-long)]
       (when port
         (with-open [s (Socket.)]
           (.connect s (java.net.InetSocketAddress. "127.0.0.1" (int port)) 300)
@@ -611,9 +611,7 @@
                              :waits (into {}
                                           (for [o (vals (:outbox @state))
                                                 :when (and root (= :sent (:state o)) (= (:conversation w) (:conversation o)))
-                                                :let [f (fs/path root "mailbox" (str (:message o) ".json"))
-                                                      ms (try (- now (.toMillis (fs/last-modified-time f)))
-                                                              (catch java.io.IOException _ nil))]
+                                                :let [ms (some->> (inbox/waiting-since root (:message o)) (- now))]
                                                 :when ms]
                                             [(:id o) ms]))}
                             now (* 60000 (:stale-delivery-minutes (policy c))))]]
@@ -700,12 +698,12 @@
     (if (model/dead-letter? @state o)
       ;; Its Worker has finished, so the row is dropped and its file deleted unread.
       (do (run! c :controller {:id (str "dropped-" id) :command :outbox-dropped! :args {:outbox id}})
-          (when message (fs/delete-if-exists (fs/path (conversation-root c conversation) "mailbox" (str message ".json")))))
+          (when message (inbox/ack! {:root (conversation-root c conversation)} message)))
       (case (:state o)
         :pending (let [root (conversation-root c conversation)
                        m (inbox/send! root text nil (when (= :steer (:delivery o)) {:kind :steer}))]
                    (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))
-        :sent (when-not (fs/exists? (fs/path (conversation-root c conversation) "mailbox" (str message ".json")))
+        :sent (when-not (inbox/waiting-since (conversation-root c conversation) message)
                 (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
         nil)))))
 
@@ -738,7 +736,7 @@
             (throw (ex-info (str "bbh super is already running on " dir) {:dir dir})))
         db (store/open (str (fs/path dir "super.db")))
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
-        c {:dir dir :conversations (or conversations (str (fs/path (data-dir) "conversations")))
+        c {:dir dir :conversations (or conversations (conversation/base))
            :launch (merge workspace/impl
                           {:wf-start! wf-start! :open! open! :release! release!
                            :open-router! client/open-router!

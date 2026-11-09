@@ -3,6 +3,7 @@
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [bbh.models :as models]
+            [bbh.conversation :as conversation]
             [bbh.inbox :as inbox]
             [bbh.repl :as repl]
             [bbh.session :as session]
@@ -67,9 +68,6 @@
     {:inputTokens input :outputTokens output :cachedReadTokens cached :cachedWriteTokens written
      :thoughtTokens thinking :totalTokens (+ input output)}))
 
-(defn- data-dir []
-  (fs/path (or (sysenv/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh" "conversations"))
-
 (def ^:private sessions (atom {}))
 
 (def ^:private resume-dir
@@ -96,8 +94,8 @@
         sid (if resume
               (str (fs/file-name resume))
               (transcript/new-id))
-        s (session/new-session {:dir (or resume (str (fs/path (data-dir) sid)))
-                                :notes (when (and resume (fs/exists? (fs/path resume "messages.jsonl")))
+        s (session/new-session {:dir (or resume (conversation/dir sid))
+                                :notes (when (and resume (conversation/saved? resume))
                                          ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
                                 ;; The Router's session evaluates in the sandbox, as in the terminal front end.
                                 :sandbox? (= "router" (sysenv/getenv "BBH_ROLE"))

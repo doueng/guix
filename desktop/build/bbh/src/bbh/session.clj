@@ -5,6 +5,7 @@
   :usage."
   (:require [babashka.fs :as fs]
             [bbh.checkpoint :as checkpoint]
+            [bbh.conversation :as conversation]
             [bbh.delimiters :as delimiters]
             [bbh.inbox :as inbox]
             [bbh.repl :as repl]
@@ -37,7 +38,7 @@
   [s id text max-chars]
   (if (<= (count text) max-chars)
     text
-    (let [f (fs/path (:dir @s) "outputs" (str (str/replace (str id) #"[^A-Za-z0-9_.-]" "_") ".txt"))]
+    (let [f (fs/path (conversation/file (:dir @s) :outputs) (str (str/replace (str id) #"[^A-Za-z0-9_.-]" "_") ".txt"))]
       (fs/create-dirs (fs/parent f))
       (spit (str f) text)
       (str "[bbh] Full output (" (count text) " chars) saved to " f ". Read parts with read-lines.\n"
@@ -63,7 +64,7 @@
   "The directory whose mailbox/ holds S's mail: the rollover root of the
   conversation S is on, which /resume can change."
   [s]
-  (inbox/root-dir (:dir @s)))
+  (conversation/root (:dir @s)))
 
 (def mail-wake
   "The prompt a front end sends when the mailbox has mail. The session puts the
@@ -140,7 +141,7 @@
 (defn- checkpoint-path
   "The conversation's checkpoint. It lives with the transcript, so /resume brings the definitions back."
   [s]
-  (str (fs/path (:dir @s) "checkpoint.clj")))
+  (conversation/file (:dir @s) :checkpoint))
 
 (defn start-repl!
   "Start the REPL, load init and replay the checkpoint. Returns a problem description or nil."
@@ -183,13 +184,9 @@
 
 (defmethod stop-engine! :default [_] nil)
 
-(def ^:private bookkeeping
-  "Files a session writes before anyone talks to it. A folder holding only these is not a conversation."
-  #{"repl.log" "repl.port" "workflow-run" "claude.log" "claude-session" "claude-seen" "inbox-session"})
-
 (defn- delete-if-unused! [dir]
   (when (and dir (fs/directory? dir)
-             (every? #(bookkeeping (str (fs/file-name %))) (fs/list-dir dir)))
+             (every? #(conversation/bookkeeping (str (fs/file-name %))) (fs/list-dir dir)))
     (fs/delete-tree dir)))
 
 (defn close!
@@ -219,7 +216,7 @@
     (swap! s assoc :cancelled true)
     (interrupt! s)
     (let [root (mail-root s)]
-      (spit (str (fs/path root (str id ".received"))) "interrupted")
+      (inbox/receipt! root id "interrupted")
       (inbox/ack! {:root root} id))
     true))
 
@@ -327,7 +324,7 @@
   "How far past its deadline an evaluation may run when a helper such as job-wait asks for it."
   600000)
 
-(defn- deadline-file [s] (str (fs/path (:repl-dir @s) "deadline")))
+(defn- deadline-file [s] (conversation/file (:repl-dir @s) :deadline))
 
 (defn- extended-until
   "The instant the REPL asked this evaluation's deadline to move to, capped at CAP."
@@ -424,15 +421,15 @@
   (let [{:keys [dir messages last-input]} @s
         id (transcript/new-id)]
     (stop-engine! s)
-    (let [new-dir (transcript/continue! dir id)
+    (let [new-dir (conversation/continue! dir id)
           checkpoint (checkpoint-path s)]
       ;; The REPL keeps running, so its definitions belong to the continuation too.
-      (when (fs/exists? checkpoint) (fs/copy checkpoint (fs/path new-dir "checkpoint.clj")))
+      (when (fs/exists? checkpoint) (fs/copy checkpoint (conversation/file new-dir :checkpoint)))
       (swap! s assoc :dir new-dir :messages [] :last-input nil :turn-from 0))
     (note! s (str "Context reached " (or last-input "the model's limit of") " tokens, so this continues in conversation " id "."))
     (str "This is a continuation session. The previous session ended because its context filled up. "
          "Its transcript has " (count messages) " messages, one JSON object per line with role, content and tool_calls, in "
-         (fs/path dir "messages.jsonl") ". "
+         (conversation/file dir :messages) ". "
          "Get context from it only as you need it, during the session, rather than reading it all up front. "
          "It can start with a link to an earlier session. "
          "The REPL kept running, so live definitions remain.")))
@@ -545,7 +542,7 @@
   [s]
   (let [dir (fs/path (:dir @s))]
     (->> (fs/list-dir (fs/parent dir))
-         (filter #(fs/exists? (fs/path % "messages.jsonl")))
+         (filter conversation/saved?)
          (map #(str (fs/file-name %)))
          (remove #{(str (fs/file-name dir))})
          sort
@@ -560,7 +557,7 @@
   newest first."
   [s]
   (let [root (fs/parent (fs/path (:dir @s)))]
-    (remove #(fs/exists? (fs/path root % "continued-in")) (conversation-ids s))))
+    (remove #(conversation/continued? (fs/path root %)) (conversation-ids s))))
 
 (defn- list-conversations [s]
   (let [root (fs/parent (fs/path (:dir @s)))
@@ -584,7 +581,7 @@
         id (if (= "last" id) (first (latest-ids s)) id)]
     (if-not (some #{id} ids)
       "No such conversation. /resume lists them."
-      (let [dir (transcript/continuation (str (fs/path (fs/parent (fs/path (:dir @s))) id)))
+      (let [dir (conversation/continuation (conversation/dir (str (fs/parent (fs/path (:dir @s)))) id))
             messages (transcript/load-messages dir)
             _ (stop-engine! s)
             _ (swap! s assoc :dir dir :messages messages :last-input nil)

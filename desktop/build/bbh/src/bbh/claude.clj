@@ -5,6 +5,7 @@
   (:require [bbh.sysenv :as sysenv]
             [babashka.fs :as fs]
             [babashka.process :as p]
+            [bbh.conversation :as conversation]
             [bbh.session :as session]
             [cheshire.core :as json]
             [clojure.java.io :as io]
@@ -40,14 +41,14 @@
     (.write w (str (json/generate-string msg) "\n"))
     (.flush w)))
 
-(defn- session-file [s] (str (fs/path (:dir @s) "claude-session")))
+(defn- session-file [s] (conversation/file (:dir @s) :claude-session))
 
 (defn- seen-file
   "How many transcript messages the Claude Code session has seen. A resumed
   session that has seen fewer gets the rest as history, such as the turns
   another model took after a /model switch."
   [s]
-  (str (fs/path (:dir @s) "claude-seen")))
+  (conversation/file (:dir @s) :claude-seen))
 
 (defn- seen [s]
   (let [f (seen-file s)]
@@ -69,7 +70,7 @@
                                 :env {"BBH_BRIDGE_PORT" (str (.getLocalPort ^ServerSocket (:server bridge)))
                                       "BBH_BRIDGE_TOKEN" (:token bridge)}}}}
         proc (apply p/process
-                    {:dir cwd :err :append :err-file (fs/file dir "claude.log")
+                    {:dir cwd :err :append :err-file (fs/file (conversation/file dir :claude-log))
                      :extra-env {"DISABLE_AUTOUPDATER" "1" "DISABLE_AUTO_COMPACT" "1"
                                  ;; job-wait may hold one tool call for 10 min past the 120 s deadline.
                                  "MCP_TOOL_TIMEOUT" "1800000"}}
@@ -142,7 +143,7 @@
   "Record why Claude Code's process ended in claude.log, stop the engine, and return the error for the user.
   Claude Code often says nothing on stderr, so its exit code and stray stdout are the only trace."
   [s unparsed]
-  (let [log (fs/file (:dir @s) "claude.log")
+  (let [log (fs/file (conversation/file (:dir @s) :claude-log))
         code (:exit (deref (get-in @s [:claude :proc]) 5000 nil))
         stderr (when (fs/exists? log) (->> (fs/read-all-lines log) (remove str/blank?)
                                              (remove #(str/starts-with? % "claude exited with code ")) last))]

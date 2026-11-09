@@ -2,6 +2,7 @@
   (:require [bbh.hermetic :as hermetic]
             [babashka.fs :as fs]
             [bbh.session :as session]
+            [bbh.conversation :as conversation]
             [bbh.transcript :as transcript]
             [cheshire.core :as json]
             [clojure.string :as str]
@@ -359,7 +360,7 @@
       (is (= notice (get-in @(:requests h) [2 :messages 1 :content])))
       (is (= 2 (count (get-in @(:requests h) [2 :messages]))))
       (is (= "=> 42" (peek (tool-results h))))
-      (is (= new-dir (transcript/continuation old))))))
+      (is (= new-dir (conversation/continuation old))))))
 
 (deftest a-full-context-mid-turn-continues-the-work-in-a-new-conversation
   (let [h (harness "(ns bbh.env) (def manifest {:rollover-at-tokens 1000})"
@@ -402,7 +403,7 @@
         current (str (fs/create-dirs (fs/path root "current")))
         h (harness "" ["hi" "back"] current)
         _ (transcript/append! old {:role "user" :content "before"})
-        new-dir (transcript/continue! old "new")]
+        new-dir (conversation/continue! old "new")]
     (transcript/append! new-dir {:role "user" :content "after"})
     (session/prompt! (:s h) "/resume old")
     (stop! h)
@@ -417,7 +418,7 @@
         h (harness "" [] current)]
     (transcript/append! other {:role "user" :content "other"})
     (transcript/append! predecessor {:role "user" :content "before"})
-    (transcript/continue! predecessor "3-current")
+    (conversation/continue! predecessor "3-current")
     (transcript/append! current {:role "user" :content "after"})
     (is (str/starts-with? (do (session/prompt! (:s h) "/resume") (peek (texts h))) "1-other  1 messages"))
     (session/prompt! (:s h) "/resume last")

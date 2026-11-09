@@ -5,6 +5,7 @@
   node's owner, and a POST must come from the page itself."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
+            [bbh.conversation :as conversation]
             [bbh.inbox :as inbox]
             [bbh.super.client :as super]
             [bbh.transcript :as transcript]
@@ -47,7 +48,7 @@
   (atom {}))
 
 (defn- messages-of [dir]
-  (let [f (fs/path dir "messages.jsonl")
+  (let [f (conversation/file dir :messages)
         size (if (fs/exists? f) (fs/size f) 0)
         entry (get @cache dir)]
     (if (= size (:size entry))
@@ -60,7 +61,7 @@
           (:messages entry))))))
 
 (defn- conversation [root]
-  (into [] (mapcat messages-of) (transcript/chain root)))
+  (into [] (mapcat messages-of) (conversation/chain root)))
 
 (defn- title [messages]
   (let [text (some #(when (= "user" (:role %))
@@ -178,7 +179,7 @@
 (defn- api [conversations {:keys [uri request-method] :as request}]
   (let [[_ id file] (re-matches #"/api/agents/([^/]+)/(?:messages|images/([^/]+))" uri)
         live (agents conversations)
-        root (when (some #(= id (:id %)) live) (str (fs/path conversations id)))]
+        root (when (some #(= id (:id %)) live) (conversation/dir conversations id))]
     (cond (and (= uri "/api/agents") (= :get request-method)) (json-response 200 live)
           (nil? root) (json-response 404 {:error "No such session"})
           file (if (= :get request-method) (image root file) (json-response 405 {:error "Method not allowed"}))
@@ -336,7 +337,7 @@
   and no request is being answered."
   [data-dir]
   (let [boot (version/fingerprint)
-        {:keys [stop in-flight]} (or (serve! {:conversations (str (fs/path data-dir "conversations"))
+        {:keys [stop in-flight]} (or (serve! {:conversations (conversation/base)
                                               :super-dir (super/super-dir) :publish? true})
                                      (throw (ex-info (str "bbh web: port " port " is taken") {})))]
     (version/record! data-dir "web" boot)

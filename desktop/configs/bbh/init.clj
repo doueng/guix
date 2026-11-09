@@ -587,12 +587,15 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
     (replace-file! path text)
     (str (str/join "\n" summaries) (when note (str "\n" note)))))
 
+;; The conversation's files, named by bbh.conversation; its directory is where repl.port is.
+(def ^:private conversation-file (requiring-resolve 'bbh.conversation/file))
+
 ;; Background jobs. State lives in files under the conversation's jobs directory, so a job and its result
 ;; survive the REPL restart that a deadline causes.
 (defn- jobs-dir []
-  (str (if-let [port (System/getenv "BBH_PORT_FILE")]
-         (fs/path (fs/parent port) "jobs")
-         (fs/path (fs/temp-dir) "bbh-jobs"))))
+  (if-let [port (System/getenv "BBH_PORT_FILE")]
+    (conversation-file (fs/parent port) :jobs)
+    (str (fs/path (fs/temp-dir) "bbh-jobs"))))
 
 (defn- heavy-command
   "CMD wrapped in bbh's machine-wide heavy-job slot when it is heavy (a test suite, a build, TLC, a browser, an eval
@@ -659,7 +662,7 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
 (defn- deadline-file
   "Where a helper asks the bbh session to move the running evaluation's deadline. Absent outside bbh."
   []
-  (some-> (System/getenv "BBH_PORT_FILE") fs/parent (fs/path "deadline") str))
+  (some-> (System/getenv "BBH_PORT_FILE") fs/parent (conversation-file :deadline)))
 
 (defn- move-deadline! [until]
   (spit (deadline-file) (str until))

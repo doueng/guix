@@ -1,6 +1,6 @@
 (ns bbh.super.process
   "Linux process identity and detached-job observation. Never signal by pid alone."
-  (:require [babashka.fs :as fs] [babashka.process :as p] [clojure.string :as str]))
+  (:require [babashka.fs :as fs] [babashka.process :as p] [bbh.conversation :as conversation] [clojure.string :as str]))
 
 (defn identity-of [pid]
   (when (and (integer? pid) (pos? pid))
@@ -54,7 +54,7 @@
                                            (matches? identity) :running
                                            (nil? start) :unknown
                                            :else :lost)})))
-         (fs/glob (fs/path root "jobs") "*.cmd"))))
+         (fs/glob (conversation/file root :jobs) "*.cmd"))))
 
 (defn stop-job!
   "Kill only the verified detached session group. Return false on missing identity."

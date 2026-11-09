@@ -2,7 +2,7 @@
   (:require [bbh.hermetic :as hermetic]
             [babashka.fs :as fs]
             [bbh.inbox :as inbox]
-            [bbh.transcript :as transcript]
+            [bbh.conversation :as conversation]
             [clojure.test :refer [deftest is use-fixtures]]))
 
 (use-fixtures :once hermetic/fixture)
@@ -64,7 +64,7 @@
 (deftest a-rolled-over-conversation-keeps-its-mailbox
   (let [base (str (fs/create-temp-dir {:prefix "bbh-inbox"}))
         root (str (fs/create-dirs (fs/path base "first")))
-        rolled (transcript/continue! root "second")
-        grandchild (transcript/continue! rolled "third")]
-    (is (= root (inbox/root-dir rolled)))
-    (is (= root (inbox/root-dir grandchild)) "a second rollover still finds the first conversation's mailbox")))
+        rolled (conversation/continue! root "second")
+        grandchild (conversation/continue! rolled "third")]
+    (is (= root (conversation/root rolled)))
+    (is (= root (conversation/root grandchild)) "a second rollover still finds the first conversation's mailbox")))
