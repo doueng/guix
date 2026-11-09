@@ -64,11 +64,13 @@
   (let [{:keys [err]} (p/shell {:dir @repo :err :string :continue true}
                                guix kind "build" "--dry-run" "-L" "modules" config
                                (str "--substitute-urls=" publish " https://bordeaux.guix.gnu.org"))
-        lines (str/split-lines (or err ""))
-        start (some #(when (re-find #"would be built" (nth lines %)) %) (range (count lines)))]
-    (if start
-      (take-while #(str/starts-with? % "   ") (drop (inc start) lines))
-      [])))
+        lines (vec (str/split-lines (or err "")))]
+    ;; "The following derivations would be built:" lists them indented by
+    ;; two spaces; profile hooks and grafts come under their own headers.
+    (->> (range (count lines))
+         (filter #(re-find #"^The following derivations? would be built" (lines %)))
+         (mapcat #(take-while (fn [l] (re-find #"^\s+/gnu/store/" l)) (drop (inc %) lines)))
+         (map str/trim))))
 
 (defn check []
   (let [ok? (zero? (:exit (p/shell {:continue true :out :string :err :string}
@@ -161,7 +163,8 @@
             (apply sh! log (concat tm ["nixpkgs-bridge" "key" nix-key])))
           (apply sh! log (concat tm ["nixpkgs-bridge" "import" nix-key])))
         (apply sh! log (concat tm ["system" "build" "-L" "modules" "desktop/system.scm" "-r" (root "system")]))
-        (apply sh! log (concat tm ["home" "build" "-L" "modules" "desktop/home.scm" "-r" (root "home")]))
+        ;; guix home build has no --root; guix build lowers the home environment the same way.
+        (apply sh! log (concat tm ["build" "-L" "modules" "-f" "desktop/home.scm" "-r" (root "home")]))
         ;; Development manifests, such as dusk's Rust toolchain.
         (doseq [m (manifests work)]
           (apply sh! log (concat tm ["shell" "-m" (str m) "-r" (root (manifest-root m)) "--" "true"])))
