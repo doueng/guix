@@ -7,7 +7,7 @@ docs/remote-builder-plan.md. Only public halves belong here; this repo is public
 - host-key.pub: the builder's ssh host key (ssh-keyscan)
 - builder-signing.pub: the builder's /etc/guix/signing-key.pub, for the laptop
 - laptop-signing.pub: the laptop's /etc/guix/signing-key.pub, for offload imports
-- nixpkgs-builder.pub: the key the builder signs nixpkgs imports with (until phase 7)
+- nixpkgs-builder.pub: the key the builder signs nixpkgs imports with (the nixpkgs-bridge channel)
 
 modules/engstrand/system/builder.scm skips any file that is missing. The laptop's
 asahi.scm trusts builder-signing.pub once it exists, and its activation creates

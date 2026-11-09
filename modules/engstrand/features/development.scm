@@ -4,7 +4,7 @@
   #:use-module (engstrand packages bun)
   #:use-module (engstrand packages github-cli)
   #:use-module (engstrand packages pi-coding-agent)
-  #:use-module (engstrand nixpkgs)
+  #:use-module (nixpkgs-bridge packages)
   #:use-module (gnu packages)
   #:export (feature-familiar-development))
 

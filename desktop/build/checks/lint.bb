@@ -61,17 +61,24 @@
     (format "%064x" (BigInteger. 1 (.digest md)))))
 
 ;; Compiling every .scm file takes about 9 s. The result depends only on those
-;; files, the data modules/ reads at load time (such as nixpkgs/lock.sexp), the
+;; files, the data modules/ reads at load time, the nixpkgs-bridge checkout, the
 ;; checker and the Guix build, so a pass is remembered under a key made from all
-;; of them, and any change recompiles everything.
+;; of them, and any change recompiles everything.  The checkout, when present,
+;; shadows the pulled nixpkgs-bridge channel, so lint works before make pull.
+(def bridge-modules (str (fs/home) "/projects/guix-nixpkgs-bridge/modules"))
+(def bridge-files
+  (when (fs/directory? bridge-modules)
+    (sort (map str (filter fs/regular-file? (fs/glob bridge-modules "**"))))))
 (defn scheme-problems []
   (let [scm (sort (filter #(str/ends-with? % ".scm") files))
         key (apply sha256 (str (fs/real-path guix)) (slurp (str c/root "/desktop/build/checks/scheme.scm"))
-                   (mapcat (fn [f] [f (sha256 (fs/read-all-bytes (str c/root "/" f)))])
-                           (sort (distinct (concat scm (filter #(str/starts-with? % "modules/") files))))))
+                   (concat (mapcat (fn [f] [f (sha256 (fs/read-all-bytes (str c/root "/" f)))])
+                                   (sort (distinct (concat scm (filter #(str/starts-with? % "modules/") files)))))
+                           (mapcat (fn [f] [f (sha256 (fs/read-all-bytes f))]) bridge-files)))
         stamp (fs/path (or (System/getenv "XDG_CACHE_HOME") (str (fs/home) "/.cache")) "guix-lint" key)]
     (when-not (fs/exists? stamp)
-      (let [{:keys [exit out err]} (apply c/sh guix "repl" "-L" "modules" "--" "desktop/build/checks/scheme.scm" scm)]
+      (let [{:keys [exit out err]} (apply c/sh guix "repl" (concat (when bridge-files ["-L" bridge-modules])
+                                                         ["-L" "modules" "--" "desktop/build/checks/scheme.scm"] scm))]
         (if (zero? exit)
           (do (fs/create-dirs (fs/parent stamp)) (spit (str stamp) "") nil)
           [(str/trim (str err out))])))))

@@ -1,6 +1,6 @@
 (define-module (engstrand features shell)
   #:use-module (engstrand features packages)
-  #:use-module (engstrand nixpkgs)
+  #:use-module (nixpkgs-bridge packages)
   #:use-module (gnu home services shells)
   #:use-module (gnu packages)
   #:use-module (gnu services)

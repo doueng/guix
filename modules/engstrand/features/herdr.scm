@@ -1,6 +1,6 @@
 (define-module (engstrand features herdr)
   #:use-module (engstrand features packages)
-  #:use-module (engstrand nixpkgs)
+  #:use-module (nixpkgs-bridge packages)
   #:use-module (engstrand packages herdr)
   #:use-module (engstrand packages jjui)
   #:use-module (gnu home services)

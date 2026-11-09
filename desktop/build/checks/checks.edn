@@ -9,7 +9,7 @@
            "**/*.scm" "**/*.fish" "**/*.json" "**/*.edn" "**/*.bb" "desktop/bin/*"]
    :checks ["make lint"]}
   {:name "guix system"
-   :paths ["modules/**" "desktop/system.scm" "desktop/system-facts.scm" "channels.scm" "desktop/build/nixpkgs/**"]
+   :paths ["modules/**" "desktop/system.scm" "desktop/system-facts.scm" "channels.scm"]
    :checks ["make lint"]
    :slow ["make check"]}
   {:name "guix home"
@@ -24,7 +24,7 @@
    :checks ["make lint"]
    :slow ["make builder-check"]}
   {:name "nixpkgs bridge"
-   :paths ["modules/engstrand/nixpkgs/**" "modules/engstrand/nixpkgs.scm" "desktop/build/nixpkgs/**"]
+   :paths ["channels.scm" "modules/engstrand/system/nixpkgs-signing-key.pub"]
    :slow ["make nixpkgs-verify"]}
   {:name "apple neural engine"
    :paths ["modules/engstrand/packages/omarchy-ane.scm" "modules/engstrand/system/bootloader.scm"

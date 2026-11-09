@@ -32,7 +32,7 @@
       (str base "/compare/" from "..." to))))
 
 ;; Guix channels pin commits in channels.scm; their packages follow the pin.
-(def channels-file (in-repo "channels.scm"))
+(def channels-file (or (System/getenv "UPDATES_CHANNELS") (in-repo "channels.scm")))
 
 (defn channel-items []
   (for [[_ name url branch commit]
@@ -139,10 +139,14 @@
                                                                       (channel-items))))))
 
 ;; nixpkgs packages share one locked revision; applying any of them relocks all.
-(def nixpkgs-dir "modules/engstrand/nixpkgs")
+;; The lock lives in the nixpkgs-bridge channel's repo, which channels.scm pins:
+;; apply relocks and commits there, publishes main and bumps the pin here.
+(def bridge-repo (or (System/getenv "NIXPKGS_BRIDGE_REPO") (str home "/projects/guix-nixpkgs-bridge")))
+(def nixpkgs-dir "modules/nixpkgs-bridge")
+(defn in-bridge [path] (str bridge-repo "/" path))
 
 (defn nixpkgs-items []
-  (let [[_ & fields] (edn/read-string (slurp (in-repo (str nixpkgs-dir "/lock.sexp"))))
+  (let [[_ & fields] (edn/read-string (slurp (in-bridge (str nixpkgs-dir "/lock.sexp"))))
         field (fn [k] (rest (some #(when (= k (first %)) %) fields)))]
     (cons {:name "nixpkgs" :current (first (field 'revision))}
           (for [[_ [_ attr] [_ version]] (field 'packages)]
@@ -150,8 +154,8 @@
 
 (defn nixpkgs-refresh [items]
   (let [[revision & rows] (str/split-lines
-                           (sh {:dir repo :err :string} guix "repl" "-L" "modules" "--"
-                               "desktop/build/nixpkgs/bridge.scm" "versions"
+                           (sh {:dir bridge-repo :err :string} guix "repl" "-L" "modules" "--"
+                               "bin/nixpkgs-bridge.scm" "versions"
                                (str nixpkgs-dir "/packages.sexp")))
         latest (into {} (for [row rows :let [[attr version changelog] (str/split row #"\t")]]
                           [attr {:latest version :changelog (first (str/split (str changelog) #" "))}]))]
@@ -165,8 +169,18 @@
                (latest name))))))
 
 (defn nixpkgs-apply! [_]
-  (run! "make" "nixpkgs-lock"
-        (str "NIXPKGS_REV=" (get-in (read-cache) [:latest ["nixpkgs" "nixpkgs"] :latest]))))
+  (let [in-bridge! (fn [& args] (apply p/shell {:dir bridge-repo} args))
+        changed? #(not (str/blank? (sh {:dir bridge-repo} "jj" "diff" "--name-only")))
+        revision (get-in (read-cache) [:latest ["nixpkgs" "nixpkgs"] :latest])]
+    (when (changed?)
+      (throw (ex-info (str bridge-repo " has uncommitted changes; commit or restore them first") {})))
+    (in-bridge! "make" "lock" (str "NIXPKGS_REV=" revision))
+    (when (changed?)
+      (in-bridge! "jj" "commit" "-m" (str "lock: nixpkgs " (subs revision 0 (min 12 (count revision))))))
+    (in-bridge! "make" "publish")
+    (let [main (sh {:dir bridge-repo} "jj" "log" "--no-graph" "-r" "main" "-T" "commit_id")]
+      (channel-apply! (for [{:keys [name current]} (channel-items) :when (= name "nixpkgs-bridge")]
+                        {:current current :latest main})))))
 
 ;; Packages built from upstream GitHub releases or commits, one per file.
 ;; Tailscale publishes its binaries elsewhere but tags the same versions here.
@@ -432,7 +446,7 @@ copy; return the files left with conflict markers."
    "guix" {:items guix-items :refresh guix-refresh :apply! guix-apply!
            :then #{"make prebuild" "make pull" "make home-apply" "make switch"}}
    "nixpkgs" {:items nixpkgs-items :refresh nixpkgs-refresh :apply! nixpkgs-apply!
-              :then #{"make prebuild" "make home-apply" "make switch"}}
+              :then #{"make prebuild" "make pull" "make home-apply" "make switch"}}
    "github" {:items github-items :refresh github-refresh :apply! github-apply!
              :then #{"make prebuild" "make home-apply" "make switch"}}
    "upstream" {:items upstream-items :refresh upstream-refresh :apply! upstream-apply!

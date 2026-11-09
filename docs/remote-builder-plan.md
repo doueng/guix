@@ -18,7 +18,7 @@ Differences from the sketches below:
 - The Hetzner environment's default `authorize? #t` already trusts the laptop's signing key on the builder (hetzner.scm line 203) [M]. laptop-signing.pub is only needed for later managed-host deploys.
 - The builder's daemon also gets `--timeout=21600 --max-silent-time=3600`, and sshd gets ClientAlive settings, against offload hangs.
 - The publish cache is warmed by fetching each closure item's narinfo, not with guix weather.
-- Still open for phase 2: you need to run `sudo guix archive --authorize < modules/engstrand/builder/nixpkgs-builder.pub` on the builder (or deploy with that file present) before the first prebuild's nixpkgs import. Phase 7 removes the need.
+- Still open for phase 2: you need to run `sudo guix archive --authorize < modules/engstrand/builder/nixpkgs-builder.pub` on the builder (or deploy with that file present) before the first prebuild's nixpkgs import.
 
 ## Phase 2 status (2026-11-09, T118 W120)
 
@@ -255,14 +255,14 @@ Add `$(JOBS_FLAG)` to the `guix pull`, `system build`, `system reconfigure`, `ho
 ```sh
 G="guix time-machine -C channels.scm --"
 $G describe                                                   # builds what make pull needs [I]
-$G repl -L modules -- desktop/build/nixpkgs/bridge.scm import modules/engstrand/nixpkgs/lock.sexp /var/lib/prebuild/nixpkgs-key.sec
+$G nixpkgs-bridge import /var/lib/prebuild/nixpkgs-key.sec      # the channel's command; file:// channel urls point at guix.git
 $G system build -L modules desktop/system.scm --root=/var/lib/prebuild/roots/system-$REV
 $G home   build -L modules desktop/home.scm   --root=/var/lib/prebuild/roots/home-$REV
 guix weather --substitute-urls=http://localhost:8080 $(guix gc -R roots/system-$REV roots/home-$REV) >/dev/null  # bakes publish's cache
 ```
 
   It keeps the last 3 revisions' roots and drops older ones, then writes /var/lib/prebuild/status.edn ({:rev :ok? :log}), which `builder-check` reads.
-- `nightly` builds the last pushed `prebuild` again, which is a no-op when nothing changed. It then builds a **speculative bump**: channels.scm rewritten to the branch heads with the holds from `updates` respected, and `nixpkgs-lock` at the latest nixpkgs-unstable (the `nix eval` runs here, not on the laptop). So when you run `updates apply` in the morning, the bump is usually already built. The prebuild script has to share the `channel-holds` table, so move it out of desktop/bin/updates line 45 into an edn file that both scripts read.
+- `nightly` builds the last pushed `prebuild` again, which is a no-op when nothing changed. It then builds a **speculative bump**: channels.scm rewritten to the branch heads with the holds from `updates` respected, and the bridge's `make lock` at the latest nixpkgs-unstable (the `nix eval` runs here, not on the laptop). So when you run `updates apply` in the morning, the bump is usually already built. The prebuild script has to share the `channel-holds` table, so move it out of desktop/bin/updates line 45 into an edn file that both scripts read.
 
 Why time-machine on the builder and `guix pull` on the laptop agree: both build the same channel-instance derivations for the same commits, and `make repro-build` already relies on this [I]. Phase 4 verifies it with `guix weather`.
 
@@ -306,7 +306,7 @@ Phase 5 (switch the laptop; you run make switch)
 14. Apply the asahi.scm diff, run `make switch`, then `sudo herd status guix-daemon` and `ps` to see `--max-jobs=0` and the builder URL.
 
 Phase 6: the `updates` integration and the nightly speculative bump.
-Phase 7: drop the nixpkgs bridge (decided 2026-11-09; see below). Until it lands, the prebuild keeps its `nixpkgs import` line.
+Phase 7: superseded. T126 moved the nixpkgs bridge into its own channel instead (see (e)), and the prebuild keeps its `nixpkgs-bridge import` line.
 
 ## Verification
 
@@ -337,7 +337,7 @@ Not covered: out-of-Guix builds (`make stow` with pi-sci, pierre-diff-ansi and b
 
 ## (e) The nixpkgs bridge: move it out, or drop it?
 
-**Decision (2026-11-09): drop it (Option B).** Option A stays below for the record.
+**Decision (2026-11-09, revised by T126): move it (Option A).** The bridge is the nixpkgs-bridge channel, /home/engstrand/projects/guix-nixpkgs-bridge, pinned in channels.scm. Unlike step 3 below, packages.sexp and lock.sexp moved with it: the bridge repo owns `make lock`, and `updates apply nixpkgs` relocks there, commits, and bumps the pin. Step 5's substitute-from-builder change and the extension's name (`guix nixpkgs-bridge`) differ too. Option B stays below for the record.
 
 What it is [M]: modules/engstrand/nixpkgs.scm (175 lines), modules/engstrand/nixpkgs/bridge.scm (431), lock.sexp (4946), packages.sexp (26 attrs), signing-key.pub, desktop/build/nixpkgs/bridge.scm (CLI), docs/nixpkgs-bridge/design.html, the Make targets nixpkgs-lock, -key, -authorize, -import and -verify, and the `nixpkgs` source in updates. `lock` and `versions` run `nix eval` through `guix shell nix` (bridge.scm line 156). `import` copies NARs from cache.nixos.org into /gnu/store, rewriting /nix/store and keeping each hash, and the gexp compiler refuses to evaluate when an item is missing (nixpkgs.scm line 74). Users: shell.scm (fish fzf zoxide ripgrep fd git neovim), development.scm (13 tools), herdr.scm (jujutsu), desktop.scm (ghostty, mesa, locales), dotfiles.scm (LOCALE_ARCHIVE) and hex.scm (Asahi Vulkan ICD from nixpkgs mesa).
 

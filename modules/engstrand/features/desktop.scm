@@ -2,7 +2,7 @@
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages bluetui)
   #:use-module (engstrand packages hex)
-  #:use-module (engstrand nixpkgs)
+  #:use-module (nixpkgs-bridge packages)
   #:use-module (asahi guix systems desktop)
   #:use-module (gnu home services)
   #:use-module (gnu home services xdg)

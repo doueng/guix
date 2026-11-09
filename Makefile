@@ -18,7 +18,7 @@ JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))
 COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
-        nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
+        nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check \
         doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check updates-check clipboard-check
 
@@ -39,7 +39,6 @@ help:
 	@echo 'builder-deploy reconfigure the builder over the tailnet'
 	@echo 'prebuild      push @ to the builder and build system, Home and pull there'
 	@echo 'builder-check builder publish reachable, last prebuild, nothing to build locally'
-	@echo 'nixpkgs-lock  resolve $(NIXPKGS)/packages.sexp against cache.nixos.org (NIXPKGS_REV=...)'
 	@echo 'nixpkgs-key   generate the key that signs nixpkgs imports'
 	@echo 'nixpkgs-authorize let the running daemon trust that key before the first switch (sudo)'
 	@echo 'nixpkgs-import copy the locked nixpkgs closures into /gnu/store'
@@ -141,30 +140,29 @@ prebuild:
 builder-check:
 	desktop/bin/builder-prebuild check
 
-# nixpkgs binaries enter /gnu/store signed by NIXPKGS_KEY; the daemon trusts
-# its public half, $(NIXPKGS)/signing-key.pub, through asahi.scm.
-NIXPKGS := modules/engstrand/nixpkgs
+# nixpkgs binaries come from the nixpkgs-bridge channel (channels.scm), whose
+# repo, ~/projects/guix-nixpkgs-bridge, owns the lock; updates bumps the pin.
+# They enter /gnu/store signed by NIXPKGS_KEY; the daemon trusts
+# its public half, $(NIXPKGS_PUB), through asahi.scm.
+NIXPKGS_PUB := modules/engstrand/system/nixpkgs-signing-key.pub
 NIXPKGS_KEY ?= $(HOME)/.config/guix/nixpkgs-bridge/signing-key.sec
-NIXPKGS_BRIDGE := "$(GUIX)" repl $(COMMON) -- desktop/build/nixpkgs/bridge.scm
-
-nixpkgs-lock:
-	$(NIXPKGS_BRIDGE) lock $(NIXPKGS)/packages.sexp $(NIXPKGS)/lock.sexp $(NIXPKGS_REV)
+NIXPKGS_BRIDGE := "$(GUIX)" nixpkgs-bridge
 
 nixpkgs-key:
 	test ! -e "$(NIXPKGS_KEY)" || { echo '$(NIXPKGS_KEY) exists' >&2; exit 1; }
 	$(NIXPKGS_BRIDGE) key "$(NIXPKGS_KEY)"
-	cp "$(basename $(NIXPKGS_KEY)).pub" $(NIXPKGS)/signing-key.pub
+	cp "$(basename $(NIXPKGS_KEY)).pub" $(NIXPKGS_PUB)
 
 # The first switch imports before it installs the key from asahi.scm, so a new
 # key must be trusted by the running daemon once; the switch then keeps it.
 nixpkgs-authorize:
-	sudo "$(GUIX)" archive --authorize < $(NIXPKGS)/signing-key.pub
+	sudo "$(GUIX)" archive --authorize < $(NIXPKGS_PUB)
 
 nixpkgs-import:
-	$(NIXPKGS_BRIDGE) import $(NIXPKGS)/lock.sexp "$(NIXPKGS_KEY)"
+	$(NIXPKGS_BRIDGE) import "$(NIXPKGS_KEY)"
 
 nixpkgs-verify:
-	$(NIXPKGS_BRIDGE) verify $(NIXPKGS)/lock.sexp
+	$(NIXPKGS_BRIDGE) verify
 
 PI_SCI := desktop/build/pi-sci
 PI_SCI_OUTPUTS := $(PI_SCI)/dist/sci.js $(addprefix $(PI_SCI)/dist/pi-,grep.mjs find.mjs read.mjs)

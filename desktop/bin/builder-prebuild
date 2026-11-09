@@ -29,15 +29,30 @@
 (def repo (delay (-> *file* fs/real-path fs/parent fs/parent fs/parent str)))
 (def guix (str home "/.config/guix/current/bin/guix"))
 
+;; Channels in channels.scm with a file:// url, such as the nixpkgs-bridge
+;; checkout: [name path commit].  The builder can't reach the laptop's paths,
+;; so push-and-build pushes each pinned commit into its guix.git as
+;; refs/heads/channel-NAME and the builder points the url there.
+(defn local-channels [text]
+  (for [[_ name path commit]
+        (re-seq #"\(name '(\S+)\)\s*\(url \"file://([^\"]+)\"\)\s*(?:\(branch \"[^\"]*\"\)\s*)?\(commit \"([0-9a-f]+)\"\)"
+                text)]
+    [name path commit]))
+
 (defn push-and-build []
   ;; jj snapshots @ into a commit in its git store; push that commit by id so an
   ;; undescribed working copy, such as an `updates apply' edit, can be built.
   (let [rev (out {:dir @repo} "jj log --no-graph -r @ -T commit_id")
-        git-dir (out {:dir @repo} "jj git root")]
+        git-dir (out {:dir @repo} "jj git root")
+        push (fn [git-dir refspec]
+               (p/shell {:extra-env {"GIT_SSH_COMMAND" ssh-cmd}}
+                        "git" (str "--git-dir=" git-dir) "push" "--force" "--quiet"
+                        (str "prebuild@" host ":guix.git") refspec))]
     (println "prebuild" rev "on" host)
-    (p/shell {:extra-env {"GIT_SSH_COMMAND" ssh-cmd}}
-             "git" (str "--git-dir=" git-dir) "push" "--force" "--quiet"
-             (str "prebuild@" host ":guix.git") (str rev ":refs/heads/prebuild"))
+    (push git-dir (str rev ":refs/heads/prebuild"))
+    (doseq [[name path commit] (local-channels (slurp (str @repo "/channels.scm")))]
+      (println "channel" name commit "from" path)
+      (push (out {:dir path} "jj git root") (str commit ":refs/heads/channel-" name)))
     (apply p/shell (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "run" rev]))))
 
 (defn dry-run-builds [kind config]
@@ -119,7 +134,8 @@
     (when-not (.tryLock lock) (die "another prebuild is running"))
     (let [log (str state "/logs/" rev ".log")
           work (str state "/work")
-          tm [(str bin "/guix") "time-machine" "-C" "channels.scm" "--"]
+          channels (str state "/channels.scm")
+          tm [(str bin "/guix") "time-machine" "-C" channels "--"]
           root #(str state "/roots/" % "-" rev)
           nix-key (str state "/nixpkgs-key.sec")
           started (str (java.time.Instant/now))]
@@ -128,15 +144,19 @@
       (try
         (sh! log "git" "fetch" "--quiet" "origin" "+refs/heads/*:refs/remotes/origin/*")
         (sh! log "git" "checkout" "--quiet" "--detach" rev)
+        ;; channels.scm with each file:// url pointing at the commits
+        ;; push-and-build put in guix.git.
+        (spit channels (str/replace (slurp (str work "/channels.scm"))
+                                    #"\(url \"file://[^\"]+\"\)"
+                                    (str "(url \"file://" state "/guix.git\")")))
         ;; What `make pull' builds: the channel instances at these commits.
         (apply sh! log (concat tm ["describe"]))
-        ;; The nixpkgs bridge, until phase 7 drops it.  The daemon must trust
+        ;; The nixpkgs-bridge channel's binaries.  The daemon must trust
         ;; nixpkgs-key.pub, which modules/engstrand/builder/nixpkgs-builder.pub holds.
-        (when (fs/exists? "/var/lib/prebuild/work/desktop/build/nixpkgs/bridge.scm")
+        (when (str/includes? (slurp channels) "(name 'nixpkgs-bridge)")
           (when-not (fs/exists? nix-key)
-            (apply sh! log (concat tm ["repl" "-L" "modules" "--" "desktop/build/nixpkgs/bridge.scm" "key" nix-key])))
-          (apply sh! log (concat tm ["repl" "-L" "modules" "--" "desktop/build/nixpkgs/bridge.scm"
-                                     "import" "modules/engstrand/nixpkgs/lock.sexp" nix-key])))
+            (apply sh! log (concat tm ["nixpkgs-bridge" "key" nix-key])))
+          (apply sh! log (concat tm ["nixpkgs-bridge" "import" nix-key])))
         (apply sh! log (concat tm ["system" "build" "-L" "modules" "desktop/system.scm" "-r" (root "system")]))
         (apply sh! log (concat tm ["home" "build" "-L" "modules" "desktop/home.scm" "-r" (root "home")]))
         ;; Development manifests, such as dusk's Rust toolchain.

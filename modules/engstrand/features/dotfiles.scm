@@ -1,6 +1,6 @@
 (define-module (engstrand features dotfiles)
   #:use-module (engstrand features packages)
-  #:use-module (engstrand nixpkgs)
+  #:use-module (nixpkgs-bridge packages)
   #:use-module (gnu home services)
   #:use-module (gnu packages)
   #:use-module (gnu services)
