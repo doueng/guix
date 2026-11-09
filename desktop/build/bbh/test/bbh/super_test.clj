@@ -394,7 +394,8 @@
         (is (not (fs/exists? (fs/path repo "only-here"))))
         (is (not (fs/exists? (fs/path (:workspace w2) "only-here"))))
         (is (= #{"default" "T1-1" "T2-1"}
-               (set (map #(first (clojure.string/split % #":")) (clojure.string/split-lines (:out (babashka.process/shell {:dir repo :out :string} "jj" "workspace" "list")))))))
+               ;; jj 0.47 marks the current workspace: "default (current): ...".
+               (set (map #(first (clojure.string/split % #"[: ]")) (clojure.string/split-lines (:out (babashka.process/shell {:dir repo :out :string} "jj" "workspace" "list")))))))
         (is (= ["T1 first" "T2 second"] (map #(str (:thread %) " " (:title %)) @launches)))
         (is (every? #(re-matches #"[0-9a-f]{48}" (:token %)) @launches) "each buffer gets its Worker's token")
         (is (= "super-W1" (:conversation (first @launches))))
