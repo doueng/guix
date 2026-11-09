@@ -522,6 +522,59 @@ the split view's thread list keeps one truncated line per thread."
       (eng/bbh-inbox--render (funcall with "from the phone") t)
       (should (equal "from the phone" (eng/bbh-inbox--answer-text "a1"))))))
 
+(defvar bbh-test--sent nil "Replies the C-n test saw sent.")
+
+(defconst bbh-test--printable
+  (apply #'string (number-sequence ?\s ?~))
+  "Every printable ASCII character, space to tilde.")
+
+(defun bbh-test--type-in-answer (keys)
+  "Enter insert state in a1's Answer with i, type KEYS as keystrokes, and
+return the commands they ran.  The hook also runs once with no command,
+which is not a key, so nil is left out."
+  (evil-local-mode 1)
+  (evil-normal-state)
+  (goto-char (point-min))
+  (forward-line 1)
+  (execute-kbd-macro (kbd "i"))
+  (should (evil-insert-state-p))
+  (should (eng/bbh-inbox--in-answer-p))
+  (let ((ran nil))
+    (let ((record (lambda () (when this-command (push this-command ran)))))
+      (add-hook 'post-command-hook record nil t)
+      (unwind-protect (execute-kbd-macro keys)
+        (remove-hook 'post-command-hook record t)))
+    (nreverse ran)))
+
+(ert-deftest bbh-inbox-insert-state-types-every-printable-key ()
+  "In insert state every printable key types itself in an Answer; none of the
+Inbox's single-key commands, such as g, j, x, digits or ., runs there."
+  (bbh-test--with-fake-inbox (view log)
+    (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
+    (let ((ran (bbh-test--type-in-answer bbh-test--printable)))
+      (should (evil-insert-state-p))
+      (should (equal (string-trim bbh-test--printable) (eng/bbh-inbox--answer-text "a1")))
+      (should (equal (length bbh-test--printable) (length ran)))
+      (should-not (seq-remove (lambda (command) (memq command '(self-insert-command org-self-insert-command org-force-self-insert))) ran))
+      ;; No verb but the outline itself reached bbh.
+      (should-not (seq-remove (lambda (verb) (equal verb "org")) (bbh-test--inbox-log log))))))
+
+(ert-deftest bbh-inbox-ctrl-n-sends-the-answer ()
+  "C-n sends the thread's reply while you type an Answer; elsewhere it moves lines."
+  (bbh-test--with-fake-inbox (view log)
+    (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
+    (should-not (eq 'eng/bbh-inbox-send (key-binding (kbd "C-n"))))
+    (bbh-test--type-in-answer "call it Zed")
+    (should (eq 'eng/bbh-inbox-send (key-binding (kbd "C-n"))))
+    (cl-letf (((symbol-function 'eng/bbh-inbox--send-thread)
+               (lambda (thread _) (push (cons thread (eng/bbh-inbox--answer-text "a1")) bbh-test--sent))))
+      (setq bbh-test--sent nil)
+      (execute-kbd-macro (kbd "C-n"))
+      (should (equal '(("T1" . "call it Zed")) bbh-test--sent)))
+    (should (evil-normal-state-p))
+    (should-not (eq 'eng/bbh-inbox-send (key-binding (kbd "C-n"))))))
+
+
 (ert-deftest bbh-inbox-opens-from-a-buffer-whose-workspace-is-gone ()
   ;; A finished Worker's workspace is removed while its buffers stay, so SPC m i
   ;; runs with a default-directory that no longer exists.

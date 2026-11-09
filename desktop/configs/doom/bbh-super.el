@@ -1237,8 +1237,12 @@ single letters replace evil commands that edit text, which only an Answer
 body has; i there types as usual.  s also shadows the global avy jump.")
 
 (defun eng/bbh-inbox--outside-answer (command)
-  "COMMAND, unless the cursor is in an Answer body, where keys type."
-  (unless (and (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox--in-answer-p)) command))
+  "COMMAND, unless evil is on or the cursor is in an Answer body, where keys type.
+Evil gives these keys normal state only, by `evil-local-set-key', and keeps
+them out of insert state, which reads the major-mode map too."
+  (unless (or (bound-and-true-p evil-local-mode)
+              (and (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox--in-answer-p)))
+    command))
 
 (defvar eng/bbh-inbox-mode-map (make-sparse-keymap)
   "The Inbox keys, for Emacs without evil: outside an Answer body a letter is
@@ -1250,12 +1254,20 @@ its command, inside it types.")
       (parent (keymap-parent eng/bbh-inbox-mode-map)))
   (setcdr map nil)
   (when parent (set-keymap-parent map parent))
-  (dolist (prefix '("g" "]" "[")) (define-key map prefix (make-sparse-keymap)))
+  ;; Each printable key, a prefix's map too, goes through the filter, so
+  ;; insert state and an Answer body type it.
+  (dolist (prefix '("g" "]" "["))
+    (let ((keys (make-sparse-keymap)))
+      (dolist (key eng/bbh-inbox-keys)
+        (when (string-prefix-p prefix (car key))
+          (define-key keys (substring (car key) 1) (cadr key))))
+      (define-key map prefix `(menu-item "" ,keys :filter eng/bbh-inbox--outside-answer))))
   (dolist (key eng/bbh-inbox-keys)
-    (define-key map (kbd (car key))
-                (if (string-prefix-p "C-" (car key))
-                    (cadr key)
-                  `(menu-item "" ,(cadr key) :filter eng/bbh-inbox--outside-answer)))))
+    (unless (member (substring (car key) 0 1) '("g" "]" "["))
+      (define-key map (kbd (car key))
+                  (if (string-prefix-p "C-" (car key))
+                      (cadr key)
+                    `(menu-item "" ,(cadr key) :filter eng/bbh-inbox--outside-answer))))))
 
 (defun eng/bbh-inbox--setup ()
   "The Inbox buffer's settings and hooks. The mode runs it, and loading this
@@ -1277,6 +1289,7 @@ thread list, in its own mode, stays one truncated line per thread."
     (dolist (key eng/bbh-inbox-keys)
       (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
     (evil-local-set-key 'insert (kbd "C-c C-c") #'eng/bbh-inbox-send)
+    (evil-local-set-key 'insert (kbd "C-n") #'eng/bbh-inbox-send)
     (evil-local-set-key 'insert (kbd "C-c C-k") #'eng/bbh-inbox-clear)))
 
 (define-derived-mode eng/bbh-inbox-mode org-mode "bbh inbox"

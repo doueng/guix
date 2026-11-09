@@ -268,9 +268,9 @@ The Inbox is an org buffer in evil normal state, so motions, search, `C-j`/`C-k`
 | TAB, S-TAB, zo, zc, za, gj, gk, gh, gl | Org and evil-org folding and moves by heading. TAB on an ask shows its Details. |
 | 1 to 9 | Pick an option. The pick is saved at once. |
 | . | Pick the recommended option. |
-| i | Go to the ask's Answer and type in insert state. Leaving insert state saves what you typed to the draft, which the phone shows too. |
+| i | Go to the ask's Answer and type in insert state, where every printable key types itself. Leaving insert state saves what you typed to the draft, which the phone shows too. |
 | r | Answer the ask, or on a thread with no open ask, write its note in the minibuffer. |
-| s, C-c C-c | Send the thread's picks, typed answers and note as one reply. C-c C-c works in insert state too. A typed answer closes its ask like a pick. |
+| s, C-c C-c | Send the thread's picks, typed answers and note as one reply. C-c C-c works in insert state too, and so does C-n (Cmd+N through kanata). A typed answer closes its ask like a pick. |
 | S | Send every thread's draft, after one question listing them. |
 | C-c C-k | Discard the thread's draft. |
 | A | Approve the review under the cursor, else the one the thread is waiting on. |
