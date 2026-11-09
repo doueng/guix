@@ -10,6 +10,8 @@
 (dolist (pkg '("goto-chg" "evil"))
   (add-to-list 'load-path (expand-file-name pkg (getenv "BBH_ELISP_BUILD"))))
 (require 'evil)
+;; Doom turns evil on everywhere, and the bbh keys are evil's only.
+(evil-mode 1)
 (load (getenv "BBH_DOOM_AGENT_SHELL") nil t)
 (require 'agent-shell)
 
@@ -23,6 +25,35 @@
                    ("." . eng/bbh-inbox-pick-recommended) ("i" . eng/bbh-inbox-answer) ("A" . eng/bbh-inbox-approve) ("J" . eng/bbh-inbox-jjui) ("gJ" . eng/bbh-inbox-jjui-close) ("q" . quit-window)
                    ("j" . evil-next-line) ("gg" . evil-goto-first-line) ("G" . evil-goto-line)))
       (should (eq (cdr key) (key-binding (kbd (car key))))))))
+
+(defun bbh-test--keys-in (state keys)
+  "In evil STATE, whether each (KEYS . COMMAND) in KEYS runs COMMAND here."
+  (evil-change-state state)
+  (dolist (key keys)
+    (should (equal (list state (car key) (cdr key))
+                   (list state (car key) (key-binding (kbd (car key))))))))
+
+(ert-deftest bbh-inbox-and-thread-list-keys-under-evil ()
+  "With evil on, as in Doom, the Inbox's letters act in normal state and type
+in insert state, where only C-n, C-c C-c and C-c C-k act; the thread list's
+keys act in normal state."
+  (with-current-buffer (get-buffer-create "*bbh-evil-inbox*")
+    (eng/bbh-inbox-mode)
+    (should (eq 'normal evil-state))
+    (bbh-test--keys-in 'normal '(("s" . eng/bbh-inbox-send) ("C-c C-c" . eng/bbh-inbox-send)
+                                 ("C-c C-k" . eng/bbh-inbox-clear) ("gv" . eng/bbh-inbox-toggle-view)
+                                 ("]t" . eng/bbh-inbox-next-waiting)))
+    (bbh-test--keys-in 'insert '(("C-n" . eng/bbh-inbox-send) ("C-c C-c" . eng/bbh-inbox-send)
+                                 ("C-c C-k" . eng/bbh-inbox-clear)))
+    (dolist (key '("s" "g" "]" "2" "m"))
+      (should (memq (key-binding (kbd key)) '(self-insert-command org-self-insert-command))))
+    (kill-buffer))
+  (with-current-buffer (get-buffer-create "*bbh-evil-threads*")
+    (eng/bbh-threads-mode)
+    (should (eq 'normal evil-state))
+    (bbh-test--keys-in 'normal '(("j" . eng/bbh-threads-next) ("gr" . eng/bbh-inbox-refresh)
+                                 ("]t" . eng/bbh-inbox-next-waiting) ("q" . quit-window)))
+    (kill-buffer)))
 
 (ert-deftest bbh-inbox-text-wraps-and-the-thread-list-does-not ()
   "Questions, details and answers wrap at the window, keeping their indent;
@@ -265,6 +296,21 @@ the split view's thread list keeps one truncated line per thread."
               (,transcript (buffer-local-value 'eng/bbh-transcript ,shell)))
          (ignore ,composer ,transcript)
          ,@body))))
+
+(ert-deftest bbh-composer-and-transcript-keys-under-evil ()
+  "The composer's send, stop and paging keys act in normal and insert state,
+and the transcript keeps q and focus moves in normal state."
+  (bbh-test--with-shell (shell composer transcript)
+    (with-current-buffer composer
+      (dolist (state '(normal insert))
+        (bbh-test--keys-in state '(("C-n" . eng/bbh-send) ("C-c C-c" . eng/bbh-send) ("M-RET" . eng/bbh-send)
+                                   ("C-c C-k" . agent-shell-viewport-interrupt) ("C-c C-t" . eng/bbh-toggle-tools)
+                                   ("M-k" . eng/bbh-output-page-up) ("M-j" . eng/bbh-output-page-down))))
+      (bbh-test--keys-in 'normal '(("g?" . eng/bbh-keys) ("C-d" . eng/bbh-output-page-down)
+                                   ("C-u" . eng/bbh-output-page-up)))
+      (evil-normal-state))
+    (with-current-buffer transcript
+      (bbh-test--keys-in 'normal '(("q" . bury-buffer) ("C-j" . eng/focus-down) ("C-k" . eng/focus-up))))))
 
 (ert-deftest bbh-mail-wakes-an-idle-shell-and-keeps-the-draft ()
   (bbh-test--with-shell (shell composer transcript)

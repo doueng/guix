@@ -91,7 +91,7 @@ reload port from the bbh-super daemon."
   :keymap eng/bbh-super-mode-map
   ;; Turned on outside a command, by the controller's emacsclient, evil would
   ;; not see the map until its next state change.
-  (when (fboundp 'evil-normalize-keymaps) (evil-normalize-keymaps)))
+  (evil-normalize-keymaps))
 ;; The composer's major mode restarts when it returns from the history view.
 (put 'eng/bbh-super-mode 'permanent-local t)
 
@@ -491,7 +491,7 @@ and new ones by default: Details, archived threads and threads with no ask."
         (save-excursion (goto-char start) (org-fold-hide-subtree))))))
 
 (defun eng/bbh-inbox--typing-p ()
-  (and (bound-and-true-p evil-local-mode) (fboundp 'evil-insert-state-p) (evil-insert-state-p)))
+  (evil-insert-state-p))
 
 (defun eng/bbh-inbox--render (text &optional quiet)
   "Show TEXT, `bbh inbox org' output: the header line, then the outline.
@@ -647,7 +647,7 @@ shows the Inbox, else when one does."
       (when (fboundp 'org-fold-show-context) (save-excursion (goto-char (car region)) (org-fold-show-context)))
       (goto-char (max (car region) (1- (cdr region))))
       (when (and (bolp) (eolp)) (insert "    "))))
-  (when (fboundp 'evil-insert-state) (evil-insert-state)))
+  (evil-insert-state))
 
 (defun eng/bbh-inbox-reply ()
   "Answer the ask under the cursor; on a thread with no ask, write its note."
@@ -1185,24 +1185,14 @@ in a narrow frame, and the thread beside it. Returns the list's window."
   "The thread list's evil normal-state keys: (KEYS COMMAND DESCRIPTION).
 Bare C-h and C-l still move between the panes, as between any windows.")
 
-(defvar eng/bbh-threads-mode-map (make-sparse-keymap)
-  "The thread list's keys, for Emacs without evil.")
-
-(let ((map eng/bbh-threads-mode-map))
-  (setcdr map nil)
-  (set-keymap-parent map special-mode-map)
-  (dolist (prefix '("g" "]" "[")) (define-key map prefix (make-sparse-keymap)))
-  (dolist (key eng/bbh-threads-keys) (define-key map (kbd (car key)) (cadr key))))
-
 (defun eng/bbh-threads--setup ()
   "The thread list's settings and hooks; loading this file runs it again in a live list."
   (setq truncate-lines t)
   (hl-line-mode 1)
   (add-hook 'post-command-hook #'eng/bbh-threads--moved nil t)
   (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t)
-  (when (fboundp 'evil-local-set-key)
-    (dolist (key eng/bbh-threads-keys)
-      (evil-local-set-key 'normal (kbd (car key)) (cadr key)))))
+  (dolist (key eng/bbh-threads-keys)
+    (evil-local-set-key 'normal (kbd (car key)) (cadr key))))
 
 (define-derived-mode eng/bbh-threads-mode special-mode "bbh threads"
   "The super-agent's threads, one per line, beside the selected one.
@@ -1210,8 +1200,7 @@ Bare C-h and C-l still move between the panes, as between any windows.")
 you have not read; m marks it read without opening it."
   (eng/bbh-threads--setup))
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state 'eng/bbh-threads-mode 'normal))
+(evil-set-initial-state 'eng/bbh-threads-mode 'normal)
 
 (defconst eng/bbh-inbox-keys
   `(("RET" eng/bbh-inbox-ret "Pick the option here, open a link, or open the thread's Worker")
@@ -1248,38 +1237,6 @@ gh and gl move by heading, and j, k, gg, G and / move as anywhere.  The
 single letters replace evil commands that edit text, which only an Answer
 body has; i there types as usual.  s also shadows the global avy jump.")
 
-(defun eng/bbh-inbox--outside-answer (command)
-  "COMMAND, unless evil is on or the cursor is in an Answer body, where keys type.
-Evil gives these keys normal state only, by `evil-local-set-key', and keeps
-them out of insert state, which reads the major-mode map too."
-  (unless (or (bound-and-true-p evil-local-mode)
-              (and (derived-mode-p 'eng/bbh-inbox-mode) (eng/bbh-inbox--in-answer-p)))
-    command))
-
-(defvar eng/bbh-inbox-mode-map (make-sparse-keymap)
-  "The Inbox keys, for Emacs without evil: outside an Answer body a letter is
-its command, inside it types.")
-
-;; Filled on every load, since `defvar' keeps the map an older load made and
-;; a Doom reload must not leave its keys behind.
-(let ((map eng/bbh-inbox-mode-map)
-      (parent (keymap-parent eng/bbh-inbox-mode-map)))
-  (setcdr map nil)
-  (when parent (set-keymap-parent map parent))
-  ;; Each printable key, a prefix's map too, goes through the filter, so
-  ;; insert state and an Answer body type it.
-  (dolist (prefix '("g" "]" "["))
-    (let ((keys (make-sparse-keymap)))
-      (dolist (key eng/bbh-inbox-keys)
-        (when (string-prefix-p prefix (car key))
-          (define-key keys (substring (car key) 1) (cadr key))))
-      (define-key map prefix `(menu-item "" ,keys :filter eng/bbh-inbox--outside-answer))))
-  (dolist (key eng/bbh-inbox-keys)
-    (unless (member (substring (car key) 0 1) '("g" "]" "["))
-      (define-key map (kbd (car key))
-                  (if (string-prefix-p "C-" (car key))
-                      (cadr key)
-                    `(menu-item "" ,(cadr key) :filter eng/bbh-inbox--outside-answer))))))
 
 (defun eng/bbh-inbox--setup ()
   "The Inbox buffer's settings and hooks. The mode runs it, and loading this
@@ -1296,20 +1253,19 @@ thread list, in its own mode, stays one truncated line per thread."
   (add-hook 'post-command-hook #'eng/bbh-inbox--moved nil t)
   (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t)
   (add-hook 'evil-insert-state-exit-hook #'eng/bbh-inbox--stopped-typing nil t)
-  ;; Buffer-local keys win over evil-org's, such as its A and I.
-  (when (fboundp 'evil-local-set-key)
-    (dolist (key eng/bbh-inbox-keys)
-      (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
-    (evil-local-set-key 'insert (kbd "C-c C-c") #'eng/bbh-inbox-send)
-    (evil-local-set-key 'insert (kbd "C-n") #'eng/bbh-inbox-send)
-    (evil-local-set-key 'insert (kbd "C-c C-k") #'eng/bbh-inbox-clear)))
+  ;; Buffer-local keys win over evil-org's, such as its A and I.  Insert
+  ;; state types every printable key; only these send or discard.
+  (dolist (key eng/bbh-inbox-keys)
+    (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
+  (evil-local-set-key 'insert (kbd "C-c C-c") #'eng/bbh-inbox-send)
+  (evil-local-set-key 'insert (kbd "C-n") #'eng/bbh-inbox-send)
+  (evil-local-set-key 'insert (kbd "C-c C-k") #'eng/bbh-inbox-clear))
 
 (define-derived-mode eng/bbh-inbox-mode org-mode "bbh inbox"
   "The threads that need you, from `bbh super', as an org outline you answer in."
   (eng/bbh-inbox--setup))
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state 'eng/bbh-inbox-mode 'normal))
+(evil-set-initial-state 'eng/bbh-inbox-mode 'normal)
 
 ;; The same commands under SPC m, where which-key lists them.
 (when (fboundp 'map!)

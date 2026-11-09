@@ -190,7 +190,7 @@ keeps the text and shows bbh's message."
       (set-window-buffer input (agent-shell-viewport--buffer :shell-buffer shell)))
     (prog1 (eng/bbh-layout shell transcript)
       ;; You were typing /new, so keep typing.
-      (when (fboundp 'evil-insert-state) (evil-insert-state))
+      (evil-insert-state)
       (let ((kill-buffer-query-functions nil))
         (when (buffer-live-p old-composer) (kill-buffer old-composer))
         (kill-buffer old)))))
@@ -824,23 +824,15 @@ Org leaves result blocks, a special block, without the code background."
         :localleader
         :desc "Toggle tool results" "t" #'eng/bbh-toggle-tools))
 
-;; Doom's evil-org keys, which win in Doom anyway: gj and gk move by element,
-;; ]h and [h between prompts, gh up.  These copies serve Emacs without
-;; evil-org.  S-TAB stays org's cycle; SPC m t or C-c C-t folds tool results.
-;; n, p and the other evil keys keep their meaning; q buries.
-(with-eval-after-load 'evil
-  (evil-define-key 'normal eng/bbh-transcript-mode-map
-    (kbd "gj") #'org-forward-element
-    (kbd "gk") #'org-backward-element
-    (kbd "]h") #'org-forward-heading-same-level
-    (kbd "[h") #'org-backward-heading-same-level
-    (kbd "gh") #'org-up-element
-    (kbd "q") #'bury-buffer)
-  ;; evil-org's C-j and C-k shadow focus, which moves between transcript and
-  ;; composer. The transcript is read-only, so normal state is enough.
-  (evil-define-key 'normal eng/bbh-transcript-mode-map
-    (kbd "C-j") #'eng/focus-down
-    (kbd "C-k") #'eng/focus-up))
+;; Doom's evil-org keys work here: gj and gk move by element, ]h and [h
+;; between prompts, gh up.  S-TAB stays org's cycle; SPC m t or C-c C-t folds
+;; tool results.  n, p and the other evil keys keep their meaning; q buries.
+;; evil-org's C-j and C-k shadow focus, which moves between transcript and
+;; composer.  The transcript is read-only, so normal state is enough.
+(evil-define-key 'normal eng/bbh-transcript-mode-map
+  (kbd "q") #'bury-buffer
+  (kbd "C-j") #'eng/focus-down
+  (kbd "C-k") #'eng/focus-up)
 
 (defvar-local eng/bbh-composer nil)
 (put 'eng/bbh-composer 'permanent-local t)
@@ -991,17 +983,14 @@ history navigation and replies, which doubles `eng/bbh-composer-padding'."
                        ("C-c ?" . eng/bbh-keys)
                        ("M-k" . eng/bbh-output-page-up)
                        ("M-j" . eng/bbh-output-page-down)))
-      (local-set-key (kbd (car binding)) (cdr binding))
-      (when (fboundp 'evil-local-set-key)
-        (dolist (state '(normal insert))
-          (evil-local-set-key state (kbd (car binding)) (cdr binding)))))
-    ;; C-n sends in every state.  In normal state C-d and C-u page the
-    ;; transcript, since the composer is a few lines tall.
-    (when (fboundp 'evil-local-set-key)
-      (dolist (binding '(("g?" . eng/bbh-keys)
-                         ("C-d" . eng/bbh-output-page-down)
-                         ("C-u" . eng/bbh-output-page-up)))
-        (evil-local-set-key 'normal (kbd (car binding)) (cdr binding))))
+      (dolist (state '(normal insert))
+        (evil-local-set-key state (kbd (car binding)) (cdr binding))))
+    ;; C-n sends in normal and insert state.  In normal state C-d and C-u page
+    ;; the transcript, since the composer is a few lines tall.
+    (dolist (binding '(("g?" . eng/bbh-keys)
+                       ("C-d" . eng/bbh-output-page-down)
+                       ("C-u" . eng/bbh-output-page-up)))
+      (evil-local-set-key 'normal (kbd (car binding)) (cdr binding)))
     (eng/bbh-composer-header)))
 
 (defun eng/bbh-layout (&optional shell transcript)
@@ -1037,7 +1026,7 @@ called interactively, restore this layout for the current session."
     ;; Normal state, so leader keys work at once.  This may run outside a
     ;; command, from the Inbox's sentinel or the controller's emacsclient,
     ;; where no hook tells the terminal the new cursor shape.
-    (when (fboundp 'evil-normal-state) (evil-normal-state))
+    (evil-normal-state)
     (when (fboundp 'etcc--set-cursor) (etcc--set-cursor))
     composer))
 
