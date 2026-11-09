@@ -863,21 +863,27 @@ selected thread, or `outline', every thread in one buffer.")
 (defun eng/bbh-inbox--list-buffer ()
   (get-buffer-create "*bbh threads*"))
 
+(defun eng/bbh-inbox--parse-row (fields)
+  "The thread row of FIELDS, `#+thread:' key=value pairs separated by tabs, as
+a plist of :id :section :status :asks :age :unseen :worker :title.  A field
+it does not know is kept under its own key, so a new one breaks nothing."
+  (let (row)
+    (dolist (field (split-string fields "\t"))
+      (when (string-match "\\`\\([^=]+\\)=\\(.*\\)\\'" field)
+        (setq row (plist-put row (intern (concat ":" (match-string 1 field))) (match-string 2 field)))))
+    (setq row (plist-put row :asks (string-to-number (or (plist-get row :asks) "0"))))
+    (setq row (plist-put row :unseen (equal "1" (plist-get row :unseen))))
+    (plist-put row :worker (unless (string-empty-p (or (plist-get row :worker) "")) (plist-get row :worker)))))
+
 (defun eng/bbh-inbox--parse-split (text)
-  "TEXT, `bbh inbox split' output, as a plist: :header, :rows (each a plist
-of :id :section :execution :asks :age :unseen :worker :title), :selected,
-the thread whose :progress, a list of (TIME KIND TEXT), it carries, and
-:outline."
+  "TEXT, `bbh inbox split' output, as a plist: :header, :rows (each a plist,
+see `eng/bbh-inbox--parse-row'), :selected, the thread whose :progress, a
+list of (TIME KIND TEXT), it carries, and :outline."
   (let* ((lines (split-string (string-trim-right text) "\n"))
          rows progress selected outline)
     (dolist (line (cdr lines))
       (cond ((string-prefix-p "#+thread: " line)
-             (pcase-let ((`(,id ,section ,execution ,asks ,age ,unseen ,worker . ,title)
-                          (split-string (substring line 10) "\t")))
-               (push (list :id id :section section :execution execution :asks (string-to-number asks)
-                           :age age :unseen (equal unseen "1") :worker (unless (string-empty-p worker) worker)
-                           :title (string-join title " "))
-                     rows)))
+             (push (eng/bbh-inbox--parse-row (substring line 10)) rows))
             ((string-prefix-p "#+selected: " line) (setq selected (substring line 12)))
             ((string-prefix-p "#+progress: " line)
              (push (cdr (split-string (substring line 12) "\t")) progress))
@@ -892,12 +898,12 @@ the thread whose :progress, a list of (TIME KIND TEXT), it carries, and
   (member (plist-get row :section) eng/bbh-inbox--waiting-sections))
 
 (defun eng/bbh-inbox--glyph (row)
-  "ROW's status: ● waiting on you, ✖ stuck, ◐ working, ✓ done, from the controller's section and execution."
-  (let ((section (plist-get row :section)) (execution (plist-get row :execution)))
-    (cond ((or (eng/bbh-inbox--waiting-p row) (equal execution "waiting")) (propertize "●" 'face 'warning))
-          ((or (equal section "needs-attention") (equal execution "failed")) (propertize "✖" 'face 'error))
-          ((member execution '("working" "queued")) (propertize "◐" 'face 'success))
-          (t (propertize "✓" 'face 'shadow)))))
+  "ROW's :status, which the controller decides, as ● on you, ✖ stuck, ◐ working, else ✓."
+  (pcase (plist-get row :status)
+    ("on-you" (propertize "●" 'face 'warning))
+    ("stuck" (propertize "✖" 'face 'error))
+    ("working" (propertize "◐" 'face 'success))
+    (_ (propertize "✓" 'face 'shadow))))
 
 (defun eng/bbh-inbox--row-line (row width)
   "ROW as one list line of WIDTH columns: unseen mark, status, id, title, open asks and age."

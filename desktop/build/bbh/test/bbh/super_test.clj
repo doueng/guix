@@ -195,12 +195,12 @@
     (is (clojure.string/starts-with? (pane/header sections ["controller" "web"]) "bbh inbox · 1 need you · old code: controller, web   1-9 pick"))))
 
 (deftest the-split-view-lists-a-line-per-thread-and-the-selected-threads-progress
-  (let [sections {:sections [{:section :stopped :threads [{:id "T1" :title "Alt+W\tcloses\nwindows" :execution :waiting
+  (let [sections {:sections [{:section :stopped :threads [{:id "T1" :title "Alt+W\tcloses\nwindows" :status :on-you
                                                          :updated-at (str (java.time.Instant/now)) :milestone-seq 7 :read-seq 5 :worker "W1"
                                                          :asks [{:id "a1"}]}]}
-                             {:section :quiet :threads [{:id "T2" :title "done one" :execution :done :milestone-seq 3 :read-seq 3 :asks []}]}]}]
-    (is (= ["#+thread: T1\tstopped\twaiting\t1\tnow\t1\tW1\tAlt+W closes windows"
-            "#+thread: T2\tquiet\tdone\t0\t\t0\t\tdone one"]
+                             {:section :quiet :threads [{:id "T2" :title "done one" :status :done :milestone-seq 3 :read-seq 3 :asks []}]}]}]
+    (is (= ["#+thread: id=T1\tsection=stopped\tstatus=on-you\tasks=1\tage=now\tunseen=1\tworker=W1\ttitle=Alt+W closes windows"
+            "#+thread: id=T2\tsection=quiet\tstatus=done\tasks=0\tage=\tunseen=0\tworker=\ttitle=done one"]
            (pane/split-rows sections))
         "unseen once the thread moved past its read cursor; tabs and newlines never split a field"))
   (let [at "2026-11-08T10:00:00Z"
@@ -1882,3 +1882,8 @@
           (is (re-find #"has no option :forr" (refuse-or-nil refused "(super-steer! \"T1\" \"x\" :forr \"o1\")")))
           (is (re-find #"resolve symbol: super-start-worker!" (refuse-or-nil refused "(super-start-worker! {:thread \"T1\" :brief \"b\"})"))
               "the old spec shape is gone"))))))
+
+(deftest a-thread-rows-status-is-decided-once-by-the-controller
+  (is (= [:on-you :on-you :stuck :stuck :working :working :archived :done :quiet]
+         (map #(apply model/status %) [[:stopped :working] [:new :waiting] [:needs-attention :none] [:quiet :failed]
+                                       [:new :working] [:working :queued] [:archived :none] [:quiet :done] [:quiet :none]]))))

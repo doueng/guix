@@ -128,13 +128,16 @@
 (defn- one-line [s] (str/trim (str/replace (str s) #"\s+" " ")))
 
 (defn split-rows
-  "The #+thread lines of SECTIONS, one per thread in section order, with a
-  1 marking an unread change."
+  "The #+thread lines of SECTIONS, one per thread in section order, with
+  unseen=1 marking an unread change. Each field is key=value, tab-separated,
+  so a reader finds them by name."
   [{:keys [sections]}]
   (for [{:keys [section threads]} sections
-        {:keys [id title execution asks updated-at worker] :as t} threads]
-    (str "#+thread: " (str/join "\t" [id (name section) (name (or execution :none)) (count asks) (or (age updated-at) "")
-                                     (if (model/unread? t) 1 0) (or worker "") (one-line title)]))))
+        {:keys [id title status asks updated-at worker] :as t} threads]
+    (str "#+thread: " (str/join "\t" (for [[k v] [[:id id] [:section (name section)] [:status (some-> status name)] [:asks (count asks)]
+                                                   [:age (or (age updated-at) "")] [:unseen (if (model/unread? t) 1 0)]
+                                                   [:worker (or worker "")] [:title (one-line title)]]]
+                                         (str (name k) "=" v))))))
 
 (def ^:private progress-kinds
   {:milestone "milestone" :note "note" :ask-opened "asked" :reply-sent "replied" :worker-started "started"

@@ -840,6 +840,18 @@
           (#{:working :queued} execution) :working
           :else :quiet)))
 
+(defn status
+  "The one status every view shows for a thread in SECTION whose work is
+  EXECUTION: :on-you while it waits on the person, :stuck when it failed or
+  needs attention, :working, then :archived, :done or :quiet."
+  [section execution]
+  (cond (or (#{:stopped :holding-up :waiting} section) (= :waiting execution)) :on-you
+        (or (= :needs-attention section) (= :failed execution)) :stuck
+        (#{:working :queued} execution) :working
+        (= :archived section) :archived
+        (= :done execution) :done
+        :else :quiet))
+
 (defn ask-line
   "The open ask of THREAD to show on its row, or nil."
   [state thread-id]
@@ -855,7 +867,7 @@
   (let [rows (for [t (map #(thread-view state %) (sort-by (comp - id-order :id) (vals (:threads state))))
                    :let [s (section state t)
                          ask (ask-line state (:id t))]]
-               (assoc t :section s :ask ask :asks (vec (sort-by :seq (vals (open-asks state (:id t)))))
+               (assoc t :section s :status (status s (:execution t)) :ask ask :asks (vec (sort-by :seq (vals (open-asks state (:id t)))))
                       :line (or (:text ask)
                                 (get-in state [:workers (:worker t) :health :problem])
                                 (when (= :failed (:execution t)) (get-in state [:workers (peek (:history t)) :reason]))

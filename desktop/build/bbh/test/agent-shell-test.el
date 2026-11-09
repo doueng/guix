@@ -905,11 +905,12 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
 ;;; The split view: the thread list beside the selected thread
 
 (defun bbh-test--split (rows &optional selected progress)
-  "`bbh inbox split' output: ROWS, each (ID SECTION EXECUTION ASKS UNSEEN TITLE),
+  "`bbh inbox split' output: ROWS, each (ID SECTION STATUS ASKS UNSEEN TITLE),
 SELECTED's PROGRESS lines, then `bbh-test--outline' and a subtree per other row."
   (concat "bbh inbox · 2 need you   keys\n"
-          (mapconcat (pcase-lambda (`(,id ,section ,execution ,asks ,unseen ,title))
-                       (format "#+thread: %s\t%s\t%s\t%d\t5m\t%s\tW%s\t%s\n" id section execution asks (if unseen 1 0) (substring id 1) title))
+          (mapconcat (pcase-lambda (`(,id ,section ,status ,asks ,unseen ,title))
+                       (format "#+thread: id=%s\tsection=%s\tstatus=%s\tasks=%d\tage=5m\tunseen=%s\tworker=W%s\ttitle=%s\n"
+                               id section status asks (if unseen 1 0) (substring id 1) title))
                      rows "")
           (if selected (format "#+selected: %s\n" selected) "")
           (mapconcat (lambda (line) (format "#+progress: %s\t11-08 10:00\tmilestone\t%s\n" selected line)) progress "")
@@ -918,12 +919,12 @@ SELECTED's PROGRESS lines, then `bbh-test--outline' and a subtree per other row.
           "* ARCHIVED T9 old one\n"))
 
 (defconst bbh-test--split-rows
-  '(("T1" "stopped" "waiting" 1 t "first")
+  '(("T1" "stopped" "on-you" 1 t "first")
     ("T2" "new" "working" 0 nil "second")
-    ("T3" "waiting" "waiting" 1 nil "third")
-    ("T4" "needs-attention" "failed" 0 nil "fourth")
+    ("T3" "waiting" "on-you" 1 nil "third")
+    ("T4" "needs-attention" "stuck" 0 nil "fourth")
     ("T5" "quiet" "done" 0 nil "fifth")
-    ("T9" "archived" "none" 0 nil "old one")))
+    ("T9" "archived" "archived" 0 nil "old one")))
 
 (ert-deftest bbh-inbox-split-lists-a-line-per-thread-with-its-status ()
   (let* ((data (eng/bbh-inbox--parse-split (bbh-test--split bbh-test--split-rows "T1" '("half way"))))
@@ -1097,7 +1098,7 @@ SPEC is (VIEW ORG LOG)."
     (with-current-buffer "*bbh threads*"
       (let ((row (count-lines (window-start) (point))))
         ;; A push with a new thread above: the selection and its screen line stay.
-        (with-temp-file view (insert (bbh-test--split (cons '("T0" "stopped" "waiting" 1 t "zeroth") bbh-test--split-rows))))
+        (with-temp-file view (insert (bbh-test--split (cons '("T0" "stopped" "on-you" 1 t "zeroth") bbh-test--split-rows))))
         (eng/bbh-inbox--changed)
         (mapc #'cancel-timer (bbh-test--inbox-reloads))
         (eng/bbh-inbox--reload)
