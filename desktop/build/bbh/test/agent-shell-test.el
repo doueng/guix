@@ -33,18 +33,46 @@
     (should (equal (list state (car key) (cdr key))
                    (list state (car key) (key-binding (kbd (car key))))))))
 
+(defun bbh-test--no-c-c-c-send (states send)
+  "In each of STATES, C-c C-c does not run SEND."
+  (dolist (state states)
+    (evil-change-state state)
+    (should-not (eq send (key-binding (kbd "C-c C-c"))))))
+
+(defvar corfu--candidates)
+(defvar company-candidates)
+
+(defun bbh-test--popup-keeps-ctrl-n (states)
+  "In each of STATES, C-n selects the next candidate while a corfu or company
+popup is open, and sends again once it closes."
+  (dolist (state states)
+    (evil-change-state state)
+    (let ((send (key-binding (kbd "C-n"))))
+      (should (memq send '(eng/bbh-send eng/bbh-inbox-send)))
+      (let ((completion-in-region-mode t) (corfu--candidates '("a" "b")))
+        (should (equal (list state 'corfu-next) (list state (key-binding (kbd "C-n"))))))
+      (cl-letf (((symbol-function 'company-select-next) #'ignore))
+        (let ((company-candidates '("a" "b")))
+          (should (equal (list state 'company-select-next) (list state (key-binding (kbd "C-n")))))))
+      (should (eq send (key-binding (kbd "C-n")))))))
+
 (ert-deftest bbh-inbox-and-thread-list-keys-under-evil ()
   "With evil on, as in Doom, the Inbox's letters act in normal state and type
-in insert state, where only C-n, C-c C-c and C-c C-k act; the thread list's
+in insert state, where only C-n and C-c C-k act; the thread list's
 keys act in normal state."
   (with-current-buffer (get-buffer-create "*bbh-evil-inbox*")
     (eng/bbh-inbox-mode)
     (should (eq 'normal evil-state))
-    (bbh-test--keys-in 'normal '(("s" . eng/bbh-inbox-send) ("C-c C-c" . eng/bbh-inbox-send)
+    (bbh-test--keys-in 'normal '(("s" . eng/bbh-inbox-send)
                                  ("C-c C-k" . eng/bbh-inbox-clear) ("gv" . eng/bbh-inbox-toggle-view)
                                  ("]t" . eng/bbh-inbox-next-waiting)))
-    (bbh-test--keys-in 'insert '(("C-n" . eng/bbh-inbox-send) ("C-c C-c" . eng/bbh-inbox-send)
-                                 ("C-c C-k" . eng/bbh-inbox-clear)))
+    (bbh-test--keys-in 'insert '(("C-n" . eng/bbh-inbox-send) ("C-c C-k" . eng/bbh-inbox-clear)))
+    (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send)
+    ;; An Inbox from before a Doom reload loses its C-c C-c on setup.
+    (evil-local-set-key 'normal (kbd "C-c C-c") #'eng/bbh-inbox-send)
+    (eng/bbh-inbox--setup)
+    (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send)
+    (evil-change-state 'insert)
     (dolist (key '("s" "g" "]" "2" "m"))
       (should (memq (key-binding (kbd key)) '(self-insert-command org-self-insert-command))))
     (kill-buffer))
@@ -303,11 +331,17 @@ and the transcript keeps q and focus moves in normal state."
   (bbh-test--with-shell (shell composer transcript)
     (with-current-buffer composer
       (dolist (state '(normal insert))
-        (bbh-test--keys-in state '(("C-n" . eng/bbh-send) ("C-c C-c" . eng/bbh-send) ("M-RET" . eng/bbh-send)
+        (bbh-test--keys-in state '(("C-n" . eng/bbh-send) ("M-RET" . eng/bbh-send)
                                    ("C-c C-k" . agent-shell-viewport-interrupt) ("C-c C-t" . eng/bbh-toggle-tools)
                                    ("M-k" . eng/bbh-output-page-up) ("M-j" . eng/bbh-output-page-down))))
       (bbh-test--keys-in 'normal '(("g?" . eng/bbh-keys) ("C-d" . eng/bbh-output-page-down)
                                    ("C-u" . eng/bbh-output-page-up)))
+      (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-send)
+      ;; A composer from before a Doom reload loses its C-c C-c on setup.
+      (evil-local-set-key 'insert (kbd "C-c C-c") #'eng/bbh-send)
+      (eng/bbh-setup-composer)
+      (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-send)
+      (bbh-test--popup-keeps-ctrl-n '(normal insert))
       (evil-normal-state))
     (with-current-buffer transcript
       (bbh-test--keys-in 'normal '(("q" . bury-buffer) ("C-j" . eng/focus-down) ("C-k" . eng/focus-up))))))
@@ -538,7 +572,8 @@ and the transcript keeps q and focus moves in normal state."
       ;; Letters type there, as keys do anywhere in an Answer.
       (should (memq (bbh-test--key "s") '(self-insert-command org-self-insert-command)))
       (should (equal "call it Zed" (eng/bbh-inbox--answer-text "a1")))
-      (call-interactively (bbh-test--key "C-c C-c"))
+      (should-not (eq 'eng/bbh-inbox-send (bbh-test--key "C-c C-c")))
+      (call-interactively (bbh-test--key "C-n"))
       (should (bbh-test--wait (lambda () (funcall logged "inbox send T1 {\"a1\" \"call it Zed\"}")) 10))
       (goto-char (point-min))
       (search-forward "T2 second")
@@ -632,6 +667,10 @@ Inbox's single-key commands, such as g, j, x, digits or ., runs there."
       (setq bbh-test--sent nil)
       (execute-kbd-macro (kbd "C-n"))
       (should (equal '(("T1" . "call it Zed")) bbh-test--sent))
+      (should (eng/bbh-inbox--in-answer-p))
+      (bbh-test--popup-keeps-ctrl-n '(normal insert))
+      (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send)
+      (evil-normal-state)
       (goto-char (point-min))
       (should-not (eng/bbh-inbox--in-answer-p))
       (should (eq (lookup-key evil-normal-state-map (kbd "C-n")) (key-binding (kbd "C-n")))))))
@@ -1047,7 +1086,9 @@ SPEC is (VIEW ORG LOG)."
       (should (bbh-test--wait (lambda () (bbh-test--logged-p log "pick T1 2 a1")) 10))
       (should (eq 'eng/bbh-inbox-pick-recommended (bbh-test--key ".")))
       (should (eq 'eng/bbh-inbox-answer (bbh-test--key "i")))
-      (should (eq 'eng/bbh-inbox-send (bbh-test--key "C-c C-c")))
+      (should-not (eq 'eng/bbh-inbox-send (bbh-test--key "C-c C-c")))
+      ;; On the ask's heading C-n stays evil's; in its Answer it sends.
+      (should-not (eq 'eng/bbh-inbox-send (bbh-test--key "C-n")))
       (should (eq 'eng/bbh-inbox-other-pane (bbh-test--key "o")))
       ;; i types the answer in place, above the progress.
       (eng/bbh-inbox-answer)

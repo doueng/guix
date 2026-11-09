@@ -965,6 +965,24 @@ history navigation and replies, which doubles `eng/bbh-composer-padding'."
     (let ((inhibit-read-only t))
       (delete-region (point-min) (1+ (point-min))))))
 
+(defun eng/bbh--popup-next ()
+  "The command that selects the next candidate in an open completion popup, or nil.
+Corfu's map sits in `minor-mode-overriding-map-alist', below evil's local
+keys, so a send key on C-n would otherwise win while the popup is open."
+  (cond ((and (bound-and-true-p completion-in-region-mode) (bound-and-true-p corfu--candidates))
+         'corfu-next)
+        ((and (bound-and-true-p company-candidates) (fboundp 'company-select-next))
+         'company-select-next)))
+
+(defun eng/bbh-send-key (command &optional when)
+  "A key binding for C-n that runs COMMAND, or the popup's next candidate.
+With WHEN, a function, the binding is absent where it returns nil, so the
+key falls through to the next keymap, such as evil's C-n."
+  `(menu-item "" ,command
+              :filter ,(lambda (cmd)
+                         (or (eng/bbh--popup-next)
+                             (and (or (null when) (funcall when)) cmd)))))
+
 (defun eng/bbh-setup-composer ()
   "Restore bbh bindings after returning from agent-shell's history view."
   (when eng/bbh-composer
@@ -975,8 +993,12 @@ history navigation and replies, which doubles `eng/bbh-composer-padding'."
     ;; agent-shell's own send keys, such as normal-state ZZ, take bbh's path too,
     ;; so the Router's input always goes through the controller.
     (local-set-key [remap agent-shell-viewport-compose-send] #'eng/bbh-send)
-    (dolist (binding '(("C-n" . eng/bbh-send)
-                       ("C-c C-c" . eng/bbh-send)
+    ;; C-n sends; C-c C-c does not, neither agent-shell's own nor an evil
+    ;; binding left by older code before a Doom reload.
+    (local-set-key (kbd "C-c C-c") #'undefined)
+    (dolist (state '(normal insert))
+      (evil-local-set-key state (kbd "C-c C-c") nil))
+    (dolist (binding `(("C-n" . ,(eng/bbh-send-key #'eng/bbh-send))
                        ("M-RET" . eng/bbh-send)
                        ("C-c C-k" . agent-shell-viewport-interrupt)
                        ("C-c C-t" . eng/bbh-toggle-tools)
@@ -1104,6 +1126,12 @@ Other runs in the repository are never read, so the header matches the session's
 
 (after! agent-shell-viewport
   (add-hook 'agent-shell-viewport-edit-mode-hook #'eng/bbh-setup-composer)
+  ;; Loading this file again, as a Doom reload does, brings live composers up
+  ;; to the new keys.
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (and eng/bbh-composer (derived-mode-p 'agent-shell-viewport-edit-mode))
+        (eng/bbh-setup-composer))))
   (advice-add 'agent-shell-viewport--update-header :after #'eng/bbh-composer-header)
   (advice-add 'agent-shell-viewport--initialize :after #'eng/bbh-composer-drop-layout-newline))
 

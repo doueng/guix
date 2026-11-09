@@ -191,7 +191,7 @@
             "  note: and why"
             "* ARCHIVED T3 old (came back)"]
            (clojure.string/split-lines (pane/org-view sections))))
-    (is (clojure.string/starts-with? (pane/header sections []) "bbh inbox · 1 need you   1-9 pick  . recommended  i answer  C-c C-c send"))
+    (is (clojure.string/starts-with? (pane/header sections []) "bbh inbox · 1 need you   1-9 pick  . recommended  i answer  s/C-n send"))
     (is (clojure.string/starts-with? (pane/header sections ["controller" "web"]) "bbh inbox · 1 need you · old code: controller, web   1-9 pick"))))
 
 (deftest the-split-view-lists-a-line-per-thread-and-the-selected-threads-progress
