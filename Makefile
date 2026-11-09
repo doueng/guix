@@ -38,7 +38,7 @@ help:
 	@echo 'builder-create once: create the Hetzner builder from desktop/builder.scm (spends money)'
 	@echo 'builder-deploy reconfigure the builder over the tailnet'
 	@echo 'prebuild      push @ to the builder and build system, Home and pull there'
-	@echo 'builder-check builder publish reachable, last prebuild, nothing to build locally'
+	@echo 'builder-check builder publish reachable, last prebuild, nothing to build locally at the channels.scm pins'
 	@echo 'builder-test  test builder-prebuild status alerts and root pruning'
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-apply    activate Home, then stow live configs'

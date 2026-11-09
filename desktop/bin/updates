@@ -666,15 +666,21 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
       (or (last-line (ex-message e)) (str e)))))
 
 ;; Build the edited tree, new pins included, on the builder before the laptop
-;; pulls, so make pull and the rebuilds only download.  Return :ok, :skipped
-;; or :failed.
+;; pulls, then check with make builder-check that make pull and the rebuilds
+;; only download.  Return :ok, :skipped or :failed.
 (defn prebuild! []
   (if-not @builder-up?
     (do (warn "prebuild skipped: builder unreachable at " builder-publish
               "; the steps below build on the laptop with JOBS=1")
         :skipped)
     (do (println "Building the new tree on the builder (make prebuild)...")
-        (try (run! "make" "prebuild") :ok
+        (try (run! "make" "prebuild")
+             (println "Checking that the laptop only downloads (make builder-check)...")
+             (try (run! "make" "builder-check") :ok
+                  (catch Exception e
+                    (warn "builder-check failed: " (failure e)
+                          "; the laptop would build what is listed above, so don't pull or switch yet")
+                    :failed))
              (catch Exception e
                (warn "prebuild failed: " (failure e) "; the new versions don't build, so don't pull or switch yet")
                :failed)))))

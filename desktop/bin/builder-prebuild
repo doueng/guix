@@ -66,11 +66,16 @@
 
 (defn dry-run-builds [kind config]
   ;; --dry-run lists what the daemon would build; with the builder first, that
-  ;; should be nothing.
-  (let [{:keys [err]} (p/shell {:dir @repo :err :string :continue true}
-                               guix kind "build" "--dry-run" "-L" "modules" config
-                               (str "--substitute-urls=" publish " https://bordeaux.guix.gnu.org"))
+  ;; should be nothing.  time-machine evaluates the pins in channels.scm, so
+  ;; this also holds before make pull, as updates apply runs it.
+  (let [urls (str "--substitute-urls=" publish " https://bordeaux.guix.gnu.org")
+        {:keys [exit err]} (p/shell {:dir @repo :err :string :continue true}
+                                    guix "time-machine" urls "-C" "channels.scm" "--"
+                                    kind "build" "--dry-run" "-L" "modules" config urls)
         lines (vec (str/split-lines (or err "")))]
+    (when-not (zero? exit)
+      (die (str kind " build --dry-run failed (exit " exit "): "
+                (last (remove str/blank? lines)))))
     ;; "The following derivations would be built:" lists them indented by
     ;; two spaces; profile hooks and grafts come under their own headers.
     (->> (range (count lines))
@@ -88,8 +93,8 @@
     (when ok?
       (apply p/shell {:continue true}
              (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "status"])))
-    (let [missing (concat (dry-run-builds "system" "desktop/system.scm")
-                          (dry-run-builds "home" "desktop/home.scm"))]
+    (let [missing (distinct (concat (dry-run-builds "system" "desktop/system.scm")
+                                    (dry-run-builds "home" "desktop/home.scm")))]
       (if (empty? missing)
         (println "local builds: none")
         (do (println (count missing) "derivations would build:")
