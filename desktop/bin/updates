@@ -422,19 +422,21 @@ copy; return the files left with conflict markers."
     (run! "pi" "install" (str "npm:" name "@" latest))))
 
 ;; Rebuild steps run in this order after declarative sources change.
-(def rebuild-steps ["make pull" "make home-apply" "make switch" "make doom-check"])
+;; make prebuild first builds the edited tree on the remote builder
+;; (docs/remote-builder-plan.md), so the laptop then only downloads.
+(def rebuild-steps ["make prebuild" "make pull" "make home-apply" "make switch" "make doom-check"])
 
 (def sources
   {"channel" {:items channel-items :refresh channel-refresh :apply! channel-apply!
-              :then #{"make pull" "make home-apply" "make switch"}}
+              :then #{"make prebuild" "make pull" "make home-apply" "make switch"}}
    "guix" {:items guix-items :refresh guix-refresh :apply! guix-apply!
-           :then #{"make pull" "make home-apply" "make switch"}}
+           :then #{"make prebuild" "make pull" "make home-apply" "make switch"}}
    "nixpkgs" {:items nixpkgs-items :refresh nixpkgs-refresh :apply! nixpkgs-apply!
-              :then #{"make home-apply" "make switch"}}
+              :then #{"make prebuild" "make home-apply" "make switch"}}
    "github" {:items github-items :refresh github-refresh :apply! github-apply!
-             :then #{"make home-apply" "make switch"}}
+             :then #{"make prebuild" "make home-apply" "make switch"}}
    "upstream" {:items upstream-items :refresh upstream-refresh :apply! upstream-apply!
-               :then #{"make home-apply"}}
+               :then #{"make prebuild" "make home-apply"}}
    "skills" {:items skills-items :refresh skills-refresh :apply! skills-apply!}
    "flatpak" {:items flatpak-items :refresh flatpak-refresh :apply! flatpak-apply!}
    "doom" {:items doom-items :refresh doom-refresh :apply! doom-apply! :then #{"make doom-check"}}
