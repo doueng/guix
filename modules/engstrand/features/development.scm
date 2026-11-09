@@ -27,6 +27,8 @@
                 "cmake"
                 "fennel"
                 "go"
+                ;; hcloud, for the remote builder (docs/remote-builder-plan.md).
+                "hetznercloud-cli"
                 "lua"
                 "pandoc"
                 ;; libsqlite3 for bbh super, loaded through babashka's FFI.
