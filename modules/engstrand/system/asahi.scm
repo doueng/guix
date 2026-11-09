@@ -93,6 +93,25 @@
             (simple-service 'familiar-zram-sysctl sysctl-service-type
                             '(("vm.swappiness" . "100")
                               ("vm.page-cluster" . "0")))
+            ;; With zram, reclaim keeps compressing, so the kernel OOM killer
+            ;; fires only once swap is full, minutes into a thrash (T108).
+            ;; earlyoom acts when both available RAM and free swap run low;
+            ;; its RAM percent is of user memory (about 9.9 of 15.6 GB).
+            ;; Chrome is not preferred: its own oom_score_adj already ranks its
+            ;; renderers high, and killing one frees little.
+            ;; Regexes match the 15-character comm: claude runs as
+            ;; ld-linux-aarch6, Emacs as .emacs-31.1-rea, so batch Emacs and
+            ;; the daemon look alike.  Logs to /var/log/earlyoom.log, with a
+            ;; memory line each minute.
+            (service earlyoom-service-type
+                     (earlyoom-configuration
+                      (minimum-available-memory 10)
+                      (minimum-free-swap 40)
+                      (prefer-regexp
+                       "^(bb|ld-linux-aarch6|claude|java|chromium|headless_shell)$")
+                      (avoid-regexp
+                       "^(Hyprland|start-hyprland|Xwayland|X|\\.sddm.*|\\.?emacs.*|kanata|herdr|shepherd|pipewire.*|wireplumber|elogind|dbus-daemon|guix-daemon)$")
+                      (memory-report-interval 60)))
             ;; Data is single-copy, so scrub only detects data corruption; DUP
             ;; metadata is repaired.  Shepherd drops timer events missed while
             ;; asleep, so the default first-Sunday midnight would rarely run.
