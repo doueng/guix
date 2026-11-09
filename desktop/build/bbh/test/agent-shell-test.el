@@ -941,6 +941,12 @@ SELECTED's PROGRESS lines, then `bbh-test--outline' and a subtree per other row.
     (should (string-match-p "^ ✖ T4 " (nth 3 lines)))
     (should (string-match-p "^ ✓ T5 " (nth 4 lines)))
     (should (= 40 (string-width (nth 0 lines))))
+    ;; Rows hold values only; the tooltip names them, empty ones left out.
+    (should-not (seq-some (lambda (line) (string-match-p "[a-z]+=" line)) lines))
+    (let ((tip (get-text-property 0 'help-echo (eng/bbh-inbox--row-line (car (plist-get data :rows)) 40))))
+      (should (string-match-p "^title: first$" tip))
+      (should (string-match-p "^asks: 1$" tip))
+      (should-not (string-match-p "^asks: 0$" (get-text-property 0 'help-echo (eng/bbh-inbox--row-line (nth 1 (plist-get data :rows)) 40)))))
     ;; Archived threads fold into one row.
     (should (equal "  ▸ 1 archived" (nth 5 lines)))
     (should-not (seq-some (lambda (line) (string-match-p "T9" line)) lines))

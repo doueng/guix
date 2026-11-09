@@ -905,6 +905,14 @@ list of (TIME KIND TEXT), it carries, and :outline."
     ("working" (propertize "◐" 'face 'success))
     (_ (propertize "✓" 'face 'shadow))))
 
+(defun eng/bbh-inbox--row-details (row)
+  "ROW's fields as `key: value' lines, the empty ones left out, for a tooltip."
+  (let (lines)
+    (cl-loop for (key value) on row by #'cddr
+             unless (member value '(nil "" 0))
+             do (push (format "%s: %s" (substring (symbol-name key) 1) (if (eq value t) "yes" value)) lines))
+    (string-join (nreverse lines) "\n")))
+
 (defun eng/bbh-inbox--row-line (row width)
   "ROW as one list line of WIDTH columns: unseen mark, status, id, title, open asks and age."
   (let* ((asks (plist-get row :asks))
@@ -916,7 +924,8 @@ list of (TIME KIND TEXT), it carries, and :outline."
              (string-pad (plist-get row :id) 4) " "
              (truncate-string-to-width (plist-get row :title) title-width nil ?\s "…") " "
              (string-pad right (max 6 (length right)) nil t))
-     'bbh-thread (plist-get row :id))))
+     'bbh-thread (plist-get row :id)
+     'help-echo (eng/bbh-inbox--row-details row))))
 
 (defun eng/bbh-inbox--visible-rows (rows)
   "ROWS the list shows: all but the archived, unless they are expanded."
