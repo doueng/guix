@@ -24,6 +24,7 @@
     [["ghostty" [(executable "ghostty")]]
      ["chrome-incognito" (conj chrome "--incognito")]
      ["chrome" chrome]
+     ["oilfm" [(executable "oilfm")]]
      ["thunar" [(executable "thunar")]]]))
 
 (defn run [command options]

@@ -4,8 +4,10 @@
   #:use-module (engstrand packages hex)
   #:use-module (engstrand nixpkgs)
   #:use-module (asahi guix systems desktop)
+  #:use-module (gnu home services)
   #:use-module (gnu home services xdg)
   #:use-module (gnu packages)
+  #:use-module (guix gexp)
   #:use-module (gnu services)
   #:use-module (gnu services desktop)
   #:export (feature-familiar-desktop))
@@ -42,13 +44,36 @@
           "font-google-noto-emoji"
           "adwaita-icon-theme"))))
 
+;; oilfm (https://github.com/doueng/oilfm is not published; the source is ~/projects/oilfm)
+;; is built like dusk: make oilfm, run through desktop/bin/oilfm. Hyprland's PATH lacks
+;; ~/.local/bin, so the entry names the wrapper by its full path. Written by hand because
+;; xdg-desktop-entry would spell MimeType as Mimetype.
+(define %oilfm-desktop-file
+  (plain-file "oilfm.desktop"
+              (string-append "[Desktop Entry]
+Type=Application
+Name=oilfm
+GenericName=File Manager
+Comment=Edit a directory as text, then apply the changes
+Exec=" (getenv "HOME") "/.local/bin/oilfm %U
+Icon=system-file-manager
+Terminal=false
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;
+StartupWMClass=oilfm
+")))
+
+(define %home-oilfm-service
+  (simple-service 'familiar-oilfm-desktop-entry home-xdg-data-files-service-type
+                  `(("applications/oilfm.desktop" ,%oilfm-desktop-file))))
+
 (define %home-mime-service
   (service home-xdg-mime-applications-service-type
     (home-xdg-mime-applications-configuration
       (default '(("x-scheme-handler/http" . "com.google.Chrome.desktop")
                  ("x-scheme-handler/https" . "com.google.Chrome.desktop")
                  ("text/html" . "com.google.Chrome.desktop")
-                 ("inode/directory" . "thunar.desktop")
+                 ("inode/directory" . "oilfm.desktop")
                  ("image/jpeg" . "imv.desktop")
                  ("image/png" . "imv.desktop")
                  ("image/webp" . "imv.desktop"))))))
@@ -76,4 +101,5 @@
                            (nixpkgs-system-services))
    #:home-services (append %asahi-desktop-home-services
                            (list %home-mime-service
+                                 %home-oilfm-service
                                  %home-user-dirs-service))))

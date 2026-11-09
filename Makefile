@@ -15,7 +15,7 @@ GUIX := $(HOME)/.config/guix/current/bin/guix
 COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
-        nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify pi-sci pi-sci-test \
+        nixpkgs-lock nixpkgs-key nixpkgs-authorize nixpkgs-import nixpkgs-verify home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check \
         doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check updates-check clipboard-check
 
@@ -54,6 +54,8 @@ help:
 	@echo 'dusk          build the dusk shell (desktop/build/dusk)'
 	@echo 'dusk-test     run isolated runtime and headless GPUI tests'
 	@echo 'dusk-verify   run dusk end-to-end checks on the live session'
+	@echo 'oilfm         build the oilfm file manager (~/projects/oilfm)'
+	@echo 'oilfm-test    run oilfm tests, headless GPUI ones included'
 	@echo 'doom-check    fail on doom doctor warnings missing from the baseline'
 	@echo 'doom-baseline accept the current doom doctor warnings'
 	@echo 'kanata-check  run kanata.kbd chord tests in the kanata simulator'
@@ -214,6 +216,15 @@ dusk-test:
 
 dusk-verify:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/dusk/verify.bb
+
+# oilfm, the file manager, lives in its own repo; build it in place like dusk.
+OILFM ?= $(HOME)/projects/oilfm
+
+oilfm:
+	cd "$(OILFM)" && scripts/vendor-gpui && scripts/cargo build --release -p oilfm
+
+oilfm-test:
+	cd "$(OILFM)" && scripts/vendor-gpui && scripts/cargo test --workspace --features oilfm/ui-tests
 
 # Doom's CLI reads a piped stdin to EOF before running, so an agent's open pipe
 # hangs it; give it /dev/null.
