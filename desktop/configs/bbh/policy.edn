@@ -4,6 +4,12 @@
 ;; A landing moves your working copy in the repo onto the new tip, changes and
 ;; all (:move-working-copy :always); a conflict lands in it as jj conflict
 ;; markers. Drop the key to move it only when it is empty.
+;; Desktop notifications when something waits on you: :do-not-disturb true
+;; silences them (gn in the Inbox flips it until you flip it back, kept in
+;; ~/.local/state/bbh/notify.edn). Asks answered within
+;; :notify-delay-seconds never notify, and a burst in that window is one
+;; notification. A Worker that ran :notify-long-minutes or more notifies when
+;; it finishes.
 ;; :projects are the repositories the Router starts Workers in, by name, with
 ;; the check that proves a change there; each check passed on 2026-11-03.
 {:workers 10
@@ -26,4 +32,7 @@
             "cljs-platformer" {:repo "~/src/cljs-platformer" :check "./check.sh"
                                :about "Mario-style canvas platformer in ClojureScript and shadow-cljs"}}
  :stale-delivery-minutes 30
- :move-working-copy :always}
+ :move-working-copy :always
+ :do-not-disturb false
+ :notify-delay-seconds 5
+ :notify-long-minutes 10}

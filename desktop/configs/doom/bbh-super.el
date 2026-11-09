@@ -1167,6 +1167,54 @@ in a narrow frame, and the thread beside it. Returns the list's window."
     (eng/bbh-inbox)
     (message "Inbox: %s view; gv switches back" (if (eq eng/bbh-inbox-view 'split) "split" "one-buffer"))))
 
+(defun eng/bbh-inbox--client-frame ()
+  "A live emacsclient frame, one showing the Inbox first."
+  (let ((frames (seq-filter (lambda (f) (and (frame-live-p f) (processp (frame-parameter f 'client))
+                                            (not (frame-parameter f 'parent-frame))))
+                            (frame-list))))
+    (or (seq-find (lambda (f) (or (get-buffer-window (eng/bbh-inbox--buffer) f)
+                                  (get-buffer-window (eng/bbh-inbox--list-buffer) f)))
+                  frames)
+        (car frames))))
+
+(defun eng/bbh-inbox--jump (thread ask)
+  "Put the cursor on ASK, else on THREAD, in the Inbox's window, and select it."
+  (with-current-buffer (eng/bbh-inbox--buffer)
+    (let ((pos (save-excursion
+                 (goto-char (point-min))
+                 (when (eq eng/bbh-inbox-view 'outline)
+                   (re-search-forward (concat "^\\* [A-Z-]+ " (regexp-quote thread) "\\_>") nil t))
+                 (when ask (re-search-forward (concat "^\\*\\* " (regexp-quote ask) "\\_>") nil t))
+                 (line-beginning-position))))
+      (goto-char pos)
+      (when-let* ((window (get-buffer-window (current-buffer))))
+        (set-window-point window pos)
+        (select-window window)))))
+
+(defun eng/bbh-inbox-goto (thread &optional ask)
+  "Show the Inbox at THREAD and its ASK in an emacsclient frame, as a click on
+a bbh notification does.  Returns that frame's tty, for the controller to
+focus the window it is in, or nil when no frame is open."
+  (when-let* ((frame (eng/bbh-inbox--client-frame)))
+    (select-frame-set-input-focus frame)
+    (eng/bbh-inbox)
+    (if (eq eng/bbh-inbox-view 'split)
+        (eng/bbh-inbox--select thread)
+      (setq eng/bbh-inbox--selected thread))
+    (eng/bbh-inbox--jump thread ask)
+    ;; The Inbox reloads on its own; land on the ask again once it has.
+    (eng/bbh-inbox--run (eng/bbh-inbox--load-args)
+                        (lambda (text)
+                          (eng/bbh-inbox--show text)
+                          (when (eq eng/bbh-inbox-view 'split) (eng/bbh-inbox--select thread))
+                          (eng/bbh-inbox--jump thread ask)))
+    (terminal-name (frame-terminal frame))))
+
+(defun eng/bbh-inbox-do-not-disturb ()
+  "Turn bbh's desktop notifications off, or back on: :do-not-disturb in policy.edn."
+  (interactive)
+  (eng/bbh-inbox--run (list "dnd") (lambda (text) (message "%s" (string-trim text)))))
+
 (with-eval-after-load 'org
   (when (fboundp 'org-link-set-parameters)
     (org-link-set-parameters "bbh-worker" :follow (lambda (id _) (eng/bbh-inbox--open-thread id)))))
@@ -1194,6 +1242,7 @@ in a narrow frame, and the thread beside it. Returns the list's window."
     ("gJ" eng/bbh-inbox-jjui-close "Close the jjui popup")
     ("S" eng/bbh-inbox-send-all "Send every thread's draft")
     ("gr" eng/bbh-inbox-refresh "Reload now")
+    ("gn" eng/bbh-inbox-do-not-disturb "Turn desktop notifications off or on")
     ("gv" eng/bbh-inbox-toggle-view "The one-buffer view")
     ("g?" describe-mode "Help")
     ("q" quit-window "Quit"))
@@ -1243,6 +1292,7 @@ you have not read; m marks it read without opening it."
     ("J" eng/bbh-inbox-jjui "jjui on the thread's workspace, in a Herdr popup; q in jjui closes it")
     ("gJ" eng/bbh-inbox-jjui-close "Close the jjui popup")
     ("gr" eng/bbh-inbox-refresh "Reload now; pushed changes reload by themselves")
+    ("gn" eng/bbh-inbox-do-not-disturb "Turn desktop notifications off or on (do not disturb)")
     ("g?" describe-mode "Help")
     ("q" quit-window "Quit"))
   "The Inbox's evil normal-state keys: (KEYS COMMAND DESCRIPTION).
@@ -1308,7 +1358,8 @@ thread list, in its own mode, stays one truncated line per thread."
         :desc "Archive"       "a" #'eng/bbh-inbox-archive
         :desc "Cancel Worker" "x" #'eng/bbh-inbox-cancel
         :desc "Resume Worker" "u" #'eng/bbh-inbox-resume
-        :desc "Reload"        "g" #'eng/bbh-inbox-refresh))
+        :desc "Reload"        "g" #'eng/bbh-inbox-refresh
+        :desc "Do not disturb" "N" #'eng/bbh-inbox-do-not-disturb))
 
 (defun eng/bbh-inbox--on-push (connection _)
   "The controller connected to say something changed."

@@ -83,6 +83,25 @@
         "the id is free again, so a retry runs")
     (store/close! db)))
 
+(deftest an-ask-notifies-once-and-its-answer-closes-the-notification
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super"}))
+        log (atom [])
+        c (super/start! {:dir dir :conversations (str (fs/create-temp-dir {:prefix "bbh-super-conv"})) :scan-ms 10
+                         :policy {:notify-delay-seconds 0}
+                         :notify {:show! (fn [n _] (swap! log conj [:show (:summary n) (:body n) (:urgency n)]) {})
+                                  :close! (fn [shown] (swap! log conj [:close (:key shown)]))}
+                         :launch (stub-launch dir (str (fs/create-temp-dir {:prefix "bbh-super-ws"})))})]
+    (swap! controllers assoc dir c)
+    (try
+      (let [{:keys [version]} (thread-with-ask dir)]
+        (is (wait-for #(seq @log)))
+        (is (= [[:show "T1 needs you: Alt+W closes windows everywhere" "Keep Ctrl+Alt+W as an alias?  [No | Yes, for a week]" :normal]]
+               @log))
+        (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "no"}}})
+        (is (wait-for #(= [:close "T1"] (last @log))))
+        (is (= 2 (count @log)) "the reply's other commits notify nothing"))
+      (finally (super/stop! c) (swap! opened dissoc dir) (swap! controllers dissoc dir)))))
+
 (deftest a-retired-event-kind-folds-to-nothing-and-an-unknown-one-throws
   (let [state (model/fold model/empty-state {:seq 1 :at "t" :kind :thread-created :thread "T1" :data {:id "T1" :title "x"}})]
     (is (= state (model/fold state {:seq 2 :at "t" :kind :message-routed :thread nil :data {:outbox "o1"}})))

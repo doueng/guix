@@ -11,6 +11,7 @@
             [bbh.super.client :as client]
             [bbh.super.emacs :as emacs]
             [bbh.super.model :as model]
+            [bbh.super.notify :as notify]
             [bbh.version :as version]
             [clojure.edn :as edn]
             [clojure.string :as str]))
@@ -287,7 +288,11 @@
       "buffer" (println (buffer id))
       "dir" (println (workdir (thread id)))
       "register" (client/register-view! (client/super-dir) (parse-long id))
-      (println "usage: bbh inbox [org|split [T [select]]|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|read T...|all|unread T...|buffer T|dir T|register PORT]"))
+      "dnd" (let [f (client/policy-file)]
+              (println (if (notify/toggle-dnd! (when (fs/exists? f) (edn/read-string (slurp (str f)))))
+                         "Do not disturb: bbh notifications are off; gn turns them on"
+                         "bbh notifications are on")))
+      (println "usage: bbh inbox [org|split [T [select]]|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|read T...|all|unread T...|buffer T|dir T|register PORT|dnd]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))

@@ -10,6 +10,7 @@
             [bbh.super.client :as client :refer [call! data-dir new-id super-dir]]
             [bbh.super.emacs :as emacs]
             [bbh.super.model :as model]
+            [bbh.super.notify :as notify]
             [bbh.super.process :as process]
             [bbh.super.sessions :as sessions]
             [bbh.super.store :as store]
@@ -53,17 +54,23 @@
   [state]
   (update state :workers update-vals #(cond-> % (:health %) (update :health dissoc :at :since))))
 
+(declare policy)
+
 (defn- run!
   "Commit COMMAND for PRINCIPAL on controller C. Serialized: the controller is
   the single writer. A commit that changed what the Inbox views show reloads
-  them; a health pass that found nothing new does not."
-  [{:keys [db state dir]} principal command]
+  them; a health pass that found nothing new does not. What started waiting
+  on the person goes to the notifier."
+  [{:keys [db state dir notifier] :as c} principal command]
   (let [[before r] (locking db
                      (let [before @state
                            r (store/commit! db before principal command)]
                        (reset! state (:state r))
                        [before r]))]
     (when-not (or (:repeat? r) (= (shown before) (shown (:state r)))) (notify-views! dir))
+    (when (and notifier (not (identical? before (:state r))))
+      (try (notify/observe! notifier before (:state r) (System/currentTimeMillis) (policy c))
+           (catch Exception e (binding [*out* *err*] (println "bbh super: notifying failed:" (ex-message e))))))
     r))
 
 ;; ---- Workers: a record first, then the workspace, the wf run and the buffer --
@@ -74,7 +81,7 @@
   [c]
   (merge model/default-policy
          (or (:policy c)
-             (let [f (fs/path (or (sysenv/getenv "XDG_CONFIG_HOME") (fs/expand-home "~/.config")) "bbh" "policy.edn")]
+             (let [f (client/policy-file)]
                (when (fs/exists? f) (edn/read-string (slurp (str f))))))))
 
 (defn wf-start!
@@ -709,6 +716,11 @@
                 (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
         nil)))))
 
+(defn- notify-tick!
+  "Show or close desktop notifications on C's current state, once a pass."
+  [c]
+  (some-> (:notifier c) (notify/tick! @(:state c) (System/currentTimeMillis) #(policy c))))
+
 (defn- serve-web!
   "Serve the website from controller C with WEB's options for `bbh.web/serve!`.
   While its port is taken, as by a bbh web still running on its own, try again
@@ -727,7 +739,7 @@
   and run the dispatcher every SCAN-MS. Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router web sessions reap-grace-ms] :or {scan-ms 500 health-ms 120000}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router web sessions reap-grace-ms notify] :or {scan-ms 500 health-ms 120000}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -749,8 +761,11 @@
            :sessions (merge session-io sessions) :machine (atom nil) :stale-since (atom {}) :was-active (atom #{}) :last-machine (atom 0) :reap-grace-ms reap-grace-ms
            :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
            :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
-           :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :web (atom nil)}]
+           :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :web (atom nil)
+           ;; NOTIFY, effects such as notify/desktop, turns desktop notifications on.
+           :notifier (some-> notify (notify/new-notifier (fs/path dir "notifications.edn")))}]
     (ensure-owner-token! c)
+    (some-> (:notifier c) (notify/resume! @(:state c)))
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
     ;; Each client gets its own thread and a read timeout, so a client that
     ;; never sends its line, or a slow launch, holds up nobody else. Commits
@@ -779,14 +794,16 @@
                           (try (observe-machine! c)
                                (catch Exception e (binding [*out* *err*] (println "bbh super: observing sessions failed:" (ex-message e))))))
                         (observe-jobs! c) (dispatch! c) (watch-ended! c)
+                        (notify-tick! c)
                            (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))
       (.setDaemon true) (.start)))
     (when web (serve-web! c web))
     c))
 
-(defn stop! [{:keys [stopped server db dir lock dispatcher in-flight web]}]
+(defn stop! [{:keys [stopped server db dir lock dispatcher in-flight web notifier]}]
   (reset! stopped true)
+  (some-> notifier notify/stop!)
   (some-> web deref :stop (apply [:timeout 5000]))
   (.close ^ServerSocket server)
   ;; Let the requests already accepted finish, a launch among them.
@@ -819,5 +836,5 @@
 (defn -main
   "bbh super serve: run the controller until killed or its code changes."
   []
-  (serve! {:dir (super-dir) :data-dir (str (data-dir)) :manage-router true :web {:publish? true}
+  (serve! {:dir (super-dir) :data-dir (str (data-dir)) :manage-router true :web {:publish? true} :notify notify/desktop
            :interval-ms (some-> (sysenv/getenv "BBH_SUPER_FOLLOW_MS") parse-long)}))
