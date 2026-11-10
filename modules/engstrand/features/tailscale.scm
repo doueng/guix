@@ -1,6 +1,7 @@
 (define-module (engstrand features tailscale)
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages tailscale)
+  #:use-module (gnu packages base)
   #:use-module (gnu packages dns)
   #:use-module (gnu packages linux)
   #:use-module (gnu services)
@@ -29,11 +30,14 @@
                        ;; families, so use legacy iptables for the firewall.
                        ;; Without resolvconf on PATH, tailscaled overwrites
                        ;; /etc/resolv.conf directly; openresolv then refuses
-                       ;; NetworkManager's DNS for every new network.
+                       ;; NetworkManager's DNS for every new network.  Tailscale
+                       ;; SSH finds the login shell with getent; without it the
+                       ;; session is a bare /bin/sh with a Debian PATH.
                        #:environment-variables
                        (cons* "TS_DEBUG_FIREWALL_MODE=iptables"
                               (string-append "PATH=" #$(file-append iptables "/sbin")
                                              ":" #$(file-append openresolv "/sbin")
+                                             ":" #$(file-append glibc "/bin")
                                              ":" (or (getenv "PATH") ""))
                               (filter (lambda (variable)
                                         (not (string-prefix? "PATH=" variable)))

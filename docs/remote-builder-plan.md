@@ -1,6 +1,6 @@
 # Remote Guix builder: plan
 
-Status: **done** (T118, W133, 2026-11-09; current state and daily workflow updated by T134 W139 below). The builder runs, and the laptop, at `--max-jobs=0`, substitutes from it and offloads to it. T128 integrated `updates`, and T130 dropped the nixpkgs bridge.
+Status: **done** (T118, W133, 2026-11-09; current state and daily workflow updated by T134 W139 below; Tailscale SSH by T134 W142, 2026-11-10). The builder runs, and the laptop, at `--max-jobs=0`, substitutes from it and offloads to it. T128 integrated `updates`, and T130 dropped the nixpkgs bridge.
 Labels: **[M]** measured here (command or file cited), **[I]** inferred from code or docs, **[G]** guess to confirm.
 
 ## Current state (2026-11-09, T134 W139)
@@ -9,7 +9,10 @@ Labels: **[M]** measured here (command or file cited), **[I]** inferred from cod
 - **No nixpkgs**: T130 (uyxotkys) dropped the bridge. ghostty 1.4.0 builds from its release tarball on the builder with upstream zig 0.17, mesa is Guix mesa with the Asahi drivers, and the locale archive is gone because Guix glibc reads GUIX_LOCPATH. T128 (ltwztpsq) moved the CLI tools: clojure-tools, curl, file, git, ripgrep, fnlfmt, gopls and nixfmt come from Guix. dasel, fd, fish, fzf, hyperfine, jujutsu, shellcheck, shfmt, tree-sitter, ty, typst, uv and zoxide come from upstream aarch64 release binaries (the `github` source of `updates`). neovim 0.12.6 is a `latest.scm` variant.
 - **updates**: `updates apply` edits the pins, runs `make prebuild` (build on the builder), then `make builder-check` (dry-run the new pins through time-machine and require nothing to build on the laptop). Only then does it print `make pull`, `make home-apply` and `make switch`. A failed step prints one `updates: ... failed: ...` line, and apply exits 1. T134 ran it end to end: rde 6821d6f→9300ace and ty 0.0.99→0.0.100 prebuilt in 2 minutes, and the dry runs leave only local-build derivations plus a 12 MB download [M].
 - **Prebuild status and alerts** (T133, spolovpn): /var/lib/prebuild/status.edn records `:state` (`:running`, `:ok` or `:failed`) and the nightly's `:checked`. `builder-prebuild alert` gives one line when the last prebuild failed, has run for 12 h or the nightly stopped for 30 h. `updates status` prints it, and the hourly `builder-alert` Home timer sends it once as a desktop notification.
-- **SSH only over the tailnet**: sshd stays, because guix offload and guix deploy need a real sshd. The Hetzner Cloud Firewall `guix-builder` admits only 41641/udp, and nftables admits tcp 22 and 8080 only on tailscale0. From the laptop, 22 and 8080 on the public IPv4 2.29.168.61 and on IPv6 time out, and 22 over the tailnet opens [M]. sshd still binds 0.0.0.0. The pinned Guix's inetd-style openssh service hard-codes INADDR_ANY and has no listen-addresses, so the two firewall layers do the restricting. Every client already uses the MagicDNS name guix-builder.tailbf68ad.ts.net: /etc/guix/machines.scm, desktop/builder.scm, builder-prebuild and updates.
+- **SSH only over the tailnet, two paths** (T134 W142, 2026-11-10):
+  - **People: Tailscale SSH on 22.** `tailscale ssh root@guix-builder`, or plain `ssh root@guix-builder.tailbf68ad.ts.net` (or `engstrand@`), needs no key. tailscaled answers 22 on the tailnet address itself, and the tailnet policy decides who logs in as whom. The policy is the admin console's default rule, check mode from your devices to your own devices as root or any non-root user, and the builder got it [M: `tailscale debug netmap` SSHPolicy, holdAndDelegate, the laptop 100.74.116.113 among the principals]. Check mode opens a browser login, and after you approve it logins pass without asking for 12 hours. The `tailscale-ssh` one-shot service in builder.scm runs `tailscale set --ssh` at boot and deploy, so the setting survives guix deploy [M: RunSSH true]. `engstrand` is a builder account without a password, so log in as root for anything needing root. tailscaled reuses sshd's host key, so known_hosts is unchanged for 22. tailscaled's PATH includes glibc's bin, because Tailscale SSH finds the login shell with getent and otherwise gives a bare /bin/sh with a Debian PATH [M: `df` and `guix` now resolve in a session].
+  - **Machines: sshd on 2222.** guix offload and guix deploy use guile-ssh and need a real sshd, and so does prebuild. It moved to 2222 because Tailscale SSH takes 22, and %builder-ssh-port in builder-keys.scm feeds machines.scm, desktop/builder.scm and builder-prebuild (`BUILDER_SSH_PORT` overrides the last two). `sudo guix offload test` passes on 2222 [M].
+  - Firewalls: the Hetzner Cloud Firewall `guix-builder` admits only 41641/udp, and nftables admits tcp 2222 and 8080 only on tailscale0. Tailscale SSH sees 22 inside tailscaled, before nftables. From the laptop, the public IPv4 2.29.168.61 and IPv6 time out [M, W139]. sshd binds 0.0.0.0, since the pinned Guix's inetd-style openssh service hard-codes INADDR_ANY and listens on one port. Every client uses the MagicDNS name guix-builder.tailbf68ad.ts.net.
 - **Cost** [M: hcloud server-type describe cax21, hel1]: 10.49 EUR net plus primary IPv4 0.50 EUR net, so **10.99 EUR/month net, 13.30 EUR with VAT**, with 20 TB of traffic included. The disk is 42 of 75 GB used [M: df].
 
 ## Day to day
@@ -20,21 +23,21 @@ Labels: **[M]** measured here (command or file cited), **[I]** inferred from cod
 
 **A package Guix lags on.** `updates` lists `release` rows where GitHub has a newer release than Guix. `updates apply release/NAME` adds NAME to `%latest` in modules/engstrand/packages/latest.scm with the source hash and prebuilds it. `updates apply latest/NAME` bumps it later. Delete its line once Guix catches up.
 
-**Builder down.** updates and prebuild print `builder unreachable at ...`, and the rebuild steps print with `JOBS=1`, which builds on the laptop for that one command. Check `tailscale status`, `make builder-check` and the Hetzner console. **Prebuild failed.** The notification or `updates status` names the revision and the log. Read the log with `ssh -i ~/.config/guix-builder/deploy_ed25519 root@guix-builder.tailbf68ad.ts.net less /var/lib/prebuild/logs/REV.log`, fix it, commit, then `make prebuild`.
+**Builder down.** updates and prebuild print `builder unreachable at ...`, and the rebuild steps print with `JOBS=1`, which builds on the laptop for that one command. Check `tailscale status`, `make builder-check` and the Hetzner console. **Prebuild failed.** The notification or `updates status` names the revision and the log. Read the log with `tailscale ssh root@guix-builder less /var/lib/prebuild/logs/REV.log`, fix it, commit, then `make prebuild`.
 
-**Builder OS updates.** After `make pull`, run `make builder-deploy`, which does guix deploy over the tailnet with the laptop's channels. The builder builds its own system. To roll back, `ssh root@guix-builder.tailbf68ad.ts.net guix system roll-back` and reboot.
+**Builder OS updates.** After `make pull`, run `make builder-deploy`, which does guix deploy over the tailnet with the laptop's channels. The builder builds its own system. To roll back, `tailscale ssh root@guix-builder guix system roll-back` and reboot. After `make builder-create`, the new server's sshd listens on 22 until its first managed deploy, so run that one as `BUILDER_SSH_PORT=22 make builder-deploy`.
 
-**Disk and gc.** On the builder, `guix gc --free-space=20G` runs at 05:00 and the prebuild roots keep the last 3 revisions. Check with `ssh root@... df -h /`. On the laptop, `make gc` deletes generations older than `GC_AGE` (2w).
+**Disk and gc.** On the builder, `guix gc --free-space=20G` runs at 05:00 and the prebuild roots keep the last 3 revisions. Check with `tailscale ssh root@guix-builder df -h /`. On the laptop, `make gc` deletes generations older than `GC_AGE` (2w).
 
 **Key backups** (none are in the repo; keep copies offline):
 - ~/.config/guix-builder/deploy_ed25519 (deploy and prebuild)
-- ~/.ssh/guix-builder (your login)
+- ~/.ssh/guix-builder (your key login to sshd on 2222, the break-glass when Tailscale SSH fails)
 - ~/.config/guix-builder/hcloud-token (break-glass via hcloud)
 - the laptop's /etc/guix/signing-key.sec and the builder's /etc/guix/signing-key.sec
 
 If you lose one, generate a new key and update its .pub in modules/engstrand/builder/, then `make switch` for the laptop key and `make builder-deploy` for the builder key. The laptop's /etc/guix/offload key is regenerated on activation; then update offload.pub and deploy.
 
-**Break-glass** (no tailnet, so no ssh). Reopening 22 in the Cloud Firewall alone doesn't help, because nftables drops it too. Use the Hetzner web console (Server → Console), or boot rescue mode with a temporary rule:
+**Break-glass.** If Tailscale SSH fails but the tailnet works (the policy changed, check mode can't reach the browser, or tailscaled's SSH is broken), use sshd with a key: `ssh -p 2222 -i ~/.ssh/guix-builder root@guix-builder.tailbf68ad.ts.net`, or the unattended deploy key. Turn Tailscale SSH off there with `tailscale set --ssh=false` if it misbehaves; the next deploy or boot turns it back on. If the tailnet is down there's no ssh at all. Reopening 22 in the Cloud Firewall alone doesn't help, because nftables drops it too. Use the Hetzner web console (Server → Console), or boot rescue mode with a temporary rule:
 
 ```sh
 HCLOUD_TOKEN=$(cat ~/.config/guix-builder/hcloud-token) hcloud firewall add-rule guix-builder \
@@ -56,7 +59,9 @@ HCLOUD_TOKEN=$(cat ~/.config/guix-builder/hcloud-token) hcloud firewall delete-r
 | `builder-prebuild alert` | one line when the last prebuild failed or the nightly stopped |
 | `make pull`, `make home-apply`, `make switch` | download and activate (`JOBS=1` builds locally when the builder is down) |
 | `make builder-deploy` | update the builder's own OS |
-| `sudo /run/current-system/profile/bin/guix offload test /etc/guix/machines.scm` | offload works |
+| `sudo /run/current-system/profile/bin/guix offload test /etc/guix/machines.scm` | offload works (sshd, port 2222) |
+| `tailscale ssh root@guix-builder` | your shell on the builder (Tailscale SSH, check mode) |
+| `ssh -p 2222 -i ~/.ssh/guix-builder root@guix-builder.tailbf68ad.ts.net` | break-glass key login to sshd |
 | `make gc` | laptop gc |
 
 ## Phase 1 status (done 2026-11-09, approved by you)
