@@ -64,6 +64,53 @@ StartupWMClass=oilfm
   (simple-service 'familiar-oilfm-desktop-entry home-xdg-data-files-service-type
                   `(("applications/oilfm.desktop" ,%oilfm-desktop-file))))
 
+;; Flatpak writes its own /gnu/store path into every exported desktop entry, so a
+;; guix gc after a flatpak upgrade breaks xdg-open and the launcher. The exports under
+;; /var/lib/flatpak are ostree checkouts flatpak rewrites on each deploy, so instead of
+;; editing them, activation copies each entry into ~/.local/share/applications, which
+;; shadows XDG_DATA_DIRS, with Exec naming the system profile's flatpak. Copies carry a
+;; marker, and a copy whose source is gone or fixed is removed.
+(define %home-flatpak-desktop-entries
+  (simple-service 'familiar-flatpak-desktop-entries home-activation-service-type
+    #~(begin
+        (use-modules (guix build utils) (ice-9 regex) (ice-9 textual-ports)
+                     (srfi srfi-1) (srfi srfi-26))
+        (let* ((home (getenv "HOME"))
+               (target (string-append home "/.local/share/applications"))
+               (marker "X-Familiar-Flatpak-Copy=")
+               (store-flatpak (make-regexp "/gnu/store/[^/ \"]+/bin/flatpak"))
+               (stable "/run/current-system/profile/bin/flatpak")
+               (sources
+                (append-map (lambda (dir)
+                              (if (file-exists? dir)
+                                  (find-files dir "\\.desktop$")
+                                  '()))
+                            (list (string-append home "/.local/share/flatpak/exports/share/applications")
+                                  "/var/lib/flatpak/exports/share/applications")))
+               (read-file (cut call-with-input-file <> get-string-all)))
+          (mkdir-p target)
+          ;; Drop stale copies first, so a fixed or removed app falls back to flatpak's entry.
+          (for-each (lambda (copy)
+                      (when (string-contains (read-file copy) marker)
+                        (delete-file copy)))
+                    (find-files target "\\.desktop$"))
+          (for-each
+           (lambda (source)
+             (let* ((text (read-file source))
+                    (fixed (regexp-substitute/global
+                            #f store-flatpak text 'pre stable 'post))
+                    (header (string-match "\\[Desktop Entry\\]\n" fixed))
+                    (copy (string-append target "/" (basename source))))
+               (when (and header
+                          (not (string=? text fixed))
+                          (not (file-exists? copy)))
+                 (call-with-output-file copy
+                   (lambda (port)
+                     (put-string port
+                       (regexp-substitute #f header
+                                          'pre 0 marker source "\n" 'post)))))))
+           sources)))))
+
 (define %home-mime-service
   (service home-xdg-mime-applications-service-type
     (home-xdg-mime-applications-configuration
@@ -98,4 +145,5 @@ StartupWMClass=oilfm
    #:home-services (append %asahi-desktop-home-services
                            (list %home-mime-service
                                  %home-oilfm-service
+                                 %home-flatpak-desktop-entries
                                  %home-user-dirs-service))))
