@@ -7,7 +7,7 @@
   #:use-module (gnu services)
   #:use-module (gnu services shepherd)
   #:use-module (guix gexp)
-  #:export (feature-familiar-tailscale %tailscale-service))
+  #:export (feature-familiar-tailscale %tailscale-service tailscale-one-shot))
 
 (define %tailscale-service
   (simple-service 'familiar-tailscale shepherd-root-service-type
@@ -44,6 +44,24 @@
                                       (default-environment-variables)))
                        #:log-file "/var/log/tailscaled.log")))
            (stop #~(make-kill-destructor))))))
+
+(define (tailscale-one-shot name documentation . arguments)
+  "Return a one-shot Shepherd service NAME that runs `tailscale ARGUMENTS...'
+once tailscaled answers, for settings such as `set --ssh' or `serve' that
+tailscaled keeps in its state and that this restates at boot and deploy."
+  (shepherd-service
+   (provision (list name))
+   (requirement '(tailscaled))
+   (one-shot? #t)
+   (documentation documentation)
+   (start #~(lambda _
+              ;; tailscaled takes a moment to open its socket.
+              (let loop ((tries 30))
+                (cond ((zero? (system* #$(file-append tailscale "/bin/tailscale")
+                               #$@arguments))
+                       #t)
+                      ((> tries 1) (sleep 1) (loop (- tries 1)))
+                      (else #f)))))))
 
 (define (feature-familiar-tailscale)
   (feature-package-set

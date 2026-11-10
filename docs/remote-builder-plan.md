@@ -15,6 +15,18 @@ Labels: **[M]** measured here (command or file cited), **[I]** inferred from cod
   - Firewalls: the Hetzner Cloud Firewall `guix-builder` admits only 41641/udp, and nftables admits tcp 2222 and 8080 only on tailscale0. Tailscale SSH sees 22 inside tailscaled, before nftables. From the laptop, the public IPv4 2.29.168.61 and IPv6 time out [M, W139]. sshd binds 0.0.0.0, since the pinned Guix's inetd-style openssh service hard-codes INADDR_ANY and listens on one port. Every client uses the MagicDNS name guix-builder.tailbf68ad.ts.net.
 - **Cost** [M: hcloud server-type describe cax21, hel1]: 10.49 EUR net plus primary IPv4 0.50 EUR net, so **10.99 EUR/month net, 13.30 EUR with VAT**, with 20 TB of traffic included. The disk is 42 of 75 GB used [M: df].
 
+## The feed reader on the builder (T143 W150, 2026-11-10)
+
+The reader (~/projects/langchain/reader: a Python Cloudflare Worker under `wrangler dev`, plus its Python suggester) moved off the laptop. It is at **https://guix-builder.tailbf68ad.ts.net/**. The old https://asahi-guix.tailbf68ad.ts.net/ is gone on purpose: keeping it would need the laptop awake (you chose the host URL over a Tailscale Service, which would need the builder tagged).
+
+- **Services** (modules/engstrand/system/reader.scm, in builder.scm's services): `reader` runs node + wrangler on 127.0.0.1:8787 with workerd through Guix's glibc loader, `reader-suggester` runs the suggester on 127.0.0.1:8788 from a uv venv over Guix python 3.12, and the `reader-serve` one-shot restates `tailscale serve --bg --https=443 http://127.0.0.1:8787` at every boot and deploy. Both run as the system user `reader`, respawn (5 tries a minute; `herd enable reader` rearms), and log to /var/log/reader.log and /var/log/reader-suggester.log. The reader waits up to a minute for DNS at start, because workerd downloads its Python runtime from pyodide-capnp-bin.edgeworker.net at every start [M: the first boot without the wait crashed once and respawned].
+- **Not a Guix package**: wrangler, workerd and the PyPI deps aren't in Guix. `make reader-push` copies the checkout (with its built public/js/main.js, .dev.vars and suggester/.env, minus VCS, caches, venv and state) to /var/lib/reader/app, writes ~/.env/jev to /var/lib/reader/jev-key, and restarts both services. Run `npm run build` in the checkout first when the ClojureScript changed. Figwheel's /figwheel-connect did not move: hot reload stays a laptop dev tool.
+- **State**: /var/lib/reader/state (wrangler `--persist-to`), the Durable Object SQLite files for sources, headlines and suggestions, about 20 MB. `desktop/bin/reader-push state` moved it once, refusing while the laptop reader ran; the laptop's copy is backed up in ~/.local/share/reader/backups/state-20261110-194943.tar and is still in the checkout's .wrangler/state. The cut-over matched: the same 200 headlines and identical SHA-256 sums for all 56 SQLite files, and a refresh fetched 43 sources with no errors [M].
+- **gc and prebuild**: the system closure roots node, glibc and python, and the venv and uv cache sit under /var/lib, so the 05:00 `guix gc` leaves them alone [M: `guix gc --list-dead` lists none of the live ones]. Builds run `--max-jobs=1 --cores=4`, so a big build slows refreshes but doesn't stop the reader.
+- **Resources**: about 700 MB RSS (wrangler 2 × node about 280 MB, workerd 2 × about 360 MB, suggester 55 MB) plus 290 MB on disk. That fits beside one build in 8 GB with 8 GB of zram, and it adds no cost to the 10.99 EUR/month CAX21. It is idle between page loads.
+- **Survives**: a guix deploy and a reboot [M: both 2026-11-10; `make reader-status` showed 200 headlines after each].
+- `make reader-status` shows the services and the headline count. Logs: `tailscale ssh root@guix-builder tail /var/log/reader.log`.
+
 ## Day to day
 
 **Edit config and switch.** Edit modules/ or desktop/, run `make verify`, and commit with jj. For a big change, run `make prebuild` so the builder builds it while you wait (the 03:00 nightly prebuilds the last pushed revision anyway). Then run `make home-apply` or `make switch`. Whatever the builder lacks offloads to it automatically.
@@ -63,6 +75,7 @@ HCLOUD_TOKEN=$(cat ~/.config/guix-builder/hcloud-token) hcloud firewall delete-r
 | `tailscale ssh root@guix-builder` | your shell on the builder (Tailscale SSH, check mode) |
 | `ssh -p 2222 -i ~/.ssh/guix-builder root@guix-builder.tailbf68ad.ts.net` | break-glass key login to sshd |
 | `make gc` | laptop gc |
+| `make reader-push` / `make reader-status` | copy the reader checkout to the builder and restart it / its services and headline count |
 
 ## Phase 1 status (done 2026-11-09, approved by you)
 
@@ -133,7 +146,7 @@ Stop the laptop from building. A Hetzner CAX (aarch64) server on the tailnet bui
 - System: desktop/system.scm and desktop/home.scm both come from `%familiar-config` (/home/engstrand/guix/modules/engstrand/config.scm), an rde config over `make-base-os` in /home/engstrand/guix/modules/engstrand/system/asahi.scm [M].
 - Daemon (asahi.scm line 141 onwards): substitutes from bordeaux, then asahi, then ci; `--max-jobs=1 --cores=4 --gc-keep-outputs`; it authorizes the asahi keys and the nixpkgs import key [M].
 - Tailscale: a binary package (/home/engstrand/guix/modules/engstrand/packages/tailscale.scm, aarch64 only) and a root Shepherd service `tailscaled` (/home/engstrand/guix/modules/engstrand/features/tailscale.scm line 11, not exported) [M]. Remote access uses ordinary OpenSSH over the tunnel, not Tailscale SSH (/home/engstrand/guix/modules/engstrand/features/remote-access.scm line 8) [M].
-- T74's ordering work did not add a `tailscale-online` service. bbh-web, reader and system-design-prep instead listen on loopback, and `tailscale serve` maps them, so their start order does not matter (bbh-web.scm line 13, reader.scm line 11) [M]. This plan follows the same pattern: no daemon gets a Shepherd requirement on Tailscale.
+- T74's ordering work did not add a `tailscale-online` service. bbh-web, reader and system-design-prep instead listen on loopback, and `tailscale serve` maps them, so their start order does not matter (bbh-web.scm line 13; the reader moved to the builder in T143) [M]. This plan follows the same pattern: no daemon gets a Shepherd requirement on Tailscale.
 - `updates apply` only edits files (channels.scm, nixpkgs lock, package hashes, ...). It then prints `make pull`, `make home-apply`, `make switch` and `make doom-check` for you to run (desktop/bin/updates line 425) [M].
 - Remote: origin is https://github.com/doueng/guix.git. It is **public**, and main@origin dates from 2026-09-18, about 600 commits behind the local `master` [M: jj log]. The builder can't fetch from it. The laptop must push revisions over the tailnet.
 - Secrets today: nothing is checked in. `local/` is gitignored (it doesn't exist right now), the nixpkgs import key lives at ~/.config/guix/nixpkgs-bridge/signing-key.sec with only its public half in the repo, and the Tailscale state lives in /var/lib/tailscale.state [M]. There is no secrets manager.

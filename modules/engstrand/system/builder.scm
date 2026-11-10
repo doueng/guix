@@ -5,6 +5,7 @@
   #:use-module (asahi guix config)
   #:use-module (engstrand features tailscale)
   #:use-module (engstrand system builder-keys)
+  #:use-module (engstrand system reader)
   #:use-module (engstrand packages assets)
   #:use-module (engstrand packages babashka)
   #:use-module (engstrand packages tailscale)
@@ -79,19 +80,9 @@
 ;; setting persists in tailscaled's state; this restates it at boot and deploy.
 (define %tailscale-ssh-service
   (simple-service 'tailscale-ssh shepherd-root-service-type
-    (list (shepherd-service
-           (provision '(tailscale-ssh))
-           (requirement '(tailscaled))
-           (one-shot? #t)
-           (documentation "Turn on Tailscale SSH (tailscale set --ssh).")
-           (start #~(lambda _
-                      ;; tailscaled takes a moment to open its socket.
-                      (let loop ((tries 30))
-                        (cond ((zero? (system* #$(file-append tailscale "/bin/tailscale")
-                                               "set" "--ssh"))
-                               #t)
-                              ((> tries 1) (sleep 1) (loop (- tries 1)))
-                              (else #f)))))))))
+    (list (tailscale-one-shot 'tailscale-ssh
+                              "Turn on Tailscale SSH (tailscale set --ssh)."
+                              "set" "--ssh"))))
 
 (define* (make-builder-os #:key bootstrap?)
   "Return the builder's operating system.  BOOTSTRAP? also admits public ssh,
@@ -171,7 +162,10 @@ to your address."
               (simple-service 'prebuild-activation activation-service-type
                               %prebuild-activation)
               (simple-service 'prebuild-jobs mcron-service-type %prebuild-jobs)
-              (modify-services (operating-system-user-services base)
+              (append
+               ;; The feed reader, on the tailnet at https://guix-builder.tailbf68ad.ts.net/.
+               %reader-services
+               (modify-services (operating-system-user-services base)
                 (delete openssh-service-type)
                 (guix-service-type
                  config => (guix-configuration
@@ -188,4 +182,4 @@ to your address."
                             (extra-options '("--max-jobs=1" "--cores=4"
                                              "--gc-keep-outputs"
                                              "--timeout=21600"
-                                             "--max-silent-time=3600"))))))))))
+                                             "--max-silent-time=3600")))))))))))

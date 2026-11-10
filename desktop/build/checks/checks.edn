@@ -18,7 +18,8 @@
   {:name "remote builder"
    :paths ["modules/engstrand/system/builder.scm" "modules/engstrand/system/builder-keys.scm" "modules/engstrand/builder/**"
            "desktop/builder.scm" "desktop/bin/builder-prebuild" "desktop/build/builder/**"
-           "modules/engstrand/features/builder-alert.scm"]
+           "modules/engstrand/features/builder-alert.scm" "modules/engstrand/system/reader.scm"
+           "desktop/bin/reader-push"]
    :checks ["make lint" "make builder-test"]
    :slow ["make builder-check"]}
   {:name "updates"

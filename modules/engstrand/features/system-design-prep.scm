@@ -10,7 +10,7 @@
 ;; serves the static spaced-repetition PWA in app/ on loopback port 8790, the
 ;; recipe of `make serve' without its `tailscale serve' line.  tailscaled keeps
 ;; the HTTPS :8444 mapping in its state and fronts the app on its own, as for
-;; the reader, so this service needs nothing from Tailscale and the order they
+;; bbh-web, so this service needs nothing from Tailscale and the order they
 ;; start in does not matter.  Run `make serve' in the checkout once to publish
 ;; it again after `make unserve'.
 (define %system-design-prep-service

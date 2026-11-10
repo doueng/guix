@@ -19,7 +19,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
-        builder-create builder-deploy prebuild builder-check builder-test updates-test \
+        builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status updates-test \
         doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check
 
 help:
@@ -40,6 +40,8 @@ help:
 	@echo 'prebuild      push @ to the builder and build system, Home and pull there'
 	@echo 'builder-check builder publish reachable, last prebuild, nothing to build locally at the channels.scm pins'
 	@echo 'builder-test  test builder-prebuild status alerts and root pruning'
+	@echo 'reader-push   copy the reader checkout (READER_DIR) to the builder and restart it'
+	@echo 'reader-status the builder reader services and the headlines it serves'
 	@echo 'updates-test  test the updates cache, rows and changelog links'
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-apply    activate Home, then stow live configs'
@@ -139,6 +141,14 @@ builder-check:
 
 builder-test:
 	bb desktop/build/builder/test.bb
+
+# The feed reader on the builder (modules/engstrand/system/reader.scm).
+# `desktop/bin/reader-push state' moves its state once; see the plan.
+reader-push:
+	desktop/bin/reader-push code
+
+reader-status:
+	desktop/bin/reader-push status
 
 updates-test:
 	bb desktop/build/updates/test.bb

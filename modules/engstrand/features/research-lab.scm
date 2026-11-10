@@ -6,8 +6,7 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-research-lab))
 
-;; The research lab checkout is mutable and the timer follows it, like the
-;; reader. Every two hours it runs one `lab tick' from the checkout's .venv,
+;; The research lab checkout is mutable and the timer follows it. Every two hours it runs one `lab tick' from the checkout's .venv,
 ;; which `dev/env.sh' builds. `lab' reads seeds/, data/ and .env relative to
 ;; the working directory, so .env's LAB_SUBJECT picks the subject. A tick that
 ;; crashed resumes from its checkpoint at the next firing. Waiting for each tick
