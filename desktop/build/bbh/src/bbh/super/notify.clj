@@ -15,7 +15,7 @@
 
 (def default-policy
   "What policy.edn says about notifications when it says nothing."
-  {:do-not-disturb false :notify-delay-seconds 5 :notify-long-minutes 10})
+  {:do-not-disturb false :notify-delay-seconds 5 :notify-long-minutes 10 :notify-expire-ms 5000})
 
 ;; ---- what waits on the person -------------------------------------------
 
@@ -124,9 +124,9 @@
 
 (defn notify-send-args
   "notify-send's argv for notification N, replacing REPLACE-ID when given. It
-  stays until closed, prints its id, then the action a click invokes."
-  [{:keys [summary body urgency]} replace-id]
-  (cond-> ["notify-send" "--app-name=bbh" (str "--urgency=" (name urgency)) "--expire-time=0"
+  closes after its :expire-ms, prints its id, then the action a click invokes."
+  [{:keys [summary body urgency expire-ms] :or {expire-ms (:notify-expire-ms default-policy)}} replace-id]
+  (cond-> ["notify-send" "--app-name=bbh" (str "--urgency=" (name urgency)) (str "--expire-time=" expire-ms)
            "--print-id" "--action=default=Open" "--wait"]
     replace-id (conj (str "--replace-id=" replace-id))
     true (conj summary body)))
@@ -215,13 +215,13 @@
   [{:keys [effects pending shown seen] :as notifier} state now policy]
   (when (and (seq @pending) (due? @pending now (* 1000 (:notify-delay-seconds (merge default-policy (policy))))))
     (let [due @pending
-          dnd (:do-not-disturb (merge default-policy (policy) (overrides)))
+          {dnd :do-not-disturb expire-ms :notify-expire-ms} (merge default-policy (policy) (overrides))
           threads (set (map :thread (vals due)))
           ;; A thread's notification is replaced, so it keeps what it showed that still waits.
           p (merge (into {} (comp (filter #(threads (key %))) (mapcat (comp :items val))) @shown) due)]
       (swap! pending #(apply dissoc % (keys due)))
       (when-not dnd
-        (doseq [n (plan p state)]
+        (doseq [n (map #(assoc % :expire-ms expire-ms) (plan p state))]
           ;; A burst stands for its threads; their own notifications go.
           (when (= :burst (:key n))
             (doseq [t (distinct (map :thread (vals p))) :when (@shown t)]
@@ -345,14 +345,22 @@
 (defn manual-check!
   "Send one real notification through show!, as the controller does, and
   report a click, which opens the Inbox at THREAD and ASK when given, or
-  that it was left alone for WAIT-MS."
-  [thread ask wait-ms]
-  (let [clicked (promise)
+  that it was left alone for WAIT-MS. URGENCY is :normal or :critical."
+  [thread ask wait-ms urgency]
+  (let [outcome (promise) clicking (volatile! false)
         n {:summary (str (or thread "T0") " needs you: bbh notification check")
-           :body "Click to open the Inbox here.  [Yes | No]" :urgency :normal :thread thread :ask ask}
-        h (show! n nil (fn [n] (try (when thread (click! n)) (finally (deliver clicked true)))))]
+           :body "Click to open the Inbox here.  [Yes | No]" :urgency urgency :thread thread :ask ask}
+        h (show! n nil (fn [n] (vreset! clicking true) (try (when thread (click! n)) (finally (deliver outcome :clicked)))))]
     (println "sent notification" (deref (:id h) 5000 "(no id: is a notification daemon running?)"))
-    (if (deref clicked wait-ms false)
-      (println "clicked" (if thread (str "; the Inbox should show " thread (when ask (str " at " ask))) ""))
-      (do (println "not clicked within" (quot wait-ms 1000) "s; closing it")
-          (close! {:handle h})))))
+    (let [start (System/currentTimeMillis)]
+      ;; notify-send --wait ends when the notification closes: clicked, dismissed or expired.
+      ;; Its reader thread sees a click by then, so wait briefly for it.
+      (future (.waitFor ^Process (:proc (:proc h)))
+              (let [ms (- (System/currentTimeMillis) start)]
+                (Thread/sleep 200)
+                (when-not @clicking (deliver outcome ms))))
+      (let [o (deref outcome wait-ms nil)]
+        (cond (= :clicked o) (println "clicked" (if thread (str "; the Inbox should show " thread (when ask (str " at " ask))) ""))
+              o (println "closed unclicked after" (format "%.1f" (/ o 1000.0)) "s")
+              :else (do (println "not clicked within" (quot wait-ms 1000) "s; closing it")
+                        (close! {:handle h})))))))

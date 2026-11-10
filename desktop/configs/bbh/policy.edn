@@ -9,7 +9,8 @@
 ;; ~/.local/state/bbh/notify.edn). Asks answered within
 ;; :notify-delay-seconds never notify, and a burst in that window is one
 ;; notification. A Worker that ran :notify-long-minutes or more notifies when
-;; it finishes.
+;; it finishes. Each notification closes after :notify-expire-ms, critical
+;; ones too (dusk honours the timeout at every urgency); 0 keeps them.
 ;; :projects are the repositories the Router starts Workers in, by name, with
 ;; the check that proves a change there; each check passed on 2026-11-03.
 {:workers 10
@@ -35,4 +36,5 @@
  :move-working-copy :always
  :do-not-disturb false
  :notify-delay-seconds 5
- :notify-long-minutes 10}
+ :notify-long-minutes 10
+ :notify-expire-ms 5000}

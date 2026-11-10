@@ -86,9 +86,11 @@
   (is (notify/due? {[:ask "a"] {:at 5} [:ask "b"] {:at 9}} 10 5)))
 
 (deftest notify-send-args
-  (is (= ["notify-send" "--app-name=bbh" "--urgency=critical" "--expire-time=0" "--print-id"
+  (is (= ["notify-send" "--app-name=bbh" "--urgency=critical" "--expire-time=3000" "--print-id"
           "--action=default=Open" "--wait" "--replace-id=7" "T1 needs you" "body"]
-         (notify/notify-send-args {:summary "T1 needs you" :body "body" :urgency :critical} 7)))
+         (notify/notify-send-args {:summary "T1 needs you" :body "body" :urgency :critical :expire-ms 3000} 7)))
+  (testing "a notification saved before :expire-ms expires after the default, 5 s"
+    (is (some #{"--expire-time=5000"} (notify/notify-send-args {:summary "s" :body "b" :urgency :normal} nil))))
   (is (not-any? #(str/starts-with? % "--replace-id") (notify/notify-send-args {:summary "s" :body "b" :urgency :normal} nil)))
   (is (= "(eng/bbh-inbox-goto \"T1\" nil)" (notify/goto-form "T1" nil))))
 
@@ -146,6 +148,17 @@
     (is (= 100 (notify/window-pid [{:pid 100 :class "ghostty"}] [300] parent)))
     (is (= 50 (notify/window-pid [{:pid 50 :class "com.mitchellh.ghostty.herdr" :focusHistoryID 0}] [300] parent)))
     (is (nil? (notify/window-pid [{:pid 50 :class "google-chrome"}] [300] parent)))))
+
+(deftest tick-shows-with-the-policy-expiry
+  (let [shown (atom [])
+        n (notify/new-notifier {:show! (fn [n _] (swap! shown conj (:expire-ms n)) {}) :close! (fn [_])})
+        s1 (ask base "a1" "T1" "Bind it?")]
+    (notify/observe! n base s1 0 {})
+    (notify/tick! n s1 10000 (constantly {:notify-delay-seconds 0 :notify-expire-ms 2500}))
+    (is (= [2500] @shown))
+    (notify/observe! n s1 (ask s1 "a2" "T2" "And?") 20000 {})
+    (notify/tick! n (ask s1 "a2" "T2" "And?") 30000 (constantly {}))
+    (is (= [2500 5000] @shown) "5 s when policy.edn says nothing")))
 
 (deftest tick-coalesces-replaces-and-closes
   (let [log (atom [])

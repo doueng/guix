@@ -111,12 +111,13 @@
   (case command
     "serve" ((requiring-resolve 'bbh.super/-main))
     "start-router" (prn (start-router! (super-dir)))
-    "notify-test" ((requiring-resolve 'bbh.super.notify/manual-check!) (first args) (second args) 60000)
+    "notify-test" (let [critical (some #{"--critical"} args) [t ask] (remove #{"--critical"} args)]
+                    ((requiring-resolve 'bbh.super.notify/manual-check!) t ask 60000 (if critical :critical :normal)))
     (nil "help" "--help")
     (println (str/join "\n" ["usage: bbh super serve"
                                "       bbh super list"
                                "       bbh super start-router"
-                               "       bbh super notify-test [T [ASK]]   send one real notification; a click opens the Inbox there"
+                               "       bbh super notify-test [--critical] [T [ASK]]   send one real notification; a click opens the Inbox there"
                                "       bbh super COMMAND [EDN-ARGS] [--id ID]"
                                "commands: thread! start-worker! finish-worker! steer! cancel! health say! ask! reply! dismiss! archive! sweep! note! milestone! answered! threads thread events sections"
                                "example: bbh super thread! '{:title \"Alt+W closes windows\"}'"]))
