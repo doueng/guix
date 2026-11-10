@@ -31,6 +31,14 @@
   (is (re-find #"has not run since 2026-11-08T03:00:00Z"
                (bp/alert {:rev rev :ok? true :finished "2026-11-08T03:00:00Z"} now))))
 
+(deftest ok-line
+  (is (= "builder prebuild: ok, a66eefb3964b built 8h ago, nightly checked 9h ago"
+         (bp/ok-line {:rev rev :state :ok :ok? true :finished "2026-11-10T04:00:00Z" :checked "2026-11-10T03:00:00Z"} now)))
+  (is (= "builder prebuild: ok, a66eefb3964b built 8h ago"
+         (bp/ok-line {:rev rev :ok? true :finished "2026-11-10T04:00:00Z" :checked "2026-11-10T04:00:00Z"} now)))
+  (is (= "builder prebuild: building a66eefb3964b, started 3h ago"
+         (bp/ok-line {:rev rev :state :running :started "2026-11-10T09:00:00Z"} now))))
+
 (deftest prune-roots-keeps-the-newest
   ;; The links point at files with one old mtime, as store items have.
   (let [dir (fs/create-temp-dir)

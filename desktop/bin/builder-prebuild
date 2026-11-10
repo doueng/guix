@@ -131,6 +131,16 @@
       (> (or (hours-since now last-run) 0) stale-hours)
       (str "builder prebuild: the nightly has not run since " last-run))))
 
+(defn ok-line
+  "The one line for a STATUS alert found nothing wrong with at the Instant NOW."
+  [{:keys [rev state started finished checked]} now]
+  (let [short (some-> rev (subs 0 (min 12 (count rev))))
+        ago #(let [h (hours-since now %)] (if (< h 1) "<1h ago" (str (Math/round h) "h ago")))]
+    (if (= state :running)
+      (str "builder prebuild: building " short ", started " (ago started))
+      (str "builder prebuild: ok, " short " built " (ago finished)
+           (when (and checked (not= checked finished)) (str ", nightly checked " (ago checked)))))))
+
 (defn remote-status []
   (let [{:keys [exit out]} (apply p/shell {:continue true :out :string :err :string}
                                   (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "status"]))]
@@ -152,7 +162,7 @@
                  (spit seen line))
                (System/exit 1))
       :else (do (fs/delete-if-exists seen)
-                (println "builder prebuild: ok" (:rev status) (:finished status))))))
+                (println (ok-line status (java.time.Instant/now)))))))
 
 (defn machines []
   (let [host-key (some-> (str @repo "/modules/engstrand/builder/host-key.pub")

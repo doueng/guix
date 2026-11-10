@@ -19,7 +19,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
-        builder-create builder-deploy prebuild builder-check builder-test \
+        builder-create builder-deploy prebuild builder-check builder-test updates-test \
         doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check
 
 help:
@@ -40,6 +40,7 @@ help:
 	@echo 'prebuild      push @ to the builder and build system, Home and pull there'
 	@echo 'builder-check builder publish reachable, last prebuild, nothing to build locally at the channels.scm pins'
 	@echo 'builder-test  test builder-prebuild status alerts and root pruning'
+	@echo 'updates-test  test the updates cache, rows and changelog links'
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-apply    activate Home, then stow live configs'
 	@echo 'stow          build SCI and install live config links using GNU Stow'
@@ -138,6 +139,9 @@ builder-check:
 
 builder-test:
 	bb desktop/build/builder/test.bb
+
+updates-test:
+	bb desktop/build/updates/test.bb
 
 PI_SCI := desktop/build/pi-sci
 PI_SCI_OUTPUTS := $(PI_SCI)/dist/sci.js $(addprefix $(PI_SCI)/dist/pi-,grep.mjs find.mjs read.mjs)

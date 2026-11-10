@@ -19,7 +19,7 @@ Labels: **[M]** measured here (command or file cited), **[I]** inferred from cod
 
 **Edit config and switch.** Edit modules/ or desktop/, run `make verify`, and commit with jj. For a big change, run `make prebuild` so the builder builds it while you wait (the 03:00 nightly prebuilds the last pushed revision anyway). Then run `make home-apply` or `make switch`. Whatever the builder lacks offloads to it automatically.
 
-**Updates.** `updates refresh` caches the latest versions, and `updates` shows what's outdated plus any prebuild alert. `updates apply [SOURCE[/NAME] ...]` edits the repo, prebuilds on the builder and checks that the laptop only downloads. Then run what it prints, usually `make pull`, `make home-apply` and `make switch`, and commit. If apply exits 1, the `updates:` line names the failed step and its log. Don't pull. Fix it or `jj restore` the edit.
+**Updates.** `updates` shows what's outdated and the builder's prebuild status line. Its header names the revision of the script that runs and how old the cached latest versions are; a source refreshes by itself when its cache is a day old (`UPDATES_MAX_AGE_HOURS`), after a pin or install changed, or when it failed last time. `updates --refresh` (or `updates refresh`) looks everything up again and `--cached` never does. `updates apply [SOURCE[/NAME] ...]` edits the repo, prebuilds on the builder and checks that the laptop only downloads. Then run what it prints, usually `make pull`, `make home-apply` and `make switch`, and commit. If apply exits 1, the `updates:` line names the failed step and its log. Don't pull. Fix it or `jj restore` the edit.
 
 **A package Guix lags on.** `updates` lists `release` rows where GitHub has a newer release than Guix. `updates apply release/NAME` adds NAME to `%latest` in modules/engstrand/packages/latest.scm with the source hash and prebuilds it. `updates apply latest/NAME` bumps it later. Delete its line once Guix catches up.
 
@@ -53,7 +53,7 @@ HCLOUD_TOKEN=$(cat ~/.config/guix-builder/hcloud-token) hcloud firewall delete-r
 
 | Command | What it does |
 |---|---|
-| `updates` / `updates refresh` / `updates apply ...` | status with prebuild alert / fetch latest / edit, prebuild, check |
+| `updates` / `updates --refresh` / `updates apply ...` | status with prebuild status, refreshing stale sources / refresh all / edit, prebuild, check |
 | `make prebuild` | push @ and build system, Home and dev manifests on the builder |
 | `make builder-check` | publish reachable, last prebuild, nothing to build locally at the channels.scm pins |
 | `builder-prebuild alert` | one line when the last prebuild failed or the nightly stopped |

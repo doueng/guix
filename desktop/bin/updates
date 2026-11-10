@@ -1,8 +1,9 @@
 #!/usr/bin/env bb
-;; Usage: updates [status|list|refresh|apply] [SOURCE[/NAME] ...]
+;; Usage: updates [status|list|refresh|apply] [--refresh|--cached] [SOURCE[/NAME] ...]
 ;;
 ;; Every source reads installed versions from the files or profiles that hold
-;; them, so this keeps no inventory of its own; refresh only caches latest versions.
+;; them, so this keeps no inventory of its own; it only caches latest versions,
+;; per source, and looks again when that cache is a day old or a pin changed.
 ;; Source release reports how far Guix trails GitHub releases; only
 ;; `updates apply release/NAME' acts on it, opting NAME in to source latest.
 ;; apply builds what it changed on the remote builder before you pull or switch.
@@ -34,6 +35,13 @@
       (str base "/log/" to)
       (str base "/compare/" from "..." to))))
 
+;; A refresh caches a commit source's repository as :compare, not a URL, since
+;; the installed commit can change before the next refresh; the changelog is
+;; built from the item's current commit each time it is shown.
+(defn changelog [{:keys [compare current latest held] :as item}]
+  (cond-> (if (and compare current latest) (compare-url compare current latest) (:changelog item))
+    held (str " (held: " held ")")))
+
 ;; Guix channels pin commits in channels.scm; their packages follow the pin.
 (def channels-file (or (System/getenv "UPDATES_CHANNELS") (in-repo "channels.scm")))
 
@@ -50,11 +58,11 @@
            :reason "rde contrib/packages/node.scm uses node-bootstrap, removed by guix 66d30bdf6d3"}})
 
 (defn channel-refresh [items]
-  (for [{:keys [name url branch current] :as item} items
+  (for [{:keys [name url branch] :as item} items
         :let [{:keys [commit reason]} (channel-holds name)
               latest (or commit (head-commit url (str "refs/heads/" branch)))]]
-    (assoc item :latest latest
-           :changelog (cond-> (compare-url url current latest) reason (str " (held: " reason ")")))))
+    (cond-> (assoc item :latest latest :compare url)
+      reason (assoc :held reason))))
 
 (defn bumped-channels [items]
   (reduce (fn [text {:keys [current latest]}] (str/replace text current latest))
@@ -187,13 +195,12 @@
   (keep (comp github-item str) (sort (fs/glob (in-repo "modules/engstrand/packages") "*.scm"))))
 
 (defn github-refresh [items]
-  (pmap (fn [{:keys [repo prefix current] :as item}]
+  (pmap (fn [{:keys [repo prefix] :as item}]
           (if prefix
             (let [{:keys [tag_name html_url]} (github (str "repos/" repo "/releases/latest"))]
               (assoc item :latest (str/replace-first tag_name prefix "") :changelog html_url))
             (let [latest (:sha (github (str "repos/" repo "/commits/HEAD")))]
-              (assoc item :latest latest
-                     :changelog (compare-url (str "https://github.com/" repo) current latest)))))
+              (assoc item :latest latest :compare (str "https://github.com/" repo)))))
         items))
 
 (defn source-uri [{:keys [name package]}]
@@ -235,10 +242,9 @@
                 tree #(sh "git" "-C" git-dir "rev-parse" (str % ":" path))
                 newest (sh "git" "-C" git-dir "log" "-1" "--format=%H" "origin/HEAD" "--" (or path "."))
                 latest (if (= (tree current) (tree newest)) current newest)]
-            (assoc item :latest latest
-                   :changelog (if path
-                                (str "https://github.com/" repo "/commits/" latest "/" path)
-                                (compare-url (str "https://github.com/" repo) current latest)))))
+            (if path
+              (assoc item :latest latest :changelog (str "https://github.com/" repo "/commits/" latest "/" path))
+              (assoc item :latest latest :compare (str "https://github.com/" repo)))))
         items))
 
 (defn merge-upstream!
@@ -356,15 +362,16 @@ copy; return the files left with conflict markers."
   [{:name "doomemacs" :current (sh "git" "-C" doom-dir "rev-parse" "HEAD")}])
 
 (defn doom-refresh [items]
-  (for [{:keys [current] :as item} items
+  (for [item items
         :let [latest (head-commit (sh "git" "-C" doom-dir "remote" "get-url" "origin") "HEAD")]]
-    (assoc item :latest latest
-           :changelog (compare-url "https://github.com/doomemacs/doomemacs" current latest))))
+    (assoc item :latest latest :compare "https://github.com/doomemacs/doomemacs")))
 
 (defn doom-apply! [_]
   (run! (str doom-dir "/bin/doom") "upgrade"))
 
 ;; lazy.nvim pins plugins in the stowed lazy-lock.json and rewrites it on update.
+;; Current is the commit the plugin's checkout has, which is what runs; :locked
+;; is the lock's, which differs when the lock was reverted or not yet written.
 (def lazy-lock (in-repo "desktop/configs/nvim/lazy-lock.json"))
 (def lazy-dir (str home "/.local/share/nvim/lazy"))
 
@@ -372,8 +379,18 @@ copy; return the files left with conflict markers."
   (for [[plugin {:keys [branch commit]}] (sort-by key (json/parse-string (slurp lazy-lock) true))
         :let [name (name plugin) dir (str lazy-dir "/" name)]
         :when (fs/exists? dir)]
-    {:name name :branch branch :current commit
+    {:name name :branch branch :current (sh "git" "-C" dir "rev-parse" "HEAD") :locked commit
      :url (sh "git" "-C" dir "remote" "get-url" "origin")}))
+
+(defn lock-drift
+  "One line naming the plugins whose lazy-lock.json commit is not the
+installed one, or nil."
+  [items]
+  (when-let [names (seq (keep #(when (and (:locked %) (not= (:locked %) (:current %))) (:name %)) items))]
+    (str "lazy: lazy-lock.json pins other commits than installed for " (count names) " plugins ("
+         (str/join ", " (take 5 names)) (when (> (count names) 5) ", ...")
+         "); keep the installed ones with nvim --headless '+lua require(\"lazy.manage.lock\").update()' +qa"
+         " or go back to the lock with nvim --headless '+Lazy! restore' +qa")))
 
 (defn lazy-refresh [items]
   (let [out (str (fs/create-temp-file))
@@ -384,11 +401,11 @@ copy; return the files left with conflict markers."
                    "if p._.updates then table.insert(lines, p.name .. '\\t' .. p._.updates.to.commit) end "
                    "end vim.fn.writefile(lines, '" out "')")
         _ (p/shell {:out :string :err :string} "nvim" "--headless" (str "+" check) "+qa")
-        updates (into {} (map #(str/split % #"\t") (str/split-lines (slurp out))))]
+        updates (into {} (keep #(let [[name commit] (str/split % #"\t")] (when commit [name commit]))
+                               (str/split-lines (slurp out))))]
     (fs/delete out)
-    (for [{:keys [name url current] :as item} items
-          :let [latest (get updates name current)]]
-      (assoc item :latest latest :changelog (compare-url url current latest)))))
+    (for [{:keys [name url current] :as item} items]
+      (assoc item :latest (get updates name current) :compare url))))
 
 (defn lazy-apply! [items]
   (run! "nvim" "--headless" (str "+Lazy! update " (str/join " " (map :name items))) "+qa"))
@@ -548,6 +565,30 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
 
 (defn latest-apply! [items] (run! latest-bump! items))
 
+;; Packages whose update is more than a version and a hash, such as Ghostty's
+;; Zig dependencies; updates reports their releases and apply says what to edit.
+(def hand-packages
+  {"ghostty" {:repo "ghostty-org/ghostty" :file "modules/engstrand/packages/ghostty.scm"}})
+
+(defn hand-version
+  "The version of the package TEXT's (define-public NAME ...) form declares."
+  [text name]
+  (some->> (str/index-of text (str "(define-public " name "\n"))
+           (subs text)
+           (re-find #"\(version \"([^\"]+)\"\)")
+           second))
+
+(defn hand-items []
+  (for [[name {:keys [file] :as entry}] (sort-by key hand-packages)]
+    (merge {:name name :current (hand-version (slurp (in-repo file)) name)} entry)))
+
+(defn hand-refresh [items] (pmap #(merge % (upstream-release %)) items))
+
+(defn hand-apply! [items]
+  (doseq [{:keys [name file latest changelog]} items]
+    (println (str "  " name " is updated by hand: read " changelog ", then bump it to " latest
+                  " in " file " as its header comment says"))))
+
 (defn latest-add! [items]
   (doseq [{:keys [name current latest repo module variable]} items
           :let [form (str "(latest \"" name "\" \"" current "\" \"" placeholder-hash "\" \"" repo "\" "
@@ -583,9 +624,10 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
    "release" {:items release-items :refresh release-refresh :apply! release-apply! :opt-in? true
                :then #{"make prebuild" "make home-apply" "make switch"}}
    "latest" {:items latest-items :refresh latest-refresh :apply! latest-apply!
-              :then #{"make prebuild" "make home-apply" "make switch"}}})
+              :then #{"make prebuild" "make home-apply" "make switch"}}
+   "hand" {:items hand-items :refresh hand-refresh :apply! hand-apply!}})
 
-(def source-order ["channel" "guix" "github" "latest" "release" "upstream" "skills"
+(def source-order ["channel" "guix" "github" "latest" "hand" "release" "upstream" "skills"
                    "flatpak" "doom" "lazy" "pi"])
 
 (defn selected? [selectors {:keys [source name]}]
@@ -607,56 +649,138 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
   (if (fs/exists? cache-file) (edn/read-string (slurp cache-file)) {:latest {}}))
 
 (defn with-latest [cache items]
-  (for [{:keys [source name] :as item} items]
-    (merge item (get-in cache [:latest [source name]]))))
+  (for [{:keys [source name] :as item} items
+        :let [item (merge item (dissoc (get-in cache [:latest [source name]]) :current))]]
+    (cond-> item (changelog item) (assoc :changelog (changelog item)))))
 
-(defn refresh! [selectors]
-  (let [items (inventory selectors)
-        fresh (apply concat
+;; The cache is refreshed per source when it is older than this, when an item's
+;; current version is not the one its latest was looked up for (a pin or an
+;; install changed since), or when an item is new.
+(def max-age-hours (or (some-> (System/getenv "UPDATES_MAX_AGE_HOURS") parse-double) 24.0))
+
+(defn cached-at
+  "When SOURCE was last refreshed in CACHE, as an Instant string, or nil."
+  [cache source]
+  (or (get-in cache [:refreshed source]) (:refreshed-at cache)))
+
+(defn hours-between [from to]
+  (/ (.toMinutes (java.time.Duration/between (java.time.Instant/parse from) to)) 60.0))
+
+(defn age
+  "How long ago FROM was at the Instant NOW, as 3d 4h, 5h 12m or 7m."
+  [from now]
+  (let [m (max 0 (.toMinutes (java.time.Duration/between (java.time.Instant/parse from) now)))
+        [d h mm] [(quot m 1440) (quot (mod m 1440) 60) (mod m 60)]]
+    (cond (pos? d) (str d "d " h "h") (pos? h) (str h "h " mm "m") (pos? mm) (str mm "m") :else "<1m")))
+
+(defn stale-sources
+  "A map of each source among ITEMS whose cached latest versions need a
+refresh at the Instant NOW to why."
+  [cache items now]
+  (into (sorted-map)
+        (for [[source group] (group-by :source (remove :error items))
+              :let [at (cached-at cache source)
+                    entries (map #(get-in cache [:latest [source (:name %)]]) group)
+                    why (cond (nil? at) "never refreshed"
+                              (> (hours-between at now) max-age-hours) (str "cached " (age at now) " ago")
+                              (some nil? entries) "new items"
+                              (some :error entries) "failed last time"
+                              (some #(not (contains? % :current)) entries) "cached by an older updates"
+                              (some (fn [[item e]] (not= (:current item) (:current e))) (map vector group entries))
+                              "pins changed")]
+              :when why]
+          [source why])))
+
+(defn refresh!
+  "Look up the latest versions of ITEMS' sources and cache them; return ITEMS
+with them."
+  [items]
+  (let [fresh (apply concat
                      (pmap (fn [[source group]]
                              (try (doall ((get-in sources [source :refresh]) group))
                                   (catch Exception e
                                     (let [error (last-line (ex-message e))]
-                                      (binding [*out* *err*]
-                                        (println (str "updates: " source " refresh failed: " error)))
+                                      (warn source " refresh failed: " error)
                                       (map #(assoc % :error error) group)))))
-                           (group-by :source items)))
+                           (group-by :source (remove :error items))))
+        now (str (java.time.Instant/now))
         cache (read-cache)]
     (fs/create-dirs (fs/parent cache-file))
     (spit cache-file
           (pr-str (-> cache
-                      (assoc :refreshed-at (str (java.time.Instant/now)))
+                      (update :refreshed merge (zipmap (distinct (map :source fresh)) (repeat now)))
                       (update :latest into
-                              (for [{:keys [source name latest changelog error]} fresh]
-                                [[source name] {:latest latest :changelog changelog :error error}])))))
+                              (for [{:keys [source name] :as item} fresh]
+                                [[source name] (select-keys item [:latest :changelog :compare :held :error :current])])))))
+    (with-latest (read-cache) items)))
+
+(defn latest!
+  "ITEMS with their latest versions, refreshing the sources MODE asks for:
+:all, :none, or :stale, those stale-sources names.  Prints which, and how
+old the rest of the cache is, in one line."
+  [items mode]
+  (let [now (java.time.Instant/now)
+        cache (read-cache)
+        stale (case mode
+                :all (zipmap (distinct (map :source items)) (repeat "--refresh"))
+                :none {}
+                :stale (stale-sources cache items now))
+        kept (remove (set (keys stale)) (distinct (map :source (remove :error items))))
+        oldest (first (sort (keep #(cached-at cache %) kept)))]
+    (when (seq stale)
+      (warn "refreshing " (str/join ", " (for [[s why] stale] (str s " (" why ")"))) "..."))
+    (println (str (cond (empty? stale) "Latest versions cached"
+                        (empty? kept) "Latest versions refreshed just now"
+                        :else (str "Refreshed " (str/join ", " (keys stale)) "; the rest cached"))
+                  (when (and (seq kept) oldest) (str " " (age oldest now) " ago"))
+                  (when (and (seq kept) (nil? oldest)) ", never refreshed")
+                  (when (seq kept) " (updates --refresh looks again)")
+                  "."))
+    (when (seq stale) (refresh! (filter #(stale (:source %)) items)))
     (with-latest (read-cache) items)))
 
 (defn outdated? [{:keys [current latest]}] (and latest (not= current latest)))
 
 (defn short [v] (if (and v (re-matches #"[0-9a-f]{40,64}" v)) (subs v 0 12) (or v "")))
 
+(defn table-rows
+  "The rows of print-table: SOURCE NAME CURRENT LATEST CHANGELOG."
+  [items]
+  (for [{:keys [source name current latest changelog error] :as item} items]
+    [source name (str (some-> (:via item) (str " ")) (short current))
+     (cond error "error" (nil? latest) "?" (outdated? item) (short latest) :else "=")
+     (or error (when (outdated? item) changelog) "")]))
+
 (defn print-table [items]
-  (let [rows (for [{:keys [source name current latest changelog error] :as item} items]
-               [source name (str (some-> (:via item) (str " ")) (short current))
-                (cond error "error" (nil? latest) "?" (outdated? item) (short latest) :else "=")
-                (or error (when (outdated? item) changelog) "")])
+  (let [rows (table-rows items)
         widths (apply map (fn [& cells] (apply max (map count cells)))
                       ["SOURCE" "NAME" "CURRENT" "LATEST" ""] rows)]
     (doseq [row (cons ["SOURCE" "NAME" "CURRENT" "LATEST" "CHANGELOG"] rows)]
       (println (str/trimr (str/join "  " (map #(format (str "%-" (max 1 %1) "s") %2) widths row)))))))
 
 (defn print-status [items]
-  (let [{:keys [refreshed-at]} (read-cache)
-        shown (filter #(and (outdated? %) (not (:error %))) items)]
-    (println (if refreshed-at (str "Latest versions from " refreshed-at) "Never refreshed; run: updates refresh"))
+  (let [shown (filter #(and (outdated? %) (not (:error %))) items)]
     (when (seq shown) (print-table shown))
+    (some-> (lock-drift (filter #(= "lazy" (:source %)) items)) println)
     (doseq [[[source error] group] (group-by (juxt :source :error) (filter :error items))]
       (println (str "ERROR " source " (" (count group) " items): " error)))
     (println (str (count (filter outdated? items)) " of " (count items) " have updates; "
                   (count (remove :latest items)) " unknown"
                   (when-let [errors (seq (filter :error items))] (str ", " (count errors) " failed"))
-                  "."))
+                  "."
+                  (when (seq shown) " Apply with: updates apply [SOURCE[/NAME] ...]")))
     (some :error items)))
+
+;; Which copy of this script runs: the last change to it in its checkout, and
+;; whether the file differs from that, so a stale checkout shows at a glance.
+(defn revision []
+  (let [jj #(apply p/shell {:dir repo :out :string :err :string :continue true} "jj" "--ignore-working-copy" %&)
+        {:keys [exit out]} (jj "log" "--no-graph" "-r" "latest(::@ & files(root:\"desktop/bin/updates\"))"
+                               "-T" "change_id.short(8) ++ \" \" ++ committer.timestamp().format(\"%Y-%m-%d\")")
+        committed (:out (jj "file" "show" "-r" "@" "root:desktop/bin/updates"))]
+    (str "updates " (if (and (zero? exit) (seq (str/trim out))) (str/trim out) "(no jj revision)")
+         (when (and (zero? exit) (not= committed (slurp (in-repo "desktop/bin/updates")))) " + local edits")
+         " in " repo)))
 
 ;; One line for a failed step: the command and exit code when a process failed.
 (defn failure [e]
@@ -685,23 +809,25 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
                (warn "prebuild failed: " (failure e) "; the new versions don't build, so don't pull or switch yet")
                :failed)))))
 
-;; The builder's last nightly prebuild, one line only when it failed, hangs or
-;; stopped running (builder-prebuild alert); status ignores an unreachable builder.
-(defn prebuild-alert! []
-  (let [{:keys [exit out]} (p/shell {:continue true :out :string :err :string}
-                                    (in-repo "desktop/bin/builder-prebuild") "alert")]
-    (when (= 1 exit) (print out) (flush))))
+;; The builder's last nightly prebuild in one line (builder-prebuild alert):
+;; ok, failed, hung, stopped running or unreachable.  Only a problem with a
+;; reachable builder fails status; the laptop is often offline.
+(defn prebuild-status! []
+  (let [{:keys [exit out err]} (p/shell {:continue true :out :string :err :string}
+                                        (in-repo "desktop/bin/builder-prebuild") "alert")]
+    (println (or (last-line out) (str "builder prebuild: status unknown: " (last-line err))))
+    (= 1 exit)))
 
 ;; Like refresh, a failed source prints one line and the rest still apply;
 ;; apply returns the failed sources so the caller can exit 1.
-(defn apply! [selectors]
+(defn apply! [selectors mode]
   (let [named? (fn [{:keys [source name]}] (some #{(str source "/" name)} selectors))
-        items (->> (with-latest (read-cache) (inventory selectors))
+        items (->> (latest! (inventory selectors) mode)
                    (filter outdated?)
                    (filter #(or (named? %) (not (get-in sources [(:source %) :opt-in?])))))
         groups (group-by :source items)]
     (if (empty? items)
-      (println "Nothing to update; run updates refresh first if the cache is old.")
+      (println "Nothing to update.")
       (let [failed (doall
                     (for [source source-order :let [group (groups source)] :when group
                           :let [_ (println (str "Updating " source ": " (str/join ", " (map :name group))))
@@ -721,14 +847,28 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
                                       " JOBS=1")))))
         (seq (cond-> failed (= prebuild :failed) (conj "prebuild")))))))
 
-(let [[command & selectors] *command-line-args*]
-  (case (or command "status")
-    "status" (let [errors (print-status (with-latest (read-cache) (inventory selectors)))]
-               (prebuild-alert!)
-               (when errors (System/exit 1)))
-    "list" (print-table (with-latest (read-cache) (inventory selectors)))
-    "refresh" (when (print-status (refresh! selectors)) (System/exit 1))
-    "apply" (when (apply! selectors) (System/exit 1))
-    (do (println "usage: updates [status|list|refresh|apply] [SOURCE[/NAME] ...]")
-        (println (str "sources: " (str/join " " source-order)))
-        (System/exit 1))))
+(defn usage []
+  (println "usage: updates [status|list|refresh|apply] [--refresh|--cached] [SOURCE[/NAME] ...]")
+  (println (str "sources: " (str/join " " source-order)))
+  (println (str "The cache refreshes a source by itself when older than " max-age-hours
+                " h (UPDATES_MAX_AGE_HOURS) or after a pin changed; --refresh (or refresh) forces it, --cached skips it."))
+  (System/exit 1))
+
+(defn -main [args]
+  (let [flags (set (filter #(str/starts-with? % "-") args))
+        [command & selectors] (remove flags args)
+        command (or command "status")
+        mode (cond (or (flags "--refresh") (= command "refresh")) :all (flags "--cached") :none :else :stale)]
+    (when (or (seq (remove #{"--refresh" "--cached"} flags)) (not (#{"status" "list" "refresh" "apply"} command)))
+      (usage))
+    (println (revision))
+    (case command
+      ("status" "refresh") (let [errors (print-status (latest! (inventory selectors) mode))
+                                  alert (prebuild-status!)]
+                              (when (or errors alert) (System/exit 1)))
+      "list" (print-table (latest! (inventory selectors) mode))
+      "apply" (when (apply! selectors mode) (System/exit 1)))))
+
+;; Not when a test loads this file for its functions.
+(when (= *file* (System/getProperty "babashka.file"))
+  (-main *command-line-args*))

@@ -21,6 +21,9 @@
            "modules/engstrand/features/builder-alert.scm"]
    :checks ["make lint" "make builder-test"]
    :slow ["make builder-check"]}
+  {:name "updates"
+   :paths ["desktop/bin/updates" "desktop/build/updates/**"]
+   :checks ["make lint" "make updates-test"]}
   {:name "apple neural engine"
    :paths ["modules/engstrand/packages/omarchy-ane.scm" "modules/engstrand/system/bootloader.scm"
            "modules/engstrand/system/asahi.scm" "desktop/build/ane/**"]
