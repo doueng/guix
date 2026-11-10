@@ -63,5 +63,23 @@
   (is (= "1.4.0" (u/hand-version "(define-public zig\n (package (version \"0.17.0\")))\n(define-public ghostty\n  (package\n    (name \"ghostty\")\n    (version \"1.4.0\")))" "ghostty")))
   (is (= "1.4.0" (:current (first (u/hand-items)))) "ghostty.scm as checked in"))
 
+(deftest a-release-that-does-not-build-is-left-as-it-was-and-the-rest-go-on
+  (let [file (str (fs/create-temp-file {:suffix ".scm"}))
+        built (atom [])]
+    (spit file "before")
+    (with-redefs [u/latest-file file
+                  u/latest-build! (fn [name]
+                                    (swap! built conj name)
+                                    (when (= name "bad") (throw (ex-info "bad does not build" {}))))]
+      (let [e (try (u/each-latest! (fn [{:keys [name]}] (spit file (str (slurp file) " " name)))
+                                   [{:name "good"} {:name "bad"} {:name "also"}])
+                   nil
+                   (catch Exception e e))]
+        (is (= ["good" "bad" "also"] @built))
+        (is (= "before good also" (slurp file)) "bad's edit is undone, the others stay")
+        (is (str/includes? (ex-message e) "bad") "the failure names the package")
+        (is (:partial (ex-data e)) "the prebuild still runs for the others")))
+    (fs/delete file)))
+
 (let [{:keys [fail error]} (run-tests)]
   (System/exit (if (zero? (+ fail error)) 0 1)))

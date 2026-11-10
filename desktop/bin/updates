@@ -366,8 +366,25 @@ copy; return the files left with conflict markers."
         :let [latest (head-commit (sh "git" "-C" doom-dir "remote" "get-url" "origin") "HEAD")]]
     (assoc item :latest latest :compare "https://github.com/doomemacs/doomemacs")))
 
+;; doom upgrade needs HEAD on a branch, which jj, colocated in the checkout,
+;; leaves detached; move the default branch up to HEAD when it is behind.
+(defn doom-attach! []
+  (let [git #(apply p/shell {:dir doom-dir :continue true :out :string :err :string} "git" %&)]
+    (when-not (zero? (:exit (git "symbolic-ref" "-q" "HEAD")))
+      (let [branch (-> (:out (git "rev-parse" "--abbrev-ref" "origin/HEAD")) str/trim
+                       (str/replace #"^origin/" ""))]
+        (when-not (zero? (:exit (git "merge-base" "--is-ancestor" branch "HEAD")))
+          (throw (ex-info (str "Doom's HEAD is detached and " branch " is not behind it; check out a branch in " doom-dir) {})))
+        (println (str "  attaching Doom's detached HEAD to " branch))
+        (sh {:dir doom-dir} "git" "checkout" "-q" "-B" branch)))))
+
+;; --force answers doom upgrade's prompts, which have no terminal here, but
+;; would also discard edits to tracked files, so refuse those first.
 (defn doom-apply! [_]
-  (run! (str doom-dir "/bin/doom") "upgrade"))
+  (when-let [dirty (not-empty (sh {:dir doom-dir} "git" "status" "--porcelain" "-uno"))]
+    (throw (ex-info (str "Doom has local edits; commit or drop them first:\n" dirty) {})))
+  (doom-attach!)
+  (run! (str doom-dir "/bin/doom") "--force" "upgrade"))
 
 ;; lazy.nvim pins plugins in the stowed lazy-lock.json and rewrites it on update.
 ;; Current is the commit the plugin's checkout has, which is what runs; :locked
@@ -464,7 +481,7 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
     {:latest (when version (if (pos? (version-compare version current)) version current))
      :changelog url}))
 
-(declare latest-items latest-add!)
+(declare latest-items latest-add! each-latest! failure)
 
 ;; How far each Guix package you install trails its GitHub release.
 ;; The version is the one the bumped channels bring when a
@@ -530,7 +547,7 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
 
 (defn release-refresh [items] (pmap #(merge % (upstream-release %)) items))
 
-(defn release-apply! [items] (latest-add! items))
+(defn release-apply! [items] (each-latest! #(latest-add! [%]) items))
 
 ;; Opted-in newer releases of Guix packages, one (latest ...) line each in
 ;; modules/engstrand/packages/latest.scm; the builder builds them in the prebuild.
@@ -563,7 +580,34 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
            (spit latest-file (str/replace text form (str/replace pending placeholder-hash hash))))
          (catch Exception e (spit latest-file text) (throw e)))))
 
-(defn latest-apply! [items] (run! latest-bump! items))
+(defn latest-build!
+  "Build NAME's opted-in release alone, on the builder while it answers."
+  [name]
+  (println (str "  building " name " on the builder..."))
+  (let [{:keys [exit err]} (apply p/shell {:dir repo :continue true :out :string :err :string}
+                                  guix "build" "-L" "modules"
+                                  (concat (builder-flags)
+                                          ["-e" (str "(assoc-ref (@ (engstrand packages latest) %latest-packages) \"" name "\")")]))]
+    (when-not (zero? exit)
+      (throw (ex-info (str name " does not build: " (build-failure err)) {})))))
+
+(defn each-latest!
+  "Run (F ITEM) for every item and build it; restore latest.scm for an item
+that fails and go on, then throw naming the failures."
+  [f items]
+  (let [failed (doall (for [{:keys [name] :as item} items
+                            :let [text (slurp latest-file)
+                                  error (try (f item) (latest-build! name) nil
+                                             (catch Exception e
+                                               (spit latest-file text)
+                                               (failure e)))]
+                            :when error]
+                        (do (warn name ": " error "; left as it was") name)))]
+    (when (seq failed)
+      (throw (ex-info (str "not updated: " (str/join ", " failed))
+                      {:partial (< (count failed) (count items))})))))
+
+(defn latest-apply! [items] (each-latest! latest-bump! items))
 
 ;; Packages whose update is more than a version and a hash, such as Ghostty's
 ;; Zig dependencies; updates reports their releases and apply says what to edit.
@@ -831,13 +875,14 @@ old the rest of the cache is, in one line."
       (let [failed (doall
                     (for [source source-order :let [group (groups source)] :when group
                           :let [_ (println (str "Updating " source ": " (str/join ", " (map :name group))))
-                                error (try ((get-in sources [source :apply!]) group) nil
-                                           (catch Exception e (failure e)))]
+                                [error partial] (try ((get-in sources [source :apply!]) group) nil
+                                                     (catch Exception e [(failure e) (:partial (ex-data e))]))]
                           :when error]
                       (do (binding [*out* *err*]
                             (println (str "updates: " source " apply failed: " error)))
-                          source)))
-            steps (set (mapcat #(get-in sources [% :then]) (remove (set failed) (keys groups))))
+                          {:source source :partial partial})))
+            steps (set (mapcat #(get-in sources [% :then])
+                               (remove (set (map :source (remove :partial failed))) (keys groups))))
             prebuild (when (steps "make prebuild") (prebuild!))]
         (when (seq steps)
           (println "Review the repository diff with jj diff, then run:")
@@ -845,7 +890,7 @@ old the rest of the cache is, in one line."
             ;; The laptop's daemon may run --max-jobs=0; JOBS=1 lets it build.
             (println (str "  " step (when (and (= prebuild :skipped) (#{"make pull" "make home-apply" "make switch"} step))
                                       " JOBS=1")))))
-        (seq (cond-> failed (= prebuild :failed) (conj "prebuild")))))))
+        (seq (cond-> (map :source failed) (= prebuild :failed) (conj "prebuild")))))))
 
 (defn usage []
   (println "usage: updates [status|list|refresh|apply] [--refresh|--cached] [SOURCE[/NAME] ...]")

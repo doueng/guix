@@ -1,6 +1,6 @@
 # pi-vent
 
-Vendored copy of [`@howaboua/pi-vent`](https://www.npmjs.com/package/@howaboua/pi-vent) v0.2.1.
+Vendored copy of [`@howaboua/pi-vent`](https://www.npmjs.com/package/@howaboua/pi-vent) v0.2.3.
 
 Upstream repository: https://github.com/IgorWarzocha/pi-vent
 
