@@ -111,8 +111,10 @@
   working-copy lock; a concurrent jj of theirs merges as any concurrent
   operation does. A stale working copy or any jj failure moves nothing.
   Returns :moved, :current when default@ already has TIP (it is never moved down), :skipped when REPO
-  is not the default workspace, or {:kept :not-empty} or {:kept :failed
-  :message m}, which the caller tells the user about."
+  is not the default workspace, or {:kept :not-empty}, {:kept :editing :at
+  commit} when default@ is a commit the line already has, as after `jj edit`
+  of a landed commit, so no move applies, or {:kept :failed :message m},
+  which the caller tells the user about."
   [{:keys [repo tip move]}]
   (try
     (let [q (fn [rev] (jj-out repo "--ignore-working-copy" "log" "--no-graph" "-r" rev "-T" "commit_id"))]
@@ -123,6 +125,8 @@
           (cond (not (zero? exit)) {:kept :failed :message (str/trim err)}
                 (re-find #"(?m)^Rebased " err) :moved
                 (not (str/blank? (q (str "default@ & " tip "::")))) :current
+                (not (str/blank? (q (str "default@ & ::" tip))))
+                {:kept :editing :at (q "default@")}
                 :else {:kept :not-empty}))))
     (catch Exception e {:kept :failed :message (ex-message e)})))
 
@@ -174,9 +178,12 @@
   (when (map? r)
     (let [short (subs tip 0 (min 8 (count tip)))
           how (str "To take it: jj rebase -r @ -d " short " in " repo ".")]
-      (if (= :not-empty (:kept r))
-        (str worker " landed " short ". Your working copy has changes, so it was left where it is. " how
-             " To always move it, set :move-working-copy :always in policy.edn.")
+      (case (:kept r)
+        :not-empty (str worker " landed " short ". Your working copy has changes, so it was left where it is. " how
+                        " To always move it, set :move-working-copy :always in policy.edn.")
+        :editing (str worker " landed " short " on top of " (subs (:at r) 0 (min 8 (count (:at r))))
+                      ", the commit your working copy edits (jj edit), so it stays there. To work on the tip: jj new "
+                      short " in " repo ".")
         (str worker " landed " short ", but moving your working copy failed: " (:message r) " " how)))))
 
 (defn- repo-of

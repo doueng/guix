@@ -1627,7 +1627,16 @@
       (is (= :current (workspace/advance! {:repo repo :tip tip})) "a repeat is a no-op")
       (jj-in repo "commit" "-m" "mine")
       (is (= :current (workspace/advance! {:repo repo :tip tip})) "a working copy above the tip stays above it")
-      (is (= "mine" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@-" "-T" "description.first_line()"))))))
+      (is (= "mine" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@-" "-T" "description.first_line()")))
+      ;; jj edit of a landed commit, then a landing on top of it: nothing to move.
+      (jj-in repo "edit" tip)
+      (jj-in ws "new" tip)
+      (commit-file ws "y" "y\n" "y")
+      (let [tip2 (jj-in ws "log" "--no-graph" "-r" "@-" "-T" "commit_id")
+            r (workspace/advance! {:repo repo :tip tip2 :move :always})]
+        (is (= {:kept :editing :at tip} r) "an edited ancestor of the tip is reported as such")
+        (is (re-find #"on top of \w{8}, the commit your working copy edits \(jj edit\), so it stays there\. To work on the tip: jj new \w{8} in "
+                     (workspace/kept-milestone {:worker "W9" :repo repo :tip tip2} r)))))))
 
 (deftest an-unclear-tip-is-refused-until-the-worker-names-one
   (with-workers
