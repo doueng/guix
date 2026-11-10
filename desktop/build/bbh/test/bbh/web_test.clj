@@ -1,6 +1,7 @@
 (ns bbh.web-test
   (:require [bbh.hermetic :as hermetic]
             [babashka.fs :as fs]
+            [bbh.docs :as docs]
             [bbh.inbox :as inbox]
             [bbh.super]
             [bbh.super.client]
@@ -99,6 +100,77 @@
   (is (= [[:p "<img src=x onerror=alert(1)>"]] (md/render "<img src=x onerror=alert(1)>")))
   (is (= [[:p [:a {:href "https://a.example/b" :target "_blank" :rel "noopener noreferrer"} "b"]]]
          (md/render "[b](https://a.example/b)"))))
+
+;; ---- the explainers under the doc roots -----------------------------------
+
+(defn- docs-site
+  "A site whose only doc root is <base>/docs, with a tagged page outside it."
+  []
+  (let [base (fs/create-temp-dir {:prefix "bbh-web-docs"})
+        page (fn [rel head]
+               (let [f (fs/path base rel)]
+                 (fs/create-dirs (fs/parent f))
+                 (spit (str f) (str "<!doctype html><html><head>" head "</head><body><h1>First heading</h1></body></html>"))
+                 (str (fs/real-path f))))]
+    {:app (web/handler (str base) (constantly "owner@example.com") (bbh.super.client/super-dir)
+                       (constantly [(str (fs/path base "docs"))]))
+     :base (str (fs/real-path base))
+     :page page}))
+
+(defn- view [{:keys [app]} path & [headers]]
+  (app {:uri "/docs/view" :request-method :get :headers (merge owner-headers headers)
+        :query-string (str "path=" (java.net.URLEncoder/encode (str path) "UTF-8"))}))
+
+(def ^:private tag "<meta name=\"bbh-doc\" content=\"T7\">")
+
+(deftest the-docs-list-shows-tagged-pages-newest-first
+  (let [{:keys [page] :as s} (docs-site)
+        old (page "docs/old.html" (str "<title>Old &amp; wise</title><meta name=\"description\" content=\"Kept since then\">" tag))
+        new (page "docs/deep/new.html" "<meta content=\"\" name=\"bbh-doc\"><title>New</title>")]
+    (page "docs/plain.html" "<title>Not an explainer</title>")
+    (page "docs/notes.txt" tag)
+    (page "outside/elsewhere.html" tag)
+    (fs/set-last-modified-time old (java.nio.file.attribute.FileTime/fromMillis 1000))
+    (let [[status docs] (get-json s "/api/docs")]
+      (is (= 200 status))
+      (is (= [new old] (map :path docs)) "only tagged .html under a root, newest first")
+      (is (= {:title "Old & wise" :description "Kept since then" :thread "T7"}
+             (select-keys (second docs) [:title :description :thread])))
+      (is (= {:title "New" :description "First heading" :thread nil}
+             (select-keys (first docs) [:title :description :thread])) "the first heading stands in for a description"))))
+
+(deftest a-doc-is-served-as-sandboxed-html
+  (let [{:keys [page] :as s} (docs-site)
+        path (page "docs/a.html" (str "<title>A</title>" tag))
+        {:keys [status headers body]} (view s path)]
+    (is (= 200 status))
+    (is (= "text/html; charset=utf-8" (headers "Content-Type")))
+    (is (= "nosniff" (headers "X-Content-Type-Options")))
+    (is (str/includes? (headers "Content-Security-Policy") "sandbox allow-scripts"))
+    (is (str/includes? (slurp body) "<title>A</title>"))
+    (is (= 403 (:status ((:app s) {:uri "/docs/view" :request-method :get :headers {}
+                                   :query-string (str "path=" path)}))) "the tailnet owner only")))
+
+(deftest only-a-listed-doc-is-served
+  (let [{:keys [page base] :as s} (docs-site)
+        outside (page "outside/secret.html" (str "<title>Secret</title>" tag))]
+    (page "docs/a.html" (str "<title>A</title>" tag))
+    (fs/create-sym-link (fs/path base "docs" "link.html") outside)
+    (testing "outside the roots" (is (= 404 (:status (view s outside)))))
+    (testing "climbing out of a root" (is (= 404 (:status (view s (str base "/docs/../outside/secret.html"))))))
+    (testing "a link out of a root"
+      (is (= 404 (:status (view s (str base "/docs/link.html")))))
+      (is (not-any? #(= outside (:path %)) (second (get-json s "/api/docs")))))
+    (testing "an untagged page" (is (= 404 (:status (view s (page "docs/plain.html" "<title>P</title>"))))))
+    (testing "a tagged file that is not .html" (is (= 404 (:status (view s (page "docs/a.txt" tag))))))
+    (testing "a relative path" (is (= 404 (:status (view s "docs/a.html")))))
+    (testing "no path" (is (= 404 (:status ((:app s) {:uri "/docs/view" :request-method :get :headers owner-headers})))))
+    (testing "a system file" (is (= 404 (:status (view s "/etc/passwd")))))))
+
+(deftest a-doc-in-tmp-is-temporary
+  (is (:temporary (docs/read-doc "/tmp/x.html" tag)))
+  (is (not (:temporary (docs/read-doc "/home/u/docs/x.html" tag))))
+  (is (nil? (docs/read-doc "/tmp/y.html" "<title>untagged</title>"))))
 
 ;; ---- the inbox over /api/super -------------------------------------------
 

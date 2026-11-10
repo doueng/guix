@@ -13,6 +13,9 @@
 ;; ones too (dusk honours the timeout at every urgency); 0 keeps them.
 ;; :projects are the repositories the Router starts Workers in, by name, with
 ;; the check that proves a change there; each check passed on 2026-11-03.
+;; :docs are the roots the phone's Docs list and serves HTML explainers from,
+;; read-only: a directory, searched for **.html, or [directory glob]. A page
+;; shows only when it carries <meta name="bbh-doc" content="T12">.
 {:workers 10
  :projects {"guix" {:repo "~/guix" :check "make lint"
                     :about "this Guix system and Home config: desktop, Doom Emacs, Herdr, kanata, bbh and its super-agent"}
@@ -37,4 +40,7 @@
  :do-not-disturb false
  :notify-delay-seconds 5
  :notify-long-minutes 10
- :notify-expire-ms 5000}
+ :notify-expire-ms 5000
+ :docs ["~/guix/docs" "~/guix/desktop/build/bbh/doc" "~/guix/desktop/build/bbh/docs"
+        ["~/guix/desktop/build/pi-sci" "*.html"] ["~/guix/desktop/configs/keybindings" "*.html"]
+        ["/tmp" "*.html"] ["~/.local/state/bbh/workflows" "*/evidence/**.html"]]}

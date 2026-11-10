@@ -185,7 +185,7 @@ figure.mock{margin:1.2rem 0 1.6rem;}figcaption{font-size:.9rem;color:#555;margin
     (str "<!doctype html>"
          (h/html
           [:html {:lang "en"}
-           [:head [:meta {:charset "utf-8"}] [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
+           [:head [:meta {:charset "utf-8"}] [:meta {:name "bbh-doc" :content ""}] [:meta {:name "description" :content "The super-agent design: Router, Workers and Inbox, with mockups and journeys"}] [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
             [:title (:title title)] [:style (h/raw css)]]
            (into [:body [:h1 (:title title)] [:p.status status]]
                  (concat (md/render (str/join "\n" intro))

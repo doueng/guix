@@ -10,7 +10,7 @@
 
 (defonce state (atom {:agents nil :current nil :conversations {} :error nil :live false :filter "all"
                       :view [:inbox] :inbox nil :inbox-at nil :inbox-error nil :threads {} :conflicts {}
-                      :busy-super #{} :outgoing {} :kept-unread {}}))
+                      :busy-super #{} :outgoing {} :kept-unread {} :docs nil :docs-error nil :doc-query ""}))
 
 ;; Typing must not repaint the page, so drafts live outside `state`.
 (defonce drafts (atom {}))
@@ -260,11 +260,13 @@
 (def undo-ms 4000)
 
 (defn- route
-  "The view a location HASH names: the inbox, a thread or a session."
+  "The view a location HASH names: the inbox, a thread, a session, the docs or a doc."
   [hash]
   (let [h (str/replace (str hash) #"^#" "")]
     (cond (re-matches #"T\d+" h) [:thread h]
           (str/starts-with? h "s/") [:session (subs h 2)]
+          (= h "docs") [:docs]
+          (str/starts-with? h "doc/") [:doc (js/decodeURIComponent (subs h 4))]
           :else [:inbox])))
 
 (defonce depth (atom 0))
@@ -276,11 +278,11 @@
   (set! (.-hash js/location) hash))
 
 (defn- back!
-  "Back to where the page came from, else to the inbox."
-  []
+  "Back to where the page came from, else to HASH, the inbox by default."
+  [& [hash]]
   (if (pos? @depth)
     (do (swap! depth dec) (.back js/history))
-    (do (.replaceState js/history nil "" "#inbox")
+    (do (.replaceState js/history nil "" (or hash "#inbox"))
         (.dispatchEvent js/window (js/HashChangeEvent. "hashchange")))))
 
 (declare sync-inbox! sync-agents!)
@@ -408,6 +410,7 @@
         [:a.link {:href (str "#s/" (:id (first agents)))
                   :on {:click (fn [e] (.preventDefault e) (go! (str "#s/" (or (:current s) (:id (first agents))))))}}
          "Sessions"])
+      [:a.link {:href "#docs" :on {:click (fn [e] (.preventDefault e) (go! "#docs"))}} "Docs"]
       [:span.live {:class (when-not live "off")} (if live "live" "offline")]]
      [:div.chips (chip f "all" "All") (chip f "you" (str "Needs you " n-you)) (chip f "archived" (str "Archived " n-archived))]
      (cond inbox-error [:p.empty inbox-error]
@@ -559,7 +562,7 @@
     [:section.detail
      [:header.dh
       [:div.top
-       [:button.back {:type "button" :on {:click back!}} "‹ Inbox"]
+       [:button.back {:type "button" :on {:click #(back!)}} "‹ Inbox"]
        [:span.id id]
        [:span.live {:class (when-not live "off")} (if live "live" "offline")]]
       [:h1 (or (:title t) (:title row))]
@@ -603,7 +606,7 @@
   (let [conversation (get conversations current)
         live (live? s current)]
     [:div.shell
-     [:header.masthead [:button.back {:type "button" :on {:click back!}} "‹ Inbox"] [:h1 "Sessions"]]
+     [:header.masthead [:button.back {:type "button" :on {:click #(back!)}} "‹ Inbox"] [:h1 "Sessions"]]
      (into [:nav.tabs] (map #(tab-view current %)) agents)
      (cond current (thread-view current conversation)
            (nil? agents) [:main#thread.thread (when error [:p.empty error])]
@@ -612,9 +615,57 @@
      (when live (attachments-view current (get attachments current)))
      (when live (composer-view current sending))]))
 
+;; ---- the docs: HTML explainers, served read-only by /docs/view -------------
+
+(defn- sync-docs! []
+  (-> (request "/api/docs" {})
+      (.then (fn [docs] (swap! state assoc :docs docs :docs-error nil)))
+      (.catch (fn [e] (swap! state assoc :docs-error (.-message e))))))
+
+(defn- doc-hash [path]
+  (str "#doc/" (js/encodeURIComponent path)))
+
+(defn- home-path [path]
+  (str/replace path #"^/home/[^/]+/" "~/"))
+
+(defn- doc-row [{:keys [path title description thread modified temporary]}]
+  [:a.row.doc {:replicant/key path :href (doc-hash path)
+               :on {:click (fn [e] (.preventDefault e) (go! (doc-hash path)))}}
+   [:span.t title]
+   [:span.age (age-text modified)]
+   (when (seq description) [:span.ds description])
+   [:span.src (when thread [:b thread]) (when temporary [:b.tmp "temporary"]) (home-path path)]])
+
+(defn- matches? [query doc]
+  (str/includes? (str/lower-case (str/join " " ((juxt :title :description :path :thread) doc))) query))
+
+(defn- docs-view [{:keys [docs docs-error doc-query]}]
+  (let [q (str/lower-case (str/trim (str doc-query)))
+        shown (filter #(matches? q %) docs)]
+    [:div.shell.docs
+     [:header.masthead [:button.back {:type "button" :on {:click #(back!)}} "‹ Inbox"] [:h1 "Docs"]]
+     [:input.txt.search {:type "search" :placeholder "Search docs" :aria-label "Search docs"
+                         :replicant/on-mount (fn [{:replicant/keys [node]}] (set! (.-value node) doc-query))
+                         :on {:input (fn [e] (swap! state assoc :doc-query (.. e -target -value)))}}]
+     [:main.doclist
+      (cond docs-error [:p.empty docs-error]
+            (nil? docs) [:p.empty "Loading"]
+            (empty? shown) [:p.empty (if (seq q) "No doc matches" "No docs yet")])
+      (map doc-row shown)]]))
+
+(defn- doc-view [{:keys [docs]} path]
+  (let [{:keys [title temporary]} (some #(when (= path (:path %)) %) docs)]
+    [:div.reader
+     [:header.masthead [:button.back {:type "button" :on {:click #(back! "#docs")}} "‹ Docs"]
+      [:h1 (or title (home-path path))]
+      (when temporary [:b.tmp "temporary"])]
+     [:iframe.page {:src (str "/docs/view?path=" (js/encodeURIComponent path)) :title (or title "Doc")}]]))
+
 (defn- app-view [{:keys [view] :as s}]
-  (if (= :session (first view))
-    (session-view s)
+  (case (first view)
+    :session (session-view s)
+    :docs (docs-view s)
+    :doc (doc-view s (second view))
     (let [id (open-thread s)]
       [:div.app {:class (when id "show-detail")}
        (list-view s)
@@ -712,6 +763,8 @@
       :session (do (swap! state assoc :current (second view))
                    (to-bottom!)
                    (sync-agents!))
+      :docs (sync-docs!)
+      :doc (when-not (:docs @state) (sync-docs!))
       nil)))
 
 (defn- near-bottom? []

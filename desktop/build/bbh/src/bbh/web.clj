@@ -6,6 +6,7 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
             [bbh.conversation :as conversation]
+            [bbh.docs :as docs]
             [bbh.inbox :as inbox]
             [bbh.super.client :as super]
             [bbh.transcript :as transcript]
@@ -131,7 +132,7 @@
    "/scittle.replicant.js" ["scittle.replicant.js" "text/javascript"]})
 
 (def ^:private csp
-  (str "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
+  (str "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; "
        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
 
 (defn- asset [uri]
@@ -186,6 +187,30 @@
           (= :get request-method) (json-response 200 (page root (query request)))
           (= :post request-method) (send-message root request)
           :else (json-response 405 {:error "Method not allowed"}))))
+
+(def ^:private doc-csp
+  "A doc runs its own inline script and style, reaches nothing else, and is
+  sandboxed to an opaque origin, so it cannot call the API as the page."
+  (str "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; "
+       "base-uri 'none'; form-action 'none'; frame-ancestors 'self'; "
+       "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox"))
+
+(defn- doc-page
+  "/docs/view?path=P: doc P, only when it is exactly a path the listing under
+  ROOTS names."
+  [roots {:keys [query-string request-method]}]
+  (let [path (some-> (re-find #"(?:^|&)path=([^&]*)" (str query-string)) second
+                     (java.net.URLDecoder/decode "UTF-8"))
+        doc (when path (docs/find-doc roots path))]
+    (cond (not= :get request-method) (json-response 405 {:error "Method not allowed"})
+          (nil? doc) (json-response 404 {:error "No such doc"})
+          :else {:status 200
+                 :headers {"Content-Type" "text/html; charset=utf-8"
+                           "X-Content-Type-Options" "nosniff"
+                           "Content-Security-Policy" doc-csp
+                           "Referrer-Policy" "no-referrer"
+                           "Cache-Control" "no-cache"}
+                 :body (fs/file path)})))
 
 (defn- when-super-up
   "(F) as the response, or 503 when the controller is down."
@@ -312,14 +337,20 @@
 (defn handler
   "The app for the conversations under CONVERSATIONS, open to tailnet user OWNER,
   a function so that a slow Tailscale start does not stick. SUPER-DIR is the
-  controller's directory for the inbox."
+  controller's directory for the inbox. DOC-ROOTS, a function, gives the roots
+  `bbh.docs` lists and serves explainers from."
   ([conversations owner] (handler conversations owner (super/super-dir)))
-  ([conversations owner super-dir]
+  ([conversations owner super-dir] (handler conversations owner super-dir docs/roots))
+  ([conversations owner super-dir doc-roots]
   (super/on-change! super-dir ::stream #(broadcast! super-dir "event: changed\ndata: 1\n\n"))
   (fn [{:keys [uri headers] :as request}]
     (let [login (headers "tailscale-user-login")]
       (cond (or (nil? login) (not= login (owner))) (json-response 403 {:error "Tailnet owner only"})
             (str/starts-with? uri "/api/super/") (super-api super-dir request)
+            (= uri "/api/docs") (if (= :get (:request-method request))
+                                    (json-response 200 (docs/listing (doc-roots)))
+                                    (json-response 405 {:error "Method not allowed"}))
+            (= uri "/docs/view") (doc-page (doc-roots) request)
             (str/starts-with? uri "/api/") (api conversations request)
             :else (or (asset uri) (json-response 404 {:error "Not found"})))))))
 
