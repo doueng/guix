@@ -200,8 +200,9 @@
                                               '("https://bordeaux.guix.gnu.org")
                                               %asahi-substitute-urls
                                               '("https://ci.guix.gnu.org")))
-                     ;; Keep build inputs of live items so gc does not force rebuilds.
                      (build-machines (append %builder-machines
                                              (guix-configuration-build-machines config)))
+                     ;; No --gc-keep-outputs: the laptop builds nothing (the builder does),
+                     ;; so keeping build inputs of live items only holds ~25 GB of store.
                      (extra-options (list (string-append "--max-jobs=" %local-max-jobs)
-                                          "--cores=4" "--gc-keep-outputs")))))))))
+                                          "--cores=4")))))))))
