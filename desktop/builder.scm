@@ -27,6 +27,9 @@
         (build-locally? #f))
        (machine-ssh-configuration
         (host-name %builder-host)
+        ;; BUILDER_SSH_PORT=22 for the first deploy after builder-create, whose
+        ;; sshd still listens on 22.
+        (port (or (and=> (getenv "BUILDER_SSH_PORT") string->number) %builder-ssh-port))
         (system "aarch64-linux")
         (user "root")
         (identity ssh-key)

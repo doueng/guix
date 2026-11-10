@@ -17,12 +17,13 @@
   #:use-module (gnu services linux)
   #:use-module (gnu services mcron)
   #:use-module (gnu services networking)
+  #:use-module (gnu services shepherd)
   #:use-module (gnu services ssh)
   #:use-module (guix gexp)
   #:use-module ((guix utils) #:select (string-replace-substring))
   #:use-module (ice-9 textual-ports)
   #:use-module (srfi srfi-1)
-  #:re-export (%builder-host builder-key-file builder-key-string)
+  #:re-export (%builder-host %builder-ssh-port builder-key-file builder-key-string)
   #:export (%builder-server-type
             make-builder-os))
 
@@ -72,6 +73,26 @@
         ;; Prebuild roots keep the last three revisions alive.
         #~(job "0 5 * * *" "guix gc --free-space=20G")))
 
+;; Tailscale SSH for people: tailscaled answers port 22 on the tailnet address
+;; and the tailnet policy's ssh rules decide who logs in as whom.  sshd stays
+;; on 2222 for guix offload, deploy and prebuild, which need a real sshd.  The
+;; setting persists in tailscaled's state; this restates it at boot and deploy.
+(define %tailscale-ssh-service
+  (simple-service 'tailscale-ssh shepherd-root-service-type
+    (list (shepherd-service
+           (provision '(tailscale-ssh))
+           (requirement '(tailscaled))
+           (one-shot? #t)
+           (documentation "Turn on Tailscale SSH (tailscale set --ssh).")
+           (start #~(lambda _
+                      ;; tailscaled takes a moment to open its socket.
+                      (let loop ((tries 30))
+                        (cond ((zero? (system* #$(file-append tailscale "/bin/tailscale")
+                                               "set" "--ssh"))
+                               #t)
+                              ((> tries 1) (sleep 1) (loop (- tries 1)))
+                              (else #f)))))))))
+
 (define* (make-builder-os #:key bootstrap?)
   "Return the builder's operating system.  BOOTSTRAP? also admits public ssh,
 for the first deploy before Tailscale is up; the Cloud Firewall then limits it
@@ -82,6 +103,12 @@ to your address."
       (host-name "guix-builder")
       (timezone "Europe/London")
       (users (cons* (user-account
+                     ;; Your login over Tailscale SSH; no password, so no sudo:
+                     ;; log in as root for that.
+                     (name "engstrand")
+                     (group "users")
+                     (comment "Douglas Engstrand"))
+                    (user-account
                      (name "offload")
                      (group "users")
                      (comment "guix offload from the laptop")
@@ -96,9 +123,14 @@ to your address."
       (packages (cons* git curl babashka tailscale (operating-system-packages base)))
       (services
        (cons* %tailscale-service
+              %tailscale-ssh-service
               (service openssh-service-type
                        (openssh-configuration
                         (openssh openssh-sans-x)
+                        ;; The inetd-style service listens on one port: 22 for the
+                        ;; bootstrap deploy over public ssh, then 2222, since
+                        ;; Tailscale SSH answers 22 on the tailnet address.
+                        (port-number (if bootstrap? 22 %builder-ssh-port))
                         (permit-root-login 'prohibit-password)
                         (password-authentication? #f)
                         ;; Offload hangs on a dead connection otherwise.

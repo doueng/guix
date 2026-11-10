@@ -19,7 +19,9 @@
 (def host (or (System/getenv "BUILDER") "guix-builder.tailbf68ad.ts.net"))
 (def home (System/getProperty "user.home"))
 (def ssh-key (or (System/getenv "BUILDER_SSH_KEY") (str home "/.config/guix-builder/deploy_ed25519")))
-(def ssh-cmd (str "ssh -i " ssh-key " -o BatchMode=yes -o ConnectTimeout=10"))
+;; sshd listens on 2222; 22 on the tailnet address is Tailscale SSH, for people.
+(def ssh-port (or (System/getenv "BUILDER_SSH_PORT") "2222"))
+(def ssh-cmd (str "ssh -i " ssh-key " -p " ssh-port " -o HostKeyAlias=" host " -o BatchMode=yes -o ConnectTimeout=10"))
 (def publish (str "http://" host ":8080"))
 
 (defn die [& msg] (binding [*out* *err*] (apply println msg)) (System/exit 1))
@@ -159,6 +161,7 @@
     (println (str "(list (build-machine\n"
                   "       (name \"" host "\")\n"
                   "       (systems '(\"aarch64-linux\"))\n"
+                  "       (port " ssh-port ")\n"
                   "       (user \"offload\")\n"
                   "       (host-key \"" host-key "\")\n"
                   "       (private-key \"/etc/guix/offload/id_ed25519\")\n"

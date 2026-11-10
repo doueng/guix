@@ -59,6 +59,7 @@
       (list #~(build-machine
                (name #$%builder-host)
                (systems '("aarch64-linux"))
+               (port #$%builder-ssh-port)
                (user "offload")
                (host-key #$%builder-host-key)
                (private-key "/etc/guix/offload/id_ed25519")

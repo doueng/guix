@@ -7,11 +7,15 @@
   #:use-module (ice-9 textual-ports)
   #:export (%builder-host
             %builder-publish-url
+            %builder-ssh-port
             builder-key-file
             builder-key-string))
 
 (define %builder-host "guix-builder.tailbf68ad.ts.net")
 (define %builder-publish-url (string-append "http://" %builder-host ":8080"))
+;; sshd for machines (offload, deploy, prebuild).  Port 22 on the tailnet
+;; address is Tailscale SSH, for people.
+(define %builder-ssh-port 2222)
 
 (define (builder-key-path name)
   (string-append %repo-dir "/modules/engstrand/builder/" name))
