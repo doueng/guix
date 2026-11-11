@@ -52,6 +52,12 @@
            "desktop/build/clipboard/**"]
    ;; Slow only because it borrows the live clipboard and Emacs daemons.
    :slow ["make clipboard-check"]}
+  {:name "herdr sesh picker"
+   :paths ["desktop/build/herdr/sesh/**"]
+   :checks ["cd desktop/build/herdr/sesh && bb tests.bb"]}
+  {:name "herdr tiny-fingers"
+   :paths ["desktop/build/herdr/tiny-fingers/**"]
+   :checks ["cd desktop/build/herdr/tiny-fingers && bb tests.bb"]}
   {:name "herdr jjui popup"
    :paths ["desktop/build/herdr/jjui/**"]
    :checks ["cd desktop/build/herdr/jjui && bb tests.bb"]
