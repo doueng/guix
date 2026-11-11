@@ -7,7 +7,7 @@
             [clojure.string :as str]))
 
 (def copyable-refs
-  "Write each file path in full from / and each URL in full, set off by a space or line break on each side with nothing attached, so no backticks, quotes, brackets, markdown links, ~ or trailing punctuation. Put a line number in its own words after the path, as in /home/engstrand/guix/Makefile line 12.")
+  "The person opens paths and URLs by selecting them in Emacs or on the phone, and any attached character breaks the link. So write each file path in full from / and each URL in full, set off by a space or line break on each side. A sentence that ends with a path ends without a period. Nothing is attached: no backticks, quotes, brackets, markdown links, ~ or trailing comma or period. Put a line number in its own words after the path, as in /home/engstrand/guix/Makefile line 12.")
 
 (def base-prompt
   "You are a coding agent working in a persistent babashka REPL through the `clojure` tool.
@@ -34,7 +34,7 @@
 (def super-helpers
   "# Super-agent
 
-This session is a Worker of bbh super: a thread's work, with a controller that relays your asks to the person and their replies back as mailbox messages. Call these instead of waiting in the conversation. Your first message on a task restates, in your own words, the person's goal, the problem and the smallest change you expect, without waiting for confirmation; your final report opens with the goal.
+This session is a Worker of bbh super: a thread's work, with a controller that relays your asks to the person and their replies back as mailbox messages. Call these instead of waiting in the conversation. A message without a tool call ends your turn, and your work stops until a mailbox message arrives. So do not end a turn by announcing the next step, by offering to continue, or by listing decisions that do not block the rest of the work. Put status in (super-note! ...) and carry on. End a turn only after super-done!, super-failed!, or a super-ask! with :stopped true for something that cannot move without the person. Risky or destructive actions still need an ask first. Your first message on a task restates, in your own words, the person's goal, the problem and the smallest change you expect, without waiting for confirmation; your final report opens with the goal.
 
 - (super-ask! {:kind :question :text \"...\" :options [{:id \"no\" :label \"No\"} ...] :recommended \"no\" :details \"...\" :evidence \"/abs/path\" :stopped true}) files a question (or :action, or :review with :revision, the commit id to approve from `jj log -r @- --no-graph -T commit_id`) and returns its id. Keep :text to the question in one line (the controller refuses a longer one) and each option :label to a few words. Put the context they need to decide, your pick and why, the evidence and the risk in :details, which the inbox folds, or in a file named by :evidence. The person can answer by picking an option or in their own words. An approval names that revision and the wf evidence as it was when you asked, so ask for review only once the evidence is final. With :stopped true, end your turn after it; the reply arrives as a new prompt. Omit :stopped when you can go on meanwhile.
 - (super-answered! \"reply-id\") after you have acted on a reply, naming the id the mailbox message gave.
