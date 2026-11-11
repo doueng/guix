@@ -61,8 +61,8 @@
    :proposal "p p switches project in Doom, IntelliJ and Herdr (sesh). TAB . picks a workspace in Doom and Herdr. TAB ` returns to the last workspace in Doom, Herdr and Hyprland."
    :status :fixed}
   {:title "Terminal toggle lived on t T in Doom"
-   :evidence "Upstream Doom puts the vterm toggle on SPC o t."
-   :proposal "o t toggles vterm in Doom, a Snacks terminal in Neovim and the terminal tool window in IntelliJ, and focuses the Herdr terminal on the desktop."
+   :evidence "Upstream Doom puts the terminal toggle on SPC o t (+ghostel/toggle with :term ghostel)."
+   :proposal "o t toggles ghostel in Doom, a Snacks terminal in Neovim and the terminal tool window in IntelliJ, and focuses the Herdr terminal on the desktop."
    :status :fixed}
   {:title "Cmd chords in a terminal reached the shell as Ctrl keys"
    :evidence "Cmd+Z sent Ctrl+Z, which suspends Neovim or a running job. fish uses vi key bindings here, and its insert mode has no undo on Ctrl+Z. Cmd+W and Cmd+T deleted a path component and transposed characters."

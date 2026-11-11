@@ -25,7 +25,7 @@
       :desc "Rename symbol" "c r" (eng/keylog-command "Space c r" "Rename symbol" #'eng/lsp-rename)
       :desc "Code action" "c a" (eng/keylog-command "Space c a" "Code action" #'eng/lsp-code-actions)
       :desc "Diagnostics" "c x" (eng/keylog-command "Space c x" "Diagnostics" #'eng/lsp-diagnostics)
-      :desc "Terminal" "o t" (eng/keylog-command "Space o t" "Terminal" #'+vterm/toggle)
+      :desc "Terminal" "o t" (eng/keylog-command "Space o t" "Terminal" #'+ghostel/toggle)
       :desc "Switch project" "p p" (eng/keylog-command "Space p p" "Switch project" #'projectile-switch-project)
       :desc "Switch workspace" "TAB ." (eng/keylog-command "Space TAB ." "Switch workspace" #'+workspace/switch-to)
       :desc "Last workspace" "TAB `" (eng/keylog-command "Space TAB `" "Last workspace" #'+workspace/other)

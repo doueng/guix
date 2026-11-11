@@ -77,7 +77,7 @@
    :doom "eng/lsp-code-actions"}
   {:keys ["c" "x"] :label "Diagnostics" :doom-match :exact :idea "<Action>(ActivateProblemsViewToolWindow)" :nvim "<cmd>Telescope diagnostics<cr>" :doom "eng/lsp-diagnostics"}
   {:keys ["o" "t"] :label "Terminal" :doom-match :exact :desktop-command ["~/.local/bin/workspace-or-herdr-tab" "1"]
-   :doom "+vterm/toggle" :nvim "<cmd>lua Snacks.terminal()<cr>" :idea "<Action>(ActivateTerminalToolWindow)"}
+   :doom "+ghostel/toggle" :nvim "<cmd>lua Snacks.terminal()<cr>" :idea "<Action>(ActivateTerminalToolWindow)"}
   {:keys ["o" "b"] :label "Browser workspace" :doom-match :analogous :desktop ["focus" {:workspace 2}]}
   {:keys ["o" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}
   {:keys ["p" "p"] :label "Switch project" :doom-match :exact :doom "projectile-switch-project"

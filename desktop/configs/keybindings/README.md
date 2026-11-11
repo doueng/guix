@@ -81,7 +81,7 @@ Single keys after the leader carry the most frequent actions, as in Doom. Groups
 | s b | Search the buffer | Editors |
 | c d, c D, c r, c a, c x | Definition, references, rename, code action, diagnostics | Editors |
 | s l | Copy visible text by hint (tiny-fingers), like Doom's jump to visible link | Herdr |
-| o t | Terminal: vterm, a Snacks terminal, IntelliJ's terminal, or the Herdr terminal | Editors, desktop |
+| o t | Terminal: ghostel, a Snacks terminal, IntelliJ's terminal, or the Herdr terminal | Editors, desktop |
 | o b, o i | Browser and IntelliJ workspaces | Desktop |
 | p p | Switch project: projectile, IntelliJ recent projects, or the Herdr sesh picker | Doom, IntelliJ, Herdr |
 | TAB . | Choose a workspace | Doom, Herdr |
