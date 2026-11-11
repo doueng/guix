@@ -67,11 +67,11 @@ Single keys after the leader carry the most frequent actions, as in Doom. Groups
 | , | Switch buffer, Herdr tab, or desktop window | All |
 | ` | Last buffer or window | Neovim, Doom, desktop |
 | . | Find a file, launch an application on the desktop, or choose a Herdr workspace | Doom, IntelliJ, desktop, Herdr. Neovim's own Space . finds a file |
-| d | Close the window or pane | Desktop, Herdr. Doom's SPC d is its debugger group, so editors use w d |
+| d | Close the pane | Herdr. Doom's SPC d is its debugger group, so editors use w d; Alt+w closes a desktop window |
 | e | Edit scrollback in `$EDITOR` | Herdr |
 | w h, w j, w k, w l | Focus left, down, up, or right | All |
 | w s, w v | Split below, split right | Editors, Herdr |
-| w d | Close the window or pane | All |
+| w d | Close the window or pane | Editors, Herdr |
 | w m | Maximize or zoom | All |
 | w = | Balance windows | Neovim, Doom |
 | b b | Choose a buffer, Herdr tab, or desktop window | All |
@@ -211,7 +211,7 @@ Cmd+n still sends a bbh composer message. This existing local override is not a 
 
 ## Reference
 
-`reference.html` is a single page that lists every binding by layer, compares the shared leader with Doom Emacs's `SPC` tree, and records the open inconsistencies. The comparison shows each binding's `:doom-match` from `leader.edn`, and `review-test.clj` fails when a sequence Doom binds has none. `bb desktop/build/keybindings/reference.bb` regenerates it from `leader.edn`, `bindings.edn`, `kanata.kbd`, `herdr/config.toml`, `hyprland.lua` and the installed Doom's `+evil-bindings.el`.
+`reference.html` is a single page that lists every binding by layer, compares the shared leader with Doom Emacs's `SPC` tree, and records the open inconsistencies. The comparison shows each binding's `:doom-match` from `leader.edn`, and `review-test.clj` fails when a sequence Doom binds has none. `bb desktop/build/keybindings/generate.bb` regenerates it from `leader.edn`, `bindings.edn`, `kanata.kbd`, `herdr/config.toml`, `hyprland.lua` and the installed Doom's `+evil-bindings.el`.
 
 ## Maintenance
 
