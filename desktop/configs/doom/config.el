@@ -241,14 +241,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (define-key evil-normal-state-map (kbd "C-o") #'evil-jump-backward)
   (define-key evil-normal-state-map (kbd "C-i") #'evil-jump-forward))
 
-(defun eng--set-process-environment-var (name value)
-  (setq-local process-environment
-              (cons (concat name "=" value)
-                    (seq-remove
-                     (lambda (entry)
-                       (string-prefix-p (concat name "=") entry))
-                     process-environment))))
-
 ;; Doom's Scheme module adds a Nix-only Guix path. In the Guix profile, use
 ;; the active Guile module paths so Geiser can resolve Guix sources.
 (after! geiser-guile
