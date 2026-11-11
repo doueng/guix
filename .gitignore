@@ -1,10 +1,6 @@
 # Private installation records, diagnostics, and local test artifacts.
 local/
 __pycache__/
-desktop/pi/agent/skills/pstack/poteto-mode/scripts/node_modules/
-
-# Large personal wallpaper assets remain outside the repository history.
-desktop/configs/theme/wallpapers/
 
 desktop/build/dusk/target/
 desktop/build/dusk/.guix-profile*
