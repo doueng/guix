@@ -4,7 +4,6 @@
   #:use-module (engstrand packages jujutsu)
   #:use-module (engstrand packages jjui)
   #:use-module (gnu home services)
-  #:use-module (gnu packages)
   #:use-module (gnu services)
   #:use-module (guix gexp)
   #:export (feature-familiar-herdr))

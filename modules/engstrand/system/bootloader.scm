@@ -5,7 +5,6 @@
   #:use-module (engstrand packages omarchy-ane)
   #:use-module (gnu bootloader)
   #:use-module (gnu bootloader grub)
-  #:use-module (gnu bootloader m1n1)
   #:use-module (gnu packages base)
   #:use-module (gnu packages bash)
   #:use-module (gnu packages compression)

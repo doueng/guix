@@ -3,7 +3,6 @@
   #:use-module (engstrand packages assets)
   #:use-module (gnu packages rust-apps)
   #:use-module (gnu services)
-  #:use-module (gnu services base)
   #:use-module (gnu services linux)
   #:use-module (gnu services shepherd)
   #:use-module (guix gexp)

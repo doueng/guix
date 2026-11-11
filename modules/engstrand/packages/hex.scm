@@ -2,7 +2,6 @@
 ;; The wrapper mirrors upstream nix/package.nix: the libraries Hex links or
 ;; dlopens, PipeWire's ALSA plugin, and wtype and wl-clipboard for paste.
 (define-module (engstrand packages hex)
-  #:use-module (gnu packages audio)
   #:use-module (gnu packages base)
   #:use-module (gnu packages elf)
   #:use-module (gnu packages fontutils)
