@@ -33,10 +33,6 @@
 (set vim.opt.sidescrolloff 8)
 (set vim.opt.smoothscroll true)
 
-(set vim.opt.ignorecase true)
-(set vim.opt.smartcase true)
-(set vim.opt.hlsearch false)
-
 (set vim.opt.swapfile false)
 (set vim.opt.undofile true)
 (set vim.opt.backup false)
