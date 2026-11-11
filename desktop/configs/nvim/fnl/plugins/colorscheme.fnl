@@ -1,8 +1,8 @@
 (local plugin (. (require :lib.lazy) :plugin))
 
 ;; Catppuccin Mocha is defined locally so the editor does not depend on an
-;; external colorscheme plugin. Keep this adapter aligned with the canonical
-;; palette in features.theme-catppuccin-mocha.
+;; external colorscheme plugin. Keep this adapter aligned with the palette in
+;; desktop/configs/ghostty/themes/catppuccin-mocha.
 (plugin :LazyVim/LazyVim
         {:opts
          {:colorscheme
