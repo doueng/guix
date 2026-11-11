@@ -72,7 +72,7 @@
            ".agents/skills/verify-bbh-state-machines/**"]
    :checks ["make bbh-tla-check"]}
   {:name "bbh voice shortcut"
-   :paths ["desktop/build/bbh/src/bbh/super/voice.clj" "desktop/configs/hypr/hyprland.lua"]
+   :paths ["desktop/build/bbh/src/bbh/super/voice.clj"]
    :checks ["make kanata-check"]}
   {:name "bbh-transcript-scroll"
    :paths ["desktop/configs/doom/{agent-shell,bbh-super}.el" "desktop/build/bbh/test/tty-scroll-test.el"
