@@ -19,7 +19,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
-        builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status updates-test \
+        builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test \
         doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check
 
 help:
@@ -42,6 +42,8 @@ help:
 	@echo 'builder-test  test builder-prebuild status alerts and root pruning'
 	@echo 'reader-push   copy the reader checkout (READER_DIR) to the builder and restart it'
 	@echo 'reader-status the builder reader services and the headlines it serves'
+	@echo 'second-brain-status the builder second brain: service, items, its page'
+	@echo 'second-brain-test test the second brain glue on the builder'
 	@echo 'updates-test  test the updates cache, rows and changelog links'
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-apply    activate Home, then stow live configs'
@@ -149,6 +151,15 @@ reader-push:
 
 reader-status:
 	desktop/bin/reader-push status
+
+# The second brain on the builder (modules/engstrand/system/second-brain.scm).
+# desktop/bin/second-brain-push imports Safari and X exports; a Home timer
+# pushes Chrome's bookmarks.
+second-brain-status:
+	desktop/bin/second-brain-push status
+
+second-brain-test:
+	bb desktop/build/second-brain/test.bb
 
 updates-test:
 	bb desktop/build/updates/test.bb

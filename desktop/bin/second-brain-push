@@ -1,0 +1,104 @@
+#!/usr/bin/env bb
+;; Usage, on the laptop:
+;;   second-brain-push chrome           push Chrome's bookmarks to the builder's
+;;                                      second brain when they changed since the
+;;                                      last push (the hourly Home timer runs this)
+;;   second-brain-push html FILE [SRC]  import a Bookmarks.html (Safari: SRC safari)
+;;   second-brain-push x-likes FILE     import like.js, or the X archive zip (only
+;;                                      its like.js leaves the laptop)
+;;   second-brain-push x-export FILE    import the JSON from tools/x-export.js
+;;   second-brain-push status           the builder's services, item count and page
+;; The push key (~/.config/guix-builder/second-brain_ed25519) can only run the
+;; importer; status uses the deploy key.  The builder side is
+;; modules/engstrand/system/second-brain.scm.  See docs/remote-builder-plan.md.
+(ns second-brain-push
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [clojure.string :as str]))
+
+(def host (or (System/getenv "BUILDER") "guix-builder.tailbf68ad.ts.net"))
+(def home (System/getProperty "user.home"))
+(def ssh-port (or (System/getenv "BUILDER_SSH_PORT") "2222"))
+(def push-key (str home "/.config/guix-builder/second-brain_ed25519"))
+(def deploy-key (or (System/getenv "BUILDER_SSH_KEY") (str home "/.config/guix-builder/deploy_ed25519")))
+(def state-dir (str home "/.local/state/second-brain-push"))
+(def profile (str home "/.var/app/com.google.Chrome/config/google-chrome/Default/"))
+(def url (str "https://" host ":8443/"))
+
+(defn die [& msg] (binding [*out* *err*] (apply println msg)) (System/exit 1))
+
+(defn ssh [key user & command]
+  (concat ["ssh" "-i" key "-p" ssh-port "-o" (str "HostKeyAlias=" host)
+           "-o" "BatchMode=yes" "-o" "ConnectTimeout=10" "-o" "IdentitiesOnly=yes"
+           (str user "@" host)]
+          command))
+
+(defn sha256 [bytes]
+  (apply str (map #(format "%02x" %)
+                  (.digest (java.security.MessageDigest/getInstance "SHA-256") bytes))))
+
+(defn push!
+  "Send BYTES to the builder's importer as KIND; return ssh's exit code."
+  [kind bytes]
+  (:exit @(p/process (ssh push-key "second-brain" kind)
+                     {:in (java.io.ByteArrayInputStream. bytes) :out :inherit :err :inherit})))
+
+(defn chrome-file
+  "Chrome keeps bookmarks in AccountBookmarks when they live in the Google
+  account and in Bookmarks when they are local."
+  []
+  (first (filter fs/exists? [(str profile "AccountBookmarks") (str profile "Bookmarks")])))
+
+(defn chrome []
+  (let [file (or (chrome-file) (die "second-brain-push: no Chrome bookmarks in" profile))
+        bytes (fs/read-all-bytes file)
+        sum (sha256 bytes)
+        stamp (str state-dir "/chrome.sha256")]
+    (if (and (fs/exists? stamp) (= sum (str/trim (slurp stamp))))
+      (println "second-brain-push: Chrome bookmarks unchanged")
+      (let [exit (push! "chrome" bytes)]
+        (cond
+          (zero? exit) (do (fs/create-dirs state-dir) (spit stamp sum))
+          ;; Asleep, offline or the builder down: the next run tries again.
+          (= 255 exit) (println "second-brain-push: builder unreachable; will retry")
+          :else (die "second-brain-push: the import failed on the builder"))))))
+
+(defn import-file [kind file]
+  (when-not (and file (fs/exists? file)) (die "second-brain-push: no file" file))
+  (let [exit (push! kind (fs/read-all-bytes file))]
+    (when-not (zero? exit) (die "second-brain-push: the import failed on the builder"))))
+
+(defn x-likes [file]
+  (if (str/ends-with? (str/lower-case (str file)) ".zip")
+    ;; Only like.js leaves the laptop, not the rest of the archive.
+    (let [r (p/sh {:out :bytes} "unzip" "-p" file "data/like.js")]
+      (when-not (and (zero? (:exit r)) (pos? (count (:out r))))
+        (die "second-brain-push: no data/like.js in" file))
+      (when-not (zero? (push! "x-likes" (:out r)))
+        (die "second-brain-push: the import failed on the builder")))
+    (import-file "x-likes" file)))
+
+(defn status []
+  (let [r @(p/process (ssh deploy-key "root"
+                           (str "herd status second-brain | head -3; "
+                                "tail -3 /var/lib/second-brain/logs/nightly.log 2>/dev/null; "
+                                "tailscale serve status | grep -A1 8443; "
+                                "sqlite3 -readonly /var/lib/second-brain/data/brain.db "
+                                "'SELECT count(*), sum(fetched_at IS NOT NULL), sum(fetch_status = \"dead\") FROM items' "
+                                "| tr '|' ' ' | (read n f d; echo \"Items: $n, fetched: $f, dead: $d\")"))
+                      {:out :inherit :err :inherit})]
+    (when-not (zero? (:exit r)) (die "second-brain-push: status failed on the builder")))
+  (let [code (str/trim (:out (p/sh "curl" "-s" "-o" "/dev/null" "-w" "%{http_code}"
+                                   "--max-time" "20" url)))]
+    (println "Page" url "answers" code)))
+
+(let [[cmd a b] *command-line-args*]
+  (case cmd
+    "chrome" (chrome)
+    "html" (do (when b (when-not (re-matches #"[a-z0-9][a-z0-9-]{0,31}" b)
+                         (die "second-brain-push: SRC is lower-case letters, digits and dashes")))
+               (import-file (str "html " (or b "safari")) a))
+    "x-likes" (x-likes a)
+    "x-export" (import-file "x-export" a)
+    "status" (status)
+    (die "usage: second-brain-push chrome | html FILE [SRC] | x-likes FILE | x-export FILE | status")))

@@ -6,12 +6,14 @@
   #:use-module (engstrand features tailscale)
   #:use-module (engstrand system builder-keys)
   #:use-module (engstrand system reader)
+  #:use-module (engstrand system second-brain)
   #:use-module (engstrand packages assets)
   #:use-module (engstrand packages babashka)
   #:use-module (engstrand packages tailscale)
   #:use-module (gnu)
   #:use-module (gnu machine hetzner)
   #:use-module (gnu packages curl)
+  #:use-module (gnu packages sqlite)
   #:use-module (gnu packages ssh)
   #:use-module (gnu packages version-control)
   #:use-module (gnu services base)
@@ -111,7 +113,7 @@ to your address."
                      (home-directory %prebuild-home)
                      (shell (file-append git "/bin/git-shell")))
                     %base-user-accounts))
-      (packages (cons* git curl babashka tailscale (operating-system-packages base)))
+      (packages (cons* git curl babashka sqlite tailscale (operating-system-packages base)))
       (services
        (cons* %tailscale-service
               %tailscale-ssh-service
@@ -127,9 +129,13 @@ to your address."
                         ;; Offload hangs on a dead connection otherwise.
                         (extra-content "ClientAliveInterval 30\nClientAliveCountMax 4\n")
                         (authorized-keys
-                         (authorized '(("root" "deploy.pub")
-                                       ("prebuild" "deploy.pub")
-                                       ("offload" "offload.pub"))))))
+                         (append (authorized '(("root" "deploy.pub")
+                                               ("prebuild" "deploy.pub")
+                                               ("offload" "offload.pub")))
+                                 ;; Runs only the second brain's importer.
+                                 (if %brain-authorized-key
+                                     `(("second-brain" ,%brain-authorized-key))
+                                     '())))))
               (service nftables-service-type
                        (nftables-configuration
                         (ruleset
@@ -165,6 +171,8 @@ to your address."
               (append
                ;; The feed reader, on the tailnet at https://guix-builder.tailbf68ad.ts.net/.
                %reader-services
+               ;; The second brain, at https://guix-builder.tailbf68ad.ts.net:8443/.
+               %brain-services
                (modify-services (operating-system-user-services base)
                 (delete openssh-service-type)
                 (guix-service-type
