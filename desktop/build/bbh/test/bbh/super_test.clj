@@ -1426,6 +1426,30 @@
               "(eng/bbh-super-open \"super-W1\" \"/w\" \"T1 a\" '((\"BBH_SUPER_TOKEN\" . \"tok\") (\"WF_RUN\" . \"run-1\")))"]
              (args))))))
 
+(deftest a-worker-on-another-model-opens-with-bbh-model-set
+  (let [{:keys [bin args]} (fake-emacsclient 0 "\"T1 a\"")]
+    (binding [bbh.super.emacs/*emacsclient* bin]
+      (super/open! {:workspace "/w" :thread "T1" :title "a" :conversation "super-W1" :token "tok" :wf-run "run-1" :model "claude/claude-fable-5-2"})
+      (is (str/includes? (last (args)) "(\"BBH_MODEL\" . \"claude/claude-fable-5-2\")")))))
+
+(deftest a-fable-worker-launches-and-resumes-on-its-model
+  (with-workers {:worker-models ["claude/claude-fable-5-2"]}
+    (fn [c dir repo launches]
+      (call dir {:command :thread! :args {:title "fable"}})
+      (call dir {:command :thread! :args {:title "plain"}})
+      (is (= :invalid (:error (start-worker dir "T1" :repo repo :model "claude/claude-fabel-5-2"))) "a typo is refused")
+      (start-worker dir "T1" :repo repo :model "claude/claude-fable-5-2")
+      (start-worker dir "T2" :repo repo)
+      (is (= ["claude/claude-fable-5-2" nil] (map :model @launches)) "only the Worker that asked runs on Fable")
+      (is (= {"T1" "claude/claude-fable-5-2" "T2" nil}
+             (into {} (for [s (:sections (:ok (call dir {:command :sections}))) t (:threads s)] [(:id t) (:model t)])))
+          "bbh super list, the Inbox and the web show it")
+      (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
+        (super/reconcile! (assoc c :restart-grace-ms -1))
+        (is (= {:ok "W1"} (call dir {:command :resume! :args {:thread "T1"}})))
+        (is (= ["super-W1" "claude/claude-fable-5-2"] ((juxt :conversation :model) (last @launches))) "a resume keeps it"))
+      (locking (:db c) (is (= (store/replay (:db c)) @(:state c))) "the model survives a restart"))))
+
 (deftest no-emacs-daemon-is-an-error-that-says-how-to-start-it
   (let [{:keys [bin]} (fake-emacsclient 1 "emacsclient: can't find socket; have you started the server?")]
     (binding [bbh.super.emacs/*emacsclient* bin]
@@ -1953,3 +1977,22 @@
   (is (= [:on-you :on-you :stuck :stuck :working :working :archived :done :quiet]
          (map #(apply model/status %) [[:stopped :working] [:new :waiting] [:needs-attention :none] [:quiet :failed]
                                        [:new :working] [:working :queued] [:archived :none] [:quiet :done] [:quiet :none]]))))
+
+(deftest a-worker-model-is-checked-against-the-policy-and-a-replacement-keeps-it
+  (let [fable "claude/claude-fable-5-2"
+        start (fn [st args] (apply-cmd st :owner {:command :start-worker! :token-hash (str (random-uuid))
+                                                  :policy {:workers 3 :worker-models [fable]}
+                                                  :args (merge {:thread "T1" :workflow :change :brief "b" :repo "/r"} args)}))
+        st0 (first (apply-cmd model/empty-state :owner {:command :thread! :args {:title "a"}}))
+        [st err] (start st0 {:model fable})]
+    (is (nil? err))
+    (is (= fable (get-in st [:workers "W1" :model])))
+    (is (not (contains? (get-in (first (start st0 {})) [:workers "W1"]) :model)) "no :model is the default")
+    (is (= :invalid (second (start st0 {:model "claude/claude-fabel-5-2"}))))
+    (is (re-find #"unknown model .*claude-fabel.*allowed: claude/claude-fable-5-2"
+                 (try (model/decide st0 :owner {:command :start-worker! :token-hash "h" :policy {:worker-models [fable]}
+                                                :args {:thread "T1" :workflow :change :brief "b" :repo "/r" :model "claude/claude-fabel-5-2"}})
+                      "" (catch clojure.lang.ExceptionInfo e (ex-message e)))))
+    (let [ended (first (apply-cmd (first (apply-cmd st :controller (second (running "W1")))) :controller {:command :health! :args {:worker "W1" :health {:classification :session-ended :process {} :jobs []}}}))]
+      (is (= fable (get-in (first (start ended {:replaces "W1"})) [:workers "W2" :model])) ":replaces carries it over")
+      (is (nil? (get-in (first (start ended {})) [:workers "W2" :model])) "a new Worker without :replaces gets the default"))))

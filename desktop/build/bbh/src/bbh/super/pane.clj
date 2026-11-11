@@ -97,10 +97,11 @@
   [{:keys [sections]}]
   (str/join "\n"
             (for [{:keys [section threads]} sections
-                  {:keys [id title line came-back updated-at execution asks draft]} threads]
+                  {:keys [id title line came-back updated-at execution asks draft model]} threads]
               (str/join "\n"
                         (concat [(str "* " (str/upper-case (name section)) " " id " " title
                                       (if came-back " (came back)" "")
+                                      (if model (str " [" model "]") "")
                                       (let [tail (str/join " · " (remove str/blank? [(when-not (contains? #{nil :none} execution) (name execution)) (age updated-at)]))]
                                         (when-not (str/blank? tail) (str "  " tail))))]
                                 (if (seq asks)

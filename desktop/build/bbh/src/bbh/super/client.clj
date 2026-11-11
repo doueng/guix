@@ -82,8 +82,8 @@
   (doseq [{:keys [title threads]} sections]
     (println)
     (println (str/upper-case title))
-    (doseq [{:keys [id title line came-back]} threads]
-      (println (format "  %-4s %s%s" id title (if came-back "  (came back)" "")))
+    (doseq [{:keys [id title line came-back model]} threads]
+      (println (format "  %-4s %s%s%s" id title (if came-back "  (came back)" "") (if model (str "  [" model "]") "")))
       (when line (println (str "       " line))))))
 
 (defn open-router!

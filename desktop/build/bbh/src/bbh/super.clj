@@ -92,10 +92,11 @@
 (defn open!
   "The Worker's buffer in the super-agent's Emacs: a bbh session on the
   Worker's conversation in its jj workspace, with its token and wf run in the
-  session's environment, named after the thread. Returns the buffer name."
-  [{:keys [workspace thread title conversation token wf-run]}]
+  session's environment, named after the thread, and its MODEL, when it has
+  one, as BBH_MODEL. Returns the buffer name."
+  [{:keys [workspace thread title conversation token wf-run model]}]
   (emacs/open! {:conversation conversation :dir workspace :title (str thread " " title)
-                :env {"BBH_SUPER_TOKEN" token "WF_RUN" wf-run}}))
+                :env (cond-> {"BBH_SUPER_TOKEN" token "WF_RUN" wf-run} model (assoc "BBH_MODEL" model))}))
 
 (defn release!
   "Move the live Emacs session of CONVERSATION out of its workspace into DIR,
@@ -116,7 +117,7 @@
         _ (run! c :controller {:id (str "prepared-" (:id w)) :command :worker-prepared!
                                 :args {:worker (:id w) :workspace workspace :wf-run wf-run
                                        :conversation (fs/file-name conversation) :started-at (System/currentTimeMillis)}})
-        buffer (open! {:repo (:repo w) :workspace workspace :thread (:thread w) :title (:title t)
+        buffer (open! {:repo (:repo w) :workspace workspace :thread (:thread w) :title (:title t) :model (:model w)
                      :conversation (fs/file-name conversation) :token token :wf-run wf-run})]
     (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
                          :args {:started-at (System/currentTimeMillis) :worker (:id w) :conversation (fs/file-name conversation) :wf-run wf-run :workspace workspace :buffer buffer}})))
@@ -223,7 +224,7 @@
   error, and the Worker shows as ended again on the next health pass."
   [{:keys [state launch] :as c} worker token id]
   (let [w (get-in @state [:workers worker])
-        buffer ((:open! launch) {:repo (:repo w) :workspace (:workspace w) :thread (:thread w)
+        buffer ((:open! launch) {:repo (:repo w) :workspace (:workspace w) :thread (:thread w) :model (:model w)
                                  :title (get-in @state [:threads (:thread w) :title])
                                  :conversation (:conversation w) :token token :wf-run (:wf-run w)})]
     (run! c :controller {:id (str "resumed-" id) :command :worker-prepared! :args {:worker worker :buffer buffer}})))
@@ -653,7 +654,7 @@
             (run! c :controller {:id (new-id) :command :issue-token! :token-hash (sha256 token) :args {:principal [:worker (:id w)]}})
             (try
               (let [buffer ((get-in c [:launch :open!])
-                            {:repo (:repo w) :workspace (:workspace w) :thread (:thread w)
+                            {:repo (:repo w) :workspace (:workspace w) :thread (:thread w) :model (:model w)
                              :title (get-in @state [:threads (:thread w) :title])
                              :conversation (:conversation w) :token token :wf-run (:wf-run w)})]
                 (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!

@@ -9,7 +9,7 @@
             [clojure.string :as str]))
 
 (def available
-  ["claude/claude-opus-5-5" "claude/claude-fable-5-1" "claude/haiku-5-5" "claude/sonnet-5-5"
+  ["claude/claude-opus-5-5" "claude/claude-fable-5-1" "claude/claude-fable-5-2" "claude/haiku-5-5" "claude/sonnet-5-5"
    "openrouter/deepseek/deepseek-v4.1-flash"
    "codex/gpt-6.1-sol"])
 

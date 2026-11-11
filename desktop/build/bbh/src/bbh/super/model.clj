@@ -24,7 +24,7 @@
   "What policy.edn says when it is absent: the Worker cap, how long a live
   Worker may leave a delivery in its mailbox before it needs you (a reply waits
   for the current turn, which can include a 10 minute job-wait)."
-  {:workers 10 :stale-delivery-minutes 30})
+  {:workers 10 :stale-delivery-minutes 30 :worker-models []})
 
 (defn authorize
   "Throw unless PRINCIPAL may run COMMAND on STATE. A Worker acts on its own
@@ -180,6 +180,17 @@
                  :data (merge {:id (:id old) :state :failed :reason (str "Replaced by " new (when for (str " as " for " asked")))}
                               (authority state principal for))}))))
 
+(defn- worker-model
+  "The model Worker start ARGS runs on: its :model, which must be one of
+  POLICY's :worker-models, else the replaced Worker's when it names :replaces,
+  else nil, the session's default."
+  [state {:keys [model replaces]} policy]
+  (cond (nil? model) (when replaces (get-in state [:workers replaces :model]))
+        (some #{model} (:worker-models policy)) model
+        :else (refuse :invalid :field :model
+                      :message (str "unknown model " (pr-str model) "; allowed: "
+                                    (if (seq (:worker-models policy)) (str/join ", " (:worker-models policy)) "none, add it to :worker-models in policy.edn")))))
+
 (defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo check bench repro for replaces] :as args} :args :keys [token-hash policy requires principal]}]
   (let [id (next-id state :workers "W")
         t (thread-of state thread)
@@ -190,7 +201,8 @@
         cleared (clearing state principal thread for id)
         state (reduce fold* state cleared)
         t (thread-of state thread)
-        policy (merge default-policy policy)]
+        policy (merge default-policy policy)
+        model (worker-model state args policy)]
     (when-not (keyword? workflow) (refuse :invalid :field :workflow))
     (when (str/blank? brief) (refuse :invalid :field :brief))
     (when (str/blank? repo) (refuse :invalid :field :repo))
@@ -198,7 +210,7 @@
       (when (str/blank? (get args flag)) (refuse :invalid :field flag :message (str (name workflow) " needs " flag))))
     (let [worker (cond-> {:id id :generation (inc (count (:history t))) :workflow workflow :brief brief :repo repo
                           :origin origin}
-                   check (assoc :check check) bench (assoc :bench bench) repro (assoc :repro repro))
+                   check (assoc :check check) bench (assoc :bench bench) repro (assoc :repro repro) model (assoc :model model))
           reason (blocked-by state policy (assoc worker :thread thread))]
       {:events (into cleared
                      [{:kind :worker-started :thread thread
@@ -890,7 +902,8 @@
                                 (get-in state [:workers (:worker t) :health :problem])
                                 (when (= :failed (:execution t)) (get-in state [:workers (peek (:history t)) :reason]))
                                 (:summary t))
-                      :came-back (boolean (and (:resolved-at t) (> (:milestone-seq t) (:resolved-at t))))))
+                      :came-back (boolean (and (:resolved-at t) (> (:milestone-seq t) (:resolved-at t))))
+                      :model (get-in state [:workers (or (:worker t) (peek (:history t))) :model])))
         by (group-by :section rows)]
     (vec (for [s section-order :when (seq (by s))]
            {:section s :title (section-titles s) :threads (vec (by s))}))))

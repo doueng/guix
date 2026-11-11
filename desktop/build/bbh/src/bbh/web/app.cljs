@@ -352,13 +352,13 @@
       (cond (< s 60) "now" (< s 3600) (str (quot s 60) "m") (< s 86400) (str (quot s 3600) "h") :else (str (quot s 86400) "d")))))
 
 
-(defn- row-view [selected {:keys [id title line status unread updated-at came-back]}]
+(defn- row-view [selected {:keys [id title line status unread updated-at came-back model]}]
   [:a.row {:replicant/key id :href (str "#" id)
            :class [(when unread "unread") (when (= id selected) "sel")]
            :on {:click (fn [e] (.preventDefault e) (go! (str "#" id)))}}
    [:span.g {:class status} (glyphs status "·")]
    [:span.id id]
-   [:span.t title]
+   [:span.t title (when model [:span.model {:title model} (str " · " (last (str/split model #"/")))])]
    [:span.age (age-text updated-at)]
    (when (and line (#{"on-you" "stuck"} status))
      [:span.ln (first (str/split-lines (str line))) (when came-back " · came back")])])

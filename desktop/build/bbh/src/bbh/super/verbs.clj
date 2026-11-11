@@ -14,7 +14,7 @@
    'super-projects {:command :projects :doc "The repositories Workers start in, by name: {:repo :check :about}."}
    'super-thread {:command :thread :args [:id] :doc "Thread ID with its asks, replies and Workers."}
    'super-thread! {:command :thread! :args [:title] :doc "A new thread titled TITLE; returns its handle."}
-   'super-start! {:command :start-worker! :args [:thread :brief] :options #{:for :workflow :project :repo :check :bench :repro :replaces}
+   'super-start! {:command :start-worker! :args [:thread :brief] :options #{:for :workflow :project :repo :check :bench :repro :replaces :model}
                   :doc "Start a Worker on THREAD with BRIEF. Options: :workflow :project :repo
   :check :bench :repro :for. What you leave out comes from the thread's last
   Worker; :project names one of (super-projects) and brings its repo and
@@ -22,7 +22,10 @@
   does not exist is made as a new jj repository). An archived thread is
   reopened, and a Worker whose session ended is replaced. :for is the id that
   opens the message you act on, such as \"o12\". :replaces, optional, names the
-  Worker you expect to replace, refused unless it is the thread's. Returns its id and state."}})
+  Worker you expect to replace, refused unless it is the thread's. :model, a
+  PROVIDER/MODEL id from policy.edn's :worker-models, runs the Worker on that
+  model instead of the default; a replacing Worker keeps the replaced one's.
+  Returns its id and state."}})
 
 (def router
   "The Router's verbs. Every one that acts takes a thread id; steer and cancel also take the thread's Worker id."

@@ -16,7 +16,10 @@
 ;; :docs are the roots the phone's Docs list and serves HTML explainers from,
 ;; read-only: a directory, searched for **.html, or [directory glob]. A page
 ;; shows only when it carries <meta name="bbh-doc" content="T12">.
+;; :worker-models are the models a Worker may be started on with :model,
+;; besides the default; any other name is refused.
 {:workers 10
+ :worker-models ["claude/claude-fable-5-2"]
  :projects {"guix" {:repo "~/guix" :check "make lint"
                     :about "this Guix system and Home config: desktop, Doom Emacs, Herdr, kanata, bbh and its super-agent"}
             "cv" {:repo "~/projects/cv" :check "make"
