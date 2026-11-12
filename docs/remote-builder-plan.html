@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="The remote Guix builder: current state, day-to-day use, the phased plan and its history">
+<meta name="bbh-doc" content="T118">
+<title>Remote Guix builder: plan</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Remote Guix builder: plan</h1>
+<nav><details><summary>Contents</summary><ol>
+<li><a href="#current-state-2026-11-09-t134-w139">Current state (2026-11-09, T134 W139)</a></li>
+<li><a href="#the-second-brain-on-the-builder-t150-w157-2026-11-11">The second brain on the builder (T150 W157, 2026-11-11)</a></li>
+<li><a href="#the-feed-reader-on-the-builder-t143-w150-2026-11-10">The feed reader on the builder (T143 W150, 2026-11-10)</a></li>
+<li><a href="#day-to-day">Day to day</a></li>
+<li><a href="#history">History</a></li>
+<li><a href="#phase-1-status-done-2026-11-09-approved-by-you">Phase 1 status (done 2026-11-09, approved by you)</a></li>
+<li><a href="#phase-2-status-2026-11-09-t118-w120">Phase 2 status (2026-11-09, T118 W120)</a></li>
+<li><a href="#final-state-2026-11-09-t118-w133">Final state (2026-11-09, T118 W133)</a></li>
+<li><a href="#goal">Goal</a></li>
+<li><a href="#what-the-repo-looked-like-when-this-was-planned-before-phase-1-2026-11-09">What the repo looked like when this was planned (before phase 1, 2026-11-09)</a></li>
+<li><a href="#b-asahi-packages-on-a-generic-aarch64-server">(b) Asahi packages on a generic aarch64 server</a></li>
+<li><a href="#architecture">Architecture</a></li>
+<li><a href="#sizing-and-cost">Sizing and cost</a></li>
+<li><a href="#secrets">Secrets</a></li>
+<li><a href="#file-changes-sketches-against-the-real-files">File changes (sketches against the real files)</a></li>
+<li><a href="#bootstrap-order">Bootstrap order</a></li>
+<li><a href="#verification">Verification</a></li>
+<li><a href="#rollback">Rollback</a></li>
+<li><a href="#failure-modes">Failure modes</a></li>
+<li><a href="#e-the-nixpkgs-bridge-move-it-out-or-drop-it">(e) The nixpkgs bridge: move it out, or drop it?</a></li>
+<li><a href="#open-questions">Open questions</a></li>
+</ol></details></nav>
+<p>Status: <strong>done</strong> (T118, W133, 2026-11-09; current state and daily workflow updated by T134 W139 below; Tailscale SSH by T134 W142, 2026-11-10). The builder runs, and the laptop, at <code>--max-jobs=0</code>, substitutes from it and offloads to it. T128 integrated <code>updates</code>, and T130 dropped the nixpkgs bridge.
+Labels: <strong>[M]</strong> measured here (command or file cited), <strong>[I]</strong> inferred from code or docs, <strong>[G]</strong> guess to confirm.</p>
+<h2 id="current-state-2026-11-09-t134-w139">Current state (2026-11-09, T134 W139)</h2>
+<ul><li><strong>Laptop</strong>: guix-daemon runs <code>--max-jobs=0</code> with <code>http://guix-builder.tailbf68ad.ts.net:8080</code> first in substitute-urls [M: ps]. Only local-build derivations (boot, activate, profiles, Home provenance, profile hooks) run on the laptop, and everything else substitutes from the builder or offloads to it. <code>sudo guix offload test /etc/guix/machines.scm</code> passes without a password [M].</li>
+<li><strong>No nixpkgs</strong>: T130 (uyxotkys) dropped the bridge. ghostty 1.4.0 builds from its release tarball on the builder with upstream zig 0.17, mesa is Guix mesa with the Asahi drivers, and the locale archive is gone because Guix glibc reads GUIX_LOCPATH. T128 (ltwztpsq) moved the CLI tools: clojure-tools, curl, file, git, ripgrep, fnlfmt, gopls and nixfmt come from Guix. dasel, fd, fish, fzf, hyperfine, jujutsu, shellcheck, shfmt, tree-sitter, ty, typst, uv and zoxide come from upstream aarch64 release binaries (the <code>github</code> source of <code>updates</code>). neovim 0.12.6 is a <code>latest.scm</code> variant.</li>
+<li><strong>updates</strong>: <code>updates apply</code> edits the pins, runs <code>make prebuild</code> (build on the builder), then <code>make builder-check</code> (dry-run the new pins through time-machine and require nothing to build on the laptop). Only then does it print <code>make pull</code>, <code>make home-apply</code> and <code>make switch</code>. A failed step prints one <code>updates: ... failed: ...</code> line, and apply exits 1. T134 ran it end to end: rde 6821d6f→9300ace and ty 0.0.99→0.0.100 prebuilt in 2 minutes, and the dry runs leave only local-build derivations plus a 12 MB download [M].</li>
+<li><strong>Prebuild status and alerts</strong> (T133, spolovpn): /var/lib/prebuild/status.edn records <code>:state</code> (<code>:running</code>, <code>:ok</code> or <code>:failed</code>) and the nightly's <code>:checked</code>. <code>builder-prebuild alert</code> gives one line when the last prebuild failed, has run for 12 h or the nightly stopped for 30 h. <code>updates status</code> prints it, and the hourly <code>builder-alert</code> Home timer sends it once as a desktop notification.</li>
+<li><strong>SSH only over the tailnet, two paths</strong> (T134 W142, 2026-11-10):<ul><li><strong>People: Tailscale SSH on 22.</strong> <code>tailscale ssh root@guix-builder</code>, or plain <code>ssh root@guix-builder.tailbf68ad.ts.net</code> (or <code>engstrand@</code>), needs no key. tailscaled answers 22 on the tailnet address itself, and the tailnet policy decides who logs in as whom. The policy is the admin console's default rule, check mode from your devices to your own devices as root or any non-root user, and the builder got it [M: <code>tailscale debug netmap</code> SSHPolicy, holdAndDelegate, the laptop 100.74.116.113 among the principals]. Check mode opens a browser login, and after you approve it logins pass without asking for 12 hours. The <code>tailscale-ssh</code> one-shot service in builder.scm runs <code>tailscale set --ssh</code> at boot and deploy, so the setting survives guix deploy [M: RunSSH true]. <code>engstrand</code> is a builder account without a password, so log in as root for anything needing root. tailscaled reuses sshd's host key, so known_hosts is unchanged for 22. tailscaled's PATH includes glibc's bin, because Tailscale SSH finds the login shell with getent and otherwise gives a bare /bin/sh with a Debian PATH [M: <code>df</code> and <code>guix</code> now resolve in a session].</li>
+<li><strong>Machines: sshd on 2222.</strong> guix offload and guix deploy use guile-ssh and need a real sshd, and so does prebuild. It moved to 2222 because Tailscale SSH takes 22, and %builder-ssh-port in builder-keys.scm feeds machines.scm, desktop/builder.scm and builder-prebuild (<code>BUILDER_SSH_PORT</code> overrides the last two). <code>sudo guix offload test</code> passes on 2222 [M].</li>
+<li>Firewalls: the Hetzner Cloud Firewall <code>guix-builder</code> admits only 41641/udp, and nftables admits tcp 2222 and 8080 only on tailscale0. Tailscale SSH sees 22 inside tailscaled, before nftables. From the laptop, the public IPv4 2.29.168.61 and IPv6 time out [M, W139]. sshd binds 0.0.0.0, since the pinned Guix's inetd-style openssh service hard-codes INADDR_ANY and listens on one port. Every client uses the MagicDNS name guix-builder.tailbf68ad.ts.net.</li>
+</ul></li>
+<li><strong>Cost</strong> [M: hcloud server-type describe cax21, hel1]: 10.49 EUR net plus primary IPv4 0.50 EUR net, so <strong>10.99 EUR/month net, 13.30 EUR with VAT</strong>, with 20 TB of traffic included. The disk is 42 of 75 GB used [M: df].</li>
+</ul>
+<h2 id="the-second-brain-on-the-builder-t150-w157-2026-11-11">The second brain on the builder (T150 W157, 2026-11-11)</h2>
+<p>The second brain (~/projects/second-brain, T147: a babashka bookmark store over sqlite3 with a phone page) runs on the builder at <strong>https://guix-builder.tailbf68ad.ts.net:8443/</strong>, the reader's host on a second HTTPS port (its links are absolute, so it can't sit under a path of the reader's URL).</p>
+<ul><li><strong>Package</strong>: <code>second-brain</code> (modules/engstrand/packages/second-brain.scm) is built from the checkout's bb.edn, README, src, test and tools. data/ and VCS never enter the store. The app's 32 tests run in the build, which offloads to the builder. <code>bin/second-brain TASK</code> runs a bb.edn task with sqlite3 and unzip on PATH. SECOND_BRAIN_DIR names another checkout. Without a checkout the package has no source, so the module still loads.</li>
+<li><strong>Services</strong> (modules/engstrand/system/second-brain.scm, in builder.scm's services): <code>second-brain</code> serves the page on 127.0.0.1:8790 as the system user <code>second-brain</code>. It requires <code>networking</code> and <code>tailscaled</code>, respawns (5 tries a minute; <code>herd enable second-brain</code> rearms it), and logs to /var/log/second-brain.log. At start it reads the login that owns the builder from <code>tailscale status --json</code> and sets <code>BRAIN_OWNER</code>, so only that login gets in. The login stays out of the repo and the log; /var/lib/second-brain/owner caches it for a start before tailscaled answers. The <code>second-brain-serve</code> one-shot restates <code>tailscale serve --bg --https=8443 http://127.0.0.1:8790</code>. The glue is desktop/build/second-brain/builder.bb (<code>make second-brain-test</code>).</li>
+<li><strong>Data</strong>: /var/lib/second-brain (mode 700): data/brain.db, data/raw/ (each import as received), data/brain/ (the markdown tree), inbox/ (the last push of each kind), backups/brain-1..7.db (one per weekday, written by the nightly job) and logs/nightly.log. Nothing moved from the laptop: W156 tested on a throwaway copy that left with its workspace, and the checkout has no data/. The data is the Chrome profile itself, which the first push imported: 1949 bookmarks became 1924 items (1880 chrome, 44 chrome-mobile), the same as W156's count [M].</li>
+<li><strong>Chrome sync, laptop to builder</strong>: the Home timer <code>second-brain-push</code> (modules/engstrand/features/second-brain.scm) runs <code>second-brain-push chrome</code> at :41 every hour. It hashes the flatpak profile's AccountBookmarks (or Bookmarks) and pipes the file over ssh only when the hash changed. Pushes use ~/.config/guix-builder/second-brain_ed25519, whose authorized_keys line for <code>second-brain</code> forces the receiver with <code>restrict</code>. It accepts one export on stdin (64 MB at most) for <code>chrome</code>, <code>html SRC</code>, <code>x-likes</code> or <code>x-export</code>, and imports it under nice. Anything else gets a usage line. When the builder is unreachable, the push says so and retries next hour. This was chosen over an upload endpoint, which would have meant changing the app.</li>
+<li><strong>Other imports</strong>: <code>second-brain-push html FILE [SRC]</code> (Safari, <code>safari</code> by default), <code>second-brain-push x-likes FILE</code> (like.js or the archive zip; only like.js leaves the laptop) and <code>second-brain-push x-export FILE</code>. There is no HN importer yet. Summaries are not scheduled: they send page text to OpenRouter and need your OK and a key on the builder.</li>
+<li><strong>Nightly, 21:30 London</strong> (mcron, user <code>second-brain</code>), away from the 03:00 prebuild and 05:00 gc: <code>enrich --limit 1500</code>, then <code>export</code>, then a sqlite <code>.backup</code>. Each runs under <code>flock</code> (imports wait for it), <code>nice -n 19</code>, <code>ionice -c 3</code> and <code>timeout 3h</code>. enrich fetches four hosts at a time with a pause between requests, so it is network-bound.</li>
+<li><strong>Resources</strong>: the page is one bb process, about 95 MB RSS, idle between requests. The data was 5.4 MB before any page text; the full fetch adds tens of MB.</li>
+<li><strong>Code updates</strong>: <code>make builder-deploy</code> builds the new package, but Shepherd keeps running services as they were. Run <code>herd restart second-brain</code> on the builder for new page code, and <code>herd restart mcron</code> when the job changed. The first deploy needed the mcron restart before the job was scheduled [M: <code>herd schedule mcron</code>]. The receiver uses the new code at once, since sshd reads authorized_keys at each login.</li>
+<li><code>make second-brain-status</code> shows the service, the serve mapping, the item, fetched and dead counts and the page's HTTP status. Logs: <code>tailscale ssh root@guix-builder tail /var/log/second-brain.log /var/lib/second-brain/logs/nightly.log</code>; on the laptop, ~/.local/state/second-brain-push.log.</li>
+</ul>
+<h2 id="the-feed-reader-on-the-builder-t143-w150-2026-11-10">The feed reader on the builder (T143 W150, 2026-11-10)</h2>
+<p>The reader (~/projects/langchain/reader: a Python Cloudflare Worker under <code>wrangler dev</code>, plus its Python suggester) moved off the laptop. It is at <strong>https://guix-builder.tailbf68ad.ts.net/</strong>. The old <a href="https://asahi-guix.tailbf68ad.ts.net/">https://asahi-guix.tailbf68ad.ts.net/</a> is gone on purpose: keeping it would need the laptop awake (you chose the host URL over a Tailscale Service, which would need the builder tagged).</p>
+<ul><li><strong>Services</strong> (modules/engstrand/system/reader.scm, in builder.scm's services): <code>reader</code> runs node + wrangler on 127.0.0.1:8787 with workerd through Guix's glibc loader, <code>reader-suggester</code> runs the suggester on 127.0.0.1:8788 from a uv venv over Guix python 3.12, and the <code>reader-serve</code> one-shot restates <code>tailscale serve --bg --https=443 http://127.0.0.1:8787</code> at every boot and deploy. Both run as the system user <code>reader</code>, respawn (5 tries a minute; <code>herd enable reader</code> rearms), and log to /var/log/reader.log and /var/log/reader-suggester.log. The reader waits up to a minute for DNS at start, because workerd downloads its Python runtime from pyodide-capnp-bin.edgeworker.net at every start [M: the first boot without the wait crashed once and respawned].</li>
+<li><strong>Not a Guix package</strong>: wrangler, workerd and the PyPI deps aren't in Guix. <code>make reader-push</code> copies the checkout (with its built public/js/main.js, .dev.vars and suggester/.env, minus VCS, caches, venv and state) to /var/lib/reader/app, writes ~/.env/jev to /var/lib/reader/jev-key, and restarts both services. Run <code>npm run build</code> in the checkout first when the ClojureScript changed. Figwheel's /figwheel-connect did not move: hot reload stays a laptop dev tool.</li>
+<li><strong>State</strong>: /var/lib/reader/state (wrangler <code>--persist-to</code>), the Durable Object SQLite files for sources, headlines and suggestions, about 20 MB. <code>desktop/bin/reader-push state</code> moved it once, refusing while the laptop reader ran; the laptop's copy is backed up in ~/.local/share/reader/backups/state-20261110-194943.tar and is still in the checkout's .wrangler/state. The cut-over matched: the same 200 headlines and identical SHA-256 sums for all 56 SQLite files, and a refresh fetched 43 sources with no errors [M].</li>
+<li><strong>gc and prebuild</strong>: the system closure roots node, glibc and python, and the venv and uv cache sit under /var/lib, so the 05:00 <code>guix gc</code> leaves them alone [M: <code>guix gc --list-dead</code> lists none of the live ones]. Builds run <code>--max-jobs=1 --cores=4</code>, so a big build slows refreshes but doesn't stop the reader.</li>
+<li><strong>Resources</strong>: about 700 MB RSS (wrangler 2 × node about 280 MB, workerd 2 × about 360 MB, suggester 55 MB) plus 290 MB on disk. That fits beside one build in 8 GB with 8 GB of zram, and it adds no cost to the 10.99 EUR/month CAX21. It is idle between page loads.</li>
+<li><strong>Survives</strong>: a guix deploy and a reboot [M: both 2026-11-10; <code>make reader-status</code> showed 200 headlines after each].</li>
+<li><code>make reader-status</code> shows the services and the headline count. Logs: <code>tailscale ssh root@guix-builder tail /var/log/reader.log</code>.</li>
+</ul>
+<h2 id="day-to-day">Day to day</h2>
+<p><strong>Edit config and switch.</strong> Edit modules/ or desktop/, run <code>make verify</code>, and commit with jj. For a big change, run <code>make prebuild</code> so the builder builds it while you wait (the 03:00 nightly prebuilds the last pushed revision anyway). Then run <code>make home-apply</code> or <code>make switch</code>. Whatever the builder lacks offloads to it automatically.</p>
+<p><strong>Updates.</strong> <code>updates</code> shows what's outdated and the builder's prebuild status line. Its header names the revision of the script that runs and how old the cached latest versions are; a source refreshes by itself when its cache is a day old (<code>UPDATES_MAX_AGE_HOURS</code>), after a pin or install changed, or when it failed last time. <code>updates --refresh</code> (or <code>updates refresh</code>) looks everything up again and <code>--cached</code> never does. <code>updates apply [SOURCE[/NAME] ...]</code> edits the repo, prebuilds on the builder and checks that the laptop only downloads. Then run what it prints, usually <code>make pull</code>, <code>make home-apply</code> and <code>make switch</code>, and commit. If apply exits 1, the <code>updates:</code> line names the failed step and its log. Don't pull. Fix it or <code>jj restore</code> the edit.</p>
+<p><strong>A package Guix lags on.</strong> <code>updates</code> lists <code>release</code> rows where GitHub has a newer release than Guix. <code>updates apply release/NAME</code> adds NAME to <code>%latest</code> in modules/engstrand/packages/latest.scm with the source hash and prebuilds it. <code>updates apply latest/NAME</code> bumps it later. Delete its line once Guix catches up.</p>
+<p><strong>Builder down.</strong> updates and prebuild print <code>builder unreachable at ...</code>, and the rebuild steps print with <code>JOBS=1</code>, which builds on the laptop for that one command. Check <code>tailscale status</code>, <code>make builder-check</code> and the Hetzner console. <strong>Prebuild failed.</strong> The notification or <code>updates status</code> names the revision and the log. Read the log with <code>tailscale ssh root@guix-builder less /var/lib/prebuild/logs/REV.log</code>, fix it, commit, then <code>make prebuild</code>.</p>
+<p><strong>Builder OS updates.</strong> After <code>make pull</code>, run <code>make builder-deploy</code>, which does guix deploy over the tailnet with the laptop's channels. The builder builds its own system. To roll back, <code>tailscale ssh root@guix-builder guix system roll-back</code> and reboot. After <code>make builder-create</code>, the new server's sshd listens on 22 until its first managed deploy, so run that one as <code>BUILDER_SSH_PORT=22 make builder-deploy</code>.</p>
+<p><strong>Disk and gc.</strong> On the builder, <code>guix gc --free-space=20G</code> runs at 05:00 and the prebuild roots keep the last 3 revisions. Check with <code>tailscale ssh root@guix-builder df -h /</code>. On the laptop, <code>make gc</code> deletes generations older than <code>GC_AGE</code> (2w).</p>
+<p><strong>Key backups</strong> (none are in the repo; keep copies offline):</p>
+<ul><li>~/.config/guix-builder/deploy_ed25519 (deploy and prebuild)</li>
+<li>~/.ssh/guix-builder (your key login to sshd on 2222, the break-glass when Tailscale SSH fails)</li>
+<li>~/.config/guix-builder/hcloud-token (break-glass via hcloud)</li>
+<li>the laptop's /etc/guix/signing-key.sec and the builder's /etc/guix/signing-key.sec</li>
+</ul>
+<p>If you lose one, generate a new key and update its .pub in modules/engstrand/builder/, then <code>make switch</code> for the laptop key and <code>make builder-deploy</code> for the builder key. The laptop's /etc/guix/offload key is regenerated on activation; then update offload.pub and deploy.</p>
+<p><strong>Break-glass.</strong> If Tailscale SSH fails but the tailnet works (the policy changed, check mode can't reach the browser, or tailscaled's SSH is broken), use sshd with a key: <code>ssh -p 2222 -i ~/.ssh/guix-builder root@guix-builder.tailbf68ad.ts.net</code>, or the unattended deploy key. Turn Tailscale SSH off there with <code>tailscale set --ssh=false</code> if it misbehaves; the next deploy or boot turns it back on. If the tailnet is down there's no ssh at all. Reopening 22 in the Cloud Firewall alone doesn't help, because nftables drops it too. Use the Hetzner web console (Server → Console), or boot rescue mode with a temporary rule:</p>
+<pre><code>HCLOUD_TOKEN=$(cat ~/.config/guix-builder/hcloud-token) hcloud firewall add-rule guix-builder \
+  --direction in --protocol tcp --port 22 --source-ips &quot;$(curl -fsS https://api.ipify.org)/32&quot; --description break-glass
+HCLOUD_TOKEN=$(cat ~/.config/guix-builder/hcloud-token) hcloud server enable-rescue guix-builder --ssh-key guix-builder
+HCLOUD_TOKEN=$(cat ~/.config/guix-builder/hcloud-token) hcloud server reboot guix-builder
+ssh root@2.29.168.61   # rescue system: mount /dev/sda1 /mnt, fix, then reboot
+HCLOUD_TOKEN=$(cat ~/.config/guix-builder/hcloud-token) hcloud firewall delete-rule guix-builder \
+  --direction in --protocol tcp --port 22 --source-ips &quot;$(curl -fsS https://api.ipify.org)/32&quot; --description break-glass</code></pre>
+<p><strong>Cheat sheet</strong></p>
+<div class=table><table><thead><tr><th>Command</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>updates</code> / <code>updates --refresh</code> / <code>updates apply ...</code></td><td>status with prebuild status, refreshing stale sources / refresh all / edit, prebuild, check</td></tr>
+<tr><td><code>make prebuild</code></td><td>push @ and build system, Home and dev manifests on the builder</td></tr>
+<tr><td><code>make builder-check</code></td><td>publish reachable, last prebuild, nothing to build locally at the channels.scm pins</td></tr>
+<tr><td><code>builder-prebuild alert</code></td><td>one line when the last prebuild failed or the nightly stopped</td></tr>
+<tr><td><code>make pull</code>, <code>make home-apply</code>, <code>make switch</code></td><td>download and activate (<code>JOBS=1</code> builds locally when the builder is down)</td></tr>
+<tr><td><code>make builder-deploy</code></td><td>update the builder's own OS</td></tr>
+<tr><td><code>sudo /run/current-system/profile/bin/guix offload test /etc/guix/machines.scm</code></td><td>offload works (sshd, port 2222)</td></tr>
+<tr><td><code>tailscale ssh root@guix-builder</code></td><td>your shell on the builder (Tailscale SSH, check mode)</td></tr>
+<tr><td><code>ssh -p 2222 -i ~/.ssh/guix-builder root@guix-builder.tailbf68ad.ts.net</code></td><td>break-glass key login to sshd</td></tr>
+<tr><td><code>make gc</code></td><td>laptop gc</td></tr>
+<tr><td><code>make reader-push</code> / <code>make reader-status</code></td><td>copy the reader checkout to the builder and restart it / its services and headline count</td></tr>
+<tr><td><code>make second-brain-status</code> / <code>second-brain-push chrome</code></td><td>the second brain's service, item counts and page / push Chrome's bookmarks now (the Home timer does it hourly)</td></tr>
+</tbody></table></div>
+<h2 id="history">History</h2>
+<p>Everything below is the dated record of the build-out: the phase logs, then the plan as it was approved before phase 1. It is kept as written, with notes where later work overtook it. Current state and Day to day above describe the builder as it is.</p>
+<h2 id="phase-1-status-done-2026-11-09-approved-by-you">Phase 1 status (done 2026-11-09, approved by you)</h2>
+<p>What landed, without creating a server or switching anything:</p>
+<ul><li>modules/engstrand/system/builder.scm: <code>make-builder-os</code>, with <code>#:bootstrap?</code>. That variant adds an nftables table admitting public ssh for the first deploy, before Tailscale is up. It also has <code>builder-key-file</code>/<code>builder-key-string</code>, which skip missing key files so the module evaluates before phase 2.</li>
+<li>modules/engstrand/builder/: nftables.conf and a README listing the public keys phase 2 adds (deploy.pub, offload.pub, host-key.pub, builder-signing.pub, laptop-signing.pub, nixpkgs-builder.pub; T130 removed the last).</li>
+<li>desktop/builder.scm: the deploy file (Hetzner when <code>BUILDER_BOOTSTRAP</code> is set, otherwise a managed host over the tailnet).</li>
+<li>desktop/bin/builder-prebuild: <code>build</code>, <code>check</code> and <code>machines</code> (dropped in T153; offload test reads /etc/guix/machines.scm) on the laptop; <code>run REV</code>, <code>nightly</code> and <code>status</code> on the builder, behind git-shell.</li>
+<li>Makefile: builder-create, builder-deploy, prebuild and builder-check. checks.edn has a &quot;remote builder&quot; rule. features/tailscale.scm exports <code>%tailscale-service</code>.</li>
+<li>Verified: <code>make lint</code> passes, and <code>guix system build -d --no-grafts</code> evaluates both variants to a system derivation (no build) [M].</li>
+</ul>
+<p>Differences from the sketches below:</p>
+<ul><li>You have no ~/.ssh/*.pub [M]. Phase 2 starts with <code>ssh-keygen -t ed25519 -f ~/.ssh/guix-builder</code>, and that key is used for deploy, root and prebuild.</li>
+<li>The Hetzner environment's default <code>authorize? #t</code> already trusts the laptop's signing key on the builder (hetzner.scm line 203) [M]. laptop-signing.pub is only needed for later managed-host deploys.</li>
+<li>The builder's daemon also gets <code>--timeout=21600 --max-silent-time=3600</code>, and sshd gets ClientAlive settings, against offload hangs.</li>
+<li>The publish cache is warmed by fetching each closure item's narinfo, not with guix weather.</li>
+<li>~~Still open for phase 2: you need to run <code>sudo guix archive --authorize &lt; modules/engstrand/builder/nixpkgs-builder.pub</code> on the builder (or deploy with that file present) before the first prebuild's nixpkgs import.~~ Obsolete: T130 dropped the nixpkgs bridge and its key.</li>
+</ul>
+<h2 id="phase-2-status-2026-11-09-t118-w120">Phase 2 status (2026-11-09, T118 W120)</h2>
+<ul><li>Server: <strong>CAX21</strong> (4 vCPU, 8 GB, 80 GB) in hel1, <code>guix-builder</code>, IPv4 2.29.168.61, created with <code>make builder-create</code>. You chose it over the CAX31, which Hetzner's live list puts at 20.99 EUR/month net. The CAX21 is 10.49 net plus the primary IPv4 [M: hcloud server-type list]. The first CAX31 attempt failed with 412 resource_unavailable in hel1, and no server was created.</li>
+<li>Cloud Firewall <code>guix-builder</code> is attached and admits only 41641/udp. The temporary 22/tcp rule from the laptop's address is removed. nftables admits 22 and 8080 only on tailscale0 [M: a public connect to 22 and 8080 times out].</li>
+<li>Tailscale: the node is <code>guix-builder</code> (100.123.26.40, guix-builder.tailbf68ad.ts.net), brought up with your auth key. It's owned by your user, not <code>tag:builder</code>, so its key expires unless you disable key expiry for it in the admin console.</li>
+<li>Keys: deploy.pub lists an unattended key, ~/.config/guix-builder/deploy_ed25519, because guile-ssh can't use the passphrase-protected ~/.ssh/guix-builder and no agent runs. deploy.pub also lists yours. offload.pub is T119's /etc/guix/offload key. host-key.pub, builder-signing.pub, laptop-signing.pub and nixpkgs-builder.pub are recorded. The nixpkgs import key's secret sits only in /var/lib/prebuild/nixpkgs-key.sec on the builder. (T130 later dropped the bridge and nixpkgs-builder.pub.)</li>
+<li>The laptop side (asahi.scm) turns on when builder-signing.pub and host-key.pub exist. It puts the builder URL first in substitute-urls and adds the build machine, and the daemon stays at <code>--max-jobs=1</code> until you change <code>%local-max-jobs</code> to &quot;0&quot;. <code>make ... JOBS=1</code> passes <code>--max-jobs</code> to the client.</li>
+<li>Sizing for the CAX21: daemon <code>--max-jobs=1 --cores=4</code>, laptop <code>parallel-builds 1</code>, nightly gc at 20G free.</li>
+</ul>
+<h2 id="final-state-2026-11-09-t118-w133">Final state (2026-11-09, T118 W133)</h2>
+<p>Audit of each phase against the repo, the builder (ssh over the tailnet) and the laptop.</p>
+<div class=table><table><thead><tr><th>Phase / step</th><th>State</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>1. Repo pieces (builder OS, deploy file, builder-prebuild, Makefile targets, checks)</td><td>Done</td><td>Landed in T116 and T118 (wzpopmqq, swsrwmus).</td></tr>
+<tr><td>2. Server, firewall, tailscale, keys, managed deploy</td><td>Done</td><td>CAX21 in hel1, <code>herd status</code> on it shows guix-daemon, guix-publish, mcron, nftables, tailscaled and ssh-daemon running [M].</td></tr>
+<tr><td>3.8 Publish reachable on the tailnet only</td><td>Done</td><td><code>curl http://guix-builder.tailbf68ad.ts.net:8080/nix-cache-info</code> answers. W120 found that public 22 and 8080 time out [M].</td></tr>
+<tr><td>3.9 <code>guix offload test</code></td><td>Done, by a real offload</td><td>A <code>--max-jobs=0</code> build of a non-local derivation printed &quot;done with offloaded ... from guix-builder&quot; through the running daemon's hook and the root offload key [M]. T119's passwordless <code>sudo guix offload test</code> never worked: sudoers reads <code>&quot;&quot;</code> as &quot;no arguments&quot; only when it is the whole argument list, so <code>offload test &quot;&quot;</code> matched nothing and sudo asked for a password [M: sudo -n]. The rule now names <code>/etc/guix/machines.scm</code>, which takes effect after your switch.</td></tr>
+<tr><td>4.10 Prebuild, including the custom kernel</td><td>Done</td><td>/var/lib/prebuild/status.edn shows rev 1a8aa9b ok at 19:52, with roots for system, home and the dusk manifest. The narinfo for asahi-linux-keyd-7.2.15-1, the kernel the laptop runs, is served (HTTP 200) [M].</td></tr>
+<tr><td>4.11 Laptop trusts the builder key</td><td>Done, declaratively (T119)</td><td>The key from builder-signing.pub is in /etc/guix/acl [M].</td></tr>
+<tr><td>4.12 Home and system download instead of building</td><td>Done</td><td><code>guix time-machine -C channels.scm -- home build --dry-run</code> (and <code>system build</code>) at T128's tip, with the builder's URL first: nothing to build, 5.9 MB and 5.8 MB to download [M].</td></tr>
+<tr><td>4.13 <code>--max-jobs=0</code> with local-build derivations</td><td>Done, risk retired</td><td>Client <code>--max-jobs=0</code>: the <code>local-build? #t</code> derivation built on the laptop and the other one offloaded [M]. The daemon still runs local builds at 0 slots, so profiles and unions don't fail.</td></tr>
+<tr><td>5.14 Laptop daemon: builder URL first, build machine, <code>--max-jobs=0</code></td><td>Done (switched; T134 saw <code>--max-jobs=0</code> in ps). Was: committed and waiting for your switch</td><td>/etc/guix/machines.scm and the current system's guix-daemon service already have the builder. But the running daemon dates from 09:32, before the 17:33 switch, so it still uses bordeaux first and <code>--max-jobs=1</code> [M: ps]. This change sets <code>%local-max-jobs</code> to &quot;0&quot;. After the switch, guix-daemon needs a restart (below).</td></tr>
+<tr><td>Nightly prebuild and gc</td><td>Done</td><td><code>herd schedule mcron</code> on the builder: <code>prebuild nightly</code> at 03:00 and <code>guix gc --free-space=20G</code> at 05:00 UTC [M].</td></tr>
+<tr><td>6. <code>updates</code> integration, speculative bump</td><td>Moved to T128</td><td>T128 landed <code>updates</code> building on the builder (ywzmznux, qyuusumy).</td></tr>
+<tr><td>7. Drop the nixpkgs bridge</td><td>Done by T130 (uyxotkys); see Current state. Was: obsolete</td><td>T126 moved the bridge into its own repo, consumed as the pinned <code>nixpkgs-bridge</code> channel (qqyzrrmy).</td></tr>
+<tr><td>Hetzner token</td><td>Your choice</td><td>~/.config/guix-builder/hcloud-token still exists and the API accepts it [M]. Deploys go over the tailnet without it, but the hcloud break-glass commands in Day to day use it. Keep it, or revoke it and rely on the web console.</td></tr>
+<tr><td>Tailscale key expiry</td><td>Remaining (you)</td><td>The builder node is yours, not <code>tag:builder</code>, and its key expires 2027-05-08 [M: tailscale status]. Disable key expiry for it in the admin console.</td></tr>
+</tbody></table></div>
+<p>To finish, run this from /home/engstrand/guix (you enter your password):</p>
+<pre><code>make pull &amp;&amp; make switch &amp;&amp; sudo herd restart guix-daemon</code></pre>
+<p><code>make pull</code> was needed because the pulled Guix predated T126's <code>nixpkgs-bridge</code> channel (which T130 later dropped), and <code>make switch</code> refuses to run until they match. It downloads from the builder. Afterwards, <code>ps -o args -C guix-daemon</code> should show the builder URL first and <code>--max-jobs=0</code>, and <code>sudo guix offload test /etc/guix/machines.scm</code> should run without a password.</p>
+<p>Monthly cost [M: Hetzner pricing API, hel1]: CAX21 10.49 EUR net plus primary IPv4 0.50 EUR net, so <strong>10.99 EUR net, 13.30 EUR with 21% VAT</strong>. Traffic is included. The builder disk is 40 of 75 GB used (31 GB free), and nightly gc keeps 20 GB free.</p>
+<h2 id="goal">Goal</h2>
+<p>Stop the laptop from building. A Hetzner CAX (aarch64) server on the tailnet builds and serves everything that <code>make pull</code>, <code>make home-apply</code> and <code>make switch</code> need, at the same pinned channels, before the laptop asks. The laptop then only evaluates, downloads and activates.</p>
+<h2 id="what-the-repo-looked-like-when-this-was-planned-before-phase-1-2026-11-09">What the repo looked like when this was planned (before phase 1, 2026-11-09)</h2>
+<p>Line numbers, pins and paths below are as of then; several have moved since.</p>
+<ul><li>Laptop: 8 cores, 15 GiB RAM plus 8 GiB zram, 32 GB free on / [M: free -g, nproc, df]. So it is 16 GB-class, not 8 GB. The freezes (T108, T111) came mostly from agent processes. Local builds add to them, and earlyoom now guards against them (/home/engstrand/guix/modules/engstrand/system/asahi.scm line 106).</li>
+<li>Channels: guix 704ad8c, asahi b913276 and rde 6821d6f, pinned in /home/engstrand/guix/channels.scm [M]. The guix pin is held, because rde's node.scm breaks on newer guix (/home/engstrand/guix/desktop/bin/updates line 45) [M].</li>
+<li>Daily builds use the <strong>pulled</strong> guix, not time-machine. <code>make channels-current</code> refuses to run when the pulled guix differs from channels.scm (/home/engstrand/guix/Makefile line 74). Only <code>make repro-build</code> uses <code>time-machine</code> [M].</li>
+<li>System: desktop/system.scm and desktop/home.scm both come from <code>%familiar-config</code> (/home/engstrand/guix/modules/engstrand/config.scm), an rde config over <code>make-base-os</code> in /home/engstrand/guix/modules/engstrand/system/asahi.scm [M].</li>
+<li>Daemon (asahi.scm line 141 onwards): substitutes from bordeaux, then asahi, then ci; <code>--max-jobs=1 --cores=4 --gc-keep-outputs</code>; it authorizes the asahi keys and the nixpkgs import key [M].</li>
+<li>Tailscale: a binary package (/home/engstrand/guix/modules/engstrand/packages/tailscale.scm, aarch64 only) and a root Shepherd service <code>tailscaled</code> (/home/engstrand/guix/modules/engstrand/features/tailscale.scm line 11, not exported) [M]. Remote access uses ordinary OpenSSH over the tunnel, not Tailscale SSH (/home/engstrand/guix/modules/engstrand/features/remote-access.scm line 8) [M].</li>
+<li>T74's ordering work did not add a <code>tailscale-online</code> service. bbh-web, reader and system-design-prep instead listen on loopback, and <code>tailscale serve</code> maps them, so their start order does not matter (bbh-web.scm line 13; the reader moved to the builder in T143) [M]. This plan follows the same pattern: no daemon gets a Shepherd requirement on Tailscale.</li>
+<li><code>updates apply</code> only edits files (channels.scm, nixpkgs lock, package hashes, ...). It then prints <code>make pull</code>, <code>make home-apply</code>, <code>make switch</code> and <code>make doom-check</code> for you to run (desktop/bin/updates line 425) [M].</li>
+<li>Remote: origin is <a href="https://github.com/doueng/guix.git">https://github.com/doueng/guix.git</a>. It is <strong>public</strong>, and main@origin dates from 2026-09-18, about 600 commits behind the local <code>master</code> [M: jj log]. The builder can't fetch from it. The laptop must push revisions over the tailnet.</li>
+<li>Secrets today: nothing is checked in. <code>local/</code> is gitignored (it doesn't exist right now), the nixpkgs import key lives at ~/.config/guix/nixpkgs-bridge/signing-key.sec with only its public half in the repo, and the Tailscale state lives in /var/lib/tailscale.state [M]. There is no secrets manager.</li>
+</ul>
+<h2 id="b-asahi-packages-on-a-generic-aarch64-server">(b) Asahi packages on a generic aarch64 server</h2>
+<div class=table><table><thead><tr><th>Item</th><th>Where</th><th>Builds on a CAX?</th></tr></thead><tbody>
+<tr><td><code>asahi-linux-keyd</code> (asahi-linux 7.2.15 plus <code>CONFIG_INPUT_UINPUT=m</code>, CONFIG_RUST, rust and bindgen as native inputs)</td><td>/home/engstrand/guix/modules/engstrand/system/bootloader.scm line 19, asahi linux.scm line 494</td><td>Yes [I]. It's an ordinary aarch64 derivation. Because it is customized, <strong>no substitute server has it</strong>, so today every kernel bump builds on the laptop. This is the builder's biggest win.</td></tr>
+<tr><td><code>asahi-linux-keyd-ane</code> (omarchy ANE out-of-tree module), <code>asahi-dtbs-ane</code></td><td>bootloader.scm lines 26 and 28</td><td>Yes [I], same reason.</td></tr>
+<tr><td><code>asahi-u-boot-os-prepare</code> (u-boot plus a local patch), <code>asahi-m1n1</code></td><td>bootloader.scm line 34</td><td>Yes [I]. Pure cross-free builds.</td></tr>
+<tr><td>Firmware</td><td>asahi <code>asahi-firmware-service-type</code> (systems/base.scm line 87), <code>asahi-fwextract</code></td><td>The package is a Python tool and builds anywhere [M: firmware.scm]. The firmware itself is extracted at boot from the ESP, which needs the Mac, but that isn't a build [I].</td></tr>
+<tr><td>mesa</td><td>Guix mesa 26.0.2; nixpkgs mesa 26.2.6 for /run/opengl-driver</td><td>Builds anywhere [I].</td></tr>
+<tr><td>Bootloader install (ESP write of m1n1, u-boot and grub), kexec, firmware extraction</td><td><code>make switch</code> activation</td><td><strong>Needs the Mac.</strong> These happen at activation, not at build time, so they stay on the laptop [I].</td></tr>
+</tbody></table></div>
+<p>Page size: Asahi runs 16K pages and Hetzner 4K. Guix already pins jemalloc to 16K pages on aarch64 (gnu/packages/jemalloc.scm line 69) [M]. Bordeaux builds on 4K hosts too, so the builder is no worse than today's substitutes [I]. Neoverse N1 (CAX) vs M1 doesn't matter, because nothing uses <code>--tune</code> (T77/overlays answer: <code>--tune</code> picks armv8-a) [M there].</p>
+<h2 id="architecture">Architecture</h2>
+<pre><code>laptop (asahi-guix)                         guix-builder (Hetzner CAX21, Guix System)
+ guix-daemon --max-jobs=0                    guix-daemon --max-jobs=1 --cores=4
+  substitute-urls:                            substitute-urls: bordeaux, asahi, ci
+   1 http://guix-builder.&lt;tailnet&gt;:8080       guix-publish :8080 (zstd, cache, bypass 100 MiB)
+   2 bordeaux  3 asahi  4 ci                  sshd :2222 (OpenSSH; users root, offload, prebuild)
+                                              Tailscale SSH :22 (people)
+  build-machines: guix-builder (offload)      mcron: 03:00 prebuild, 05:00 gc
+  authorizes builder signing key              authorizes laptop signing key (offload imports)
+                 \____ tailnet (WireGuard) ____/
+Hetzner Cloud Firewall inbound: 41641/udp only (plus 22/tcp from your IP during bootstrap).
+Builder nftables: 2222 and 8080 accepted only on tailscale0.</code></pre>
+<h2 id="sizing-and-cost">Sizing and cost</h2>
+<p>Prices are from memory of Hetzner's list (EUR/month, excl. VAT, hourly billing) [G]. Check <a href="https://www.hetzner.com/cloud/">https://www.hetzner.com/cloud/</a> before buying.</p>
+<div class=table><table><thead><tr><th>Type</th><th>vCPU / RAM / disk</th><th>Price [G]</th><th>Fit</th></tr></thead><tbody>
+<tr><td>CAX21</td><td>4 / 8 GB / 80 GB</td><td>about 6.5</td><td>Fine for the kernel (Rust objects, about 2 to 4 GB peak [G]). Too tight when bordeaux lags and rust or LLVM must build (8 GB with <code>--cores=4</code>), and 80 GB fills with two system generations, a speculative bump and the nixpkgs closures.</td></tr>
+<tr><td><strong>CAX31</strong></td><td>8 / 16 GB / 160 GB</td><td>about 12.5</td><td><strong>Recommended.</strong> It roughly halves kernel time. Rust bootstrap fits with 8 GB zram. The disk holds 3 generations plus speculative builds.</td></tr>
+<tr><td>CAX41</td><td>16 / 32 GB / 320 GB</td><td>about 24.5</td><td>Only if you also want it for other work.</td></tr>
+</tbody></table></div>
+<p>Add a primary IPv4 (about 0.5 [G]; <code>guix deploy</code> with Hetzner uses the public IPv4, hetzner.scm line 334 [M]). Traffic is included. Locations for CAX are fsn1, nbg1 and hel1 [G]. To grow, rescale CAX31 to CAX41 with the server off and keep the disk.</p>
+<h2 id="secrets">Secrets</h2>
+<div class=table><table><thead><tr><th>Secret</th><th>Lives</th><th>Never in</th></tr></thead><tbody>
+<tr><td>Hetzner API token</td><td><code>GUIX_HETZNER_API_TOKEN</code>, read from ~/.config/guix-builder/hcloud-token (0600) only by <code>make builder-create</code>. Use a project-scoped token in a project that holds only this server, and revoke it after bootstrap. Later deploys go over the tailnet with <code>managed-host-environment-type</code>, which needs no token.</td><td>repo, store, shell history</td></tr>
+<tr><td>Tailscale auth key</td><td>One-time, pre-approved, tagged <code>tag:builder</code>, non-reusable, 1 h expiry. It's pasted once into <code>tailscale up --auth-key=...</code> over ssh during bootstrap. After that, the node state in /var/lib/tailscale.state on the builder is the credential. Tagged nodes don't expire.</td><td>repo, store, the deploy file</td></tr>
+<tr><td>Tailscale ACL</td><td>Grants laptop (or <code>autogroup:member</code>) to <code>tag:builder:22,8080</code>, with nothing from the builder to the laptop. Set in the admin console.</td><td>n/a</td></tr>
+<tr><td>Deploy ssh key (you to builder root)</td><td>Your existing ~/.ssh key. Its public half goes to Hetzner through <code>hetzner-configuration ssh-key</code>, and later to root's authorized keys in the builder OS.</td><td>n/a</td></tr>
+<tr><td>Offload key (laptop daemon to builder <code>offload</code>)</td><td>/etc/guix/offload/id_ed25519, root 0600, generated on the laptop. The public half goes in the repo at modules/engstrand/builder/offload.pub.</td><td>store</td></tr>
+<tr><td>Prebuild key (you to builder <code>prebuild</code>, git-shell only)</td><td>Your ~/.ssh key, restricted by the account's shell.</td><td>n/a</td></tr>
+<tr><td>Guix signing keys</td><td>Each machine keeps its own /etc/guix/signing-key.sec. The publics go in the repo: modules/engstrand/builder/builder-signing.pub (the laptop trusts it) and laptop-signing.pub (the builder trusts it for offload imports).</td><td>the repo for .sec files</td></tr>
+<tr><td>Builder host key</td><td>The public half goes in the repo (for <code>build-machine host-key</code> and known_hosts).</td><td>n/a</td></tr>
+</tbody></table></div>
+<p>Risk: once the laptop authorizes the builder's key, root on the builder can feed the laptop any store item. Keep the builder single-purpose and reachable only on the tailnet, with no other services and password login off.</p>
+<h2 id="file-changes-sketches-against-the-real-files">File changes (sketches against the real files)</h2>
+<h3 id="new-modules-engstrand-system-builder-scm-builder-os">New: modules/engstrand/system/builder.scm (builder OS)</h3>
+<pre><code>(define-module (engstrand system builder)
+  #:use-module (engstrand features tailscale)   ; needs %tailscale-service exported
+  #:use-module (engstrand packages babashka)
+  #:use-module (gnu) #:use-module (gnu machine hetzner)
+  #:use-module (gnu services base) #:use-module (gnu services mcron)
+  #:use-module (gnu services networking) #:use-module (gnu services ssh)
+  #:use-module (gnu services linux) #:use-module (gnu packages ssh)
+  #:use-module (gnu packages version-control)
+  #:export (%builder-os))
+
+(define %prebuild-job
+  #~(job &quot;0 3 * * *&quot; &quot;/var/lib/prebuild/bin/prebuild nightly&quot; #:user &quot;prebuild&quot;))
+(define %gc-job
+  #~(job &quot;0 5 * * *&quot; &quot;guix gc --free-space=40G&quot;))
+
+(define %builder-os
+  (let ((base (make-hetzner-os &quot;cax31&quot;)))     ; %hetzner-os-arm is deprecated (hetzner.scm line 199)
+    (operating-system
+      (inherit base)
+      (host-name &quot;guix-builder&quot;)
+      (users (cons* (user-account (name &quot;offload&quot;) (group &quot;users&quot;) (home-directory &quot;/home/offload&quot;))
+                    (user-account (name &quot;prebuild&quot;) (group &quot;users&quot;) (home-directory &quot;/var/lib/prebuild&quot;)
+                                  (shell (file-append git &quot;/bin/git-shell&quot;)))
+                    %base-user-accounts))
+      (packages (cons* git babashka (operating-system-packages base)))
+      (services
+       (cons* %tailscale-service                 ; same package and service as the laptop
+              (service openssh-service-type
+                       (openssh-configuration
+                        (openssh openssh-sans-x)
+                        (permit-root-login 'prohibit-password)
+                        (password-authentication? #f)
+                        (authorized-keys
+                         `((&quot;root&quot; ,(local-file &quot;../builder/you.pub&quot;))
+                           (&quot;offload&quot; ,(local-file &quot;../builder/offload.pub&quot;))
+                           (&quot;prebuild&quot; ,(local-file &quot;../builder/you.pub&quot;))))))
+              (service nftables-service-type    ; 22 and 8080 only on tailscale0; 41641/udp open
+                       (nftables-configuration (ruleset (local-file &quot;../builder/nftables.conf&quot;))))
+              (service guix-publish-service-type
+                       (guix-publish-configuration
+                        (host &quot;0.0.0.0&quot;) (port 8080)          ; nftables limits it to the tailnet
+                        (compression '((&quot;zstd&quot; 9)))
+                        (cache &quot;/var/cache/guix/publish&quot;)
+                        (cache-bypass-threshold (* 100 1024 1024))
+                        (ttl (* 30 24 3600)) (negative-ttl 60)))
+              (service zram-device-service-type
+                       (zram-device-configuration (size &quot;8G&quot;) (compression-algorithm 'zstd)))
+              (simple-service 'builder-cron mcron-service-type (list %prebuild-job %gc-job))
+              (modify-services (operating-system-user-services base)
+                (delete openssh-service-type)
+                (guix-service-type
+                 config =&gt; (guix-configuration
+                            (inherit config)
+                            (substitute-urls (append '(&quot;https://bordeaux.guix.gnu.org&quot;)
+                                                     %asahi-substitute-urls '(&quot;https://ci.guix.gnu.org&quot;)))
+                            (authorized-keys (append %asahi-substitute-keys
+                                                     (list (local-file &quot;../builder/laptop-signing.pub&quot;))
+                                                     (guix-configuration-authorized-keys config)))
+                            (extra-options '(&quot;--max-jobs=2&quot; &quot;--cores=4&quot; &quot;--gc-keep-outputs&quot;))))))))))</code></pre>
+<p>The ssh <code>authorized-keys</code> override for root is needed because <code>make-hetzner-os</code> takes them from the Hetzner key only at first install [I].
+Note that <code>base</code>'s file systems (/dev/sda1 ext4, /dev/sda15 vfat) come from hetzner.scm line 115 [M].</p>
+<h3 id="new-desktop-builder-scm-the-deploy-file-like-desktop-system-scm">New: desktop/builder.scm (the deploy file, like desktop/system.scm)</h3>
+<pre><code>(use-modules (engstrand system builder) (gnu machine) (gnu machine hetzner) (gnu machine ssh))
+(define bootstrap? (getenv &quot;BUILDER_BOOTSTRAP&quot;))
+(list (machine
+       (operating-system %builder-os)
+       (environment (if bootstrap? hetzner-environment-type managed-host-environment-type))
+       (configuration
+        (if bootstrap?
+            (hetzner-configuration
+             (server-type &quot;cax31&quot;) (location &quot;hel1&quot;)
+             (ssh-key (string-append (getenv &quot;HOME&quot;) &quot;/.ssh/id_ed25519&quot;))
+             (build-locally? #f))                ; the server builds its own OS
+            (machine-ssh-configuration
+             (host-name &quot;guix-builder.tailbf68ad.ts.net&quot;) (system &quot;aarch64-linux&quot;)
+             (user &quot;root&quot;) (identity (string-append (getenv &quot;HOME&quot;) &quot;/.ssh/id_ed25519&quot;))
+             (build-locally? #f)
+             (host-key &quot;ssh-ed25519 AAAA... (from phase 2)&quot;))))))</code></pre>
+<h3 id="change-modules-engstrand-features-tailscale-scm">Change: modules/engstrand/features/tailscale.scm</h3>
+<pre><code>-  #:export (feature-familiar-tailscale))
++  #:export (feature-familiar-tailscale %tailscale-service))</code></pre>
+<h3 id="change-modules-engstrand-system-asahi-scm-guix-service-type-phase-5">Change: modules/engstrand/system/asahi.scm, <code>guix-service-type</code> (phase 5)</h3>
+<pre><code>                      (authorized-keys (append %asahi-substitute-keys
+                                               (list (local-file &quot;../nixpkgs/signing-key.pub&quot; &quot;nixpkgs-signing-key.pub&quot;))
++                                              ;; The remote builder; see docs/remote-builder-plan.md.
++                                              (list (local-file &quot;../builder/builder-signing.pub&quot; &quot;builder-signing-key.pub&quot;))
+                                               (guix-configuration-authorized-keys config)))
+-                     (substitute-urls (append '(&quot;https://bordeaux.guix.gnu.org&quot;)
++                     (substitute-urls (append '(&quot;http://guix-builder.tailbf68ad.ts.net:8080&quot;
++                                                &quot;https://bordeaux.guix.gnu.org&quot;)
+                                               %asahi-substitute-urls
+                                               '(&quot;https://ci.guix.gnu.org&quot;)))
++                     (build-machines
++                      (list #~(build-machine
++                               (name &quot;guix-builder.tailbf68ad.ts.net&quot;)
++                               (systems '(&quot;aarch64-linux&quot;))
++                               (user &quot;offload&quot;)
++                               (host-key #$%builder-host-key)   ; read from modules/engstrand/builder/host-key.pub
++                               (private-key &quot;/etc/guix/offload/id_ed25519&quot;)
++                               (parallel-builds 2)
++                               (overload-threshold 0.8))))
+-                     (extra-options '(&quot;--max-jobs=1&quot; &quot;--cores=4&quot; &quot;--gc-keep-outputs&quot;)))))))))
++                     ;; Build nothing here; offload or substitute.  make ... JOBS=1 overrides.
++                     (extra-options '(&quot;--max-jobs=0&quot; &quot;--cores=4&quot; &quot;--gc-keep-outputs&quot;)))))))))</code></pre>
+<p>Since the URL uses MagicDNS, it fails fast when tailscaled is down: the name doesn't resolve, and the daemon falls through to bordeaux. That's why guix-daemon needs no Shepherd requirement on tailscaled, which is T74's lesson [I]. If MagicDNS is flaky at boot, use the builder's 100.x address instead.</p>
+<h3 id="change-makefile-new-targets-each-needs-a-make-help-line-and-a-checks-edn-rule">Change: Makefile (new targets; each needs a <code>make help</code> line and a checks.edn rule)</h3>
+<pre><code>BUILDER ?= guix-builder.tailbf68ad.ts.net
+JOBS ?=
+JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))   # JOBS=1 builds locally when the builder is down
+
+builder-create:   # once: create the server from desktop/builder.scm (spends money)
+	GUIX_HETZNER_API_TOKEN=$$(cat ~/.config/guix-builder/hcloud-token) BUILDER_BOOTSTRAP=1 \
+	  &quot;$(GUIX)&quot; deploy -L &quot;$(MODULES)&quot; desktop/builder.scm
+builder-deploy:   # reconfigure the builder over the tailnet
+	&quot;$(GUIX)&quot; deploy -L &quot;$(MODULES)&quot; desktop/builder.scm
+prebuild:         # push @ and build system, home and pull on the builder; wait
+	desktop/bin/builder-prebuild push-and-build
+builder-check:    # offload test, plus weather for this revision against the builder
+	desktop/bin/builder-prebuild check</code></pre>
+<p>Add <code>$(JOBS_FLAG)</code> to the <code>guix pull</code>, <code>system build</code>, <code>system reconfigure</code>, <code>home build</code> and <code>home reconfigure</code> lines.</p>
+<h3 id="new-desktop-bin-builder-prebuild-bb-runs-on-both-sides">New: desktop/bin/builder-prebuild (bb; runs on both sides)</h3>
+<ul><li>Laptop, <code>push-and-build</code>: <code>jj bookmark set prebuild -r @ --allow-backwards</code>, then <code>jj git push --remote builder -b prebuild</code> (remote <code>builder</code> = <code>prebuild@$BUILDER:guix.git</code>), then <code>ssh prebuild@$BUILDER prebuild &lt;commit&gt;</code>, streaming output. git-shell allows only the commands in ~prebuild/git-shell-commands/.</li>
+<li>Builder, <code>prebuild REV</code> and <code>nightly</code>. A lock file under /var/lib/prebuild/lock keeps runs from overlapping. Each run checks out REV into a worktree, then:</li>
+</ul>
+<pre><code>G=&quot;guix time-machine -C channels.scm --&quot;
+$G describe                                                   # builds what make pull needs [I]
+$G nixpkgs-bridge import /var/lib/prebuild/nixpkgs-key.sec      # the channel's command; file:// channel urls point at guix.git
+$G system build -L modules desktop/system.scm --root=/var/lib/prebuild/roots/system-$REV
+$G home   build -L modules desktop/home.scm   --root=/var/lib/prebuild/roots/home-$REV
+guix weather --substitute-urls=http://localhost:8080 $(guix gc -R roots/system-$REV roots/home-$REV) &gt;/dev/null  # bakes publish's cache</code></pre>
+<p>  It keeps the last 3 revisions' roots (by the links' own mtimes; until T133 it compared the store items' 1970 mtimes and could drop the newest) and drops older ones, then writes /var/lib/prebuild/status.edn ({:rev :state :ok? :started :finished :checked :error :log}; :state is :running during a run, and the nightly stamps :checked). <code>builder-check</code> prints it, and <code>builder-prebuild alert</code> turns it into one line when the last run failed, has run over 12 hours or the nightly hasn't run for 30 hours. <code>updates status</code> prints that line, and the Home timer builder-alert (modules/engstrand/features/builder-alert.scm) sends it hourly as a critical desktop notification, once per problem.</p>
+<ul><li><code>nightly</code> builds the last pushed <code>prebuild</code> again, which is a no-op when nothing changed. It then builds a <strong>speculative bump</strong>: channels.scm rewritten to the branch heads with the holds from <code>updates</code> respected, and the bridge's <code>make lock</code> at the latest nixpkgs-unstable (the <code>nix eval</code> runs here, not on the laptop). So when you run <code>updates apply</code> in the morning, the bump is usually already built. The prebuild script has to share the <code>channel-holds</code> table, so move it out of desktop/bin/updates line 45 into an edn file that both scripts read.</li>
+</ul>
+<p>Why time-machine on the builder and <code>guix pull</code> on the laptop agree: both build the same channel-instance derivations for the same commits, and <code>make repro-build</code> already relies on this [I]. Phase 4 verifies it with <code>guix weather</code>.</p>
+<h3 id="change-desktop-bin-updates-point-c">Change: desktop/bin/updates (point c)</h3>
+<pre><code>-(def rebuild-steps [&quot;make pull&quot; &quot;make home-apply&quot; &quot;make switch&quot; &quot;make doom-check&quot;])
++(def rebuild-steps [&quot;make prebuild&quot; &quot;make pull&quot; &quot;make home-apply&quot; &quot;make switch&quot; &quot;make doom-check&quot;])
+...
+-   &quot;channel&quot; {... :then #{&quot;make pull&quot; &quot;make home-apply&quot; &quot;make switch&quot;}}
++   &quot;channel&quot; {... :then #{&quot;make prebuild&quot; &quot;make pull&quot; &quot;make home-apply&quot; &quot;make switch&quot;}}
+   (likewise guix, nixpkgs, github)</code></pre>
+<p>Optionally, <code>apply</code> runs <code>make prebuild</code> itself when channel, guix, nixpkgs or github changed, so the printed steps start at <code>make pull</code>. Either way the builder has built the exact edited tree before the laptop pulls, which avoids channel skew. <code>updates refresh</code> (nixpkgs <code>versions</code>, a <code>nix eval</code>) can run as <code>ssh prebuild@builder prebuild versions</code> too.</p>
+<h2 id="bootstrap-order">Bootstrap order</h2>
+<p>Phase 1 (repo only, no spend; this is what I ask you to approve)</p>
+<ol><li>Export <code>%tailscale-service</code>. Add modules/engstrand/system/builder.scm, desktop/builder.scm, modules/engstrand/builder/{nftables.conf,you.pub} and desktop/bin/builder-prebuild, plus the Makefile targets, help lines and checks.edn rules (lint only, plus <code>guix repl</code> loading the module; no builds).</li>
+<li><code>make lint</code>, then <code>guix system build -d -L modules -e '(@ (engstrand system builder) %builder-os)'</code>. It evaluates the builder OS and prints its derivation without building [I].</li>
+</ol>
+<p>Phase 2 (you; spends about 12.5 EUR/month)</p>
+<ol><li>Create a Hetzner project and a token, and save it to ~/.config/guix-builder/hcloud-token (0600). Create the Cloud Firewall: 41641/udp and ICMP in, plus 22/tcp from your current IP.</li>
+<li><code>make builder-create</code>. <code>guix deploy</code> creates the CAX31 and installs Guix through rescue, and the server builds its own system (<code>build-locally? #f</code>).</li>
+<li><code>ssh root@&lt;ipv4&gt; tailscale up --auth-key=&lt;one-time tagged key&gt; --hostname=guix-builder</code>. Set the ACL. Then remove 22/tcp from the Cloud Firewall.</li>
+<li>Record <code>ssh-keyscan guix-builder.tailbf68ad.ts.net</code> into modules/engstrand/builder/host-key.pub. Copy the builder's /etc/guix/signing-key.pub into builder-signing.pub, and the laptop's into laptop-signing.pub. Run <code>sudo bash -c 'umask 077; mkdir -p /etc/guix/offload; ssh-keygen -t ed25519 -N &quot;&quot; -f /etc/guix/offload/id_ed25519'</code> on the laptop and commit the .pub. Generate the builder's nixpkgs import key on the builder (dropped with the bridge in T130).</li>
+<li><code>make builder-deploy</code>, now over the tailnet (managed host), so the builder gets the users, keys, publish, nftables and mcron.</li>
+</ol>
+<p>Phase 3 (test without touching the laptop daemon)</p>
+<ol><li><code>curl http://guix-builder.tailbf68ad.ts.net:8080/nix-cache-info</code> from the laptop works. The same from a non-tailnet host times out.</li>
+<li><code>guix offload test /tmp/machines.scm</code> with the same <code>build-machine</code> written to a file. It needs <code>sudo</code> for the root key [I].</li>
+</ol>
+<p>Phase 4 (prebuild and trial)</p>
+<ol><li>Add the git remote, then <code>make prebuild</code>. The first run builds the kernel and anything bordeaux lacks.</li>
+<li><code>sudo guix archive --authorize &lt; modules/engstrand/builder/builder-signing.pub</code>, a one-off like the former <code>make nixpkgs-authorize</code>.</li>
+<li><code>guix system build -L modules desktop/system.scm --dry-run --substitute-urls='http://guix-builder.tailbf68ad.ts.net:8080 https://bordeaux.guix.gnu.org'</code> lists <strong>no</strong> &quot;would be built&quot; lines. Do the same with <code>guix home build</code>.</li>
+<li><code>guix system build --max-jobs=0 --substitute-urls=... -L modules desktop/system.scm</code>, a client-side max-jobs=0 with the daemon unchanged. This tests the risk under Failure modes: local-build derivations with max-jobs=0.</li>
+</ol>
+<p>Phase 5 (switch the laptop; you run make switch)</p>
+<ol><li>Apply the asahi.scm diff, run <code>make switch</code>, then <code>sudo herd status guix-daemon</code> and <code>ps</code> to see <code>--max-jobs=0</code> and the builder URL.</li>
+</ol>
+<p>Phase 6: the <code>updates</code> integration and the nightly speculative bump. Moved to T128.
+Phase 7: superseded. T126 moved the nixpkgs bridge into its own channel instead (see (e)), and the prebuild keeps its <code>nixpkgs-bridge import</code> line. T130 (uyxotkys) then dropped the bridge altogether.</p>
+<h2 id="verification">Verification</h2>
+<ul><li><code>guix offload test</code> passes, and <code>guix offload status</code> shows the builder's load.</li>
+<li><code>guix weather --substitute-urls=http://guix-builder...:8080</code> gives 100% for the system and home closures of the pushed revision.</li>
+<li><code>make switch</code> and <code>make home-apply</code> after a channel bump print only &quot;substitutes&quot; (downloads), with no &quot;would be built&quot; lines and no building lines in <code>/var/log/guix-daemon.log</code>. The earlyoom log stays quiet.</li>
+<li>Builder down (<code>ssh root@builder herd stop guix-publish</code>): <code>make switch</code> still succeeds when bordeaux has everything, and fails fast with &quot;unable to start any build&quot; when it doesn't, rather than building.</li>
+</ul>
+<h2 id="rollback">Rollback</h2>
+<ul><li>Fast: <code>make switch JOBS=1</code> (client <code>--max-jobs=1</code>) builds locally once without a config change. That client override needs checking [I: guix/scripts/build.scm line 228 sends <code>build-max-jobs</code> only when given, and the daemon is expected to honor it].</li>
+<li>Full: revert the asahi.scm diff (restore <code>--max-jobs=1</code>, drop <code>build-machines</code> and the URL; the key can stay), then <code>make switch</code>, or boot the previous system generation from grub.</li>
+<li>Builder: <code>ssh root@guix-builder guix system roll-back</code>. To remove it entirely, deploy once with <code>(delete? #t)</code> in <code>hetzner-configuration</code> (hetzner.scm line 263) [M] and revert the laptop first.</li>
+</ul>
+<h2 id="failure-modes">Failure modes</h2>
+<div class=table><table><thead><tr><th>Failure</th><th>Effect</th><th>Mitigation</th></tr></thead><tbody>
+<tr><td>Builder down or tailscale down</td><td>Lookups to the builder fail (DNS fails at once without MagicDNS; with tailscale up and the builder off, each connect may wait for a timeout [G]). Substitutes then come from bordeaux, asahi and ci. Anything only the builder has, such as the custom kernel, fails with &quot;unable to start any build&quot;.</td><td><code>make switch JOBS=1</code> for a one-off local build. Keep bordeaux next in the list. Measure the timeout in phase 4 and use the 100.x IP if DNS fails slowly.</td></tr>
+<tr><td><code>--max-jobs=0</code> and <code>local-build?</code> derivations (profiles, unions, the trivial <code>nixpkgs-*</code> wrappers)</td><td>Daemon semantics: these prefer local builds, so with 0 slots they might fail instead of offloading [G].</td><td>Phase 4 step 13 tests it before any config change. In practice they are substitutable from the builder after a prebuild. If it bites, fall back to the daemon at <code>--max-jobs=1</code> plus offload: the hook takes non-local builds first, and the local builds left over are only small ones.</td></tr>
+<tr><td>Offload hangs (ssh stall, builder overloaded)</td><td><code>make switch</code> hangs.</td><td><code>overload-threshold 0.8</code>, sshd ClientAlive settings on the builder, daemon <code>--timeout=21600 --max-silent-time=3600</code>, and <code>sudo herd restart guix-daemon</code> (consider adding it to <code>%restartable-services</code> in agent-control.scm line 42).</td></tr>
+<tr><td>publish 404 while baking</td><td>The laptop gets a 404 for a large item it asked for during the bake. The client caches a miss for publish's <code>negative-ttl</code>.</td><td>Prebuild bakes before you pull (the weather step). <code>cache-bypass-threshold</code> 100 MiB serves smaller items at once. <code>negative-ttl 60</code>. A miss only costs an offload, which finds the output already on the builder.</td></tr>
+<tr><td>Channel skew (laptop pulls before the builder built that tree)</td><td>Local builds, or failures under max-jobs=0.</td><td><code>make prebuild</code> comes first in the updates steps. Optionally, <code>make pull</code> checks <code>status.edn</code> for <code>@</code>'s commit and warns.</td></tr>
+<tr><td>Disk full on the builder</td><td>Builds fail.</td><td>Nightly <code>guix gc --free-space=20G</code>, GC roots only for the last 3 revisions, and an alert in <code>builder-check</code>.</td></tr>
+<tr><td>Builder compromise</td><td>It can push store items to the laptop.</td><td>Tailnet only, nftables, no passwords, single purpose, and the key can be revoked by removing one line in asahi.scm.</td></tr>
+</tbody></table></div>
+<p>Not covered: out-of-Guix builds (<code>make stow</code> with pi-sci, pierre-diff-ansi and bun, dusk with cargo, kanata-sim, doom sync). They still run on the laptop.</p>
+<h2 id="e-the-nixpkgs-bridge-move-it-out-or-drop-it">(e) The nixpkgs bridge: move it out, or drop it?</h2>
+<p><strong>Outcome: T130 (uyxotkys) dropped the bridge after all (Option B in effect).</strong> The rest of this section is the record of the decision.</p>
+<p><strong>Decision (2026-11-09, revised by T126): move it (Option A).</strong> The bridge is the nixpkgs-bridge channel, /home/engstrand/projects/guix-nixpkgs-bridge, pinned in channels.scm. Unlike step 3 below, packages.sexp and lock.sexp moved with it: the bridge repo owns <code>make lock</code>, and <code>updates apply nixpkgs</code> relocks there, commits, and bumps the pin. Step 5's substitute-from-builder change and the extension's name (<code>guix nixpkgs-bridge</code>) differ too. Option B stays below for the record.</p>
+<p>What it is [M]: modules/engstrand/nixpkgs.scm (175 lines), modules/engstrand/nixpkgs/bridge.scm (431), lock.sexp (4946), packages.sexp (26 attrs), signing-key.pub, desktop/build/nixpkgs/bridge.scm (CLI), docs/nixpkgs-bridge/design.html, the Make targets nixpkgs-lock, -key, -authorize, -import and -verify, and the <code>nixpkgs</code> source in updates. <code>lock</code> and <code>versions</code> run <code>nix eval</code> through <code>guix shell nix</code> (bridge.scm line 156). <code>import</code> copies NARs from cache.nixos.org into /gnu/store, rewriting /nix/store and keeping each hash, and the gexp compiler refuses to evaluate when an item is missing (nixpkgs.scm line 74). Users: shell.scm (fish fzf zoxide ripgrep fd git neovim), development.scm (13 tools), herdr.scm (jujutsu), desktop.scm (ghostty, mesa, locales), dotfiles.scm (LOCALE_ARCHIVE) and hex.scm (Asahi Vulkan ICD from nixpkgs mesa).</p>
+<h3 id="option-a-move-it-into-its-own-repo-consumed-as-a-channel">Option A: move it into its own repo, consumed as a channel</h3>
+<p>Following T67 (wf run /home/engstrand/.local/state/bbh/workflows/20261106-152119-628-investigation, recommendation &quot;pinned Guix package + local checkout&quot;, with a channel judged overkill <strong>for bbh</strong>): the bridge differs, because it <em>is</em> Guix modules, so a channel fits.</p>
+<ol><li>New repo ~/projects/guix-nixpkgs (jj). <code>git filter-repo --path modules/engstrand/nixpkgs.scm --path modules/engstrand/nixpkgs/ --path desktop/build/nixpkgs/ --path docs/nixpkgs-bridge/</code> keeps the history. Rename the modules to <code>(nixpkgs-bridge ...)</code> and keep <code>(engstrand nixpkgs)</code> as a one-line re-export in guix for a transition. Add .guix-channel, a channel introduction (sign commits with your key) and a LICENSE.</li>
+<li>Turn the CLI into a Guix extension, guix/extensions/nixpkgs.scm, so <code>guix nixpkgs lock|versions|import|verify|key</code> works from any pulled Guix that has the channel [I: Guix loads <code>(guix extensions ...)</code> from channels]. The Makefile targets become one-line wrappers.</li>
+<li>Per-user data stays in guix: packages.sexp and lock.sexp go in modules/engstrand/nixpkgs-lock/ and are passed to <code>nixpkgs-package</code> through a parameter or <code>#:lock</code>. Bumping a nixpkgs revision then stays one atomic guix commit, and only bridge <em>code</em> changes need a channel bump. This avoids T67's main con, cross-repo commits, for the frequent case (lock bumps).</li>
+<li>channels.scm gains a <code>nixpkgs-bridge</code> channel pinned by commit. updates' <code>channel</code> source bumps it like the others.</li>
+<li>Builder role: the prebuild runs <code>guix time-machine -C channels.scm -- nixpkgs import</code> and <code>nixpkgs lock</code> (the nightly speculative bump). Then **change the gexp compiler (nixpkgs.scm line 71) from <code>valid-path?</code> to <code>ensure-path</code>/<code>build-things</code>**, so the laptop <em>substitutes</em> the imported items from the builder (they are signed by the builder's key on publish) instead of importing locally. The laptop no longer needs <code>make nixpkgs-import</code>, curl to cache.nixos.org, or its own nixpkgs key, and the builder is the only importer. When the builder is down, <code>make nixpkgs-import</code> on the laptop is the fallback, unchanged.</li>
+<li>T77's aarch64 cache gaps (attrs uncached on cache.nixos.org; the lock keeps the earlier entry, bridge.scm line 195): the builder could later run <code>nix build</code> for an uncached attr and import the result. That's an open question, not in scope.</li>
+</ol>
+<p>Cost: one more channel and its introduction, a pin bump per bridge-code change (bridge code changed rarely; most churn is lock bumps, which stay local [I]), and moving 4 Makefile targets.</p>
+<h3 id="option-b-drop-it">Option B: drop it</h3>
+<p>What each package becomes [M: <code>guix repl</code> find-packages-by-name at guix 704ad8c, versus lock.sexp]:</p>
+<div class=table><table><thead><tr><th>nixpkgs attr (locked)</th><th>Guix (pinned)</th><th>Replacement</th></tr></thead><tbody>
+<tr><td>fish 4.9.3, fzf 0.74.5, zoxide 0.10.0, ripgrep 15.2.0, fd 10.5.1, git 2.56.0, neovim 0.12.6</td><td>4.7.1, 0.74.2, 0.9.9, 15.2.0, 10.5.0, 2.55.0, 0.12.1</td><td>Guix; minor version lag only</td></tr>
+<tr><td>jujutsu 0.46.0</td><td>0.41.0</td><td>Guix is 5 minor versions behind. Check whether herdr, jjui or bbh use newer jj templates or revsets. Otherwise a custom <code>jujutsu</code> from the release binary (like tailscale.scm) or <code>--with-latest</code> built <strong>on the builder</strong></td></tr>
+<tr><td>clojure, curl, dasel, file, fnlfmt, gopls, hyperfine, nixfmt, shellcheck, shfmt, tree-sitter, typst, uv</td><td>all present (some a few versions older, e.g. hyperfine 1.20 vs 2.0, uv 0.10 vs 0.13)</td><td>Guix</td></tr>
+<tr><td>python314 3.14.8</td><td>python 3.12.12</td><td>Guix python, or uv-managed python for 3.14</td></tr>
+<tr><td>ty 0.0.95</td><td><strong>missing</strong></td><td>Binary package from GitHub releases (copy-build-system, like tailscale.scm), or <code>uv tool install ty</code></td></tr>
+<tr><td>ghostty 1.4.0</td><td><strong>missing</strong></td><td>Custom package. Zig builds are heavy, so the builder builds it, or pin the upstream aarch64 tarball/AppImage if one exists [G]</td></tr>
+<tr><td>mesa 26.2.6 for /run/opengl-driver</td><td>26.0.2</td><td>Only nixpkgs GUI programs (ghostty) and hex.scm read /run/opengl-driver. With ghostty from Guix, use Guix mesa (check that it has the asahi Vulkan driver) and point hex.scm's VK_DRIVER_FILES at it [I]</td></tr>
+<tr><td>glibcLocalesUtf8</td><td>n/a</td><td>Only needed for nix binaries, so drop it with them</td></tr>
+</tbody></table></div>
+<p>Dropping removes about 5.6k lines, 5 Makefile targets, a signing key, <code>nix eval</code> memory spikes and the cache.nixos.org dependency. You lose the versions that lead nixpkgs-unstable, most visibly jj (0.46 vs 0.41) and ty and ghostty, which need custom packages.</p>
+<h3 id="drop-steps-phase-7">Drop steps (phase 7)</h3>
+<ol><li>Before switching, add custom packages for ty (a GitHub release binary, copy-build-system like tailscale.scm) and ghostty (built on the builder, or an upstream aarch64 binary if one exists [G]). Decide jj: Guix 0.41, or a release-binary <code>jujutsu</code> package. First check herdr, jjui and bbh for features newer than 0.41.</li>
+<li>In shell.scm, development.scm, herdr.scm and desktop.scm, replace <code>(nixpkgs-package &quot;x&quot;)</code> with <code>specification-&gt;package</code> or the custom packages. Drop <code>nixpkgs-system-services</code>, the LOCALE_ARCHIVE in dotfiles.scm, and the nixpkgs key in asahi.scm.</li>
+<li>In hex.scm, point VK_DRIVER_FILES at Guix mesa's asahi ICD, after confirming Guix mesa ships it [I].</li>
+<li>Delete modules/engstrand/nixpkgs.scm, modules/engstrand/nixpkgs/, desktop/build/nixpkgs/ and docs/nixpkgs-bridge/. Remove the five nixpkgs-* Make targets and the <code>nixpkgs-import</code> prerequisites of build, switch, home-build and home-apply. Remove the <code>nixpkgs</code> source from desktop/bin/updates and its test in desktop/build/updates/test.bb, and update checks.edn.</li>
+<li>Verify: <code>make prebuild</code>, then <code>make home-apply</code> and <code>make switch</code> with nothing built locally. Check that ghostty renders, hex finds Vulkan, and fish, jj and nvim start. Remove ~/.config/guix/nixpkgs-bridge and ~/.cache/nixpkgs-bridge afterwards.</li>
+</ol>
+<p>My earlier lean, kept for the record: <strong>A</strong> if you value the newest jj, ty and ghostty (the builder makes A cheaper, since it becomes the only importer). <strong>B</strong> if lagging versions are fine, because it's simpler and nothing on the laptop touches Nix. Your call.</p>
+<h2 id="open-questions">Open questions</h2>
+<ol><li>Move the nixpkgs bridge out, or drop it?</li>
+<li>CAX31 in hel1 (or fsn1 or nbg1)? Are about 13 EUR/month plus VAT acceptable?</li>
+<li>Do you want the nightly speculative bump (it costs builder time and disk), or prebuilds only on <code>make prebuild</code>?</li>
+<li>Should <code>updates apply</code> run <code>make prebuild</code> itself, or just list it first?</li>
+<li>Should <code>guix-daemon</code> go into <code>%restartable-services</code> for the agent (offload hangs)?</li>
+<li>Is the tailnet ACL edited by hand in the admin console, or kept as a file somewhere (outside this public repo)?</li>
+</ol>
+</main></body></html>

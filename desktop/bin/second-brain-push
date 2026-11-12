@@ -10,7 +10,7 @@
 ;;   second-brain-push status           the builder's services, item count and page
 ;; The push key (~/.config/guix-builder/second-brain_ed25519) can only run the
 ;; importer; status uses the deploy key.  The builder side is
-;; modules/engstrand/system/second-brain.scm.  See docs/remote-builder-plan.md.
+;; modules/engstrand/system/second-brain.scm.  See docs/remote-builder-plan.html.
 (ns second-brain-push
   (:require [babashka.classpath :as classpath]
             [babashka.fs :as fs]

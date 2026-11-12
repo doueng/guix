@@ -8,7 +8,7 @@
 ;;                              it as a desktop notification, once per problem
 ;; On the builder (the prebuild account's git-shell command and mcron job):
 ;;   prebuild run REV | nightly | status
-;; See docs/remote-builder-plan.md.
+;; See docs/remote-builder-plan.html.
 (ns builder-prebuild
   (:require [babashka.classpath :as classpath]
             [babashka.fs :as fs]

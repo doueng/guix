@@ -114,7 +114,7 @@
 
 (defn warn [& parts] (binding [*out* *err*] (println (apply str "updates: " parts))))
 
-;; The remote builder (docs/remote-builder-plan.md): heavy builds offload or
+;; The remote builder (docs/remote-builder-plan.html): heavy builds offload or
 ;; prebuild there and the laptop downloads them from its publish server.
 (def builder-publish builder/publish)
 
@@ -653,7 +653,7 @@ that fails and go on, then throw naming the failures."
 
 ;; Rebuild steps run in this order after declarative sources change.  apply
 ;; runs make prebuild itself, which builds the edited tree on the remote
-;; builder (docs/remote-builder-plan.md), so the laptop then only downloads.
+;; builder (docs/remote-builder-plan.html), so the laptop then only downloads.
 (def rebuild-steps ["make prebuild" "make pull" "make home-apply" "make switch" "make doom-check"])
 
 (def sources

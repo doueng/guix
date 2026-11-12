@@ -1,4 +1,4 @@
-;;; The remote aarch64 builder on Hetzner (docs/remote-builder-plan.md).
+;;; The remote aarch64 builder on Hetzner (docs/remote-builder-plan.html).
 ;;; It builds and publishes what the laptop's make pull, home-apply and switch
 ;;; need, reachable only over the tailnet.
 (define-module (engstrand system builder)

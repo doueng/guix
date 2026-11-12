@@ -1,4 +1,4 @@
-;;; Public keys and address of the remote builder (docs/remote-builder-plan.md).
+;;; Public keys and address of the remote builder (docs/remote-builder-plan.html).
 ;;; Both the builder OS and the laptop's daemon read them.  The key files are
 ;;; committed in modules/engstrand/builder/; each key is #f when its file is
 ;;; missing, as in a clone without them.

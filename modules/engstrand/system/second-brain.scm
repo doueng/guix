@@ -1,6 +1,6 @@
 ;;; The second brain (T147, ~/projects/second-brain) as a system service on the
 ;;; remote builder, published on the tailnet at
-;;; https://guix-builder.tailbf68ad.ts.net:8443/ (docs/remote-builder-plan.md).
+;;; https://guix-builder.tailbf68ad.ts.net:8443/ (docs/remote-builder-plan.html).
 ;;;
 ;;; The app is a Guix package, (engstrand packages second-brain), so a deploy
 ;;; ships the code.  Its data lives in %brain-home/data, outside the store, and

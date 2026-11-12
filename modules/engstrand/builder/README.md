@@ -1,5 +1,5 @@
 Public keys for the remote builder, recorded in phase 2 of
-docs/remote-builder-plan.md. Only public halves belong here; this repo is public.
+docs/remote-builder-plan.html. Only public halves belong here; this repo is public.
 
 - deploy.pub: ssh keys for root and the prebuild account: the unattended deploy key
   (~/.config/guix-builder/deploy_ed25519, no passphrase) and yours (~/.ssh/guix-builder.pub)

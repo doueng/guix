@@ -1,4 +1,4 @@
-;; guix deploy file for the remote builder (docs/remote-builder-plan.md).
+;; guix deploy file for the remote builder (docs/remote-builder-plan.html).
 ;; make builder-create sets BUILDER_BOOTSTRAP to create the Hetzner server and
 ;; admit public ssh; make builder-deploy reconfigures it over the tailnet.
 (use-modules (engstrand system builder)

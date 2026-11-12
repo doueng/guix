@@ -28,7 +28,7 @@
   #:export (make-base-os))
 
 ;; The daemon's key for offloading to the remote builder
-;; (docs/remote-builder-plan.md).  Only root reads the key; the .pub is
+;; (docs/remote-builder-plan.html).  Only root reads the key; the .pub is
 ;; world-readable so an agent can copy it to modules/engstrand/builder/offload.pub.
 (define %offload-key-activation
   (simple-service 'familiar-offload-key activation-service-type
@@ -45,7 +45,7 @@
               (chmod key #o600)
               (chmod (string-append key ".pub") #o644)))))))
 
-;; The remote builder (docs/remote-builder-plan.md), on when its signing key
+;; The remote builder (docs/remote-builder-plan.html), on when its signing key
 ;; and ssh host key are in modules/engstrand/builder/, as they are committed:
 ;; the daemon then substitutes from it first and offloads builds to it.
 (define %builder-signing-key (builder-key-file "builder-signing.pub"))

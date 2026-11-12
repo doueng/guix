@@ -7,7 +7,7 @@
 ;;                       reader runs, and keeps a backup on both sides
 ;;   reader-push status  the builder's reader services and its headline count
 ;; The reader lives at READER_DIR (~/projects/langchain/reader); the builder
-;; runs it as modules/engstrand/system/reader.scm.  See docs/remote-builder-plan.md.
+;; runs it as modules/engstrand/system/reader.scm.  See docs/remote-builder-plan.html.
 (ns reader-push
   (:require [babashka.classpath :as classpath]
             [babashka.fs :as fs]

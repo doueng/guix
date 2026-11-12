@@ -125,7 +125,7 @@ gc:
 home-build: channels-current
 	"$(GUIX)" home build $(JOBS_FLAG) $(COMMON) "$(HOME_CONFIG)"
 
-# The remote builder; see docs/remote-builder-plan.md.  The Hetzner token is
+# The remote builder; see docs/remote-builder-plan.html.  The Hetzner token is
 # read only here, and later deploys go over the tailnet without it.
 BUILDER_TOKEN ?= $(HOME)/.config/guix-builder/hcloud-token
 

@@ -37,7 +37,7 @@
                 "cmake"
                 "fennel"
                 "go"
-                ;; hcloud, for the remote builder (docs/remote-builder-plan.md).
+                ;; hcloud, for the remote builder (docs/remote-builder-plan.html).
                 "hetznercloud-cli"
                 "lua"
                 "pandoc"

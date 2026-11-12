@@ -1,6 +1,6 @@
 ;;; The feed reader (~/projects/langchain/reader) as a system service on the
 ;;; remote builder, published on the tailnet at
-;;; https://guix-builder.tailbf68ad.ts.net/ (docs/remote-builder-plan.md).
+;;; https://guix-builder.tailbf68ad.ts.net/ (docs/remote-builder-plan.html).
 ;;;
 ;;; The reader is a Python Cloudflare Worker run by `wrangler dev' (node and
 ;;; Cloudflare's workerd from the checkout's node_modules) plus the suggester,
