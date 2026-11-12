@@ -138,7 +138,8 @@ command = "fullerzz.sesh.last"
 description = "switch to the previous workspace"
 
 # Show letter hints for URLs, paths, SHAs, and other visible text, then copy
-# the selected match to the clipboard.
+# the selected match to the clipboard. An http or https match also opens in
+# Chrome (xdg-open) and focuses it.
 [[keys.command]]
 key = "prefix+f"
 type = "plugin_action"

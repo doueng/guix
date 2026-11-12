@@ -154,6 +154,24 @@
   (print (str "\u001b]52;c;" (.encodeToString (java.util.Base64/getEncoder) (.getBytes text StandardCharsets/UTF_8)) "\u0007"))
   (flush))
 
+(defn web-url? [text] (boolean (re-matches #"https?://[^\s'\"()]+" text)))
+
+(defn- lua-string [s]
+  (str "\"" (-> s (str/replace "\\" "\\\\") (str/replace "\"" "\\\"")) "\""))
+
+(defn browse-dispatches
+  "Hyprland Lua dispatches that open URL with xdg-open (Chrome, by mimeapps)
+  and focus Chrome. web-url? admits no quote or space, so single quotes keep
+  the shell command whole."
+  [url]
+  [(str "hl.dsp.exec_cmd(" (lua-string (str "xdg-open '" url "'")) ")")
+   (str "hl.dsp.focus({ window = " (lua-string "class:google-chrome") " })")])
+
+(defn browse! [url]
+  ;; Hyprland runs xdg-open detached from this overlay pane, which closes next.
+  (doseq [d (browse-dispatches url)]
+    (.waitFor (.start (ProcessBuilder. (into-array String ["hyprctl" "dispatch" d]))))))
+
 (defn run! []
   (let [context (json/parse-string (or (System/getenv "HERDR_PLUGIN_CONTEXT_JSON") "{}") true)
         pane-id (:focused_pane_id context)]
@@ -182,6 +200,9 @@
                       (if (:direct-paste config)
                         (call! "pane.send_text" {:pane_id pane-id :text value})
                         (do (copy! value)
+                            (when (web-url? value)
+                              (try (browse! value)
+                                   (catch Exception e (binding [*out* *err*] (println "tiny-fingers: open failed:" (.getMessage e))))))
                             (when (:copy-toast config)
                               (try (call! "notification.show" {:title (str "Copied: " (subs value 0 (min 15 (count value))))})
                                    (catch Exception _ nil)))))))

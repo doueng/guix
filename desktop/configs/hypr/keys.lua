@@ -82,7 +82,8 @@ function M.herdr_menu()
   end
 end
 
--- Cmd+Y: copy visible text by hint with tiny-fingers (Herdr's Ctrl+b f).
+-- Cmd+Y: copy visible text by hint with tiny-fingers (Herdr's Ctrl+b f);
+-- web URLs also open in Chrome.
 function M.herdr_yank()
   if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "f" } }) then
     M.log("Cmd+Y", "Copy visible text by hint")

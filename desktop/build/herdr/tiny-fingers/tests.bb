@@ -71,6 +71,16 @@
     (is (.contains manifest "command = [\"./bin/herdr-tiny-fingers\", \"open\"]"))
     (is (.contains manifest "command = [\"./bin/herdr-tiny-fingers\"]"))))
 
+(deftest web-urls-open-in-chrome
+  (is (finger/web-url? "https://example.org/a?b=1"))
+  (is (finger/web-url? "http://localhost:8080"))
+  (is (not (finger/web-url? "git@github.com:a/b")))
+  (is (not (finger/web-url? "/tmp/file")))
+  (is (not (finger/web-url? "https://x';touch${IFS}/tmp/p;'")))
+  (is (= ["hl.dsp.exec_cmd(\"xdg-open 'https://example.org/a'\")"
+          "hl.dsp.focus({ window = \"class:google-chrome\" })"]
+         (finger/browse-dispatches "https://example.org/a"))))
+
 (deftest hint-overflow
   (is (= 2 (count (finger/hint 28 2)))))
 

@@ -16,7 +16,7 @@
 | Fullscreen, floating, close | Ctrl+Alt+f, Ctrl+Alt+v, Alt+w | Generated `hypr/keybindings.lua` |
 | Application launch and focus | Unrewritten Cmd chords | `hypr/hyprland.lua` |
 | Terminal multiplexer | Ctrl+b prefix, Cmd+digits | `herdr/config.toml` |
-| Copy visible Herdr text by hint (tiny-fingers) | Cmd+Y from any window | `hypr/keys.lua`, Herdr's Ctrl+b f |
+| Copy visible Herdr text by hint (tiny-fingers); web URLs also open in Chrome | Cmd+Y from any window | `hypr/keys.lua`, Herdr's Ctrl+b f |
 | Herdr terminal window | Ghostty class `com.mitchellh.ghostty.herdr` | `desktop/bin/herdr-terminal` |
 | Editor commands | Space leader from `leader.edn`, then native leader keys | Doom, Neovim, IdeaVim |
 | Web pages | Vimium normal mode and ? help | Vimium extension |
