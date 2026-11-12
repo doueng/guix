@@ -41,8 +41,10 @@
   (let [clean #(str/replace (str %) #"[\t\n]" " ")]
     (str (str/join "\t" (map clean [time (program-id program) keys effect kind version])) "\n")))
 
+;; An explicit pattern, since LocalDateTime's toString drops :00 seconds.
 (defn now []
-  (str (.truncatedTo (java.time.LocalDateTime/now) java.time.temporal.ChronoUnit/SECONDS)))
+  (.format (java.time.LocalDateTime/now)
+           (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss")))
 
 (defn log!
   "Append that PROGRAM handled KEYS as KIND with EFFECT."

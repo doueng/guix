@@ -2,15 +2,14 @@
 ;; Records which keybinding ran, what it did, and which program handled it.
 ;; Rows are TIME PROGRAM KEYS EFFECT KIND 2, as desktop/lib/keylog.clj describes.
 ;; Writers call `keylog add`; editors and keyleader append the same format.
-(require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
+(require '[babashka.classpath :as classpath] '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[keylog])
 
-(def file (or (System/getenv "KEYLOG_FILE")
-              (str (or (System/getenv "XDG_STATE_HOME") (str (fs/home) "/.local/state"))
-                   "/keybindings/keys.tsv")))
+(def file (keylog/path))
 (def usage "usage: keylog [COUNT] | keylog top [COUNT] | keylog path | keylog report [--since DATE] [--top N] | keylog add KIND PROGRAM KEYS EFFECT")
 
 (defn fail [msg] (binding [*out* *err*] (println msg)) (System/exit 2))
-(defn clean [s] (str/replace s #"[\t\n]" " "))
 (defn rows [] (when (fs/exists? file) (str/split-lines (slurp file))))
 (defn count-arg [s default] (if s (parse-long s) default))
 
@@ -19,15 +18,10 @@
     "add"
     (let [[kind program keys effect] args]
       (when-not (= 4 (count args)) (fail "usage: keylog add KIND PROGRAM KEYS EFFECT"))
-      (when-not (#{"action" "leader" "cancel" "forward"} kind) (fail (str "keylog: unknown kind " kind)))
+      (when-not (keylog/kinds kind) (fail (str "keylog: unknown kind " kind)))
       (when-not (re-matches #"[a-z0-9-]+" program)
         (fail (str "keylog: program ids are lower-case, such as hyprland: " program)))
-      (fs/create-dirs (fs/parent file))
-      (spit file (str (str/join "\t" [(.format (java.time.LocalDateTime/now)
-                                                  (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss"))
-                                         program (clean keys) (clean effect) kind "2"])
-                      "\n")
-            :append true))
+      (keylog/log! kind program keys effect))
 
     "top"
     (doseq [[n row] (->> (rows)
