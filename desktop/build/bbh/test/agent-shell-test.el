@@ -209,6 +209,54 @@ the split view's thread list keeps one truncated line per thread."
                                  "Done.\n\n* again\n\nFine.\n"))))
       (delete-directory data t))))
 
+(ert-deftest bbh-transcript-fontifies-chunk-by-chunk-without-repeating-blocks ()
+  "Redisplay fontifies a transcript in chunks that end inside long blocks.
+That signals nothing, colors code nested in a prompt's quote and result
+bodies, and fontifies each block natively at most twice: org redoes a
+block it marked multiline once, and nothing may add to that."
+  (let* ((calls (make-hash-table :test #'equal))
+         (count (lambda (_lang beg end) (cl-incf (gethash (cons beg end) calls 0)))))
+    (advice-add 'org-src-font-lock-fontify-block :before count)
+    (unwind-protect
+        (with-current-buffer (get-buffer-create "bbh fontify test")
+          (eng/bbh-transcript-mode)
+          ;; font-lock-mode stays off in batch Emacs unless it thinks otherwise.
+          (let ((noninteractive nil)) (font-lock-mode 1))
+          (let ((inhibit-read-only t))
+            (dotimes (i 20)
+              (insert (format "* prompt %d\n#+begin_quote\nquoted\n#+begin_src emacs-lisp\n(defun f%d ())\n#+end_src\n#+end_quote\n\n" i i)
+                      "#+begin_src emacs-lisp\n"
+                      (mapconcat (lambda (n) (format "(setq x%d %d)" n n)) (number-sequence 1 200) "\n")
+                      "\n#+end_src\n#+begin_result done 1\n=> 3\n#+end_result\n\n")))
+          (let ((p (point-min)))
+            (while (setq p (text-property-any p (point-max) 'fontified nil))
+              (jit-lock-fontify-now p (+ p jit-lock-chunk-size))))
+          (should (= 40 (hash-table-count calls)))
+          (should (<= (apply #'max (hash-table-values calls)) 2))
+          (goto-char (point-min))
+          (search-forward "defun f3")
+          (should (memq 'font-lock-keyword-face (ensure-list (get-text-property (match-beginning 0) 'face))))
+          (search-forward "=> 3")
+          (should (memq 'org-block (ensure-list (get-text-property (match-beginning 0) 'face))))
+          (kill-buffer))
+      (advice-remove 'org-src-font-lock-fontify-block count))))
+
+(ert-deftest bbh-transcript-links-do-not-backtrack-on-escaped-quotes ()
+  "A tool call quoting JSON puts [[ before runs of escaped quotes.  Org's
+link regexp takes time exponential in their number to fail there, and hung
+the daemon's redisplay; the transcript's link regexp fails at once and
+still reads links."
+  (with-current-buffer (get-buffer-create "bbh links test")
+    (eng/bbh-transcript-mode)
+    ;; Org's own regexp takes about 1.6 s here, and 14 s with one more pair.
+    (let ((escaped (concat "[[" (apply #'concat (make-list 7 "(s n) \\\\\\\" | \\\\\\\" "))))
+          (t0 (float-time)))
+      (should-not (string-match org-link-any-re escaped))
+      (should (< (- (float-time) t0) 0.1)))
+    (should (string-match org-link-bracket-re "see [[https://example.org][the docs]] here"))
+    (should (equal "the docs" (match-string 2 "see [[https://example.org][the docs]] here")))
+    (kill-buffer)))
+
 (ert-deftest bbh-resuming-this-conversation-keeps-the-transcript ()
   (save-window-excursion
     (delete-other-windows)

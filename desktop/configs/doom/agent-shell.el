@@ -905,21 +905,55 @@ and took ELAPSED, such as 12s.  Cache misses and cost appear only when present."
 
 (defun eng/bbh--fontify-nested-blocks (limit)
   "Fontify src and example blocks up to LIMIT as code.
-Org leaves result blocks, a special block, without the code background."
-  (while (re-search-forward "^#\\+begin_\\(src\\|example\\|result\\)\\(?: +\\(\\S-+\\)\\)?.*\n" limit t)
+Org leaves result blocks, a special block, without the code background,
+and skips blocks nested in a quote.  A block org has already fontified
+natively in this pass carries `src-block' and is left alone.
+A block may end past LIMIT, so stop once point passes it: searching
+again would signal, and an error here makes jit-lock forget how far
+font-lock reached, so it fontifies the same block again for every chunk."
+  (while (and (< (point) limit)
+              (re-search-forward "^#\\+begin_\\(src\\|example\\|result\\)\\(?: +\\(\\S-+\\)\\)?.*\n" limit t))
     (let ((beg (match-end 0))
           (type (match-string 1))
           (lang (and (equal (match-string 1) "src") (match-string 2))))
       (when (re-search-forward (format "^#\\+end_%s$" type) nil t)
         (let ((end (match-beginning 0)))
-          (when (and lang (< beg end))
-            (org-src-font-lock-fontify-block lang beg end))
-          (add-face-text-property beg end 'org-block t)))))
+          (unless (get-text-property beg 'src-block)
+            (when (and lang (< beg end))
+              (org-src-font-lock-fontify-block lang beg end))
+            (add-face-text-property beg end 'org-block t))))))
   nil)
 
 (defconst eng/bbh-transcript--markup
   '((eng/bbh--fontify-nested-blocks))
   "Format nested blocks as code.  `eng/bbh-transcript--decorate' hides their markup.")
+
+(defconst eng/bbh--link-bracket-re
+  (rx "[["
+      (group (one-or-more
+              (or (not (any "[]\\"))
+                  (seq "\\" (zero-or-more "\\\\") (any "[]"))
+                  (seq (one-or-more "\\") (not (any "[]\\"))))))
+      "]"
+      (opt "[" (group (+? anything)) "]")
+      "]")
+  "`org-link-bracket-re' without its exponential backtracking.
+Org lets a run of backslashes end in another backslash, so a run can be
+split many ways, and every split is retried when no closing ]] follows.
+Tool calls in a transcript quote JSON, where [[ is followed by hundreds of
+\\\" escapes: org's regexp then never returns, and redisplay hangs in
+`org-activate-links'.  Here a run of backslashes ends only in a character
+that is neither a bracket nor a backslash, so each run parses one way.
+The one link this no longer matches has an even run of backslashes right
+before its closing ]].")
+
+(defun eng/bbh-transcript--use-linear-links ()
+  "Read links in this buffer with `eng/bbh--link-bracket-re'.
+Font-lock and org-element look both regexps up in the current buffer."
+  (setq-local org-link-bracket-re eng/bbh--link-bracket-re
+              org-link-any-re (concat "\\(" org-link-bracket-re "\\)\\|\\("
+                                      org-link-angle-re "\\)\\|\\("
+                                      org-link-plain-re "\\)")))
 
 (define-derived-mode eng/bbh-transcript-mode org-mode "bbh"
   "A read-only org rendering of a bbh conversation."
@@ -930,12 +964,23 @@ Org leaves result blocks, a special block, without the code background."
   ;; size, position and mode name here say nothing useful.
   (setq-local mode-line-format nil)
   (add-hook 'after-change-functions #'eng/bbh-transcript--note-change nil t)
+  (eng/bbh-transcript--use-linear-links)
   (font-lock-add-keywords nil eng/bbh-transcript--markup 'append)
+  ;; Clear org's `src-block' mark with the faces, so it only ever says that
+  ;; org fontified the block in the current pass.
+  (add-to-list (make-local-variable 'font-lock-extra-managed-props) 'src-block)
   ;; Doom-one paints org-block with an opaque background. In a terminal that
   ;; band hides the transparent default, so drop it in this buffer only.
   (unless (display-graphic-p)
     (face-remap-add-relative 'org-block '(:background "unspecified-bg")))
   (visual-line-mode 1))
+
+;; Loading this file again fixes the transcripts already open.
+(dolist (buffer (buffer-list))
+  (with-current-buffer buffer
+    (when (derived-mode-p 'eng/bbh-transcript-mode)
+      (eng/bbh-transcript--use-linear-links)
+      (add-to-list (make-local-variable 'font-lock-extra-managed-props) 'src-block))))
 
 (defun eng/bbh--transcript (shell &optional buffer)
   "Return SHELL's org transcript, clearing BUFFER to serve as it if SHELL has none."

@@ -205,6 +205,12 @@ readable.  Returns the shell's name, or nil when no session runs CONVERSATION."
     (with-current-buffer shell
       ;; Finished first: the mailbox watch then wakes it no more.
       (setq eng/bbh-super-finished t)
+      ;; Nor does it check: each of the many finished shells a long-running
+      ;; daemon keeps would otherwise run a timer every second, which
+      ;; allocates and so brings on the daemon's slow garbage collections.
+      (when (timerp eng/bbh-mail--watch)
+        (cancel-timer eng/bbh-mail--watch)
+        (setq eng/bbh-mail--watch 'ended))
       (ignore-errors (agent-shell--shutdown)))
     (buffer-name shell)))
 
