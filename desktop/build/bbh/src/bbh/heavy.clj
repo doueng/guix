@@ -33,6 +33,8 @@
         "|guix\\s+(build|system|home|pull|package|time-machine)"
         "|doom\\s+(sync|doctor|build|upgrade)"
         "|tlc|tla2tools|chrome|chromium|com\\.google\\.Chrome|playwright"
+        ;; A capped Emacs check away from the live daemon (T163), one at a time.
+        "|(\\S*/)?emacs-throwaway"
         ")(?=$|[\\s;&|)])")))
 
 (defn heavy?

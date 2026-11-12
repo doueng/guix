@@ -1,0 +1,43 @@
+#!/usr/bin/env bb
+;; emacsclient for a bbh super Worker's REPL, which finds this one first on its
+;; PATH.  It refuses the live bbh-super daemon: that daemon runs every Router and
+;; Worker session and the Inbox, and Workers that benchmarked or debugged in it
+;; froze it twice and half-reloaded agent-shell (T163).  Every other server goes
+;; to the real emacsclient.
+(require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
+
+(def live
+  "The live daemon's name, as the controller reads it: bbh-super, or
+  BBH_EMACS_SERVER, which the tests point at a daemon that does not exist."
+  (or (not-empty (System/getenv "BBH_EMACS_SERVER")) "bbh-super"))
+
+(defn servers
+  "The server names ARGS and EMACS-SOCKET-NAME point emacsclient at."
+  [args env-socket]
+  (loop [[a & more] args acc (cond-> [] env-socket (conj env-socket))]
+    (cond (nil? a) acc
+          (= "--" a) acc
+          (#{"-s" "--socket-name"} a) (recur (rest more) (conj acc (first more)))
+          (str/starts-with? a "--socket-name=") (recur more (conj acc (subs a (count "--socket-name="))))
+          (and (str/starts-with? a "-s") (> (count a) 2) (not (str/starts-with? a "--"))) (recur more (conj acc (subs a 2)))
+          :else (recur more acc))))
+
+(defn live? [server]
+  (and server (= live (fs/file-name server))))
+
+(let [args *command-line-args*
+      here (str (fs/parent (fs/absolutize *file*)))]
+  (when (some live? (servers args (System/getenv "EMACS_SOCKET_NAME")))
+    (binding [*out* *err*]
+      (println (str "bbh: a Worker may not use the live " live " Emacs; it runs every session, and Workers froze it twice (T163)."))
+      (println "Run Emacs checks in batch Emacs, one at a time after free -m, or in a throwaway daemon of your own:")
+      (let [throwaway (str (fs/normalize (fs/path here ".." ".." ".." "bin" "emacs-throwaway")))]
+        (println (str "  " throwaway " --batch -- -Q -l test.el -f ert-run-tests-batch-and-exit"))
+        (println (str "  " throwaway " --daemon NAME   # then emacsclient -s NAME"))))
+    (System/exit 126))
+  (let [real (some #(let [f (fs/path % "emacsclient")]
+                      (when (and (not= (str (fs/absolutize %)) here) (fs/executable? f)) (str f)))
+                   (str/split (or (System/getenv "PATH") "") #":"))]
+    (if real
+      (apply p/exec real args)
+      (do (binding [*out* *err*] (println "bbh: no emacsclient on PATH")) (System/exit 127)))))

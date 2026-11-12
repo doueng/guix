@@ -1,0 +1,58 @@
+#!/usr/bin/env bb
+;; Run an Emacs check away from the live bbh-super daemon, with a memory cap
+;; and a time limit (T163).
+;;
+;;   emacs-throwaway [--mem-mb N] [--timeout S] --batch -- EMACS-ARGS...
+;;       emacs --batch EMACS-ARGS, as from `emacs -Q --batch`.
+;;   emacs-throwaway [--mem-mb N] [--timeout S] --daemon NAME [-- EMACS-ARGS...]
+;;       a foreground daemon NAME with your Doom config, for emacsclient -s NAME.
+;;       Run it as a job; it exits after the timeout or when you kill it.
+;;
+;; It refuses to start while MemAvailable is under the cap, so a check cannot
+;; push the machine into swap and earlyoom.  The cap is the address space
+;; (prlimit --as), so Emacs gets an allocation error instead of the machine
+;; running out.
+(require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
+
+(defn parse [args]
+  (loop [[a & more :as args] args opts {:mem-mb 2048 :timeout 600}]
+    (case a
+      nil opts
+      "--" (assoc opts :emacs-args (vec more))
+      "--mem-mb" (recur (rest more) (assoc opts :mem-mb (parse-long (first more))))
+      "--timeout" (recur (rest more) (assoc opts :timeout (parse-long (first more))))
+      "--batch" (recur more (assoc opts :mode :batch))
+      "--daemon" (recur (rest more) (assoc opts :mode :daemon :name (first more)))
+      (assoc opts :error (str "unknown argument " a)))))
+
+(defn mem-available-mb []
+  (some->> (str/join "\n" (fs/read-all-lines "/proc/meminfo")) (re-find #"MemAvailable:\s+(\d+) kB") second parse-long (#(quot % 1024))))
+
+(defn command
+  "The argv that runs OPTS."
+  [{:keys [mode name mem-mb timeout emacs-args]}]
+  ;; The profile's emacs, not desktop/bin/emacs: that wrapper is babashka,
+  ;; which cannot start under an address-space cap.
+  (let [emacs (or (some-> (fs/path (fs/home) ".guix-home/profile/bin/emacs") (#(when (fs/executable? %) (str %))))
+                  "emacs")
+        cap ["prlimit" (str "--as=" (* mem-mb 1024 1024)) "timeout" (str timeout)]]
+    (case mode
+      :batch (concat cap [emacs "--batch"] emacs-args)
+      :daemon (concat cap [emacs (str "--init-directory=" (fs/home) "/.config/emacs") (str "--fg-daemon=" name)]
+                      emacs-args))))
+
+(defn fail [& lines]
+  (binding [*out* *err*] (run! println lines))
+  (System/exit 2))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (let [{:keys [mode name mem-mb error] :as opts} (parse *command-line-args*)
+        available (mem-available-mb)]
+    (cond error (fail error "usage: emacs-throwaway [--mem-mb N] [--timeout S] (--batch | --daemon NAME) [-- EMACS-ARGS...]")
+          (nil? mode) (fail "say --batch or --daemon NAME")
+          (and (= :daemon mode) (or (str/blank? name) (= "bbh-super" name) (= "server" name)))
+          (fail "name the throwaway daemon something other than bbh-super or server")
+          (and available (< available mem-mb))
+          (fail (str "only " available " MB available, under the " mem-mb " MB cap; wait for other checks to finish")))
+    (when (= :daemon mode) (binding [*out* *err*] (println (str "emacs-throwaway: daemon " name "; emacsclient -s " name))))
+    (apply p/exec (command opts))))

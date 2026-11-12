@@ -1689,7 +1689,7 @@
     (binding [bbh.super.emacs/*emacsclient* bin]
       (is (= "T1 a" (super/open! {:workspace "/w" :thread "T1" :title "a" :conversation "super-W1" :token "tok" :wf-run "run-1"})))
       (is (= ["-s" (bbh.super.emacs/server) "--timeout=30" "--eval"
-              "(eng/bbh-super-open \"super-W1\" \"/w\" \"T1 a\" '((\"BBH_SUPER_TOKEN\" . \"tok\") (\"WF_RUN\" . \"run-1\")))"]
+              "(eng/bbh-super-open \"super-W1\" \"/w\" \"T1 a\" '((\"BBH_SUPER_TOKEN\" . \"tok\") (\"WF_RUN\" . \"run-1\") (\"BBH_ROLE\" . \"worker\")))"]
              (args))))))
 
 (deftest a-worker-on-another-model-opens-with-bbh-model-set

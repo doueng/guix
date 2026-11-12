@@ -4,6 +4,7 @@
             [babashka.fs :as fs]
             [babashka.process :as p]
             [bbh.conversation :as conversation]
+            [bbh.version :as version]
             [bencode.core :as b]
             [clojure.edn :as edn]
             [clojure.string :as str])
@@ -78,6 +79,19 @@
     (or (some #(get % "new-session") messages)
         (throw (ex-info "nREPL clone failed" {:messages messages})))))
 
+(def shims
+  "Commands a super Worker's REPL finds first on its PATH: an emacsclient that
+  refuses the live bbh-super daemon (T163)."
+  (str (fs/path version/root "shims")))
+
+(defn repl-env
+  "The REPL's environment: BASE with ENV and the port file. A super Worker's,
+  BBH_ROLE=worker, has the shims first on its PATH."
+  [base env port-file]
+  (let [e (merge base env {"BBH_PORT_FILE" port-file})]
+    (cond-> e
+      (= "worker" (get e "BBH_ROLE")) (assoc "PATH" (str shims ":" (get e "PATH"))))))
+
 (defn start!
   "Start a REPL process in CWD that logs to DIR/repl.log."
   [{:keys [dir cwd env]}]
@@ -87,7 +101,7 @@
         _ (fs/delete-if-exists port-file)
         config (System/getProperty "babashka.config")
         ;; Nothing writes the REPL's stdin, and an open pipe there would hang any child that reads it.
-        proc (apply p/process {:dir cwd :env (merge (sysenv/getenv) env {"BBH_PORT_FILE" port-file})
+        proc (apply p/process {:dir cwd :env (repl-env (sysenv/getenv) env port-file)
                                :in (fs/file "/dev/null")
                                :out :append :out-file log :err :append :err-file log}
                     (concat ["bb"] (when config ["--config" config]) ["-e" bootstrap]))

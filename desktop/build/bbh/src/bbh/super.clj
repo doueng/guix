@@ -97,10 +97,11 @@
   "The Worker's buffer in the super-agent's Emacs: a bbh session on the
   Worker's conversation in its jj workspace, with its token and wf run in the
   session's environment, named after the thread, and its MODEL, when it has
-  one, as BBH_MODEL. Returns the buffer name."
+  one, as BBH_MODEL. BBH_ROLE=worker puts bbh's shims first on its REPL's
+  PATH, so it cannot reach the live Emacs. Returns the buffer name."
   [{:keys [workspace thread title conversation token wf-run model]}]
   (emacs/open! {:conversation conversation :dir workspace :title (str thread " " title)
-                :env (cond-> {"BBH_SUPER_TOKEN" token "WF_RUN" wf-run} model (assoc "BBH_MODEL" model))}))
+                :env (cond-> {"BBH_SUPER_TOKEN" token "WF_RUN" wf-run "BBH_ROLE" "worker"} model (assoc "BBH_MODEL" model))}))
 
 (defn release!
   "Move the live Emacs session of CONVERSATION out of its workspace into DIR,
