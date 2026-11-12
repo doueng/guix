@@ -248,19 +248,59 @@ session, one waiting to retry after a failure, or one that gave up."
         (agent-shell--prompt-queue-enqueue :prompt "[mail]")
         (agent-shell--prompt-queue-process-next)))))
 
+(defun eng/bbh-mail--done-p (shell)
+  "Whether SHELL will take no more mail: it was killed, or its Worker finished."
+  (or (not (buffer-live-p shell))
+      (with-current-buffer shell (bound-and-true-p eng/bbh-super-finished))))
+
 (defun eng/bbh-mail-watch (shell)
   "Check SHELL's mailbox every second, and now.  It reads the conversation
 SHELL is on at each check, so /new and /resume need nothing more.  A timer
-rather than file-notify, whose events Emacs reads only between commands."
+rather than file-notify, whose events Emacs reads only between commands.
+The timer cancels itself once SHELL is killed or its Worker finished, so a
+long-running daemon does not keep checking the mailboxes of old Workers."
   (with-current-buffer shell
     (unless (timerp eng/bbh-mail--watch)
       (let (timer)
         (setq timer (run-with-timer 1 1 (lambda ()
-                                          (if (buffer-live-p shell)
-                                              (eng/bbh-mail-wake shell)
-                                            (cancel-timer timer))))
+                                          (if (eng/bbh-mail--done-p shell)
+                                              (eng/bbh-mail-unwatch shell timer)
+                                            (eng/bbh-mail-wake shell))))
               eng/bbh-mail--watch timer)))
     (eng/bbh-mail-wake shell)))
+
+(defun eng/bbh-mail-unwatch (shell &optional timer)
+  "Stop checking SHELL's mailbox: cancel TIMER, or SHELL's watch."
+  (let ((timer (or timer (and (buffer-live-p shell) (buffer-local-value 'eng/bbh-mail--watch shell)))))
+    (when (timerp timer) (cancel-timer timer))
+    (when (and (buffer-live-p shell) (eq timer (buffer-local-value 'eng/bbh-mail--watch shell)))
+      (with-current-buffer shell (setq eng/bbh-mail--watch 'ended)))))
+
+(defun eng/bbh-mail--timer-shell (timer)
+  "The shell whose mailbox TIMER checks, or nil when TIMER is no mail watch.
+It reads the timer's closure, so it also finds the watches older code made,
+which no buffer remembers any more."
+  (let ((f (timer--function timer)) shell mail)
+    (when (closurep f)
+      (named-let walk ((x (list (aref f 1) (aref f 2))) (depth 0))
+        (cond ((> depth 6))
+              ((eq x 'eng/bbh-mail-wake) (setq mail t))
+              ((bufferp x) (setq shell (or shell x)))
+              ((consp x) (walk (car x) (1+ depth)) (walk (cdr x) depth))
+              ((and (vectorp x) (not (recordp x))) (mapc (lambda (y) (walk y (1+ depth))) x)))))
+    (and mail shell)))
+
+(defun eng/bbh-mail-sweep ()
+  "Cancel the mail watches of shells that take no more mail, and duplicates.
+Returns (SWEPT . WATCHING): how many it cancelled, and how many still run."
+  (let ((swept 0) (watching 0))
+    (dolist (timer (copy-sequence timer-list))
+      (when-let* ((shell (eng/bbh-mail--timer-shell timer)))
+        (if (or (eng/bbh-mail--done-p shell)
+                (not (eq timer (buffer-local-value 'eng/bbh-mail--watch shell))))
+            (progn (eng/bbh-mail-unwatch shell timer) (setq swept (1+ swept)))
+          (setq watching (1+ watching)))))
+    (cons swept watching)))
 
 (defun eng/bbh-mail--on-event (shell event)
   "Watch SHELL's mailbox once its session exists, and check it after each turn."

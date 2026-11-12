@@ -124,6 +124,7 @@
         ws (str (fs/create-temp-dir {:prefix "bbh-super-ws"}))
         group (atom nil)
         ended (atom [])
+        swept (atom [])
         c (super/start! {:dir dir :conversations conversations :scan-ms 10
                          :launch {:workspace! (fn [_ w] (str (fs/create-dirs (fs/path ws (str (:thread w) "-" (:generation w))))))
                                   :open! (fn [{:keys [conversation]}]
@@ -135,6 +136,8 @@
                                   :land! (fn [_] {:landed nil}) :retire! (constantly nil) :release! (constantly nil)}
                          :sessions {:live #(if-let [g @group] [(assoc g :conversation "super-W1")] [])
                                     :end! #(swap! ended conj (:conversation %))
+                                    :sweep! (fn [conversations] (swap! swept conj (vec conversations))
+                                              {:shells-ended 0 :timers-swept 2 :mail-timers 1})
                                     :machine (constantly {:mem-available-mb 4000 :swap-used-mb 100})}})]
     (try
       (client/call! dir {:command :thread! :args {:title "reap me"}})
@@ -153,6 +156,10 @@
             "nothing is left in its process group")
         (super/observe-machine! c)
         (is (= 0 (:active-workers @(:machine c))))
+        (is (= [] (first @swept)) "no Worker had ended at the first pass")
+        (is (= ["super-W1"] (last @swept)) "Emacs is told which Workers ended, to end their shells")
+        (is (= {:mail-timers 1 :timers-swept 2} (select-keys @(:machine c) [:mail-timers :timers-swept]))
+            "the health event counts Emacs's mailbox timers")
         (is (some #(= :machine-observed (:kind %)) (store/events (:db c))) "the health pass logs the machine")
         (is (= (:machine (:ok (client/call! dir {:command :sections}))) @(:machine c)) "bbh super list shows it"))
       (finally
@@ -166,6 +173,10 @@
       (is (false? (sessions/kill! id :grace-ms 100)))
       (is (process/matches? id))
       (finally (p/destroy proc)))))
+
+(deftest the-list-line-counts-emacs-mailbox-timers
+  (is (= "4000 MB available, 1200 MB swap used; 5 sessions live, 3 of them Workers' for 2 active Workers; 3 Emacs mailbox timers (69 leftover cancelled)"
+         (client/machine-line {:mem-available-mb 4000 :swap-used-mb 1200 :sessions 5 :worker-sessions 3 :active-workers 2 :mail-timers 3 :timers-swept 69}))))
 
 (deftest the-list-line-names-stale-sessions
   (is (= "4000 MB available, 1200 MB swap used; 5 sessions live, 3 of them Workers' for 2 active Workers; stale: super-W9"

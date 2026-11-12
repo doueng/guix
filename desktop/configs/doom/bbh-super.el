@@ -186,6 +186,8 @@ so it runs no more prompts, and what you type there goes to the Router.
 Returns the shell's name, or nil when no session runs CONVERSATION."
   (when-let* ((shell (eng/bbh-super--shell conversation)))
     (with-current-buffer shell (setq eng/bbh-super-finished t))
+    ;; Finished shells take no mail, so stop checking for it.
+    (eng/bbh-mail-unwatch shell)
     (let ((dir (file-name-as-directory (expand-file-name dir))))
       (dolist (buffer (list shell
                             (buffer-local-value 'eng/bbh-transcript shell)
@@ -208,11 +210,25 @@ readable.  Returns the shell's name, or nil when no session runs CONVERSATION."
       ;; Nor does it check: each of the many finished shells a long-running
       ;; daemon keeps would otherwise run a timer every second, which
       ;; allocates and so brings on the daemon's slow garbage collections.
-      (when (timerp eng/bbh-mail--watch)
-        (cancel-timer eng/bbh-mail--watch)
-        (setq eng/bbh-mail--watch 'ended))
+      (eng/bbh-mail-unwatch shell)
       (ignore-errors (agent-shell--shutdown)))
     (buffer-name shell)))
+
+(defun eng/bbh-super-sweep (&optional ended)
+  "End the shells of ENDED, the conversations of Workers that ended, then
+cancel leftover mailbox timers: those of killed or finished shells, and
+duplicates.  A Worker whose bbh died before the controller reaped it keeps a
+shell nobody ended, which checked its mailbox every second for good.  The
+controller calls this at start and at each health pass and logs the counts.
+Returns (ENDED SWEPT WATCHING): shells ended, timers cancelled, and mailbox
+timers still running."
+  (let* ((ended (seq-count (lambda (conversation)
+                             (when-let* ((shell (eng/bbh-super--shell conversation)))
+                               (unless (buffer-local-value 'eng/bbh-super-finished shell)
+                                 (eng/bbh-super-end conversation))))
+                           ended))
+         (counts (eng/bbh-mail-sweep)))
+    (list ended (car counts) (cdr counts))))
 
 (defun eng/bbh-super-visit (name)
   "Show the session in buffer NAME as its transcript above its composer, alone in the frame."

@@ -478,6 +478,74 @@ and the transcript keeps q and focus moves in normal state."
         (should (= 1 (length logged)))
         (should (string-match-p "agent-shell--more-config-options" (car logged)))))))
 
+;;; Leftover mailbox timers
+
+(defun bbh-test--timer-live-p (timer)
+  (and (timerp timer) (memq timer timer-list) t))
+
+(defun bbh-test--legacy-watch (shell)
+  "A mailbox timer for SHELL as the code before T163 made it, which no buffer remembers."
+  (let (timer)
+    (setq timer (run-with-timer 1 1 (lambda ()
+                                      (if (buffer-live-p shell)
+                                          (eng/bbh-mail-wake shell)
+                                        (cancel-timer timer)))))))
+
+(ert-deftest bbh-a-finished-shell-stops-checking-its-mailbox ()
+  (let ((shell (generate-new-buffer " bbh-test-finished")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'eng/bbh-mail-wake) #'ignore))
+          (eng/bbh-mail-watch shell)
+          (let ((timer (buffer-local-value 'eng/bbh-mail--watch shell)))
+            (should (bbh-test--timer-live-p timer))
+            (with-current-buffer shell (setq eng/bbh-super-finished t))
+            (should (bbh-test--wait (lambda () (not (bbh-test--timer-live-p timer))) 3))
+            (should (eq 'ended (buffer-local-value 'eng/bbh-mail--watch shell)))))
+      (kill-buffer shell))))
+
+(ert-deftest bbh-the-sweep-cancels-leftover-mailbox-timers ()
+  (let ((live (generate-new-buffer " bbh-test-live"))
+        (finished (generate-new-buffer " bbh-test-done"))
+        timers base)
+    (unwind-protect
+        (cl-letf (((symbol-function 'eng/bbh-mail-wake) #'ignore))
+          ;; Shells earlier tests left keep their watches.
+          (setq base (cdr (eng/bbh-mail-sweep)))
+          (eng/bbh-mail-watch live)
+          (with-current-buffer finished (setq eng/bbh-super-finished t))
+          (let ((watch (buffer-local-value 'eng/bbh-mail--watch live))
+                (old-live (bbh-test--legacy-watch live))
+                (old-finished (bbh-test--legacy-watch finished))
+                (other (run-with-timer 1 1 (lambda () (ignore live)))))
+            (setq timers (list watch old-live old-finished other))
+            (should (eq live (eng/bbh-mail--timer-shell old-live)))
+            (should (eq live (eng/bbh-mail--timer-shell watch)))
+            (should-not (eng/bbh-mail--timer-shell other))
+            ;; The finished shell's and the live shell's duplicate go; its watch stays.
+            (should (equal (cons 2 (1+ base)) (eng/bbh-mail-sweep)))
+            (should (bbh-test--timer-live-p watch))
+            (should-not (bbh-test--timer-live-p old-live))
+            (should-not (bbh-test--timer-live-p old-finished))
+            (should (bbh-test--timer-live-p other))
+            (should (equal (cons 0 (1+ base)) (eng/bbh-mail-sweep)))))
+      (mapc (lambda (timer) (when (timerp timer) (cancel-timer timer))) timers)
+      (kill-buffer live)
+      (kill-buffer finished))))
+
+(ert-deftest bbh-super-sweep-ends-the-shells-of-ended-workers ()
+  (let ((shell (generate-new-buffer " bbh-test-W12")) (ended nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'eng/bbh-super-end)
+                   (lambda (conversation) (push conversation ended)
+                     (with-current-buffer shell (setq eng/bbh-super-finished t)) "name")))
+          (with-current-buffer shell (setq eng/bbh-super-conversation "super-W12"))
+          (should (equal '(1 0) (take 2 (eng/bbh-super-sweep '("super-W12" "super-W404")))))
+          (should (equal '("super-W12") ended))
+          ;; Ended once: a finished shell is not ended again.
+          (should (equal '(0 0) (take 2 (eng/bbh-super-sweep '("super-W12")))))
+          (should (= 1 (length ended))))
+      (kill-buffer shell))))
+
 ;;; Super-agent
 
 (defun bbh-test--environ (pid)

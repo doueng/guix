@@ -549,9 +549,18 @@
   [{:keys [conversation]}]
   (emacs/call! "eng/bbh-super-end" conversation))
 
+(defn sweep-emacs!
+  "Have the super-agent's Emacs end the shells of the Workers that ended,
+whose conversations are ENDED, and cancel leftover mailbox timers. Returns
+{:shells-ended :timers-swept :mail-timers}, the last being the mailbox timers
+still running (T163)."
+  [ended]
+  (let [[shells swept watching] (map parse-long (re-seq #"\d+" (emacs/call! "eng/bbh-super-sweep" (vec ended))))]
+    {:shells-ended shells :timers-swept swept :mail-timers watching}))
+
 (def session-io
   "How the controller reads and ends sessions; a test passes its own as :sessions."
-  {:live sessions/live :kill! sessions/kill! :end! end-session! :machine sessions/machine})
+  {:live sessions/live :kill! sessions/kill! :end! end-session! :machine sessions/machine :sweep! sweep-emacs!})
 
 (defn- session-agents
   "Each conversation of SESSIONS to its announced session, from agent.json."
@@ -583,15 +592,23 @@
 
 (defn observe-machine!
   "The health pass's sweep and log line: reap the sessions of Workers that
-  ended, then record MemAvailable, swap used and live sessions against active
-  Workers as a :machine-observed event, kept for bbh super list."
+  ended, have Emacs end their shells and cancel leftover mailbox timers, then
+  record MemAvailable, swap used, live sessions against active Workers and
+  the mailbox timers still running as a :machine-observed event, kept for bbh
+  super list."
   [{:keys [state sessions machine] :as c}]
   (let [live ((:live sessions))
         tried (reap-sessions! c live :all? true)
         reaped (keep (fn [[conversation gone]] (when gone conversation)) tried)
         live (remove (comp (set reaped) :conversation) live)
+        ended (keep (fn [[conversation w]] (when (#{:done :failed :cancelled} (:state w)) conversation))
+                    (sessions/owners @state))
+        emacs (when-let [sweep! (:sweep! sessions)]
+                (try (sweep! ended)
+                     (catch Exception e (binding [*out* *err*] (println "bbh super: sweeping Emacs failed:" (ex-message e))))))
         report (merge ((:machine sessions))
                       (sessions/report @state live (session-agents c live) (sessions/stale @state live) reaped)
+                      emacs
                       {:at (System/currentTimeMillis)})]
     (reset! machine report)
     (run! c :controller {:id (new-id) :command :machine-observed! :args report})
