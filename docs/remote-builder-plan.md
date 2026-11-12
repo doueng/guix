@@ -102,7 +102,7 @@ What landed, without creating a server or switching anything:
 - modules/engstrand/system/builder.scm: `make-builder-os`, with `#:bootstrap?`. That variant adds an nftables table admitting public ssh for the first deploy, before Tailscale is up. It also has `builder-key-file`/`builder-key-string`, which skip missing key files so the module evaluates before phase 2.
 - modules/engstrand/builder/: nftables.conf and a README listing the public keys phase 2 adds (deploy.pub, offload.pub, host-key.pub, builder-signing.pub, laptop-signing.pub, nixpkgs-builder.pub; T130 removed the last).
 - desktop/builder.scm: the deploy file (Hetzner when `BUILDER_BOOTSTRAP` is set, otherwise a managed host over the tailnet).
-- desktop/bin/builder-prebuild: `build`, `check` and `machines` on the laptop; `run REV`, `nightly` and `status` on the builder, behind git-shell.
+- desktop/bin/builder-prebuild: `build`, `check` and `machines` (dropped in T153; offload test reads /etc/guix/machines.scm) on the laptop; `run REV`, `nightly` and `status` on the builder, behind git-shell.
 - Makefile: builder-create, builder-deploy, prebuild and builder-check. checks.edn has a "remote builder" rule. features/tailscale.scm exports `%tailscale-service`.
 - Verified: `make lint` passes, and `guix system build -d --no-grafts` evaluates both variants to a system derivation (no build) [M].
 

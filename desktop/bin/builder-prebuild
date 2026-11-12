@@ -3,7 +3,6 @@
 ;;   builder-prebuild build     push @ to the builder, build system, Home and
 ;;                              desktop/build/*/manifest.scm there, wait
 ;;   builder-prebuild check     publish reachable, last prebuild, nothing to build locally
-;;   builder-prebuild machines  print a machines.scm for `sudo guix offload test FILE'
 ;;   builder-prebuild alert [--notify]  one line when the last prebuild failed,
 ;;                              hangs or the nightly stopped; --notify also sends
 ;;                              it as a desktop notification, once per problem
@@ -164,19 +163,6 @@
       :else (do (fs/delete-if-exists seen)
                 (println (ok-line status (java.time.Instant/now)))))))
 
-(defn machines []
-  (let [host-key (some-> (str @repo "/modules/engstrand/builder/host-key.pub")
-                         (as-> f (when (fs/exists? f) (str/trim (slurp f)))))]
-    (when-not host-key (die "modules/engstrand/builder/host-key.pub is missing; see phase 2"))
-    (println (str "(list (build-machine\n"
-                  "       (name \"" host "\")\n"
-                  "       (systems '(\"aarch64-linux\"))\n"
-                  "       (port " ssh-port ")\n"
-                  "       (user \"offload\")\n"
-                  "       (host-key \"" host-key "\")\n"
-                  "       (private-key \"/etc/guix/offload/id_ed25519\")\n"
-                  "       (parallel-builds 1)))"))))
-
 ;;; Builder side
 
 (def state "/var/lib/prebuild")
@@ -279,9 +265,8 @@
     (case cmd
       "build" (push-and-build)
       "check" (check)
-      "machines" (machines)
       "alert" (alert-command args)
       "run" (run-prebuild (first args))
       "nightly" (nightly)
       "status" (prn (read-status))
-      (die "usage: builder-prebuild build|check|machines|alert [--notify] (laptop) or run REV|nightly|status (builder)"))))
+      (die "usage: builder-prebuild build|check|alert [--notify] (laptop) or run REV|nightly|status (builder)"))))
