@@ -1,5 +1,3 @@
-" Selected IntelliSpace modules
-
 Plug 'justinmk/vim-sneak'
 
 "" idea-doom-emacs
@@ -10,7 +8,6 @@ set norelativenumber
 " Map file tree navigation
 map <leader>e :action SelectInProjectView<CR>
 nmap <C-h> :action SelectInProjectView<CR>
-let g:NERDTreeMapActivateNode = 'l'
 
 " Execute an action. Like <M-x>
 let g:WhichKeyDesc_Leader_Space = "<leader><Space> M-x"
@@ -20,19 +17,6 @@ vnoremap <leader><Space>    :action GotoAction<CR>
 " Find file
 map <Leader>ff :action GotoFile<CR>
 let g:WhichKeyDesc_find_file2 = '<leader>ff Find file'
-
-
-"" Intellimacs
-" source ~/.intellimacs/spacemacs.vim
-"
-" " (Optional) Enable other Intellimacs modules
-" source ~/.intellimacs/extra.vim
-" source ~/.intellimacs/major.vim
-" source ~/.intellimacs/hybrid.vim
-"
-" " (Optional) Enable which-key plugin
-" source ~/.intellimacs/which-key.vim
-"
 
 nmap <C-o> <Action>(Back)
 nmap <C-i> <Action>(Forward)
