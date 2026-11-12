@@ -1,4 +1,4 @@
-Public keys for the remote builder, filled in during phase 2 of
+Public keys for the remote builder, recorded in phase 2 of
 docs/remote-builder-plan.md. Only public halves belong here; this repo is public.
 
 - deploy.pub: ssh keys for root and the prebuild account: the unattended deploy key

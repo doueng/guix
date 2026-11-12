@@ -42,7 +42,7 @@
             #:email ""
             #:user-groups '("wheel" "netdev" "audio" "video"))
            ;; Supply the package value rde needs without adopting its patched
-           ;; Shepherd or adding a Home Shepherd service during this migration.
+           ;; Shepherd or adding a Home Shepherd service.
            (feature
             (name 'familiar-shepherd)
             (values `((shepherd . ,shepherd-1.0))))

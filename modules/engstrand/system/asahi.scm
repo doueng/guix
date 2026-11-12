@@ -45,9 +45,9 @@
               (chmod key #o600)
               (chmod (string-append key ".pub") #o644)))))))
 
-;; The remote builder (docs/remote-builder-plan.md), on once phase 2 has put
-;; its signing key and ssh host key in modules/engstrand/builder/: the daemon
-;; then substitutes from it first and offloads builds to it.
+;; The remote builder (docs/remote-builder-plan.md), on when its signing key
+;; and ssh host key are in modules/engstrand/builder/, as they are committed:
+;; the daemon then substitutes from it first and offloads builds to it.
 (define %builder-signing-key (builder-key-file "builder-signing.pub"))
 (define %builder-host-key (builder-key-string "host-key.pub"))
 (define %builder? (and %builder-signing-key %builder-host-key #t))
@@ -189,7 +189,7 @@
                      (inherit config)
                      (channels channels)
                      (authorized-keys (append %asahi-substitute-keys
-                                              ;; The remote builder, once phase 2 has put its key in the repo.
+                                              ;; The remote builder, when its key is in the repo.
                                               (if %builder? (list %builder-signing-key) '())
                                               (guix-configuration-authorized-keys config)))
                      ;; The builder has what a prebuild built, including the custom

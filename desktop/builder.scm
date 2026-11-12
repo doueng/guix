@@ -34,5 +34,5 @@
         (user "root")
         (identity ssh-key)
         (build-locally? #f)
-        ;; Phase 2 records it with ssh-keyscan.
+        ;; Recorded with ssh-keyscan in phase 2 of the plan.
         (host-key (builder-key-string "host-key.pub")))))))
