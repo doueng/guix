@@ -37,9 +37,8 @@ hl.env("XCURSOR_SIZE", "20")
 
 require("startup")
 
--- IntelliJ owns workspace 4. Opening the empty workspace starts it, and its
--- windows land there when started from elsewhere.
-hl.workspace_rule({ workspace = "4", on_created_empty = "flatpak run com.jetbrains.IntelliJ-IDEA-Community" })
+-- IntelliJ windows land on workspace 4. Opening the empty workspace no longer
+-- starts it: Alt+4 and Cmd+I started it by accident.
 hl.window_rule({ name = "intellij-workspace", match = { class = "jetbrains-idea" }, workspace = "4" })
 
 -- Cmd application shortcuts. Terminal bindings focus the Herdr terminal,
@@ -47,7 +46,6 @@ hl.window_rule({ name = "intellij-workspace", match = { class = "jetbrains-idea"
 hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 1"))
 hl.bind("SUPER + U", hl.dsp.focus({ workspace = 2 }))
 hl.bind("SUPER + SHIFT + U", hl.dsp.focus({ workspace = 3 }))
-hl.bind("SUPER + I", hl.dsp.focus({ workspace = 4 }))
 hl.bind("SUPER + E", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 2"))
 hl.bind("SUPER + D", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 3"))
 hl.bind("SUPER + G", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 4"))

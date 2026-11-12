@@ -21,7 +21,6 @@
              {:id "b" :label "Browser workspace" :chord "Cmd+U" :dispatch ["focus" {:workspace 2}]}
              {:id "c" :label "Open Chrome" :command ["~/.local/bin/chrome-unified"]}
              {:id "u" :label "Workspace 3" :chord "Cmd+Shift+U" :dispatch ["focus" {:workspace 3}]}
-             {:id "i" :label "IntelliJ workspace" :chord "Cmd+I" :dispatch ["focus" {:workspace 4}]}
              {:id "h" :label "Herdr" :chord "Cmd+B" :command ["~/.local/bin/herdr-terminal"]}
              {:id "," :label "Edit hyprland.lua" :chord "Cmd+," :command ["ghostty" "nvim" "~/.config/hypr/hyprland.lua"]}
              {:id "m" :label "Dictate with Hex: hold to talk" :chord "Cmd+M" :tip "Hold Cmd+M and speak; Hex pastes the text when you let go. Run hex for its settings and history."}
