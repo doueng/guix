@@ -27,8 +27,6 @@
                        :plugins.lualine
                        :plugins.bufferline
                        :plugins.lsp
-                       :plugins.java
-                       :plugins.noice
                        :plugins.conform])
 
 (local specs [])

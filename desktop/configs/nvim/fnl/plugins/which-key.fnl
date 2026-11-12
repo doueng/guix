@@ -3,5 +3,4 @@
 (plugin :folke/which-key.nvim
         {:opts {:delay 350
                 ;; leader.edn names the shared groups (shared-keys.fnl).
-                :spec [(plugin :<leader>g {:group :git})
-                       (plugin :<leader>t {:group :test})]}})
+                :spec [(plugin :<leader>g {:group :git})]}})
