@@ -92,11 +92,15 @@ HCLOUD_TOKEN=$(cat ~/.config/guix-builder/hcloud-token) hcloud firewall delete-r
 | `make reader-push` / `make reader-status` | copy the reader checkout to the builder and restart it / its services and headline count |
 | `make second-brain-status` / `second-brain-push chrome` | the second brain's service, item counts and page / push Chrome's bookmarks now (the Home timer does it hourly) |
 
+## History
+
+Everything below is the dated record of the build-out: the phase logs, then the plan as it was approved before phase 1. It is kept as written, with notes where later work overtook it. Current state and Day to day above describe the builder as it is.
+
 ## Phase 1 status (done 2026-11-09, approved by you)
 
 What landed, without creating a server or switching anything:
 - modules/engstrand/system/builder.scm: `make-builder-os`, with `#:bootstrap?`. That variant adds an nftables table admitting public ssh for the first deploy, before Tailscale is up. It also has `builder-key-file`/`builder-key-string`, which skip missing key files so the module evaluates before phase 2.
-- modules/engstrand/builder/: nftables.conf and a README listing the public keys phase 2 adds (deploy.pub, offload.pub, host-key.pub, builder-signing.pub, laptop-signing.pub, nixpkgs-builder.pub).
+- modules/engstrand/builder/: nftables.conf and a README listing the public keys phase 2 adds (deploy.pub, offload.pub, host-key.pub, builder-signing.pub, laptop-signing.pub, nixpkgs-builder.pub; T130 removed the last).
 - desktop/builder.scm: the deploy file (Hetzner when `BUILDER_BOOTSTRAP` is set, otherwise a managed host over the tailnet).
 - desktop/bin/builder-prebuild: `build`, `check` and `machines` on the laptop; `run REV`, `nightly` and `status` on the builder, behind git-shell.
 - Makefile: builder-create, builder-deploy, prebuild and builder-check. checks.edn has a "remote builder" rule. features/tailscale.scm exports `%tailscale-service`.
@@ -107,14 +111,14 @@ Differences from the sketches below:
 - The Hetzner environment's default `authorize? #t` already trusts the laptop's signing key on the builder (hetzner.scm line 203) [M]. laptop-signing.pub is only needed for later managed-host deploys.
 - The builder's daemon also gets `--timeout=21600 --max-silent-time=3600`, and sshd gets ClientAlive settings, against offload hangs.
 - The publish cache is warmed by fetching each closure item's narinfo, not with guix weather.
-- Still open for phase 2: you need to run `sudo guix archive --authorize < modules/engstrand/builder/nixpkgs-builder.pub` on the builder (or deploy with that file present) before the first prebuild's nixpkgs import.
+- ~~Still open for phase 2: you need to run `sudo guix archive --authorize < modules/engstrand/builder/nixpkgs-builder.pub` on the builder (or deploy with that file present) before the first prebuild's nixpkgs import.~~ Obsolete: T130 dropped the nixpkgs bridge and its key.
 
 ## Phase 2 status (2026-11-09, T118 W120)
 
 - Server: **CAX21** (4 vCPU, 8 GB, 80 GB) in hel1, `guix-builder`, IPv4 2.29.168.61, created with `make builder-create`. You chose it over the CAX31, which Hetzner's live list puts at 20.99 EUR/month net. The CAX21 is 10.49 net plus the primary IPv4 [M: hcloud server-type list]. The first CAX31 attempt failed with 412 resource_unavailable in hel1, and no server was created.
 - Cloud Firewall `guix-builder` is attached and admits only 41641/udp. The temporary 22/tcp rule from the laptop's address is removed. nftables admits 22 and 8080 only on tailscale0 [M: a public connect to 22 and 8080 times out].
 - Tailscale: the node is `guix-builder` (100.123.26.40, guix-builder.tailbf68ad.ts.net), brought up with your auth key. It's owned by your user, not `tag:builder`, so its key expires unless you disable key expiry for it in the admin console.
-- Keys: deploy.pub lists an unattended key, ~/.config/guix-builder/deploy_ed25519, because guile-ssh can't use the passphrase-protected ~/.ssh/guix-builder and no agent runs. deploy.pub also lists yours. offload.pub is T119's /etc/guix/offload key. host-key.pub, builder-signing.pub, laptop-signing.pub and nixpkgs-builder.pub are recorded. The nixpkgs import key's secret sits only in /var/lib/prebuild/nixpkgs-key.sec on the builder.
+- Keys: deploy.pub lists an unattended key, ~/.config/guix-builder/deploy_ed25519, because guile-ssh can't use the passphrase-protected ~/.ssh/guix-builder and no agent runs. deploy.pub also lists yours. offload.pub is T119's /etc/guix/offload key. host-key.pub, builder-signing.pub, laptop-signing.pub and nixpkgs-builder.pub are recorded. The nixpkgs import key's secret sits only in /var/lib/prebuild/nixpkgs-key.sec on the builder. (T130 later dropped the bridge and nixpkgs-builder.pub.)
 - The laptop side (asahi.scm) turns on when builder-signing.pub and host-key.pub exist. It puts the builder URL first in substitute-urls and adds the build machine, and the daemon stays at `--max-jobs=1` until you change `%local-max-jobs` to "0". `make ... JOBS=1` passes `--max-jobs` to the client.
 - Sizing for the CAX21: daemon `--max-jobs=1 --cores=4`, laptop `parallel-builds 1`, nightly gc at 20G free.
 
@@ -145,7 +149,7 @@ To finish, run this from /home/engstrand/guix (you enter your password):
 make pull && make switch && sudo herd restart guix-daemon
 ```
 
-`make pull` is needed because the pulled Guix predates T126's `nixpkgs-bridge` channel, and `make switch` refuses to run until they match. It downloads from the builder. Afterwards, `ps -o args -C guix-daemon` should show the builder URL first and `--max-jobs=0`, and `sudo guix offload test /etc/guix/machines.scm` should run without a password.
+`make pull` was needed because the pulled Guix predated T126's `nixpkgs-bridge` channel (which T130 later dropped), and `make switch` refuses to run until they match. It downloads from the builder. Afterwards, `ps -o args -C guix-daemon` should show the builder URL first and `--max-jobs=0`, and `sudo guix offload test /etc/guix/machines.scm` should run without a password.
 
 Monthly cost [M: Hetzner pricing API, hel1]: CAX21 10.49 EUR net plus primary IPv4 0.50 EUR net, so **10.99 EUR net, 13.30 EUR with 21% VAT**. Traffic is included. The builder disk is 40 of 75 GB used (31 GB free), and nightly gc keeps 20 GB free.
 
@@ -153,7 +157,9 @@ Monthly cost [M: Hetzner pricing API, hel1]: CAX21 10.49 EUR net plus primary IP
 
 Stop the laptop from building. A Hetzner CAX (aarch64) server on the tailnet builds and serves everything that `make pull`, `make home-apply` and `make switch` need, at the same pinned channels, before the laptop asks. The laptop then only evaluates, downloads and activates.
 
-## What the repo looks like today
+## What the repo looked like when this was planned (before phase 1, 2026-11-09)
+
+Line numbers, pins and paths below are as of then; several have moved since.
 
 - Laptop: 8 cores, 15 GiB RAM plus 8 GiB zram, 32 GB free on / [M: free -g, nproc, df]. So it is 16 GB-class, not 8 GB. The freezes (T108, T111) came mostly from agent processes. Local builds add to them, and earlyoom now guards against them (/home/engstrand/guix/modules/engstrand/system/asahi.scm line 106).
 - Channels: guix 704ad8c, asahi b913276 and rde 6821d6f, pinned in /home/engstrand/guix/channels.scm [M]. The guix pin is held, because rde's node.scm breaks on newer guix (/home/engstrand/guix/desktop/bin/updates line 45) [M].
@@ -182,16 +188,17 @@ Page size: Asahi runs 16K pages and Hetzner 4K. Guix already pins jemalloc to 16
 ## Architecture
 
 ```
-laptop (asahi-guix)                         guix-builder (Hetzner CAX31, Guix System)
- guix-daemon --max-jobs=0                    guix-daemon --max-jobs=2 --cores=4
+laptop (asahi-guix)                         guix-builder (Hetzner CAX21, Guix System)
+ guix-daemon --max-jobs=0                    guix-daemon --max-jobs=1 --cores=4
   substitute-urls:                            substitute-urls: bordeaux, asahi, ci
    1 http://guix-builder.<tailnet>:8080       guix-publish :8080 (zstd, cache, bypass 100 MiB)
-   2 bordeaux  3 asahi  4 ci                  sshd :22 (OpenSSH; users root, offload, prebuild)
+   2 bordeaux  3 asahi  4 ci                  sshd :2222 (OpenSSH; users root, offload, prebuild)
+                                              Tailscale SSH :22 (people)
   build-machines: guix-builder (offload)      mcron: 03:00 prebuild, 05:00 gc
   authorizes builder signing key              authorizes laptop signing key (offload imports)
                  \____ tailnet (WireGuard) ____/
 Hetzner Cloud Firewall inbound: 41641/udp only (plus 22/tcp from your IP during bootstrap).
-Builder nftables: 22 and 8080 accepted only on tailscale0.
+Builder nftables: 2222 and 8080 accepted only on tailscale0.
 ```
 
 ## Sizing and cost
@@ -409,7 +416,7 @@ Phase 2 (you; spends about 12.5 EUR/month)
 3. Create a Hetzner project and a token, and save it to ~/.config/guix-builder/hcloud-token (0600). Create the Cloud Firewall: 41641/udp and ICMP in, plus 22/tcp from your current IP.
 4. `make builder-create`. `guix deploy` creates the CAX31 and installs Guix through rescue, and the server builds its own system (`build-locally? #f`).
 5. `ssh root@<ipv4> tailscale up --auth-key=<one-time tagged key> --hostname=guix-builder`. Set the ACL. Then remove 22/tcp from the Cloud Firewall.
-6. Record `ssh-keyscan guix-builder.tailbf68ad.ts.net` into modules/engstrand/builder/host-key.pub. Copy the builder's /etc/guix/signing-key.pub into builder-signing.pub, and the laptop's into laptop-signing.pub. Run `sudo bash -c 'umask 077; mkdir -p /etc/guix/offload; ssh-keygen -t ed25519 -N "" -f /etc/guix/offload/id_ed25519'` on the laptop and commit the .pub. Generate the builder's nixpkgs import key on the builder.
+6. Record `ssh-keyscan guix-builder.tailbf68ad.ts.net` into modules/engstrand/builder/host-key.pub. Copy the builder's /etc/guix/signing-key.pub into builder-signing.pub, and the laptop's into laptop-signing.pub. Run `sudo bash -c 'umask 077; mkdir -p /etc/guix/offload; ssh-keygen -t ed25519 -N "" -f /etc/guix/offload/id_ed25519'` on the laptop and commit the .pub. Generate the builder's nixpkgs import key on the builder (dropped with the bridge in T130).
 7. `make builder-deploy`, now over the tailnet (managed host), so the builder gets the users, keys, publish, nftables and mcron.
 
 Phase 3 (test without touching the laptop daemon)
@@ -418,7 +425,7 @@ Phase 3 (test without touching the laptop daemon)
 
 Phase 4 (prebuild and trial)
 10. Add the git remote, then `make prebuild`. The first run builds the kernel and anything bordeaux lacks.
-11. `sudo guix archive --authorize < modules/engstrand/builder/builder-signing.pub`, a one-off like `make nixpkgs-authorize`.
+11. `sudo guix archive --authorize < modules/engstrand/builder/builder-signing.pub`, a one-off like the former `make nixpkgs-authorize`.
 12. `guix system build -L modules desktop/system.scm --dry-run --substitute-urls='http://guix-builder.tailbf68ad.ts.net:8080 https://bordeaux.guix.gnu.org'` lists **no** "would be built" lines. Do the same with `guix home build`.
 13. `guix system build --max-jobs=0 --substitute-urls=... -L modules desktop/system.scm`, a client-side max-jobs=0 with the daemon unchanged. This tests the risk under Failure modes: local-build derivations with max-jobs=0.
 
@@ -426,7 +433,7 @@ Phase 5 (switch the laptop; you run make switch)
 14. Apply the asahi.scm diff, run `make switch`, then `sudo herd status guix-daemon` and `ps` to see `--max-jobs=0` and the builder URL.
 
 Phase 6: the `updates` integration and the nightly speculative bump. Moved to T128.
-Phase 7: superseded. T126 moved the nixpkgs bridge into its own channel instead (see (e)), and the prebuild keeps its `nixpkgs-bridge import` line.
+Phase 7: superseded. T126 moved the nixpkgs bridge into its own channel instead (see (e)), and the prebuild keeps its `nixpkgs-bridge import` line. T130 (uyxotkys) then dropped the bridge altogether.
 
 ## Verification
 
@@ -450,12 +457,14 @@ Phase 7: superseded. T126 moved the nixpkgs bridge into its own channel instead 
 | Offload hangs (ssh stall, builder overloaded) | `make switch` hangs. | `overload-threshold 0.8`, sshd ClientAlive settings on the builder, daemon `--timeout=21600 --max-silent-time=3600`, and `sudo herd restart guix-daemon` (consider adding it to `%restartable-services` in agent-control.scm line 42). |
 | publish 404 while baking | The laptop gets a 404 for a large item it asked for during the bake. The client caches a miss for publish's `negative-ttl`. | Prebuild bakes before you pull (the weather step). `cache-bypass-threshold` 100 MiB serves smaller items at once. `negative-ttl 60`. A miss only costs an offload, which finds the output already on the builder. |
 | Channel skew (laptop pulls before the builder built that tree) | Local builds, or failures under max-jobs=0. | `make prebuild` comes first in the updates steps. Optionally, `make pull` checks `status.edn` for `@`'s commit and warns. |
-| Disk full on the builder | Builds fail. | Nightly `guix gc --free-space=40G`, GC roots only for the last 3 revisions, and an alert in `builder-check`. |
+| Disk full on the builder | Builds fail. | Nightly `guix gc --free-space=20G`, GC roots only for the last 3 revisions, and an alert in `builder-check`. |
 | Builder compromise | It can push store items to the laptop. | Tailnet only, nftables, no passwords, single purpose, and the key can be revoked by removing one line in asahi.scm. |
 
 Not covered: out-of-Guix builds (`make stow` with pi-sci, pierre-diff-ansi and bun, dusk with cargo, kanata-sim, doom sync). They still run on the laptop.
 
 ## (e) The nixpkgs bridge: move it out, or drop it?
+
+**Outcome: T130 (uyxotkys) dropped the bridge after all (Option B in effect).** The rest of this section is the record of the decision.
 
 **Decision (2026-11-09, revised by T126): move it (Option A).** The bridge is the nixpkgs-bridge channel, /home/engstrand/projects/guix-nixpkgs-bridge, pinned in channels.scm. Unlike step 3 below, packages.sexp and lock.sexp moved with it: the bridge repo owns `make lock`, and `updates apply nixpkgs` relocks there, commits, and bumps the pin. Step 5's substitute-from-builder change and the extension's name (`guix nixpkgs-bridge`) differ too. Option B stays below for the record.
 
