@@ -13,8 +13,7 @@
 (global-set-key [remap delete-frame] nil)
 
 (let ((interactive-shell (or (executable-find "fish") shell-file-name)))
-  (setq-default explicit-shell-file-name interactive-shell
-                vterm-shell interactive-shell))
+  (setq-default explicit-shell-file-name interactive-shell))
 
 ;; Doom 2.2.3's Nix doctor checks this before loading nix-format.el.
 ;; Remove once upstream requires nix-format before checking the executable.
