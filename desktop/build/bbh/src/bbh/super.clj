@@ -485,7 +485,7 @@
   The event and its outbox row commit together with a stable worker/job id."
   [{:keys [state] :as c}]
   (doseq [w (vals (:workers @state))
-          :when (and (:conversation w) (#{:working :waiting} (:state w)))
+          :when (and (:conversation w) (= :working (:state w)))
           dir (repl-dirs c (:conversation w))
           f (fs/glob (conversation/file dir :jobs) "*.exit")
           :let [job (str/replace (fs/file-name f) #"\.exit$" "")

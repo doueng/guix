@@ -71,6 +71,18 @@
                                                      :stopped true}})
     {:token token :version (:asks-version (:ok (call dir {:command :thread :args {:id "T1"}})))}))
 
+(deftest reads-show-a-worker-waiting-while-its-stopped-ask-is-open
+  (with-controller
+    (fn [c dir _]
+      (let [{:keys [version]} (thread-with-ask dir)
+            read (fn [] [(:state (:ok (call dir {:command :worker :args {:id "W1"}})))
+                         (:state (last (:workers (:ok (call dir {:command :thread :args {:id "T1"}})))))
+                         (:execution (first (:ok (call dir {:command :threads}))))])]
+        (is (= [:waiting :waiting :waiting] (read)) "the Worker, its thread's list and the thread's execution agree")
+        (is (= :working (get-in @(:state c) [:workers "W1" :state])) "from the ask, not from a stored state")
+        (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "no"}}})
+        (is (= [:working :working :working] (read)))))))
+
 (deftest a-command-that-fails-after-its-events-leaves-no-row
   (let [db (store/open nil)
         state (store/replay db)]
@@ -967,11 +979,14 @@
 (deftest health-is-decided-from-what-the-controller-observed
   (let [w {:id "W1" :thread "T1" :state :working :conversation "super-W1" :wf-run "run1"}
         state {:outbox {"o1" {:id "o1" :thread "T1" :state :sent :conversation "super-W1"}}}
+        asked (assoc state :asks {"a1" {:id "a1" :thread "T1" :worker "W1" :state :open :stopped true}})
         alive {:agent {:pid 7 :start "9"} :jobs [] :wf {:status :active} :repl? true :waits {}}
-        judge (fn [w obs] ((juxt :classification :problem) (model/health state w obs 1000 60000)))]
+        judge (fn [w obs] ((juxt :classification :problem) (model/health state w obs 1000 60000)))
+        judge-asked (fn [w obs] ((juxt :classification :problem) (model/health asked w obs 1000 60000)))]
     (is (= [:running nil] (judge w alive)))
-    (is (= [:waiting nil] (judge (assoc w :state :waiting) alive)))
-    (is (= [:running nil] (judge (assoc w :state :waiting) (assoc-in alive [:agent :busy] true))) "a turn wins over a stopped ask")
+    (is (= [:waiting nil] (judge-asked w alive)) "a stopped ask is open")
+    (is (= [:running nil] (judge-asked w (assoc-in alive [:agent :busy] true))) "a turn wins over a stopped ask")
+    (is (= [:running nil] (judge-asked (assoc w :id "W2") alive)) "another Worker's ask")
     (is (= [:waiting nil] (judge (assoc w :state :queued) {})))
     (is (= [:needs-human "Its session (pid 7) is alive but its REPL does not answer."] (judge w (assoc alive :repl? false))))
     (is (= [:needs-human "Delivery o1 has waited 2 min in its mailbox while the Worker runs; it is not taking messages."]
@@ -1218,7 +1233,8 @@
                 [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "Which?" :stopped true}}]]
         busy (:state (run-commands (conj asking (health "h1" {:busy true :prompted-at 0}))))
         typed (:state (run-commands (conj asking (health "h1" {:busy true :prompted-at (+ (System/currentTimeMillis) 1000)}))))]
-    (is (= :waiting (get-in busy [:workers "W1" :state])) "a prompt older than the ask answers nothing")
+    (is (model/waiting? busy (get-in busy [:workers "W1"])) "a prompt older than the ask answers nothing")
+    (is (= :working (get-in busy [:workers "W1" :state])) "waiting is read from the ask, not stored")
     (is (= :open (get-in busy [:asks "a1" :state])))
     (is (= :working (model/execution busy "T1")) "a session in a turn shows working")
     (is (= :superseded (get-in typed [:asks "a1" :state])))
@@ -1283,7 +1299,28 @@
                                        [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "ok?" :stopped true}}]])]
     (is (not (contains? (get-in state [:threads "T1"]) :execution)) "the record holds no copy")
     (is (= :waiting (model/execution state "T1")))
-    (is (= :waiting (:execution (model/thread-view state (get-in state [:threads "T1"])))))))
+    (is (= :waiting (:execution (model/thread-view state (get-in state [:threads "T1"])))))
+    (is (= :working (get-in state [:workers "W1" :state])) "nor does the Worker hold a copy")
+    (is (= :waiting (:state (model/linked state :workers "W1"))) "a read of the Worker shows it")))
+
+(deftest a-worker-waits-exactly-while-its-stopped-ask-is-open
+  ;; T79: `resume` copied the asks into the Worker's state at four folds, and 23
+  ;; of 68 stopped asks ended without one, so the Worker worked on as :waiting.
+  (let [base [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
+              (start-cmd "s1" "T1") (running "W1")
+              [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "ok?" :stopped true}}]]
+        shown (fn [more] (let [state (:state (run-commands (into base more)))]
+                           [(get-in state [:workers "W1" :state]) (:state (model/linked state :workers "W1")) (model/execution state "T1")]))]
+    (is (= [:working :waiting :waiting] (shown [])))
+    (is (= [:working :working :working] (shown [[:owner {:id "d1" :command :dismiss! :args {:thread "T1"}}]]))
+        "a dismissed ask")
+    (is (= [:working :working :working] (shown [[[:worker "W1"] {:id "k2" :command :ask! :args {:kind :question :text "FYI" :supersedes ["a1"]}}]]))
+        "superseded by an ask that does not stop")
+    (is (= [:working :waiting :waiting] (shown [[[:worker "W1"] {:id "k2" :command :ask! :args {:kind :question :text "and?" :stopped true :supersedes ["a1"]}}]]))
+        "superseded by one that does")
+    (is (= [:cancelling :cancelling :working] (shown [[:owner {:id "c1" :command :cancel! :args {:thread "T1" :reason "stop"}}]]))
+        "a cancel wins")
+    (is (= [:done :done :done] (shown [[[:worker "W1"] {:id "f1" :command :finish-worker! :args {:state-after :done}}]])))))
 
 (deftest a-finished-workers-open-asks-are-superseded
   (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]

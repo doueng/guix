@@ -39,7 +39,8 @@
 
 (def ^:private v1-states
   "States that version 1 rows still hold and no fold writes any more."
-  {:outbox {:acked :done :processed :done} :asks {:delivered :sent} :replies {:delivered :sent}})
+  {:outbox {:acked :done :processed :done} :asks {:delivered :sent} :replies {:delivered :sent}
+   :workers {:waiting :working}})
 
 (def ^:private v1-fields
   "Fields that version 1 rows still hold and nothing reads any more."

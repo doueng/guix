@@ -98,15 +98,33 @@
 (defn- open-asks [state thread]
   (into {} (filter (fn [[_ a]] (and (= thread (:thread a)) (= :open (:state a)))) (:asks state))))
 
-(def active-states #{:starting :working :waiting :cancelling})
+(def active-states
+  "The states of a Worker that has not finished. Waiting is not one: a Worker
+  waits on the person while it is :working with a stopped ask open, which
+  `waiting?` reads from the asks."
+  #{:starting :working :cancelling})
+
+(defn waiting?
+  "Whether Worker W waits on the person: it is working and one of its stopped
+  asks is open. The asks alone say so, so no event has to keep a second copy
+  in step with them."
+  [state w]
+  (boolean (and (= :working (:state w))
+                (some #(and (= (:id w) (:worker %)) (= :open (:state %)) (:stopped %)) (vals (:asks state))))))
+
+(defn shown-state
+  "Worker W's state as reads show it: :waiting while it waits on the person
+  and its session was not seen in a turn, else the state it holds."
+  [state w]
+  (if (and (waiting? state w) (not (get-in w [:health :busy]))) :waiting (:state w)))
 
 (defn session-ended?
-  "Whether health found Worker W's session gone while it was working, waiting
-  or cancelling, so it runs nothing until the person resumes or finishes it.
+  "Whether health found Worker W's session gone while it was working or
+  cancelling, so it runs nothing until the person resumes or finishes it.
   It reads the process health saw, not the classification it shows, which can
   name a lost job or a missing wf run instead."
   [w]
-  (and (#{:working :waiting :cancelling} (:state w)) (some? (:health w)) (empty? (get-in w [:health :process]))))
+  (and (#{:working :cancelling} (:state w)) (some? (:health w)) (empty? (get-in w [:health :process]))))
 
 (defn holds-slot?
   "Whether Worker W counts against the Worker cap: it is active, its session
@@ -266,7 +284,7 @@
   (let [thread (target-thread state args)
         worker (or (thread-worker state thread) (refuse :no-worker :thread thread :message (str thread " has no Worker to cancel")))
         w (get-in state [:workers worker])]
-    (when-not (or (#{:starting :working :waiting} (:state w)) (= :queued (:state w))) (refuse :not-running :worker worker))
+    (when-not (#{:queued :starting :working} (:state w)) (refuse :not-running :worker worker))
     (when (str/blank? reason) (refuse :invalid :field :reason))
     {:events [{:kind :cancel-requested :thread (:thread w)
                :data (merge {:id worker :reason reason} (authority state principal for))}]
@@ -301,8 +319,8 @@
               stale [:needs-human (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
                                           (:id stale) (quot (:waited stale) 60000))]
               ;; A session in a turn is working, whatever asks are open.
-              agent [(if (and (= :waiting (:state w)) (not (:busy agent))) :waiting :running)]
-              (#{:working :waiting :cancelling} (:state w))
+              agent [(if (and (waiting? state w) (not (:busy agent))) :waiting :running)]
+              (#{:working :cancelling} (:state w))
               [:session-ended (format "Its session ended. Resume it with u in the Inbox or bbh inbox resume %s." (:thread w))]
               :else [:starting])
         same? (= [classification problem] [(get-in w [:health :classification]) (get-in w [:health :problem])])]
@@ -333,7 +351,7 @@
   opened before PROMPTED-AT, the epoch ms of the last prompt the person typed
   into W's session. Such a turn answers them, though no reply was sent."
   [state w prompted-at]
-  (when (and prompted-at (#{:working :waiting} (:state w)))
+  (when (and prompted-at (= :working (:state w)))
     (->> (vals (:asks state))
          (filter #(and (= (:id w) (:worker %)) (= :open (:state %))
                        (some-> (:opened-at %) (< prompted-at))))
@@ -362,7 +380,7 @@
   (let [t (thread-of state thread)
         w (or (get-in state [:workers (:worker t)]) (refuse :no-worker :thread thread))
         rebooted (rebooted-jobs w)]
-    (when-not (and (session-ended? w) (#{:working :waiting} (:state w)))
+    (when-not (and (session-ended? w) (= :working (:state w)))
       (refuse :not-ended :worker (:id w) :message (str (:id w) "'s session has not ended")))
     (when (= :missing (get-in w [:health :workflow :status]))
       (refuse :wf-missing :worker (:id w) :message (str (:id w) "'s wf run " (:wf-run w) " is missing, so it cannot be resumed")))
@@ -380,7 +398,7 @@
 (defn- deliverable?
   "Whether Worker W has a session that takes mailbox messages now."
   [w]
-  (and (#{:working :waiting} (:state w)) (not (str/blank? (:conversation w)))))
+  (and (= :working (:state w)) (not (str/blank? (:conversation w)))))
 
 (defn- deliverable-worker! [w]
   (when-not (deliverable? w) (refuse :not-running :worker (:id w)))
@@ -433,7 +451,7 @@
     (when-not (= worker (:worker t)) (refuse :no-active-worker :thread thread))
     (let [ws (get-in state [:workers worker :state])]
       (when (= :cancelling ws) (refuse :cancelling :worker worker :message (str worker " is being cancelled")))
-      (when-not (#{:starting :working :waiting} ws) (refuse :no-active-worker :thread thread)))
+      (when-not (#{:starting :working} ws) (refuse :no-active-worker :thread thread)))
     (doseq [a supersedes] (when-not (open a) (refuse :no-such-ask :ask a)))
     (let [id (next-id state :asks "a")]
       {:events [{:kind :ask-opened :thread thread
@@ -682,7 +700,7 @@
 
 (def ^:private versions
   "The format version of each event kind that has changed since version 1."
-  {})
+  {:snapshot 2})
 
 (defn version-of "The format version events of KIND are written in." [kind] (get versions kind 1))
 
@@ -690,7 +708,10 @@
   "{[kind version] f}: F turns an event of KIND in VERSION into the next
   version. Change an event's format by raising its entry in `versions` and
   adding the step here, so a log written before the change still folds."
-  {})
+  ;; A version 1 snapshot stored :waiting on a Worker; the asks say it now.
+  {[:snapshot 1] (fn [event]
+                   (update-in event [:data :state :workers] update-vals
+                              #(cond-> % (= :waiting (:state %)) (assoc :state :working))))})
 
 (defn upcast
   "EVENT, as an old log holds it, in the format `fold` reads today."
@@ -797,27 +818,15 @@
 (defmethod fold* :token-issued [state {{:keys [hash principal]} :data}]
   (assoc-in state [:tokens hash] {:id hash :principal principal :revoked false}))
 
-(defn- resume
-  "STATE with THREAD's Worker working again when no stopped ask is open. A
-  Worker on an archived thread resumes too, and the thread stays archived."
-  [state thread]
-  (let [t (get-in state [:threads thread])
-        stopped? (some #(and (= thread (:thread %)) (= :open (:state %)) (:stopped %)) (vals (:asks state)))]
-    (cond-> state
-      (and (:worker t) (not stopped?) (not= :cancelling (get-in state [:workers (:worker t) :state])))
-      (assoc-in [:workers (:worker t) :state] :working))))
-
-(defmethod fold* :ask-opened [state {{:keys [id stopped supersedes] :as ask} :data :keys [thread seq at]}]
+(defmethod fold* :ask-opened [state {{:keys [id supersedes] :as ask} :data :keys [thread seq at]}]
   (-> state (bump :asks)
       (set-states :asks supersedes :superseded)
       (assoc-in [:asks id] (assoc ask :thread thread :seq seq :state :open :opened-at (event-ms at)))
       (assoc-in [:threads thread :asks-version] seq)
-      (assoc-in [:threads thread :milestone-seq] seq)
-      (cond-> stopped (assoc-in [:workers (:worker ask) :state] :waiting)
-              (not stopped) (resume thread))))
+      (assoc-in [:threads thread :milestone-seq] seq)))
 
-(defmethod fold* :asks-answered-in-chat [state {{:keys [asks]} :data :keys [thread]}]
-  (-> state (set-states :asks asks :superseded) (resume thread)))
+(defmethod fold* :asks-answered-in-chat [state {{:keys [asks]} :data}]
+  (set-states state :asks asks :superseded))
 
 (defmethod fold* :reply-sent [state {{:keys [id picks dismiss outbox conversation text] :as reply} :data :keys [thread seq]}]
   (-> state (bump :outbox)
@@ -827,8 +836,7 @@
       (set-states :asks (concat (keys picks) (keys (:answers reply)) (keys (:approved reply))) :sent)
       (set-states :asks dismiss :dismissed)
       (assoc-in [:threads thread :asks-version] seq)
-      (update-in [:threads thread] dissoc :draft)
-      (resume thread)))
+      (update-in [:threads thread] dissoc :draft)))
 
 (defn linked
   "The record KIND/ID of STATE with the ids it links, so a reader can hop from
@@ -840,7 +848,7 @@
       :asks (assoc r :reply (some (fn [p] (when (or (contains? (:picks p) id) (contains? (:answers p) id) (contains? (:approved p) id) (contains? (set (:dismiss p)) id)) (:id p)))
                                   (sort-by :seq (vals (:replies state)))))
       :replies (assoc r :asks (vec (sort (distinct (concat (keys (:picks r)) (keys (:answers r)) (keys (:approved r)) (:dismiss r))))))
-      :workers (assoc r :asks (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:asks state)))))
+      :workers (assoc r :state (shown-state state r) :asks (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:asks state)))))
                         :replies (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:replies state))))))
       r)))
 
@@ -864,9 +872,9 @@
   [state thread]
   (let [t (get-in state [:threads thread])
         w (->> (vals (:workers state)) (filter #(= thread (:thread %))) (sort-by (comp id-order :id)) last)
-        ;; A session seen in a turn is working, though a stale ask keeps it :waiting.
-        e (if (and (= :waiting (:state w)) (get-in w [:health :busy])) :working (get execution-of (:state w) :none))]
-    (if (and (:resolved-at t) (not (#{:queued :starting :working :waiting} (:state w)))) :none e)))
+        ;; A session seen in a turn is working, though a stopped ask is open.
+        e (get execution-of (shown-state state w) :none)]
+    (if (and (:resolved-at t) (not (#{:queued :starting :working} (:state w)))) :none e)))
 
 (defn thread-view
   "Thread record T as reads show it, with its derived :execution."
@@ -1007,10 +1015,9 @@
 (defmethod fold* :draft-discarded [state {{:keys [thread]} :data}]
   (update-in state [:threads thread] dissoc :draft))
 
-(defmethod fold* :reply-answered [state {{:keys [id]} :data :keys [thread]}]
+(defmethod fold* :reply-answered [state {{:keys [id]} :data}]
   (let [reply (get-in state [:replies id])]
     (-> state (assoc-in [:replies id :state] :answered)
         (assoc-in [:outbox (:outbox reply) :state] :done)
-        (set-states :asks (concat (keys (:picks reply)) (keys (:answers reply)) (keys (:approved reply))) :answered)
-        (resume thread))))
+        (set-states :asks (concat (keys (:picks reply)) (keys (:answers reply)) (keys (:approved reply))) :answered))))
 

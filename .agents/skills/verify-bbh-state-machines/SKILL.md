@@ -15,9 +15,7 @@ description: Model-check the bbh super Worker, ask and reply lifecycles and the 
 | `OneWorkerPerThread` | A thread has at most one queued or active Worker. | Two Workers act on one thread. |
 | `NoLaunchOnArchived` | No Worker is launched for a thread that stays archived; a start reopens it. | A process starts for work the person put away. |
 | `OpenAskHasWorker` | An open ask has a live Worker. | The person answers into the void. |
-| `WaitingMeansStopped` | A Worker is `:waiting` only while one of its stopped asks is open. | The thread says it waits for the person while it does not. |
-| `StoppedAskWaits` | An open stopped ask keeps its Worker waiting. | The Worker runs on without the answer it stopped for. |
-| `MidTurnNotShownWaiting` | A Worker the last health pass saw in a turn shows `:working`, not `:waiting`. | The Inbox says it waits on the person while it works. |
+| `StoppedAskWaits` | An open stopped ask has its Worker waiting (`model/waiting?`, read from the asks, never stored) or being cancelled. | The Worker runs on without the answer it stopped for. |
 | `TypedAnswerCloses` | Once a health pass saw the person type to a Worker, no ask opened before that prompt is open. | Asks answered in the chat keep the Worker waiting forever. |
 | `AnsweredAfterTaken` | A reply is answered only after its addressee's live session took it from the mailbox. | A Worker marks a reply answered that it never read. |
 | `VisitsWithinCap` | No phase is visited more than `max-visits` times. | A run loops past its retry budget. |

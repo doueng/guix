@@ -178,11 +178,17 @@
            :let [w (->> workers (filter #(= (:id t) (:thread %))) (sort-by (comp model/id-order :id)) last)]
            :when (and (get-in w [:health :busy]) (= :waiting (model/execution state (:id t))))]
        [:mid-turn-shown-waiting (:id t)])
-     (for [w workers :when (= :waiting (:state w))
-           :when (not-any? #(and (:stopped %) (= (:id w) (:worker %))) open)]
-       [:waiting-without-a-stopped-ask (:id w)])
-     (for [a open :when (:stopped a) :when (not (#{:waiting :cancelling} (get-in state [:workers (:worker a) :state])))]
-       [:stopped-ask-but-not-waiting (:id a)])
+     ;; Waiting is read from the asks, so no Worker stores it, and a read shows
+     ;; it exactly while a working Worker outside a turn has a stopped ask open.
+     (for [w workers :when (= :waiting (:state w))] [:waiting-is-stored (:id w)])
+     (for [w workers
+           :let [stopped (boolean (some #(and (:stopped %) (= (:id w) (:worker %))) open))
+                 shown (:state (model/linked state :workers (:id w)))]
+           :when (not= (= :waiting shown) (and stopped (= :working (:state w)) (not (get-in w [:health :busy]))))]
+       [:waiting-shown-disagrees-with-the-asks (:id w) shown])
+     (for [w workers :when (not= (:state w) (:state (model/linked state :workers (:id w))))
+           :when (not= :waiting (:state (model/linked state :workers (:id w))))]
+       [:read-shows-another-state (:id w)])
      (for [w workers :when (and (= :queued (:state w)) (get-in state [:threads (:thread w) :resolved-at]))]
        [:queued-on-an-archived-thread (:id w)])
      (for [t (vals (:threads state)) :when (:worker t) :when (not= (:id t) (get-in state [:workers (:worker t) :thread]))]
@@ -271,7 +277,7 @@
        ;; A prompt the person typed answers every ask the Worker opened before it.
        (when-let [p (and (not refused) (get-in args [:health :prompted-at]))]
          (let [w (get-in after [:workers (:worker args)])]
-           (when (and (#{:working :waiting} (get-in before [:workers (:worker args) :state]))
+           (when (and (= :working (get-in before [:workers (:worker args) :state]))
                       (some #(and (= (:id w) (:worker %)) (= :open (:state %)) (< (:opened-at %) p)) (vals (:asks after))))
              (bad :typed-answer-left-asks-open))))
 
@@ -314,7 +320,7 @@
          (let [a (get-in after [:asks result])
                w (get-in after [:workers (:worker a)])]
            (concat (when (not= [(boolean (:stopped args)) :open] [(:stopped a) (:state a)]) (bad :ask-not-recorded a))
-                   (when (and (:stopped args) (not (#{:waiting :cancelling} (:state w)))) (bad :stopped-ask-does-not-wait (:state w)))
+                   (when (and (:stopped args) (not (model/waiting? after w))) (bad :stopped-ask-does-not-wait (:state w)))
                    (when-not (every? #(= :superseded (get-in after [:asks % :state])) (:supersedes args)) (bad :not-superseded)))))
        :dismiss!
        (when-not refused
@@ -339,7 +345,7 @@
        ;; Steering a Worker whose session ended resumes it first, so it is delivered too.
        :steer!
        (let [w (get-in before [:workers (get-in before [:threads (:thread args) :worker])])
-             deliverable? (and (#{:working :waiting} (:state w)) (:conversation w) (not (model/session-ended? w)))]
+             deliverable? (and (= :working (:state w)) (:conversation w) (not (model/session-ended? w)))]
          (cond refused (when (and deliverable? (not (vector? principal)))
                          (when (not= (if (str/blank? (:text args)) :invalid ::accepted) (:error refused))
                            (bad :steer-refused refused)))
@@ -349,14 +355,14 @@
        ;; or waits to, on an archived thread too.
        :cancel!
        (let [w (get-in before [:workers (get-in before [:threads (:thread args) :worker])])]
-         (when (and refused (#{:queued :starting :working :waiting} (:state w)) (not (str/blank? (:reason args))))
+         (when (and refused (#{:queued :starting :working} (:state w)) (not (str/blank? (:reason args))))
            (bad :cancel-refused refused)))
        :say!
        (let [[handle message] (model/parse-handle (:text args))
              w (get-in before [:workers (get-in before [:threads handle :worker])])
              router (get-in before [:router :router :conversation])]
          (cond (and handle (not (get-in before [:threads handle]))) (when (not= :no-such-thread (:error refused)) (bad :unknown-handle))
-               (and w (#{:working :waiting} (:state w)) (:conversation w))
+               (and w (= :working (:state w)) (:conversation w))
                (when-not (and (= {:thread handle :to (:id w)} result)
                               (some #(and (= (:conversation w) (:conversation %))
                                           (= (format "[%s from %s%s] %s" handle (name (:origin args)) (if (= :voice (:origin args)) ", dictated" "") message) (:text %)))
@@ -416,7 +422,7 @@
                     out (try (store/commit! db state principal cmd)
                              (catch clojure.lang.ExceptionInfo e {:refused (refusal e) :state state}))
                     after (:state out)
-                    launched (into launched (keep #(when (#{:starting :working :waiting} (:state %)) (:id %))) (vals (:workers after)))
+                    launched (into launched (keep #(when (#{:starting :working} (:state %)) (:id %))) (vals (:workers after)))
                     problems (concat (if (:repeat? out)
                                        (concat (when (not= first-result (:result out)) [[:repeat-gave-another-result]])
                                                (when (not= state after) [[:repeat-changed-state]])

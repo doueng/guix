@@ -10,8 +10,8 @@ CONSTANTS NW, Threads, Cap, MaxAsks, MaxReplies, Chat  \* Chat: model turns and 
 Workers == 1..NW
 None == 0
 NoThread == "none"
-Active == {"starting", "working", "waiting", "cancelling"}  \* active-states
-Running == {"starting", "working", "waiting"}
+Active == {"starting", "working", "cancelling"}  \* active-states
+Running == {"starting", "working"}
 Finished == {"done", "failed", "cancelled"}
 AskIds == 1..MaxAsks
 ReplyIds == 1..MaxReplies
@@ -58,7 +58,7 @@ NextReply(r) == replies[r].st = "none" /\ \A q \in ReplyIds : q < r => replies[q
 \* thread-worker: the queued or active Worker of thread t.
 ThreadWorkers(t) == {w \in Workers : wthread[w] = t /\ wstate[w] \in Active \cup {"queued"}}
 \* session-ended?
-Ended(w) == ended[w] /\ wstate[w] \in {"working", "waiting", "cancelling"}
+Ended(w) == ended[w] /\ wstate[w] \in {"working", "cancelling"}
 \* holds-slot?
 SlotWorkers == {w \in Workers : wstate[w] \in Active /\ ~Ended(w) /\ ~resolved[wthread[w]]}
 \* blocked-by
@@ -66,13 +66,8 @@ Blocked(w) == Cardinality(SlotWorkers \ {w}) >= Cap
 OpenAsks(t) == {a \in AskIds : asks[a].st = "open" /\ asks[a].thread = t}
 SetAsks(as, ids, st) == [a \in AskIds |-> IF a \in ids THEN [as[a] EXCEPT !.st = st] ELSE as[a]]
 
-\* resume: wake the thread's Worker when no stopped ask is open.
-Resume(t, as, ws) ==
-  LET w == tworker[t] IN
-  IF /\ w /= None
-     /\ ~\E a \in AskIds : as[a].st = "open" /\ as[a].thread = t /\ as[a].stopped
-     /\ ws[w] /= "cancelling"
-  THEN [ws EXCEPT ![w] = "working"] ELSE ws
+\* waiting?: no event stores it; the asks say it.
+Waiting(w) == wstate[w] = "working" /\ \E a \in AskIds : asks[a].st = "open" /\ asks[a].worker = w /\ asks[a].stopped
 
 \* decide* :start-worker!: clearing refuses a thread whose Worker's session
 \* still runs; otherwise it ends that Worker, whose session ended, as failed
@@ -83,7 +78,7 @@ StartWorker(w, t) ==
   LET olds == ThreadWorkers(t)
       ws == [v \in Workers |-> IF v \in olds THEN "failed" ELSE wstate[v]]
       res == [resolved EXCEPT ![t] = FALSE]
-      slots == {v \in Workers : ws[v] \in Active /\ ~(ended[v] /\ ws[v] \in {"working", "waiting", "cancelling"})
+      slots == {v \in Workers : ws[v] \in Active /\ ~(ended[v] /\ ws[v] \in {"working", "cancelling"})
                                 /\ ~res[wthread[v]]}
   IN
   /\ NextWorker(w)
@@ -147,16 +142,15 @@ Ask(w, a, stopped, sup) ==
   /\ sup \subseteq OpenAsks(t)
   /\ LET as == [SetAsks(asks, sup, "superseded") EXCEPT ![a] =
                    [st |-> "open", worker |-> w, thread |-> t, stopped |-> stopped, typed |-> FALSE]]
-     IN /\ asks' = as
-        /\ wstate' = IF stopped THEN [wstate EXCEPT ![w] = "waiting"] ELSE Resume(t, as, wstate)
-  /\ UNCHANGED <<wthread, launched, tworker, resolved, replies>>
+     IN asks' = as
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, replies>>
 
 \* fold* :reply-sent, from decide* :reply!, :approve!, :dismiss! and :archive!
 ReplySent(t, r, picks, dismiss, then(_)) ==
   LET as == SetAsks(SetAsks(asks, picks, "sent"), dismiss, "dismissed") IN
   /\ replies' = [replies EXCEPT ![r] = [st |-> "sent", thread |-> t, picks |-> picks, to |-> tworker[t], taken |-> FALSE]]
   /\ asks' = as
-  /\ wstate' = then(Resume(t, as, wstate))
+  /\ wstate' = then(wstate)
 
 \* decide* :reply! and :approve! by the person, with the current asks-version
 Reply(t, r, picks, dismiss) ==
@@ -196,15 +190,14 @@ Answered(w, r) ==
   /\ replies[r].st /= "none" /\ replies[r].taken /\ wstate[w] \in Active /\ wthread[w] = t
   /\ replies' = [replies EXCEPT ![r].st = "answered"]
   /\ asks' = as
-  /\ wstate' = Resume(t, as, wstate)
-  /\ UNCHANGED <<wthread, launched, tworker, resolved>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved>>
 
 \* reconcile! on an active Worker: health sees no live session, and decide*
 \* :health! with fold* :health-observed stores it. session-ended? reads that
 \* process, not the classification, so a later pass that names a lost job or a
 \* missing wf run keeps the session ended; only :resume! clears it.
 SessionEnds(w) ==
-  /\ wstate[w] \in {"working", "waiting", "cancelling"} /\ ~ended[w]
+  /\ wstate[w] \in {"working", "cancelling"} /\ ~ended[w]
   /\ ended' = [ended EXCEPT ![w] = TRUE]
   /\ busy' = [busy EXCEPT ![w] = FALSE] /\ hbusy' = [hbusy EXCEPT ![w] = FALSE]
   /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, fresh>>
@@ -213,7 +206,7 @@ SessionEnds(w) ==
 \* the mail wake [mail] is the person typing, so agent.json :prompted-at moves
 \* past every open ask of the Worker.
 TurnStarts(w, typed) ==
-  /\ wstate[w] \in {"working", "waiting"} /\ ~Ended(w) /\ ~busy[w]
+  /\ wstate[w] = "working" /\ ~Ended(w) /\ ~busy[w]
   /\ busy' = [busy EXCEPT ![w] = TRUE]
   /\ IF typed
      THEN /\ asks' = [a \in AskIds |-> IF asks[a].st = "open" /\ asks[a].worker = w
@@ -228,21 +221,19 @@ TurnEnds(w) ==
 
 \* reconcile! on a live Worker: decide* :health! stores what it saw of the turn,
 \* and answered-in-chat with fold* :asks-answered-in-chat supersedes the asks
-\* the person typed over and resumes the Worker.
+\* the person typed over, so the Worker no longer waits on them.
 Health(w) ==
-  LET t == wthread[w]
-      as == [a \in AskIds |-> IF asks[a].st = "open" /\ asks[a].worker = w /\ asks[a].typed
+  LET as == [a \in AskIds |-> IF asks[a].st = "open" /\ asks[a].worker = w /\ asks[a].typed
                               THEN [asks[a] EXCEPT !.st = "superseded"] ELSE asks[a]] IN
-  /\ wstate[w] \in {"working", "waiting"} /\ ~Ended(w)
+  /\ wstate[w] = "working" /\ ~Ended(w)
   /\ hbusy' = [hbusy EXCEPT ![w] = busy[w]]
   /\ fresh' = [fresh EXCEPT ![w] = TRUE]
   /\ asks' = as
-  /\ wstate' = Resume(t, as, wstate)
-  /\ UNCHANGED <<wthread, launched, tworker, resolved, replies, ended, busy>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, replies, ended, busy>>
 
 \* decide* :resume! by the person, fold* :worker-resumed: only with a free slot.
 ResumeWorker(w) ==
-  /\ Ended(w) /\ wstate[w] \in {"working", "waiting"} /\ ~Blocked(w)
+  /\ Ended(w) /\ wstate[w] = "working" /\ ~Blocked(w)
   /\ ended' = [ended EXCEPT ![w] = FALSE]
   /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, chat>>
 
@@ -272,16 +263,11 @@ CapRespected == Cardinality({w \in SlotWorkers : launched[w]}) <= Cap
 OneWorkerPerThread == \A t \in Threads : Cardinality(ThreadWorkers(t)) <= 1
 \* An open ask has a live Worker to read its answer.
 OpenAskHasWorker == \A a \in AskIds : asks[a].st = "open" => wstate[asks[a].worker] \in Active
-\* A Worker shows as waiting only while one of its stopped asks is open.
-WaitingMeansStopped == \A w \in Workers : wstate[w] = "waiting" =>
-  \E a \in AskIds : asks[a].st = "open" /\ asks[a].stopped /\ asks[a].worker = w
-\* An open stopped ask keeps its Worker waiting.
+\* An open stopped ask has its Worker waiting, unless a cancel is on its way.
+\* That a Worker waits only while such an ask is open, and that one seen in a
+\* turn is not shown waiting (shown-state), hold by the definition of Waiting.
 StoppedAskWaits == \A a \in AskIds : asks[a].st = "open" /\ asks[a].stopped =>
-  wstate[asks[a].worker] \in {"waiting", "cancelling"}
-\* execution: a Worker the last health pass saw in a turn shows :working.
-Shown(w) == IF wstate[w] = "waiting" /\ hbusy[w] THEN "working" ELSE wstate[w]
-\* A Worker seen mid-turn is never shown as waiting.
-MidTurnNotShownWaiting == \A w \in Workers : hbusy[w] => Shown(w) /= "waiting"
+  Waiting(asks[a].worker) \/ wstate[asks[a].worker] = "cancelling"
 \* Once a health pass has seen that the person typed to a Worker, no ask they
 \* typed over is still open, so the Worker is not left waiting on it.
 TypedAnswerCloses == \A a \in AskIds :
