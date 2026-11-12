@@ -130,6 +130,51 @@
     {:dir dir :conversations (str (fs/path root "conversations")) :scan-ms 10
      :launch (stub-launch dir (str (fs/path root "workspaces")))}))
 
+(deftest a-deadline-fires-once-across-a-controller-restart
+  (let [{:keys [dir conversations] :as opts} (restartable)
+        clock (atom (System/currentTimeMillis))
+        log (atom [])
+        opts (-> opts (assoc :now #(deref clock) :policy {:notify-delay-seconds 5}
+                             :notify {:show! (fn [n _] (swap! log conj (:summary n)) {}) :close! (fn [_])})
+                 ;; Emacs is down, so no session opens and W1 stays :starting.
+                 (update :launch assoc :emacs-up? (constantly false)
+                         :open! (fn [_] (throw (ex-info "no socket" {:error :emacs})))))
+        c (super/start! opts)
+        fired (fn [c] (mapv (comp (juxt :kind :subject) :data) (filter #(= :timer-fired (:kind %)) (store/events (:db c)))))
+        row (fn [c] (select-keys (first (mapcat :threads (:sections (:ok (call dir {:command :sections}))))) [:section :line]))]
+    (swap! controllers assoc dir c)
+    (try
+      (call dir {:command :thread! :args {:title "slow start"}})
+      (call dir {:command :start-worker! :args {:thread "T1" :workflow :investigation :brief "look" :repo (str (fs/home))}})
+      (is (= :starting (get-in @(:state c) [:workers "W1" :state])))
+      (swap! clock + (* 9 60000))
+      (Thread/sleep 50)
+      (is (= [] (fired c)) "not before the deadline")
+      (super/stop! c)
+      (swap! clock + 61000)
+      (let [c2 (super/start! opts)]
+        (try
+          (is (wait-for #(= 2 (count (fired c2)))) "the restarted controller finds it due from the log")
+          (swap! clock + (* 60 60000))
+          (Thread/sleep 50)
+          (is (= [[:starting "W1"] [:notify [:needs-human "W1"]]] (fired c2)) "once, then the person is told once")
+          (is (= {:section :needs-attention :line "W1 has been starting for 10 minutes and its session has not opened."} (row c2)))
+          (is (= ["T1 needs you: slow start"] @log))
+          (is (= :starting (get-in @(:state c2) [:workers "W1" :state])) "nothing is killed")
+          (testing "a cancel that the Worker does not obey is told the same way"
+            ;; A session that lives and never takes the cancellation.
+            (with-redefs [model/cancel-owed? (constantly true) bbh.inbox/agent (constantly {:pid 1 :start 1})]
+              (call dir {:command :cancel! :args {:thread "T1" :reason "stop"}})
+              (swap! clock + (* 10 60000) 1000)
+              (is (wait-for #(some #{[:cancelling "W1"]} (fired c2))))
+              (Thread/sleep 50)
+              (is (= 1 (count (filter #{[:cancelling "W1"]} (fired c2)))))
+              (is (= :cancelling (get-in @(:state c2) [:workers "W1" :state])))
+              (is (= "W1 was told to stop 10 minutes ago and has not." (:line (row c2))))))
+          (locking (:db c2) (is (= (store/replay (:db c2)) @(:state c2))))
+          (finally (super/stop! c2))))
+      (finally (swap! opened dissoc dir) (swap! controllers dissoc dir)))))
+
 (deftest a-send-the-controller-died-before-recording-is-one-message
   (let [{:keys [dir conversations] :as opts} (restartable)
         c (super/start! opts)

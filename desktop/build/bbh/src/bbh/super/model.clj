@@ -15,7 +15,7 @@
 (def ^:private grants
   {:router #{:thread! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :machine-observed! :finish-worker! :cancel-delivered! :effect-done! :effect-failed!}})
+   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :machine-observed! :finish-worker! :cancel-delivered! :effect-done! :effect-failed! :timer-fired!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, how long a live
@@ -227,6 +227,35 @@
   (some (fn [kind] (let [e (get-in w [:effects kind])]
                      (when (and (not (:done e)) (>= (:tries e 0) effect-tries)) {:kind kind :error (:error e)})))
         (:owes w)))
+
+(def deadlines
+  "How long a Worker may stay in a state, in ms, before the person is told."
+  {:starting 600000 :cancelling 600000})
+
+(defn overdue
+  "What to tell the person when Worker W has stayed past the deadline of the
+  state it is in, or nil."
+  [w]
+  (when (and (:overdue w) (= (:overdue w) (:state w)))
+    (let [minutes (quot (deadlines (:state w)) 60000)]
+      (case (:state w)
+        :starting (format "%s has been starting for %d minutes and its session has not opened." (:id w) minutes)
+        :cancelling (format "%s was told to stop %d minutes ago and has not." (:id w) minutes)))))
+
+(defn due
+  "The timer commands due in STATE at NOW, epoch ms, each under an id that is a
+  function of the timer, so it commits once."
+  [state now]
+  (vec (for [w (sort-by (comp id-order :id) (vals (:workers state)))
+             :let [limit (deadlines (:state w))]
+             :when (and limit (:state-at w) (not (overdue w)) (>= (- now (:state-at w)) limit))]
+         {:id (str "timer-" (name (:state w)) "-" (:id w)) :command :timer-fired! :args {:kind (:state w) :subject (:id w)}})))
+
+(defmethod decide* :timer-fired! [state {{:keys [kind subject since] :as args} :args}]
+  (let [w (get-in state [:workers subject])
+        moot? (if (= :notify kind) (= since (get-in state [:notified subject])) (not= kind (:state w)))]
+    {:events (if moot? [] [{:kind :timer-fired :thread (:thread w) :data args}])
+     :result subject}))
 
 (defn- owed-effect!
   "The finished Worker that owes effect KIND, or a refusal."
@@ -802,10 +831,15 @@
 (defmethod fold* :snapshot [_ {{:keys [state]} :data}] state)
 
 (defn fold
-  "STATE after EVENT, with the thread it concerns stamped :updated-at."
-  [state {:keys [thread at] :as event}]
-  (let [state (fold* state event)]
+  "STATE after EVENT, with the thread it concerns stamped :updated-at and the
+  Worker it moved to another state stamped :state-at, which timers count from."
+  [before {:keys [thread at data] :as event}]
+  (let [state (fold* before event)
+        w (or (:id data) (:worker data))
+        moved? (and (not= :snapshot (:kind event)) (get-in state [:workers w])
+                    (not= (get-in before [:workers w :state]) (get-in state [:workers w :state])))]
     (cond-> state
+      moved? (assoc-in [:workers w :state-at] (event-ms at))
       (get-in state [:threads thread]) (assoc-in [:threads thread :updated-at] at))))
 
 (defmethod fold* :machine-observed [state _] state)
@@ -884,6 +918,11 @@
     outbox (-> (bump :outbox)
                (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
                                            :state :pending :message nil :delivery :cancel}))))
+
+(defmethod fold* :timer-fired [state {{:keys [kind subject since]} :data}]
+  (if (= :notify kind)
+    (assoc-in state [:notified subject] since)
+    (assoc-in state [:workers subject :overdue] kind)))
 
 (defmethod fold* :health-observed [state {{:keys [worker health]} :data}]
   (cond-> state worker (assoc-in [:workers worker :health] health)))
@@ -981,7 +1020,7 @@
           (seq open) :waiting
           resolved-at :archived
           (and (or (= :failed execution) (#{:needs-human :session-ended} (get-in state [:workers (:worker (get-in state [:threads id])) :health :classification]))) (empty? open)) :needs-attention
-          (some stuck-effect (filter #(= id (:thread %)) (vals (:workers state)))) :needs-attention
+          (some (some-fn stuck-effect overdue) (filter #(= id (:thread %)) (vals (:workers state)))) :needs-attention
           (some #(= :sent (:state %)) replies) :sent
           (unread? t) :new
           (#{:working :queued} execution) :working
@@ -1018,8 +1057,10 @@
                       :line (or (:text ask)
                                 (get-in state [:workers (:worker t) :health :problem])
                                 (when (= :failed (:execution t)) (get-in state [:workers (peek (:history t)) :reason]))
-                                (some (fn [w] (when-let [{:keys [kind error]} (and (= (:id t) (:thread w)) (stuck-effect w))]
-                                                (format "%s finished, but its %s failed %d times: %s" (:id w) (name kind) effect-tries error)))
+                                (some (fn [w] (when (= (:id t) (:thread w))
+                                                (if-let [{:keys [kind error]} (stuck-effect w)]
+                                                  (format "%s finished, but its %s failed %d times: %s" (:id w) (name kind) effect-tries error)
+                                                  (overdue w))))
                                       (sort-by (comp - id-order :id) (vals (:workers state))))
                                 (:summary t))
                       :came-back (boolean (and (:resolved-at t) (> (:milestone-seq t) (:resolved-at t))))

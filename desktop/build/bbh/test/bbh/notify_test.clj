@@ -1,5 +1,6 @@
 (ns bbh.notify-test
-  (:require [bbh.super.notify :as notify]
+  (:require [bbh.super.model :as model]
+            [bbh.super.notify :as notify]
             [clojure.edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
@@ -11,49 +12,72 @@
              "W2" {:id "W2" :thread "T2" :state :working :started-at 0 :health {:classification :running}}}
    :asks {}})
 
-(defn- ask [state id thread text & labels]
-  (assoc-in state [:asks id] {:id id :thread thread :state :open :text text :kind :question
-                              :options (vec (map-indexed (fn [i l] {:id (str i) :label l}) labels))}))
+(defn- ask
+  "STATE with an ask open since epoch ms 0, or since AT when the id is [id at]."
+  [state id thread text & labels]
+  (let [[id at] (if (vector? id) id [id 0])]
+    (assoc-in state [:asks id] {:id id :thread thread :state :open :text text :kind :question :opened-at at
+                                :options (vec (map-indexed (fn [i l] {:id (str i) :label l}) labels))})))
 
 (defn- answer [state id] (assoc-in state [:asks id :state] :sent))
 
-(deftest an-ask-arrives-once
-  (let [after (ask base "a1" "T1" "Bind it to Cmd+W?" "Yes" "No")]
-    (is (= #{[:ask "a1"]} (set (keys (notify/arrivals base after 0 {})))))
-    (testing "a later commit with the ask still open brings nothing new"
-      (is (empty? (notify/arrivals after (assoc-in after [:threads "T1" :summary] "x") 0 {}))))
-    (testing "a re-ask is a new ask id, so it arrives again"
-      (is (= #{[:ask "a2"]} (set (keys (notify/arrivals after (ask (answer after "a1") "a2" "T1" "Cmd+Q then?") 0 {}))))))))
+(defn- told
+  "STATE after ITEMS, as tick! returned them, were recorded as notified."
+  [state items]
+  (reduce (fn [s [k item]] (model/fold s {:kind :timer-fired :data (:args (notify/timer k (:at item)))})) state items))
+
+(deftest an-ask-is-unnotified-until-it-is-recorded
+  (let [after (ask base "a1" "T1" "Bind it to Cmd+W?" "Yes" "No")
+        items (notify/unnotified after {})]
+    (is (= #{[:ask "a1"]} (set (keys items))))
+    (is (= "timer-notify-ask-a1-0" (:id (notify/timer [:ask "a1"] 0))) "the record's id is a function of the item")
+    (testing "once recorded, the ask still open brings nothing new"
+      (is (empty? (notify/unnotified (told after items) {}))))
+    (testing "a re-ask is a new ask id, so it counts again"
+      (is (= #{[:ask "a2"]} (set (keys (notify/unnotified (ask (answer (told after items) "a1") "a2" "T1" "Cmd+Q then?") {}))))))
+    (testing "an item whose time the log does not say is left out"
+      (is (empty? (notify/unnotified (update-in after [:asks "a1"] dissoc :opened-at) {}))))))
 
 (deftest needs-human-is-critical-and-session-ended-is-not
-  (let [sick (assoc-in base [:workers "W1" :health] {:classification :needs-human :problem "Its REPL does not answer."})
-        both (assoc-in sick [:workers "W2" :health] {:classification :session-ended :problem "Its session ended."})
-        a (notify/arrivals base both 0 {})]
+  (let [sick (assoc-in base [:workers "W1" :health] {:classification :needs-human :problem "Its REPL does not answer." :since 5})
+        both (assoc-in sick [:workers "W2" :health] {:classification :session-ended :problem "Its session ended." :since 6})
+        a (notify/unnotified both {})]
     (is (= :critical (:urgency (a [:needs-human "W1"]))))
     (is (= "Its REPL does not answer." (:text (a [:needs-human "W1"]))))
-    (is (= :normal (:urgency (a [:session-ended "W2"])))))
+    (is (= :normal (:urgency (a [:session-ended "W2"]))))
+    (testing "a Worker that needs help again, at a later time, counts again"
+      (let [s (told both a)]
+        (is (empty? (notify/unnotified s {})))
+        (is (= [[:needs-human "W1"]] (keys (notify/unnotified (assoc-in s [:workers "W1" :health :since] 90) {})))))))
   (testing "a Worker that failed on an open thread needs you; a resolved thread does not"
     (let [failed (-> base (assoc-in [:workers "W1" :state] :failed) (assoc-in [:workers "W1" :reason] "Launch failed")
                      (assoc-in [:threads "T1" :worker] nil) (assoc-in [:threads "T1" :history] ["W1"]))]
       (is (contains? (notify/waiting failed) [:needs-human "W1"]))
-      (is (not (contains? (notify/waiting (assoc-in failed [:threads "T1" :resolved-at] 9)) [:needs-human "W1"]))))))
+      (is (not (contains? (notify/waiting (assoc-in failed [:threads "T1" :resolved-at] 9)) [:needs-human "W1"])))))
+  (testing "a Worker past the deadline of its state needs you, and says why"
+    (let [late (update-in base [:workers "W1"] assoc :state :starting :state-at 7 :overdue :starting :health {:classification :starting})]
+      (is (= {:urgency :critical :at 7 :text "W1 has been starting for 10 minutes and its session has not opened."}
+             (select-keys ((notify/waiting late) [:needs-human "W1"]) [:urgency :at :text])))
+      (is (empty? (notify/waiting (assoc-in late [:workers "W1" :state] :working))) "leaving the state clears it"))))
 
-(deftest a-long-finish-arrives-a-short-one-does-not
-  (let [done (fn [s] (-> s (assoc-in [:workers "W1" :state] :done) (assoc-in [:threads "T1" :milestone-seq] 4)
-                         (assoc-in [:threads "T1" :summary] "W1 landed abc12345")))]
-    (is (= {[:finished "W1"] {:thread "T1" :worker "W1" :urgency :normal :text "W1 landed abc12345"}}
-           (notify/arrivals base (done base) (* 11 60000) {})))
-    (is (empty? (notify/arrivals base (done base) (* 9 60000) {})))
-    (is (seq (notify/arrivals base (done base) (* 2 60000) {:notify-long-minutes 1})))
+(deftest a-long-finish-counts-a-short-one-does-not
+  (let [done (fn [s minutes] (-> s (update-in [:workers "W1"] assoc :state :done :state-at (* minutes 60000))
+                                 (assoc-in [:threads "T1" :milestone-seq] 4)
+                                 (assoc-in [:threads "T1" :summary] "W1 landed abc12345")))]
+    (is (= {[:finished "W1"] {:thread "T1" :worker "W1" :urgency :normal :text "W1 landed abc12345" :at (* 11 60000)}}
+           (notify/unnotified (done base 11) {})))
+    (is (empty? (notify/unnotified (done base 9) {})))
+    (is (seq (notify/unnotified (done base 2) {:notify-long-minutes 1})))
     (testing "it stays only while its thread is unread"
-      (let [p (notify/arrivals base (done base) (* 11 60000) {})]
-        (is (= "T1 finished: Alt+W closes windows" (:summary (first (notify/plan p (done base))))))
-        (is (empty? (notify/plan p (assoc-in (done base) [:threads "T1" :read-seq] 4))))))))
+      (let [p (notify/unnotified (done base 11) {})]
+        (is (= "T1 finished: Alt+W closes windows" (:summary (first (notify/plan p (done base 11))))))
+        (is (empty? (notify/plan p (assoc-in (done base 11) [:threads "T1" :read-seq] 4))))
+        (is (empty? (notify/unnotified (assoc-in (done base 11) [:threads "T1" :read-seq] 4) {})))))))
 
 (deftest plan-one-thread
   (let [s (-> base (ask "a1" "T1" "Bind it to Cmd+W?" "Yes" "No" "Cmd+Q" "Leave it")
               (ask "a2" "T1" "Also in Emacs?"))
-        [n & more] (notify/plan (notify/arrivals base s 0 {}) s)]
+        [n & more] (notify/plan (notify/unnotified s {}) s)]
     (is (nil? more))
     (is (= {:key "T1" :thread "T1" :ask "a1" :urgency :normal :keys #{[:ask "a1"] [:ask "a2"]}
             :summary "T1 needs you: Alt+W closes windows"
@@ -62,13 +86,13 @@
 
 (deftest plan-drops-what-was-answered-meanwhile
   (let [s (ask base "a1" "T1" "Bind it to Cmd+W?" "Yes")
-        pending (notify/arrivals base s 0 {})]
+        pending (notify/unnotified s {})]
     (is (empty? (notify/plan pending (answer s "a1"))))))
 
 (deftest plan-coalesces-threads-into-one
   (let [s (-> base (ask "a1" "T1" "Bind it to Cmd+W?" "Yes" "No")
-              (assoc-in [:workers "W2" :health] {:classification :needs-human :problem "Job j1 is lost."}))
-        [n & more] (notify/plan (notify/arrivals base s 0 {}) s)]
+              (assoc-in [:workers "W2" :health] {:classification :needs-human :problem "Job j1 is lost." :since 0}))
+        [n & more] (notify/plan (notify/unnotified s {}) s)]
     (is (nil? more))
     (is (= :burst (:key n)))
     (is (= :critical (:urgency n)))
@@ -81,9 +105,10 @@
         shown {"T1" {:keys #{[:ask "a1"]}}}]
     (is (= [] (notify/stale shown s)))
     (is (= ["T1"] (notify/stale shown (answer s "a1")))))
-  (is (not (notify/due? {} 10 5)))
-  (is (not (notify/due? {[:ask "a"] {:at 8}} 10 5)))
-  (is (notify/due? {[:ask "a"] {:at 5} [:ask "b"] {:at 9}} 10 5)))
+  (let [s (-> base (ask ["a" 5] "T1" "One?") (ask ["b" 9] "T1" "Two?"))]
+    (is (empty? (notify/due base 10000 {})))
+    (is (empty? (notify/due s 5004 {})) "not before the oldest has waited the delay")
+    (is (= #{[:ask "a"] [:ask "b"]} (set (keys (notify/due s 5005 {})))) "then all that wait go together")))
 
 (deftest notify-send-args
   (is (= ["notify-send" "--app-name=bbh" "--urgency=critical" "--expire-time=3000" "--print-id"
@@ -108,8 +133,7 @@
         (let [log (atom [])
               n (notify/new-notifier {:show! (fn [n _] (swap! log conj (:key n)) {}) :close! (fn [_])})
               s (ask base "a1" "T1" "Bind it?")]
-          (notify/observe! n base s 0 {})
-          (notify/tick! n s 10000 (constantly {:do-not-disturb true}))
+          (notify/tick! n s 10000 {:do-not-disturb true})
           (is (= ["T1"] @log)))))
     (babashka.fs/delete-tree dir)))
 
@@ -122,10 +146,9 @@
         n1 (notify/new-notifier ((fn [log] {:show! (fn [n _] (swap! log conj (:key n)) {:id (doto (promise) (deliver (count @log)))})
                                             :close! (fn [_])}) log1)
                                 file)]
-    (notify/observe! n1 base (ask base "a1" "T1" "Bind it?" "Yes") 0 {})
-    (notify/tick! n1 (ask base "a1" "T1" "Bind it?" "Yes") 10000 (constantly {}))
-    (notify/observe! n1 base (ask base "a2" "T2" "Dark theme?") 20000 {})
-    (notify/tick! n1 s 30000 (constantly {}))
+    (let [s1 (ask base "a1" "T1" "Bind it?" "Yes")
+          s1 (told s1 (notify/tick! n1 s1 10000 {}))]
+      (notify/tick! n1 (ask s1 ["a2" 20000] "T2" "Dark theme?") 30000 {}))
     (is (= ["T1" "T2"] @log1))
     (testing "after a restart, what still waits is shown again in place and the rest closed"
       (let [log2 (atom [])
@@ -134,7 +157,7 @@
         (is (= #{[:show "T1" 1] [:close 2]} (set @log2)))
         (is (= ["T1"] (keys @(:shown n2))))
         (testing "and answering it later closes it under its id"
-          (notify/tick! n2 (-> s (answer "a1") (answer "a2")) 40000 (constantly {}))
+          (notify/tick! n2 (-> s (answer "a1") (answer "a2")) 40000 {})
           (is (= [:close 40] (last @log2))))))
     (babashka.fs/delete file)))
 
@@ -153,36 +176,33 @@
   (let [shown (atom [])
         n (notify/new-notifier {:show! (fn [n _] (swap! shown conj (:expire-ms n)) {}) :close! (fn [_])})
         s1 (ask base "a1" "T1" "Bind it?")]
-    (notify/observe! n base s1 0 {})
-    (notify/tick! n s1 10000 (constantly {:notify-delay-seconds 0 :notify-expire-ms 2500}))
-    (is (= [2500] @shown))
-    (notify/observe! n s1 (ask s1 "a2" "T2" "And?") 20000 {})
-    (notify/tick! n (ask s1 "a2" "T2" "And?") 30000 (constantly {}))
+    (let [s2 (told s1 (notify/tick! n s1 10000 {:notify-delay-seconds 0 :notify-expire-ms 2500}))]
+      (is (= [2500] @shown))
+      (notify/tick! n (ask s2 ["a2" 20000] "T2" "And?") 30000 {}))
     (is (= [2500 5000] @shown) "5 s when policy.edn says nothing")))
 
 (deftest tick-coalesces-replaces-and-closes
   (let [log (atom [])
         n (notify/new-notifier {:show! (fn [n prev] (swap! log conj [:show (:key n) (:summary n) prev]) {:h (count @log)})
                                 :close! (fn [shown] (swap! log conj [:close (:key shown)]))})
-        s1 (ask base "a1" "T1" "Bind it?" "Yes")
-        s2 (ask s1 "a2" "T1" "Also Emacs?")
-        policy (constantly {:notify-delay-seconds 5})]
-    (notify/observe! n base s1 1000 {})
-    (notify/observe! n s1 s2 3000 {})
-    (notify/tick! n s2 4000 policy)
+        s2 (-> base (ask ["a1" 1000] "T1" "Bind it?" "Yes") (ask ["a2" 3000] "T1" "Also Emacs?"))
+        policy {:notify-delay-seconds 5}]
+    (is (empty? (notify/tick! n s2 4000 policy)))
     (is (= [] @log) "nothing before the delay")
-    (notify/tick! n s2 6000 policy)
-    (is (= [[:show "T1" "T1 needs you: Alt+W closes windows" nil]] @log) "two asks, one notification")
-    (let [s3 (ask s2 "a3" "T1" "And Vim?")]
-      (notify/observe! n s2 s3 7000 {})
-      (notify/tick! n s3 12000 policy)
-      (is (= [:show "T1" "T1 needs you: Alt+W closes windows" {:h 1}] (last @log)) "replaces the thread's notification")
-      (is (= #{[:ask "a1"] [:ask "a2"] [:ask "a3"]} (get-in @(:shown n) ["T1" :keys])) "and keeps the asks still open")
-      (notify/tick! n (-> s3 (answer "a1") (answer "a2") (answer "a3")) 12500 policy)
-      (is (= [:close "T1"] (last @log)) "closed once nothing waits"))
-    (testing "do-not-disturb drops what is due"
+    (let [due (notify/tick! n s2 6000 policy)
+          s2 (told s2 due)]
+      (is (= #{[:ask "a1"] [:ask "a2"]} (set (keys due))) "it returns what it showed, to be recorded")
+      (is (= [[:show "T1" "T1 needs you: Alt+W closes windows" nil]] @log) "two asks, one notification")
+      (notify/tick! n s2 60000 policy)
+      (is (= 1 (count @log)) "once recorded, a later pass shows nothing")
+      (let [s3 (ask s2 ["a3" 7000] "T1" "And Vim?")]
+        (notify/tick! n s3 12000 policy)
+        (is (= [:show "T1" "T1 needs you: Alt+W closes windows" {:h 1}] (last @log)) "replaces the thread's notification")
+        (is (= #{[:ask "a1"] [:ask "a2"] [:ask "a3"]} (get-in @(:shown n) ["T1" :keys])) "and keeps the asks still open")
+        (notify/tick! n (-> s3 (answer "a1") (answer "a2") (answer "a3")) 12500 policy)
+        (is (= [:close "T1"] (last @log)) "closed once nothing waits")))
+    (testing "do-not-disturb shows nothing, and what was due is still returned to be recorded"
       (reset! log [])
-      (notify/observe! n base s1 20000 {})
-      (notify/tick! n s1 30000 (constantly {:do-not-disturb true}))
-      (is (= [] @log))
-      (is (empty? @(:pending n))))))
+      (let [s (ask base ["a9" 20000] "T1" "Bind it?" "Yes")]
+        (is (= [[:ask "a9"]] (keys (notify/tick! n s 30000 {:do-not-disturb true}))))
+        (is (= [] @log))))))

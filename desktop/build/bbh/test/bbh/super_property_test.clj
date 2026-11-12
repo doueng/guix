@@ -428,6 +428,23 @@
                  (when (not= (whole) (whole)) [[:fold-is-not-deterministic]])
                  (when (not= state reopened) [[:restart-differs]])))))
 
+(defn- fire-timers
+  "Commit every timer due long after the last event. Returns [problems state]:
+  each fires once, a second pass finds none due, firing moves no Worker to
+  another state, and a Worker is overdue exactly when it had a deadline."
+  [db state]
+  (let [far (+ (System/currentTimeMillis) (* 24 3600000))
+        due (model/due state far)
+        after (reduce (fn [s cmd] (:state (store/commit! db s :controller cmd))) state due)
+        again (reduce (fn [s cmd] (:state (store/commit! db s :controller cmd))) after due)]
+    [(concat (when (seq (model/due after far)) [[:timer-due-after-firing]])
+             (when (not= after again) [[:timer-fired-twice]])
+             (when (not= (update-vals (:workers state) :state) (update-vals (:workers after) :state)) [[:timer-moved-a-worker]])
+             (for [w (vals (:workers after))
+                   :when (not= (boolean (model/overdue w)) (boolean (model/deadlines (:state w))))]
+               [:overdue-disagrees-with-its-deadline (:id w) (:state w)]))
+     after]))
+
 (defn- run-steps
   "Commit the commands random CHOICES make, one at a time, on a store with a
   Worker cap of CAP, taking a snapshot before step SNAP-AT. A choice can repeat
@@ -441,7 +458,8 @@
       (loop [state (store/replay db) [ch & more] (concat preamble choices) i 0 accepted [] launched #{}]
         (when (= i snap-at) (store/snapshot! db state))
         (if (nil? ch)
-          (when-let [problems (history-problems db path state)] {:problems (vec problems)})
+          (let [[late state] (fire-timers db state)]
+            (when-let [problems (seq (concat late (history-problems db path state)))] {:problems (vec problems)}))
           (let [[step first-result] (if (= :repeat (pick kinds (first ch)))
                                       (pick accepted (second ch))
                                       [(command state cap i ch)])]

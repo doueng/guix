@@ -50,27 +50,22 @@
          (catch java.io.IOException _ (fs/delete-if-exists f)))))
 
 (defn- shown
-  "STATE without what no view shows: when each health was observed."
+  "STATE without what no view shows: when each health was observed and what
+  the person was notified of."
   [state]
-  (update state :workers update-vals #(cond-> % (:health %) (update :health dissoc :at :since))))
-
-(declare policy)
+  (update (dissoc state :notified) :workers update-vals #(cond-> % (:health %) (update :health dissoc :at :since))))
 
 (defn- run!
   "Commit COMMAND for PRINCIPAL on controller C. Serialized: the controller is
   the single writer. A commit that changed what the Inbox views show reloads
-  them; a health pass that found nothing new does not. What started waiting
-  on the person goes to the notifier."
-  [{:keys [db state dir notifier] :as c} principal command]
+  them; a health pass that found nothing new does not."
+  [{:keys [db state dir] :as c} principal command]
   (let [[before r] (locking db
                      (let [before @state
                            r (store/commit! db before principal command)]
                        (reset! state (:state r))
                        [before r]))]
     (when-not (or (:repeat? r) (= (shown before) (shown (:state r)))) (notify-views! dir))
-    (when (and notifier (not (identical? before (:state r))))
-      (try (notify/observe! notifier before (:state r) (System/currentTimeMillis) (policy c))
-           (catch Exception e (binding [*out* *err*] (println "bbh super: notifying failed:" (ex-message e))))))
     r))
 
 ;; ---- Workers: a record first, then the workspace, the wf run and the buffer --
@@ -762,10 +757,16 @@
                 (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
         nil)))))
 
-(defn- notify-tick!
-  "Show or close desktop notifications on C's current state, once a pass."
-  [c]
-  (some-> (:notifier c) (notify/tick! @(:state c) (System/currentTimeMillis) #(policy c))))
+(defn- fire-timers!
+  "One pass over what is due on C's state by its clock: each Worker deadline is
+  recorded, and what waits on the person is notified and then recorded, so a
+  controller that dies in between shows it again and never loses it."
+  [{:keys [state notifier now] :as c}]
+  (let [now (now)]
+    (doseq [cmd (model/due @state now)] (run! c :controller cmd))
+    (when notifier
+      (doseq [[k item] (notify/tick! notifier @state now (policy c))]
+        (run! c :controller (notify/timer k (:at item)))))))
 
 (defn- serve-web!
   "Serve the website from controller C with WEB's options for `bbh.web/serve!`.
@@ -785,7 +786,7 @@
   and run the dispatcher every SCAN-MS. Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router web sessions reap-grace-ms notify] :or {scan-ms 500 health-ms 120000}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router web sessions reap-grace-ms notify now] :or {scan-ms 500 health-ms 120000 now #(System/currentTimeMillis)}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -805,7 +806,7 @@
                           launch)
            :policy policy
            :sessions (merge session-io sessions) :machine (atom nil) :stale-since (atom {}) :was-active (atom #{}) :last-machine (atom 0) :reap-grace-ms reap-grace-ms
-           :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
+           :boot-at (System/currentTimeMillis) :now now :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
            :db db :state (atom (store/replay db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
            :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :web (atom nil)
            ;; NOTIFY, effects such as notify/desktop, turns desktop notifications on.
@@ -840,7 +841,7 @@
                           (try (observe-machine! c)
                                (catch Exception e (binding [*out* *err*] (println "bbh super: observing sessions failed:" (ex-message e))))))
                         (observe-jobs! c) (dispatch! c) (watch-ended! c)
-                        (notify-tick! c)
+                        (fire-timers! c)
                            (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))
       (.setDaemon true) (.start)))

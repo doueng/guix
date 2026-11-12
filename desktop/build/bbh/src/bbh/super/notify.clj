@@ -21,44 +21,48 @@
 
 (defn waiting
   "Everything in STATE that waits on the person now, by key: [:ask id],
-  [:needs-human worker] (critical) and [:session-ended worker]."
+  [:needs-human worker] (critical) and [:session-ended worker]. Each has :at,
+  the epoch ms it began to wait, when the log says."
   [state]
   (merge
    (into {} (for [a (vals (:asks state)) :when (= :open (:state a))]
               [[:ask (:id a)] {:thread (:thread a) :ask (:id a) :text (:text a) :urgency :normal
-                               :options (mapv :label (:options a))}]))
+                               :options (mapv :label (:options a)) :at (:opened-at a)}]))
    (into {} (for [w (vals (:workers state))
                   :let [t (get-in state [:threads (:thread w)])
                         latest? (= (:id w) (or (:worker t) (peek (:history t))))
-                        c (get-in w [:health :classification])
-                        kind (cond (and (model/active-states (:state w)) (= :needs-human c)) :needs-human
-                                   (and (model/active-states (:state w)) (= :session-ended c)) :session-ended
+                        late (model/overdue w)
+                        by-health (when (model/active-states (:state w))
+                                    (#{:needs-human :session-ended} (get-in w [:health :classification])))
+                        kind (cond by-health by-health
+                                   late :needs-human
                                    (and (= :failed (:state w)) latest? (not (:resolved-at t))) :needs-human)]
                   :when kind]
               [[kind (:id w)] {:thread (:thread w) :worker (:id w)
                                :urgency (if (= :needs-human kind) :critical :normal)
-                               :text (or (get-in w [:health :problem]) (:reason w)
+                               :at (if by-health (get-in w [:health :since]) (:state-at w))
+                               :text (or (when by-health (get-in w [:health :problem])) late (:reason w)
                                          (if (= :needs-human kind) "It needs your help." "Its session ended."))}]))))
 
 (defn- finished
-  "The Workers that finished :done between BEFORE and AFTER after running at
-  least LONG-MS by NOW, as [:finished worker] items."
-  [before after now long-ms]
-  (into {} (for [w (vals (:workers after))
-                 :when (and (= :done (:state w)) (not= :done (get-in before [:workers (:id w) :state]))
-                            (:started-at w) (>= (- now (:started-at w)) long-ms))]
-             [[:finished (:id w)] {:thread (:thread w) :worker (:id w) :urgency :normal
-                                   :text (or (get-in after [:threads (:thread w) :summary]) (str (:id w) " finished."))}])))
+  "The Workers of STATE that ended :done after running at least LONG-MS and
+  whose thread is still unread, as [:finished worker] items."
+  [state long-ms]
+  (into {} (for [w (vals (:workers state))
+                 :when (and (= :done (:state w)) (:started-at w) (:state-at w) (>= (- (:state-at w) (:started-at w)) long-ms)
+                            (some-> (get-in state [:threads (:thread w)]) model/unread?))]
+             [[:finished (:id w)] {:thread (:thread w) :worker (:id w) :urgency :normal :at (:state-at w)
+                                   :text (or (get-in state [:threads (:thread w) :summary]) (str (:id w) " finished."))}])))
 
-(defn arrivals
-  "The items that started waiting between controller states BEFORE and AFTER
-  at NOW, under POLICY: keys new in `waiting`, so a re-ask (a new ask id)
-  arrives again, and long finishes."
-  [before after now policy]
-  (let [was (waiting before)
-        long-ms (* 60000 (:notify-long-minutes (merge default-policy policy)))]
-    (merge (into {} (remove (comp was key)) (waiting after))
-           (finished before after now long-ms))))
+(defn unnotified
+  "The items of STATE the person has not been told of, under POLICY: what
+  waits, and long finishes, that :notified does not hold at the time each
+  began. So a re-ask (a new ask id) or a Worker that needs help again counts
+  again. An item whose time the log does not say is left out."
+  [state policy]
+  (let [long-ms (* 60000 (:notify-long-minutes (merge default-policy policy)))]
+    (into {} (filter (fn [[k {:keys [at]}]] (and at (not= at (get-in state [:notified k])))))
+          (merge (waiting state) (finished state long-ms)))))
 
 (defn current?
   "Whether item KEY still waits on the person in STATE: its key is still
@@ -117,10 +121,19 @@
                :when (not-any? #(current? state now-waiting % (get items %)) keys)]
            k))))
 
-(defn due?
-  "Whether PENDING, items with :at, is due at NOW: its oldest is DELAY-MS old."
-  [pending now delay-ms]
-  (boolean (when (seq pending) (>= (- now (apply min (map (comp :at val) pending))) delay-ms))))
+(defn due
+  "The items of STATE to notify at NOW under POLICY: all the unnotified ones
+  once the oldest has waited :notify-delay-seconds, so a burst is one
+  notification."
+  [state now policy]
+  (let [pending (unnotified state policy)
+        delay-ms (* 1000 (:notify-delay-seconds (merge default-policy policy)))]
+    (if (and (seq pending) (>= (- now (apply min (map (comp :at val) pending))) delay-ms)) pending {})))
+
+(defn timer
+  "The command that records item KEY, due since AT, as notified."
+  [[kind id :as key] at]
+  {:id (str "timer-notify-" (name kind) "-" id "-" at) :command :timer-fired! :args {:kind :notify :subject key :since at}})
 
 (defn notify-send-args
   "notify-send's argv for notification N, replacing REPLACE-ID when given. It
@@ -166,7 +179,7 @@
   there, so a restarted controller can `resume!` it."
   ([effects] (new-notifier effects nil))
   ([effects file]
-   {:effects effects :file file :pending (atom {}) :shown (atom {}) :seen (atom nil)}))
+   {:effects effects :file file :shown (atom {}) :seen (atom nil)}))
 
 (defn- shown-id [entry]
   (some-> entry :handle :id (deref 2000 nil)))
@@ -200,44 +213,37 @@
   [{:keys [shown]}]
   (doseq [entry (vals @shown)] (some-> entry :handle :proc p/destroy)))
 
-(defn observe!
-  "Add what started waiting between BEFORE and AFTER to NOTIFIER's pending."
-  [{:keys [pending]} before after now policy]
-  (let [new (arrivals before after now policy)]
-    (when (seq new)
-      (swap! pending #(merge (update-vals new (fn [item] (assoc item :at now))) %)))))
-
 (defn tick!
-  "Once a dispatcher pass: when pending is due, show its plan on STATE, or drop
-  it under :do-not-disturb; when STATE changed, close shown notifications that
-  no longer wait. POLICY is a thunk, read only when something is due; the
-  Inbox key's overrides win over it."
-  [{:keys [effects pending shown seen] :as notifier} state now policy]
-  (when (and (seq @pending) (due? @pending now (* 1000 (:notify-delay-seconds (merge default-policy (policy))))))
-    (let [due @pending
-          {dnd :do-not-disturb expire-ms :notify-expire-ms} (merge default-policy (policy) (overrides))
-          threads (set (map :thread (vals due)))
-          ;; A thread's notification is replaced, so it keeps what it showed that still waits.
-          p (merge (into {} (comp (filter #(threads (key %))) (mapcat (comp :items val))) @shown) due)]
-      (swap! pending #(apply dissoc % (keys due)))
-      (when-not dnd
-        (doseq [n (map #(assoc % :expire-ms expire-ms) (plan p state))]
-          ;; A burst stands for its threads; their own notifications go.
-          (when (= :burst (:key n))
-            (doseq [t (distinct (map :thread (vals p))) :when (@shown t)]
-              ((:close! effects) (@shown t))
-              (swap! shown dissoc t)))
-          (let [prev (@shown (:key n))
-                handle ((:show! effects) n (:handle prev))]
-            (swap! shown assoc (:key n) (assoc n :handle handle :items (select-keys p (:keys n))))))
-        (save! notifier))))
-  (when-not (identical? state @seen)
-    (reset! seen state)
-    (when-let [gone (seq (stale @shown state))]
-      (doseq [k gone]
-        ((:close! effects) (@shown k))
-        (swap! shown dissoc k))
-      (save! notifier))))
+  "Once a dispatcher pass: show the plan for what is due on STATE at NOW, or
+  nothing under :do-not-disturb; when STATE changed, close shown notifications
+  that no longer wait. The Inbox key's overrides win over POLICY. Returns the
+  due items, for the caller to record as notified."
+  [{:keys [effects shown seen] :as notifier} state now policy]
+  (let [due (due state now policy)]
+    (when (seq due)
+      (let [{dnd :do-not-disturb expire-ms :notify-expire-ms} (merge default-policy policy (overrides))
+            threads (set (map :thread (vals due)))
+            ;; A thread's notification is replaced, so it keeps what it showed that still waits.
+            p (merge (into {} (comp (filter #(threads (key %))) (mapcat (comp :items val))) @shown) due)]
+        (when-not dnd
+          (doseq [n (map #(assoc % :expire-ms expire-ms) (plan p state))]
+            ;; A burst stands for its threads; their own notifications go.
+            (when (= :burst (:key n))
+              (doseq [t (distinct (map :thread (vals p))) :when (@shown t)]
+                ((:close! effects) (@shown t))
+                (swap! shown dissoc t)))
+            (let [prev (@shown (:key n))
+                  handle ((:show! effects) n (:handle prev))]
+              (swap! shown assoc (:key n) (assoc n :handle handle :items (select-keys p (:keys n))))))
+          (save! notifier))))
+    (when-not (identical? state @seen)
+      (reset! seen state)
+      (when-let [gone (seq (stale @shown state))]
+        (doseq [k gone]
+          ((:close! effects) (@shown k))
+          (swap! shown dissoc k))
+        (save! notifier)))
+    due))
 
 ;; ---- the desktop's effects ---------------------------------------------
 

@@ -5,7 +5,8 @@
 \* which bbh.super.store commits in one transaction. Each action names them.
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS NW, Threads, Cap, MaxAsks, MaxReplies, Chat  \* Chat: model turns and health passes
+CONSTANTS NW, Threads, Cap, MaxAsks, MaxReplies, Chat,  \* Chat: model turns and health passes
+          Timers  \* Timers: model the :starting and :cancelling deadlines
 
 Workers == 1..NW
 None == 0
@@ -28,10 +29,11 @@ VARIABLES
   busy,      \* the Worker's session is in a turn, as agent.json :busy says
   hbusy,     \* :busy of the Worker's stored health, the last pass's view of busy
   fresh,     \* a health pass ran on the Worker since the person last typed to it
-  csig       \* the Worker's cancellation as an outbox row: "none", "owed" or "taken"
+  csig,      \* the Worker's cancellation as an outbox row: "none", "owed" or "taken"
+  overdue    \* :overdue of each Worker: the state a timer found it in too long, or "none"
 
 chat == <<busy, hbusy, fresh>>
-vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, busy, hbusy, fresh, csig>>
+vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, busy, hbusy, fresh, csig, overdue>>
 
 \* typed: the person typed a prompt into the Worker's session after the ask
 \* opened (:prompted-at after :opened-at), which answers it.
@@ -51,6 +53,7 @@ Init ==
   /\ hbusy = [w \in Workers |-> FALSE]
   /\ fresh = [w \in Workers |-> FALSE]
   /\ csig = [w \in Workers |-> "none"]
+  /\ overdue = [w \in Workers |-> "none"]
 
 \* next-id: ids are handed out in order, so Worker w exists only after w-1.
 NextWorker(w) == wstate[w] = "none" /\ \A v \in Workers : v < w => wstate[v] /= "none"
@@ -257,6 +260,17 @@ ResumeWorker(w) ==
   /\ ended' = [ended EXCEPT ![w] = FALSE]
   /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, chat, csig>>
 
+\* decide* :timer-fired! from model/due, fold* :timer-fired: a Worker :starting
+\* or :cancelling past its deadline is marked. Nothing else moves, so a timer
+\* kills nothing; overdue reads the mark only while the Worker is in that state.
+TimerFired(w) ==
+  /\ wstate[w] \in {"starting", "cancelling"} /\ overdue[w] /= wstate[w]
+  /\ overdue' = [overdue EXCEPT ![w] = wstate[w]]
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, chat, csig>>
+
+\* overdue: the thread shows under Needs attention while this holds.
+Overdue(w) == overdue[w] /= "none" /\ overdue[w] = wstate[w]
+
 Commands ==
   \/ \E w \in Workers, t \in Threads : StartWorker(w, t) /\ UNCHANGED csig
   \/ PromoteWorker /\ UNCHANGED csig
@@ -267,12 +281,16 @@ Commands ==
   \/ \E t \in Threads : Archive(t) /\ UNCHANGED csig
   \/ \E r \in ReplyIds, w \in Workers : Answered(w, r) /\ UNCHANGED csig
 
-Next ==
+Moves ==
   \/ Commands /\ UNCHANGED <<ended, chat>>
   \/ \E w \in Workers : SessionEnds(w) \/ ResumeWorker(w)
   \/ Chat /\ \E w \in Workers : Health(w) \/ TurnEnds(w) \/ \E typed \in BOOLEAN : TurnStarts(w, typed)
   \/ \E w \in Workers, r \in ReplyIds : Take(w, r)
   \/ \E w \in Workers : TakeCancel(w)
+
+Next ==
+  \/ Moves /\ UNCHANGED overdue
+  \/ Timers /\ \E w \in Workers : TimerFired(w)
 
 Spec == Init /\ [][Next]_vars
 
@@ -302,4 +320,11 @@ CancelledAfterTold == \A w \in Workers : wstate[w] = "cancelled" /\ csig[w] = "o
 \* No Worker is launched for a thread the person archived; starting one reopens it first.
 NoLaunchOnArchived == [][\A w \in Workers :
   (wstate[w] /= "starting" /\ wstate'[w] = "starting") => ~resolved'[wthread'[w]]]_vars
+\* A deadline kills nothing: the step that marks a Worker overdue moves no
+\* Worker, thread, ask or reply, and marks only a Worker in that state.
+TimerKillsNothing == [][overdue' /= overdue =>
+  /\ UNCHANGED <<wstate, tworker, resolved, asks, replies, csig>>
+  /\ \A w \in Workers : overdue'[w] /= overdue[w] => Overdue(w)']_vars
+\* Only a launched Worker is found starting too long.
+OverdueStartingLaunched == \A w \in Workers : overdue[w] = "starting" => launched[w]
 ====
