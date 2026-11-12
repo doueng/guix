@@ -8,7 +8,6 @@
   #:use-module (engstrand features editor)
   #:use-module (engstrand features herdr)
   #:use-module (engstrand features kanata)
-  #:use-module (engstrand features moshi)
   #:use-module (engstrand features remote-access)
   #:use-module (engstrand features research-lab)
   #:use-module (engstrand features second-brain)
@@ -52,7 +51,6 @@
            (feature-familiar-development)
            ;; This precedes dotfiles because Herdr activation consumes its live config.
            (feature-familiar-herdr)
-           (feature-familiar-moshi)
            (feature-familiar-bbh-web)
            (feature-familiar-research-lab)
            (feature-familiar-builder-alert)
