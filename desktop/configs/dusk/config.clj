@@ -27,7 +27,8 @@
    :shadow :md})
 
 
-(def wallpaper-path "~/Desktop/wallpaper.jpg")
+;; Alma-Tadema's Cicero, 1672x941; :cover crops it to fill the 2560x1600 panel.
+(def wallpaper-path "~/.config/dusk/wallpaper.jpg")
 
 (defn wallpaper []
   (ui/layer {:id :wallpaper

@@ -98,7 +98,7 @@
   (let [[w h] output-size
         shot (on-empty-workspace screenshot)
         expected-file (str shot-dir "/wallpaper-expected.png")
-        _ (sh (tool "convert") (str (fs/expand-home "~/Desktop/wallpaper.jpg"))
+        _ (sh (tool "convert") (str config-dir "/wallpaper.jpg")
               "-resize" (format "%dx%d^" w h) "-gravity" "center" "-extent" (format "%dx%d" w h)
               expected-file)
         probes [[1260 780] [300 1300] [2200 1300]]]
