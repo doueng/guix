@@ -22,3 +22,32 @@
 (stow-package! (str repo "/configs") home "ideavim")
 (stow-package! repo (str home "/.local/bin") "bin")
 (stow-package! (str repo "/pi") (str home "/.pi/agent") "agent")
+
+;; Stow never removes a link whose file left the repo, so delete the dangling
+;; links that point into it, and the directories that leaves empty.
+(defn dangling-repo-link? [path]
+  (and (fs/sym-link? path)
+       (not (fs/exists? path))
+       (let [target (fs/normalize (fs/path (fs/parent path) (fs/read-link path)))]
+         (.startsWith target (fs/path repo)))))
+
+(defn prune! [root recursive?]
+  (when (fs/directory? root)
+    (let [links (if recursive?
+                  (let [found (atom [])]
+                    (fs/walk-file-tree root {:visit-file (fn [p _] (when (dangling-repo-link? p) (swap! found conj p)) :continue)
+                                             :visit-file-failed (fn [_ _] :skip-subtree)})
+                    @found)
+                  (filter dangling-repo-link? (fs/list-dir root)))]
+      (doseq [link links]
+        (println "stow-home: removing dangling" (str link))
+        (fs/delete link)
+        (loop [dir (fs/parent link)]
+          (when (and (not= (fs/canonicalize dir) (fs/canonicalize root)) (empty? (fs/list-dir dir)))
+            (fs/delete dir)
+            (recur (fs/parent dir))))))))
+
+(prune! (str home "/.config") true)
+(prune! (str home "/.local/bin") true)
+(prune! (str home "/.pi/agent") true)
+(prune! home false)
