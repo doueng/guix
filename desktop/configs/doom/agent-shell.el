@@ -398,6 +398,60 @@ A client shut down on purpose has no process any more, so it is left alone."
 
 (advice-add 'acp--start-client :after #'eng/bbh--watch-process)
 
+;;; Turn-end guard
+
+;; agent-shell clears a shell's busy flag near the end of its prompt reply
+;; handler.  When anything before that signals, as a half-reloaded
+;; agent-shell did with void-function at every turn end (T163), the flag
+;; stays set, every mailbox wake waits for a turn end that never comes, and
+;; the shell takes no more mail.  So a prompt's reply handlers run inside a
+;; guard that, on an error, logs it once and finishes the turn anyway.
+
+(defvar-local eng/bbh--turn-end-error nil
+  "The last error a turn's end signalled in this shell, so each is logged once.")
+
+(defun eng/bbh--turn-end-failed (shell err request)
+  "Finish SHELL's turn after the end of REQUEST, its prompt, signalled ERR.
+Then wake SHELL for its mail.  A prompt the handler already sent next keeps
+SHELL busy, as its own turn."
+  (when (buffer-live-p shell)
+    (with-current-buffer shell
+      (let ((why (error-message-string err)))
+        (unless (equal why eng/bbh--turn-end-error)
+          (setq eng/bbh--turn-end-error why)
+          (message "%s: the end of a turn failed (%s); the shell was set idle so it takes mail"
+                   (buffer-name shell) why)))
+      (ignore-errors (agent-shell-heartbeat-stop :heartbeat (map-elt agent-shell--state :heartbeat)))
+      (when (and (bound-and-true-p shell-maker--busy)
+                 (not (seq-some (lambda (r) (and (not (eq r request))
+                                                 (equal "session/prompt" (map-elt r :method))))
+                                (map-elt agent-shell--state :active-requests))))
+        (ignore-errors (agent-shell--finish-output :config shell-maker--config :success nil))
+        (setq shell-maker--busy nil))
+      (force-mode-line-update t))
+    (run-at-time 0 nil #'eng/bbh-mail-wake shell)))
+
+(defun eng/bbh--guard-turn-end (shell request callback)
+  "CALLBACK, a reply handler of REQUEST, SHELL's prompt, which cannot leave SHELL busy."
+  (when callback
+    (lambda (&rest args)
+      (condition-case err
+          (apply callback args)
+        (error (eng/bbh--turn-end-failed shell err request))))))
+
+(defun eng/bbh--guard-prompt-request (args)
+  "Guard the reply handlers in ARGS, `agent-shell--send-request's, of a session/prompt request."
+  (let ((shell (plist-get args :buffer)))
+    (if (and (buffer-live-p shell)
+             (equal "session/prompt" (map-elt (plist-get args :request) :method)))
+        (let ((args (copy-sequence args)))
+          (dolist (key '(:on-success :on-failure) args)
+            (when (plist-get args key)
+              (setq args (plist-put args key (eng/bbh--guard-turn-end shell (plist-get args :request) (plist-get args key)))))))
+      args)))
+
+(advice-add 'agent-shell--send-request :filter-args #'eng/bbh--guard-prompt-request)
+
 (defun eng/bbh-inbox-switch (shell)
   "Move SHELL's mailbox watch to the conversation it is on now.
 Messages to the old conversation stay in its mailbox until it is resumed."

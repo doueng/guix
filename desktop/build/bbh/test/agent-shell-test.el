@@ -452,6 +452,31 @@ and the transcript keeps q and focus moves in normal state."
           (should (bbh-test--wait (lambda () (string-match-p "to the resumed conversation" (bbh-test--text transcript)))
                                   30)))))))
 
+(ert-deftest bbh-an-error-at-the-end-of-a-turn-leaves-the-shell-taking-mail ()
+  ;; T163: a half-reloaded agent-shell signalled void-function at every turn
+  ;; end, before it cleared the busy flag, so mail never woke the shell again.
+  (bbh-test--with-shell (shell composer transcript)
+    (bbh-test--submit shell (concat "/model script/"
+                                    (make-temp-file "bbh-turn-end" nil ".edn" "[\"first reply\" \"mail reply\"]")))
+    (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+    (let ((logged nil) (real-message (symbol-function 'message)))
+      (cl-letf (((symbol-function 'agent-shell--render-deferred-markup)
+                 (lambda (&rest _) (signal 'void-function '(agent-shell--more-config-options))))
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args)
+                   (when (and fmt (string-match-p "end of a turn failed" fmt)) (push (apply #'format fmt args) logged))
+                   (apply real-message fmt args))))
+        (bbh-test--submit shell "say something")
+        (should (bbh-test--wait (lambda () (string-match-p "first reply" (bbh-test--text shell))) 30))
+        (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 10))
+        ;; Still failing at each turn end, the shell takes its mail.
+        (let ((file (bbh-test--mail (eng/bbh--conversation shell) "4-m4" "after the broken turn")))
+          (should (bbh-test--wait (lambda () (not (file-exists-p file))) 30))
+          (should (bbh-test--wait (lambda () (string-match-p "after the broken turn" (bbh-test--text transcript))) 30))
+          (should (bbh-test--wait (lambda () (string-match-p "mail reply" (bbh-test--text shell))) 30))
+          (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30)))
+        (should (= 1 (length logged)))
+        (should (string-match-p "agent-shell--more-config-options" (car logged)))))))
 
 ;;; Super-agent
 
