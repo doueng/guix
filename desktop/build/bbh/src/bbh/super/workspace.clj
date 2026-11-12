@@ -73,7 +73,8 @@
   change ids finished Workers landed. ONTO names the tip when
   the line has more than one head. Runs jj in WORKSPACE, so the user's working
   copy is not even snapshotted. Throws, leaving the Worker to act, when its
-  working copy has uncommitted changes and when the tip is unclear. Returns
+  working copy has uncommitted changes, when the tip is unclear and when
+  commits built on its own are not under its working copy. Returns
   {:onto tip :landed change-id}, the head of what it landed or nil, or, when
   the rebase leaves conflicts in its commits, {:onto tip :conflicts revs :todo
   text}: the rebase stands and the Worker resolves them, so a repeat once they
@@ -82,20 +83,28 @@
   (let [refuse (fn [error message] (throw (ex-info message {:error error})))]
     (when (seq (revs workspace (str "@ & ~empty() & (description(exact:\"\") | " wip-description ")")))
       (refuse :in-progress "your working copy has uncommitted changes: commit them with a real description (jj commit -m), or discard them, before super-done!"))
-    (let [line (str "(::default@-" (apply str (for [id landed] (str " | ::present(" id ")"))) ") ~ " placeholder)
+    (let [trunk (str "(::default@-" (apply str (for [id landed] (str " | ::present(" id ")"))) ")")
+          line (str trunk " ~ " placeholder)
           heads (if onto (revs workspace (str "exactly(" onto ", 1)")) (revs workspace (str "heads(" line ")")))
           _ (when (not= 1 (count heads))
               (refuse :unclear-tip (str "the line has " (count heads) " heads, so its tip is unclear: " (str/join "; " heads)
                                         ". Ask the person which one your revision goes on, then (super-done! {:onto \"<commit id>\"}).")))
           tip (first (str/split (first heads) #" "))
-          mine (str "(" tip "..@) ~ " placeholder)
+          ;; Not the line's own commits the tip lacks, as the person's beside a tip
+          ;; given by ONTO: those stay theirs, neither moved nor prefixed.
+          mine (str "(" tip "..@) ~ " trunk " ~ " placeholder)
           _ (when-let [w (seq (revs workspace (str "(" mine ") & " wip-description)))]
               (refuse :wip (str "these commits still have the wip placeholder description: " (str/join "; " w)
-                                ". Describe them (jj describe -r <id> -m ...), then (super-done!) again.")))]
+                                ". Describe them (jj describe -r <id> -m ...), then (super-done!) again.")))
+          ;; Work built on the Worker's commits but off its working copy, as after
+          ;; resolving a conflict with jj edit then jj new, would be left behind.
+          _ (when-let [s (seq (revs workspace (str "((" mine ")::) ~ ::@ ~ " placeholder)))]
+              (refuse :off-stack (str "these commits build on yours but are not under your working copy, so they would not land: " (str/join "; " s)
+                                      ". Put your working copy on top of them (jj new <id>, or jj edit <id> for the newest), then (super-done!) again.")))]
       (if (empty? (revs workspace mine))
         {:onto tip :landed nil}
         (do (when thread (prefix! workspace mine thread))
-            (jj-out workspace "rebase" "-s" (str "roots(" tip "..@)") "-d" tip)
+            (jj-out workspace "rebase" "-s" (str "roots(" mine ")") "-d" tip)
             (if-let [c (seq (revs workspace (str "(" mine ") & conflicts()")))]
               {:onto tip :conflicts (vec c)
                :todo (str "Landing on " tip " left conflicts in " (str/join "; " c)
@@ -113,7 +122,10 @@
   Returns :moved, :current when default@ already has TIP (it is never moved down), :skipped when REPO
   is not the default workspace, or {:kept :not-empty}, {:kept :editing :at
   commit} when default@ is a commit the line already has, as after `jj edit`
-  of a landed commit, so no move applies, or {:kept :failed :message m},
+  of a landed commit, so no move applies, {:kept :off-line :at commit} when
+  default@ sits on a commit of the user's that TIP lacks, as when they
+  committed while the Worker worked and its landing went :onto its own tip,
+  where a move would take their commit out of their checkout, or {:kept :failed :message m},
   which the caller tells the user about."
   [{:keys [repo tip move]}]
   (try
@@ -121,12 +133,14 @@
       (if (not= (q "present(@)") (q "present(default@)"))
         :skipped
         (let [{:keys [exit err]} (p/shell {:dir repo :out :string :err :string :continue true}
-                                          "jj" "rebase" "-r" (str "default@ ~ ::" tip " ~ " tip "::" (when-not (= :always move) " & empty()")) "-d" tip)]
+                                          "jj" "rebase" "-r" (str "default@ ~ ::" tip " ~ " tip ":: & children(::" tip ")" (when-not (= :always move) " & empty()")) "-d" tip)]
           (cond (not (zero? exit)) {:kept :failed :message (str/trim err)}
                 (re-find #"(?m)^Rebased " err) :moved
                 (not (str/blank? (q (str "default@ & " tip "::")))) :current
                 (not (str/blank? (q (str "default@ & ::" tip))))
                 {:kept :editing :at (q "default@")}
+                (str/blank? (q (str "default@ & children(::" tip ")")))
+                {:kept :off-line :at (q "default@-")}
                 :else {:kept :not-empty}))))
     (catch Exception e {:kept :failed :message (ex-message e)})))
 
@@ -181,6 +195,9 @@
       (case (:kept r)
         :not-empty (str worker " landed " short ". Your working copy has changes, so it was left where it is. " how
                         " To always move it, set :move-working-copy :always in policy.edn.")
+        :off-line (let [at (subs (:at r) 0 (min 8 (count (:at r))))]
+                    (str worker " landed " short " beside your commit " at ", which it does not contain, so your working copy stays on your commit."
+                         " To put yours on top: jj rebase -b @ -d " short " in " repo "."))
         :editing (str worker " landed " short " on top of " (subs (:at r) 0 (min 8 (count (:at r))))
                       ", the commit your working copy edits (jj edit), so it stays there. To work on the tip: jj new "
                       short " in " repo ".")
