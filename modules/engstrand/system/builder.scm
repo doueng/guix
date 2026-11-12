@@ -26,7 +26,7 @@
   #:use-module ((guix utils) #:select (string-replace-substring))
   #:use-module (ice-9 textual-ports)
   #:use-module (srfi srfi-1)
-  #:re-export (%builder-host %builder-ssh-port builder-key-file builder-key-string)
+  #:re-export (%builder-host %builder-ssh-port builder-key-string)
   #:export (%builder-server-type
             make-builder-os))
 

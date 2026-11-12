@@ -24,9 +24,7 @@
   #:use-module (gnu system accounts)
   #:use-module (gnu system shadow)
   #:use-module (guix gexp)
-  #:export (%reader-home
-            %reader-port
-            %reader-services))
+  #:export (%reader-services))
 
 (define %reader-home "/var/lib/reader")
 (define %reader-port 8787)

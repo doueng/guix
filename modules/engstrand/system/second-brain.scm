@@ -14,7 +14,6 @@
   #:use-module (engstrand packages second-brain)
   #:use-module (engstrand packages tailscale)
   #:use-module (engstrand system builder-keys)
-  #:use-module (gnu packages admin)
   #:use-module (gnu packages base)
   #:use-module (gnu packages bash)
   #:use-module (gnu packages linux)
@@ -25,8 +24,7 @@
   #:use-module (gnu system accounts)
   #:use-module (gnu system shadow)
   #:use-module (guix gexp)
-  #:export (%brain-home
-            %brain-authorized-key
+  #:export (%brain-authorized-key
             %brain-services))
 
 (define %brain-home "/var/lib/second-brain")
