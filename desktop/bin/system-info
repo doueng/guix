@@ -1,8 +1,11 @@
 #!/usr/bin/env bb
 
 (require '[clojure.string :as str]
+         '[babashka.classpath :as classpath]
          '[babashka.process :as p]
          '[babashka.fs :as fs])
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[airpods])
 
 (def home (System/getProperty "user.home"))
 (def notify-replace-bin
@@ -27,7 +30,7 @@
 
 (defn get-bluetooth-connection []
   (try
-    (let [result (p/shell {:out :string} "bluetoothctl" "info" "74:77:86:19:BA:5A")]
+    (let [result (p/shell {:out :string} "bluetoothctl" "info" airpods/address)]
       (if (str/includes? (:out result) "Connected: yes")
         "🎧 AirPods connected"
         "🎧 Not connected"))

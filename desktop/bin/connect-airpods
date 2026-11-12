@@ -1,9 +1,13 @@
 #!/usr/bin/env bb
 
-(require '[babashka.process :as p]
+(require '[babashka.classpath :as classpath]
+         '[babashka.fs :as fs]
+         '[babashka.process :as p]
          '[clojure.string :as str])
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[airpods])
 
-(def address "74:77:86:19:BA:5A")
+(def address airpods/address)
 
 (defn bluetoothctl [& args]
   @(p/process (into ["bluetoothctl"] args)
