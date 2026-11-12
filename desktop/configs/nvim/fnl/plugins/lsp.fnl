@@ -10,7 +10,6 @@
                  (local go-servers
                         {:lua_ls {:settings {:Lua {:workspace {:checkThirdParty false}
                                                    :completion {:callSnippet :Replace}}}}
-                         :nixd {}
                          :pyright {}
                          :gopls {:filetypes [:go :gomod :gowork :gotmpl]
                                  :settings {:gopls {:gofumpt true

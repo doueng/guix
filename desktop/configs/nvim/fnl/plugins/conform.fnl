@@ -4,5 +4,5 @@
         {:opts {:formatters_by_ft {:fennel [:fnlfmt]
                                    :lua [:stylua]
                                    :java [:google_java_format]
-                                   :nix [:nixpkgs_fmt]
+                                   :nix [:nixfmt]
                                    :python [:black]}}})
