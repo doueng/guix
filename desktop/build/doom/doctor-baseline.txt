@@ -2,7 +2,6 @@
 :lang go: Couldn't find gomodifytags. Manipulating struct tags will not work
 :lang go: Couldn't find gore. REPL will not work
 :lang go: Couldn't find gotests. Generating tests will not work
-:lang nix: Couldn't find the nix package manager. nix-mode won't work.
 :lang python: Couldn't find black. Code formatting will not work.
 :lang python: Couldn't find nosetests. Running tests through nose will not work.
 :lang python: Couldn't find pipenv. pipenv support will not work.

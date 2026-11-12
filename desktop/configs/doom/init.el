@@ -53,7 +53,6 @@
        (javascript +lsp +tree-sitter)
        (lua +fennel)
        markdown
-       (nix +lsp)
        org
        (python +lsp +tree-sitter)
        (scheme +guile)

@@ -15,10 +15,6 @@
 (let ((interactive-shell (or (executable-find "fish") shell-file-name)))
   (setq-default explicit-shell-file-name interactive-shell))
 
-;; Doom 2.2.3's Nix doctor checks this before loading nix-format.el.
-;; Remove once upstream requires nix-format before checking the executable.
-(defvar nix-nixfmt-bin "nixfmt")
-
 (defvar eng/doom-config-dir
   (file-name-directory
    (or (and (boundp 'load-file-name) load-file-name)
@@ -277,7 +273,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
         lsp-enable-file-watchers nil
         lsp-format-buffer-on-save nil
         lsp-fix-all-on-save nil
-        lsp-disabled-clients '(deno-ls golangci-lint nix-nil rnix-lsp semgrep-ls)
+        lsp-disabled-clients '(deno-ls golangci-lint semgrep-ls)
         lsp-headerline-breadcrumb-enable nil
         lsp-lens-enable nil
         lsp-modeline-code-actions-enable nil
