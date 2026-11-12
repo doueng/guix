@@ -76,13 +76,26 @@
   [{:keys [id kind]}]
   (str (if (= "steer" kind) "[Steering " "[Mail ") id "]"))
 
+(defn- held?
+  "Whether S's transcript already holds MESSAGE: a session that died between
+  recording it and deleting its file finds the file again when it restarts."
+  [s message]
+  (let [tag (mail-tag message)]
+    (boolean (some #(and (#{"user" "tool"} (:role %)) (string? (:content %)) (str/includes? (:content %) tag))
+                   (:messages @s)))))
+
 (defn- claimable
   "S's mailbox messages that no input holds yet. A cancel is a control, not mail,
-  and a cancelled session takes nothing."
+  and a cancelled session takes nothing. A message the transcript already holds
+  is removed unread, so it is delivered once."
   [s]
   (when-not (:cancelled @s)
-    (filter #(and (not= "cancel" (:kind %)) (not (contains? (:taken @s) (:id %))))
-            (inbox/pending (mail-root s)))))
+    (let [root (mail-root s)]
+      (doall
+       (remove #(or (= "cancel" (:kind %))
+                    (contains? (:taken @s) (:id %))
+                    (when (held? s %) (inbox/ack! {:root root} (:id %)) true))
+               (inbox/pending root))))))
 
 (defn take-mail!
   "Claim S's pending mailbox messages, serialized with evaluation, as the text
@@ -209,15 +222,14 @@
 
 (defn receive-control!
   "Act on a typed cancellation at once, outside the front end turn lock: mark
-  S cancelled so no mailbox message starts another turn, interrupt, then write
-  the receipt and remove the message. Returns true when MESSAGE was a control."
+  S cancelled so no mailbox message starts another turn, interrupt, then
+  remove the message, which tells its sender. Returns true when MESSAGE was a
+  control."
   [s {:keys [id kind]}]
   (when (= "cancel" kind)
     (swap! s assoc :cancelled true)
     (interrupt! s)
-    (let [root (mail-root s)]
-      (inbox/receipt! root id "interrupted")
-      (inbox/ack! {:root root} id))
+    (inbox/ack! {:root (mail-root s)} id)
     true))
 
 (defn watch-controls!

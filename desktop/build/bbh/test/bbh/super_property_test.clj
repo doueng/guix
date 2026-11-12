@@ -207,6 +207,18 @@
        [:read-shows-another-state (:id w)])
      (for [w workers :when (and (= :queued (:state w)) (get-in state [:threads (:thread w) :resolved-at]))]
        [:queued-on-an-archived-thread (:id w)])
+     ;; A reply stops waiting when its Worker ends.
+     (for [r (vals (:replies state)) :when (and (= :sent (:state r)) (finished (get-in state [:workers (:worker r) :state])))]
+       [:reply-waits-on-a-finished-worker (:id r)])
+     ;; A cancellation is one outbox row: a Worker with a session being
+     ;; cancelled has exactly one, and nobody else has any.
+     (let [cancels (frequencies (keep #(when (= :cancel (:delivery %)) (:conversation %)) (vals (:outbox state))))]
+       (concat
+        (for [w workers :when (and (= :cancelling (:state w)) (:conversation w) (not= 1 (get cancels (:conversation w))))]
+          [:cancelling-without-one-cancel-row (:id w)])
+        (for [[conversation n] cancels
+              :when (or (> n 1) (not-any? #(and (= conversation (:conversation %)) (:cancel-reason %)) workers))]
+          [:cancel-row-nobody-asked-for conversation])))
      (for [t (vals (:threads state)) :when (:worker t) :when (not= (:id t) (get-in state [:workers (:worker t) :thread]))]
        [:thread-names-a-foreign-worker (:id t)])
      (for [kind [:threads :workers :asks :outbox] id (keys (kind state))

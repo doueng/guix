@@ -683,10 +683,8 @@
                 stopped? (every? true? (mapv process/stop-job! running))]
             (when (and (empty? blocked) stopped?)
               (doseq [j running] (spit (str (:base j) ".exit") "137\n"))
-              (when (and root agent (not (fs/exists? (fs/path root (str "0-cancel-" (:id w) ".received")))))
-                (inbox/send! root (str "[Cancelled] " (:cancel-reason w)) nil
-                             {:kind :cancel :message-id (str "0-cancel-" (:id w))}))
-              (when (or (not agent) (fs/exists? (fs/path root (str "0-cancel-" (:id w) ".received"))))
+              ;; dispatch! sends the cancellation and marks its row done once the session took it.
+              (when (or (not agent) (not (model/cancel-owed? @state w)))
                 (run! c :controller {:id (str "cancelled-" (:id w)) :command :cancel-delivered! :args {:worker (:id w)}})
                 (promote! c))))
 
@@ -740,24 +738,26 @@
         rows (sort-by (comp model/id-order :id) (vals (:outbox @state)))
         for-router? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
         batch (filter for-router? rows)
-        line (fn [{:keys [id text delivery]}]
-               (str (when-not (= :summary delivery) (str id " ")) text))]
-    ;; The Router reads its pending rows as one prompt, oldest first. Summaries
+        send! (fn [{:keys [id conversation]} text kind]
+                ;; The file is named after the row, so a pass that died before
+                ;; recording the send writes the same message again, not a second.
+                (let [m (inbox/send! (conversation-root c conversation) text nil
+                                     (cond-> {:message-id (model/message-id id)} kind (assoc :kind kind)))]
+                  (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}})))]
+    ;; The Router's turn takes its pending rows together, oldest first. Summaries
     ;; of messages already routed to a Worker ride along but never wake it alone.
     (when (some #(not= :summary (:delivery %)) batch)
-      (let [m (inbox/send! (conversation-root c router) (str/join "\n\n" (map line batch)))]
-        (doseq [{:keys [id]} batch]
-          (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))))
+      (doseq [{:keys [id text delivery] :as o} batch]
+        (send! o (str (when-not (= :summary delivery) (str id " ")) text) nil)))
   (doseq [{:keys [id conversation text message] :as o} rows
           :when (not (and (= :pending (:state o)) (= router conversation)))]
     (if (model/dead-letter? @state o)
       ;; Its Worker has finished, so the row is dropped and its file deleted unread.
       (do (run! c :controller {:id (str "dropped-" id) :command :outbox-dropped! :args {:outbox id}})
-          (when message (inbox/ack! {:root (conversation-root c conversation)} message)))
+          ;; A pending row may have a file too, written by a pass that died before recording it.
+          (inbox/ack! {:root (conversation-root c conversation)} (or message (model/message-id id))))
       (case (:state o)
-        :pending (let [root (conversation-root c conversation)
-                       m (inbox/send! root text nil (when (= :steer (:delivery o)) {:kind :steer}))]
-                   (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}}))
+        :pending (send! o text (#{:steer :cancel} (:delivery o)))
         :sent (when-not (inbox/waiting-since (conversation-root c conversation) message)
                 (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
         nil)))))

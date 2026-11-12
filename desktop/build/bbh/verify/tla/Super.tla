@@ -27,10 +27,11 @@ VARIABLES
   ended,     \* session-ended?: health found the Worker's session gone
   busy,      \* the Worker's session is in a turn, as agent.json :busy says
   hbusy,     \* :busy of the Worker's stored health, the last pass's view of busy
-  fresh      \* a health pass ran on the Worker since the person last typed to it
+  fresh,     \* a health pass ran on the Worker since the person last typed to it
+  csig       \* the Worker's cancellation as an outbox row: "none", "owed" or "taken"
 
 chat == <<busy, hbusy, fresh>>
-vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, busy, hbusy, fresh>>
+vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, busy, hbusy, fresh, csig>>
 
 \* typed: the person typed a prompt into the Worker's session after the ask
 \* opened (:prompted-at after :opened-at), which answers it.
@@ -49,6 +50,7 @@ Init ==
   /\ busy = [w \in Workers |-> FALSE]
   /\ hbusy = [w \in Workers |-> FALSE]
   /\ fresh = [w \in Workers |-> FALSE]
+  /\ csig = [w \in Workers |-> "none"]
 
 \* next-id: ids are handed out in order, so Worker w exists only after w-1.
 NextWorker(w) == wstate[w] = "none" /\ \A v \in Workers : v < w => wstate[v] /= "none"
@@ -65,6 +67,10 @@ SlotWorkers == {w \in Workers : wstate[w] \in Active /\ ~Ended(w) /\ ~resolved[w
 Blocked(w) == Cardinality(SlotWorkers \ {w}) >= Cap
 OpenAsks(t) == {a \in AskIds : asks[a].st = "open" /\ asks[a].thread = t}
 SetAsks(as, ids, st) == [a \in AskIds |-> IF a \in ids THEN [as[a] EXCEPT !.st = st] ELSE as[a]]
+\* fold* :worker-finished: a reply the Workers in ws have not answered is closed, a
+\* state of its own. Nobody is left to act on it.
+CloseReplies(ws) == [r \in ReplyIds |-> IF replies[r].st = "sent" /\ replies[r].to \in ws
+                                         THEN [replies[r] EXCEPT !.st = "closed"] ELSE replies[r]]
 
 \* waiting?: no event stores it; the asks say it.
 Waiting(w) == wstate[w] = "working" /\ \E a \in AskIds : asks[a].st = "open" /\ asks[a].worker = w /\ asks[a].stopped
@@ -92,7 +98,7 @@ StartWorker(w, t) ==
      THEN /\ wstate' = [ws EXCEPT ![w] = "queued"] /\ UNCHANGED launched
      ELSE /\ wstate' = [ws EXCEPT ![w] = "starting"]
           /\ launched' = [launched EXCEPT ![w] = TRUE]
-  /\ UNCHANGED replies
+  /\ replies' = CloseReplies(olds)
 
 \* decide* :promote-worker! (next-queued), fold* :worker-promoted
 PromoteWorker ==
@@ -117,7 +123,8 @@ WorkerFinished(w, outcome) ==
   /\ asks' = [a \in AskIds |-> IF asks[a].worker = w /\ asks[a].st = "open"
                                 THEN [asks[a] EXCEPT !.st = "superseded"] ELSE asks[a]]
   /\ tworker' = IF tworker[t] \in {w, None} THEN [tworker EXCEPT ![t] = None] ELSE tworker
-  /\ UNCHANGED <<wthread, launched, resolved, replies>>
+  /\ replies' = CloseReplies({w})
+  /\ UNCHANGED <<wthread, launched, resolved>>
 
 \* decide* :finish-worker!: a Worker's super-done! or super-failed!, a failed
 \* launch, or the person.
@@ -125,14 +132,27 @@ FinishWorker(w, outcome) ==
   /\ wstate[w] \notin {"none", "cancelling"} \cup Finished
   /\ WorkerFinished(w, outcome)
 
-\* decide* :cancel!, fold* :cancel-requested
+\* decide* :cancel!, fold* :cancel-requested. A Worker that has a conversation
+\* is told through an outbox row with :delivery :cancel; a queued one has none.
 Cancel(w) ==
   /\ wstate[w] \in Running \cup {"queued"}
   /\ wstate' = [wstate EXCEPT ![w] = "cancelling"]
+  /\ csig' = [csig EXCEPT ![w] = IF launched[w] THEN "owed" ELSE "none"]
   /\ UNCHANGED <<wthread, launched, tworker, resolved, asks, replies>>
 
-\* decide* :cancel-delivered!
-CancelDelivered(w) == wstate[w] = "cancelling" /\ WorkerFinished(w, "cancelled")
+\* decide* :cancel-delivered!, which reconcile! sends once cancel-owed? is false
+\* or no session lives.
+CancelDelivered(w) ==
+  /\ wstate[w] = "cancelling" /\ (csig[w] /= "owed" \/ ended[w])
+  /\ WorkerFinished(w, "cancelled")
+  /\ UNCHANGED csig
+
+\* The Worker's live session interrupts on the cancel in its mailbox and deletes
+\* the file; dispatch! then marks the row :done (fold* :outbox-acked).
+TakeCancel(w) ==
+  /\ wstate[w] = "cancelling" /\ csig[w] = "owed" /\ ~ended[w]
+  /\ csig' = [csig EXCEPT ![w] = "taken"]
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, chat>>
 
 \* decide* :ask! by Worker w, fold* :ask-opened
 Ask(w, a, stopped, sup) ==
@@ -181,13 +201,13 @@ Take(w, r) ==
   /\ replies[r].st = "sent" /\ ~replies[r].taken
   /\ replies[r].to = w /\ wstate[w] \in Running /\ ~Ended(w)
   /\ replies' = [replies EXCEPT ![r].taken = TRUE]
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, ended, chat>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, ended, chat, csig>>
 
 \* decide* :answered! by a live Worker of the reply's thread, fold* :reply-answered
 Answered(w, r) ==
   LET t == replies[r].thread
       as == SetAsks(asks, replies[r].picks, "answered") IN
-  /\ replies[r].st /= "none" /\ replies[r].taken /\ wstate[w] \in Active /\ wthread[w] = t
+  /\ replies[r].st = "sent" /\ replies[r].taken /\ wstate[w] \in Active /\ wthread[w] = t
   /\ replies' = [replies EXCEPT ![r].st = "answered"]
   /\ asks' = as
   /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved>>
@@ -200,7 +220,7 @@ SessionEnds(w) ==
   /\ wstate[w] \in {"working", "cancelling"} /\ ~ended[w]
   /\ ended' = [ended EXCEPT ![w] = TRUE]
   /\ busy' = [busy EXCEPT ![w] = FALSE] /\ hbusy' = [hbusy EXCEPT ![w] = FALSE]
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, fresh>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, fresh, csig>>
 
 \* bbh acp session/prompt: a live session starts a turn. A prompt other than
 \* the mail wake [mail] is the person typing, so agent.json :prompted-at moves
@@ -213,11 +233,11 @@ TurnStarts(w, typed) ==
                                          THEN [asks[a] EXCEPT !.typed = TRUE] ELSE asks[a]]
           /\ fresh' = [fresh EXCEPT ![w] = FALSE]
      ELSE UNCHANGED <<asks, fresh>>
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, replies, ended, hbusy>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, replies, ended, hbusy, csig>>
 
 TurnEnds(w) ==
   /\ busy[w] /\ busy' = [busy EXCEPT ![w] = FALSE]
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, hbusy, fresh>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, hbusy, fresh, csig>>
 
 \* reconcile! on a live Worker: decide* :health! stores what it saw of the turn,
 \* and answered-in-chat with fold* :asks-answered-in-chat supersedes the asks
@@ -229,29 +249,30 @@ Health(w) ==
   /\ hbusy' = [hbusy EXCEPT ![w] = busy[w]]
   /\ fresh' = [fresh EXCEPT ![w] = TRUE]
   /\ asks' = as
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, replies, ended, busy>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, replies, ended, busy, csig>>
 
 \* decide* :resume! by the person, fold* :worker-resumed: only with a free slot.
 ResumeWorker(w) ==
   /\ Ended(w) /\ wstate[w] = "working" /\ ~Blocked(w)
   /\ ended' = [ended EXCEPT ![w] = FALSE]
-  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, chat>>
+  /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, chat, csig>>
 
 Commands ==
-  \/ \E w \in Workers, t \in Threads : StartWorker(w, t)
-  \/ PromoteWorker
-  \/ \E w \in Workers : WorkerRunning(w) \/ Cancel(w) \/ CancelDelivered(w)
-                         \/ \E o \in {"done", "failed"} : FinishWorker(w, o)
-  \/ \E w \in Workers, a \in AskIds, s \in BOOLEAN, sup \in SUBSET AskIds : Ask(w, a, s, sup)
-  \/ \E t \in Threads, r \in ReplyIds, p \in SUBSET AskIds, d \in SUBSET AskIds : Reply(t, r, p, d)
-  \/ \E t \in Threads : Archive(t)
-  \/ \E r \in ReplyIds, w \in Workers : Answered(w, r)
+  \/ \E w \in Workers, t \in Threads : StartWorker(w, t) /\ UNCHANGED csig
+  \/ PromoteWorker /\ UNCHANGED csig
+  \/ \E w \in Workers : (WorkerRunning(w) /\ UNCHANGED csig) \/ Cancel(w) \/ CancelDelivered(w)
+                         \/ \E o \in {"done", "failed"} : FinishWorker(w, o) /\ UNCHANGED csig
+  \/ \E w \in Workers, a \in AskIds, s \in BOOLEAN, sup \in SUBSET AskIds : Ask(w, a, s, sup) /\ UNCHANGED csig
+  \/ \E t \in Threads, r \in ReplyIds, p \in SUBSET AskIds, d \in SUBSET AskIds : Reply(t, r, p, d) /\ UNCHANGED csig
+  \/ \E t \in Threads : Archive(t) /\ UNCHANGED csig
+  \/ \E r \in ReplyIds, w \in Workers : Answered(w, r) /\ UNCHANGED csig
 
 Next ==
   \/ Commands /\ UNCHANGED <<ended, chat>>
   \/ \E w \in Workers : SessionEnds(w) \/ ResumeWorker(w)
   \/ Chat /\ \E w \in Workers : Health(w) \/ TurnEnds(w) \/ \E typed \in BOOLEAN : TurnStarts(w, typed)
   \/ \E w \in Workers, r \in ReplyIds : Take(w, r)
+  \/ \E w \in Workers : TakeCancel(w)
 
 Spec == Init /\ [][Next]_vars
 
@@ -274,6 +295,10 @@ TypedAnswerCloses == \A a \in AskIds :
   asks[a].st = "open" /\ asks[a].typed => ~fresh[asks[a].worker]
 \* A reply is answered only after its session took it from the mailbox.
 AnsweredAfterTaken == \A r \in ReplyIds : replies[r].st = "answered" => replies[r].taken
+\* A reply stops waiting when its Worker ends: none stays sent to a finished Worker.
+NoReplyWaitsOnFinished == \A r \in ReplyIds : replies[r].st = "sent" => wstate[replies[r].to] \notin Finished
+\* A Worker ends cancelled only after its session took the cancellation or ended.
+CancelledAfterTold == \A w \in Workers : wstate[w] = "cancelled" /\ csig[w] = "owed" => ended[w]
 \* No Worker is launched for a thread the person archived; starting one reopens it first.
 NoLaunchOnArchived == [][\A w \in Workers :
   (wstate[w] /= "starting" /\ wstate'[w] = "starting") => ~resolved'[wthread'[w]]]_vars

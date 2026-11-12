@@ -122,6 +122,103 @@
     (is (= :unknown-event (:error (ex-data (try (model/fold state {:seq 3 :at "t" :kind :no-such-kind :data {}})
                                                 (catch Exception e e))))))))
 
+(defn- restartable
+  "Options for a controller on a new directory that a test stops and starts again."
+  []
+  (let [root (fs/create-temp-dir {:prefix "super-signals"})
+        dir (str (fs/path root "controller"))]
+    {:dir dir :conversations (str (fs/path root "conversations")) :scan-ms 10
+     :launch (stub-launch dir (str (fs/path root "workspaces")))}))
+
+(deftest a-send-the-controller-died-before-recording-is-one-message
+  (let [{:keys [dir conversations] :as opts} (restartable)
+        c (super/start! opts)
+        root (str (fs/path conversations "super-W1"))]
+    (swap! controllers assoc dir c)
+    (try
+      (call dir {:command :thread! :args {:title "plan"}})
+      (run-worker dir "T1")
+      (super/stop! c)
+      ;; The steer commits, dispatch! writes its file, and the controller dies
+      ;; before :outbox-sent! commits.
+      (let [db (store/open (str (fs/path dir "super.db")))
+            st (try (:state (store/commit! db (store/replay db) :owner {:id "s1" :command :steer! :args {:thread "T1" :text "use plan B"}}))
+                    (finally (store/close! db)))
+            row (some #(when (= :steer (:delivery %)) %) (vals (:outbox st)))
+            message (model/message-id (:id row))]
+        (is (= :pending (:state row)))
+        (bbh.inbox/send! root (:text row) nil {:kind :steer :message-id message})
+        (let [c2 (super/start! opts)]
+          (try
+            (is (wait-for #(= :sent (get-in @(:state c2) [:outbox (:id row) :state]))) "the next pass sends the row again")
+            (is (= [{:id message :kind "steer" :text "[Steering] use plan B"}] (bbh.inbox/pending root))
+                "and the mailbox holds one message, the row's")
+            (bbh.inbox/ack! {:root root} message)
+            (is (wait-for #(= :done (get-in @(:state c2) [:outbox (:id row) :state]))))
+            (Thread/sleep 50)
+            (is (= [] (bbh.inbox/pending root)) "a taken message is not sent again")
+            (locking (:db c2) (is (= (store/replay (:db c2)) @(:state c2))))
+            (finally (super/stop! c2)))))
+      (finally (swap! opened dissoc dir) (swap! controllers dissoc dir)))))
+
+(deftest a-cancel-is-an-outbox-row-taken-once-across-a-controller-restart
+  (let [{:keys [dir conversations] :as opts} (restartable)
+        c (super/start! opts)
+        root (str (fs/path conversations "super-W1"))]
+    (swap! controllers assoc dir c)
+    (try
+      (call dir {:command :thread! :args {:title "stop me"}})
+      (run-worker dir "T1")
+      (let [session (bbh.inbox/start! {:root root :project "p" :scan-ms 5 :deliver (fn [_])})
+            files #(sort (map fs/file-name (fs/glob root "**")))]
+        (try
+          (super/reconcile! c)
+          (is (= {:ok "W1"} (call dir {:command :cancel! :args {:thread "T1" :reason "stop now"}})))
+          (let [row (some #(when (= :cancel (:delivery %)) %) (vals (:outbox @(:state c))))
+                message (model/message-id (:id row))]
+            (is (wait-for #(= :sent (get-in @(:state c) [:outbox (:id row) :state]))))
+            (is (= [{:id message :kind "cancel" :text "[Cancelled] stop now"}] (bbh.inbox/pending root)))
+            (is (not-any? #(re-find #"received|0-cancel" %) (files)) "no file of its own and no receipt")
+            (super/reconcile! c)
+            (is (= :cancelling (get-in @(:state c) [:workers "W1" :state])) "it waits for the session")
+            (super/stop! c)
+            (let [c2 (super/start! opts)]
+              (try
+                (super/reconcile! c2)
+                (Thread/sleep 50)
+                (is (= :cancelling (get-in @(:state c2) [:workers "W1" :state])) "and still does after a restart")
+                (is (= [message] (map :id (bbh.inbox/pending root))) "the restart sends no second cancel")
+                ;; The session interrupts and deletes the file.
+                (bbh.inbox/ack! {:root root} message)
+                (is (wait-for #(= :cancelled (get-in @(:state c2) [:workers "W1" :state]))))
+                (is (= :done (get-in @(:state c2) [:outbox (:id row) :state])))
+                (is (= {:cancel-requested 1 :worker-finished 1}
+                       (select-keys (frequencies (map :kind (store/events (:db c2)))) [:cancel-requested :worker-finished])))
+                (is (= [] (bbh.inbox/pending root)))
+                (locking (:db c2) (is (= (store/replay (:db c2)) @(:state c2))))
+                (finally (super/stop! c2)))))
+          (finally (bbh.inbox/stop! session))))
+      (finally (when-not @(:stopped c) (super/stop! c)) (swap! opened dissoc dir) (swap! controllers dissoc dir)))))
+
+(deftest a-reply-stops-waiting-when-its-worker-ends
+  (with-controller
+    (fn [c dir conversations]
+      (let [{:keys [version token]} (thread-with-ask dir)
+            section #(model/section @(:state c) (get-in @(:state c) [:threads "T1"]))]
+        (call dir {:command :reply! :args {:thread "T1" :asks-version version :picks {"a1" "no"}}})
+        (is (= [:sent] (map :state (vals (:replies @(:state c))))))
+        (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :failed :reason "gave up"}})))
+        (is (= [:closed] (map :state (vals (:replies @(:state c))))) "closed, a state of its own: nobody answered it")
+        (is (not= :sent (section)))
+        (is (wait-for #(= [] (bbh.inbox/pending (str (fs/path conversations "super-W1"))))) "its message is deleted unread")
+        (let [reply (ffirst (:replies @(:state c)))
+]
+          (call dir {:command :start-worker! :args {:thread "T1" :workflow :investigation :brief "again" :repo (str (fs/home))}})
+          (is (= :ok (ffirst (call dir {:command :answered! :args {:thread "T1" :reply reply}}))))
+          (is (= [:closed] (map :state (vals (:replies @(:state c))))) "a later Worker cannot answer what it never took")
+          (is (not-any? #(= :reply-answered (:kind %)) (store/events (:db c)))))
+        (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
+
 (deftest an-outbox-row-is-done-when-its-mailbox-file-is-removed
   (with-controller
     (fn [c dir conversations]
@@ -486,7 +583,7 @@
   (is (nil? (model/parse-handle "Make the page show cost per session")))
   (is (nil? (model/parse-handle "tea for two")) "a word that is not a number is not a handle"))
 
-(deftest unresolved-messages-reach-the-router-as-one-batched-prompt
+(deftest unresolved-messages-reach-the-router-together-one-file-a-row
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-r"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-rconv"}))
         ;; a slow dispatcher, so two messages are pending at once
@@ -499,9 +596,10 @@
         (is (= {:ok {:to :router}} (call dir {:command :say! :args {:text "and what is T3 doing" :origin :voice}})))
         (is (wait-for #(seq (fs/glob root "mailbox/*.json"))))
         (Thread/sleep 100)
-        (is (= 1 (count (fs/glob root "mailbox/*.json"))) "one prompt for both")
-        (is (= "o1 [herdr] Make the page show cost per session\n\no2 [voice] (spoken) and what is T3 doing"
-               (:text (cheshire.core/parse-string (slurp (str (first (fs/glob root "mailbox/*.json")))) true))))
+        (is (= [{:id "0000000001-o1" :text "o1 [herdr] Make the page show cost per session"}
+                {:id "0000000002-o2" :text "o2 [voice] (spoken) and what is T3 doing"}]
+               (bbh.inbox/pending (str root)))
+            "each row is its own message, named after the row, and one turn takes both")
         (is (= #{:sent} (set (map :state (vals (:outbox @(:state c)))))))
         (testing "the Router's token starts work but does not answer asks"
           (is (= {:ok "T1"} (call dir {:token token :command :thread! :args {:title "web cost per session"}})))
@@ -866,7 +964,7 @@
       (is (= :unauthorized (:error (call dir {:token (second (first @opened)) :command :threads}))) "and the old token is revoked")
       (finally (some-> @session bbh.inbox/stop!) (super/stop! c)))))
 
-(deftest surviving-workers-are-observed-not-restarted-and-cancel-waits-for-receipt
+(deftest surviving-workers-are-observed-not-restarted-and-cancel-waits-for-the-session
   (with-workers
     (fn [c dir repo launches]
       (call dir {:command :thread! :args {:title "survive sleep"}})
@@ -880,9 +978,15 @@
           (is (= {:ok "W1"} (call dir {:command :cancel! :args {:thread "T1" :reason "stop now"}})))
           (is (= :cancelling (get-in @(:state c) [:workers "W1" :state])))
           (is (= "W1" (get-in @(:state c) [:threads "T1" :worker])))
-          (is (= [{:kind "cancel" :text "[Cancelled] stop now"}]
-                 (mapv #(select-keys % [:kind :text]) (filter #(= "cancel" (:kind %)) (bbh.inbox/pending root)))))
-          (spit (str (fs/path root "0-cancel-W1.received")) "interrupted")
+          (is (wait-for #(some (fn [m] (= "cancel" (:kind m))) (bbh.inbox/pending root))))
+          (let [[m :as cancels] (filter #(= "cancel" (:kind %)) (bbh.inbox/pending root))
+                row (some #(when (= :cancel (:delivery %)) %) (vals (:outbox @(:state c))))]
+            (is (= [{:id (model/message-id (:id row)) :kind "cancel" :text "[Cancelled] stop now"}] cancels)
+                "the cancellation is an outbox row's message")
+            (super/reconcile! c)
+            (is (= :cancelling (get-in @(:state c) [:workers "W1" :state])) "it waits for the session to take it")
+            (bbh.inbox/ack! {:root root} (:id m))
+            (is (wait-for #(= :done (get-in @(:state c) [:outbox (:id row) :state])))))
           (super/reconcile! c)
           (is (= :cancelled (get-in @(:state c) [:workers "W1" :state])))
           (is (nil? (get-in @(:state c) [:threads "T1" :worker])))
@@ -1182,7 +1286,8 @@
         (is (= [] (prompts)) "a routed message alone wakes no Router")
         (call dir {:command :say! :args {:text "what is running" :origin :phone}})
         (is (wait-for #(seq (prompts))))
-        (is (= ["[routed to T1 W1 from herdr] keep the alias\n\no4 [phone] what is running"] (prompts)))))))
+        (is (wait-for #(= 2 (count (prompts)))))
+        (is (= ["[routed to T1 W1 from herdr] keep the alias" "o4 [phone] what is running"] (sort (prompts))))))))
 
 (deftest approval-binds-to-the-reviewed-revision-and-its-evidence
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-ap"}))
@@ -2026,7 +2131,7 @@
                       client/call! (let [call! client/call!] (fn [req] (call! dir req)))]
           (is (= "W1" (sandbox/eval-in (sandbox/context sandbox/bindings) (format "(super-cancel! \"T1\" \"stuck\" :for %s)" (pr-str for))))))
         (is (= [{:id "W1" :reason "stuck" :for for :origin :emacs}]
-               (mapv :data (filter #(= :cancel-requested (:kind %)) (store/events (:db c))))))
+               (mapv #(select-keys (:data %) [:id :reason :for :origin]) (filter #(= :cancel-requested (:kind %)) (store/events (:db c))))))
         (is (#{:cancelling :cancelled} (get-in @(:state c) [:workers "W1" :state])))
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
 

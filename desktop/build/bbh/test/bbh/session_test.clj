@@ -597,7 +597,6 @@
       (is (:evaluating @s))
       (session/receive-control! s {:id "control-test" :kind "cancel"})
       (is (= :cancelled (deref turn 10000 :timeout)))
-      (is (= "interrupted" (slurp (str (fs/path (:dir h) "control-test.received")))))
       (is (not (:evaluating @s)))
       (finally (stop! h)))))
 
@@ -626,14 +625,13 @@
       (loop [n 0] (when (and (< n 300) (< (count @prompts) 5)) (Thread/sleep 10) (recur (inc n))))
       (is (= (repeat 5 session/mail-wake) @prompts) "each wakes the session, which takes the mail itself")
       (is (empty? @acked))
-      (bbh.inbox/send! (:dir h) "[Cancelled] stop now" nil {:kind :cancel :message-id "0-cancel-W1"})
-      (deliver {:id "0-cancel-W1" :kind "cancel" :text "[Cancelled] stop now"})
+      (bbh.inbox/send! (:dir h) "[Cancelled] stop now" nil {:kind :cancel :message-id "0000000007-o7"})
+      (deliver {:id "0000000007-o7" :kind "cancel" :text "[Cancelled] stop now"})
       (deliver {:id "m9" :text "a reply that was already queued"})
       (loop [n 0] (when (and (< n 300) (< (count @acked) 1)) (Thread/sleep 10) (recur (inc n))))
       (is (= 5 (count @prompts)) "neither the cancel nor a later message starts a turn")
       (is (= "m9" (last @acked)))
-      (is (fs/exists? (fs/path (:dir h) "0-cancel-W1.received")))
-      (is (= [] (filter #(= "cancel" (:kind %)) (bbh.inbox/pending (:dir h)))))
+      (is (= [] (filter #(= "cancel" (:kind %)) (bbh.inbox/pending (:dir h)))) "its file is gone, which tells the sender")
       (is (= :cancelled (session/prompt! s "late mailbox prompt" :mailbox? true)))
       (is (empty? @(:requests h)) "no model request after the cancel")
       (finally (stop! h)))))
@@ -642,8 +640,31 @@
   (let [h (harness "" ["done"])
         stop-watch (session/watch-controls! (:s h) :scan-ms 10)]
     (try
-      (bbh.inbox/send! (:dir h) "[Cancelled] stop" nil {:kind :cancel :message-id "0-cancel-W2"})
-      (loop [n 0] (when (and (< n 300) (not (fs/exists? (fs/path (:dir h) "0-cancel-W2.received")))) (Thread/sleep 10) (recur (inc n))))
-      (is (fs/exists? (fs/path (:dir h) "0-cancel-W2.received")))
+      (bbh.inbox/send! (:dir h) "[Cancelled] stop" nil {:kind :cancel :message-id "0000000008-o8"})
+      (loop [n 0] (when (and (< n 300) (seq (bbh.inbox/pending (:dir h)))) (Thread/sleep 10) (recur (inc n))))
+      (is (= [] (bbh.inbox/pending (:dir h))))
       (is (:cancelled @(:s h)))
       (finally (stop-watch) (stop! h)))))
+
+(deftest a-session-restarted-before-its-ack-reads-the-mail-once
+  ;; The session died after its transcript held the mail and before it deleted
+  ;; the file, or the controller wrote the same row's file a second time.
+  (let [h (harness "" ["done"])
+        mail! #(bbh.inbox/send! (:dir h) "[Reply] Keep the alias?: No" nil {:message-id "0000000007-o7"})]
+    (try
+      (mail!)
+      (is (= :end-turn (session/prompt! (:s h) session/mail-wake)))
+      (is (= 1 (count @(:requests h))))
+      (mail!)
+      (finally (stop! h)))
+    (let [h2 (harness "" ["again"] (:dir h))]
+      (try
+        (is (= 1 (count (bbh.inbox/pending (:dir h)))) "the file is back")
+        (is (= :end-turn (session/prompt! (:s h2) session/mail-wake)))
+        (is (empty? @(:requests h2)) "no second turn for mail the transcript holds")
+        (is (= [] (bbh.inbox/pending (:dir h))) "and the file is gone")
+        (is (= 1 (count (filter #(str/includes? (str (:content %)) "[Mail 0000000007-o7]") (:messages @(:s h2))))))
+        (bbh.inbox/send! (:dir h) "a new one" nil {:message-id "0000000009-o9"})
+        (is (= :end-turn (session/prompt! (:s h2) session/mail-wake)))
+        (is (= 1 (count @(:requests h2))) "new mail is still read")
+        (finally (stop! h2))))))

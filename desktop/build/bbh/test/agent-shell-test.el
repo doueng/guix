@@ -375,7 +375,7 @@ and the transcript keeps q and focus moves in normal state."
 
 (ert-deftest bbh-a-cancel-in-the-mailbox-starts-no-turn ()
   (bbh-test--with-shell (shell composer transcript)
-    (bbh-test--mail (eng/bbh--conversation shell) "0-cancel-W1" "[Cancelled] stop" "cancel")
+    (bbh-test--mail (eng/bbh--conversation shell) "0000000007-o7" "[Cancelled] stop" "cancel")
     (bbh-test--wait (lambda () nil) 1.5)
     (should-not (string-match-p "\\[mail\\]" (bbh-test--text transcript)))))
 

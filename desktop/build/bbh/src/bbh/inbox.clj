@@ -5,7 +5,9 @@
   directory is the rollover root's, so a rollover keeps both.
 
   The session takes its own mail and deletes a message once its transcript
-  holds it, so delivery is at least once."
+  holds it. A sender that names a message after what it owes (`send!` with
+  :message-id) can send again after a crash without leaving two, and a session
+  skips a message its transcript already holds, so such mail is read once."
   (:require [babashka.fs :as fs]
             [bbh.conversation :as conversation]
             [bbh.super.process :as process]
@@ -124,12 +126,6 @@
   "Take message ID out of conversation ROOT's mailbox."
   [{:keys [root]} id]
   (fs/delete-if-exists (message-file root id)))
-
-(defn receipt!
-  "Leave TEXT as the receipt of control message ID in conversation ROOT's
-  directory, beside its mailbox, for the sender that waits on it."
-  [root id text]
-  (spit (str (fs/path root (str (fs/file-name id) ".received"))) text))
 
 (defn waiting-since
   "When message ID was left in conversation ROOT's mailbox, as epoch ms, or nil

@@ -144,6 +144,12 @@
 
 (defn id-order "The order of ids of one kind: T12 → 12, so T9 comes before T10." [id] (parse-long (subs id 1)))
 
+(defn message-id
+  "The mailbox message of outbox row OUTBOX. It is the row's alone, so sending
+  the row twice leaves one message, and the names sort in row order."
+  [outbox]
+  (format "%010d-%s" (id-order outbox) outbox))
+
 (defn next-queued
   "The oldest queued Worker that may start now under POLICY, or nil."
   [state policy]
@@ -346,8 +352,18 @@
     (when-not (#{:queued :starting :working} (:state w)) (refuse :not-running :worker worker))
     (when (str/blank? reason) (refuse :invalid :field :reason))
     {:events [{:kind :cancel-requested :thread (:thread w)
-               :data (merge {:id worker :reason reason} (authority state principal for))}]
+               ;; A Worker with a session is told through the outbox, like any other signal.
+               :data (merge {:id worker :reason reason} (authority state principal for)
+                            (when (:conversation w)
+                              {:outbox (next-id state :outbox "o") :conversation (:conversation w)
+                               :text (str "[Cancelled] " reason)}))}]
      :result worker}))
+
+(defn cancel-owed?
+  "Whether Worker W's session has yet to take its cancellation."
+  [state w]
+  (boolean (some #(and (= :cancel (:delivery %)) (= (:conversation w) (:conversation %)) (#{:pending :sent} (:state %)))
+                 (vals (:outbox state)))))
 
 (defmethod decide* :cancel-delivered! [state {{:keys [worker]} :args}]
   (let [w (get-in state [:workers worker])]
@@ -702,7 +718,8 @@
 (defmethod decide* :answered! [state {{:keys [thread reply]} :args}]
   (let [r (or (get-in state [:replies reply]) (refuse :no-such-reply :reply reply))]
     (when (not= thread (:thread r)) (refuse :forbidden :reply reply))
-    {:events [{:kind :reply-answered :thread thread :data {:id reply}}] :result reply}))
+    ;; A reply closed by its Worker's end stays closed: a later Worker never took it.
+    {:events (if (= :closed (:state r)) [] [{:kind :reply-answered :thread thread :data {:id reply}}]) :result reply}))
 
 (defmethod decide* :issue-token! [_ {{:keys [principal]} :args :keys [token-hash]}]
   {:events [{:kind :token-issued :data {:hash token-hash :principal principal}}] :result :issued})
@@ -854,14 +871,19 @@
         (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
         ;; Nobody is left to read an answer, whatever the outcome.
         (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= id (:worker a)) (= :open (:state a))) (assoc :state :superseded))]) %)))
+        ;; Nor to act on a reply it has not answered. Closed is not answered.
+        (update :replies update-vals #(cond-> % (and (= id (:worker %)) (= :sent (:state %))) (assoc :state :closed)))
         (cond-> (contains? #{id nil} (:worker t))
           (-> (assoc-in [:threads thread :worker] nil)
               (update-in [:threads thread :history] conj id)
               (assoc-in [:threads thread :milestone-seq] seq)
               (assoc-in [:threads thread :summary] (finish-line t w id outcome reason landed)))))))
 
-(defmethod fold* :cancel-requested [state {{:keys [id reason]} :data}]
-  (update-in state [:workers id] assoc :state :cancelling :cancel-reason reason))
+(defmethod fold* :cancel-requested [state {{:keys [id reason outbox conversation text]} :data :keys [thread]}]
+  (cond-> (update-in state [:workers id] assoc :state :cancelling :cancel-reason reason)
+    outbox (-> (bump :outbox)
+               (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
+                                           :state :pending :message nil :delivery :cancel}))))
 
 (defmethod fold* :health-observed [state {{:keys [worker health]} :data}]
   (cond-> state worker (assoc-in [:workers worker :health] health)))
