@@ -506,7 +506,8 @@
   (case command
     "nav" (nav! (first args) (second args))
     "term-nav" (term-nav! (load-grammar) (first args))
-    "listen" (listen!)
+    ;; Its own name keeps earlyoom's bb preference off this long-lived listener, as in hyprkan.
+    "listen" (do (spit "/proc/self/comm" "keyleader") (listen!))
     "run" (run-desktop! (load-grammar) (vec args))
     "herdr" (herdr-leader! (load-grammar))
     "--check" (do (load-grammar) (println "Leader grammar is valid"))

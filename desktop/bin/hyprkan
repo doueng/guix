@@ -71,8 +71,17 @@
               :when class]
         (focus! class)))))
 
+(defn name-process!
+  "earlyoom prefers to kill processes named bb (modules/engstrand/system/asahi.scm),
+  under memory pressure. Without this follower kanata stays on the last app
+  layer, so after a terminal Cmd+T and Cmd+W do nothing in Chrome. Under its own
+  name it is ranked by its small memory instead."
+  [name]
+  (try (spit "/proc/self/comm" name)
+       (catch Exception e (warn "cannot rename process:" (ex-message e)))))
+
 (case (first *command-line-args*)
-  nil (follow-focus!)
+  nil (do (name-process! "hyprkan") (follow-focus!))
   "layer" (println (:name (send! {:RequestCurrentLayerName {}} (reply :CurrentLayerName))))
   ;; Reload rereads the file kanata last loaded, which ReloadFile may have changed.
   "reload" (do (send! {:ReloadFile {:path "/etc/kanata/kanata.kbd"}} reset-after-reload)
