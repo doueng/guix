@@ -679,28 +679,64 @@
                   "thirteen" "fourteen" "fifteen" "sixteen" "seventeen" "eighteen" "nineteen"] (range 20))
          {"twenty" 20 "thirty" 30 "forty" 40 "fifty" 50 "sixty" 60 "seventy" 70 "eighty" 80 "ninety" 90}))
 
+(defn- spoken-tokens
+  "The words of S, each with its value as a number word or digits, whether
+  punctuation after it ends the number (a hyphen only beside a space, as
+  twenty-two is one number), and the offset where the text after
+  it starts."
+  [s]
+  (let [m (re-matcher #"([^\s,.:;!?-]+)([\s,.:;!?-]*)" s)]
+    (loop [acc []]
+      (if (.find m)
+        (let [w (str/lower-case (.group m 1))
+              sep (.group m 2)]
+          (recur (conj acc {:v (or (number-words w) (when (re-matches #"\d{1,3}" w) (parse-long w)))
+                            :digits? (boolean (re-matches #"\d{1,3}" w))
+                            :word w
+                            :stop? (boolean (re-find #"[,.:;!?]|\s-|-\s" sep))
+                            :end (.end m)})))
+        acc))))
+
 (defn- spoken-number
-  "The number WORDS say (\"twenty two\", \"twelve\", \"1 2\"), and the words left."
-  [words]
-  (loop [n nil [w & more :as ws] words]
-    (let [w' (some-> w str/lower-case (str/replace #"[^a-z0-9]" ""))
-          v (when w' (or (number-words w') (when (re-matches #"\d{1,2}" w') (parse-long w'))))]
-      (cond (nil? v) [n ws]
-            (and n (< v 10) (>= n 20) (zero? (mod n 10))) (recur (+ n v) more)
-            (and n (re-matches #"\d{1,2}" w')) (recur (+ (* 10 n) v) more)
-            n [n ws]
-            :else (recur v more)))))
+  "The number the words of S say, and the text after it: \"twelve\", \"twenty
+  two\", \"1 2\", \"170\", \"one seventy\" and \"one hundred and seventy\".
+  Punctuation after a word ends the number, so \"twelve, 3 files\" is 12."
+  [s]
+  (let [ts (spoken-tokens s)
+        at (fn [i] (let [t (get ts i)] (when (and t (or (zero? i) (not (:stop? (get ts (dec i)))))) t)))
+        ;; A number below a hundred in words from token I: [n next-index].
+        below-100 (fn [i]
+                    (when-let [{:keys [v digits?]} (at i)]
+                      (cond (or (nil? v) digits?) nil
+                            (and (>= v 20) (let [u (at (inc i))] (and u (:v u) (< 0 (:v u) 10))))
+                            [(+ v (:v (at (inc i)))) (+ i 2)]
+                            :else [v (inc i)])))
+        digits (fn []
+                 (loop [n (:v (at 0)) i 1]
+                   (let [t (at i)]
+                     (if (and t (:digits? t) (< (* n 10) 1000)) (recur (parse-long (str n (:word t))) (inc i)) [n i]))))
+        hundreds (fn []
+                   (let [u (:v (at 0))]
+                     (when (and u (< 0 u 10) (not (:digits? (at 0))))
+                       (if (= "hundred" (:word (at 1)))
+                         (let [i (if (= "and" (:word (at 2))) 3 2)]
+                           (if-let [[r j] (below-100 i)] [(+ (* 100 u) r) j] [(* 100 u) 2]))
+                         (when-let [[r j] (below-100 1)] (when (>= r 10) [(+ (* 100 u) r) j]))))))
+        [n i] (cond (nil? (:v (at 0))) nil
+                    (:digits? (at 0)) (digits)
+                    :else (or (hundreds) (below-100 0)))]
+    (when n [n (if (zero? i) s (subs s (:end (get ts (dec i)))))])))
 
 (defn parse-handle
   "[handle rest] when TEXT starts with a thread handle, typed (`T12`, `t12`)
-  or spoken (`tee twelve`, `T twelve`, `tee twenty two`); else nil."
+  or spoken (`tee twelve`, `T twelve`, `tee twenty two`, `tee one seventy`); else nil."
   [text]
   (let [text (str/trim (str text))]
     (if-let [[_ n rest] (re-matches #"(?is)t\s*(\d+)\b[\s,.:;-]*(.*)" text)]
       [(str "T" (parse-long n)) (str/trim rest)]
       (when-let [[_ rest] (re-matches #"(?is)(?:tee|tea|t)\b[\s,.:;-]*(.*)" text)]
-        (let [[n ws] (spoken-number (str/split rest #"\s+"))]
-          (when n [(str "T" n) (str/trim (str/replace (str/join " " ws) #"^[\s,.:;-]+" ""))]))))))
+        (when-let [[n more] (spoken-number rest)]
+          [(str "T" n) (str/trim (str/replace more #"^[\s,.:;-]+" ""))])))))
 
 (defn- router-row
   "The outbox row that owes TEXT to the Router, or a refusal when none is registered."
