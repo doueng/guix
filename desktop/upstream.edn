@@ -18,4 +18,6 @@
  "pi/agent/skills/pstack"
  {:repo "cursor/plugins" :path "pstack" :commit "c742dd61706fbacc1b95f1a20b7b988cf096ce6c" :manual true}
  "pi/agent/skills/retro"
- {:repo "mattpocock/skills" :path "skills/engineering/retro" :commit "a7d038f6bf7f01b516408e95e2fb56e0b338fa6f"}}
+  {:repo "mattpocock/skills" :path "skills/engineering/retro" :commit "a7d038f6bf7f01b516408e95e2fb56e0b338fa6f"}
+ "pi/agent/skills/skill-diet"
+ {:repo "nicobailon/skill-diet" :commit "5f41df1220eb5759c413390206f1b9e6c63be754" :manual true}}
