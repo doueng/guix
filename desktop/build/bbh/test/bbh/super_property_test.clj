@@ -5,7 +5,8 @@
   must replay to the stored state. It stands in for the socket tests that only
   checked these rules; super_test.clj keeps those that need files, processes,
   jj or Emacs."
-  (:require [bbh.super.model :as model]
+  (:require [babashka.fs :as fs]
+            [bbh.super.model :as model]
             [bbh.super.store :as store]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
@@ -378,17 +379,33 @@
     [[(k :thread!) 0 1 0] [(k :thread!) 0 1 0] [(k :thread!) 0 1 0] [(k :register-router!) 0 0 0]
      [(k :start-worker!) 1 1 1] [(k :worker-running!) 1 0 0] [(k :start-worker!) 2 1 1] [(k :worker-running!) 1 0 0]]))
 
+(defn- history-problems
+  "What breaks 'the state is a function of the event log' for the store at
+  PATH, whose controller held STATE: the log folded from its newest snapshot,
+  folded twice from its first event, and folded by a store opened anew, as
+  after a restart, must each give STATE."
+  [db path state]
+  (let [whole #(reduce model/fold model/empty-state (store/events db))
+        reopened (let [db2 (store/open path)] (try (store/replay db2) (finally (store/close! db2))))]
+    (seq (concat (when (not= state (store/replay db)) [[:replay-differs]])
+                 (when (not= state (whole)) [[:whole-log-differs-from-snapshot-and-tail]])
+                 (when (not= (whole) (whole)) [[:fold-is-not-deterministic]])
+                 (when (not= state reopened) [[:restart-differs]])))))
+
 (defn- run-steps
-  "Commit the commands random CHOICES make, one at a time, on an in-memory
-  store with a Worker cap of CAP. A choice can repeat an earlier accepted
-  command with its id, which must return the first result and change nothing.
-  Returns the first problem found, or nil."
-  [cap choices]
-  (let [db (store/open nil)]
+  "Commit the commands random CHOICES make, one at a time, on a store with a
+  Worker cap of CAP, taking a snapshot before step SNAP-AT. A choice can repeat
+  an earlier accepted command with its id, which must return the first result
+  and change nothing. Returns the first problem found, or nil."
+  [cap snap-at choices]
+  (let [dir (fs/create-temp-dir {:prefix "bbh-super-property"})
+        path (str (fs/path dir "super.db"))
+        db (store/open path)]
     (try
-      (loop [state (store/load db) [ch & more] (concat preamble choices) i 0 accepted [] launched #{}]
+      (loop [state (store/replay db) [ch & more] (concat preamble choices) i 0 accepted [] launched #{}]
+        (when (= i snap-at) (store/snapshot! db state))
         (if (nil? ch)
-          (when-not (= (store/replay db) (store/load db) state) {:problems [[:replay-differs]]})
+          (when-let [problems (history-problems db path state)] {:problems (vec problems)})
           (let [[step first-result] (if (= :repeat (pick kinds (first ch)))
                                       (pick accepted (second ch))
                                       [(command state cap i ch)])]
@@ -412,12 +429,13 @@
                   (recur after more (inc i)
                          (cond-> accepted (not (or (:refused out) (:repeat? out))) (conj [step (:result out)]))
                          launched)))))))
-      (finally (store/close! db)))))
+      (finally (store/close! db) (fs/delete-tree dir)))))
 
 (def ^:private choice (gen/vector (gen/choose 0 1000) 4))
 
 (deftest property-random-command-sequences-keep-the-controllers-rules
   (let [result (tc/quick-check 150 (prop/for-all [cap (gen/choose 1 2)
+                                                  snap-at (gen/choose 0 70)
                                                   choices (gen/vector choice 1 60)]
-                                     (nil? (run-steps cap choices))))]
-    (is (:pass? result) (pr-str (when-let [[cap choices] (get-in result [:shrunk :smallest])] (run-steps cap choices))))))
+                                     (nil? (run-steps cap snap-at choices))))]
+    (is (:pass? result) (pr-str (when-let [[cap snap-at choices] (get-in result [:shrunk :smallest])] (run-steps cap snap-at choices))))))

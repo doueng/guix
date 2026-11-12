@@ -761,7 +761,7 @@
            :policy policy
            :sessions (merge session-io sessions) :machine (atom nil) :stale-since (atom {}) :was-active (atom #{}) :last-machine (atom 0) :reap-grace-ms reap-grace-ms
            :boot-at (System/currentTimeMillis) :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
-           :db db :state (atom (store/load db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
+           :db db :state (atom (store/replay db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
            :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :web (atom nil)
            ;; NOTIFY, effects such as notify/desktop, turns desktop notifications on.
            :notifier (some-> notify (notify/new-notifier (fs/path dir "notifications.edn")))}]

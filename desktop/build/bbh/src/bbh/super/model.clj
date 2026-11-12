@@ -1,14 +1,11 @@
 (ns bbh.super.model
   "The super-agent's state machine, pure. `decide` turns a command into events
-  or refuses it, `fold` applies one event, and `changed` names the records a
-  fold touched so the store can materialize them. Nothing here knows SQL,
-  sockets or mailboxes."
+  or refuses it, and `fold` applies one event, so the state is a function of the
+  event log alone. Nothing here knows SQL, sockets or mailboxes."
   (:require [clojure.string :as str]))
 
 (def empty-state
   {:counters {} :threads {} :workers {} :asks {} :replies {} :outbox {} :tokens {} :router {}})
-
-(def entity-kinds [:counters :threads :workers :asks :replies :outbox :tokens :router])
 
 (defn- refuse [error & {:keys [message] :as more}]
   (throw (ex-info (or message (name error)) (assoc (dissoc more :message) :error error))))
@@ -675,13 +672,37 @@
 
 (def retired-events
   "Event kinds no command emits any more. An old log still holds them, so they
-  fold to nothing; store/load keeps whatever they once wrote."
+  fold to nothing."
   #{:message-routed :router-triaged :lease-moved :lease-granted :restart-attempted :restart-failed :worker-restarted})
 
 (defmethod fold* :default [state {:keys [kind]}]
   (if (retired-events kind)
     state
     (throw (ex-info (str "unknown event " kind) {:error :unknown-event :kind kind}))))
+
+(def ^:private versions
+  "The format version of each event kind that has changed since version 1."
+  {})
+
+(defn version-of "The format version events of KIND are written in." [kind] (get versions kind 1))
+
+(def ^:private upcasts
+  "{[kind version] f}: F turns an event of KIND in VERSION into the next
+  version. Change an event's format by raising its entry in `versions` and
+  adding the step here, so a log written before the change still folds."
+  {})
+
+(defn upcast
+  "EVENT, as an old log holds it, in the format `fold` reads today."
+  [{:keys [kind v] :as event}]
+  (let [v (or v 1)]
+    (if-let [f (get upcasts [kind v])]
+      (recur (assoc (f event) :v (inc v)))
+      event)))
+
+;; The whole state at one point of the log. A replay starts at the newest one,
+;; so events before it need not fold to it any more.
+(defmethod fold* :snapshot [_ {{:keys [state]} :data}] state)
 
 (defn fold
   "STATE after EVENT, with the thread it concerns stamped :updated-at."
@@ -993,16 +1014,3 @@
         (set-states :asks (concat (keys (:picks reply)) (keys (:answers reply)) (keys (:approved reply))) :answered)
         (resume thread))))
 
-(defn changed
-  "[kind id record] for every record that differs between BEFORE and AFTER,
-  with record nil for one AFTER no longer has."
-  [before after]
-  (concat
-   (for [kind entity-kinds
-         [id record] (kind after)
-         :when (not= record (get-in before [kind id]))]
-     [kind id record])
-   (for [kind entity-kinds
-         id (keys (kind before))
-         :when (not (contains? (kind after) id))]
-     [kind id nil])))

@@ -79,20 +79,18 @@ Two identities are kept apart.
 
 ### Store: SQLite
 
-Authoritative orchestration state lives in `~/.local/share/bbh/super/super.db`, SQLite in WAL mode with `synchronous=FULL`, `foreign_keys=ON` and a 5 s busy timeout. The controller is the only writer. Views open read-only connections, so the Inbox buffer and the phone page query indexed tables instead of folding history, and they read while the controller writes.
+Authoritative orchestration state lives in `~/.local/share/bbh/super/super.db`, SQLite in WAL mode with `synchronous=FULL`, `foreign_keys=ON` and a 5 s busy timeout. The controller is the only writer and the only reader: it holds the state in memory, and the Inbox buffer and the phone page ask it.
 
 ```
 super.db
   events          append-only history, global seq
   commands        idempotency keys with the result each returned
-  threads, workers, asks, replies, tokens, router   materialized state
-  outbox          deliveries owed: pending, sent, done or dropped
   schema_version  PRAGMA user_version, migrated before the controller starts
 ```
 
-An accepted command is one transaction: look up the command id and, if seen, return the original result; check the caller's identity and the expected state version; insert the event; update the materialized rows; insert any outbox rows; commit. A failed check rolls everything back. The duplicate check comes before the version check, so a retried Send returns its original success rather than a conflict.
+An accepted command is one transaction: look up the command id and, if seen, return the original result; check the caller's identity and the expected state version; insert the events; commit. Outbox rows, deliveries owed, are state like the rest and come from folding those events. A failed check rolls everything back. The duplicate check comes before the version check, so a retried Send returns its original success rather than a conflict.
 
-State transitions stay pure Clojure functions over events. The tables are their materialization, and a test replays the whole `events` table into an empty database and compares it with the materialized state. Nothing above the store knows SQL.
+State transitions stay pure Clojure functions over events, and the state is nothing but their fold over the log. A `snapshot` event holds the whole state at one point, and the controller boots by folding from the newest one. Each event row carries the format version it was written in, and an older one is brought to today's format before it is folded, so a log outlives changes to its events. A property test checks that the log folded twice, folded from a snapshot and its tail, and folded by a store opened anew all give the state the controller held. Until version 2 the state was also kept in one table per record kind and booted from there; opening such a database backs it up to `super.db.v1.bak` and appends those tables' state as a snapshot. Nothing above the store knows SQL.
 
 Delivery is at least once. The dispatcher writes each pending row into its conversation's bbh mailbox and marks it sent. The session takes its own mail at the start of each input and before each model call, and deletes the file once its transcript holds it, which marks the row done; Emacs only wakes an idle session. A reply stays sent until the Worker calls `answered!`. A row for a Worker that has finished is dropped. A model turn, a shell command or a GitHub push cannot join the transaction, so each external side effect carries its own idempotency key and a reconciliation rule.
 

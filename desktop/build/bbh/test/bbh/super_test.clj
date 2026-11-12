@@ -73,12 +73,14 @@
 
 (deftest a-command-that-fails-after-its-events-leaves-no-row
   (let [db (store/open nil)
-        state (store/load db)]
+        state (store/replay db)]
     (is (thrown? Exception
-                 (with-redefs [model/changed (fn [_ _] (throw (ex-info "disk full" {})))]
+                 ;; The second event cannot be written, after the first was.
+                 (with-redefs [model/decide (fn [& _] {:events [{:kind :thread-created :thread "T1" :data {:id "T1" :title "x"}} {:kind nil}]
+                                                       :result "T1"})]
                    (store/commit! db state :owner {:id "c1" :command :thread! :args {:title "x"}}))))
     (is (empty? (store/events db)))
-    (is (= model/empty-state (store/load db)))
+    (is (= model/empty-state (store/replay db)))
     (is (= "T1" (:result (store/commit! db state :owner {:id "c1" :command :thread! :args {:title "x"}})))
         "the id is free again, so a retry runs")
     (store/close! db)))
@@ -458,7 +460,7 @@
         (doseq [f (fs/glob root "mailbox/*.json")] (fs/delete f))
         (is (wait-for #(= [:done] (map :state (vals (:outbox @(:state c)))))))
         (is (= {} (:replies @(:state c))) "a brief is not a reply")
-        (locking (:db c) (is (= (store/replay (:db c)) (store/load (:db c)) @(:state c))))))))
+        (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
 
 ;; ---- the Router ------------------------------------------------------------
 
@@ -538,7 +540,7 @@
           (is (re-find #"Job build-1 exited with status 17"
                        (:text (cheshire.core/parse-string
                                 (slurp (str (first (fs/glob conversations "super-W1/mailbox/*.json")))) true))))
-          (locking (:db c2) (is (= (store/replay (:db c2)) (store/load (:db c2)) @(:state c2))))
+          (locking (:db c2) (is (= (store/replay (:db c2)) @(:state c2))))
           (finally (super/stop! c2))))
       (let [c3 (super/start! opts)]
         (try
@@ -589,7 +591,7 @@
         (fs/delete (str (base "waited") ".waiting"))
         (super/observe-jobs! c)
         (is (= 1 (count (job-rows))) "an exit nobody read once the wait ended sends one")
-        (locking (:db c) (is (= (store/replay (:db c)) (store/load (:db c)) @(:state c))))))))
+        (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
 
 (deftest mail-to-a-finished-worker-is-dropped-and-its-file-deleted
   (with-controller
@@ -602,7 +604,7 @@
         (is (wait-for #(= :dropped (get-in @(:state c) [:outbox "o2" :state]))))
         (is (empty? (fs/glob conversations "super-W1/mailbox/*.json")) "the unread file is deleted")
         (is (empty? (filter #(#{:pending :sent} (:state %)) (vals (:outbox @(:state c))))))
-        (locking (:db c) (is (= (store/replay (:db c)) (store/load (:db c)) @(:state c))))))))
+        (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
 
 (deftest cancellation-kills-only-identity-verified-detached-jobs
   (with-controller
@@ -1184,7 +1186,7 @@
               (let [r (try (store/commit! db state principal cmd)
                            (catch clojure.lang.ExceptionInfo e {:state state :result {:error (:error (ex-data e))}}))]
                 (-> acc (assoc :state (:state r)) (update :results conj (:result r)))))
-            {:db db :state (store/load db) :results []}
+            {:db db :state (store/replay db) :results []}
             steps)))
 
 (defn- running
