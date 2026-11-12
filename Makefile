@@ -179,7 +179,7 @@ $(PI_SCI_OUTPUTS) &: $(PI_SCI_SOURCES)
 
 pi-sci: $(PI_SCI_OUTPUTS)
 
-pi-sci-test:
+pi-sci-test: pi-sci
 	desktop/build/pi-sci/verify.bb
 
 BBH_RUNS ?= 10
