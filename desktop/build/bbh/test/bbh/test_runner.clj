@@ -59,17 +59,36 @@
 (defn- read-proc [pid file]
   (try (str/replace (slurp (str "/proc/" pid "/" file)) "\u0000" " ") (catch Exception _ "")))
 
-(defn leaked-controllers
-  "The controllers, `bbh super serve` or `bbh.super/start!` in a bb, still
-  running from the test run MARKER, as {:pid :cmd}."
-  [marker]
+(def ^:private leftover-re
+  "What no test may leave running: a controller (`bbh super serve` or `bbh.super/start!` in a bb), a session's nREPL
+  server (T167: agent-shell-test's restart tests SIGKILL bbh, and its REPLs lived on) or a browser."
+  #"super serve|bbh\.super.*start!|babashka\.nrepl\.server|chrome|bwrap")
+
+(defn- leftovers-now [marker]
   (for [d (fs/list-dir "/proc")
         :let [pid (str (fs/file-name d))]
         :when (re-matches #"\d+" pid)
         :when (str/includes? (read-proc pid "environ") (str marker-var "=" marker " "))
         :let [cmd (str/trim (read-proc pid "cmdline"))]
-        :when (re-find #"super serve|bbh\.super.*start!" cmd)]
+        :when (re-find leftover-re cmd)]
     {:pid (parse-long pid) :cmd cmd}))
+
+(defn leaked-controllers
+  "The controllers, session REPLs and browsers still running from the test run MARKER, as {:pid :cmd}. Waits up to
+  3 s first, since a REPL notices its parent's death within half a second."
+  [marker]
+  (loop [n 30]
+    (let [found (doall (leftovers-now marker))]
+      (if (and (seq found) (pos? n)) (do (Thread/sleep 100) (recur (dec n))) found))))
+
+(defn- report-leaks!
+  "Print and SIGKILL what MARKER's run left running. Returns them."
+  [marker]
+  (let [leaked (leaked-controllers marker)]
+    (doseq [{:keys [pid cmd]} leaked]
+      (println (str "\nERROR: a test left " pid " running: " (subs cmd 0 (min 200 (count cmd)))))
+      (p/shell {:continue true :err :discard} "kill" "-KILL" (str pid)))
+    leaked))
 
 (defn- real-dirs
   "The person's bbh dirs, as this process, outside the hermetic env, sees them."
@@ -103,11 +122,13 @@
   (let [root (hermetic/root)
         tmp (str (fs/create-dirs (fs/path root "tmp")))
         before (entries)
-        {:keys [exit]} (apply p/shell {:continue true :env (merge (hermetic/env) {"TMPDIR" tmp} extra)} cmd)
+        marker (str (random-uuid))
+        {:keys [exit]} (apply p/shell {:continue true :env (merge (hermetic/env) {"TMPDIR" tmp marker-var marker} extra)} cmd)
+        leaked (report-leaks! marker)
         written (leaks before root)]
     (doseq [w written] (println (str "ERROR: a test wrote to the real bbh dirs: " w)))
     (when (empty? written) (fs/delete-tree root))
-    (System/exit (if (and (zero? exit) (empty? written)) 0 1))))
+    (System/exit (if (and (zero? exit) (empty? written) (empty? leaked)) 0 1))))
 
 (defn -main
   "Run every test var on BBH_TEST_JOBS workers (default 4, or fewer cores), print failures and the slowest tests,
@@ -158,10 +179,7 @@
                            :else (do (println (first lines)) (recur current (rest lines)))))
                        @proc))
         _ (run! deref (doall (repeatedly jobs #(future (run-worker)))))
-        leaked (doall (leaked-controllers marker))
-        _ (doseq [{:keys [pid cmd]} leaked]
-            (println (str "\nERROR: a test left controller " pid " running: " cmd))
-            (p/shell {:continue true :err :discard} "kill" "-KILL" (str pid)))
+        leaked (report-leaks! marker)
         written (leaks before root)
         _ (doseq [w written] (println (str "\nERROR: a test wrote to the real bbh dirs: " w)))
         _ (when (empty? written) (fs/delete-tree root))

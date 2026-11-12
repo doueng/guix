@@ -12,10 +12,15 @@
   (:import [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
 (def ^:private bootstrap
+  "Serve nREPL until the bbh process that started this REPL dies, then kill what the REPL started and exit, so a
+  crashed, killed or timed-out parent, such as a test run, leaves no orphan behind."
   "(require '[babashka.nrepl.server :as srv])
+(def parent (.get (.parent (java.lang.ProcessHandle/current))))
 (spit (System/getenv \"BBH_PORT_FILE\")
       (.getLocalPort (:socket (srv/start-server! {:host \"127.0.0.1\" :port 0 :quiet true}))))
-@(promise)")
+(while (.isAlive parent) (Thread/sleep 500))
+(run! #(.destroyForcibly %) (iterator-seq (.iterator (.descendants (java.lang.ProcessHandle/current)))))
+(System/exit 0)")
 
 (defn- decode [v]
   (cond (bytes? v) (String. ^bytes v "UTF-8")
@@ -153,8 +158,17 @@
     (future (read-loop conn))
     (assoc conn :user (clone! conn) :control (clone! conn))))
 
+(defn kill-tree!
+  "SIGKILL PROC, a babashka.process or java.lang.Process, and every descendant. SIGTERM is not enough: a flatpak
+  app's bwrap outlives it, while SIGKILL lets bwrap's die-with-parent take the whole sandbox down."
+  [proc]
+  (let [handle (.toHandle ^java.lang.Process (if (map? proc) (:proc proc) proc))
+        tree (cons handle (iterator-seq (.iterator (.descendants handle))))]
+    (run! #(.destroyForcibly ^java.lang.ProcessHandle %) tree)
+    proc))
+
 (defn kill! [{:keys [proc sock]}]
-  (p/destroy-tree proc)
+  (kill-tree! proc)
   (.close ^java.net.Socket sock)
   (deref proc 5000 nil))
 

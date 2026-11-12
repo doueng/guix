@@ -74,3 +74,45 @@
         (is (= 2 (count (re-seq #"did not speak nREPL" (log)))))
         (is (not (str/includes? (log) "Wrong first byte")) "no stack trace"))
       (finally (repl/kill! conn) (fs/delete-tree dir)))))
+
+(defn- alive? [pid] (fs/exists? (str "/proc/" pid)))
+
+(defn- gone-within? [ms pids]
+  (let [end (+ (System/currentTimeMillis) ms)]
+    (loop []
+      (cond (not-any? alive? pids) true
+            (> (System/currentTimeMillis) end) false
+            :else (do (Thread/sleep 100) (recur))))))
+
+(deftest a-repl-exits-when-the-process-that-started-it-dies
+  ;; T167: test runs that failed or timed out left their session REPLs running, reparented to the shepherd.
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-orphan"}))
+        code (str "(require 'bbh.repl) (let [c (bbh.repl/start! {:dir " (pr-str dir) " :cwd " (pr-str dir) "})]"
+                  " (println (.pid (:proc (:proc c)))) (flush) (System/exit 0))")
+        {:keys [out err]} (p/shell {:out :string :err :string :continue true}
+                                   "bb" "--config" (System/getProperty "babashka.config") "-e" code)
+        pid (some-> out str/trim parse-long)]
+    (try
+      (is pid err)
+      (is (gone-within? 5000 [pid]) "the orphaned REPL went on running")
+      (finally (when (and pid (alive? pid)) (p/shell {:continue true} "kill" "-9" (str pid)))
+               (fs/delete-tree dir)))))
+
+(deftest kill-tree-takes-down-children-that-ignore-sigterm
+  ;; flatpak's bwrap outlives SIGTERM with Chrome inside it (T167).
+  (let [proc (p/process "bash" "-c" "trap '' TERM; sleep 600 & sleep 600 & echo $!; wait")
+        child (parse-long (str/trim (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (:out proc))))))
+        pids (cons (.pid (:proc proc)) (map #(.pid %) (iterator-seq (.iterator (.descendants (.toHandle (:proc proc)))))))]
+    (try
+      (is (= 3 (count pids)))
+      (is (some #{child} pids))
+      (repl/kill-tree! proc)
+      (is (gone-within? 3000 pids))
+      (finally (run! #(p/shell {:continue true :err :discard} "kill" "-9" (str %)) (filter alive? pids))))))
+
+(deftest the-test-runner-finds-a-repl-a-test-left-running
+  (let [marker (str (random-uuid))
+        proc (p/process {:extra-env {"BB_TEST_RUN" marker}} "bash" "-c" "exec -a 'bb -e (require (quote [babashka.nrepl.server]))' sleep 30")]
+    (try
+      (is (= [(.pid (:proc proc))] (map :pid ((requiring-resolve 'bbh.test-runner/leaked-controllers) marker))))
+      (finally (repl/kill-tree! proc)))))

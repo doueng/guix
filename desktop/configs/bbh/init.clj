@@ -1019,15 +1019,22 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
                (str "--user-data-dir=" profile) (str "--virtual-time-budget=" wait)
                (str "--screenshot=" out) (str "--window-size=" w "," h) url]
          ;; Chrome takes the machine-wide heavy-job slot, waiting at most half the limit, so screenshots wait for a running test suite.
-         proc (p/process {:out :string :err :string}
+         ;; stderr goes to a file, so the wait ends when Chrome exits, not when a child that kept the pipe does.
+         err-file (str profile ".err")
+         proc (p/process {:out :discard :err (fs/file err-file)}
                          "bash" "-c" (heavy-command (str/join " " (map shell-quote argv)) :timeout-s (max 1 (quot limit 2000))))
-         r (deref proc limit nil)]
-     (when-not r (p/destroy-tree proc))
-     (fs/delete-tree profile)
+         ;; Always SIGKILL the tree, even after a clean exit or an interrupt: Chrome can leave its sandbox behind,
+         ;; and SIGTERM strands flatpak's bwrap with Chrome inside it.
+         r (try (deref proc limit nil)
+                (finally ((requiring-resolve 'bbh.repl/kill-tree!) proc)
+                         ;; A Chrome process that left the tree still names its unique profile.
+                         (p/shell {:continue true :out :discard :err :discard} "pkill" "-KILL" "-f" profile)
+                         (fs/delete-tree profile)))
+         err (str/join "\n" (take-last 5 (str/split-lines (str (when (fs/exists? err-file) (slurp err-file))))))]
+     (fs/delete-if-exists err-file)
      (cond (fs/exists? out) out
            (nil? r) (throw (ex-info (str "screenshot of " url " timed out after " limit " ms") {}))
-           :else (let [err (str/join "\n" (take-last 5 (str/split-lines (str (:err r)))))]
-                   (throw (ex-info (str "screenshot of " url " failed, exit " (:exit r) (when (seq err) (str ":\n" err))) {})))))))
+           :else (throw (ex-info (str "screenshot of " url " failed, exit " (:exit r) (when (seq err) (str ":\n" err))) {}))))))
 
 (defn explainer!
   "Write an explanation for the person to PATH as one self-contained HTML page with the shared explainer style

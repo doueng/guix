@@ -2,6 +2,7 @@
   "Loads the installed init.clj in a real session, the same path a conversation takes."
   (:require [bbh.hermetic :as hermetic]
             [babashka.fs :as fs]
+            [babashka.process :as p]
             [bbh.models :as models]
             [bbh.repl :as repl]
             [bbh.session :as session]
@@ -122,3 +123,48 @@
       (is (= "true" (:value (repl/eval! (:repl @s) "(let [t (:system (bbh.env/manifest))] (boolean (and (str/includes? t \"job-wait\") (str/includes? t \"120 s\"))))" 30000)))
           "the prompt should name the deadline and the job helpers")
       (finally (session/close! s)))))
+
+(def ^:private fake-flatpak
+  "A flatpak that acts like Chrome's sandbox: it leaves SIGTERM-ignoring processes that name the profile, one in
+  its tree and one that left it, and writes the screenshot unless the URL says hang."
+  "#!/usr/bin/env bash
+for a in \"$@\"; do case \"$a\" in --user-data-dir=*) profile=${a#*=};; --screenshot=*) out=${a#*=};; esac; done
+mkdir -p \"$profile\"; echo \"$profile\" >> \"$FAKE_CHROME_LOG\"
+setsid -f bash -c 'trap \"\" TERM; exec -a \"fake-chrome $0\" sleep 600' \"$profile\"
+bash -c 'trap \"\" TERM; exec -a \"fake-chrome $0\" sleep 600' \"$profile\" &
+case \"$*\" in *hang*) wait;; *) printf png > \"$out\";; esac
+")
+
+(deftest shot-leaves-no-chrome-or-profile-behind
+  ;; T167: Chrome sandboxes from shot outlived it for days.
+  (let [bin (fs/create-temp-dir {:prefix "bbh-fake-flatpak"})
+        log (str (fs/path bin "profiles"))
+        _ (spit (str (fs/path bin "flatpak")) fake-flatpak)
+        _ (fs/set-posix-file-permissions (fs/path bin "flatpak") "rwx------")
+        s (session/new-session {:dir (str (fs/create-temp-dir {:prefix "bbh-shot-test"}))
+                                :init (str (fs/absolutize "../../configs/bbh/init.clj"))
+                                :cwd (str (fs/absolutize "../.."))
+                                :env {"PATH" (str bin ":" (System/getenv "PATH")) "FAKE_CHROME_LOG" log "BBH_HEAVY_SLOT" "1"}
+                                :model (models/default-model)
+                                :make-engine models/engine
+                                :emit (fn [_])})
+        leftovers #(remove str/blank? (str/split-lines (:out (p/shell {:out :string :continue true} "pgrep" "-f" (str "fake-chrome " %)))))
+        name (str "bbh-shot-test-" (random-uuid))]
+    (try
+      (is (nil? (session/start-repl! s)))
+      (is (str/ends-with? (:value (repl/eval! (:repl @s) (str "(shot \"http://ok/\" :name " (pr-str name) ")") 30000)) (str name ".png\"")))
+      (is (str/includes? (:value (repl/eval! (:repl @s) "(with-redefs [bbh.env/budget-ms (constantly 1500)] (try (shot \"http://hang/\") (catch Exception e (ex-message e))))" 30000))
+                         "timed out"))
+      (let [profiles (str/split-lines (slurp log))]
+        (is (= 2 (count profiles)))
+        (doseq [profile profiles]
+          (is (empty? (leftovers profile)) (str "Chrome processes of " profile " outlived shot"))
+          (is (not (fs/exists? profile)) "the profile is removed")))
+      (finally
+        (session/close! s)
+        (when (fs/exists? log)
+          (doseq [profile (str/split-lines (slurp log))]
+            (p/shell {:continue true} "pkill" "-KILL" "-f" (str "fake-chrome " profile))
+            (fs/delete-tree profile)))
+        (fs/delete-if-exists (str "/tmp/bbh-shots/" name ".png"))
+        (fs/delete-tree bin)))))

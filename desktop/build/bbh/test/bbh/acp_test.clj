@@ -214,3 +214,18 @@
         (is (clojure.string/starts-with? currentModelId "script/"))
         (is (some #{currentModelId} (map :modelId availableModels))))
       (finally (stop! c)))))
+
+(deftest a-killed-bbh-takes-its-repl-with-it
+  ;; T167: agent-shell-test's restart tests SIGKILL bbh, and each left its session REPL running for good.
+  (let [c (client ["ok"])]
+    (try
+      (start! c)
+      (let [handle (.toHandle (:proc (:proc c)))
+            repls (vec (iterator-seq (.iterator (.children handle))))]
+        (is (= 1 (count repls)) "the session started its REPL")
+        (.destroyForcibly handle)
+        (let [end (+ (System/currentTimeMillis) 5000)]
+          (while (and (some #(.isAlive %) repls) (< (System/currentTimeMillis) end)) (Thread/sleep 100)))
+        (is (not-any? #(.isAlive %) repls) "the REPL outlived the bbh that started it")
+        (run! #(.destroyForcibly %) repls))
+      (finally (stop! c)))))
