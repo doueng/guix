@@ -285,8 +285,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
         lsp-enable-symbol-highlighting nil
         lsp-enable-folding nil
         lsp-enable-text-document-color nil
-        lsp-javascript-typescript-server "typescript-language-server"
-        lsp-nix-nixd-server-path "nixd"
         lsp-go-gopls-server-path "gopls"
         lsp-go-gopls-server-args '("-remote=auto")
         lsp-go-use-gofumpt t
@@ -311,16 +309,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (advice-remove #'lsp--on-diagnostics-update-stats
                  #'eng/lsp--skip-unused-diagnostic-aggregates)
   (advice-add #'lsp--on-diagnostics-update-stats :override
-              #'eng/lsp--skip-unused-diagnostic-aggregates)
-
-  (unless (gethash 'fish-lsp lsp-clients)
-    (lsp-register-client
-     (make-lsp-client :new-connection (lsp-stdio-connection '("fish-lsp" "start"))
-                      :major-modes '(fish-mode)
-                      :server-id 'fish-lsp)))
-
-  (add-hook 'nix-mode-hook #'lsp-deferred)
-  (add-hook 'fish-mode-hook #'lsp-deferred))
+              #'eng/lsp--skip-unused-diagnostic-aggregates))
 
 (after! lsp-ui
   (setq lsp-ui-doc-enable nil
