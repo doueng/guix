@@ -98,5 +98,6 @@
    :checks ["make dusk-test"]
    :slow ["make dusk-verify"]}
   {:name "pierre-diff-ansi"
-   :paths ["desktop/build/pierre-diff-ansi/**" "desktop/bin/{pierre-diff-ansi,jj-diff-pierre}"]
-   :checks ["make pierre-diff-ansi"]}]}
+   :paths ["desktop/build/pierre-diff-ansi/**" "desktop/bin/{pierre-diff-ansi,jj-diff-pierre}"
+           "desktop/build/bbh/src/bbh/web/highlights.js"]
+   :checks ["make pierre-diff-ansi-test"]}]}

@@ -18,7 +18,7 @@ JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))
 COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
-        home-build home-apply stow pierre-diff-ansi bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
+        home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test \
         doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check
 
@@ -55,6 +55,7 @@ help:
 	@echo 'bbh-tla-check model-check the bbh super and wf state machines with TLA+ (desktop/build/bbh/verify/tla)'
 	@echo 'skill-diet-check check the skill-diet links and the bbh eval adapter'
 	@echo 'pierre-diff-ansi install the highlighter behind jjui diff previews'
+	@echo 'pierre-diff-ansi-test highlight a sample diff and check the bbh highlights.js bundle'
 	@echo 'bbh-web-highlights bundle that highlighter for the bbh website'
 	@echo 'dusk          build the dusk shell (desktop/build/dusk)'
 	@echo 'dusk-test     run isolated runtime and headless GPUI tests'
@@ -202,6 +203,9 @@ $(PIERRE_DIFF)/node_modules: $(PIERRE_DIFF)/package.json $(PIERRE_DIFF)/bun.lock
 	touch $@
 
 pierre-diff-ansi: $(PIERRE_DIFF)/node_modules
+
+pierre-diff-ansi-test: pierre-diff-ansi
+	bb $(PIERRE_DIFF)/test.bb
 
 bbh-web-highlights: $(PIERRE_DIFF)/node_modules
 	cd $(PIERRE_DIFF) && bun build browser.ts --target=browser --format=iife --minify --outfile=../bbh/src/bbh/web/highlights.js
