@@ -7,6 +7,7 @@
             [bbh.version :as version]
             [bencode.core :as b]
             [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str])
   (:import [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
@@ -79,6 +80,43 @@
     (or (some #(get % "new-session") messages)
         (throw (ex-info "nREPL clone failed" {:messages messages})))))
 
+(defn quiet-log
+  "LINES of the REPL's stderr as repl.log keeps them. babashka's nREPL server
+  reports a connection that does not speak nREPL, such as a local HTTP probe
+  (`Wrong first byte: 71` is the G of GET), as an ERROR line and a stack
+  trace. The connection just closes and the server goes on, so the report
+  becomes one line."
+  [lines]
+  ;; Reports from two connections interleave line by line, and the ERROR
+  ;; line that starts one may end a line of another's stack, so each line is
+  ;; judged alone: the message line becomes the one line, and the rest of a
+  ;; report goes while one is being dropped.
+  (let [anchor? #(str/includes? % "nREPL message must be a map")]
+    (letfn [(step [lines dropping?]
+              (lazy-seq
+               (when-let [[line & more] (seq lines)]
+                 (cond (anchor? line)
+                       (cons "nREPL: closed a connection that did not speak nREPL, such as an HTTP request"
+                             (step more true))
+                       (and (str/ends-with? line "ERROR: nil") (some anchor? (take 4 more)))
+                       (step more dropping?)
+                       (and dropping? (re-find #"^(\s+at |\s+\.\.\. |Wrong first byte)" line))
+                       (step more true)
+                       :else (cons line (step more false))))))]
+      (step lines false))))
+
+(defn- log-stderr!
+  "Copy PROC's stderr into LOG through quiet-log, on a daemon thread."
+  [proc log]
+  (doto (Thread. #(try (with-open [r (io/reader (:err proc))
+                                   w (io/writer log :append true)]
+                         (doseq [line (quiet-log (line-seq r))]
+                           (.write w (str line "\n"))
+                           (.flush w)))
+                       (catch java.io.IOException _ nil)))
+    (.setDaemon true)
+    (.start)))
+
 (def shims
   "Commands a super Worker's REPL finds first on its PATH: an emacsclient that
   refuses the live bbh-super daemon (T163)."
@@ -103,8 +141,9 @@
         ;; Nothing writes the REPL's stdin, and an open pipe there would hang any child that reads it.
         proc (apply p/process {:dir cwd :env (repl-env (sysenv/getenv) env port-file)
                                :in (fs/file "/dev/null")
-                               :out :append :out-file log :err :append :err-file log}
+                               :out :append :out-file log}
                     (concat ["bb"] (when config ["--config" config]) ["-e" bootstrap]))
+        _ (log-stderr! proc log)
         port (wait-for-port port-file proc)
         sock (doto (java.net.Socket. "127.0.0.1" (int port)) (.setTcpNoDelay true) ack-quickly!)
         conn {:proc proc :port port :sock sock
