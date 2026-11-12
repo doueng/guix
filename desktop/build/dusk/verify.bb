@@ -181,7 +181,7 @@
 
 (defn dmenu-run [keys]
   (let [proc (p/process [dusk "dmenu" "-p" "verify"]
-                        {:in "ghostty\nchrome-incognito\nchrome\nthunar\n" :out :string :err :string})
+                        {:in "ghostty\nchrome-incognito\nchrome\noilfm\n" :out :string :err :string})
         [opened] (wait-for 2000 #(contains? (surfaces) "launcher"))]
     ;; Give the compositor a moment to hand the exclusive surface focus.
     (Thread/sleep 250)
@@ -195,13 +195,13 @@
       {:opened (boolean opened) :exit (:exit r) :out (some-> r :out str/trim)})))
 
 (defn check-launcher []
-  (let [pick (dmenu-run ["thu" "key:Return"])
+  (let [pick (dmenu-run ["oil" "key:Return"])
         fuzzy (dmenu-run ["chi" "key:Return"])
         arrows (dmenu-run ["key:Down" "key:Down" "key:Return"])
         cancel (dmenu-run ["gh" "key:Escape"])
         [closed] (wait-for 1000 #(not (contains? (surfaces) "launcher")))]
     [{:ok (:opened pick) :detail "launcher surface opened"}
-     {:ok (= [0 "thunar"] [(:exit pick) (:out pick)]) :detail (str "typing thu + Return printed " (pr-str (:out pick)))}
+     {:ok (= [0 "oilfm"] [(:exit pick) (:out pick)]) :detail (str "typing oil + Return printed " (pr-str (:out pick)))}
      {:ok (= "chrome-incognito" (:out fuzzy)) :detail (str "subsequence chi picked " (pr-str (:out fuzzy)))}
      {:ok (= "chrome" (:out arrows)) :detail (str "Down Down Return picked " (pr-str (:out arrows)))}
      {:ok (= 1 (:exit cancel)) :detail (str "Escape exited " (:exit cancel) " with output " (pr-str (:out cancel)))}
