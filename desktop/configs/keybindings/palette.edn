@@ -47,6 +47,6 @@
   {:label "Reformat code" :keys "Ctrl+Alt+L" :action "ReformatCode"}
   {:label "Optimize imports" :keys "Ctrl+Alt+O" :action "OptimizeImports"}
   {:label "Refactor this" :keys "Ctrl+Alt+Shift+T" :action "Refactorings.QuickListPopupAction"}
-  {:label "Project tool window" :keys "Alt+1" :action "ActivateProjectToolWindow"}
+  {:label "Project tool window" :keys "palette (Alt+1 is workspace 1)" :action "ActivateProjectToolWindow"}
   {:label "Comment line" :keys "Ctrl+/" :action "CommentByLineComment"}
   {:label "Go to implementation" :keys "gi" :action "GotoImplementation"}]}

@@ -12,7 +12,10 @@
 (deftest workspace-digits-expand-to-dispatchers
   (let [workspaces (:entries (second registry))]
     (is (= ["focus" {:workspace 10}] (keyguide/dispatcher (first workspaces))))
-    (is (= ["window.move" {:workspace 3}] (keyguide/dispatcher (nth workspaces 13))))))
+    (is (= ["window.move" {:workspace 3}] (keyguide/dispatcher (nth workspaces 13))))
+    (is (= ["ALT SHIFT" "3"] (subvec (:hypr (nth workspaces 13)) 0 2)))
+    (is (str/includes? (keyguide/hypr-config [{:entries [(nth workspaces 13)]}])
+                       "keys.bind(\"CTRL + ALT + SHIFT + 3\", hl.dsp.window.move({ workspace = 3 }), \"CTRL+ALT+SHIFT+3\""))))
 
 (deftest dispatchers-render-as-lua
   (is (= "hl.dsp.focus({ direction = \"left\" })" (hypr/lua ["focus" {:direction "left"}])))
@@ -41,8 +44,9 @@
                      :when (and chord (not (str/includes? line "release = true")))]
                  (set (map str/upper-case (str/split chord #" \+ "))))]
     (is (= (count chords) (count (distinct chords))))
-    (is (not-any? #(and (contains? % "ALT") (= 2 (count %)) (not (some #{"SPACE" "W"} %))) chords)
-        "Alt plus a single key belongs to applications, except Alt+Space and Alt+W (close window)")))
+    (is (not-any? #(and (contains? % "ALT") (<= 2 (count %) 3) (not (contains? % "CTRL"))
+                       (not (some (set (cons "SPACE" (map str "W0123456789"))) %))) chords)
+        "Alt plus a key belongs to applications, except Alt+Space, Alt+W (close window) and Alt+digits (workspaces)")))
 
 (defn chord-keys
   "The set of upper-cased keys in a Hyprland chord such as \"SUPER + COMMA\" or a

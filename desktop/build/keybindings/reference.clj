@@ -214,10 +214,10 @@ document.getElementById('filter').addEventListener('input', e => {
         (table ["Group" "Entry" "Chord" "Action or tip"]
                (for [g (:groups guide)
                      e (if (:workspace-digits g)
-                         [{:label "Workspaces 1 to 10" :chord "CTRL ALT 1..0, add SHIFT to move a window" :tip "Focus or move to the workspace"}]
+                         [{:label "Workspaces 1 to 10" :chord "ALT 1..0 (or CTRL ALT 1..0), add SHIFT to move a window" :tip "Focus or move to the workspace"}]
                          (:entries g))]
                  [(:label g) (:label e)
-                  [:code (or (:chord e) (when-let [[mods k] (:hypr e)] (str mods " " k)) (when (:workspace-digits g) "CTRL ALT digits"))]
+                  [:code (or (:chord e) (when-let [[mods k] (:hypr e)] (str mods " " k)) (when (:workspace-digits g) "ALT digits"))]
                   (or (:tip e) (some-> (or (:command e) (:dispatch e) (nth (:hypr e) 2 nil)) show))]))
         [:h3 "hyprland.lua"]
         (table ["Chord" "Action"] (for [[c a] hypr] [[:code c] [:code a]]))

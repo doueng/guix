@@ -33,7 +33,7 @@ Hard constraints override the score.
 ## Hard constraints
 
 - Ctrl+Alt is desktop control. Add Shift for the corresponding move action.
-- Plain Alt belongs to applications. Do not globally consume Emacs M-f or IdeaVim Alt+digits. The exceptions are Alt+Space, the Herdr leader, and Alt+W, which closes a window (so M-w is shadowed).
+- Plain Alt belongs to applications. Do not globally consume Emacs M-f. The exceptions are Alt+Space, the Herdr leader, Alt+W, which closes a window (so M-w is shadowed), and Alt and Alt+Shift digits, which focus and move to workspaces by request.
 - Cmd is partly rewritten by kanata. Cmd+S becomes Ctrl+S and Cmd+L becomes Right. Do not assume physical Cmd means Super. In Ghostty and Herdr the `terminal` layer sends nothing for Cmd+Z, Cmd+Shift+Z, Cmd+W and Cmd+T, because their Ctrl chords suspend or edit there. `hyprkan` reads `apps.edn` live, but kanata reads `kanata.kbd` only after `make switch`, so do not point `apps.edn` at a layer before the switch installs it.
 - Herdr runs in the Ghostty class `com.mitchellh.ghostty.herdr`, started by `desktop/bin/herdr-terminal`. Target Herdr by that class, never by `com.mitchellh.ghostty`, which every other Ghostty window shares.
 - Check upstream defaults on the real surface. `ghostty +list-keybinds` lists what Ghostty consumes before a program sees it.

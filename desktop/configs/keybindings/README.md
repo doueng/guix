@@ -12,7 +12,7 @@
 | Window focus | Ctrl+Alt+h/j/k/l | Generated `hypr/keybindings.lua` |
 | Window hints | Cmd+F | `desktop/bin/winhint`, the Dusk `:window-hints` overlay |
 | Move windows | Ctrl+Alt+Shift+h/j/k/l | Generated `hypr/keybindings.lua` |
-| Workspaces | Ctrl+Alt+1..0, add Shift to move a window | Generated `hypr/keybindings.lua` |
+| Workspaces | Alt+1..0 or Ctrl+Alt+1..0, add Shift to move a window | Generated `hypr/keybindings.lua` |
 | Fullscreen, floating, close | Ctrl+Alt+f, Ctrl+Alt+v, Alt+w | Generated `hypr/keybindings.lua` |
 | Application launch and focus | Unrewritten Cmd chords | `hypr/hyprland.lua` |
 | Terminal multiplexer | Ctrl+b prefix, Cmd+digits | `herdr/config.toml` |
@@ -23,7 +23,7 @@
 | Line editing | Native Ctrl and Alt keys | fish and the focused application |
 
 Caps+Alt provides Ctrl+Alt without reaching for the bottom-left Ctrl key.
-Plain Alt letters and digits belong to applications, not Hyprland. There are two exceptions: Alt+Space, the Herdr leader, so Emacs M-SPC is not available, and Alt+W, which closes a window everywhere, so Emacs M-w is shadowed.
+Plain Alt letters belong to applications, not Hyprland. There are three exceptions. Alt+Space is the Herdr leader, so Emacs M-SPC is not available. Alt+W closes a window everywhere, so Emacs M-w is shadowed. Alt+1..0 focus workspaces 1 to 10 and Alt+Shift+1..0 move the window there, by request, since Cmd+1..9 already switch tabs. Applications lose Alt and Alt+Shift digits: Chrome's Alt+1..9 tab keys, Ghostty's goto_tab, Doom's M-1..M-0 workspace keys (SPC TAB 1..9 remain), Emacs digit-argument (C-u N remains), Emacs M-! M-$ M-% M-& M-( M-) (Doom's :%s and SPC : remain), and IntelliJ's Alt+1..9 tool windows (Goto Action remains).
 Cmd+hjkl remains the existing arrow layer. Cmd+L is not Chrome's address-bar shortcut. Use Ctrl+L or Vimium `o`.
 Cmd chords can differ per application. See [Application layers](#application-layers).
 
@@ -176,6 +176,7 @@ No global keyboard listener or browser content script has been added.
 | Alt+f toggles fullscreen | Ctrl+Alt+f | Preserve Emacs M-f and Vimium Alt+f |
 | Alt+arrows focus windows | Ctrl+Alt+hjkl | Preserve word movement and the Alt+arrow rewrite |
 | Alt+digits switch workspaces | Ctrl+Alt+digits | Preserve application tabs |
+| Ctrl+Alt+digits switch workspaces | Alt+digits, Ctrl+Alt+digits kept | User request (T159): one hand, Cmd+digits already switch tabs |
 | Cmd+s launches Herdr | Cmd+b | Cmd+s becomes Ctrl+s |
 | Ctrl+s opens Herdr text hints | Ctrl+b f | Preserve editor save |
 | Herdr edit-scrollback default collides with workspace picker | Ctrl+b Shift+E | Keep Ctrl+b e for workspaces |
