@@ -883,7 +883,6 @@ Inbox's single-key commands, such as g, j, x, digits or ., runs there."
   "C-n sends the thread's reply while you type an Answer."
   (bbh-test--with-fake-inbox (view log)
     (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
-    (should-not (eq 'eng/bbh-inbox-send (key-binding (kbd "C-n"))))
     (bbh-test--type-in-answer "call it Zed")
     (should (eq 'eng/bbh-inbox-send (key-binding (kbd "C-n"))))
     (cl-letf (((symbol-function 'eng/bbh-inbox--send-thread)
@@ -894,7 +893,7 @@ Inbox's single-key commands, such as g, j, x, digits or ., runs there."
     (should (evil-normal-state-p))))
 
 (ert-deftest bbh-inbox-ctrl-n-sends-from-an-answer-in-normal-state ()
-  "After Esc, C-n in an Answer still sends; on any other line it keeps evil's binding."
+  "After Esc, C-n in an Answer still sends."
   (bbh-test--with-fake-inbox (view log)
     (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
     (bbh-test--type-in-answer "call it Zed")
@@ -908,11 +907,53 @@ Inbox's single-key commands, such as g, j, x, digits or ., runs there."
       (should (equal '(("T1" . "call it Zed")) bbh-test--sent))
       (should (eng/bbh-inbox--in-answer-p))
       (bbh-test--popup-keeps-ctrl-n '(normal insert))
-      (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send)
-      (evil-normal-state)
-      (goto-char (point-min))
-      (should-not (eng/bbh-inbox--in-answer-p))
-      (should (eq (lookup-key evil-normal-state-map (kbd "C-n")) (key-binding (kbd "C-n")))))))
+      (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send))))
+
+(ert-deftest bbh-inbox-ctrl-n-sends-from-every-line-in-both-states ()
+  "C-n sends the thread under the cursor from every line of the Inbox, in
+normal and insert state: a thread or ask heading, an option after a pick,
+the Details, the Answer heading and another thread.  Before T125's second
+fix it sent only from an Answer body in normal state, so C-n after a pick
+ran evil's paste-pop instead.  A completion popup keeps C-n everywhere."
+  (bbh-test--with-fake-inbox (view log)
+    (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
+    (evil-local-mode 1)
+    (cl-letf (((symbol-function 'eng/bbh-inbox--send-thread)
+               (lambda (thread _) (push thread bbh-test--sent))))
+      (dolist (spot '(("STOPPED T1" . "T1") ("a1 Keep" . "T1") ("1. No" . "T1") ("2. Yes" . "T1")
+                      ("Because" . "T1") ("*** Answer" . "T1") ("NEW T2" . "T2") ("its summary" . "T2")))
+        (dolist (state '(normal insert))
+          (goto-char (point-min))
+          (search-forward (car spot))
+          (evil-change-state state)
+          (setq bbh-test--sent nil)
+          (should (equal (list (car spot) state 'eng/bbh-inbox-send)
+                         (list (car spot) state (key-binding (kbd "C-n")))))
+          (execute-kbd-macro (kbd "C-n"))
+          (should (equal (list (car spot) state (list (cdr spot)))
+                         (list (car spot) state bbh-test--sent)))
+          (should (evil-normal-state-p))
+          (bbh-test--popup-keeps-ctrl-n (list state)))))))
+
+(ert-deftest bbh-inbox-ctrl-n-in-the-note-prompt-saves-and-sends ()
+  "In the note prompt, a free-text reply to a thread without an ask, C-n
+saves the note and sends the thread; RET only saves it."
+  (bbh-test--with-fake-inbox (view log)
+    (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
+    (evil-local-mode 1)
+    (evil-normal-state)
+    (goto-char (point-min))
+    (search-forward "NEW T2")
+    (let ((ran nil))
+      (cl-letf (((symbol-function 'eng/bbh-inbox--run)
+                 (lambda (args on-done) (push args ran) (when on-done (funcall on-done ""))))
+                ((symbol-function 'eng/bbh-inbox-refresh) #'ignore))
+        (execute-kbd-macro (kbd "r looks SPC good C-n"))
+        (should (equal '("note" "T2" "looks good") (cadr ran)))
+        (should (equal '("send" "T2" "{}") (car ran)))
+        (setq ran nil)
+        (execute-kbd-macro (kbd "r later RET"))
+        (should (equal '(("note" "T2" "later")) ran))))))
 
 
 (ert-deftest bbh-inbox-opens-from-a-buffer-whose-workspace-is-gone ()
@@ -1326,8 +1367,8 @@ SPEC is (VIEW ORG LOG)."
       (should (eq 'eng/bbh-inbox-pick-recommended (bbh-test--key ".")))
       (should (eq 'eng/bbh-inbox-answer (bbh-test--key "i")))
       (should-not (eq 'eng/bbh-inbox-send (bbh-test--key "C-c C-c")))
-      ;; On the ask's heading C-n stays evil's; in its Answer it sends.
-      (should-not (eq 'eng/bbh-inbox-send (bbh-test--key "C-n")))
+      ;; The right pane is the Inbox buffer, so C-n sends from any line of it.
+      (should (eq 'eng/bbh-inbox-send (bbh-test--key "C-n")))
       (should (eq 'eng/bbh-inbox-other-pane (bbh-test--key "o")))
       ;; i types the answer in place, above the progress.
       (eng/bbh-inbox-answer)
@@ -1337,6 +1378,13 @@ SPEC is (VIEW ORG LOG)."
       (should (string-match-p "^    call it Zed\n\\*\\* Progress$" (bbh-test--right))))
     (with-current-buffer "*bbh threads*"
       (should (equal "T1" (eng/bbh-inbox--at-point)))
+      ;; C-n in the list sends the selected thread with the answer typed on the right.
+      (should (eq 'eng/bbh-inbox-send (bbh-test--key "C-n")))
+      (cl-letf (((symbol-function 'eng/bbh-inbox--send-thread)
+                 (lambda (thread _) (push (cons thread (eng/bbh-inbox--answer-text "a1")) bbh-test--sent))))
+        (setq bbh-test--sent nil)
+        (call-interactively (bbh-test--key "C-n"))
+        (should (equal '(("T1" . "call it Zed")) bbh-test--sent)))
       (dolist (key '(("j" . eng/bbh-threads-next) ("k" . eng/bbh-threads-previous) ("n" . eng/bbh-threads-next)
                      ("]t" . eng/bbh-inbox-next-waiting) ("[t" . eng/bbh-inbox-previous-waiting)
                      ("o" . eng/bbh-inbox-other-pane) ("RET" . eng/bbh-threads-ret) ("gv" . eng/bbh-inbox-toggle-view)

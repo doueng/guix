@@ -1265,14 +1265,10 @@ keys, so a send key on C-n would otherwise win while the popup is open."
         ((and (bound-and-true-p company-candidates) (fboundp 'company-select-next))
          'company-select-next)))
 
-(defun eng/bbh-send-key (command &optional when)
-  "A key binding for C-n that runs COMMAND, or the popup's next candidate.
-With WHEN, a function, the binding is absent where it returns nil, so the
-key falls through to the next keymap, such as evil's C-n."
+(defun eng/bbh-send-key (command)
+  "A key binding for C-n that runs COMMAND, or the popup's next candidate."
   `(menu-item "" ,command
-              :filter ,(lambda (cmd)
-                         (or (eng/bbh--popup-next)
-                             (and (or (null when) (funcall when)) cmd)))))
+              :filter ,(lambda (cmd) (or (eng/bbh--popup-next) cmd))))
 
 (defun eng/bbh-setup-composer ()
   "Restore bbh bindings after returning from agent-shell's history view."

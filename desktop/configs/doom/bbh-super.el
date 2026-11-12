@@ -704,11 +704,14 @@ already on its way with the older draft does not overwrite it."
                       on-done))
 
 (defun eng/bbh-inbox-send ()
-  "Send the thread's picks, typed answers and note as one reply."
+  "Send the thread's picks, typed answers and note as one reply.
+In the split view's thread list it sends the selected thread, whose answers
+the Inbox buffer holds."
   (interactive)
   (let ((thread (eng/bbh-inbox--thread)))
     (when (eng/bbh-inbox--typing-p) (evil-normal-state))
-    (eng/bbh-inbox--send-thread thread (lambda (_) (message "Sent %s" thread) (eng/bbh-inbox-refresh)))))
+    (with-current-buffer (eng/bbh-inbox--buffer)
+      (eng/bbh-inbox--send-thread thread (lambda (_) (message "Sent %s" thread) (eng/bbh-inbox-refresh))))))
 
 (defun eng/bbh-inbox--has-draft-p (thread)
   "Whether THREAD shows a pick, a note or a typed answer."
@@ -760,10 +763,34 @@ already on its way with the older draft does not overwrite it."
   (when (y-or-n-p (format "Cancel %s's Worker? " (eng/bbh-inbox--thread)))
     (eng/bbh-inbox--act "cancel")))
 
-(defun eng/bbh-inbox-note (text)
-  "Save TEXT as the thread's note, sent with its picks."
-  (interactive (list (read-string (format "%s note: " (eng/bbh-inbox--thread)))))
-  (eng/bbh-inbox--act "note" text))
+(defvar eng/bbh-inbox-note-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map minibuffer-local-map)
+    (define-key map (kbd "C-n") #'eng/bbh-inbox-note-send)
+    map)
+  "The note prompt's keys: RET saves the note, C-n saves it and sends the thread.")
+
+(defvar eng/bbh-inbox--note-send nil "Non-nil when the note prompt ended with C-n.")
+
+(defun eng/bbh-inbox-note-send ()
+  "End the note prompt, then send the thread with the note."
+  (interactive)
+  (setq eng/bbh-inbox--note-send t)
+  (exit-minibuffer))
+
+(defun eng/bbh-inbox-note (text &optional send)
+  "Save TEXT as the thread's note, sent with its picks; with SEND, send them now.
+In the prompt RET saves the note and C-n saves it and sends."
+  (interactive (let ((eng/bbh-inbox--note-send nil))
+                 (list (read-from-minibuffer (format "%s note: " (eng/bbh-inbox--thread)) nil eng/bbh-inbox-note-map)
+                       eng/bbh-inbox--note-send)))
+  (let ((thread (eng/bbh-inbox--thread)))
+    (eng/bbh-inbox--run (list "note" thread text)
+                        (lambda (_)
+                          (if send
+                              (with-current-buffer (eng/bbh-inbox--buffer)
+                                (eng/bbh-inbox--send-thread thread (lambda (_) (message "Sent %s" thread) (eng/bbh-inbox-refresh))))
+                            (eng/bbh-inbox-refresh))))))
 
 (defun eng/bbh-inbox-router ()
   "Show the Router's conversation, where what you type goes to the Router."
@@ -1042,7 +1069,7 @@ else the first thread waiting on you, else the first."
 
 (defun eng/bbh-inbox--thread-header (id)
   (concat (if id (format "%s   " id) "")
-          "1-9 pick  . recommended  i answer  s send (C-n in an Answer)  TAB fold  RET open  o list  ]t next waiting  J jjui  gv one buffer  g? help"))
+          "1-9 pick  . recommended  i answer  s/C-n send  TAB fold  RET open  o list  ]t next waiting  J jjui  gv one buffer  g? help"))
 
 (defun eng/bbh-inbox--draw-thread (&optional quiet)
   "Show the selected thread on the right. QUIET, for a pushed reload, waits
@@ -1278,7 +1305,9 @@ Bare C-h and C-l still move between the panes, as between any windows.")
   (add-hook 'post-command-hook #'eng/bbh-threads--moved nil t)
   (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t)
   (dolist (key eng/bbh-threads-keys)
-    (evil-local-set-key 'normal (kbd (car key)) (cadr key))))
+    (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
+  ;; C-n sends the selected thread's draft here too, as in the Inbox.
+  (evil-local-set-key 'normal (kbd "C-n") #'eng/bbh-inbox-send))
 
 (define-derived-mode eng/bbh-threads-mode special-mode "bbh threads"
   "The super-agent's threads, one per line, beside the selected one.
@@ -1344,10 +1373,10 @@ thread list, in its own mode, stays one truncated line per thread."
   ;; state types every printable key; only these send or discard.
   (dolist (key eng/bbh-inbox-keys)
     (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
-  ;; C-n sends, unless a completion popup is open.  In normal state it sends
-  ;; only from an Answer; elsewhere evil's own C-n runs.
-  (evil-local-set-key 'insert (kbd "C-n") (eng/bbh-send-key #'eng/bbh-inbox-send))
-  (evil-local-set-key 'normal (kbd "C-n") (eng/bbh-send-key #'eng/bbh-inbox-send #'eng/bbh-inbox--in-answer-p))
+  ;; C-n sends from anywhere in the Inbox, in normal and insert state, so it
+  ;; sends after a pick as after a typed answer; a completion popup keeps it.
+  (dolist (state '(normal insert))
+    (evil-local-set-key state (kbd "C-n") (eng/bbh-send-key #'eng/bbh-inbox-send)))
   ;; C-c C-c does not send; clear it from an Inbox set up by older code.
   (dolist (state '(normal insert))
     (evil-local-set-key state (kbd "C-c C-c") nil))

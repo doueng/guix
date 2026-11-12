@@ -269,7 +269,7 @@ The Inbox is an org buffer in evil normal state, so motions, search, `C-j`/`C-k`
 | . | Pick the recommended option. |
 | i | Go to the ask's Answer and type in insert state, where every printable key types itself. Leaving insert state saves what you typed to the draft, which the phone shows too. |
 | r | Answer the ask, or on a thread with no open ask, write its note in the minibuffer. |
-| s, C-n | Send the thread's picks, typed answers and note as one reply. C-n (Cmd+N through kanata) sends from an Answer in insert and normal state; elsewhere it stays evil's C-n, and while a completion popup is open it selects the next candidate. A typed answer closes its ask like a pick. |
+| s, C-n | Send the thread's picks, typed answers and note as one reply. C-n (Cmd+N through kanata) sends from anywhere in the Inbox, in insert and normal state, and from the split view's thread list; in the note prompt it saves the note and sends. While a completion popup is open it selects the next candidate. A typed answer closes its ask like a pick. |
 | S | Send every thread's draft, after one question listing them. |
 | C-c C-k | Discard the thread's draft. |
 | A | Approve the review under the cursor, else the one the thread is waiting on. |
