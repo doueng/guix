@@ -63,7 +63,7 @@
 ;; Compiling every .scm file takes about 9 s. The result depends only on those
 ;; files, the data modules/ reads at load time, the checker and the Guix build,
 ;; so a pass is remembered under a key made from all of them, and any change
-;; recompiles everything.
+;; recompiles everything.  Only the newest stamps are kept.
 (defn scheme-problems []
   (let [scm (sort (filter #(str/ends-with? % ".scm") files))
         key (apply sha256 (str (fs/real-path guix)) (slurp (str c/root "/desktop/build/checks/scheme.scm"))
@@ -73,7 +73,11 @@
     (when-not (fs/exists? stamp)
       (let [{:keys [exit out err]} (apply c/sh guix "repl" "-L" "modules" "--" "desktop/build/checks/scheme.scm" scm)]
         (if (zero? exit)
-          (do (fs/create-dirs (fs/parent stamp)) (spit (str stamp) "") nil)
+          (do (fs/create-dirs (fs/parent stamp))
+              (spit (str stamp) "")
+              (doseq [old (drop 20 (sort-by #(- (.toMillis (fs/last-modified-time %))) (fs/list-dir (fs/parent stamp))))]
+                (fs/delete-if-exists old))
+              nil)
           [(str/trim (str err out))])))))
 
 (def steps
