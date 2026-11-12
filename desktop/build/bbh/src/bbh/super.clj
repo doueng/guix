@@ -828,9 +828,10 @@ still running (T163)."
            :db db :state (atom (store/replay db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
            :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :web (atom nil)
            ;; NOTIFY, effects such as notify/desktop, turns desktop notifications on.
-           :notifier (some-> notify (notify/new-notifier (fs/path dir "notifications.edn")))}]
+           ;; What waited before it started is history, which it records but does not show.
+           :notifier (some-> notify (notify/new-notifier (fs/path dir "notifications.edn") (- (now) notify/replay-grace-ms)))}]
     (ensure-owner-token! c)
-    (some-> (:notifier c) (notify/resume! @(:state c)))
+    (some-> (:notifier c) (notify/resume! @(:state c) (now)))
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
     ;; Each client gets its own thread and a read timeout, so a client that
     ;; never sends its line, or a slow launch, holds up nobody else. Commits

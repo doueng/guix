@@ -22,7 +22,8 @@
 (defn waiting
   "Everything in STATE that waits on the person now, by key: [:ask id],
   [:needs-human worker] (critical) and [:session-ended worker]. Each has :at,
-  the epoch ms it began to wait, when the log says."
+  the epoch ms it began to wait, when the log says, and :news-at when it
+  became news later than that."
   [state]
   (merge
    (into {} (for [a (vals (:asks state)) :when (= :open (:state a))]
@@ -38,19 +39,28 @@
                                    late :needs-human
                                    (and (= :failed (:state w)) latest? (not (:resolved-at t))) :needs-human)]
                   :when kind]
-              [[kind (:id w)] {:thread (:thread w) :worker (:id w)
+              [[kind (:id w)] (cond-> {:thread (:thread w) :worker (:id w)
                                :urgency (if (= :needs-human kind) :critical :normal)
                                :at (if by-health (get-in w [:health :since]) (:state-at w))
                                :text (or (when by-health (get-in w [:health :problem])) late (:reason w)
-                                         (if (= :needs-human kind) "It needs your help." "Its session ended."))}]))))
+                                         (if (= :needs-human kind) "It needs your help." "Its session ended."))}
+                                ;; A late Worker became news at its deadline, not when it entered the state.
+                                (and late (not by-health) (:state-at w))
+                                (assoc :news-at (+ (:state-at w) (model/deadlines (:state w) 0))))]))))
+
+(defn- archived?
+  "Whether thread T was archived and has had no milestone since."
+  [{:keys [resolved-at milestone-seq]}]
+  (boolean (and resolved-at (<= (or milestone-seq 0) resolved-at))))
 
 (defn- finished
   "The Workers of STATE that ended :done after running at least LONG-MS and
   whose thread is still unread, as [:finished worker] items."
   [state long-ms]
   (into {} (for [w (vals (:workers state))
+                 :let [t (get-in state [:threads (:thread w)])]
                  :when (and (= :done (:state w)) (:started-at w) (:state-at w) (>= (- (:state-at w) (:started-at w)) long-ms)
-                            (some-> (get-in state [:threads (:thread w)]) model/unread?))]
+                            (some-> t model/unread?) (not (archived? t)))]
              [[:finished (:id w)] {:thread (:thread w) :worker (:id w) :urgency :normal :at (:state-at w)
                                    :text (or (get-in state [:threads (:thread w) :summary]) (str (:id w) " finished."))}])))
 
@@ -69,7 +79,8 @@
   waiting, or for a finish, its thread is still unread."
   [state now-waiting [kind :as k] item]
   (if (= :finished kind)
-    (boolean (some-> (get-in state [:threads (:thread item)]) model/unread?))
+    (let [t (get-in state [:threads (:thread item)])]
+      (boolean (and (some-> t model/unread?) (not (archived? t)))))
     (contains? now-waiting k)))
 
 (def ^:private max-options 3)
@@ -174,12 +185,21 @@
 
 ;; ---- the notifier: pending, shown, and its effects ------------------------
 
+(def replay-grace-ms
+  "How long before a controller's start an item may have begun and still be
+  shown by it: one that began earlier is history, which a restart replays
+  from the log, so it is recorded as notified without a notification."
+  60000)
+
 (defn new-notifier
   "A notifier over EFFECTS {:show! :close!}. With FILE, what it shows is kept
-  there, so a restarted controller can `resume!` it."
+  there, so a restarted controller can `resume!` it. With LIVE-FROM, epoch
+  ms, it shows only items that began then or later; the controller passes its
+  start less `replay-grace-ms`."
   ([effects] (new-notifier effects nil))
-  ([effects file]
-   {:effects effects :file file :shown (atom {}) :seen (atom nil)}))
+  ([effects file] (new-notifier effects file nil))
+  ([effects file live-from]
+   {:effects effects :file file :live-from live-from :shown (atom {}) :seen (atom nil)}))
 
 (defn- shown-id [entry]
   (some-> entry :handle :id (deref 2000 nil)))
@@ -188,24 +208,34 @@
   (when file
     (spit (str file) (pr-str (update-vals @shown #(-> % (dissoc :handle) (assoc :id (shown-id %))))))))
 
+(defn- on-screen?
+  "Whether ENTRY, as saved, may still be on screen at NOW: it expires
+  :expire-ms after :shown-at. One saved before :shown-at was kept is not."
+  [{:keys [shown-at expire-ms] :or {expire-ms (:notify-expire-ms default-policy)}} now]
+  (boolean (and shown-at (pos? expire-ms) (< now (+ shown-at expire-ms)))))
+
 (defn- handle-of [id]
   {:id (doto (promise) (deliver id))})
 
 (defn resume!
-  "Take over what a previous controller showed, from the notifier's file: each
-  that still waits in STATE is shown again in place, by its id, so a click
-  reaches this process; the rest are closed."
-  [{:keys [effects file shown] :as n} state]
-  (when (and file (fs/exists? file))
-    (let [before (try (edn/read-string (slurp (str file))) (catch Exception _ {}))
-          now-waiting (waiting state)]
-      (doseq [[k entry] before
-              :let [prev (handle-of (:id entry))
-                    entry (dissoc entry :id)]]
-        (if (some #(current? state now-waiting % (get (:items entry) %)) (:keys entry))
-          (swap! shown assoc k (assoc entry :handle ((:show! effects) entry prev)))
-          ((:close! effects) {:handle prev})))
-      (save! n))))
+  "Take over what a previous controller showed, from the notifier's file,
+  showing nothing: a restart is not news. Each that still waits in STATE is
+  kept, so its thread's next notification replaces it and lists it; the rest
+  are closed. Only an entry still on screen at NOW keeps its daemon id, since
+  the daemon reuses the ids of expired ones."
+  ([n state] (resume! n state (System/currentTimeMillis)))
+  ([{:keys [effects file shown] :as n} state now]
+   (when (and file (fs/exists? file))
+     (let [before (try (edn/read-string (slurp (str file))) (catch Exception _ {}))
+           now-waiting (waiting state)]
+       (doseq [[k entry] before
+               :let [live (on-screen? entry now)
+                     prev (when live (handle-of (:id entry)))
+                     entry (dissoc entry :id)]]
+         (if (some #(current? state now-waiting % (get (:items entry) %)) (:keys entry))
+           (swap! shown assoc k (cond-> entry prev (assoc :handle prev)))
+           (when prev ((:close! effects) {:handle prev}))))
+       (save! n)))))
 
 (defn stop!
   "End the notify-send processes waiting for clicks; the notifications stay,
@@ -218,13 +248,15 @@
   nothing under :do-not-disturb; when STATE changed, close shown notifications
   that no longer wait. The Inbox key's overrides win over POLICY. Returns the
   due items, for the caller to record as notified."
-  [{:keys [effects shown seen] :as notifier} state now policy]
-  (let [due (due state now policy)]
-    (when (seq due)
+  [{:keys [effects shown seen live-from] :as notifier} state now policy]
+  (let [due (due state now policy)
+        ;; What began before the controller started is history replayed from the log.
+        news (into {} (remove #(and live-from (< (or (:news-at (val %)) (:at (val %))) live-from))) due)]
+    (when (seq news)
       (let [{dnd :do-not-disturb expire-ms :notify-expire-ms} (merge default-policy policy (overrides))
-            threads (set (map :thread (vals due)))
+            threads (set (map :thread (vals news)))
             ;; A thread's notification is replaced, so it keeps what it showed that still waits.
-            p (merge (into {} (comp (filter #(threads (key %))) (mapcat (comp :items val))) @shown) due)]
+            p (merge (into {} (comp (filter #(threads (key %))) (mapcat (comp :items val))) @shown) news)]
         (when-not dnd
           (doseq [n (map #(assoc % :expire-ms expire-ms) (plan p state))]
             ;; A burst stands for its threads; their own notifications go.
@@ -234,13 +266,13 @@
                 (swap! shown dissoc t)))
             (let [prev (@shown (:key n))
                   handle ((:show! effects) n (:handle prev))]
-              (swap! shown assoc (:key n) (assoc n :handle handle :items (select-keys p (:keys n))))))
+              (swap! shown assoc (:key n) (assoc n :handle handle :shown-at now :items (select-keys p (:keys n))))))
           (save! notifier))))
     (when-not (identical? state @seen)
       (reset! seen state)
       (when-let [gone (seq (stale @shown state))]
         (doseq [k gone]
-          ((:close! effects) (@shown k))
+          (when (:handle (@shown k)) ((:close! effects) (@shown k)))
           (swap! shown dissoc k))
         (save! notifier)))
     due))

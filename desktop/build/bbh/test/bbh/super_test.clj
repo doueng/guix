@@ -10,6 +10,7 @@
             [babashka.process]
             [cheshire.core]
             [bbh.super.model :as model]
+            [bbh.super.notify :as notify]
             [bbh.super.store :as store]
             [bbh.super.workspace :as workspace]
             [clojure.string :as str]
@@ -129,6 +130,33 @@
         dir (str (fs/path root "controller"))]
     {:dir dir :conversations (str (fs/path root "conversations")) :scan-ms 10
      :launch (stub-launch dir (str (fs/path root "workspaces")))}))
+
+(deftest a-restarted-controller-does-not-notify-what-it-replays
+  (let [{:keys [dir] :as opts} (restartable)
+        log (atom [])
+        c (super/start! opts)]
+    (swap! controllers assoc dir c)
+    (try
+      ;; The first controller has notifications off, so the ask is never recorded as notified.
+      (let [{:keys [token]} (thread-with-ask dir)]
+        (Thread/sleep 20)
+        (super/stop! c)
+        (let [c2 (with-redefs [notify/replay-grace-ms 0]
+                   (super/start! (assoc opts :policy {:notify-delay-seconds 0}
+                                        ;; The stub Worker's session is gone, which is news of its own; count the asks.
+                                        :notify {:show! (fn [n _] (swap! log into (filter #(= :ask (first %)) (:keys n))) {}) :close! (fn [_])})))]
+          (swap! controllers assoc dir c2)
+          (try
+            (is (wait-for #(contains? (:notified @(:state c2)) [:ask "a1"])) "the replayed ask is recorded")
+            (Thread/sleep 100)
+            (is (= [] @log) "but not shown")
+            (testing "a live ask is shown once"
+              (call dir {:token token :command :ask! :args {:kind :question :text "And Cmd+W?" :options [{:id "y" :label "Yes"}]}})
+              (is (wait-for #(seq @log)))
+              (Thread/sleep 100)
+              (is (= [[:ask "a2"]] @log)))
+            (finally (super/stop! c2)))))
+      (finally (swap! opened dissoc dir) (swap! controllers dissoc dir)))))
 
 (deftest a-deadline-fires-once-across-a-controller-restart
   (let [{:keys [dir conversations] :as opts} (restartable)

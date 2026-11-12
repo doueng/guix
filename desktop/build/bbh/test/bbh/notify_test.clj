@@ -137,11 +137,12 @@
           (is (= ["T1"] @log)))))
     (babashka.fs/delete-tree dir)))
 
-(deftest a-restarted-controller-resumes-what-it-showed
+(deftest a-restarted-controller-resumes-what-it-showed-without-showing-it-again
   (let [file (str (babashka.fs/create-temp-file {:suffix ".edn"}))
-        effects (fn [log] {:show! (fn [n prev] (swap! log conj [:show (:key n) @(:id prev)]) {:id (doto (promise) (deliver 40))})
+        effects (fn [log] {:show! (fn [n prev] (swap! log conj [:show (:key n) (some-> prev :id deref) (:body n)])
+                                    {:id (doto (promise) (deliver 40))})
                            :close! (fn [{:keys [handle]}] (swap! log conj [:close @(:id handle)]))})
-        s (-> base (ask "a1" "T1" "Bind it?" "Yes") (ask "a2" "T2" "Dark theme?"))
+        s (-> base (ask "a1" "T1" "Bind it?" "Yes") (ask ["a2" 20000] "T2" "Dark theme?"))
         log1 (atom [])
         n1 (notify/new-notifier ((fn [log] {:show! (fn [n _] (swap! log conj (:key n)) {:id (doto (promise) (deliver (count @log)))})
                                             :close! (fn [_])}) log1)
@@ -150,16 +151,63 @@
           s1 (told s1 (notify/tick! n1 s1 10000 {}))]
       (notify/tick! n1 (ask s1 ["a2" 20000] "T2" "Dark theme?") 30000 {}))
     (is (= ["T1" "T2"] @log1))
-    (testing "after a restart, what still waits is shown again in place and the rest closed"
+    (testing "a restart shows nothing; what no longer waits and is still on screen is closed"
       (let [log2 (atom [])
             n2 (notify/new-notifier (effects log2) file)]
-        (notify/resume! n2 (answer s "a2"))
-        (is (= #{[:show "T1" 1] [:close 2]} (set @log2)))
-        (is (= ["T1"] (keys @(:shown n2))))
-        (testing "and answering it later closes it under its id"
-          (notify/tick! n2 (-> s (answer "a1") (answer "a2")) 40000 {})
-          (is (= [:close 40] (last @log2))))))
+        ;; T1's expired at 15000; T2's, shown at 30000, is still on screen at 32000.
+        (notify/resume! n2 (answer s "a2") 32000)
+        (is (= [[:close 2]] @log2))
+        (is (= ["T1"] (keys @(:shown n2))) "T1 still waits, so it is kept")
+        (is (nil? (:handle (@(:shown n2) "T1"))) "without the id of an expired notification, which the daemon reuses")
+        (testing "T1's next ask replaces it and lists both"
+          (let [s3 (-> s (answer "a2") (ask ["a3" 40000] "T1" "Also Emacs?"))]
+            (notify/tick! n2 s3 50000 {})
+            (is (= [:show "T1" nil "Bind it?  [Yes]\nAlso Emacs?"] (last @log2)))
+            (testing "and answering both closes it under its id"
+              (notify/tick! n2 (-> s3 (answer "a1") (answer "a3")) 60000 {})
+              (is (= [:close 40] (last @log2))))))))
     (babashka.fs/delete file)))
+
+(deftest a-replayed-history-notifies-nothing-and-one-live-ask-once
+  (let [log (atom [])
+        effects {:show! (fn [n _] (swap! log conj (:key n)) {}) :close! (fn [_])}
+        boot 1000000
+        n (notify/new-notifier effects nil (- boot notify/replay-grace-ms))
+        ;; Many asks on many threads, opened long before the controller started, never recorded.
+        old (reduce (fn [s i] (-> s (assoc-in [:threads (str "T" i)] {:id (str "T" i) :title "old"})
+                                  (ask [(str "a" i) (* i 1000)] (str "T" i) "Old question?" "Yes")))
+                    base (range 1 40))
+        due (notify/tick! n old (+ boot 10000) {})]
+    (is (= [] @log) "history is not shown")
+    (is (= 39 (count due)) "but it is returned, to be recorded as notified")
+    (let [s (told old due)]
+      (is (empty? (notify/tick! n s (+ boot 20000) {})))
+      (testing "one live ask gives exactly one notification"
+        (let [s (ask s ["a99" (+ boot 30000)] "T1" "New question?" "Yes")
+              d (notify/tick! n s (+ boot 40000) {})]
+          (is (= ["T1"] @log))
+          (is (= [[:ask "a99"]] (keys d)))
+          (notify/tick! n (told s d) (+ boot 50000) {})
+          (is (= ["T1"] @log) "and no more"))))))
+
+(deftest a-late-worker-is-news-at-its-deadline
+  (let [w {:id "W1" :thread "T1" :state :starting :state-at 1000 :overdue :starting :health {:classification :starting}}
+        s (assoc-in base [:workers "W1"] w)
+        item ((notify/waiting s) [:needs-human "W1"])]
+    (is (= 1000 (:at item)))
+    (is (= (+ 1000 (model/deadlines :starting)) (:news-at item)))
+    (let [log (atom [])
+          n (notify/new-notifier {:show! (fn [n _] (swap! log conj (:key n)) {}) :close! (fn [_])} nil 5000)]
+      (notify/tick! n s (+ 1000 (model/deadlines :starting) 10000) {})
+      (is (= ["T1"] @log) "a deadline passed after the start is news though the state began before it"))))
+
+(deftest an-archived-thread-s-finish-is-not-news
+  (let [done (-> base (update-in [:workers "W1"] assoc :state :done :state-at (* 11 60000))
+                 (assoc-in [:threads "T1" :milestone-seq] 4))]
+    (is (seq (notify/unnotified done {})))
+    (is (empty? (notify/unnotified (assoc-in done [:threads "T1" :resolved-at] 5) {})))
+    (is (seq (notify/unnotified (-> done (assoc-in [:threads "T1" :resolved-at] 5) (assoc-in [:threads "T1" :milestone-seq] 6)) {}))
+        "unless it came back")))
 
 (deftest hyprland-dispatchers-are-lua
   (is (= "hl.dsp.focus({ window = \"pid:42\" })" (notify/focus-dispatch 42)))
