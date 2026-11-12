@@ -85,21 +85,14 @@
 
 (map! :leader
       :desc "Find file"             "f f" #'find-file
-      :desc "Recent files"          "f r" #'recentf-open-files
-      :desc "Save file"             "f s" #'save-buffer
       :desc "Save all"              "f S" #'evil-write-all)
 
 (map! :leader
       :desc "Search project"        "s p" #'+default/search-project
-      :desc "Search buffer"         "s b" #'consult-line
       :desc "Search files"          "s f" #'consult-fd
       :desc "Search all"            "s a" #'+default/search-project-for-symbol-at-point)
 
 (map! :leader
-      :desc "List buffers"          "b b" #'switch-to-buffer
-      :desc "Kill buffer"           "b d" #'kill-current-buffer
-      :desc "Next buffer"           "b n" #'next-buffer
-      :desc "Previous buffer"       "b p" #'previous-buffer
       :desc "Kill all buffers"      "b D" #'doom/kill-all-buffers)
 
 (map! :leader
@@ -115,10 +108,6 @@
 
 (map! :leader
       :desc "Format buffer"         "c f" #'+format/buffer
-      :desc "LSP rename"            "c r" #'eng/lsp-rename
-      :desc "LSP find definition"   "c d" #'eng/lsp-find-definition
-      :desc "LSP code actions"      "c a" #'eng/lsp-code-actions
-      :desc "LSP diagnostics"       "c x" #'eng/lsp-diagnostics
       :desc "Comment line"          "c /" #'comment-line)
 
 ;; Match idea-doom-emacs where Doom's defaults differ. Git hunks stay on
@@ -156,7 +145,6 @@
           :desc "Diagnostics"           "x" #'eng/lsp-diagnostics)))
 
 (map! :leader
-      :desc "Open project"          "p p" #'projectile-switch-project
       :desc "Search in project"     "p s" #'projectile-grep
       :desc "Recent project files"  "p r" #'projectile-recentf)
 
@@ -166,11 +154,7 @@
       :desc "Toggle word wrap"      "t w" #'visual-line-mode)
 
 (map! :leader
-      :desc "Split window below"    "w s" #'split-window-below
-      :desc "Split window right"    "w v" #'split-window-right
-      :desc "Delete window"         "w d" #'delete-window
-      :desc "Delete other windows"  "w o" #'delete-other-windows
-      :desc "Balance windows"       "w =" #'balance-windows)
+      :desc "Delete other windows"  "w o" #'delete-other-windows)
 
 (map! :leader
       :desc "M-x"                   "SPC" #'execute-extended-command
