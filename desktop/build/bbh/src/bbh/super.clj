@@ -89,6 +89,15 @@
   [workspace {:keys [workflow brief check bench repro]}]
   (workflow/start! workflow {:cwd workspace :task brief :check check :bench bench :repro repro}))
 
+(defn wf-close!
+  "Close wf run WF-RUN of a Worker that ended in STATE for REASON: a run still
+  active or blocked is abandoned with the reason, so it is nobody's default
+  run. A run that is done, abandoned or was never written stays as it is."
+  [{:keys [wf-run state reason]}]
+  (when (fs/exists? (fs/path (workflow/state-root) wf-run "journal.edn"))
+    (when (#{:active :blocked} (:status (workflow/status wf-run)))
+      (workflow/abandon! wf-run (str "its Worker ended " (name state) (when-not (str/blank? reason) (str ": " reason)))))))
+
 (defn open!
   "The Worker's buffer in the super-agent's Emacs: a bbh session on the
   Worker's conversation in its jj workspace, with its token and wf run in the
@@ -313,7 +322,8 @@
   (let [{:keys [repo thread]} (get-in @state [:workers worker])
         r ((:advance! launch) {:repo repo :tip tip :move (:move-working-copy (policy c))})]
     (when-let [text (workspace/kept-milestone {:worker worker :repo repo :tip tip} r)]
-      (run! c :owner {:id (new-id) :command :milestone! :args {:thread thread :text text}}))
+      ;; A fixed id, so a retry after a crash says it once.
+      (run! c :owner {:id (str "kept-" worker) :command :milestone! :args {:thread thread :text text}}))
     r))
 
 (defn- stop-jobs!
@@ -339,14 +349,48 @@
 
 (defn- retire-worker!
   "Remove Worker WORKER's workspace when it is retirable?, keeping work that
-  did not land under a bookmark; a failure is logged, the finish stands."
+  did not land under a bookmark."
   [{:keys [state launch] :as c} worker]
   (let [st @state
         w (get-in st [:workers worker])]
     (when (and (:workspace w) (workspace/retirable? st w))
       (release-session! c w)
-      (try ((:retire! launch) (assoc w :keep? (not= :done (:state w))))
-           (catch Exception e (binding [*out* *err*] (println "bbh super: retiring" worker "failed:" (ex-message e))))))))
+      ((:retire! launch) (assoc w :keep? (not= :done (:state w)))))))
+
+(defn- effect!
+  "Run effect KIND that finished Worker W owes. Each can run again after a
+  crash: a stopped job, a closed run, a working copy already on the tip and a
+  workspace already gone are all left as they are."
+  [{:keys [launch] :as c} w kind]
+  (case kind
+    :stop-jobs (stop-jobs! c (:id w))
+    :close-wf ((:wf-close! launch) (select-keys w [:id :wf-run :state :reason]))
+    :advance (advance-worker! c (:id w) (:landed w))
+    :retire (retire-worker! c (:id w))))
+
+(defn- settle!
+  "Run what finished Workers still owe (model/obligations), in order, and
+  record each under a fixed id, effect-<worker>-<kind> when done or
+  effect-<worker>-<kind>-fail-<n> with its error, so a repeat records nothing twice. A Worker's first
+  failure ends its pass; the next health pass tries again, and after
+  model/effect-tries the thread needs the person. Under land-lock, since an
+  effect moves the person's working copy."
+  [{:keys [state] :as c}]
+  (locking land-lock
+    (doseq [id (keep #(when (:owes %) (:id %)) (vals (:workers @state)))]
+      (loop []
+        (let [st @state
+              w (get-in st [:workers id])]
+          (when-let [kind (first (model/obligations st w))]
+            (when (try (effect! c w kind)
+                       (run! c :controller {:id (str "effect-" id "-" (name kind)) :command :effect-done! :args {:worker id :kind kind}})
+                       true
+                       (catch Exception e
+                         (binding [*out* *err*] (println "bbh super:" (name kind) "of" id "failed:" (ex-message e)))
+                         (run! c :controller {:id (str "effect-" id "-" (name kind) "-fail-" (inc (get-in w [:effects kind :tries] 0)))
+                                              :command :effect-failed! :args {:worker id :kind kind :error (or (ex-message e) (str e))}})
+                         false))
+              (recur))))))))
 
 (defn- sweep!
   "The workspace directories under DIR/workspaces that no live Worker owns, as
@@ -366,8 +410,8 @@
   revision first, under land-lock with the commit, so the next landing sees this
   one, and moves the user's working copy onto it. A landing that left conflicts
   commits nothing and returns them, so the Worker resolves them and finishes
-  again. Then its jobs stop, its workspace goes when retirable? and a queued
-  Worker may take its slot."
+  again. Then settle! runs what its end owes and a queued Worker may take its
+  slot."
   [c principal {:keys [args] :as cmd}]
   (let [r (if (= :done (keyword (:state-after args)))
             (locking land-lock
@@ -375,14 +419,11 @@
                 (if (:conflicts l)
                   {:conflicts (select-keys l [:conflicts :todo])}
                   (let [r (run! c principal (assoc-in cmd [:args :landed] (:landed l)))]
-                    ;; Only a new landing moves the user's working copy; a repeat already did.
-                    (when (and (:landed l) (not (:repeat? r))) (advance-worker! c (:result r) (:landed l)))
                     r))))
             (run! c principal cmd))]
     (if-let [conflicts (:conflicts r)]
       conflicts
-      (do (stop-jobs! c (:result r))
-          (retire-worker! c (:result r))
+      (do (settle! c)
           (when-not (:repeat? r) (promote! c))
           (:result r)))))
 
@@ -407,12 +448,16 @@
             :cancel!
             (let [r (run! c principal cmd)]
               (reconcile! c)
+              (settle! c)
               {:ok (:result r)})
             ;; An archived thread's Worker no longer holds a slot.
             :archive!
             (let [r (run! c principal cmd)]
-              (doseq [w (vals (:workers @(:state c))) :when (= (:thread args) (:thread w))]
-                (retire-worker! c (:id w)))
+              ;; Workers that ended before effects were recorded owe nothing, so theirs go here.
+              (doseq [w (vals (:workers @(:state c))) :when (and (= (:thread args) (:thread w)) (not (:owes w)))]
+                (try (retire-worker! c (:id w))
+                     (catch Exception e (binding [*out* *err*] (println "bbh super: retiring" (:id w) "failed:" (ex-message e))))))
+              (settle! c)
               (promote-all! c)
               {:ok (:result r)})
             :sweep!
@@ -753,7 +798,7 @@
         server (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         c {:dir dir :conversations (or conversations (conversation/base))
            :launch (merge workspace/impl
-                          {:wf-start! wf-start! :open! open! :release! release!
+                          {:wf-start! wf-start! :wf-close! wf-close! :open! open! :release! release!
                            :open-router! client/open-router!
                            ;; Whether open! can work: the daemon's, unless a caller brought its own open!.
                            :emacs-up? (if (:open! launch) (constantly true) emacs/alive?)}
@@ -787,7 +832,7 @@
                         (when (or (some (fn [w] (= :cancelling (:state w))) (vals (:workers @(:state c))))
                                   (> (- (System/currentTimeMillis) @(:last-health c)) health-ms))
                           ;; A pass can find a Worker gone, which frees its slot.
-                          (reconcile! c) (promote-all! c) (reset! (:last-health c) (System/currentTimeMillis)))
+                          (reconcile! c) (settle! c) (promote-all! c) (reset! (:last-health c) (System/currentTimeMillis)))
                         ;; At start and every health interval: reap sessions that outlived their
                         ;; Worker, and log memory, swap and live sessions.
                         (when (> (- (System/currentTimeMillis) @(:last-machine c)) health-ms)

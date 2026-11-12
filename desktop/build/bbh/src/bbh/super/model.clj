@@ -15,7 +15,7 @@
 (def ^:private grants
   {:router #{:thread! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :machine-observed! :finish-worker! :cancel-delivered!}})
+   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :machine-observed! :finish-worker! :cancel-delivered! :effect-done! :effect-failed!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, how long a live
@@ -179,6 +179,66 @@
 
 (declare fold* worker-of)
 
+;; ---- what a finished Worker still owes -------------------------------------
+
+(def effect-order
+  "The effects a Worker's end can leave to the controller, in the order it
+  runs them: its jobs stop, its wf run closes, the person's working copy moves
+  onto what it landed and its workspace goes. Its session is not among them:
+  the reaper ends it from the process table, once its turn is over."
+  [:stop-jobs :close-wf :advance :retire])
+
+(def effect-tries "How often the controller tries an effect before it needs the person." 3)
+
+(defn- finished
+  "The event that ends Worker W with DATA, its :state, :reason and the rest.
+  :owes names the effects its end leaves, from what it holds."
+  [w data]
+  (let [owed (cond-> #{}
+               (:conversation w) (conj :stop-jobs)
+               (:wf-run w) (conj :close-wf)
+               (:landed data) (conj :advance)
+               (:workspace w) (conj :retire))]
+    {:kind :worker-finished :thread (:thread w)
+     :data (assoc data :id (:id w) :owes (filterv owed effect-order))}))
+
+(defn obligations
+  "The effects finished Worker W still owes, in order: those its end left that
+  are neither done nor failed `effect-tries` times. Its workspace goes at once
+  when it is done; a failed or cancelled one's stays to be inspected until its
+  thread is archived."
+  [state w]
+  (vec (for [kind (:owes w)
+             :let [e (get-in w [:effects kind])]
+             :when (and (not (:done e)) (< (:tries e 0) effect-tries))
+             :when (or (not= :retire kind) (= :done (:state w)) (get-in state [:threads (:thread w) :resolved-at]))]
+         kind)))
+
+(defn stuck-effect
+  "{:kind :error} of the first effect Worker W owes that failed `effect-tries`
+  times, so the person has to look, or nil."
+  [w]
+  (some (fn [kind] (let [e (get-in w [:effects kind])]
+                     (when (and (not (:done e)) (>= (:tries e 0) effect-tries)) {:kind kind :error (:error e)})))
+        (:owes w)))
+
+(defn- owed-effect!
+  "The finished Worker that owes effect KIND, or a refusal."
+  [state worker kind]
+  (let [w (or (get-in state [:workers worker]) (refuse :no-such-worker :worker worker))]
+    (when-not (some #{kind} (:owes w)) (refuse :not-owed :worker worker :kind kind))
+    w))
+
+(defmethod decide* :effect-done! [state {{:keys [worker kind]} :args}]
+  (let [w (owed-effect! state worker kind)]
+    {:events (if (get-in w [:effects kind :done]) [] [{:kind :effect-done :thread (:thread w) :data {:worker worker :kind kind}}])
+     :result kind}))
+
+(defmethod decide* :effect-failed! [state {{:keys [worker kind error]} :args}]
+  (let [w (owed-effect! state worker kind)]
+    {:events (if (get-in w [:effects kind :done]) [] [{:kind :effect-failed :thread (:thread w) :data {:worker worker :kind kind :error (str error)}}])
+     :result kind}))
+
 (defn- clearing
   "The events that clear THREAD for a new Worker NEW: an archived thread is
   reopened, and a Worker whose session ended fails, replaced. A Worker still
@@ -191,9 +251,8 @@
               :message (str thread " has Worker " (:id old) " running; cancel it first, or steer it")))
     (cond-> []
       (:resolved-at t) (conj {:kind :thread-reopened :thread thread :data (or (authority state principal for) {})})
-      old (conj {:kind :worker-finished :thread thread
-                 :data (merge {:id (:id old) :state :failed :reason (str "Replaced by " new (when for (str " as " for " asked")))}
-                              (authority state principal for))}))))
+      old (conj (finished old (merge {:state :failed :reason (str "Replaced by " new (when for (str " as " for " asked")))}
+                                     (authority state principal for)))))))
 
 (defn- worker-model
   "The model Worker start ARGS runs on: its :model, which must be one of
@@ -277,7 +336,7 @@
     (when (= :cancelling (:state w)) (refuse :cancelling :worker worker))
     (when-not (#{:done :failed} state-after) (refuse :invalid :field :state-after))
     (when (#{:done :failed :cancelled} (:state w)) (refuse :already-finished :worker worker))
-    {:events [{:kind :worker-finished :thread (:thread w) :data (cond-> {:id worker :state state-after :reason reason} (and landed (= :done state-after)) (assoc :landed landed))}]
+    {:events [(finished w (cond-> {:state state-after :reason reason} (and landed (= :done state-after)) (assoc :landed landed)))]
      :result worker}))
 
 (defmethod decide* :cancel! [state {{:keys [reason for] :as args} :args :keys [principal]}]
@@ -293,7 +352,7 @@
 (defmethod decide* :cancel-delivered! [state {{:keys [worker]} :args}]
   (let [w (get-in state [:workers worker])]
     (when-not (= :cancelling (:state w)) (refuse :not-cancelling))
-    {:events [{:kind :worker-finished :thread (:thread w) :data {:id worker :state :cancelled :reason (:cancel-reason w)}}]
+    {:events [(finished w {:state :cancelled :reason (:cancel-reason w)})]
      :result worker}))
 
 (defn health
@@ -562,9 +621,9 @@
 (defmethod decide* :archive! [state {{:keys [thread]} :args :keys [id]}]
   ;; A queued Worker has no process yet, so it is new work, which an archived
   ;; thread takes none of. A running Worker carries on.
-  (let [queued (some #(when (and (= thread (:thread %)) (= :queued (:state %))) (:id %)) (vals (:workers state)))]
+  (let [queued (some #(when (and (= thread (:thread %)) (= :queued (:state %))) %) (vals (:workers state)))]
     {:events (filterv some? [(dismissal state thread id)
-                             (when queued {:kind :worker-finished :thread thread :data {:id queued :state :cancelled :reason "thread archived"}})
+                             (when queued (finished queued {:state :cancelled :reason "thread archived"}))
                              {:kind :thread-resolved :thread thread :data {}}])
      :result thread}))
 
@@ -781,11 +840,17 @@
          (when-not (str/blank? reason) (str ": " reason))
          (when note (str ". Last note: " note)))))
 
-(defmethod fold* :worker-finished [state {{:keys [id reason landed] outcome :state} :data :keys [thread seq]}]
+(defmethod fold* :effect-done [state {{:keys [worker kind]} :data}]
+  (assoc-in state [:workers worker :effects kind] {:done true}))
+
+(defmethod fold* :effect-failed [state {{:keys [worker kind error]} :data}]
+  (update-in state [:workers worker :effects kind] #(-> % (update :tries (fnil inc 0)) (assoc :error error))))
+
+(defmethod fold* :worker-finished [state {{:keys [id reason landed owes] outcome :state} :data :keys [thread seq]}]
   (let [t (get-in state [:threads thread])
         w (get-in state [:workers id])]
     (-> state
-        (update-in [:workers id] #(cond-> (assoc % :state outcome :reason reason) landed (assoc :landed landed)))
+        (update-in [:workers id] #(cond-> (assoc % :state outcome :reason reason) landed (assoc :landed landed) (not-empty owes) (assoc :owes owes)))
         (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
         ;; Nobody is left to read an answer, whatever the outcome.
         (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= id (:worker a)) (= :open (:state a))) (assoc :state :superseded))]) %)))
@@ -894,6 +959,7 @@
           (seq open) :waiting
           resolved-at :archived
           (and (or (= :failed execution) (#{:needs-human :session-ended} (get-in state [:workers (:worker (get-in state [:threads id])) :health :classification]))) (empty? open)) :needs-attention
+          (some stuck-effect (filter #(= id (:thread %)) (vals (:workers state)))) :needs-attention
           (some #(= :sent (:state %)) replies) :sent
           (unread? t) :new
           (#{:working :queued} execution) :working
@@ -930,6 +996,9 @@
                       :line (or (:text ask)
                                 (get-in state [:workers (:worker t) :health :problem])
                                 (when (= :failed (:execution t)) (get-in state [:workers (peek (:history t)) :reason]))
+                                (some (fn [w] (when-let [{:keys [kind error]} (and (= (:id t) (:thread w)) (stuck-effect w))]
+                                                (format "%s finished, but its %s failed %d times: %s" (:id w) (name kind) effect-tries error)))
+                                      (sort-by (comp - id-order :id) (vals (:workers state))))
                                 (:summary t))
                       :came-back (boolean (and (:resolved-at t) (> (:milestone-seq t) (:resolved-at t))))
                       :model (get-in state [:workers (or (:worker t) (peek (:history t))) :model])))

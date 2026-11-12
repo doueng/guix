@@ -677,6 +677,82 @@
               (finally (when (bbh.super.process/matches? after) (bbh.super.process/stop-job! after)))))
           (finally (when (bbh.super.process/matches? during) (bbh.super.process/stop-job! during))))))))
 
+(defn- effect-events [c]
+  (locking (:db c)
+    (mapv (juxt :kind (comp :kind :data)) (filter #(#{:effect-done :effect-failed} (:kind %)) (store/events (:db c))))))
+
+(deftest a-finish-the-controller-died-after-is-settled-once-at-restart
+  (let [root (fs/create-temp-dir {:prefix "super-effects"})
+        dir (str (fs/path root "controller"))
+        ran (atom [])
+        opts {:dir dir :conversations (str (fs/path root "conversations")) :scan-ms 10
+              :launch (assoc (stub-launch dir (str (fs/path root "workspaces")))
+                             :retire! (fn [w] (swap! ran conj [:retire (:id w)]) nil)
+                             :advance! (fn [{:keys [tip]}] (swap! ran conj [:advance tip]) :moved))}
+        c (super/start! opts)]
+    (swap! controllers assoc dir c)
+    (try
+      (doseq [t ["lands" "fails"]] (call dir {:command :thread! :args {:title t}}))
+      (run-worker dir "T1")
+      (run-worker dir "T2")
+      (let [run-of #(get-in @(:state c) [:workers % :wf-run])
+            runs [(run-of "W1") (run-of "W2")]]
+        (is (= [:active :active] (map #(:status (bbh.workflow/status %)) runs)))
+        (super/stop! c)
+        ;; The finish commits and the controller dies before any effect ran.
+        (let [db (store/open (str (fs/path dir "super.db")))]
+          (try (reduce (fn [st cmd] (:state (store/commit! db st :controller cmd)))
+                       (store/replay db)
+                       [{:id "f1" :command :finish-worker! :args {:worker "W1" :state-after :done :landed "tip1"}}
+                        {:id "f2" :command :finish-worker! :args {:worker "W2" :state-after :failed :reason "gave up"}}])
+               (finally (store/close! db))))
+        (is (= [] @ran))
+        (let [c2 (super/start! opts)
+              owed #(mapcat (fn [w] (model/obligations @(:state c2) w)) (vals (:workers @(:state c2))))]
+          (try
+            (is (= [:stop-jobs :close-wf :advance :retire] (get-in @(:state c2) [:workers "W1" :owes])))
+            (is (= [:stop-jobs :close-wf :retire] (get-in @(:state c2) [:workers "W2" :owes])))
+            (is (wait-for #(= 6 (count (effect-events c2)))) "the first pass after the restart runs them")
+            (is (= [[:advance "tip1"] [:retire "W1"]] @ran) "a failed Worker's workspace stays until its thread is archived")
+            (is (= [:abandoned :abandoned] (map #(:status (bbh.workflow/status %)) runs)))
+            (is (re-find #"ended failed: gave up" (pr-str (bbh.workflow/status (second runs)))))
+            (is (= {:ok "T2"} (call dir {:command :archive! :args {:thread "T2"}})))
+            (is (= [[:advance "tip1"] [:retire "W1"] [:retire "W2"]] @ran))
+            (is (empty? (owed)))
+            (is (= 7 (count (effect-events c2))))
+            (locking (:db c2) (is (= (store/replay (:db c2)) @(:state c2))))
+            (finally (super/stop! c2))))
+        (let [c3 (super/start! opts)]
+          (try
+            (super/reconcile! c3)
+            (Thread/sleep 100)
+            (is (= 3 (count @ran)) "a second restart runs nothing again")
+            (is (= 7 (count (effect-events c3))))
+            (finally (super/stop! c3)))))
+      (finally (swap! opened dissoc dir) (swap! controllers dissoc dir)))))
+
+(deftest an-effect-that-keeps-failing-needs-the-person-after-three-tries
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-stuck"}))
+        tries (atom 0)
+        c (super/start! {:dir dir :conversations (str (fs/create-temp-dir {:prefix "bbh-super-stuck-conv"})) :scan-ms 10 :health-ms 20
+                         :launch (assoc (stub-launch dir (str (fs/create-temp-dir {:prefix "bbh-super-stuck-ws"})))
+                                        :retire! (fn [_] (swap! tries inc) (throw (ex-info "jj is locked" {}))))})]
+    (swap! controllers assoc dir c)
+    (try
+      (call dir {:command :thread! :args {:title "t"}})
+      (run-worker dir "T1")
+      (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})) "the finish stands")
+      (is (wait-for #(model/stuck-effect (get-in @(:state c) [:workers "W1"]))))
+      (Thread/sleep 100)
+      (is (= 3 @tries) "it is not tried a fourth time")
+      (is (= {:kind :retire :error "jj is locked"} (model/stuck-effect (get-in @(:state c) [:workers "W1"]))))
+      (let [row (first (mapcat :threads (model/sections @(:state c))))]
+        (is (= :needs-attention (:section row)))
+        (is (= "W1 finished, but its retire failed 3 times: jj is locked" (:line row))))
+      (is (= [[:effect-done :stop-jobs] [:effect-done :close-wf] [:effect-failed :retire] [:effect-failed :retire] [:effect-failed :retire]]
+             (effect-events c)))
+      (finally (super/stop! c) (swap! opened dissoc dir) (swap! controllers dissoc dir)))))
+
 (deftest a-dead-session-waits-for-resume-holding-no-slot
   (with-workers
     (fn [c dir repo launches]

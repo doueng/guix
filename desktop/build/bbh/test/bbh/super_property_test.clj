@@ -47,7 +47,7 @@
                {:thread! 3 :start-worker! 4 :router-start! 1 :promote-worker! 2 :worker-running! 4 :finish-worker! 2
                 :cancel! 1 :cancel-delivered! 1 :health! 3 :resume! 2 :steer! 1 :ask! 5 :foreign-ask! 1 :reply! 5
                 :approve! 2 :draft! 1 :read! 1 :dismiss! 1 :archive! 1 :say! 2 :register-router! 1 :note! 1 :answered! 2
-                :outbox! 3 :job-exited! 1 :repeat 2})))
+                :outbox! 3 :job-exited! 1 :effect! 3 :repeat 2})))
 
 (defn- pick-id
   "Mostly one of IDS, chosen by N; one time in ten, or when there are none,
@@ -76,7 +76,14 @@
       :worker-running! [:controller {:id id :command :worker-running!
                                      :args {:worker (or (pick (keep #(when (= :starting (:state %)) (:id %)) (vals (:workers state))) b) worker)
                                             :conversation (str "conv-" i) :wf-run "run" :workspace "/w" :buffer "b" :started-at 0}}]
-      :finish-worker! (let [args {:state-after (pick [:done :failed :cancelled] b) :reason "r"}]
+      :effect! (let [owing (keep #(when (seq (model/obligations state %)) (:id %)) (vals (:workers state)))
+                     w (pick-id owing a worker)
+                     kind (or (pick (if (odd? c) (model/obligations state (get-in state [:workers w])) (get-in state [:workers w :owes])) b)
+                              (pick model/effect-order b))]
+                 [:controller (if (zero? (mod b 3))
+                                {:id id :command :effect-failed! :args {:worker w :kind kind :error "boom"}}
+                                {:id id :command :effect-done! :args {:worker w :kind kind}})])
+      :finish-worker! (let [args (cond-> {:state-after (pick [:done :failed :cancelled] b) :reason "r"} (zero? (mod a 3)) (assoc :landed "tip"))]
                         (if (and live (even? c))
                           [[:worker live] {:id id :command :finish-worker! :args args}]
                           [:controller {:id id :command :finish-worker! :args (assoc args :worker worker)}]))
@@ -181,6 +188,15 @@
      ;; Waiting is read from the asks, so no Worker stores it, and a read shows
      ;; it exactly while a working Worker outside a turn has a stopped ask open.
      (for [w workers :when (= :waiting (:state w))] [:waiting-is-stored (:id w)])
+     ;; Only a Worker that ended owes effects, each at most once, and what it
+     ;; still owes is among them, without those done or failed too often.
+     (for [w workers :when (and (:owes w) (not (finished (:state w))))] [:live-worker-owes (:id w)])
+     (for [w workers :when (not= (:owes w) (seq (filter (set (:owes w)) model/effect-order)))] [:owes-out-of-order (:id w) (:owes w)])
+     (for [w workers kind (model/obligations state w)
+           :let [e (get-in w [:effects kind])]
+           :when (or (not (some #{kind} (:owes w))) (:done e) (>= (:tries e 0) model/effect-tries))]
+       [:owes-what-it-should-not (:id w) kind])
+     (for [w workers kind (keys (:effects w)) :when (not (some #{kind} (:owes w)))] [:effect-nobody-owed (:id w) kind])
      (for [w workers
            :let [stopped (boolean (some #(and (:stopped %) (= (:id w) (:worker %))) open))
                  shown (:state (model/linked state :workers (:id w)))]
@@ -238,6 +254,8 @@
          :when (and (= :starting (:state w)) (not= :starting (get-in before [:workers id :state]))
                     (get-in after [:threads (:thread w) :resolved-at]))]
      [:started-on-an-archived-thread id])
+   (for [[id w] (:workers before) [kind e] (:effects w) :when (and (:done e) (not (:done (get-in after [:workers id :effects kind]))))]
+     [:effect-undone id kind])
    (for [[id a] (:asks before) :let [s (get-in after [:asks id :state])]
          :when (or (< (ask-rank s) (ask-rank (:state a))) (and (not= :open (:state a)) (not= s (:state a)) (not= [:sent :answered] [(:state a) s])))]
      [:ask-moved-back id (:state a) s])
