@@ -87,7 +87,7 @@ Single keys after the leader carry the most frequent actions, as in Doom. Groups
 | TAB . | Choose a workspace | Doom, Herdr |
 | TAB ` | Last workspace | Doom, Herdr, desktop |
 
-`keyleader --check` rejects a single key that is also a group key. Doom's Treemacs toggle stays on its upstream SPC o p. Ctrl+b f and Ctrl+b Shift+E still work.
+`keyleader --check` rejects a single key that is also a group key. Doom's Treemacs toggle is on its upstream SPC o p and, by request, on SPC e. Ctrl+b f and Ctrl+b Shift+E still work.
 `keyleader --check` also rejects desktop sequences that differ only by case, because Hyprland submaps cannot tell `c r` from `c R`.
 `reference.html` maps every binding against Doom Emacs; see [Reference](#reference).
 
@@ -196,7 +196,7 @@ No global keyboard listener or browser content script has been added.
 | Alt+Space a a/t/b/i | Alt+Space o a/t/b/i | Doom's SPC o opens terminals and the browser |
 | Alt+Space o a launches an application | Alt+Space . | Two keys for the most used desktop action, like Doom's SPC . |
 | Space c R finds references | Space c D | Doom pairs c d with c D |
-| Doom Space e toggles Treemacs, Space t T toggles vterm | Space o p and Space o t | Upstream Doom's keys |
+| Doom Space t T toggles vterm | Space o t | Upstream Doom's key. Space e still toggles Treemacs beside Space o p, by request (T153) |
 | IdeaVim Space b b opens recent files | The Switcher | f r already opens recent files |
 | Cmd+Z, Cmd+W and Cmd+T in a terminal send Ctrl+Z, Ctrl+W and Ctrl+T | Nothing | Ctrl+Z suspended Neovim, and fish's vi insert mode has no undo on it |
 | Ctrl+Shift+4 copies a region | Cmd+Shift+4 sends Shift+Print, Cmd+Shift+3 sends Print | Ctrl belongs to applications |
