@@ -7,10 +7,10 @@
   jj or Emacs."
   (:require [babashka.fs :as fs]
             [bbh.super.model :as model]
+            [bbh.props :as props]
             [bbh.super.store :as store]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
-            [clojure.test.check :as tc]
+            [clojure.test :refer [deftest]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]))
 
@@ -445,6 +445,29 @@
                [:overdue-disagrees-with-its-deadline (:id w) (:state w)]))
      after]))
 
+(defn- call-shape-problems
+  "What breaks T120's rule for the Router's steer! and cancel! on STATE: a
+  thread's id, its Worker's id and the pre-T104 {:worker} shape name the same
+  thread, so each decides the same; a Worker that is no longer its thread's
+  Worker names nothing and is refused as :not-running."
+  [state]
+  (let [decide (fn [command args]
+                 (try (model/decide state :router {:id "shape" :command command :token-hash "h" :policy {:workers 2} :args args})
+                      (catch clojure.lang.ExceptionInfo e (:error (ex-data e)))))]
+    (concat
+     (for [t (vals (:threads state)) :let [w (:worker t)] :when w
+           [command extra] [[:steer! {:text "go on"}] [:cancel! {:reason "stop"}]]
+           :let [by-thread (decide command (assoc extra :thread (:id t)))
+                 shapes [(decide command (assoc extra :thread w)) (decide command (assoc extra :worker w))]]
+           :when (not-every? #(= by-thread %) shapes)]
+       [:call-shapes-disagree command (:id t) w by-thread shapes])
+     (for [w (vals (:workers state))
+           :when (not= (:id w) (get-in state [:threads (:thread w) :worker]))
+           [command extra] [[:steer! {:text "go on"}] [:cancel! {:reason "stop"}]]
+           :let [r (decide command (assoc extra :thread (:id w)))]
+           :when (not= :not-running r)]
+       [:stale-worker-id-not-refused command (:id w) r]))))
+
 (defn- run-steps
   "Commit the commands random CHOICES make, one at a time, on a store with a
   Worker cap of CAP, taking a snapshot before step SNAP-AT. A choice can repeat
@@ -459,7 +482,7 @@
         (when (= i snap-at) (store/snapshot! db state))
         (if (nil? ch)
           (let [[late state] (fire-timers db state)]
-            (when-let [problems (seq (concat late (history-problems db path state)))] {:problems (vec problems)}))
+            (when-let [problems (seq (concat late (history-problems db path state) (call-shape-problems state)))] {:problems (vec problems)}))
           (let [[step first-result] (if (= :repeat (pick kinds (first ch)))
                                       (pick accepted (second ch))
                                       [(command state cap i ch)])]
@@ -477,6 +500,7 @@
                                                (when (not= events (count (store/events db))) [[:repeat-added-events]]))
                                        (postconditions step state after out cap))
                                      (violations after cap launched)
+                                     (when (= i snap-at) (call-shape-problems after))
                                      (regressions state after))]
                 (if (seq problems)
                   {:step i :command step :out (dissoc out :state) :problems (vec problems)}
@@ -488,8 +512,9 @@
 (def ^:private choice (gen/vector (gen/choose 0 1000) 4))
 
 (deftest property-random-command-sequences-keep-the-controllers-rules
-  (let [result (tc/quick-check 150 (prop/for-all [cap (gen/choose 1 2)
-                                                  snap-at (gen/choose 0 70)
-                                                  choices (gen/vector choice 1 60)]
-                                     (nil? (run-steps cap snap-at choices))))]
-    (is (:pass? result) (pr-str (when-let [[cap snap-at choices] (get-in result [:shrunk :smallest])] (run-steps cap snap-at choices))))))
+  (props/check "random command sequences" 150
+               (prop/for-all [cap (gen/choose 1 2)
+                              snap-at (gen/choose 0 70)
+                              choices (gen/vector choice 1 60)]
+                 (nil? (run-steps cap snap-at choices)))
+               :explain run-steps))

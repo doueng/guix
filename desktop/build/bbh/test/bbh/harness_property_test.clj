@@ -13,8 +13,8 @@
             [bbh.transcript :as transcript]
             [bbh.workflow :as wf]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]
-            [clojure.test.check :as tc]
+            [bbh.props :as props]
+            [clojure.test :as t :refer [deftest use-fixtures]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]))
 
@@ -23,8 +23,7 @@
 (defn- temp-dir [] (str (fs/create-temp-dir {:prefix "harness-property"})))
 
 (defn- passes [trials property]
-  (let [result (tc/quick-check trials property)]
-    (is (:pass? result) (pr-str (:shrunk result)))))
+  (props/check (str (first t/*testing-vars*)) trials property))
 
 ;; ---- wf journal --------------------------------------------------------------
 

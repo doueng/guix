@@ -56,6 +56,10 @@
                :requires ([bbh.test-runner] [bbh.heavy])
                :task (do (bbh.heavy/reexec-held! (concat ["bb"] (some->> (System/getProperty "babashka.config") (vector "--config")) ["test"] *command-line-args*))
                          (bbh.test-runner/-main))}
+         test:props {:doc "Run only the property tests, PROPS_SCALE (default 20) times their default trials; BBH_PROP_SEED replays a failure's seed."
+                     :requires ([bbh.test-runner] [bbh.heavy])
+                     :task (do (bbh.heavy/reexec-held! (concat ["bb"] (some->> (System/getProperty "babashka.config") (vector "--config")) ["test:props"]))
+                               (bbh.test-runner/-main "--props"))}
          try {:doc "bb try MODEL PROMPT...: run real prompts through agent-shell headlessly."
               :task (let [[model & prompts] *command-line-args*
                           home (System/getProperty "user.home")]

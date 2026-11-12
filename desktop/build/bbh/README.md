@@ -109,6 +109,7 @@ The transcript is durable and only grows. The context is the transcript, so each
 
 ```sh
 bb test                  # sessions, streaming, ACP process, Claude adapter, MCP and workflows, in parallel (BBH_TEST_JOBS, default 4), in the heavy-job slot
+bb test:props            # only the property tests (*_property_test.clj), 20 times their trials; BBH_PROP_SEED=N replays a failure's seed
 bb test:emacs            # composer, history, cancellation and nREPL endpoint
 bb test:doom             # installed Doom startup and Ctrl-N, in a separate terminal
 bb test:doom launcher    # installed emacs-bbh launcher, including automatic session startup

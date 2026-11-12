@@ -1290,6 +1290,38 @@ SELECTED's PROGRESS lines, then `bbh-test--outline' and a subtree per other row.
       (should (equal "T3" (eng/bbh-inbox--choose "T2" rows (seq-remove (lambda (r) (equal "T2" (plist-get r :id))) rows))))
       (should (equal "T1" (eng/bbh-inbox--choose nil nil rows))))))
 
+(defun bbh-test--random-title ()
+  "A thread title the controller could send: one line of letters, digits,
+`=', wide characters, emoji and the ellipsis, up to 70 characters."
+  (let ((pool ["a" "Z" "9" " " "=" "é" "日本" "🙂" "…" "#+" "*" "T12" "long-word"]))
+    (string-trim (apply #'concat (cl-loop repeat (random 25) collect (aref pool (random (length pool))))))))
+
+(ert-deftest bbh-inbox-property-random-rows-parse-back-fill-their-width-and-keep-order ()
+  ;; A property over random rows, with a fixed seed so a failure replays: the
+  ;; controller's `key=value' fields parse back, each list line is exactly
+  ;; the list's width whatever the title holds, and the list keeps the
+  ;; controller's order.
+  (let ((seed "T170") (eng/bbh-inbox--show-archived nil))
+    (random seed)
+    (dotimes (trial 60)
+      (let* ((n (1+ (random 8)))
+             (width (+ 30 (random 90)))
+             (specs (cl-loop for i below n
+                             collect (list (format "T%d" (1+ (random 999)))
+                                           (nth (random 5) '("stopped" "new" "waiting" "quiet" "archived"))
+                                           (nth (random 4) '("on-you" "working" "stuck" "done"))
+                                           (random 13) (zerop (random 2)) (bbh-test--random-title))))
+             (rows (plist-get (eng/bbh-inbox--parse-split (bbh-test--split specs)) :rows))
+             (live (seq-remove (lambda (s) (equal "archived" (nth 1 s))) specs))
+             (lines (split-string (substring-no-properties (eng/bbh-inbox--list-text rows width)) "\n")))
+        (should (equal (list seed trial (mapcar (lambda (s) (list (nth 0 s) (nth 3 s) (nth 4 s) (nth 5 s))) specs))
+                       (list seed trial (mapcar (lambda (r) (list (plist-get r :id) (plist-get r :asks) (plist-get r :unseen) (plist-get r :title))) rows))))
+        (cl-loop for s in live for line in lines
+                 do (should (equal (list seed trial (nth 5 s) width)
+                                   (list seed trial (nth 5 s) (string-width line))))
+                 (should (equal (list seed trial (nth 0 s))
+                                (list seed trial (cadr (split-string line))))))))))
+
 (ert-deftest bbh-inbox-split-lists-newest-threads-first-within-a-section ()
   ;; The controller sends threads newest first in each section (T99), numerically:
   ;; T100 above T99 above T12, waiting sections still first. The list keeps that order,

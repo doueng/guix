@@ -45,8 +45,8 @@
 (defn- last-times []
   (try (edn/read-string (slurp (times-file))) (catch Exception _ {})))
 
-(defn- all-vars []
-  (let [nss (test-namespaces)]
+(defn- all-vars [& {:keys [props?]}]
+  (let [nss (cond->> (test-namespaces) props? (filterv #(str/ends-with? (name %) "property-test")))]
     (apply require nss)
     (for [n nss, v (sort-by (comp :line meta) (vals (ns-interns n))) :when (:test (meta v))]
       (symbol v))))
@@ -132,12 +132,15 @@
 
 (defn -main
   "Run every test var on BBH_TEST_JOBS workers (default 4, or fewer cores), print failures and the slowest tests,
-  and exit nonzero on any failure or error."
-  [& _]
-  (let [start (System/currentTimeMillis)
+  and exit nonzero on any failure or error. With --props, run only the property tests, each with
+  PROPS_SCALE (default 20) times its default trials."
+  [& args]
+  (let [props? (some #{"--props"} args)
+        vars (all-vars :props? props?)
+        start (System/currentTimeMillis)
         marker (str (random-uuid))
         times (last-times)
-        queue (java.util.concurrent.LinkedBlockingQueue. (sort-by #(- (get times % 0)) (all-vars)))
+        queue (java.util.concurrent.LinkedBlockingQueue. (sort-by #(- (get times % 0)) vars))
         ;; Each worker and the child REPLs its tests start take a few hundred MB, and 8 at once beside running
         ;; Workers helped freeze the laptop (T108), so the default stays at 4.
         jobs (or (some-> (System/getenv "BBH_TEST_JOBS") parse-long)
@@ -152,6 +155,7 @@
                            "BBH_EMACS_SERVER" (str "bbh-test-" marker)
                            hermetic/root-var root
                            "TMPDIR" tmp}
+                          (when props? {"BBH_PROPS" "full"})
                           (hermetic/dirs root)
                           ;; sqlite looks under user.home, which now names root.
                           (when (and (not (System/getenv "BBH_SQLITE_LIB")) (fs/exists? sqlite))
@@ -188,11 +192,11 @@
              (seq written) (conj {:var 'real-dirs-written :ms 0 :counters {:test 1 :error 1}}))
         total (apply merge-with + (map :counters rs))
         bad (+ (:fail total 0) (:error total 0))]
-    (spit (times-file) (pr-str (into times (map (juxt :var :ms)) rs)))
+    (when-not props? (spit (times-file) (pr-str (into times (map (juxt :var :ms)) rs))))
     (println "\nSlowest tests (ms):")
     (doseq [{:keys [var ms]} (take 10 (sort-by (comp - :ms) rs))] (println (format "%7d  %s" ms var)))
     (println (format "\nRan %d tests containing %d assertions on %d workers in %.1f s."
                      (:test total 0) (+ (:pass total 0) (:fail total 0) (:error total 0)) jobs
                      (/ (- (System/currentTimeMillis) start) 1000.0)))
     (println (str (:fail total 0) " failures, " (:error total 0) " errors."))
-    (System/exit (if (and (zero? bad) (= (count rs) (count (all-vars)))) 0 1))))
+    (System/exit (if (and (zero? bad) (= (count rs) (count vars))) 0 1))))
