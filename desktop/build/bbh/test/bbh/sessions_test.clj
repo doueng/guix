@@ -182,6 +182,20 @@
   (is (= "4000 MB available, 1200 MB swap used; 5 sessions live, 3 of them Workers' for 2 active Workers; stale: super-W9"
          (client/machine-line {:mem-available-mb 4000 :swap-used-mb 1200 :sessions 5 :worker-sessions 3 :active-workers 2 :stale ["super-W9"]}))))
 
+(deftest the-list-line-names-the-last-earlyoom-kill
+  (is (= "4000 MB available, 1200 MB swap used; 5 sessions live, 3 of them Workers' for 2 active Workers; last earlyoom kill: 2026-11-12T21:00:00+0000 pid=7 uid=1000 name=bb"
+         (client/machine-line {:mem-available-mb 4000 :swap-used-mb 1200 :sessions 5 :worker-sessions 3 :active-workers 2
+                               :earlyoom-last "2026-11-12T21:00:00+0000 pid=7 uid=1000 name=bb"}))))
+
+(deftest the-last-earlyoom-kill-is-the-log's-last-line
+  (let [f (fs/create-temp-file)]
+    (try
+      (is (nil? (sessions/last-earlyoom-kill (str f))))
+      (spit (str f) "t1 pid=1 uid=0 name=a\nt2 pid=2 uid=1000 name=bb\n")
+      (is (= "t2 pid=2 uid=1000 name=bb" (sessions/last-earlyoom-kill (str f))))
+      (is (nil? (sessions/last-earlyoom-kill "/nonexistent/earlyoom-kills.log")))
+      (finally (fs/delete-if-exists f)))))
+
 ;; ---- the heavy-job slot --------------------------------------------------------
 
 (deftest heavy-commands-are-recognized

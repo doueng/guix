@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="T165: earlyoom kill hook writes a world-readable log; bbh list shows the last kill">
+<meta name="bbh-doc" content="T165">
+<title>earlyoom kills readable without root</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>earlyoom kills readable without root</h1>
+
+<h2>Outcome</h2>
+<p>earlyoom now writes one line per kill to <b>/var/log/earlyoom-kills.log</b>, mode 0644, so you and agents can read it without sudo. <code>bbh super list</code> shows the last kill on its machine line. Built and committed, not applied yet: applying it needs sudo.</p>
+<h2>Apply and check</h2>
+<pre>make switch</pre>
+<p>Then:</p>
+<pre>ls -l /var/log/earlyoom-kills.log
+cat /var/log/earlyoom-kills.log
+sudo herd status earlyoom</pre>
+<p>Expect <code>-rw-r--r-- root root</code>. The file starts empty and gets a line only when earlyoom kills something. A line looks like this:</p>
+<pre>2026-11-12T21:55:24+0000 pid=43 uid=1000 name=bb</pre>
+<p><code>make switch</code> restarts earlyoom only if shepherd upgrades it in place. If <code>sudo herd status earlyoom</code> still shows the old command line without <code>-N</code>, run <code>sudo herd restart earlyoom</code> or reboot.</p>
+<h2>Why this option</h2>
+<ul>
+<li><b>Making /var/log/earlyoom.log group-readable doesn't hold.</b> Shepherd creates that file 0640 root:root, and it does so again after every restart and log rotation. An activation chmod would be undone the first time either happens.</li>
+<li><b>It would also leak.</b> earlyoom's kill line includes the victim's full command line, and a command line can hold a token. The new hook writes only the time, pid, uid and the 15-character process name. It never reads EARLYOOM_CMDLINE.</li>
+<li><b>It's small and needs no upkeep.</b> The hook is a three-line bash-minimal script that runs once per kill, and one line per kill needs no rotation. An activation snippet creates the file at 0644 so readers find it before the first kill.</li>
+</ul>
+<h2>What was checked</h2>
+<ul>
+<li><code>make lint</code> and <code>make build</code> pass (offloaded to the builder). The built earlyoom service passes <code>-N /gnu/store/…-earlyoom-kill-hook</code>.</li>
+<li>I ran the built hook against a temporary file. A name containing a space and a newline came out as <code>ld-linux_aarch6_</code>, and a secret in EARLYOOM_CMDLINE didn't appear in the output.</li>
+<li><code>bbh super list</code>'s line read the last line from that file: <code>…; last earlyoom kill: 2026-11-12T21:55:24+0000 pid=43 uid=1000 name=bb</code>. bbh.sessions-test passes (12 tests).</li>
+</ul>
+<h2>Limits</h2>
+<p>The new file records kills from now on only. To check the 2026-11-12 exits 137 and 143 you still need <code>sudo grep -i sending /var/log/earlyoom.log</code>. The hook isn't told whether the signal was SIGTERM or SIGKILL. That detail stays in the root-only log.</p>
+<p>Changed: /home/engstrand/guix/modules/engstrand/system/asahi.scm and bbh's super/sessions.clj and super/client.clj. T163's earlier sessions changes are already in the base, so this doesn't conflict with them.</p>
+</main></body></html>

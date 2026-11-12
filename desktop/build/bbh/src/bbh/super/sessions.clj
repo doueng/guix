@@ -50,14 +50,28 @@
              :when id]
          (assoc id :conversation c))))
 
+(def earlyoom-kills-log
+  "One line per earlyoom kill, time pid uid name, world-readable; the Guix
+  system writes it (modules/engstrand/system/asahi.scm, T165)."
+  "/var/log/earlyoom-kills.log")
+
+(defn last-earlyoom-kill
+  "The last line of the earlyoom kill log at PATH, or nil when it is missing
+  or empty."
+  ([] (last-earlyoom-kill earlyoom-kills-log))
+  ([path]
+   (some->> (try (slurp path) (catch Exception _ nil)) str/split-lines (remove str/blank?) last)))
+
 (defn machine
-  "MemAvailable, MemTotal and swap used in MB, from /proc/meminfo."
+  "MemAvailable, MemTotal and swap used in MB, from /proc/meminfo, and the
+  last earlyoom kill."
   []
   (let [kb (into {} (for [[_ k v] (re-seq #"(?m)^(\w+):\s+(\d+) kB" (or (proc-bytes "/proc/meminfo") ""))]
                       [k (parse-long v)]))
         mb #(some-> (get kb %) (quot 1024))]
     {:mem-available-mb (mb "MemAvailable") :mem-total-mb (mb "MemTotal")
-     :swap-used-mb (when (and (kb "SwapTotal") (kb "SwapFree")) (quot (- (kb "SwapTotal") (kb "SwapFree")) 1024))}))
+     :swap-used-mb (when (and (kb "SwapTotal") (kb "SwapFree")) (quot (- (kb "SwapTotal") (kb "SwapFree")) 1024))
+     :earlyoom-last (last-earlyoom-kill)}))
 
 ;; ---- killing -----------------------------------------------------------------
 

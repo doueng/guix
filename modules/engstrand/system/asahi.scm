@@ -9,6 +9,7 @@
   #:use-module (engstrand system bootloader)
   #:use-module (engstrand system builder-keys)
   #:use-module (gnu)
+  #:use-module (gnu packages bash)
   #:use-module (gnu packages linux)
   #:use-module (gnu packages ncurses)
   #:use-module (gnu packages package-management)
@@ -71,6 +72,33 @@
 ;; `make switch JOBS=1' builds locally once when the builder is down.
 (define %local-max-jobs "0")
 
+;; earlyoom's own log, /var/log/earlyoom.log, is root-only: shepherd creates
+;; it 0640 root, again after each rotation, and its kill lines carry the full
+;; command line, which can hold a token.  So earlyoom's -N hook appends one
+;; line per kill, time, pid, uid and the 15-character comm, to a world-readable
+;; file that bbh super list shows (T165).  A line per kill needs no rotation.
+(define %earlyoom-kills-log "/var/log/earlyoom-kills.log")
+
+(define %earlyoom-kill-hook
+  (computed-file "earlyoom-kill-hook"
+    #~(begin
+        (call-with-output-file #$output
+          (lambda (port)
+            (format port "#!~a
+umask 022
+name=${EARLYOOM_NAME//[^[:graph:]]/_}
+printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\" \"${EARLYOOM_UID}\" \"$name\" >> ~a
+"
+                    #$(file-append bash-minimal "/bin/bash")
+                    #$%earlyoom-kills-log)))
+        (chmod #$output #o555))))
+
+(define %earlyoom-kills-log-activation
+  (simple-service 'familiar-earlyoom-kills-log activation-service-type
+    #~(let ((log #$%earlyoom-kills-log))
+        (close-port (open-file log "a"))
+        (chmod log #o644))))
+
 (define* (make-base-os #:key root-uuid esp-uuid channels)
   (unless (and (string? root-uuid) (string? esp-uuid) (pair? channels))
     (error "Supply root/ESP UUIDs and pinned channels"))
@@ -120,6 +148,7 @@
      (append
       (list %udev-backlight-service
             %offload-key-activation
+            %earlyoom-kills-log-activation
             ;; The Neural Engine; Arch leaves this to systemd's 0666 default.
             (udev-rules-service 'ane-accel
                                 (udev-rule "70-ane-accel.rules"
@@ -148,7 +177,7 @@
             ;; Regexes match the 15-character comm: claude runs as
             ;; ld-linux-aarch6, Emacs as .emacs-31.1-rea, so batch Emacs and
             ;; the daemon look alike.  Logs to /var/log/earlyoom.log, with a
-            ;; memory line each minute.
+            ;; memory line each minute; kills also go to %earlyoom-kills-log.
             (service earlyoom-service-type
                      (earlyoom-configuration
                       (minimum-available-memory 10)
@@ -157,7 +186,8 @@
                        "^(bb|ld-linux-aarch6|claude|java|chromium|headless_shell)$")
                       (avoid-regexp
                        "^(Hyprland|start-hyprland|Xwayland|X|\\.sddm.*|\\.?emacs.*|kanata|herdr|shepherd|pipewire.*|wireplumber|elogind|dbus-daemon|guix-daemon)$")
-                      (memory-report-interval 60)))
+                      (memory-report-interval 60)
+                      (send-notification-command %earlyoom-kill-hook)))
             ;; Data is single-copy, so scrub only detects data corruption; DUP
             ;; metadata is repaired.  Shepherd drops timer events missed while
             ;; asleep, so the default first-Sunday midnight would rarely run.

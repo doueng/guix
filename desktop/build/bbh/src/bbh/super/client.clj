@@ -69,13 +69,15 @@
 
 (defn machine-line
   "One line for `bbh super list` from the last health pass's MACHINE report:
-  memory, swap, and live sessions against active Workers, stale ones named."
-  [{:keys [mem-available-mb swap-used-mb sessions worker-sessions active-workers stale mail-timers timers-swept]}]
+  memory, swap, and live sessions against active Workers, stale ones named,
+  and earlyoom's last kill."
+  [{:keys [mem-available-mb swap-used-mb sessions worker-sessions active-workers stale mail-timers timers-swept earlyoom-last]}]
   (str (format "%s MB available, %s MB swap used; %d sessions live, %d of them Workers' for %d active Workers"
                (or mem-available-mb "?") (or swap-used-mb "?") (or sessions 0) (or worker-sessions 0) (or active-workers 0))
        (when mail-timers (format "; %d Emacs mailbox timers" mail-timers))
        (when (some-> timers-swept pos?) (format " (%d leftover cancelled)" timers-swept))
-       (when (seq stale) (str "; stale: " (str/join ", " stale)))))
+       (when (seq stale) (str "; stale: " (str/join ", " stale)))
+       (when earlyoom-last (str "; last earlyoom kill: " earlyoom-last))))
 
 (defn- print-list! [{:keys [badge sections machine]}]
   (println (format "%d need you" badge))
