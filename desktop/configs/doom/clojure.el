@@ -6,14 +6,6 @@
 ;; had already loaded.
 (add-to-list 'auto-mode-alist '("\\.bb\\'" . clojure-mode))
 
-;; Corretto 25's Nix package currently ships jspawnhelper without its execute
-;; bit. clojure-lsp runs `bb print-deps', whose Clojure subprocess may need to
-;; spawn Git, so use Java's legacy fork launcher until the package is fixed.
-(let ((fork-option "-Djdk.lang.Process.launchMechanism=FORK"))
-  (unless (member fork-option (split-string (or (getenv "JAVA_TOOL_OPTIONS") "")))
-    (setenv "JAVA_TOOL_OPTIONS"
-            (string-join (delq nil (list (getenv "JAVA_TOOL_OPTIONS") fork-option)) " "))))
-
 (after! clojure-mode
   (setq cider-babashka-command "bb"))
 
