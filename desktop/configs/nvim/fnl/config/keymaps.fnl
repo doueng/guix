@@ -29,14 +29,6 @@
 (vim.keymap.set :v "<" :<gv)
 (vim.keymap.set :v ">" :>gv)
 
-(pcall vim.keymap.del :n :<leader>bb)
-(vim.keymap.set :n :<leader>bb
-                "<cmd>Telescope buffers sort_mru=true ignore_current_buffer=true<cr>"
-                {:desc "Search open buffers"})
-(let [(ok which-key) (pcall require :which-key)]
-  (when ok
-    (which-key.add [{1 :<leader>b :group :buffer}
-                    {1 :<leader>bb :desc "Search open buffers"}])))
 (vim.keymap.set :n "<A-,>" :<cmd>BufferLineCyclePrev<cr> {:desc "Previous buffer"})
 (vim.keymap.set :n :<A-.> :<cmd>BufferLineCycleNext<cr> {:desc "Next buffer"})
 
