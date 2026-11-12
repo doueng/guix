@@ -1,0 +1,163 @@
+#!/usr/bin/env bb
+;; md-view FILE.md|file://URI ...: render GitHub-flavored markdown with pandoc to a
+;; self-contained HTML file and open it in Chrome. The xdg handler for text/markdown
+;; (md-view.desktop, modules/engstrand/features/desktop.scm).
+;;
+;; Flatpak Chrome only sees ~/Downloads among home dirs (not ~/.cache, not host /tmp),
+;; so pages go to ~/Downloads/.md-view/<sha1 of path>.html. Relative images become
+;; data URIs; relative links to .md files point at their rendered pages, rendered too.
+;; A page is re-rendered only when its source is newer. --no-open renders and prints
+;; the page path.
+
+(require '[babashka.fs :as fs]
+         '[babashka.process :as p]
+         '[clojure.string :as str])
+
+(import '(java.net URI URLDecoder)
+        '(java.security MessageDigest)
+        '(java.util Base64))
+
+(def home (System/getProperty "user.home"))
+;; MD_VIEW_DIR overrides it for tests.
+(def out-dir (fs/path (or (System/getenv "MD_VIEW_DIR") (fs/path home "Downloads" ".md-view"))))
+(def max-pages 200)
+;; Hyprland's PATH may lack the Home profile.
+(def pandoc (str (or (fs/which "pandoc") (fs/path home ".guix-home/profile/bin/pandoc"))))
+
+(def css "
+:root{color-scheme:light dark;--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--link:#2f6f8f;--code:#ece9e1;
+--kw:#7a4fa0;--st:#2e7d4f;--co:#8a8f9c;--dt:#8a6a1f;--fu:#2f6f8f;--er:#b3382c}
+@media(prefers-color-scheme:dark){:root{--fg:#dfe3ea;--mut:#9aa3b2;--bg:#16181d;--card:#1e2128;--line:#3d4350;--link:#7cc0e0;--code:#262a33;
+--kw:#c79bf0;--st:#8fd19e;--co:#7d8594;--dt:#e3c07a;--fu:#7cc0e0;--er:#f08a7e}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:900px;margin:0 auto;padding:26px 20px 80px}
+.src{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);margin-bottom:14px;word-break:break-all}
+h1,h2{padding-bottom:4px;border-bottom:1px solid var(--line)}h1{font-size:27px}h2{font-size:21px;margin-top:36px}
+a{color:var(--link)}img{max-width:100%}hr{border:0;border-top:1px solid var(--line)}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 4px;border-radius:3px}
+pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;overflow-x:auto}
+pre code{background:none;padding:0}div.sourceCode{background:none;margin:1em 0}
+blockquote{margin:0;padding:0 14px;color:var(--mut);border-left:4px solid var(--line)}
+table{border-collapse:collapse;margin:1em 0;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:5px 10px}th{background:var(--card)}
+ul.task-list{list-style:none;padding-left:1.2em}input[type=checkbox]{accent-color:var(--link)}
+code span.kw,code span.cf,code span.im{color:var(--kw)}code span.st,code span.ch,code span.ss,code span.vs{color:var(--st)}
+code span.co,code span.do,code span.an,code span.cv{color:var(--co);font-style:italic}
+code span.dt,code span.dv,code span.bn,code span.fl,code span.cn,code span.sc{color:var(--dt)}
+code span.fu,code span.bu,code span.at,code span.va{color:var(--fu)}code span.er,code span.al{color:var(--er)}
+code span.op,code span.ot,code span.pp{color:inherit}
+")
+
+(def template
+  (str "<!doctype html>\n<html><head><meta charset=utf-8>"
+       "<meta name=viewport content='width=device-width,initial-scale=1'>"
+       "<title>$pagetitle$</title><style>" css "</style></head>\n"
+       "<body><main><div class=src>$source$</div>\n$body$\n</main></body></html>\n"))
+
+(defn sha1 [s]
+  (let [d (.digest (MessageDigest/getInstance "SHA-1") (.getBytes (str s) "UTF-8"))]
+    (apply str (map #(format "%02x" %) d))))
+
+(defn page-for [src] (fs/path out-dir (str (sha1 src) ".html")))
+
+(defn ->path [arg]
+  (fs/canonicalize (if (str/starts-with? arg "file:") (fs/path (URI. arg)) arg)))
+
+(defn relative? [url]
+  (not (or (str/blank? url) (str/starts-with? url "#") (str/starts-with? url "/")
+           (re-find #"^[a-zA-Z][a-zA-Z0-9+.-]*:" url))))
+
+(defn resolve-url [dir url]
+  (let [[path frag] (str/split url #"#" 2)]
+    [(fs/normalize (fs/path dir (URLDecoder/decode path "UTF-8"))) frag]))
+
+(defn markdown? [path] (re-find #"(?i)\.(md|markdown|mdown|mkd)$" (str path)))
+
+(def mime {"png" "image/png" "jpg" "image/jpeg" "jpeg" "image/jpeg" "gif" "image/gif"
+           "webp" "image/webp" "svg" "image/svg+xml" "avif" "image/avif"})
+
+(defn data-uri [path]
+  (when-let [m (and (fs/regular-file? path) (mime (str/lower-case (fs/extension path))))]
+    (str "data:" m ";base64,"
+         (.encodeToString (Base64/getEncoder) (fs/read-all-bytes path)))))
+
+(defn escape-attr [s] (str/escape (str s) {\& "&amp;" \" "&quot;" \< "&lt;"}))
+
+(defn rewrite
+  "Point relative hrefs at rendered pages or file:// URLs and inline relative images.
+  Returns [html linked-markdown-sources]."
+  [html dir]
+  (let [linked (volatile! #{})
+        html (str/replace html #"(href|src)=\"([^\"]*)\""
+               (fn [[whole attr url]]
+                 (let [url (str/replace url "&amp;" "&")]
+                   (if-not (relative? url)
+                     whole
+                     (let [[path frag] (resolve-url dir url)
+                           frag (when frag (str "#" frag))]
+                       (cond
+                         (= attr "src")
+                         (if-let [uri (data-uri path)] (str "src=\"" uri "\"") whole)
+
+                         (and (markdown? path) (fs/regular-file? path))
+                         (let [path (fs/canonicalize path)]
+                           (vswap! linked conj path)
+                           (str "href=\"" (fs/file-name (page-for path)) frag "\""))
+
+                         :else
+                         (str "href=\"" (escape-attr (str (.toUri (fs/path path)) frag)) "\"")))))))]
+    [html @linked]))
+
+(defn render! [src template-file]
+  (let [page (page-for src)
+        dir (fs/parent src)
+        fresh? (and (fs/exists? page)
+                    (every? #(pos? (compare (fs/last-modified-time page) (fs/last-modified-time %)))
+                            [src template-file]))]
+    (if fresh?
+      ;; Follow the recorded links so edited neighbours still get refreshed.
+      (let [links (str page ".links")]
+        (when (fs/exists? links)
+          (map fs/path (remove str/blank? (str/split-lines (slurp links))))))
+      (let [{:keys [out err exit]}
+            (p/shell {:out :string :err :string :continue true :dir (str dir)}
+                     pandoc "--from=gfm+footnotes" "--to=html5" "--standalone" "--wrap=none"
+                     (str "--template=" template-file)
+                     "--highlight-style=pygments"
+                     "-M" (str "pagetitle=" (fs/file-name src))
+                     "-V" (str "source=" src)
+                     (str src))]
+        (when-not (zero? exit)
+          (binding [*out* *err*] (println "md-view: pandoc failed on" (str src) "\n" err))
+          (System/exit 1))
+        (let [[html linked] (rewrite out dir)]
+          (spit (str page) html)
+          (spit (str page ".links") (str/join "\n" linked))
+          linked)))))
+
+(defn render-all!
+  "Render root and the markdown it links to, breadth first, up to max-pages."
+  [root]
+  (let [template-file (str (fs/path out-dir "template.html"))]
+    (fs/create-dirs out-dir)
+    (when-not (= template (when (fs/exists? template-file) (slurp template-file)))
+      (spit template-file template))
+    (loop [queue [root] seen #{root}]
+      (when-let [src (first queue)]
+        (let [linked (remove seen (render! src template-file))
+              room (max 0 (- max-pages (count seen)))
+              linked (take room linked)]
+          (recur (into (subvec queue 1) linked) (into seen linked)))))
+    (page-for root)))
+
+(let [no-open? (some #{"--no-open"} *command-line-args*)
+      files (remove #{"--no-open"} *command-line-args*)]
+  (when (empty? files)
+    (binding [*out* *err*] (println "usage: md-view [--no-open] FILE.md|file://URI ..."))
+    (System/exit 2))
+  (let [pages (mapv (comp render-all! ->path) files)]
+    (if no-open?
+      (run! (comp println str) pages)
+      (apply p/exec (str home "/.local/bin/chrome-unified")
+             (map #(str (.toUri (fs/path %))) pages)))))

@@ -60,9 +60,26 @@ MimeType=inode/directory;
 StartupWMClass=oilfm
 ")))
 
-(define %home-oilfm-service
-  (simple-service 'familiar-oilfm-desktop-entry home-xdg-data-files-service-type
-                  `(("applications/oilfm.desktop" ,%oilfm-desktop-file))))
+;; md-view renders markdown with pandoc and opens it in Chrome (desktop/bin/md-view).
+;; Only xdg-open and portal callers use it; Emacs and Neovim open .md files themselves.
+(define %md-view-desktop-file
+  (plain-file "md-view.desktop"
+              (string-append "[Desktop Entry]
+Type=Application
+Name=Markdown Viewer
+Comment=Render markdown and open it in Chrome
+Exec=/home/engstrand/.local/bin/md-view %U
+Icon=text-x-generic
+Terminal=false
+NoDisplay=true
+Categories=Utility;
+MimeType=text/markdown;text/x-markdown;
+")))
+
+(define %home-desktop-entries
+  (simple-service 'familiar-desktop-entries home-xdg-data-files-service-type
+                  `(("applications/oilfm.desktop" ,%oilfm-desktop-file)
+                    ("applications/md-view.desktop" ,%md-view-desktop-file))))
 
 ;; Flatpak writes its own /gnu/store path into every exported desktop entry, so a
 ;; guix gc after a flatpak upgrade breaks xdg-open and the launcher. The exports under
@@ -118,6 +135,8 @@ StartupWMClass=oilfm
                  ("x-scheme-handler/https" . "com.google.Chrome.desktop")
                  ("text/html" . "com.google.Chrome.desktop")
                  ("inode/directory" . "oilfm.desktop")
+                 ("text/markdown" . "md-view.desktop")
+                 ("text/x-markdown" . "md-view.desktop")
                  ("image/jpeg" . "imv.desktop")
                  ("image/png" . "imv.desktop")
                  ("image/webp" . "imv.desktop"))))))
@@ -144,6 +163,6 @@ StartupWMClass=oilfm
                                     (bluetooth-configuration (auto-enable? #t))))
    #:home-services (append %asahi-desktop-home-services
                            (list %home-mime-service
-                                 %home-oilfm-service
+                                 %home-desktop-entries
                                  %home-flatpak-desktop-entries
                                  %home-user-dirs-service))))

@@ -25,6 +25,9 @@
   {:name "updates"
    :paths ["desktop/bin/updates" "desktop/build/updates/**"]
    :checks ["make lint" "make updates-test"]}
+  {:name "md-view"
+   :paths ["desktop/bin/md-view" "desktop/build/md-view/**"]
+   :checks ["make lint" "make md-view-test"]}
   {:name "second brain"
    :paths ["modules/engstrand/system/second-brain.scm" "modules/engstrand/packages/second-brain.scm"
            "modules/engstrand/features/second-brain.scm" "desktop/bin/second-brain-push"
