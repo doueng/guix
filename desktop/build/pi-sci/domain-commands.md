@@ -45,7 +45,7 @@ Machine-readable reads validate JJ JSON before normalization. JJ's JSON format i
 
 ## Search and files
 
-`search/text` and `search/files` use checked adaptations of Pi 1.0.4's own grep and find implementations. `scripts/prepare-search.mjs` verifies pinned source SHA-256 hashes, retains internal records before display formatting, and writes ignored build artifacts. See `PI-LICENSE`. Built-in Pi tools are not replaced. Their original schemas and output conventions remain available to existing callers.
+`search/text` and `search/files` use checked adaptations of the pinned Pi SDK's own grep and find implementations. `scripts/prepare-search.mjs` verifies pinned source SHA-256 hashes, retains internal records before display formatting, and writes ignored build artifacts. See `PI-LICENSE`. Built-in Pi tools are not replaced. Their original schemas and output conventions remain available to existing callers.
 
 Text search takes `:query`, optional `:path` or `:paths`, `:glob`, `:literal`, `:ignore_case`, and `:limit`. A query string can be followed by an options map. Records contain absolute `:path`, one-based `:line`, `:column`, `:columns`, `:column_unit "utf8-byte"`, and bounded `:text`. Results contain `:items`, `:root`, `:paths`, and `:truncated`. Pi's match/byte/line limits remain visible. Ignore files apply outside Git repositories, including JJ repositories. Explicit positive globs have Pi/ripgrep's normal override behavior for ignored files.
 

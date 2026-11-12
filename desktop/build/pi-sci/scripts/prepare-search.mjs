@@ -114,7 +114,7 @@ for (const [name, hash] of Object.entries(hashes)) {
 	const pending = new URL(`pi-${name}.pending.mjs`, output);
 	writeFileSync(
 		pending,
-		`// Adapted from MIT-licensed Pi 1.0.4. See PI-LICENSE and scripts/prepare-search.mjs.\n${source}`,
+		`// Adapted from MIT-licensed Pi, the SDK version package.json pins. See PI-LICENSE and scripts/prepare-search.mjs.\n${source}`,
 	);
 	renameSync(pending, new URL(`pi-${name}.mjs`, output));
 }

@@ -16,11 +16,11 @@ make pi-sci-test
 make stow
 ```
 
-The first build fetches pinned Clojure dependencies and installs locked npm dependencies without lifecycle scripts when missing. The framework adapter integrates with the installed Pi. The structured file/search adapters use checked Pi SDK 1.0.4 implementations and their locked helper dependencies.
+The first build fetches pinned Clojure dependencies and installs locked npm dependencies without lifecycle scripts when missing. The framework adapter integrates with the installed Pi. The structured file/search adapters use checked implementations from the Pi SDK version that package.json pins and their locked helper dependencies.
 
 `make stow` builds SCI before linking the extension. Restart Pi or use `/reload` after changes. Build artifacts stay in the ignored `dist/` directory. The compiler publishes the bundle with an atomic rename.
 
-The checked runtimes are the installed Pi 1.0.0 binary and Pi SDK 1.0.4. Tests exercise the actual CLI, terminal UI, and Stow-style symlinks. The SDK tests use deterministic local providers. They do not send prompts, files, or credentials to a service.
+The checked runtimes are the installed Pi binary (modules/engstrand/packages/pi-coding-agent.scm) and the Pi SDK that package.json pins. Tests exercise the actual CLI, terminal UI, and Stow-style symlinks. The SDK tests use deterministic local providers. They do not send prompts, files, or credentials to a service.
 
 ### Run a focused SCI check
 
