@@ -23,7 +23,7 @@
 | Line editing | Native Ctrl and Alt keys | fish and the focused application |
 
 Caps+Alt provides Ctrl+Alt without reaching for the bottom-left Ctrl key.
-Plain Alt letters and digits belong to applications, not Hyprland. Alt+Space, the Herdr leader, is the one exception, so Emacs M-SPC is not available.
+Plain Alt letters and digits belong to applications, not Hyprland. There are two exceptions: Alt+Space, the Herdr leader, so Emacs M-SPC is not available, and Alt+W, which closes a window everywhere, so Emacs M-w is shadowed.
 Cmd+hjkl remains the existing arrow layer. Cmd+L is not Chrome's address-bar shortcut. Use Ctrl+L or Vimium `o`.
 Cmd chords can differ per application. See [Application layers](#application-layers).
 

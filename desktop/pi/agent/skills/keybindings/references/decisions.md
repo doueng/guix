@@ -62,11 +62,11 @@ These entries supersede the Alt+Space and Cmd+Space entries above.
 
 The entries below retain the earlier investigation record. These decisions supersede the corresponding open items.
 
-- Hyprland window and workspace bindings now use Ctrl+Alt. Plain Alt+w, Alt+f, and Alt+digits reach applications. Generated bindings live in `desktop/configs/hypr/keybindings.lua`.
+- Hyprland window and workspace bindings now use Ctrl+Alt. Plain Alt+f and Alt+digits reach applications. Alt+w came back later, by request, as the one chord that closes a window (README decisions table). Generated bindings live in `desktop/configs/hypr/keybindings.lua`.
 - Herdr launch moved from unreachable Super+S to Super+B. Cmd+S becomes Ctrl+S in kanata, and Cmd+B runs `herdr-terminal`.
 - Herdr tiny-fingers moved from Ctrl+S to prefix+f. Editor save no longer competes with the plugin. Native help stays prefix+?. Scrollback editing now explicitly uses prefix+Shift+E, leaving prefix+e for the workspace picker.
 - Ghostty no longer binds Ctrl+Left and Ctrl+Right. kanata sends them for Alt+arrows, and fish moves by word itself.
-- Keymapper was removed in the kanata migration. The old statement that Alt+W kills a window no longer describes Hyprland.
+- Keymapper was removed in the kanata migration. The old statement that Alt+W kills a window described keymapper; Alt+W closes a window again through Hyprland's generated bindings.
 - Cmd+/ opens a Dusk discovery menu. It is on-demand discovery, not application prefix interception. The canonical desktop command registry is `desktop/configs/keybindings/bindings.edn`.
 - Neovim Hardtime and Doom's command coach suggest motions without blocking them. Browser guidance is available in the menu. No global input capture was added.
 - Vimium aliases in `desktop/configs/vimium/keybindings.txt` preserve defaults. They require merging into the extension's existing custom mappings. The supplied blob URL was not treated as a portable export.

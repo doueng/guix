@@ -7,13 +7,11 @@
 3. Run `hyprctl configerrors` and confirm that the output is empty.
 4. Reload Ghostty's configuration with Ctrl+Alt+Shift+R.
 5. Reload Herdr with Ctrl+b Shift+R.
-6. Restart Neovim after installing missing plugins with `:Lazy install`.
+6. Restart Neovim after installing missing plugins, such as smart-splits and its Herdr backend, with `:Lazy install`.
 7. Reload Doom with Space h r r, or restart Emacs.
-
 8. Start the which-key panel listener once with `setsid -f ~/.local/bin/keyleader listen`. Hyprland starts it at later logins. A second copy exits immediately.
-9. In Neovim, run `:Lazy install` for smart-splits and its Herdr backend.
 
-No kanata change or system switch is required for these additions.
+A change to `kanata.kbd` also needs `make switch`; the steps above do not reload kanata.
 
 ## Add or change a leader sequence
 
@@ -71,8 +69,8 @@ Run `make keybindings-check` for the registry, Doom coach tests, and Neovim moti
 The Neovim check uses the installed user configuration and needs its plugins installed.
 Run `make doom-check` after Doom changes.
 Run `ghostty +validate-config` after Ghostty changes.
-Run `bb desktop/build/keybindings/verify.bb` to exercise Cmd+/, Escape, and Ctrl+Alt+0 through kanata on the live desktop.
-That check temporarily changes workspaces, opens the Herdr menu with Cmd+Space, and restores the original workspace.
+Run `bb desktop/build/keybindings/verify.bb` to exercise Ctrl+Alt+0, Cmd+Space, Cmd+/, Escape and Alt+Space through kanata on the live desktop.
+That check temporarily changes workspaces, enters the desktop leader with Cmd+Space, opens the guide with Cmd+/, sends Alt+Space to Herdr, and restores the original workspace.
 Run `make hypr-nested-check` to load `hypr/hyprland.lua` in a nested Hyprland and type the leader, Ctrl+Alt and Cmd+Space keys into it with wtype. The nested window stays on a hidden special workspace, so it does not take focus.
 
 `desktop/build/keybindings/decisions.tsv` records this implementation's decisions and verification gaps.
