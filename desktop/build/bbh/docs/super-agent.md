@@ -2,7 +2,7 @@
 
 Status: stages 0 through 5 implemented, including the Router sandbox, with offline integration coverage and a live Herdr pane replacement (before the move to Emacs on 2026-11-03, which was checked live with a Worker ask, pick, send and finish); suspend acceptance remains to be exercised. Stage 6 voice input and shortcut are implemented; recorded-clip acoustic acceptance remains pending. Written 2026-11-02.
 
-`doc/super-state-machine.html` describes the code function by function.
+`doc/super-state-machine-interactive.html` shows the state machines interactively, derived from the code; `doc/super-state-machine.html` is the older static version.
 
 This document describes how bbh could grow from separate conversations into one agent that you talk to from Herdr and the iPhone, by typing or by voice, and that works on several tasks at once. It adapts the Super-agent architecture from DeepSeek Harness (a Router, isolated Workers, event triggers, asynchronous tools) and the attention model of [Plannotator Inbox](https://github.com/backnotprop/plannotator#plannotator-inbox) (threads grouped by what they need from you, replies that wake the session that asked).
 

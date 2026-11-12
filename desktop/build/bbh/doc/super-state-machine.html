@@ -5,7 +5,7 @@
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <meta name="description" content="How the super-agent turns what you say into threads, Workers, asks and replies">
 <meta name="bbh-doc" content="">
-<title>bbh super: the state machine</title>
+<title>bbh super: the state machine (static version)</title>
 <style>
   body { font: 16px/1.55 system-ui, sans-serif; max-width: 1000px; margin: 2rem auto; padding: 0 1rem; color: #1d1f21; }
   h1 { font-size: 1.9rem; margin-bottom: .2rem; }
@@ -38,7 +38,8 @@
 </head>
 <body>
 
-<h1>bbh super: the state machine</h1>
+<h1>bbh super: the state machine (static version)</h1>
+<p class='note'><b>This is the static version.</b> The interactive page, <a href='super-state-machine-interactive.html'>super-state-machine-interactive.html</a>, is derived from the current code: clickable diagrams for each machine, a step-through of a real event log and of scenarios folded by the real model, and the Router calls mapped to their events. Prefer it; this page is kept for its prose.</p>
 <p class='lead'>How the super-agent turns what you say into threads, Workers, asks and replies, and back again. Every transition below is cited to the function that makes it. Derived from the source at revision <code class='nw'>19fefba3</code> (2026-11-08) and brought up to T154 (2026-11-12), which made the log the state, waiting a reading of the asks, a finish's effects and each signal recorded steps, and deadlines timers. <a href='#model'>Model agreement</a> lists where <code class='nw'>Super.tla</code> and the code differ.</p>
 <nav>
 <a href='#big'>Big picture</a> <a href='#procs'>Processes</a> <a href='#store'>Commands and events</a> <a href='#who'>Principals</a> <a href='#thread'>Threads</a> <a href='#worker'>Workers</a> <a href='#health'>Health and resume</a> <a href='#timers'>Timers</a> <a href='#asks'>Asks and replies</a> <a href='#outbox'>Outbox and delivery</a> <a href='#router'>Router</a> <a href='#wf'>wf phases</a> <a href='#ws'>Workspaces</a> <a href='#flows'>Message flows</a> <a href='#events'>Event index</a> <a href='#model'>Model agreement</a> <a href='#changes'>Related threads</a>
