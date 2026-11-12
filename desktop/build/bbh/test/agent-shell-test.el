@@ -505,6 +505,104 @@ and the transcript keeps q and focus moves in normal state."
       (when-let* ((s (eng/bbh-super--shell "super-W10"))) (eng/bbh-super--kill s))
       (delete-directory ws t))))
 
+(defun bbh-test--acp (conversation)
+  "The live bbh acp process of CONVERSATION, or nil."
+  (seq-find (lambda (p) (and (process-live-p p) (member conversation (process-command p)))) (process-list)))
+
+(defun bbh-test--count (regexp buf)
+  (with-current-buffer buf (how-many regexp (point-min) (point-max))))
+
+(ert-deftest bbh-a-restarted-process-gets-a-new-session-and-takes-its-mail ()
+  ;; T162: the controller died and took W172's bbh with it.  agent-shell then
+  ;; started a new bbh but sent it the old session id, bbh answered `Unknown
+  ;; session', and the mailbox wake printed that every second.
+  (let* ((ws (make-temp-file "bbh-super-ws" t))
+         (shell (get-buffer (eng/bbh-super-open "super-W11" ws "T11 test" nil)))
+         (transcript (buffer-local-value 'eng/bbh-transcript shell)))
+    (unwind-protect
+        (progn
+          (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
+          (let ((old (bbh-test--acp "super-W11")))
+            (should old)
+            (signal-process old 'SIGKILL)
+            (should (bbh-test--wait (lambda () (not (process-live-p old)))  10))
+            (let ((file (bbh-test--mail "super-W11" "11-m11" "sent after the restart")))
+              (should (bbh-test--wait (lambda () (not (file-exists-p file))) 30))
+              (should (bbh-test--wait (lambda () (string-match-p "sent after the restart" (bbh-test--text transcript))) 30))
+              (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
+              (let ((new (bbh-test--acp "super-W11")))
+                (should new)
+                (should-not (eq old new)))
+              (should (equal "super-W11" (eng/bbh--conversation shell)))
+              (should (= 0 (bbh-test--count "Unknown session" transcript)))
+              (should (= 0 (bbh-test--count "Unknown session" shell)))
+              (should-not (buffer-local-value 'eng/bbh--attention shell)))))
+      (when-let* ((s (eng/bbh-super--shell "super-W11"))) (eng/bbh-super--kill s))
+      (delete-directory ws t))))
+
+(ert-deftest bbh-a-restarted-plain-session-continues-its-conversation ()
+  (bbh-test--with-shell (shell composer transcript)
+    (let ((id (eng/bbh--conversation shell)))
+      (bbh-test--submit shell "add forty and two")
+      (should (bbh-test--wait (lambda () (and (bbh-test--idle-p shell) (string-match-p "=> 42" (bbh-test--text shell)))) 60))
+      (let ((old (bbh-test--acp "acp")))
+        (signal-process old 'SIGKILL)
+        (should (bbh-test--wait (lambda () (not (process-live-p old))) 10))
+        (should (bbh-test--wait (lambda () (and (bbh-test--acp "acp")
+                                                (map-nested-elt (buffer-local-value 'agent-shell--state shell) '(:session :id))))
+                                30))
+        (should (equal id (eng/bbh--session-id shell)))
+        (should (member id (process-command (bbh-test--acp "acp"))))))))
+
+(ert-deftest bbh-a-failing-mail-wake-backs-off-stops-and-says-so-once ()
+  ;; Every prompt fails with `Unknown session'.  The shell starts new sessions
+  ;; a bounded number of times, shows the wake and its error once, then stops
+  ;; and asks for attention instead of retrying every second.
+  (let* ((ws (make-temp-file "bbh-super-ws" t))
+         (shell (get-buffer (eng/bbh-super-open "super-W13" ws "T13 test" nil)))
+         (transcript (buffer-local-value 'eng/bbh-transcript shell))
+         (send (symbol-function 'acp-send-request))
+         (prompts 0)
+         (eng/bbh-retry-delay 0.1)
+         (eng/bbh-retry-limit 3))
+    (unwind-protect
+        (progn
+          (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
+          (let ((file nil) (messages nil))
+            (cl-letf (((symbol-function 'acp-send-request)
+                       (lambda (&rest args)
+                         (if (equal "session/prompt" (map-elt (plist-get args :request) :method))
+                             (let ((on-failure (plist-get args :on-failure))
+                                   (buffer (plist-get args :buffer)))
+                               (setq prompts (1+ prompts))
+                               ;; As acp answers: later, in the request's buffer.
+                               (run-at-time 0 nil (lambda ()
+                                                    (with-current-buffer buffer
+                                                      (funcall on-failure (acp-make-error :code -32602 :message "Unknown session") nil)))))
+                           (apply send args))))
+                      ((symbol-function 'message)
+                       (lambda (format &rest args) (push (apply #'format-message format args) messages))))
+              (setq file (bbh-test--mail "super-W13" "13-m13" "sent to a broken session"))
+              (should (bbh-test--wait (lambda () (buffer-local-value 'eng/bbh--attention shell)) 30))
+              ;; Long enough for several more mailbox checks.
+              (bbh-test--wait (lambda () nil) 3)
+              (should (= 3 prompts))
+              (should (file-exists-p file))
+              (should (= 1 (bbh-test--count "^Error: Unknown session$" transcript)))
+              (should (= 1 (bbh-test--count "^\\* \\[mail\\]$" transcript)))
+              (should (= 1 (bbh-test--count "stopped retrying" transcript)))
+              (should (= 1 (seq-count (lambda (m) (string-match-p "stopped retrying" m)) messages)))
+              (eng/bbh-super-visit (buffer-name shell))
+              (with-current-buffer (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)
+                (should (string-match-p "Stopped: Unknown session" (eng/bbh--header)))))
+            ;; Once bbh answers again, reconnecting takes the mail.
+            (with-current-buffer shell (eng/bbh-reconnect))
+            (should (bbh-test--wait (lambda () (not (file-exists-p file))) 30))
+            (should (bbh-test--wait (lambda () (string-match-p "sent to a broken session" (bbh-test--text transcript))) 30))
+            (should-not (buffer-local-value 'eng/bbh--attention shell))))
+      (when-let* ((s (eng/bbh-super--shell "super-W13"))) (eng/bbh-super--kill s))
+      (delete-directory ws t))))
+
 (ert-deftest bbh-super-open-refuses-a-missing-directory ()
   (should-error (eng/bbh-super-open "super-W8" "/nonexistent/bbh" "T8" nil)))
 

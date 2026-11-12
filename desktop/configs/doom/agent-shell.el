@@ -10,10 +10,15 @@ RESUME is a saved conversation id the session continues under that id."
    :shell-prompt "bbh> "
    :shell-prompt-regexp "bbh> "
    :client-maker (lambda (buffer)
-                   (agent-shell--make-acp-client
-                    :command (or (executable-find "bbh") (expand-file-name "~/.local/bin/bbh"))
-                    :command-params (append '("acp") (when resume (list "--resume" resume)))
-                    :context-buffer buffer))))
+                   ;; A client made again after bbh died continues the conversation (T162).
+                   (let ((resume (or (and (buffer-live-p buffer)
+                                          (when-let* ((id (buffer-local-value 'eng/bbh-conversation buffer)))
+                                            (and (file-exists-p (eng/bbh--conversation-file id "messages.jsonl")) id)))
+                                     resume)))
+                     (agent-shell--make-acp-client
+                      :command (or (executable-find "bbh") (expand-file-name "~/.local/bin/bbh"))
+                      :command-params (append '("acp") (when resume (list "--resume" resume)))
+                      :context-buffer buffer)))))
 
 (defvar-local eng/bbh-conversation nil
   "The conversation a /resume in this shell moved to.  The session id stays the same.")
@@ -228,11 +233,15 @@ bbh acts on it without a turn."
 (defun eng/bbh-mail-wake (shell)
   "Send SHELL the prompt `[mail]' when its mailbox has mail and it is idle.
 A running turn takes the mail itself.  A finished Worker's shell is never
-woken: its workspace is gone, so it runs nothing."
+woken: its workspace is gone, so it runs nothing.  Nor is a shell without a
+session, one waiting to retry after a failure, or one that gave up."
   (when (buffer-live-p shell)
     (with-current-buffer shell
       (when-let* ((conversation (eng/bbh--conversation shell))
                   ((not (bound-and-true-p eng/bbh-super-finished)))
+                  ((map-nested-elt agent-shell--state '(:session :id)))
+                  ((not eng/bbh--attention))
+                  ((not (timerp eng/bbh--retry)))
                   ((not (shell-maker-busy)))
                   ((not (map-elt agent-shell--state :pending-prompts)))
                   ((eng/bbh-mail-waiting-p (eng/bbh-mail-dir conversation))))
@@ -257,20 +266,137 @@ rather than file-notify, whose events Emacs reads only between commands."
   "Watch SHELL's mailbox once its session exists, and check it after each turn."
   (pcase (map-elt event :event)
     ((or 'prompt-ready 'init-finished)
-     (unless (buffer-local-value 'eng/bbh-mail--watch shell) (eng/bbh-mail-watch shell)))
-    ((or 'turn-complete 'error)
+     (unless (buffer-local-value 'eng/bbh-mail--watch shell) (eng/bbh-mail-watch shell))
+     (run-at-time 0 nil #'eng/bbh-mail-wake shell))
+    ('turn-complete
+     (eng/bbh--recovered shell)
      ;; After agent-shell has sent any prompt it queued meanwhile.
      (run-at-time 0 nil #'eng/bbh-mail-wake shell))
+    ('error
+     (let ((why (or (map-nested-elt event '(:data :message)) "the request failed")))
+       (if (string-prefix-p "Unknown session" why)
+           (eng/bbh--session-lost shell why)
+         (eng/bbh--failed shell why))))
     ('clean-up
      (with-current-buffer shell
        (when (timerp eng/bbh-mail--watch) (cancel-timer eng/bbh-mail--watch))
-       (setq eng/bbh-mail--watch nil)))))
+       (when (timerp eng/bbh--retry) (cancel-timer eng/bbh--retry))
+       (setq eng/bbh-mail--watch nil eng/bbh--retry nil)))))
 
 (defun eng/bbh-inbox-connect (shell)
   "Wake SHELL whenever its mailbox has mail."
   (agent-shell-subscribe-to :shell-buffer shell
                             :on-event (lambda (event) (eng/bbh-mail--on-event shell event)))
   (eng/bbh-mail-watch shell))
+
+;;; Recovery
+
+;; When the bbh process dies, agent-shell keeps its client, handshake and
+;; session id, and acp starts a new process at the next request.  That
+;; process never made the session, so bbh answers `Unknown session' (T162).
+;; A bbh shell instead drops all of it and starts a new session on the same
+;; conversation, which bbh reopens from its transcript as the controller's
+;; resume does.  Failures in a row back off, and after
+;; `eng/bbh-retry-limit' of them the shell stops and says so once.
+
+(defvar eng/bbh-retry-delay 1
+  "Seconds before the first retry after a failure.  Each next one waits twice as long.")
+(defvar eng/bbh-retry-max-delay 30 "Longest wait between two retries, in seconds.")
+(defvar eng/bbh-retry-limit 5
+  "Failures in a row after which a shell stops retrying and asks for attention.")
+
+(defvar-local eng/bbh--failures 0
+  "Failures in a row: process exits, lost sessions and failed prompts.  A completed turn clears it.")
+(defvar-local eng/bbh--retry nil "The timer of the next retry.  Mailbox wakes wait for it.")
+(defvar-local eng/bbh--attention nil "Why this shell stopped retrying, or nil.")
+(defvar-local eng/bbh--shown-error nil
+  "The error the transcript last showed since a turn completed, so a retry does not repeat it.")
+
+(defun eng/bbh--shell-p (buffer)
+  "Whether BUFFER is a live bbh agent-shell."
+  (and (buffer-live-p buffer)
+       (eq 'bbh (map-nested-elt (buffer-local-value 'agent-shell--state buffer) '(:agent-config :identifier)))))
+
+(defun eng/bbh--failed (shell why)
+  "Count a failure of SHELL for reason WHY and retry later, or give up.
+A failure while a retry is already waiting is the same incident."
+  (when (buffer-live-p shell)
+    (with-current-buffer shell
+      (unless (or (timerp eng/bbh--retry) eng/bbh--attention)
+        (setq eng/bbh--failures (1+ eng/bbh--failures))
+        (if (>= eng/bbh--failures eng/bbh-retry-limit)
+            (eng/bbh--give-up shell why)
+          (setq eng/bbh--retry
+                (run-at-time (min eng/bbh-retry-max-delay
+                                  (* eng/bbh-retry-delay (expt 2 (1- eng/bbh--failures))))
+                             nil #'eng/bbh--retry-now shell)))))))
+
+(defun eng/bbh--give-up (shell why)
+  "Stop retrying SHELL after WHY, and say so once."
+  (with-current-buffer shell
+    (setq eng/bbh--attention why)
+    (force-mode-line-update t))
+  (let ((transcript (buffer-local-value 'eng/bbh-transcript shell)))
+    (when (buffer-live-p transcript)
+      (with-current-buffer transcript
+        (eng/bbh-transcript--note
+         (format "bbh stopped retrying after %d failures: %s.  M-x eng/bbh-reconnect tries again."
+                 eng/bbh-retry-limit why)))))
+  (message "%s: bbh stopped retrying (%s); M-x eng/bbh-reconnect" (buffer-name shell) why))
+
+(defun eng/bbh--retry-now (shell)
+  "Start SHELL a new session if it has none, else wake it for its mail."
+  (when (buffer-live-p shell)
+    (with-current-buffer shell
+      (setq eng/bbh--retry nil)
+      (cond ((or eng/bbh--attention (bound-and-true-p eng/bbh-super-finished)))
+            ((not (map-elt agent-shell--state :client))
+             (agent-shell--handle :shell-buffer shell))
+            (t (eng/bbh-mail-wake shell))))))
+
+(defun eng/bbh--session-lost (shell why)
+  "Drop SHELL's client and session after WHY, and start a new session on its conversation."
+  (when (and (eng/bbh--shell-p shell)
+             (not (with-current-buffer shell (bound-and-true-p eng/bbh-super-finished))))
+    (with-current-buffer shell
+      (when-let* ((conversation (eng/bbh--conversation shell)))
+        (setq eng/bbh-conversation conversation))
+      (agent-shell--shutdown)
+      (map-put! (map-elt agent-shell--state :session) :id nil))
+    (eng/bbh--failed shell why)))
+
+(defun eng/bbh--recovered (shell)
+  "SHELL completed a turn, so its next failure starts the count again."
+  (with-current-buffer shell
+    (when (timerp eng/bbh--retry) (cancel-timer eng/bbh--retry))
+    (setq eng/bbh--failures 0 eng/bbh--retry nil eng/bbh--attention nil eng/bbh--shown-error nil)))
+
+(defun eng/bbh-reconnect ()
+  "Start this bbh shell again after it stopped retrying."
+  (interactive)
+  (let ((shell (or (eng/bbh--shell) (user-error "No bbh session in this buffer"))))
+    (eng/bbh--recovered shell)
+    (eng/bbh--retry-now shell)))
+
+(defun eng/bbh--on-process-exit (client process event)
+  "Treat the exit of PROCESS, CLIENT's bbh, as a lost session.  EVENT says how it ended.
+A client shut down on purpose has no process any more, so it is left alone."
+  (let ((shell (map-elt client :context-buffer)))
+    (when (and (memq (process-status process) '(exit signal))
+               (eq process (map-elt client :process))
+               (eng/bbh--shell-p shell)
+               (eq client (map-elt (buffer-local-value 'agent-shell--state shell) :client)))
+      (eng/bbh--session-lost shell (format "bbh exited (%s)" (string-trim event))))))
+
+(defun eng/bbh--watch-process (&rest args)
+  "Watch the process `acp--start-client' started for the client in ARGS."
+  (let* ((client (plist-get args :client))
+         (process (map-elt client :process)))
+    (when (and (processp process) (eng/bbh--shell-p (map-elt client :context-buffer)))
+      (add-function :after (process-sentinel process)
+                    (lambda (proc event) (eng/bbh--on-process-exit client proc event))))))
+
+(advice-add 'acp--start-client :after #'eng/bbh--watch-process)
 
 (defun eng/bbh-inbox-switch (shell)
   "Move SHELL's mailbox watch to the conversation it is on now.
@@ -600,6 +726,24 @@ Messages do not record whether a tool call failed, so every result shows as done
      (insert (eng/bbh-transcript--separator)
              (propertize (concat "Error: " message) 'font-lock-face 'error) "\n"))))
 
+(defun eng/bbh-transcript--note (text)
+  (setq eng/bbh-transcript--reply nil)
+  (eng/bbh-transcript--edit
+   (lambda ()
+     (insert (eng/bbh-transcript--separator) (propertize text 'font-lock-face 'warning) "\n"))))
+
+(defun eng/bbh-transcript--retrying-p (shell prompt)
+  "Whether PROMPT is SHELL's mailbox wake retried after a failure the transcript shows."
+  (and (equal prompt "[mail]") (buffer-live-p shell)
+       (buffer-local-value 'eng/bbh--shown-error shell)))
+
+(defun eng/bbh-transcript--shown-p (shell message)
+  "Whether the transcript already shows MESSAGE as SHELL's latest error, and mark it shown."
+  (when (buffer-live-p shell)
+    (with-current-buffer shell
+      (prog1 (equal message eng/bbh--shown-error)
+        (setq eng/bbh--shown-error message)))))
+
 ;;; Usage
 
 (defvar-local eng/bbh-usage-requests nil
@@ -728,12 +872,18 @@ and took ELAPSED, such as 12s.  Cache misses and cost appear only when present."
       (let ((data (map-elt event :data)))
         (pcase (map-elt event :event)
           ('input-submitted (eng/bbh-transcript--turn-start)
-                            (eng/bbh-transcript--prompt (map-elt data :prompt)))
+                            ;; A retry repeats neither its prompt nor its error (T162).
+                            (unless (eng/bbh-transcript--retrying-p eng/bbh-transcript-shell (map-elt data :prompt))
+                              (when (buffer-live-p eng/bbh-transcript-shell)
+                                (with-current-buffer eng/bbh-transcript-shell (setq eng/bbh--shown-error nil)))
+                              (eng/bbh-transcript--prompt (map-elt data :prompt))))
           ('agent-message-chunk (eng/bbh-transcript--reply-chunk (map-elt data :text-chunk)))
           ('tool-call-update (eng/bbh-transcript--tool (map-elt data :tool-call-id)
                                                        (map-elt data :tool-call)))
           ('error (eng/bbh-transcript--end-turn)
-                  (eng/bbh-transcript--error (or (map-elt data :message) "the request failed")))
+                  (let ((message (or (map-elt data :message) "the request failed")))
+                    (unless (eng/bbh-transcript--shown-p eng/bbh-transcript-shell message)
+                      (eng/bbh-transcript--error message))))
           ('turn-complete (setq eng/bbh-transcript--reply nil)
                           (let ((elapsed (eng/bbh--elapsed eng/bbh-transcript-shell)))
                             (eng/bbh-transcript--end-turn)
@@ -898,7 +1048,9 @@ This reads no process, so it is cheap enough for the status line."
 The key hints and conversation id are in `eng/bbh-keys'.  % is escaped because the header is a mode-line."
   (let* ((shell (agent-shell-viewport--shell-buffer))
          (busy (agent-shell-viewport--busy-p))
-         (parts (delq nil (list (if busy "Working" "Ready")
+         (parts (delq nil (list (if-let* ((why (and (buffer-live-p shell) (buffer-local-value 'eng/bbh--attention shell))))
+                                    (propertize (concat "Stopped: " why " · M-x eng/bbh-reconnect") 'face 'error)
+                                  (if busy "Working" "Ready"))
                                 (and busy (eng/bbh--elapsed shell))
                                 (eng/bbh--queued shell)
                                 (eng/bbh--workflow-label shell)
