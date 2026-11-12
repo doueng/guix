@@ -268,7 +268,8 @@
             (call dir {:command :thread! :args {:title "two"}})
             (let [section (fn [id] (some (fn [{:keys [section threads]}] (when (some #(= id (:id %)) threads) section))
                                          (:sections (:ok (call dir {:command :sections})))))
-                  events #(count (store/events (:db c)))
+                  ;; The dispatcher's first machine observation can land at any moment.
+                  events #(count (remove (comp #{:machine-observed} :kind) (store/events (:db c))))
                   at (get-in @(:state c) [:threads "T1" :updated-at])]
               (is (= [:new :new] (map section ["T1" "T2"])) "a new thread is unread")
               (pane/read! ["T1"] true)
