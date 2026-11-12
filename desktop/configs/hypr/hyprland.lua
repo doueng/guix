@@ -52,7 +52,7 @@ hl.bind("SUPER + E", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 2"))
 hl.bind("SUPER + D", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 3"))
 hl.bind("SUPER + G", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 4"))
 hl.bind("SUPER + B", hl.dsp.exec_cmd("~/.local/bin/herdr-terminal"))
-hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("ghostty nvim ~/.config/hypr/hyprland.lua"))
+hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("ghostty -e nvim ~/.config/hypr/hyprland.lua"))
 hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
 -- Dictation with Hex: hold Cmd+M to talk; Hex pastes the text when you let go.
 -- Releasing M or Cmd finishes it.  Hyprland reports a release of M only while Cmd is still
