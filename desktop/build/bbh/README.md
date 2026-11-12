@@ -97,6 +97,7 @@ The controller also sends desktop notifications (`bbh.super.notify`) when someth
 - Heavy commands run one at a time across all Workers and sessions (`bbh.heavy`): `job`, `sh` and `$` in a bbh REPL, `shot`, and `bb test` wait for a flock on `~/.local/share/bbh/super/heavy.lock` when the command is a test suite, a guix or make build, TLC, a browser or an eval replay, printing `waiting for the heavy-job slot held by W…`, and exit 75 after `BBH_HEAVY_TIMEOUT_S` (1800). Inside the slot `BBH_HEAVY_SLOT=1`, so nested heavy commands do not wait for their parent.
 - A Worker the controller launched has its running jobs stopped when it ends, done or failed; an attached conversation is yours and keeps its jobs; a test that starts a controller must stop it, and `bb test` fails, naming it, when one is left running.
 - The Shepherd services themselves (`modules/engstrand/features/bbh-web.scm`) still need `make switch`.
+- To try a change against a live controller without touching yours, `bb test/scratch-stack.bb up` starts a scratch stack (controller, Emacs daemon, `bbh acp` sessions) on this checkout under `$BBH_STACK` (default /tmp/bbh-stack); `env` prints how to use it and `down` stops it.
 
 ## Lifetimes
 
