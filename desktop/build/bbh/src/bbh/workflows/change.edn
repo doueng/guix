@@ -14,9 +14,9 @@
    :gates [{:kind :command :cmd :check :expect :zero}]
    :next :verify}
   :verify
-  {:brief "Exercise the changed behavior on the real surface. Write verify.md in the evidence directory with what you observed."
+  {:brief "Exercise the changed behavior on the real surface. Write verify.html in the evidence directory, a self-contained HTML page for the person, with what you observed."
    :principles ["prove-it-works"]
-   :gates [{:kind :artifact :path "verify.md"}]
+   :gates [{:kind :artifact :path "verify.html"}]
    :next :review}
   :review
   {:brief "Review the diff for unrelated changes, comments that narrate phases, and drift from the shape. Run `wf review` for an independent verdict."

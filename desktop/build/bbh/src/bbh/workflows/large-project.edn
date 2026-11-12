@@ -3,9 +3,9 @@
  :start :decompose
  :phases
  {:decompose
-  {:brief "Split the work into stages. Each stage must end in a check you can run. Write plan.md in the evidence directory with the stages in order, the check for each, and the riskiest stage. Then run `wf attest`."
+  {:brief "Split the work into stages. Each stage must end in a check you can run. Write plan.html in the evidence directory, a self-contained HTML page for the person, with the stages in order, the check for each, and the riskiest stage. Then run `wf attest`."
    :principles ["sequence-verifiable-units" "outcome-oriented-execution" "separate-before-serializing-shared-state"]
-   :gates [{:kind :artifact :path "plan.md"}]
+   :gates [{:kind :artifact :path "plan.html"}]
    :next :review}
   :review
   {:brief "Get an independent judgment of the plan. Run `wf review`."

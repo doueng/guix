@@ -18,8 +18,8 @@
    :gates [{:kind :artifact :path "observation.md"}]
    :next :answer}
   :answer
-  {:brief "Answer the question from the observation. Write answer.md with the answer, your confidence, and what would change it. Label each claim measured or inferred. Then run `wf review`."
-   :gates [{:kind :artifact :path "answer.md"}
+  {:brief "Answer the question from the observation. Write answer.html, a self-contained HTML page for the person, with the answer, your confidence, and what would change it. Label each claim measured or inferred. Then run `wf review`."
+   :gates [{:kind :artifact :path "answer.html"}
            {:kind :verdict :criteria "The answer follows from the observation, and the observation came from running the sketch."}]
    :next nil
    :on-fail :observe}}}

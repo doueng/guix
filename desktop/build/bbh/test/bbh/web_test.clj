@@ -2,6 +2,7 @@
   (:require [bbh.hermetic :as hermetic]
             [babashka.fs :as fs]
             [bbh.docs :as docs]
+            [bbh.explainer :as explainer]
             [bbh.inbox :as inbox]
             [bbh.super]
             [bbh.super.client]
@@ -138,6 +139,20 @@
              (select-keys (second docs) [:title :description :thread])))
       (is (= {:title "New" :description "First heading" :thread nil}
              (select-keys (first docs) [:title :description :thread])) "the first heading stands in for a description"))))
+
+(deftest an-explainer-page-is-listed-in-docs-with-its-title-description-and-thread
+  (let [{:keys [base] :as s} (docs-site)
+        f (str (fs/path base "docs" "answer.html"))
+        html (explainer/page {:title "Why <b> & \"q\"" :description "The short answer" :thread "T9"
+                              :body "<p>Because.</p><svg viewBox='0 0 10 10'></svg>"})]
+    (fs/create-dirs (fs/parent f))
+    (spit f html)
+    (let [[_ docs] (get-json s "/api/docs")]
+      (is (= [{:path f :title "Why <b> & \"q\"" :description "The short answer" :thread "T9"}]
+             (map #(select-keys % [:path :title :description :thread]) docs))))
+    (is (str/includes? html "<p>Because.</p><svg") "the body is HTML, not escaped")
+    (is (str/includes? html "width=device-width") "readable at phone width")
+    (is (not (re-find #"(?i)(src|href)=['\"]?https?:|@import|url\(" html)) "no network resources")))
 
 (deftest a-doc-is-served-as-sandboxed-html
   (let [{:keys [page] :as s} (docs-site)

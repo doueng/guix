@@ -179,7 +179,7 @@
   (let [dir (buggy-repo)
         id (wf/start! :investigation {:cwd dir :task "t"})
         evidence (:evidence (wf/status id))]
-    (spit (str evidence "/answer.md") "done")
+    (spit (str evidence "/answer.html") "done")
     (doseq [out [(cli "attest" id "--claim" "answered") (cli "status" id)]]
       (is (str/includes? out "status done") out)
       (is (not (str/includes? out "brief:")))

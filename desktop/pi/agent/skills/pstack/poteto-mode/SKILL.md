@@ -41,5 +41,6 @@ Workflows are defined in `desktop/build/bbh/src/bbh/workflows/`. Run them with `
 - Open your first message and the final report with the user's goal and problem, in your own words.
 - Say what changed and how it was verified. Say what you could not verify.
 - Label each claim measured, inferred, or guess.
+- An explanation for the user (answer, plan, audit, review, comparison, design) is one self-contained HTML file, not markdown: inline CSS and SVG, no network resources, readable at phone width. Name it by its full path.
 - Write without em dashes or mid-sentence colons.
 - No pull requests. Commit with jj when the repo uses it.

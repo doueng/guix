@@ -5,6 +5,7 @@ Personal Guix configuration for an M1 MacBook Air (Asahi) that boots from the in
 - Keep `local/` private and ignored. Never commit firmware, credentials, password hashes or machine backups.
 - Scheme lives in `modules/`. Mutable app configs live in `desktop/configs/<app>`, which `desktop/stow-home` links into Home. Keep build-time assets out of `desktop/configs/`.
 - Write scripts in babashka (`#!/usr/bin/env bb`). `make lint` rejects shell scripts.
+- Docs written to explain something to the user, such as plans, audits and explainers in `docs/`, are self-contained HTML in the style of `desktop/build/bbh/src/bbh/explainer.clj`. READMEs, skills and code docs stay markdown.
 - Use jj, not git. Scheme evaluation needs Guix and the pinned Asahi and rde channels. `make help` lists every workflow.
 - Checks. `make lint` takes seconds and also checks that the Makefile, this file and `desktop/build/checks/checks.edn` agree. `make affected` lists the checks covering files changed in `@` (`REV=@-` for the last commit). `make verify` runs lint and those checks, and `SLOW=1` adds builds. A new component or test needs a `checks.edn` rule, and a new Makefile target needs a `make help` line.
 - Doom. After config changes run `make doom-check`, which fails on `doom doctor` warnings missing from `desktop/build/doom/doctor-baseline.txt`. Changes to `init.el` or `packages.el` also need `doom sync` and an Emacs restart.
