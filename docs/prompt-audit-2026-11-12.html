@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Results of /doctor prompt-audit on /home/engstrand/guix, checked against T148, T87 and T155">
+<meta name="bbh-doc" content="T160">
+<title>Claude Code prompt audit of the guix repo</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Claude Code prompt audit of the guix repo</h1>
+
+<p><b>Goal.</b> Run Claude Code's prompt audit on the guix repo without changing anything, judge each finding against T148, T87 and T155, and let you pick which fixes to apply. Labels: <i>measured</i> means read from a file or command output in this session, <i>inferred</i> means my reading of that, and <i>guess</i> means a judgment call.</p>
+
+<h2>Bottom line</h2>
+<ul>
+<li>The repo's own instruction files came out clean. The audit found no stale paths, no stale make targets and no dated prompt patterns in AGENTS.md. It proposed no edit to any project file. <i>measured</i></li>
+<li>It reported 4 findings, all in vendored or account-synced files or about scope. Only one comes with an edit: the all-caps CRITICAL line in the synced pdf skill. My pick is to <b>apply nothing</b>. That file is overwritten on each account sync, and bbh sessions never load it. <i>inferred</i></li>
+<li>The audit <b>does not</b> cover the bbh Router or Worker prompts, the pstack and Pi skills, or .agents/skills/guix and verify-bbh-state-machines. It covers only what Claude Code itself loads. T148 and T87 already reviewed those. <i>measured</i> scope, <i>inferred</i> overlap</li>
+</ul>
+
+<h2>What the feature is</h2>
+<ul>
+<li>Claude Code 2.1.308 is installed (<code>claude --version</code>). Its <code>claude doctor --help</code> lists no subcommands. The audit is a slash command, <code>/doctor prompt-audit [&lt;path&gt;]</code>, also called <code>/checkup prompt-audit</code>. It hands off to the bundled claude-api skill's shared/prompt-audit.md guide. <i>measured</i>: strings in the bundled binary, and /home/engstrand/.cache/checkouts/github.com/anthropics/claude-code/CHANGELOG.md line 2620</li>
+<li>The feature is older than 2.1.308. No release after it changes the feature, up to 2.1.322 (CHANGELOG lines 1 to 882). T148 bumped pi-claude-bridge to 0.12.0 (Claude Code 2.1.321), but the installed binary is still 2.1.308. <i>measured</i> That probably means the Pi npm install has not run since. <i>inferred</i></li>
+<li>No model came out on 2026-11-11. The newest is Claude Fable 5.2, from 2026-11-09, which Claude Code added in 2.1.321. T148 reached the same result. <i>measured</i></li>
+<li>How I ran it: <code>cd /home/engstrand/guix &amp;&amp; claude -p '/doctor prompt-audit' --allowedTools 'Read Glob Grep Skill' --disallowedTools 'Edit Write NotebookEdit Bash WebFetch WebSearch'</code>. It took one session and about 9 minutes. Write tools were blocked, so it changed nothing. <i>measured</i></li>
+</ul>
+
+<h2>What it covers</h2>
+<p>The scope text built into the binary says: "only the Claude Code configuration that loads into sessions in this project". That means CLAUDE.md and AGENTS.md files at every level, and .claude/ and ~/.claude/ rules, skills, commands, agents and output styles. It reads no settings files, .mcp.json or ~/.claude.json. <i>measured</i></p>
+<table>
+<tr><th>Item</th><th>Audited?</th></tr>
+<tr><td>/home/engstrand/guix/AGENTS.md and /home/engstrand/guix/desktop/pi/agent/AGENTS.md</td><td>Yes</td></tr>
+<tr><td>.claude/skills/typesafe-ai, a link to .agents/skills/typesafe-ai</td><td>Yes, report only (hash-locked in skills-lock.json)</td></tr>
+<tr><td>13 synced skills in ~/.claude/skills/synced</td><td>Yes (they affect all projects)</td></tr>
+<tr><td>bbh Worker and Router prompts: /home/engstrand/.config/bbh/init.clj and /home/engstrand/guix/desktop/build/bbh/src/bbh/super/model.clj</td><td><b>No</b></td></tr>
+<tr><td>pstack, herdr, keybindings, librarian, retro and skill-diet in /home/engstrand/guix/desktop/pi/agent/skills</td><td><b>No</b></td></tr>
+<tr><td>.agents/skills/guix and .agents/skills/verify-bbh-state-machines</td><td><b>No</b> (not linked into .claude/skills)</td></tr>
+</table>
+<p>Why the bbh prompts fall outside: bbh starts Claude Code with <code>--tools ""</code>, <code>--setting-sources ""</code> and its own <code>--system-prompt</code> (/home/engstrand/guix/desktop/build/bbh/src/bbh/claude.clj line 80). bbh then adds AGENTS.md itself (/home/engstrand/guix/desktop/configs/bbh/init.clj line 211). So the root AGENTS.md that bbh Workers read was audited. The ~/.claude skills, however, never reach a bbh session. <i>measured</i> flags, <i>inferred</i> effect</p>
+
+<h2>Findings and my assessment</h2>
+<table>
+<tr><th>#</th><th>Finding</th><th>Assessment</th><th>Overlap</th></tr>
+<tr><td>1</td><td>~/.claude/skills/synced/&lt;id&gt;/pdf/FORMS.md line 1: <code>**CRITICAL: You MUST complete these steps in order...**</code>. All-caps pressure with no reason given. The audit offers a rewrite.</td>
+<td><b>Agree</b> with the diagnosis (checked: the line is there). Still, I would <b>skip</b> it: the next account sync would overwrite the edit, and bbh Workers never load it. If anything, report it upstream.</td>
+<td>New. T148 noted that Fable 5.2 applies rules literally, but it never looked at ~/.claude.</td></tr>
+<tr><td>2</td><td>skill-creator/references/schemas.md line 312: the example value <code>claude-sonnet-4-20250514</code>, a retired model id</td>
+<td><b>Agree</b>, and it needs no action. It is an example value, not an instruction, in a synced file.</td><td>New. T148's model-id fix (R2c) was about bbh's own models.clj, not this.</td></tr>
+<tr><td>3</td><td>.agents/skills/typesafe-ai/SKILL.md line 151: "As of Jev 1.14 ...", a claim pinned to a version</td>
+<td><b>Agree</b>, report only. The file is vendored and hash-locked, so a fix has to come upstream.</td><td>Related to T87, which proposed cutting this skill's 660-char description in bbh's skill index. That is still open: the description is unchanged. This is a separate line in the body.</td></tr>
+<tr><td>4</td><td>/home/engstrand/guix/desktop/pi/agent/AGENTS.md line 5 (the audit cites line 3): "do not generate temporary ... Babashka programs" looks like it contradicts the root rule "write scripts in babashka".</td>
+<td><b>Agree, no edit.</b> The rule applies only to Pi's tools, and the audit says the same.</td><td>Already handled. T148 edited this file for the path reason and left this rule alone.</td></tr>
+<tr><td>-</td><td>Root AGENTS.md: all paths and make targets exist, the lint claims hold, and each prohibition gives its reason.</td><td><b>Already handled.</b></td><td>T155 added the HTML rule line. T148 R3 gave the path rule its reason.</td></tr>
+</table>
+
+<h2>Gaps the audit leaves, and who covers them</h2>
+<ul>
+<li><b>bbh Worker and Router prompts</b>: T148 checked init.clj and workflow.clj against the Opus 5.5 and Fable 5.2 guides, and R2 to R4 have landed. Its R5 (style rules and the Communicating clearly block) is deferred until Fable Workers run. T87 measured the prompt at about 3,200 tokens, 2.9% of input. Its diet cuts and Finding A (phase principles do not reach Workers) are still open. <i>measured</i> from those runs' answer.md</li>
+<li><b>pstack and Pi skills</b>: T148 regex-checked 85 skill files for dated patterns and found none apart from technical-writing line 67. T87 advised against a full pstack diet and proposed slimming herdr. <i>measured</i> in those runs</li>
+<li>Running <code>/doctor prompt-audit &lt;path&gt;</code> on init.clj or a skill folder might audit those with the same guide. I did not try it, because the brief said to ask before improvising. <i>guess</i> that it would add little beyond T148</li>
+</ul>
+
+<h2>Options</h2>
+<ol>
+<li><b>Apply nothing</b> (my pick). The project is clean, and the only edit would be overwritten on the next sync.</li>
+<li>Apply finding 1's rewrite to the synced FORMS.md locally, knowing a sync may undo it.</li>
+<li>Also run <code>/doctor prompt-audit</code> with a path, on /home/engstrand/.config/bbh/init.clj and /home/engstrand/guix/desktop/pi/agent/skills. That is one more session of about 10 minutes.</li>
+</ol>
+
+<details><summary>Raw audit output (claude -p '/doctor prompt-audit', 59 lines)</summary>
+<pre style="white-space:pre-wrap;font-size:12px"># Prompt audit: Claude Code configuration for `/home/engstrand/guix`
+
+**Assumptions**
+- **Target model:** Opus 5.5 (`claude-opus-5-5`), the model running this session. None of the files in scope pin a model of their own.
+- **Scope:** every instruction file that loads in this project.
+  - **In the project:** `AGENTS.md`, the nested `desktop/pi/agent/AGENTS.md`, and `.claude/skills/typesafe-ai`. The last is a link to `.agents/skills/typesafe-ai/SKILL.md`.
+  - **Under `~/.claude`:** 13 skills in `~/.claude/skills/synced/&lt;id&gt;/`, which your account syncs from Anthropic, plus their reference files.
+  - **Not found:** no `CLAUDE.md` or `CLAUDE.local.md` at any level, no ancestor instruction files, no `.claude/CLAUDE.md`, no rules, commands, subagents or output styles, and no managed-policy file.
+  - **Plugins:** the plugin marketplace has been downloaded, but no plugins are installed, so plugin skills, commands and agents don't load.
+  - **Imports:** none.
+  - **Not read:** settings files, `.mcp.json` and `~/.claude.json`.
+- **Vendored skill:** `typesafe-ai` is pinned by hash in `skills-lock.json`, so I report on it only. Editing it would break the hash and be lost on the next update.
+- **Synced skills:** any edit to them affects every project, and the next account sync will probably overwrite it.
+
+## Summary
+
+The project's own instructions have no dated patterns. In the root `AGENTS.md`:
+- **Paths:** every path it names exists (`desktop/stow-home`, `desktop/build/checks/checks.edn`, `desktop/build/doom/doctor-baseline.txt`, `desktop/build/bbh/src/bbh/explainer.clj`, `modules/engstrand/features/agent-control.scm`).
+- **Make targets:** every target it names is defined in `Makefile` (`lint`, `affected`, `verify`, `doom-check`, `kanata-check`, `switch`, `help`).
+- **Lint claims:** `desktop/build/checks/lint.bb` does reject shell scripts, and it does check that the Makefile, `AGENTS.md` and `checks.edn` agree.
+- **Service list:** `%restartable-services` and the `offload test` and `offload status` commands for `/etc/guix/machines.scm` are defined in `agent-control.scm`.
+- **Prohibitions:** each one gives its reason.
+
+The one finding worth acting on is a block of all-caps emphasis at the top of the synced `pdf` skill's `FORMS.md`.
+
+**Counts per group:**
+- **Group 1 (dated prompt text):** 1 medium-confidence finding and 1 low-confidence flag.
+- **Group 2 (configuration files):** 1 low-confidence flag.
+- **Group 3 (tool descriptions):** not applicable.
+- **Group 4 (request config and architecture):** not applicable.
+
+## Findings
+
+| # | Location | Evidence | Pattern | Why it's obsolete | Confidence | Action |
+|---|---|---|---|---|---|---|
+| 1 | `~/.claude/skills/synced/&lt;id&gt;/pdf/FORMS.md:1` (affects all projects; synced) | `**CRITICAL: You MUST complete these steps in order. Do not skip ahead to writing code.**` | 1a, pressure language | The order matters here (check the fields, then extract, then fill), so the rule stays. Only the volume is the problem. Current models over-apply all-caps emphasis, and this line gives no reason. | Medium | `rewrite`: see the diff |
+| 2 | `~/.claude/skills/synced/&lt;id&gt;/skill-creator/references/schemas.md:312` | `"executor_model": "claude-sonnet-4-20250514"` | Group 2, pinned model names | A retired, dated model ID inside an example schema. It's an illustrative value, not an instruction, but a model copying the example could reuse it. | Low | `flag` |
+| 3 | `.agents/skills/typesafe-ai/SKILL.md:151` (vendored) | `As of Jev 1.14, this companion Noul usually works better…` | Group 2, volatile version pin | A date-relative claim about TypeSafe's own model. It's the vendor's text, and the hash lock means fixes have to come upstream. | Low | `flag` (report only) |
+| 4 | `desktop/pi/agent/AGENTS.md:3` | `Every tool call goes through codemode…` | Group 2, instruction files that contradict each other | This file is the Pi agent's guidance (`desktop/build/pi-sci/eval/run.mjs:17` loads it). It also says not to write temporary Babashka programs, which looks like it clashes with the root file's "write scripts in babashka". It doesn't: the rules are scoped to Pi's own tools, so the file overrides the root one rather than contradicting it, and it stays. It's only worth knowing that a Claude Code session working in that directory may also see it. | Low | `flag` (no edit) |
+
+**Other lines that match the patterns but stay:**
+- **`pdf/SKILL.md:171` (`IMPORTANT: Never use Unicode subscript…`):** gives its reason, the glyphs render as black boxes.
+- **The `NEVER` lines in `pptx/SKILL.md:192-193`:** these name specific visual defaults to avoid and give the reason, which is the form that works (Group 1e).
+- **The never-list in `morning/SKILL.md:133`:** each item comes with its positive replacement.
+- **`skill-creator/SKILL.md:122` (`ALWAYS use this exact template`):** pins an output format that depends on that exact shape (keep-list item 7).
+
+## Proposed diff
+
+There are no changes to project files. One hunk for a user-level file (it affects all projects, and an account sync will probably overwrite it):
+
+```diff
+--- a/~/.claude/skills/synced/&lt;id&gt;/pdf/FORMS.md
++++ b/~/.claude/skills/synced/&lt;id&gt;/pdf/FORMS.md
+@@ -1,1 +1,1 @@
+-**CRITICAL: You MUST complete these steps in order. Do not skip ahead to writing code.**
++Complete these steps in order: the later steps depend on what the field check and extraction scripts find, so don't write fill code before running them.
+```
+
+Because this skill is synced from your account, the lasting fix is upstream. If you'd rather not keep a local change that a sync will overwrite, skip this hunk; the rest of the configuration needs no changes.
+</pre></details>
+<p>Evidence: /home/engstrand/.local/state/bbh/workflows/20261112-115517-603-investigation/evidence/raw-audit.txt</p>
+
+</main></body></html>
