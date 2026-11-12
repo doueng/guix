@@ -7,7 +7,8 @@ set norelativenumber
 
 " Map file tree navigation
 map <leader>e :action SelectInProjectView<CR>
-nmap <C-h> :action SelectInProjectView<CR>
+" Ctrl+h moves focus left, as in the other editors (keybindings README).
+nnoremap <C-h> <C-w>h
 
 " Execute an action. Like <M-x>
 let g:WhichKeyDesc_Leader_Space = "<leader><Space> M-x"
