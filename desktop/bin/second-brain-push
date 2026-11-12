@@ -12,26 +12,25 @@
 ;; importer; status uses the deploy key.  The builder side is
 ;; modules/engstrand/system/second-brain.scm.  See docs/remote-builder-plan.md.
 (ns second-brain-push
-  (:require [babashka.fs :as fs]
+  (:require [babashka.classpath :as classpath]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [clojure.string :as str]))
 
-(def host (or (System/getenv "BUILDER") "guix-builder.tailbf68ad.ts.net"))
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[builder])
+
+(def host builder/host)
 (def home (System/getProperty "user.home"))
-(def ssh-port (or (System/getenv "BUILDER_SSH_PORT") "2222"))
 (def push-key (str home "/.config/guix-builder/second-brain_ed25519"))
-(def deploy-key (or (System/getenv "BUILDER_SSH_KEY") (str home "/.config/guix-builder/deploy_ed25519")))
+(def deploy-key builder/deploy-key)
 (def state-dir (str home "/.local/state/second-brain-push"))
 (def profile (str home "/.var/app/com.google.Chrome/config/google-chrome/Default/"))
 (def url (str "https://" host ":8443/"))
 
 (defn die [& msg] (binding [*out* *err*] (apply println msg)) (System/exit 1))
 
-(defn ssh [key user & command]
-  (concat ["ssh" "-i" key "-p" ssh-port "-o" (str "HostKeyAlias=" host)
-           "-o" "BatchMode=yes" "-o" "ConnectTimeout=10" "-o" "IdentitiesOnly=yes"
-           (str user "@" host)]
-          command))
+(def ssh builder/ssh)
 
 (defn sha256 [bytes]
   (apply str (map #(format "%02x" %)

@@ -12,6 +12,7 @@
             builder-key-file
             builder-key-string))
 
+;; desktop/lib/builder.clj holds the same host and port for the scripts.
 (define %builder-host "guix-builder.tailbf68ad.ts.net")
 (define %builder-publish-url (string-append "http://" %builder-host ":8080"))
 ;; sshd for machines (offload, deploy, prebuild).  Port 22 on the tailnet

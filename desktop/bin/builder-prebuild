@@ -10,18 +10,22 @@
 ;;   prebuild run REV | nightly | status
 ;; See docs/remote-builder-plan.md.
 (ns builder-prebuild
-  (:require [babashka.fs :as fs]
+  (:require [babashka.classpath :as classpath]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
-(def host (or (System/getenv "BUILDER") "guix-builder.tailbf68ad.ts.net"))
+;; desktop/lib from the repo; on the builder, the prebuild command passes it
+;; with -cp (modules/engstrand/system/builder.scm).
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[builder])
+
+(def host builder/host)
 (def home (System/getProperty "user.home"))
-(def ssh-key (or (System/getenv "BUILDER_SSH_KEY") (str home "/.config/guix-builder/deploy_ed25519")))
-;; sshd listens on 2222; 22 on the tailnet address is Tailscale SSH, for people.
-(def ssh-port (or (System/getenv "BUILDER_SSH_PORT") "2222"))
-(def ssh-cmd (str "ssh -i " ssh-key " -p " ssh-port " -o HostKeyAlias=" host " -o BatchMode=yes -o ConnectTimeout=10"))
-(def publish (str "http://" host ":8080"))
+(def ssh-cmd (builder/ssh-command builder/deploy-key))
+(def publish builder/publish)
+(defn ssh-prebuild [& command] (apply builder/ssh builder/deploy-key "prebuild" command))
 
 (defn die [& msg] (binding [*out* *err*] (apply println msg)) (System/exit 1))
 (defn out [& args]
@@ -58,7 +62,7 @@
       (println "channel" name commit "from" path)
       (push (out {:dir path} "jj git root") (str commit ":refs/heads/channel-" name)))
     (let [{:keys [exit]} (apply p/shell {:continue true}
-                                (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "run" rev]))]
+                                (ssh-prebuild "prebuild" "run" rev))]
       (when-not (zero? exit)
         (die (str "prebuild of " rev " on " host " failed (exit " exit "); its log is above"))))))
 
@@ -93,7 +97,7 @@
     (println (if ok? "publish: ok" (str "publish: unreachable at " publish)))
     (when ok?
       (apply p/shell {:continue true}
-             (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "status"])))
+             (ssh-prebuild "prebuild" "status")))
     (let [missing (distinct (concat (dry-run-builds "system" "desktop/system.scm")
                                     (dry-run-builds "home" "desktop/home.scm")))]
       (if (empty? missing)
@@ -142,7 +146,7 @@
 
 (defn remote-status []
   (let [{:keys [exit out]} (apply p/shell {:continue true :out :string :err :string}
-                                  (concat (str/split ssh-cmd #" ") [(str "prebuild@" host) "prebuild" "status"]))]
+                                  (ssh-prebuild "prebuild" "status"))]
     (if (zero? exit) {:status (parse-status out)} {:unreachable true})))
 
 ;; Exit 0 when fine, 1 on an alert, 2 when the builder doesn't answer.  An

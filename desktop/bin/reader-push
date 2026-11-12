@@ -9,18 +9,19 @@
 ;; The reader lives at READER_DIR (~/projects/langchain/reader); the builder
 ;; runs it as modules/engstrand/system/reader.scm.  See docs/remote-builder-plan.md.
 (ns reader-push
-  (:require [babashka.fs :as fs]
+  (:require [babashka.classpath :as classpath]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.string :as str]))
 
-(def host (or (System/getenv "BUILDER") "guix-builder.tailbf68ad.ts.net"))
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[builder])
+
+(def host builder/host)
 (def home (System/getProperty "user.home"))
 (def src (or (System/getenv "READER_DIR") (str home "/projects/langchain/reader")))
-(def ssh-key (or (System/getenv "BUILDER_SSH_KEY") (str home "/.config/guix-builder/deploy_ed25519")))
-(def ssh-port (or (System/getenv "BUILDER_SSH_PORT") "2222"))
-(def ssh ["ssh" "-i" ssh-key "-p" ssh-port "-o" (str "HostKeyAlias=" host)
-          "-o" "BatchMode=yes" "-o" "ConnectTimeout=10" (str "root@" host)])
+(def ssh (builder/ssh builder/deploy-key "root"))
 (def lib "/var/lib/reader")
 (def jev-key (str home "/.env/jev"))
 

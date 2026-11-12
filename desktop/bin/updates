@@ -8,12 +8,17 @@
 ;; `updates apply release/NAME' acts on it, opting NAME in to source latest.
 ;; apply builds what it changed on the remote builder before you pull or switch.
 (ns updates
-  (:require [babashka.fs :as fs]
+  (:require [babashka.classpath :as classpath]
+            [babashka.fs :as fs]
             [babashka.http-client :as http]
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]))
+
+;; desktop/lib: the builder's address (builder.clj).
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[builder])
 
 (def repo (-> *file* fs/real-path fs/parent fs/parent fs/parent str))
 (def home (System/getProperty "user.home"))
@@ -111,7 +116,7 @@
 
 ;; The remote builder (docs/remote-builder-plan.md): heavy builds offload or
 ;; prebuild there and the laptop downloads them from its publish server.
-(def builder-publish (or (System/getenv "BUILDER_PUBLISH") "http://guix-builder.tailbf68ad.ts.net:8080"))
+(def builder-publish builder/publish)
 
 (def builder-up?
   (delay (zero? (:exit (p/shell {:continue true :out :string :err :string}

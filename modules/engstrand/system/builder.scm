@@ -16,6 +16,7 @@
   #:use-module (gnu packages sqlite)
   #:use-module (gnu packages ssh)
   #:use-module (gnu packages version-control)
+  #:use-module (gnu services)
   #:use-module (gnu services base)
   #:use-module (gnu services linux)
   #:use-module (gnu services mcron)
@@ -42,10 +43,16 @@
               users+files))
 
 ;; git-shell runs only the commands in ~/git-shell-commands, so the laptop's
-;; `ssh prebuild@builder prebuild REV' can do nothing else.
+;; `ssh prebuild@builder prebuild REV' can do nothing else.  The script loads
+;; desktop/lib/builder.clj, which -cp supplies from the store.
+(define %prebuild-lib
+  (file-union "prebuild-lib"
+              `(("builder.clj" ,(package-asset "desktop/lib/builder.clj")))))
+
 (define %prebuild-command
   (program-file "prebuild"
                 #~(apply execl #$(file-append babashka "/bin/bb") "bb"
+                         "-cp" #$%prebuild-lib
                          #$(package-asset "desktop/bin/builder-prebuild")
                          (cdr (command-line)))))
 
