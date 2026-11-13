@@ -7,8 +7,6 @@ editor = "nvim"
 pager = "less"
 default-command = "status"
 paginate = "never"
-# Plain `jj diff` (and jjui's fullscreen diff) goes through jj-diff-pierre, which
-# pipes git-format output into pierre-diff-ansi for syntax highlighting.
 diff-formatter = "pierre"
 conflict-marker-style = "diff-experimental"
 diff-editor = ":builtin"

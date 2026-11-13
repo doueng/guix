@@ -12,7 +12,7 @@
 ;; it finishes. Each notification closes after :notify-expire-ms, critical
 ;; ones too (dusk honours the timeout at every urgency); 0 keeps them.
 ;; :projects are the repositories the Router starts Workers in, by name, with
-;; the check that proves a change there; each check passed on 2026-11-03.
+;; the check that proves a change there.
 ;; :docs are the roots the phone's Docs list and serves HTML explainers from,
 ;; read-only: a directory, searched for **.html, or [directory glob]. A page
 ;; shows only when it carries <meta name="bbh-doc" content="T12">.

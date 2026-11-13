@@ -1,21 +1,17 @@
 Plug 'justinmk/vim-sneak'
 
-"" idea-doom-emacs
 source ~/.config/ideavim/idea-doom-emacs/init.vim
 source ~/.config/ideavim/idea-doom-emacs/subword-mode.vim
 set norelativenumber
 
-" Map file tree navigation
 map <leader>e :action SelectInProjectView<CR>
 " Ctrl+h moves focus left, as in the other editors (keybindings README).
 nnoremap <C-h> <C-w>h
 
-" Execute an action. Like <M-x>
 let g:WhichKeyDesc_Leader_Space = "<leader><Space> M-x"
 nnoremap <leader><Space>    :action GotoAction<CR>
 vnoremap <leader><Space>    :action GotoAction<CR>
 
-" Find file
 map <Leader>ff :action GotoFile<CR>
 let g:WhichKeyDesc_find_file2 = '<leader>ff Find file'
 

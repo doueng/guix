@@ -1,5 +1,3 @@
-# Ghostty Configuration
-
 font-family = JetBrainsMono Nerd Font
 # Keep programming operators literal in terminal applications such as Neovim.
 font-feature = -calt, -liga, -dlig
@@ -35,7 +33,6 @@ confirm-close-surface = false
 gtk-titlebar = false
 gtk-single-instance = desktop
 
-# Key Bindings (custom)
 keybind = shift+insert=paste_from_clipboard
 # The default toggles fullscreen, which Ctrl+Alt+f owns, and hides C-RET from Emacs and TUIs.
 keybind = ctrl+enter=unbind

@@ -85,8 +85,6 @@ You are the Router of bbh super: one long-lived conversation that reads what the
   (reset! live-sh #{})
   nil)
 
-;; Skills
-
 (def skill-roots ["~/.pi/agent/skills" "~/.agents/skills" ".agents/skills" ".pi/skills"])
 
 (defn- frontmatter
@@ -148,8 +146,6 @@ You are the Router of bbh super: one long-lived conversation that reads what the
 (defn- skill-block [{:keys [name path]}]
   (str "<skill name=\"" name "\" location=\"" path "\">\nReferences are relative to " (fs/parent path) ".\n\n"
        (str/trim (str/replace (slurp path) #"(?s)\A---\n.*?\n---\n" "")) "\n</skill>"))
-
-;; Jev task routing for poteto-mode, after Pi's jev-pstack extension
 
 (def routes
   {:investigation "Read-only understanding, explanation, or diagnosis; no implementation is requested."
@@ -261,8 +257,6 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
          {:name "poteto-mode-off" :description "Turn off poteto-mode for this conversation."}]
         (for [{:keys [name description]} (skills)]
           {:name (str "skill:" name) :description description})))
-
-;; Delegation: a fresh model conversation with one bash tool, for independent verifiers.
 
 (def delegate-system
   "You are a delegated agent working for another agent. Your one tool, bash, runs in the working directory. Do the brief and nothing else. Do not edit tracked files in the working directory. Run every check you report, and never report a check you did not run. End with the report format the brief asks for.")
@@ -590,7 +584,6 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
     (replace-file! path text)
     (str (str/join "\n" summaries) (when note (str "\n" note)))))
 
-;; The conversation's files, named by bbh.conversation; its directory is where repl.port is.
 (def ^:private conversation-file (requiring-resolve 'bbh.conversation/file))
 
 ;; Background jobs. State lives in files under the conversation's jobs directory, so a job and its result
@@ -700,13 +693,10 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
 (defn- shell-quote [s]
   (if (re-matches #"[\w@%+=:,./-]+" s) s (str "'" (str/replace s "'" "'\\''") "'")))
 
-;; Super-agent Worker helpers, over the controller's socket with this Worker's token.
-
 (defn- super-call! [command args]
   (let [{:keys [ok error message data]} ((requiring-resolve 'bbh.super.client/call!) {:command command :args args})]
     (if error (throw (ex-info (str "bbh super: " (name error) (when message (str ", " message))) (or data {}))) ok)))
 
-;; super-ask!, super-done! and the rest, from the one table in bbh.super.verbs.
 (let [table @(requiring-resolve 'bbh.super.verbs/worker)
       usage (requiring-resolve 'bbh.super.verbs/usage)]
   (doseq [[sym f] ((requiring-resolve 'bbh.super.verbs/bind) super-call! table)]
@@ -998,8 +988,7 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
            (sort-by #(parse-long (first (str/split % #"-")))) reverse
            (mapv #(dissoc (job-status % :lines 0) :tail))))))
 
-;; Headless browser screenshots via the flatpak Chrome (Guix has no aarch64 chromium substitute), and a
-;; Claude delegate that views them, since bbh tool results carry text only.
+;; The flatpak Chrome, since Guix has no aarch64 chromium substitute.
 (def shot-dir "/tmp/bbh-shots")
 
 (defn shot

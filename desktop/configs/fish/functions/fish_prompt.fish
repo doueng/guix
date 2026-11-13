@@ -5,7 +5,6 @@ end
 function fish_prompt
     set -l prompt_cell_marker '\u00a0'
 
-    # Breathing room above the prompt inside Herdr panes.
     if set -q HERDR_ENV
         echo
     end

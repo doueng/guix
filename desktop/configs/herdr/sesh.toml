@@ -1,6 +1,5 @@
-# Local Babashka implementation of fullerzz.sesh: the picker lists open Herdr
-# workspaces first, then zoxide directories. Newly created projects get these
-# additional tabs; the initial workspace tab remains the shell.
+# Newly created projects get these additional tabs; the initial workspace tab
+# remains the shell.
 [[window]]
 name = "emacs"
 startup_script = "emacs-project-start"
@@ -13,7 +12,6 @@ startup_script = "emacs-bbh"
 name = "jjui"
 startup_script = "jjui"
 
-# Apply the project layout to every new directory from zoxide or a direct path.
 [[wildcard]]
 pattern = "/**"
 windows = ["emacs", "bbh", "jjui"]

@@ -106,7 +106,6 @@
          :keys [(key :<leader><leader>
                      (fn []
                        (current-file-path)
-                       ;; The desktop's Dusk palette, or Snacks when Dusk is not running.
                        (when (not ((. (require :config.palette) :open)))
                         (_G.Snacks.picker {:title "Command Palette"
                                           :multi [(command-palette-actions-source)

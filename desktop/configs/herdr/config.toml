@@ -15,7 +15,6 @@ resume_agents_on_restore = true
 delivery = "system"
 
 [keys]
-# Keep the tmux-style prefix familiar while adding direct project-tab chords.
 # previous_tab is unbound: prefix+p is taken over by herdr-annotate (annotate.capture).
 prefix = "ctrl+b"
 help = "prefix+?"
@@ -25,8 +24,6 @@ next_tab = "prefix+n"
 # kanata turns Cmd+digits into Ctrl+digits.
 switch_tab = ["prefix+1..9", "ctrl+1..9"]
 
-# Open Spaces navigation with prefix+w or prefix+e, then move the selection
-# with w (up) and e (down); enter focuses the workspace, esc leaves.
 workspace_picker = ["prefix+w", "prefix+e"]
 navigate_workspace_up = "w"
 navigate_workspace_down = "e"
@@ -39,7 +36,6 @@ focus_pane_down = []
 focus_pane_up = []
 focus_pane_right = []
 
-# prefix+Space opens the shared leader menu from keybindings/leader.edn.
 [[keys.command]]
 key = "prefix+space"
 type = "popup"
@@ -96,7 +92,6 @@ type = "shell"
 command = "$HOME/.local/bin/keyleader nav right 'Ctrl+b l'"
 description = "focus right, then the desktop"
 
-# Pick an agent from any workspace with an fzf selector that previews its pane.
 [[keys.command]]
 key = "prefix+a"
 type = "popup"
@@ -105,7 +100,6 @@ description = "focus an agent"
 width = "85%"
 height = "80%"
 
-# The bbh inbox: a terminal frame on *bbh inbox* in the bbh-super Emacs daemon.
 [[keys.command]]
 key = "prefix+t"
 type = "popup"
@@ -134,18 +128,14 @@ type = "plugin_action"
 command = "fullerzz.sesh.last"
 description = "switch to the previous workspace"
 
-# Show letter hints for URLs, paths, SHAs, and other visible text, then copy
-# the selected match to the clipboard. An http or https match also opens in
-# Chrome (xdg-open) and focuses it.
 [[keys.command]]
 key = "prefix+f"
 type = "plugin_action"
 command = "hotchpotch.herdr-tiny-fingers.open"
 description = "copy visible text by hint"
 
-# herdr-annotate: comment on terminal selections, review documents and agent
-# replies, send feedback back to the agent. prefix+a is taken by the agent
-# picker and prefix+e opens workspaces, so capture lives on prefix+p.
+# prefix+a is taken by the agent picker and prefix+e opens workspaces, so
+# herdr-annotate's capture lives on prefix+p.
 [[keys.command]]
 key = "prefix+p"
 type = "plugin_action"
@@ -172,7 +162,6 @@ description = "review documents in this folder"
 
 [ui]
 confirm_close = false
-# Sort the agent panel as an attention queue (blocked/done before idle agents).
 agent_panel_sort = "spaces"
 pane_borders = "off"
 show_agent_labels_on_pane_borders = false
