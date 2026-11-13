@@ -53,8 +53,6 @@ Crash == pc' = "idle" /\ UNCHANGED <<done, tries, changes, cur>>
 Next == Record \/ Crash \/ \E k \in Kinds : Perform(k)
 Spec == Init /\ [][Next]_vars
 
-\* ---- rules ----
-
 \* However often the controller dies, no effect changes the world twice.
 ChangedOnce == \A k \in Kinds : changes[k] <= 1
 \* An effect recorded done was performed.

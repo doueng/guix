@@ -12,8 +12,6 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]))
 
-;; ---- thread handles ------------------------------------------------------------
-
 (def ^:private units
   ["zero" "one" "two" "three" "four" "five" "six" "seven" "eight" "nine" "ten" "eleven" "twelve"
    "thirteen" "fourteen" "fifteen" "sixteen" "seventeen" "eighteen" "nineteen"])
@@ -44,8 +42,6 @@
                         0 5)))
 
 (deftest property-a-spoken-handle-names-its-thread-and-leaves-the-message
-  ;; Before T170 no thread past T99 could be said, and a number after the
-  ;; comma joined the handle: seed 170 failed on [100 0 "tee" ", " ""].
   (props/check "spoken handle" 300
                (prop/for-all [n (gen/choose 1 999)
                               form-i gen/nat
@@ -80,8 +76,6 @@
                                              (gen/fmap #(apply str %) (gen/vector (gen/elements ["t" "tee" " " "," "-" "1" "9" "one" "hundred" "and" "twenty" "." "ü"]) 0 12))])]
                  (let [r (model/parse-handle s)]
                    (or (nil? r) (and (re-matches #"T\d+" (first r)) (string? (second r))))))))
-
-;; ---- super-* helper calls ----------------------------------------------------------
 
 (def ^:private verb-call
   "[table sym positional options form]: a verb, values for its arguments, a
@@ -118,8 +112,6 @@
                           ;; An option the verb lacks, or a missing argument, is refused.
                           (= :invalid (call table sym (pass (assoc options :no-such-option "x"))))
                           (or (empty? positional) (= :invalid (call table sym (butlast positional))))))))))
-
-;; ---- strings to Emacs and back ---------------------------------------------------
 
 (deftest property-a-string-sent-to-emacs-reads-back-the-same
   (props/check "elisp string" 500

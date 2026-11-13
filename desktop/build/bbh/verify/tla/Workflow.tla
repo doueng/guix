@@ -73,8 +73,6 @@ Abandon ==
 Next == Abandon \/ \E a \in Attesters : BeginAttest(a) \/ EndAttest(a)
 Spec == Init /\ [][Next]_vars
 
-\* ---- rules ----
-
 VisitsWithinCap == \A p \in Phases : visits[p] <= Cap
 \* A done or abandoned run stays so, and a blocked run can only be abandoned.
 Settled == [][/\ status \in {"done", "abandoned"} => status' = status

@@ -10,8 +10,6 @@
             [clojure.string :as str]
             [hiccup2.core :as h]))
 
-;; Loading
-
 (defn conversations-root []
   (str (fs/path (or (sysenv/getenv "XDG_DATA_HOME") (fs/expand-home "~/.local/share")) "bbh" "conversations")))
 
@@ -71,8 +69,6 @@
        (sort-by #(str (fs/file-name %)) #(compare %2 %1))
        (take n)))
 
-;; Text
-
 (def ^:private wrapper-re #"(?s)<(skill|system-reminder)\b([^>]*)>(.*?)</\1>")
 
 (defn prompt-text
@@ -115,8 +111,6 @@
             [:details.wrapper [:summary "<" (str/trim (str tag " " (str/trim attrs))) "> " [:span.dim (line-count body) " lines"]]
              [:pre.plain (str/trim body)]])
           (markdown (prompt-text content)))))
-
-;; Conversations
 
 (def ^:private spill-re #"^\[bbh\] Full output \((\d+) chars\) saved to (\S+?)\. ")
 
@@ -181,8 +175,6 @@
    :turns (count (filter #(= "user" (:role %)) messages))
    :calls (reduce + (map (comp count :tool_calls) messages))
    :runs (count runs)})
-
-;; Workflow runs
 
 (defn- run-status [events]
   (or (some #(case (:type %) :done "done" :abandon "abandoned" :block "blocked" nil) (rseq (vec events)))
@@ -264,8 +256,6 @@
      (when (seq evidence)
        [:details [:summary "evidence files " [:span.dim (str/join ", " (keys evidence))]]
         (for [[n t] evidence] [:details.evidence [:summary n] [:pre.plain t]])])]))
-
-;; Page
 
 (defn conversation-section [{:keys [id dir prompts runs jobs claude-log updated] :as c} nested?]
   (let [{:keys [title model turns calls]} (summary c)]

@@ -25,8 +25,6 @@
 (defn- passes [trials property]
   (props/check (str (first t/*testing-vars*)) trials property))
 
-;; ---- wf journal --------------------------------------------------------------
-
 (def ^:private journal-step
   (gen/one-of [(gen/tuple (gen/return :attest) (gen/elements [{:pass? true} {:pass? false} {:pending? true}]) gen/string)
                (gen/tuple (gen/return :set) gen/string)
@@ -115,8 +113,6 @@
                                      (and (str/includes? (ex-message e) "journal corrupt")
                                           (= (cut-line lines (mod m last-i) n) (slurp file)))))))))))))
 
-;; ---- mailbox -----------------------------------------------------------------
-
 (defn- mail-id [i] (model/message-id (str "o" i)))
 
 (def ^:private mailbox-op
@@ -183,8 +179,6 @@
                    (empty? (inbox/pending dir))
                    (nil? (session/take-mail! (first caught-up))))))))
 
-;; ---- REPL checkpoint ---------------------------------------------------------
-
 (def ^:private checkpoint-namespaces '[user harness.one harness.two])
 (def ^:private checkpoint-names '[harness-a harness-b harness-c])
 
@@ -234,8 +228,6 @@
                 (binding [*ns* (the-ns 'user)] (load-string (slurp path))))
               (and (= values (defined))
                    (= (count values) (count (when (fs/exists? path) (checkpoint/definitions (slurp path) 'user)))))))))
-
-;; ---- transcript --------------------------------------------------------------
 
 (def ^:private message
   (gen/let [role (gen/elements ["user" "assistant" "tool"])

@@ -134,8 +134,6 @@
               :when (seq hits)]
           [id hits])))
 
-;; Rendering
-
 (defn- elide-skills [text]
   (str/replace (str text) #"(?s)<skill name=\"([^\"]+)\".*?</skill>" "[skill $1 expanded here]"))
 
@@ -173,8 +171,6 @@
                   (for [m turn :when (= "assistant" (:role m))]
                     (str (when-not (str/blank? (:content m)) (str "\n" (str/trim (:content m)) "\n"))
                          (str/join (map #(render-step by-place %) (take-steps! (count (:tool_calls m))))))))))))))
-
-;; Lint report
 
 (defn report
   "A Markdown table of graded passes and assertion hits per cohort, with example traces."

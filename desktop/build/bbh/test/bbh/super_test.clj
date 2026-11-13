@@ -521,8 +521,6 @@
     (is (= repo (bbh.super.pane/workdir thread)))
     (is (thrown-with-msg? Exception #"T2 has no Worker" (bbh.super.pane/workdir {:id "T2" :workers []})))))
 
-;; ---- Workers ---------------------------------------------------------------
-
 (deftest a-worker-on-a-missing-repository-starts-a-new-project
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-new"}))
         repo (str (fs/path dir "projects" "game"))
@@ -645,8 +643,6 @@
         (is (wait-for #(= [:done] (map :state (vals (:outbox @(:state c)))))))
         (is (= {} (:replies @(:state c))) "a brief is not a reply")
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
-
-;; ---- the Router ------------------------------------------------------------
 
 (deftest a-handle-is-read-typed-or-spoken
   (is (= ["T12" "also handle the phone layout"] (model/parse-handle "T12 also handle the phone layout")))
@@ -1446,8 +1442,6 @@
       (finally (super/stop! c)))))
 
 
-;; ---- review regressions: the pure state machine -------------------------
-
 (defn- run-commands
   "Commit each [principal command] in turn on an in-memory store. Returns the
   db, the final state and each result, a refusal as {:error kw}."
@@ -1635,8 +1629,6 @@
     (is (= [:queued "1 Workers already running"] ((juxt :state :reason) (nth results 7))) "W2 does hold it")
     (is (= :working (get-in state [:workers "W1" :state])) "archiving leaves the Worker itself alone")))
 
-;; ---- review regressions: the controller ---------------------------------
-
 (deftest a-silent-client-does-not-block-the-controller
   (with-controller
     (fn [_ dir _]
@@ -1648,8 +1640,6 @@
     (fn [_ dir _]
       (is (= "rw-------" (java.nio.file.attribute.PosixFilePermissions/toString (fs/posix-file-permissions (fs/path dir "token"))))))))
 
-
-;; ---- review regressions: voice and the Inbox pane -------------------------
 
 (deftest voice-takes-a-pick-and-send-in-one-breath
   (with-controller
@@ -1699,8 +1689,6 @@
       (is (= [["dictation" "start"] ["dictation" "stop" "--print"]] @calls))
       (is (empty? (fs/list-dir dir)) "the stop request is used up"))))
 
-
-;; ---- the super-agent's Emacs ---------------------------------------------
 
 (defn- fake-emacsclient
   "A script that prints OUT and exits with EXIT, recording its arguments in a file."
@@ -2076,8 +2064,6 @@
       (is (= "T1 a" (super/release! {:conversation "super-W1" :dir "/repo"})))
       (is (= ["-s" (bbh.super.emacs/server) "--timeout=30" "--eval" "(eng/bbh-super-release \"super-W1\" \"/repo\")"]
              (args))))))
-
-;; ---- the person's message a Router command names, and jobs a reboot lost ----
 
 (defn- apply-cmd
   "[state error events] after PRINCIPAL's CMD on STATE; a refusal leaves STATE."

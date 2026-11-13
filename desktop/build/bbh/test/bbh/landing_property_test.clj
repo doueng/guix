@@ -32,8 +32,6 @@
 
 (defn- write! [dir file text] (spit (str (fs/path dir file)) (str text "\n")))
 
-;; ---- the world ---------------------------------------------------------------
-
 (defn- start [root]
   (let [repo (str (fs/create-dirs (fs/path root "repo")))]
     (write! repo "README" "hello")

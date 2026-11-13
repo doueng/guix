@@ -294,8 +294,6 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-\* ---- rules ----
-
 \* The cap counts launched Workers on live threads; holds-slot? frees the slot
 \* of an archived thread.
 CapRespected == Cardinality({w \in SlotWorkers : launched[w]}) <= Cap

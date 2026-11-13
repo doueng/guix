@@ -102,8 +102,6 @@
   (is (= [[:p [:a {:href "https://a.example/b" :target "_blank" :rel "noopener noreferrer"} "b"]]]
          (md/render "[b](https://a.example/b)"))))
 
-;; ---- the explainers under the doc roots -----------------------------------
-
 (defn- docs-site
   "A site whose only doc root is <base>/docs, with a tagged page outside it."
   []
@@ -186,8 +184,6 @@
   (is (:temporary (docs/read-doc "/tmp/x.html" tag)))
   (is (not (:temporary (docs/read-doc "/home/u/docs/x.html" tag))))
   (is (nil? (docs/read-doc "/tmp/y.html" "<title>untagged</title>"))))
-
-;; ---- the inbox over /api/super -------------------------------------------
 
 (defn- start-super
   "A controller in a temporary directory whose launch makes plain directories

@@ -216,7 +216,6 @@
       (finally (stop! c)))))
 
 (deftest a-killed-bbh-takes-its-repl-with-it
-  ;; T167: agent-shell-test's restart tests SIGKILL bbh, and each left its session REPL running for good.
   (let [c (client ["ok"])]
     (try
       (start! c)

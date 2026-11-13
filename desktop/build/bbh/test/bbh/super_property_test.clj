@@ -14,8 +14,6 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]))
 
-;; ---- commands from random choices -------------------------------------------
-
 (def ^:private finished #{:done :failed :cancelled})
 
 (defn- pick
@@ -163,8 +161,6 @@
       :job-exited! [:controller {:id id :command :job-exited!
                                  :args {:worker worker :job (str "j" (mod b 2)) :exit (mod c 3) :log "l" :seen (odd? c)}}]
       :repeat nil)))
-
-;; ---- the rules ----------------------------------------------------------------
 
 (defn- violations
   "What STATE breaks of Super.tla's invariants and the record rules. LAUNCHED
@@ -404,8 +400,6 @@
                :else (when-not (and (= :router (:to result)) (some #(= router (:conversation %)) (new-rows before after)))
                        (bad :not-for-the-router result))))
        nil))))
-
-;; ---- the property -------------------------------------------------------------
 
 (def ^:private preamble
   "Random numbers that open with three threads, a Router and two running

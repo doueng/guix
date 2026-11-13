@@ -136,7 +136,6 @@ case \"$*\" in *hang*) wait;; *) printf png > \"$out\";; esac
 ")
 
 (deftest shot-leaves-no-chrome-or-profile-behind
-  ;; T167: Chrome sandboxes from shot outlived it for days.
   (let [bin (fs/create-temp-dir {:prefix "bbh-fake-flatpak"})
         log (str (fs/path bin "profiles"))
         _ (spit (str (fs/path bin "flatpak")) fake-flatpak)

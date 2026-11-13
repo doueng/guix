@@ -25,8 +25,6 @@
                    (> (System/currentTimeMillis) end) false
                    :else (do (Thread/sleep 20) (recur))))))
 
-;; ---- which sessions go --------------------------------------------------------
-
 (deftest a-session-is-found-by-its-acp-argv
   (is (= "super-W7" (sessions/conversation-of ["bb" "--config" "x/bb.edn" "-m" "bbh.main" "acp" "--id" "super-W7"])))
   (is (= "router" (sessions/conversation-of ["bb" "-m" "bbh.main" "acp" "--id" "router"])))
@@ -54,8 +52,6 @@
     (is (= {:sessions 6 :worker-sessions 3 :active-workers 1 :stale ["super-W2"] :reaped ["super-W3"]}
            (sessions/report state live agents [(s "super-W2" 2)] ["super-W3"]))
         "W4's process is not its announced session, so it is not counted as a Worker's")))
-
-;; ---- property: no session outlives its Worker ----------------------------------
 
 (def ^:private grace 50)
 
@@ -104,8 +100,6 @@
                (every? (fn [[c _]] (sessions/holds-session? (get-in w [:workers (str/replace c "super-" "")])))
                        (:sessions w)))))]
     (is (:pass? r) (pr-str (:shrunk r)))))
-
-;; ---- the controller reaps a real process group ---------------------------------
 
 (defn- session-group!
   "A process group standing in for a session, its leader and a child each a
@@ -195,8 +189,6 @@
       (is (= "t2 pid=2 uid=1000 name=bb" (sessions/last-earlyoom-kill (str f))))
       (is (nil? (sessions/last-earlyoom-kill "/nonexistent/earlyoom-kills.log")))
       (finally (fs/delete-if-exists f)))))
-
-;; ---- the heavy-job slot --------------------------------------------------------
 
 (deftest heavy-commands-are-recognized
   (doseq [cmd ["bb test" "cd desktop/build/bbh && bb test:emacs" "make verify SLOW=1" "make doom-check" "guix build -f x.scm"

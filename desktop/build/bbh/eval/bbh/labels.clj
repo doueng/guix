@@ -32,8 +32,6 @@
 (defn- human-labeled [labels]
   (set (for [[[dir labeler]] labels :when (= "human" labeler)] dir)))
 
-;; Human review
-
 (defn- ask [question]
   (print question)
   (flush)
@@ -57,8 +55,6 @@
                                  :critique (ask "Why? ")})
                     (recur more))
                 (= "s" answer) (recur more)))))))
-
-;; LLM judge
 
 (defn sha8 [s]
   (subs (format "%064x" (java.math.BigInteger.
@@ -114,8 +110,6 @@
              (add-label! (merge {:trace (:dir t) :labeler labeler} v))
              (println (:outcome v) (:dir t)))
            (catch Exception e (println "ERROR" (:dir t) (ex-message e)))))))
-
-;; Agreement
 
 (defn- ratio [a b] (when (pos? b) (double (/ a b))))
 

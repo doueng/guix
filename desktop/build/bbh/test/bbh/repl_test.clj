@@ -85,7 +85,6 @@
             :else (do (Thread/sleep 100) (recur))))))
 
 (deftest a-repl-exits-when-the-process-that-started-it-dies
-  ;; T167: test runs that failed or timed out left their session REPLs running, reparented to the shepherd.
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-orphan"}))
         code (str "(require 'bbh.repl) (let [c (bbh.repl/start! {:dir " (pr-str dir) " :cwd " (pr-str dir) "})]"
                   " (println (.pid (:proc (:proc c)))) (flush) (System/exit 0))")
