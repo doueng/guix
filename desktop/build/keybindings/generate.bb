@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Writes, or with --check verifies, every file derived from keybindings/leader.edn.
 (ns generate-leaders
   (:require [clojure.edn :as edn] [clojure.string :as str]))
 (load-file "desktop/bin/keyleader")

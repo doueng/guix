@@ -1,17 +1,14 @@
--- Helpers shared by hyprland.lua and the generated keybindings.lua and leader.lua.
 local M = {}
 
 local function quote(s)
   return "'" .. (s:gsub("'", "'\\''")) .. "'"
 end
 
--- Append the binding to the personal log that `keylog` shows. KIND is one of
--- desktop/lib/keylog.clj's kinds and defaults to action.
+-- KIND is one of desktop/lib/keylog.clj's kinds.
 function M.log(keys, effect, kind)
   hl.exec_cmd("~/.local/bin/keylog add " .. (kind or "action") .. " hyprland " .. quote(keys) .. " " .. quote(effect))
 end
 
--- Enter the leader SUBMAP that KEYS open.
 function M.enter(submap, keys)
   return function()
     hl.dispatch(hl.dsp.submap(submap))
@@ -19,7 +16,6 @@ function M.enter(submap, keys)
   end
 end
 
--- Bind CHORD to DISPATCHER and log it as KEYS doing EFFECT.
 function M.bind(chord, dispatcher, keys, effect, opts)
   return hl.bind(chord, function()
     hl.dispatch(dispatcher)
@@ -27,7 +23,6 @@ function M.bind(chord, dispatcher, keys, effect, opts)
   end, opts)
 end
 
--- Run DISPATCHER, then leave the leader submap.
 function M.leave(dispatcher, keys, effect)
   return function()
     hl.dispatch(hl.dsp.submap("reset"))
@@ -75,15 +70,12 @@ local function send_to_herdr(chords)
   return true
 end
 
--- Alt+Space: open Herdr's leader menu (Ctrl+b Space).
 function M.herdr_menu()
   if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "space" } }) then
     M.log("Alt+Space", "Forwarded to herdr", "forward")
   end
 end
 
--- Cmd+Y: copy visible text by hint with tiny-fingers (Herdr's Ctrl+b f);
--- web URLs also open in Chrome.
 function M.herdr_yank()
   if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "f" } }) then
     M.log("Cmd+Y", "Copy visible text by hint")

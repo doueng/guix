@@ -5,8 +5,6 @@
             [clojure.string :as str]
             [hiccup2.core :as h]))
 
-;; Elisp leader maps
-
 (defn- elisp-tokens
   "Strings, parens and atoms of elisp TEXT, without comments or character literals."
   [text]
@@ -59,8 +57,6 @@
                        :when (not (re-find #"^\s*\(:prefix" k))]
                    [k (command-label sym)])))))
 
-;; Other sources
-
 (defn kanata-layers
   "[layer [[key action comment] ...]] for each deflayermap in kanata TEXT."
   [text]
@@ -104,8 +100,6 @@
 (defn ghostty-keys [text]
   (for [[_ chord action] (re-seq #"(?m)^keybind = (.+?)=(.+)$" text)] [chord action]))
 
-;; Doom alignment
-
 (defn alignment
   "How binding B compares with Doom's DOOM-LABELS at the same keys, as leader.edn
   records it in :doom-match. Labels alone cannot tell copying text from jumping
@@ -131,8 +125,6 @@
                          (some-> (get windows (second (:keys b))) (#(vector (str % " (C-w " (second (:keys b)) ")"))))))]]
     {:keys seq-keys :label (:label b) :contexts (into {} (for [c contexts :let [a (context-action b c)] :when a] [c a]))
      :doom doom :mine (get mine seq-keys) :alignment (alignment b doom)}))
-
-;; HTML
 
 (defn- show [v] (if (string? v) v (pr-str v)))
 

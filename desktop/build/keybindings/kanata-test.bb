@@ -1,6 +1,4 @@
 ;; Usage: bb desktop/build/keybindings/kanata-test.bb <kanata_simulated_input>
-;; Replays chords through desktop/kanata.kbd in kanata's simulator and compares
-;; the emitted events with the chords each binding promises.
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.edn :as edn]

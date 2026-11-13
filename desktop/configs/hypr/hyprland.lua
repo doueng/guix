@@ -1,4 +1,3 @@
--- Guix Hyprland configuration in Hyprland 0.55's Lua format.
 -- keybindings.lua and leader.lua are generated; see keybindings/install.md.
 local keys = require("keys")
 
@@ -37,11 +36,8 @@ hl.env("XCURSOR_SIZE", "20")
 
 require("startup")
 
--- IntelliJ windows land on workspace 4.
 hl.window_rule({ name = "intellij-workspace", match = { class = "jetbrains-idea" }, workspace = "4" })
 
--- Cmd application shortcuts. Terminal bindings focus the Herdr terminal,
--- then select its Herdr tab when it is already focused.
 hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 1"))
 hl.bind("SUPER + U", hl.dsp.focus({ workspace = 2 }))
 hl.bind("SUPER + SHIFT + U", hl.dsp.focus({ workspace = 3 }))
@@ -51,7 +47,6 @@ hl.bind("SUPER + G", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 4"))
 hl.bind("SUPER + B", hl.dsp.exec_cmd("~/.local/bin/herdr-terminal"))
 hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("ghostty -e nvim ~/.config/hypr/hyprland.lua"))
 hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
--- Dictation with Hex: hold Cmd+M to talk; Hex pastes the text when you let go.
 -- Releasing M or Cmd finishes it.  Hyprland reports a release of M only while Cmd is still
 -- held, so Cmd's own release (code:133/134) also stops; the flag keeps every
 -- other Cmd release from starting a process.
@@ -107,16 +102,11 @@ end
 hl.bind("SUPER + M", release_cmd, { release = true })
 hl.bind("SUPER + code:133", release_cmd, { release = true, non_consuming = true })
 hl.bind("SUPER + code:134", release_cmd, { release = true, non_consuming = true })
--- Label every visible window, Herdr pane and editor window, then focus the typed one.
 hl.bind("SUPER + F", hl.dsp.exec_cmd("~/.local/bin/winhint"))
 
--- Top-level menus: Space Space in editors, Cmd+Space for Hyprland (leader.lua),
--- Alt+Space for Herdr.
 hl.bind("ALT + SPACE", keys.herdr_menu)
--- Yank: copy visible Herdr text by hint, from any window.
 hl.bind("SUPER + Y", keys.herdr_yank)
--- Clipboard history: Cmd+Caps+V, which kanata leaves as Super+Ctrl+V. Picks an
--- entry in Dusk, copies it and pastes it.
+-- Cmd+Caps+V, which kanata leaves as Super+Ctrl+V.
 hl.bind("SUPER + CTRL + V", hl.dsp.exec_cmd("~/.local/bin/clipboard-history pick"))
 
 require("keybindings")

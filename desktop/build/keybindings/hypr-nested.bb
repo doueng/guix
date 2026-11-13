@@ -1,7 +1,4 @@
 #!/usr/bin/env bb
-;; Runs desktop/configs/hypr/hyprland.lua in a nested Hyprland and types keys
-;; into it with wtype. The nested window waits on a hidden special workspace,
-;; startup programs are disabled, and the keybinding log goes to a temp file.
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[cheshire.core :as json]
@@ -126,9 +123,8 @@
   (let [f (str work "/plain")]
     (check (not (and (fs/exists? f) (pos? (fs/size f))))
            (str "the other Ghostty window receives nothing, got " (pr-str (when (fs/exists? f) (slurp f))))))
-  ;; Now press the chord itself. Keys Hyprland sends while wtype still holds
-  ;; Alt arrive garbled, though they arrive intact through kanata, so this
-  ;; checks the bind and the focus only.
+  ;; Keys Hyprland sends while wtype still holds Alt arrive garbled, though they
+  ;; arrive intact through kanata, so this checks the bind and the focus only.
   (no-herdr-window!)
   (client! "com.mitchellh.ghostty.herdr" "sleep" "30")
   (hypr "dispatch" "hl.dsp.focus({ window = \"class:^com\\\\.mitchellh\\\\.ghostty$\" })")

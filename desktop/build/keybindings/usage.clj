@@ -1,9 +1,6 @@
 #!/usr/bin/env bb
 ;; Usage: bb desktop/build/keybindings/usage.clj [--log PATH] [--leader PATH]
 ;;          [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--top N]
-;; `keylog report` runs this. It weights each logged binding's physical cost by
-;; how often it ran, and compares the use of leader.edn's bindings with the
-;; grammar's rule that the most frequent actions take one key after the leader.
 (ns keybindings-usage
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
