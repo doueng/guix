@@ -4,9 +4,6 @@
 ;; Every source reads installed versions from the files or profiles that hold
 ;; them, so this keeps no inventory of its own; it only caches latest versions,
 ;; per source, and looks again when that cache is a day old or a pin changed.
-;; Source release reports how far Guix trails GitHub releases; only
-;; `updates apply release/NAME' acts on it, opting NAME in to source latest.
-;; apply builds what it changed on the remote builder before you pull or switch.
 (ns updates
   (:require [babashka.classpath :as classpath]
             [babashka.fs :as fs]
@@ -16,7 +13,6 @@
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
-;; desktop/lib: the builder's address (builder.clj).
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
 (require '[builder])
 
@@ -47,7 +43,6 @@
   (cond-> (if (and compare current latest) (compare-url compare current latest) (:changelog item))
     held (str " (held: " held ")")))
 
-;; Guix channels pin commits in channels.scm; their packages follow the pin.
 (def channels-file (or (System/getenv "UPDATES_CHANNELS") (in-repo "channels.scm")))
 
 (defn channel-items []
@@ -74,7 +69,6 @@
 (defn channel-apply! [items]
   (spit channels-file (bumped-channels items)))
 
-;; Packages installed from the channels, at the versions a channel bump brings.
 ;; Comparing the newest version per name before and after the bump hides older
 ;; variants that stay installed.
 (def guix-versions-script
@@ -112,8 +106,6 @@
 
 (defn warn [& parts] (binding [*out* *err*] (println (apply str "updates: " parts))))
 
-;; The remote builder (docs/remote-builder-plan.html): heavy builds offload or
-;; prebuild there and the laptop downloads them from its publish server.
 (def builder-publish builder/publish)
 
 (def builder-up?
@@ -127,7 +119,6 @@
     ["--max-jobs=0" (str "--substitute-urls=" builder-publish " https://bordeaux.guix.gnu.org")]
     (do (warn "builder unreachable at " builder-publish "; building on the laptop") [])))
 
-;; Name the failing module and exception from a failed time-machine build log.
 (defn build-failure [message]
   (let [log (second (re-find #"View build log at '([^']+)'" message))
         lines (when log (try (str/split-lines (sh "zcat" log)) (catch Exception _ nil)))
@@ -173,7 +164,6 @@
   (channel-apply! (filter outdated? (with-latest (read-cache) (map #(assoc % :source "channel")
                                                                       (channel-items))))))
 
-;; Packages built from upstream GitHub releases or commits, one per file.
 ;; Tailscale publishes its binaries elsewhere but tags the same versions here.
 (def github-repos {"tailscale" {:repo "tailscale/tailscale" :prefix "v"}})
 
@@ -225,7 +215,6 @@
         (spit file text)
         (throw e)))))
 
-;; Upstream code vendored under desktop/, recorded in desktop/upstream.edn.
 (def upstream-file (in-repo "desktop/upstream.edn"))
 
 (defn checkout [repo]
@@ -304,7 +293,6 @@ copy; return the files left with conflict markers."
                            (str "$1" latest)))
         (doseq [file conflicts] (println (str "  conflict: " file)))))))
 
-;; Skills installed by the skills CLI, which pins each folder's content hash.
 (def skills-lock (in-repo "skills-lock.json"))
 
 (defn folder-hash
@@ -430,7 +418,6 @@ installed one, or nil."
 (defn lazy-apply! [items]
   (run! "nvim" "--headless" (str "+Lazy! update " (str/join " " (map :name items))) "+qa"))
 
-;; Pi installs npm packages pinned in the stowed settings.json.
 (def pi-settings (in-repo "desktop/pi/agent/settings.json"))
 
 (defn pi-items []
@@ -552,8 +539,6 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
 
 (defn release-apply! [items] (each-latest! #(latest-add! [%]) items))
 
-;; Opted-in newer releases of Guix packages, one (latest ...) line each in
-;; modules/engstrand/packages/latest.scm; the builder builds them in the prebuild.
 (def latest-file (in-repo "modules/engstrand/packages/latest.scm"))
 (def latest-re #"\(latest \"([^\"]+)\" \"([^\"]+)\" \"([0-9a-z]+)\" \"([^\"]+)\" (\([^)]+\)) (\S+)\)")
 (def placeholder-hash (apply str (repeat 52 "0")))
@@ -649,9 +634,8 @@ that fails and go on, then throw naming the failures."
     (try (latest-bump! {:name name :form form :current current :latest latest})
          (catch Exception e (spit latest-file text) (throw e)))))
 
-;; Rebuild steps run in this order after declarative sources change.  apply
-;; runs make prebuild itself, which builds the edited tree on the remote
-;; builder (docs/remote-builder-plan.html), so the laptop then only downloads.
+;; apply runs make prebuild itself, which builds the edited tree on the remote
+;; builder, so the laptop then only downloads.
 (def rebuild-steps ["make prebuild" "make pull" "make home-apply" "make switch" "make doom-check"])
 
 (def sources
@@ -829,16 +813,12 @@ old the rest of the cache is, in one line."
          (when (and (zero? exit) (not= committed (slurp (in-repo "desktop/bin/updates")))) " + local edits")
          " in " repo)))
 
-;; One line for a failed step: the command and exit code when a process failed.
 (defn failure [e]
   (let [{:keys [cmd exit]} (ex-data e)]
     (if (and cmd exit)
       (str (str/join " " cmd) " exited " exit)
       (or (last-line (ex-message e)) (str e)))))
 
-;; Build the edited tree, new pins included, on the builder before the laptop
-;; pulls, then check with make builder-check that make pull and the rebuilds
-;; only download.  Return :ok, :skipped or :failed.
 (defn prebuild! []
   (if-not @builder-up?
     (do (warn "prebuild skipped: builder unreachable at " builder-publish
@@ -856,9 +836,8 @@ old the rest of the cache is, in one line."
                (warn "prebuild failed: " (failure e) "; the new versions don't build, so don't pull or switch yet")
                :failed)))))
 
-;; The builder's last nightly prebuild in one line (builder-prebuild alert):
-;; ok, failed, hung, stopped running or unreachable.  Only a problem with a
-;; reachable builder fails status; the laptop is often offline.
+;; Only a problem with a reachable builder fails status; the laptop is often
+;; offline.
 (defn prebuild-status! []
   (let [{:keys [exit out err]} (p/shell {:continue true :out :string :err :string}
                                         (in-repo "desktop/bin/builder-prebuild") "alert")]

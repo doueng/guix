@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; The global command palette. Cmd+Space Space runs it from any window.
 ;;   palette          open the palette for the focused window
 ;;   palette fish     choose a fish command and print it, for fish's own binding
 ;; Editors that can open the palette themselves are asked to: Emacs over its
@@ -23,8 +22,6 @@
 
 (defn notify! [message]
   (p/process ["notify-send" "-a" "Palette" "Palette" message]))
-
-;; Context: the focused window and, in the Herdr terminal, its focused pane.
 
 (def window-contexts
   {"com.mitchellh.ghostty.herdr" :herdr

@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Taildrop between this laptop and the phone, over Tailscale.
-;;
 ;;   taildrop receive           Move files sent to this laptop into ~/Downloads/Taildrop
 ;;                              and notify; loops forever (the taildrop-receive Home service).
 ;;   taildrop send FILE...      Send FILEs to a device, the phone first.
@@ -39,8 +37,6 @@
     (if result
       (not-empty (str/trim (:out result)))
       (do (p/destroy-tree proc) nil))))
-
-;; Receive
 
 (def image-re #"(?i)\.(png|jpe?g|gif|webp|heic|heif|avif)$")
 
@@ -86,8 +82,6 @@
         (do (log "tailscale file get:" (str/trim (str (:out r) (:err r))))
             (Thread/sleep (min 60000 (* 2000 (inc failures))))
             (recur (inc failures)))))))
-
-;; Send
 
 (defn targets
   "Devices that accept files, as maps of :name :online?, phones and tablets

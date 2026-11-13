@@ -34,7 +34,6 @@
                       :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane :edit-scrollback
                                :choose-workspace :choose-agent}})
 (def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :herdr :doom-match})
-;; How a binding's meaning compares with upstream Doom's at the same keys.
 (def doom-matches #{:exact :analogous :differs})
 
 (defn- text? [v] (and (string? v) (not (str/blank? v))))
@@ -358,8 +357,6 @@
                    (bind (second (:keys b)) (action b)))))
        groups)
       [""]))))
-
-;; Herdr context: a popup that reads single keys like which-key.
 
 (defn read-key []
   (let [saved (str/trim (run! ["stty" "-g"] {:in :inherit}))]

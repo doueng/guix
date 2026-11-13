@@ -27,8 +27,6 @@
       (throw (ex-info (str "Dusk palette failed: " (:error reply)) reply)))
     (:value reply)))
 
-;; History
-
 (defn history-path [context]
   (str (or (System/getenv "XDG_STATE_HOME") (str (fs/home) "/.local/state")) "/palette/" (name context) ".edn"))
 

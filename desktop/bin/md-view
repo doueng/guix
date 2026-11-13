@@ -1,13 +1,8 @@
 #!/usr/bin/env bb
-;; md-view FILE.md|file://URI ...: render GitHub-flavored markdown with pandoc to a
-;; self-contained HTML file and open it in Chrome. The xdg handler for text/markdown
-;; (md-view.desktop, modules/engstrand/features/desktop.scm).
+;; md-view [--no-open] FILE.md|file://URI ...
 ;;
-;; Flatpak Chrome only sees ~/Downloads among home dirs (not ~/.cache, not host /tmp),
-;; so pages go to ~/Downloads/.md-view/<sha1 of path>.html. Relative images become
-;; data URIs; relative links to .md files point at their rendered pages, rendered too.
-;; A page is re-rendered only when its source is newer. --no-open renders and prints
-;; the page path.
+;; Flatpak Chrome only sees ~/Downloads among home dirs (not ~/.cache, not host
+;; /tmp), so pages go to ~/Downloads/.md-view/<sha1 of path>.html.
 
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
@@ -18,7 +13,6 @@
         '(java.util Base64))
 
 (def home (System/getProperty "user.home"))
-;; MD_VIEW_DIR overrides it for tests.
 (def out-dir (fs/path (or (System/getenv "MD_VIEW_DIR") (fs/path home "Downloads" ".md-view"))))
 (def max-pages 200)
 ;; Hyprland's PATH may lack the Home profile.

@@ -9,8 +9,7 @@
 ;;   second-brain-push x-export FILE    import the JSON from tools/x-export.js
 ;;   second-brain-push status           the builder's services, item count and page
 ;; The push key (~/.config/guix-builder/second-brain_ed25519) can only run the
-;; importer; status uses the deploy key.  The builder side is
-;; modules/engstrand/system/second-brain.scm.  See docs/remote-builder-plan.html.
+;; importer; status uses the deploy key.
 (ns second-brain-push
   (:require [babashka.classpath :as classpath]
             [babashka.fs :as fs]
@@ -69,7 +68,6 @@
 
 (defn x-likes [file]
   (if (str/ends-with? (str/lower-case (str file)) ".zip")
-    ;; Only like.js leaves the laptop, not the rest of the archive.
     (let [r (p/sh {:out :bytes} "unzip" "-p" file "data/like.js")]
       (when-not (and (zero? (:exit r)) (pos? (count (:out r))))
         (die "second-brain-push: no data/like.js in" file))

@@ -1,6 +1,5 @@
 #!/usr/bin/env bb
-;; A minimal hyprkan: switch kanata's base layer to match the focused Hyprland
-;; window. ~/.config/kanata/apps.edn maps window classes to layers.
+;; ~/.config/kanata/apps.edn maps window classes to layers.
 ;;   hyprkan          follow focus; Hyprland starts it at login
 ;;   hyprkan layer    print kanata's current layer
 ;;   hyprkan reload   make kanata reread /etc/kanata/kanata.kbd after a switch

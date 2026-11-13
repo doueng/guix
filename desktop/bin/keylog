@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Records which keybinding ran, what it did, and which program handled it.
 ;; Rows are TIME PROGRAM KEYS EFFECT KIND 2, as desktop/lib/keylog.clj describes.
 ;; Writers call `keylog add`; editors and keyleader append the same format.
 (require '[babashka.classpath :as classpath] '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])

@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; jj external diff formatter: `jj diff` output goes through pierre-diff-ansi,
-;; so jjui's fullscreen diff gets the same highlighting as its previews.
 ;; jj passes two directory trees; diff them the way git does, then highlight.
 (require '[babashka.process :as p] '[clojure.string :as str])
 (let [[left right] *command-line-args*

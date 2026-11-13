@@ -1,18 +1,11 @@
 #!/usr/bin/env bb
-;; Clipboard history with cliphist, picked in the Dusk launcher.
-;;
-;;   clipboard-history watch   Record each new clipboard entry; waits for a Wayland
-;;                             session and follows it across restarts (Home service).
+;;   clipboard-history watch   Record each new clipboard entry (Home service).
 ;;   clipboard-history store   wl-paste --watch runs this per copy, content on stdin.
 ;;   clipboard-history pick    Choose an entry (Cmd+Caps+V): copy it and paste it.
 ;;   clipboard-history wipe    Forget the whole history.
 ;;
-;; Skipped: copies that a password manager marks sensitive (wl-paste sets
-;; CLIPBOARD_STATE=sensitive for x-kde-passwordManagerHint, and cliphist drops
-;; them), copies made while a password manager's window has focus, and entries
-;; over max-bytes. The history keeps the newest max-items entries.
-;; Emacs and Neovim copy through wl-copy (T42), so their kills are recorded and
-;; a picked entry reaches them as the system clipboard.
+;; wl-paste sets CLIPBOARD_STATE=sensitive for x-kde-passwordManagerHint, and
+;; cliphist drops those copies.
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs]
          '[babashka.process :as p]
