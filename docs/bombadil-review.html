@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Whether Antithesis&#39;s Bombadil UI property tester fits oilfm and the bbh Emacs inbox: skip for oilfm, time-boxed TTY prototype for Emacs.">
+<meta name="bbh-doc" content="T174">
+<title>Bombadil for oilfm and the bbh Emacs UI</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Bombadil for oilfm and the bbh Emacs UI</h1>
+
+<p class=sub>T174 · W190 · 2026-11-13 · Tags: <span class='tag measured'>measured</span> I ran it or read it in source here; <span class='tag inferred'>inferred</span> my reading, not tested; <span class='tag guess'>guess</span> effort estimates.</p>
+<nav><a href='#verdict'>Verdict</a><a href='#what'>What it is</a><a href='#run'>Run here</a><a href='#oilfm'>oilfm</a><a href='#bbh'>bbh Emacs</a><a href='#alt'>Alternatives</a><a href='#src'>Sources</a></nav>
+
+<h2 id=verdict>Verdict</h2>
+<div class='card bad'><b>oilfm: skip Bombadil.</b> It cannot drive a native Wayland window. Also, the brief is out of date: oilfm is no longer Zig on zgui. T122 rewrote it in Rust on gpui. It already has proptest planner properties and a headless gpui <code>TestApp</code> that types keys and checks files on disk. The cheap win is a proptest <i>random key sequence</i> test on that harness, about half a day <span class='tag guess'>guess</span>.</div>
+<div class='card warn'><b>bbh Emacs UI: prototype, time-boxed to about 1.5 days</b> <span class='tag guess'>guess</span>. Bombadil's terminal driver ran <code>emacs -nw</code> on this machine at 76 states/s. The model-level rules (never waiting while working, an ask closes once) are already covered by T154/T170 properties and T66's TLA+. What is not covered is the screen: async <code>bbh inbox</code> refreshes racing real keystrokes through evil, and batch ERT never redisplays. That layer is exactly what Bombadil sees. Stop if a few hours of runs find nothing, or if flakiness from mid-redisplay samples swamps the signal.</div>
+<div class='card'><b>Web inbox (T121): later, and only if the TTY prototype pays off.</b> The browser driver gives default properties (no uncaught exceptions or console errors) for free and is the more mature driver. But Chromium is not on PATH here, and the web view mirrors the same model, so it adds less. Never point it at the live controller: it would click real answers.</div>
+
+<h2 id=what>What Bombadil is</h2>
+<p>Property-based testing for UIs, from Antithesis, MIT licensed, version 0.7.10 (repo commit 69a61bc, 2026-11-13). It's standalone: Antithesis is optional, an environment where it can also run. <span class='tag measured'>measured</span></p>
+<svg viewBox='0 0 640 120' role=img aria-label='loop'>
+<g font-size='13' text-anchor='middle'>
+<rect x='5' y='35' width='140' height='50' rx='8' fill='#e6f0f5' stroke='#2f6f8f'/><text x='75' y='57'>extract state</text><text x='75' y='74' font-size='11'>DOM, or terminal grid</text>
+<rect x='170' y='35' width='140' height='50' rx='8' fill='#e4f3ea' stroke='#2e7d4f'/><text x='240' y='57'>check LTL props</text><text x='240' y='74' font-size='11'>always / next / eventually</text>
+<rect x='335' y='35' width='140' height='50' rx='8' fill='#f7efdc' stroke='#8a6a1f'/><text x='405' y='57'>pick weighted action</text><text x='405' y='74' font-size='11'>from your generators</text>
+<rect x='500' y='35' width='135' height='50' rx='8' fill='#f0e9f6' stroke='#7a4fa0'/><text x='567' y='57'>wait for quiescence</text><text x='567' y='74' font-size='11'>output stops, or timeout</text>
+</g>
+<g stroke='#5d6678' fill='none' stroke-width='1.5'><path d='M145 60h22M310 60h22M475 60h22'/><path d='M567 85v20H75v-18'/></g>
+</svg>
+<div class=table><table>
+<tr><th>Question</th><th>Answer</th></tr>
+<tr><td>What it drives</td><td>Two drivers. <b>browser</b>: anything with a DOM, through Chrome or Chromium over CDP. It can also attach to an existing Chrome or Electron app on a remote-debugging port. <b>terminal</b> (marked experimental): any program on a PTY (portable-pty), with the screen parsed by libghostty-vt. No native GUI driver, so nothing for Wayland or X11 windows. <span class='tag measured'>measured</span></td></tr>
+<tr><td>How it explores</td><td>Random weighted choice from action templates that your generators return for the current state (<code>actions</code>, <code>weighted</code>, <code>map/filter/flatMap</code>, <code>.when</code>). The terminal actions are TypeText (regex or charset generators), Resize, Click(row, column) and ScrollUp/Down. In the browser, JS coverage is instrumented and fed to the Antithesis fuzzer; there is no coverage guidance when running locally <span class='tag inferred'>inferred</span>. <code>fuzz</code> runs many short runs (experimental).</td></tr>
+<tr><td>Specs</td><td>TypeScript modules that export properties and generators. <code>extract(state =&gt; …)</code> makes a Cell; properties are LTL formulas: <code>always</code>, <code>next</code>, <code>eventually</code>, <code>now</code>, <code>.and/.or/.implies/not</code>. Terminal state is <code>grid</code> (rows, cells, styles), <code>scrollback</code>, <code>cursor</code>, <code>exitStatus</code> and <code>lastAction</code>. Custom actions are browser-only. <span class='tag measured'>measured</span></td></tr>
+<tr><td>Runtime</td><td>One static Rust binary. It transpiles TS with oxc and runs it in the boa JS engine, so Node is not needed; npm only provides the type definitions. Specs see only the extracted state and cannot read files <span class='tag inferred'>inferred</span> from boa having no fs bindings.</td></tr>
+<tr><td>Debugging</td><td>Traces, <code>--reproduce</code> (best effort), <code>shrink</code> (experimental), <code>browser inspect</code> web viewer. The terminal <code>trace</code> viewer is documented on main but not yet in 0.7.10. <span class='tag measured'>measured</span></td></tr>
+<tr><td>aarch64 / Guix</td><td>The release ships <code>bombadil-aarch64-linux</code>, statically linked with musl (14 MB), and it runs on this Asahi kernel. There's no Guix package <span class='tag inferred'>inferred</span>. A tiny binary-download package or a pinned fetch in a bb task would do. There's also a Nix flake. <span class='tag measured'>measured</span></td></tr>
+</table></div>
+
+<h2 id=run>Smoke run on this machine</h2>
+<p><span class='tag measured'>measured</span> I downloaded the release binary to /tmp and ran a 20 s terminal test against <code>emacs -Q -nw</code>. The spec said the mode line names *scratch*, and the generators typed letters plus C-n/C-p/C-f/C-b/RET/DEL/C-g (never C-x).</p>
+<ul>
+<li>Throughput 76.3 states/s, default quiescence 5 ms.</li>
+<li>It flagged a violation after about 10 s, a state where the mode-line row was blank. The likely cause is a sample taken mid-redisplay or a grown echo area <span class='tag inferred'>inferred</span>. This is the main risk for Emacs: properties must tolerate transient frames, or <code>--quiescence-timeout-ms</code> must be raised.</li>
+<li><code>terminal shrink</code> reproduced the violation 2 of 3 times, then failed with “No such file or directory”. Shrinking is labeled experimental and was not usable in this run.</li>
+</ul>
+<p>Spec and trace: /tmp/bombadil-spec/emacs.ts and /tmp/bombadil-spec/trace.bin (temporary).</p>
+
+<h2 id=oilfm>oilfm</h2>
+<div class='card warn'><b>Brief correction</b> <span class='tag measured'>measured</span>. /home/engstrand/projects/oilfm is a Rust Cargo workspace on gpui (Zed). T122 commit ee1124d0 says “rewrite the GUI on gpui … drop vendored zgui”. The check is <code>scripts/cargo test --workspace --features oilfm/ui-tests</code>, not <code>zig build test</code>. Zig fuzzing therefore no longer applies; cargo-fuzz or proptest are the native tools.</div>
+<h3>Fit</h3>
+<ul>
+<li>Native Wayland window: Bombadil has no driver for it. A Wayland driver would mean ydotool plus screenshots and OCR, which is flaky and outside Bombadil.</li>
+<li>Test mode on a TTY: oilfm-core's editor and session are GUI-free, so a small TUI front-end could expose them to the terminal driver. But that tests a front-end nobody uses, and the core is already reachable from Rust tests.</li>
+<li>Port the planner to a web view: same objection, and more work.</li>
+<li>What exists already <span class='tag measured'>measured</span>: <code>crates/oilfm-core/tests/plan_props.rs</code> runs 512 proptest cases. Each one builds a random tree and random edits, plans, applies, and checks that the result equals the edited buffers. Deletes are exactly the confirmed ones, nothing outside the root and trash changes, a refused plan touches nothing, and a stale plan touches nothing. <code>crates/oilfm/src/view_tests.rs</code> drives the real view headlessly with <code>simulate_keystroke</code> and checks files on disk.</li>
+</ul>
+<h3>Properties you named, and where they belong</h3>
+<div class=table><table>
+<tr><th>Property</th><th>Covered now</th><th>Best home</th></tr>
+<tr><td>Apply never deletes outside the confirmation</td><td>Planner and executor level, yes (plan_props). Through the keys, only by example.</td><td>A random key-sequence proptest over <code>TestApp</code>: disk changes only after a confirm panel showed and <code>y</code> or Enter was pressed, and every removed path was in that panel's delete list.</td></tr>
+<tr><td>Renames and moves applied exactly</td><td>Yes, plan_props property 1</td><td>Keep. Add: after save plus y, a re-list equals the buffer names.</td></tr>
+<tr><td>h/l keep the cursor</td><td>Example tests</td><td>The same key-sequence test: after <code>l</code> into a dir then <code>h</code>, the cursor is on that dir's line. <code>n</code>, <code>q</code> or Esc on the panel changes nothing on disk.</td></tr>
+</table></div>
+<h3>Plan (if wanted): about 0.5 day <span class='tag guess'>guess</span></h3>
+<ol><li>A proptest strategy for <code>Vec&lt;Key&gt;</code> weighted over j k h l dd yy p A&lt;text&gt;Esc o&lt;name&gt;Esc u :w y n Esc, on a random small tree, reusing <code>mount</code> from view_tests.rs.</li>
+<li>Check the invariants above after each key. proptest shrinks the sequence for free, which Bombadil's terminal shrink could not do here.</li>
+<li>Run it with the existing ui-tests feature. It needs no Wayland, so it runs on Asahi and in CI.</li></ol>
+
+<h2 id=bbh>bbh Emacs UI</h2>
+<h3>What is already covered</h3>
+<ul>
+<li><span class='tag measured'>measured</span> In /home/engstrand/guix/desktop/build/bbh/test/bbh/super_property_test.clj, random command sequences check “a Worker seen mid-turn is never shown as waiting”, that waiting agrees with the asks, and the ask lifecycle ranks (an ask is answered once, a closed ask refuses an answer).</li>
+<li>T66 TLA+ (/home/engstrand/guix/desktop/build/bbh/verify/tla/Super.tla) checks StoppedAskWaits, TypedAnswerCloses, AnsweredAfterTaken and NoReplyWaitsOnFinished.</li>
+<li>T154 harness_property_test.clj covers the journal, mailbox, checkpoint and transcript. T170 added a seeded ERT property for inbox rows (width and order) in agent-shell-test.el.</li>
+<li>Emacs takes its status from the controller, which decides the <code>:status</code> of each row (bbh-super.el, the status glyph function). So “never waiting while working” is a model rule already checked, and the UI only has to render it faithfully.</li>
+</ul>
+<h3>The gap Bombadil fits</h3>
+<p>The screen layer. The inbox reloads by running <code>bbh inbox</code> asynchronously (<code>make-process</code> with a sentinel), and keys arrive through evil and keymaps meanwhile. Batch ERT never redisplays (the tty-scroll test says so). The existing TTY tests use <code>script</code> plus <code>emacs -nw</code> but feed keys with <code>execute-kbd-macro</code>. Those keys probably don't interleave with process output the way real typing does <span class='tag inferred'>inferred</span>. Bombadil types into a real PTY, waits for output, and checks temporal properties on what is drawn.</p>
+<h3>Seams that already exist <span class='tag measured'>measured</span></h3>
+<ul>
+<li><code>eng/bbh-inbox-bbh</code> overrides the bbh command the inbox runs, so Emacs can be pointed at a test controller.</li>
+<li>web_test.clj's <code>start-super</code> runs a controller in temp dirs with no-op launch, retire and release, and <code>run-worker</code> starts a Worker on it. A churn script on top can make fake Workers ask, note, go busy and finish.</li>
+</ul>
+<h3>Properties as Bombadil formulas <span class='tag inferred'>inferred design</span></h3>
+<div class=table><table>
+<tr><th>Your property</th><th>Screen version</th></tr>
+<tr><td>Status never shows waiting while working</td><td><code>always</code>: no row has ◐ and an open question, and no row in a waiting section (STOPPED, HOLDING-UP, WAITING) shows ◐. Bombadil cannot read controller state, so the fixture gives every ask a unique text to make the screen self-describing.</td></tr>
+<tr><td>Answering an ask closes it exactly once</td><td>After a pick key (1–9 or .) on a row showing ask X, <code>eventually</code> X is gone, and from then on <code>always</code> X never shows again (unique texts make reappearance a bug).</td></tr>
+<tr><td>C-n always sends</td><td>After C-n with a non-empty draft, <code>eventually</code> the draft is empty, and the echo area <code>always</code> lacks “is undefined”. Covers normal and insert state and an open completion popup (agent-shell.el binds a popup-aware C-n).</td></tr>
+<tr><td>Navigation keeps point</td><td>If the last action was not a motion or pick key, then <code>next</code> the selected thread id is unchanged unless that row disappeared, which catches async refresh jumps.</td></tr>
+</table></div>
+<h3>Prototype plan: about 1.5 days <span class='tag guess'>guess</span></h3>
+<ol>
+<li><b>Fixture (3 h).</b> A bb task that starts a temp controller as <code>start-super</code> does, then churns fake Workers on a timer (ask with unique text, note, busy and idle, finish). It prints the dir.</li>
+<li><b>Launcher (2 h).</b> <code>emacs -Q -nw</code> that loads evil and bbh-super.el the way tty-scroll-test.el does, with <code>eng/bbh-inbox-bbh</code> pointed at the fixture, opening the split inbox.</li>
+<li><b>Spec (4 h).</b> Extractors that parse rows (glyph, id, section header, ask text), the selected row, the evil state and the echo row. Weighted generators: j/k/TAB/RET/]t/1–9/./i plus text/C-n/Esc/gr. Never SPC q, C-x C-c, J (jjui) or D/archive on non-fixture rows. The four properties above, written to tolerate one transient frame, with <code>--quiescence-timeout-ms</code> around 30.</li>
+<li><b>Run and judge (3 h).</b> Run 3 × 10 min, triage, and write up. Keep it only if it finds a real bug or runs clean and cheap. Then add a <code>bb test:bombadil</code> task and a checks.edn rule, with the binary pinned by hash. It stays out of <code>make verify</code> by default because it is slow.</li>
+</ol>
+<p>Risks: the terminal driver is marked experimental, shrink failed here, and repro was 2 of 3. Emacs redraw timing needs the property tolerance above. Real Doom config is heavy, so test the bbh modules on <code>-Q</code> plus evil as the TTY tests do, which misses Doom keymap interactions.</p>
+
+<h2 id=alt>Alternatives compared</h2>
+<div class=table><table>
+<tr><th>Tool</th><th>Layer</th><th>Strength</th><th>Misses</th><th>Cost</th></tr>
+<tr><td>T66 TLA+</td><td>Protocol</td><td>Exhaustive within bounds, liveness</td><td>Code drift, UI</td><td>Exists</td></tr>
+<tr><td>T154/T170 properties (test.check style, bbh.props seeds)</td><td>Controller code</td><td>Real code, seeds and replays</td><td>Emacs, screen</td><td>Exists</td></tr>
+<tr><td>ERT with random keys (seeded, like T170's row property)</td><td>Elisp, whitebox</td><td>Reads buffers and vars directly, fast, no new dependency</td><td>Batch has no redisplay. In a TTY frame, keys come from a macro, not a PTY</td><td>About 0.5–1 day for a TTY variant</td></tr>
+<tr><td>Bombadil terminal</td><td>Black-box screen</td><td>Real PTY input, LTL, traces, Antithesis-ready</td><td>Cannot see state, experimental, flaky timing</td><td>About 1.5 days prototype</td></tr>
+<tr><td>Bombadil browser on T121 web</td><td>Black-box DOM</td><td>Mature driver, free default properties</td><td>Not Emacs, needs Chromium</td><td>About 1 day after the TTY prototype</td></tr>
+<tr><td>oilfm proptest over TestApp</td><td>Rust, whitebox</td><td>Shrinking, disk oracle, headless</td><td>Real Wayland input</td><td>About 0.5 day</td></tr>
+<tr><td>Zig fuzzing</td><td>n/a</td><td colspan=3>oilfm is no longer Zig</td></tr>
+</table></div>
+<p>If you only spend half a day on Emacs, a seeded random key-sequence ERT run in the existing TTY harness is the cheaper first step <span class='tag inferred'>inferred</span>. Bombadil is worth the extra day only for real-PTY timing and the trace tooling.</p>
+
+<h2 id=src>Sources</h2>
+<ul class=cite>
+<li>/home/engstrand/.cache/checkouts/github.com/antithesishq/bombadil/docs/manual/src/03-specification-language.md</li>
+<li>/home/engstrand/.cache/checkouts/github.com/antithesishq/bombadil/lib/bombadil/src/specification/terminal/index.ts</li>
+<li>/home/engstrand/.cache/checkouts/github.com/antithesishq/bombadil/lib/bombadil-cli/src/terminal.rs</li>
+<li>/home/engstrand/.cache/checkouts/github.com/antithesishq/bombadil/.github/workflows/ci.yml</li>
+<li>https://antithesishq.github.io/bombadil/</li>
+<li>/home/engstrand/projects/oilfm/DESIGN.md</li>
+<li>/home/engstrand/projects/oilfm/crates/oilfm-core/tests/plan_props.rs</li>
+<li>/home/engstrand/projects/oilfm/crates/oilfm/src/view_tests.rs</li>
+<li>/home/engstrand/guix/desktop/configs/doom/bbh-super.el</li>
+<li>/home/engstrand/guix/desktop/build/bbh/test/bbh/super_property_test.clj</li>
+<li>/home/engstrand/guix/desktop/build/bbh/test/bbh/web_test.clj</li>
+<li>/home/engstrand/guix/desktop/build/bbh/test/tty-scroll-test.el</li>
+<li>/home/engstrand/guix/desktop/build/bbh/verify/tla/Super.tla</li>
+</ul>
+</main></body></html>
