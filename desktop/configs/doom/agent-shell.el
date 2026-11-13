@@ -691,12 +691,24 @@ strips `display' text properties from whole blocks on partial redisplays."
     (dolist (w followers) (set-window-point w (point-max)))))
 
 (defun eng/bbh-transcript--latest-start (window)
-  "The start of WINDOW that puts the end of its transcript on the bottom row."
+  "The start of WINDOW that puts the end of its transcript on the bottom row.
+Moving back by screen lines miscounts text that folded tool results and
+hidden block markup keep off the screen, in either direction: it left blank
+rows below the end, as many as eight under long folded output.  So the
+backward move only finds a point safely above the window, and the start is
+found moving forward, which lays text out as redisplay does: the rows from
+there to the end, less the window's, are the screen lines to skip."
   (with-current-buffer (window-buffer window)
     (save-excursion
-      (goto-char (point-max))
-      (vertical-motion (- 1 (window-body-height window)) window)
-      (point))))
+      (let ((rows (window-body-height window))
+            (count (lambda () (count-screen-lines (point) (point-max) t window))))
+        (goto-char (point-max))
+        (vertical-motion (- (* 2 rows)) window)
+        (while (and (> (point) (point-min)) (< (funcall count) rows))
+          (vertical-motion (- rows) window))
+        (let ((excess (- (funcall count) rows)))
+          (when (> excess 0) (vertical-motion excess window)))
+        (point)))))
 
 (defun eng/bbh-transcript--clamp-scroll ()
   "Pull back any window that scrolled past the end of a transcript.

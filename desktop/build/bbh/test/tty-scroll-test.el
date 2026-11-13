@@ -83,8 +83,40 @@
         (unless (< (window-start window) bottom)
           (error "M-k no longer scrolls back"))))))
 
+(defun bbh-tty--rendered (n)
+  "Show a fresh transcript of N turns rendered as bbh renders them: a
+prompt, two tool calls whose long output is folded, and a reply."
+  (delete-other-windows)
+  (when (get-buffer "bbh transcript") (kill-buffer "bbh transcript"))
+  (switch-to-buffer (get-buffer-create "bbh transcript"))
+  (eng/bbh-transcript-mode)
+  (setq eng/bbh-transcript--tools (make-hash-table :test #'equal))
+  (dotimes (i n)
+    (eng/bbh-transcript--prompt (format "prompt %d" i))
+    (dotimes (k 2)
+      (eng/bbh-transcript--tool
+       (format "call-%d-%d" i k)
+       `((:raw-input . ((code . ,(format "(step %d)" k)))) (:status . "completed")
+         (:content . (((content . ((text . ,(concat (format "```clojure\n(step %d)\n```\n\n```\nfirst\n" k)
+                                                     (make-string 4500 ?a) "\nlast\n```"))))))))))
+    (eng/bbh-transcript--reply-chunk "Done.\n\n```clojure\n(a b)\n```")
+    (setq eng/bbh-transcript--reply nil))
+  (goto-char (point-max))
+  (selected-window))
+
+(defun bbh-tty--check-folded-end ()
+  "The latest start keeps the end on the bottom row when folded long output
+and hidden block markup sit in the last window, whose screen lines moving
+back from the end overcounted."
+  (let ((window (bbh-tty--rendered 6)))
+    (set-window-start window (eng/bbh-transcript--latest-start window))
+    (bbh-tty--assert-no-overscroll window "the latest start over folded tool output")
+    (unless (pos-visible-in-window-p (point-max) window)
+      (error "the latest start over folded tool output leaves the end below the window"))))
+
 (defun bbh-tty--check ()
   (bbh-tty--check-composer)
+  (bbh-tty--check-folded-end)
   (let ((window (bbh-tty--transcript 200)))
     (bbh-tty--press "<f5>" 1)
     (unless (> (window-start window) (point-min))
