@@ -69,6 +69,8 @@ conversation."
          (eng/bbh-inbox-switch (eng/bbh--shell)))
        (if (eng/bbh-super--to-router-p (eng/bbh--shell))
            (let ((composer (current-buffer)))
+             ;; As agent-shell says for a Worker; the controller would refuse blank text.
+             (when (string-empty-p draft) (user-error "Nothing to send"))
              (eng/bbh-super--say-from (eng/bbh--shell) draft
                                       (lambda () (when (buffer-live-p composer)
                                                    (with-current-buffer composer (erase-buffer))))))

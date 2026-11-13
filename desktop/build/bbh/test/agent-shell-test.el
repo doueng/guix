@@ -799,6 +799,27 @@ and the transcript keeps q and focus moves in normal state."
       (when-let* ((s (eng/bbh-super--shell "super-W9"))) (eng/bbh-super--kill s))
       (delete-directory repo t))))
 
+(ert-deftest bbh-an-empty-draft-to-the-router-sends-nothing ()
+  "C-n on an empty composer of the Router says there is nothing to send, as
+a Worker's does, instead of the controller's refusal of blank text, which
+showed as `Router: bbh super: invalid invalid' (Bombadil, T174)."
+  (let* ((router (generate-new-buffer "Router test"))
+         (said nil))
+    (with-current-buffer router (setq eng/bbh-super-conversation "router"))
+    (unwind-protect
+        (cl-letf (((symbol-function 'eng/bbh--shell) (lambda () router))
+                  ((symbol-function 'eng/bbh-super-say) (lambda (text &optional on-done) (push text said) (when on-done (funcall on-done)))))
+          (with-temp-buffer
+            (insert "  \n ")
+            (should (equal "Nothing to send" (cadr (should-error (eng/bbh-send) :type 'user-error))))
+            (should-not said)
+            (erase-buffer)
+            (insert "hello")
+            (eng/bbh-send)
+            (should (equal '("hello") said))
+            (should (equal "" (buffer-string)))))
+      (kill-buffer router))))
+
 (ert-deftest bbh-super-end-frees-a-finished-workers-session-and-keeps-its-buffer ()
   ;; The controller ends a finished Worker's session to free its memory. Its
   ;; process goes, its buffers stay readable, and no client is made again.
