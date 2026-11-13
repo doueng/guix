@@ -1022,7 +1022,10 @@ else the first thread waiting on you, else the first."
       found)))
 
 (defun eng/bbh-inbox--draw-list ()
-  "Draw the thread list, its cursor on the selected thread at the same screen line."
+  "Draw the thread list, its cursor on the selected thread at the same screen
+line, unless that would leave the window empty below the list while rows hide
+above it, such as a thread that just began to wait on you.  Then the list's
+end sits at the window's bottom, and a list that fits starts at its top."
   (with-current-buffer (eng/bbh-inbox--list-buffer)
     (unless (derived-mode-p 'eng/bbh-threads-mode) (eng/bbh-threads-mode))
     (let* ((windows (mapcar (lambda (window)
@@ -1042,7 +1045,12 @@ else the first thread waiting on you, else the first."
         (goto-char pos)
         (pcase-dolist (`(,window ,row) windows)
           (set-window-point window pos)
-          (set-window-start window (save-excursion (goto-char pos) (forward-line (- row)) (point)) t)))
+          (set-window-start window
+                            (min (save-excursion (goto-char pos) (forward-line (- row)) (point))
+                                 (save-excursion (goto-char (point-max))
+                                                 (forward-line (- 1 (window-body-height window)))
+                                                 (line-beginning-position)))
+                            t)))
       (when (bound-and-true-p hl-line-mode) (hl-line-highlight)))))
 
 (defun eng/bbh-inbox--subtree (outline id)

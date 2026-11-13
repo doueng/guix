@@ -1462,6 +1462,59 @@ SPEC is (VIEW ORG LOG)."
       (should (equal "T3" (eng/bbh-inbox--at-point)))
       (eng/bbh-inbox-toggle-view))))
 
+(ert-deftest bbh-inbox-split-reload-keeps-a-long-lists-screen-line ()
+  ;; A list taller than its window keeps the selected row on its screen line
+  ;; when a thread arrives above, so the list does not jump under you.
+  (let ((rows (cl-loop for n from 1 to 60 collect (list (format "T%d" n) "new" "working" 0 nil (format "thread %d" n)))))
+    (bbh-test--with-split-inbox (view org log)
+      (with-temp-file view (insert (bbh-test--split rows)))
+      (with-temp-file org (insert "bbh inbox · 0 need you\n"))
+      (eng/bbh-inbox)
+      (should (bbh-test--wait (lambda () (with-current-buffer "*bbh threads*" (string-match-p "T60" (buffer-string)))) 10))
+      (eng/bbh-inbox--select "T40")
+      (with-current-buffer "*bbh threads*"
+        (set-window-start (get-buffer-window) (save-excursion (forward-line -5) (point)))
+        (let ((row (count-lines (window-start) (point))))
+          (should (> (window-start) (point-min)))
+          (with-temp-file view (insert (bbh-test--split (cons '("T0" "stopped" "on-you" 1 t "zeroth") rows))))
+          (eng/bbh-inbox--changed)
+          (mapc #'cancel-timer (bbh-test--inbox-reloads))
+          (eng/bbh-inbox--reload)
+          (should (bbh-test--wait (lambda () (string-match-p "T0 " (buffer-string))) 10))
+          (should (equal "T40" (eng/bbh-inbox--at-point)))
+          (should (= row (count-lines (window-start) (point)))))))))
+
+(ert-deftest bbh-inbox-split-reload-fills-the-window-before-hiding-rows-above ()
+  ;; The selection at the top of a list one line taller than its window; three
+  ;; threads below it begin to wait on you and sort above it.  Keeping its
+  ;; screen line would hide them with the window empty below the list (T174).
+  (bbh-test--with-split-inbox (view org log)
+    (with-temp-file view (insert (bbh-test--split '(("T1" "new" "working" 0 nil "one")))))
+    (with-temp-file org (insert "bbh inbox · 0 need you\n"))
+    (eng/bbh-inbox)
+    (should (bbh-test--wait (lambda () (with-current-buffer "*bbh threads*" (string-match-p "T1 " (buffer-string)))) 10))
+    (let* ((height (window-body-height (get-buffer-window "*bbh threads*")))
+           ;; Rows, a blank line and the legend: one line more than the window.
+           (rows (cl-loop for n from 1 to (1- height)
+                          collect (list (format "T%d" n) "new" "working" 0 nil (format "thread %d" n))))
+           (waiting (lambda (n) (list (format "T%d" n) "stopped" "on-you" 1 nil (format "thread %d" n)))))
+      (with-temp-file view (insert (bbh-test--split rows)))
+      (eng/bbh-inbox-refresh)
+      (should (bbh-test--wait (lambda () (with-current-buffer "*bbh threads*" (string-match-p (format "T%d " (1- height)) (buffer-string)))) 10))
+      (eng/bbh-inbox--select "T1")
+      (with-current-buffer "*bbh threads*"
+        (set-window-start (get-buffer-window) (point-min))
+        (with-temp-file view
+          (insert (bbh-test--split (append (mapcar waiting '(5 6 7))
+                                           (seq-remove (lambda (r) (member (car r) '("T5" "T6" "T7"))) rows)))))
+        (eng/bbh-inbox--changed)
+        (mapc #'cancel-timer (bbh-test--inbox-reloads))
+        (eng/bbh-inbox--reload)
+        (should (bbh-test--wait (lambda () (string-prefix-p "T5" (cadr (split-string (buffer-string))))) 10))
+        (should (equal "T1" (eng/bbh-inbox--at-point)))
+        (should (>= (count-lines (window-start (get-buffer-window)) (point-max)) height))
+        (should (= 1 (count-lines (point-min) (window-start (get-buffer-window)))))))))
+
 (ert-deftest bbh-inbox-split-reload-keeps-the-selection-and-gv-switches-views ()
   (bbh-test--with-split-inbox (view org log)
     (with-temp-file view (insert (bbh-test--split bbh-test--split-rows)))
@@ -1470,8 +1523,9 @@ SPEC is (VIEW ORG LOG)."
     (should (bbh-test--wait (lambda () (string-match-p "T1 first" (bbh-test--right))) 10))
     (eng/bbh-inbox--select "T3")
     (with-current-buffer "*bbh threads*"
-      (let ((row (count-lines (window-start) (point))))
-        ;; A push with a new thread above: the selection and its screen line stay.
+      (progn
+        ;; A push with a new thread above: the selection stays, and a list
+        ;; that fits shows the new row rather than hiding it above (T174).
         (with-temp-file view (insert (bbh-test--split (cons '("T0" "stopped" "on-you" 1 t "zeroth") bbh-test--split-rows))))
         (eng/bbh-inbox--changed)
         (mapc #'cancel-timer (bbh-test--inbox-reloads))
@@ -1479,7 +1533,7 @@ SPEC is (VIEW ORG LOG)."
         (should (bbh-test--wait (lambda () (string-match-p "T0" (buffer-string))) 10))
         (should (equal "T3" eng/bbh-inbox--selected))
         (should (equal "T3" (eng/bbh-inbox--at-point)))
-        (should (= row (count-lines (window-start) (point))))
+        (should (= (point-min) (window-start)))
         (should (string-match-p "third" (bbh-test--right)))
         (should (bbh-test--logged-p log "split T3")))
       ;; RET on the archived row shows the archived threads.
