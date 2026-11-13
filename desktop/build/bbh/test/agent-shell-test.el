@@ -435,6 +435,31 @@ Bombadil found each chunk pulling the reader back to the reply's start."
                            "\n* again\n\n#+begin_src clojure\n(+ 5 6)\n#+end_src\n")))
     (kill-buffer)))
 
+(ert-deftest bbh-transcript-a-reply-that-renders-again-above-the-reader-keeps-them-in-place ()
+  "A chunk can change how text above a scrolled-up reader renders, as a
+closing backtick does to its line.  The reader stays at their position,
+not where the change began (Bombadil, T174)."
+  (with-current-buffer (get-buffer-create "bbh rerender test")
+    (eng/bbh-transcript-mode)
+    (setq eng/bbh-transcript--tools (make-hash-table :test #'equal))
+    (eng/bbh-transcript--prompt "go")
+    (eng/bbh-transcript--reply-chunk "Line one.\nsee `foo bar baz")
+    (let* ((reader (selected-window))
+           (follower (split-window reader)))
+      (set-window-buffer reader (current-buffer))
+      (set-window-buffer follower (current-buffer))
+      (set-window-point follower (point-max))
+      (let ((here (save-excursion (goto-char (point-min)) (search-forward "bar") (point))))
+        (set-window-point reader here)
+        (set-window-start reader here)
+        (eng/bbh-transcript--reply-chunk "` and more")
+        (should (string-match-p "see ~foo bar baz~ and more" (buffer-string)))
+        (should (= here (window-point reader)))
+        (should (= here (window-start reader)))
+        (should (= (point-max) (window-point follower))))
+      (delete-window follower))
+    (kill-buffer)))
+
 (ert-deftest bbh-resuming-this-conversation-keeps-the-transcript ()
   (save-window-excursion
     (delete-other-windows)

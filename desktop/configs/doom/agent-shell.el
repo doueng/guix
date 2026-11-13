@@ -714,19 +714,30 @@ strips `display' text properties from whole blocks on partial redisplays."
                (eng/bbh-transcript--markup-overlay (1- (match-beginning 0)) (match-end 0) "")))))))
 
 (defun eng/bbh-transcript--edit (change)
-  "Call CHANGE at the end of the transcript, keeping followers at the end."
-  (let ((inhibit-read-only t)
-        (eng/bbh-transcript--dirty nil)
-        (followers (seq-filter (lambda (w) (= (window-point w) (point-max)))
-                               (get-buffer-window-list nil nil t)))
-        (at-end (= (point) (point-max))))
+  "Call CHANGE at the end of the transcript, keeping followers at the end.
+CHANGE rewrites only the tail, so the text before any position that is not
+at the end stays put, and a reader there keeps it.  A reader inside the
+rewritten tail, as when a closing backtick renders their line again, keeps
+the same position rather than falling back to where the rewrite began."
+  (let* ((inhibit-read-only t)
+         (eng/bbh-transcript--dirty nil)
+         (windows (mapcar (lambda (w) (list w (window-point w) (window-start w)))
+                          (get-buffer-window-list nil nil t)))
+         (here (point))
+         (at-end (= here (point-max)))
+         (end (point-max)))
     (save-excursion
       (goto-char (point-max))
       (funcall change)
       (when eng/bbh-transcript--dirty
         (eng/bbh-transcript--decorate (car eng/bbh-transcript--dirty) (cdr eng/bbh-transcript--dirty))))
-    (when at-end (goto-char (point-max)))
-    (dolist (w followers) (set-window-point w (point-max)))))
+    (goto-char (if at-end (point-max) (min here (point-max))))
+    (pcase-dolist (`(,w ,pt ,start) windows)
+      (if (= pt end)
+          (set-window-point w (point-max))
+        (set-window-point w (min pt (point-max)))
+        (unless (= start (window-start w))
+          (set-window-start w (min start (point-max)) t))))))
 
 (defun eng/bbh-transcript--latest-start (window)
   "The start of WINDOW that puts the end of its transcript on the bottom row.
