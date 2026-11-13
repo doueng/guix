@@ -445,14 +445,16 @@ A client shut down on purpose has no process any more, so it is left alone."
 When a shell needs a new client, as after its bbh died, agent-shell turns the
 shell's viewport into its read-only view of the last turn and erases it.  A
 bbh composer is that viewport and the shell's only input, so it comes back
-in edit mode with the draft and point it had (T174)."
+in edit mode with the draft, point and evil state it had: the restart lands
+while you type, and the mode's return would put you in normal state (T174)."
   (let* ((shell (or (plist-get args :shell-buffer) (current-buffer)))
          (composer (and (eng/bbh--shell-p shell) (featurep 'agent-shell-viewport)
                         (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)))
          (saved (and (buffer-live-p composer)
                      (with-current-buffer composer
                        (and eng/bbh-composer (derived-mode-p 'agent-shell-viewport-edit-mode)
-                            (cons (buffer-substring (point-min) (point-max)) (point)))))))
+                            (list (buffer-substring (point-min) (point-max)) (point)
+                                  (bound-and-true-p evil-state)))))))
     (unwind-protect (apply handle args)
       (when (and saved (buffer-live-p composer))
         (with-current-buffer composer
@@ -460,8 +462,11 @@ in edit mode with the draft and point it had (T174)."
             (let ((inhibit-read-only t))
               (agent-shell-viewport-edit-mode)
               (erase-buffer)
-              (insert (car saved))
-              (goto-char (min (cdr saved) (point-max))))))))))
+              (insert (nth 0 saved))
+              (goto-char (min (nth 1 saved) (point-max))))
+            (when (and (nth 2 saved) (fboundp 'evil-change-state)
+                       (not (eq evil-state (nth 2 saved))))
+              (evil-change-state (nth 2 saved)))))))))
 
 (advice-add 'agent-shell--handle :around #'eng/bbh--keep-composer)
 
@@ -1265,6 +1270,28 @@ Font-lock and org-element look both regexps up in the current buffer."
   (kbd "q") #'bury-buffer
   (kbd "C-j") #'eng/focus-down
   (kbd "C-k") #'eng/focus-up)
+
+(defun eng/bbh-transcript-compose ()
+  "Type in the composer below this transcript, in insert state, after its draft.
+The transcript is read-only, so evil's insert keys there move to the
+composer: in insert state here j and G would only say the buffer is
+read-only (Bombadil, T174).  The draft's end, since normal state left the
+cursor before its last character, where typing would split a word."
+  (interactive)
+  (let* ((shell (or (eng/bbh--shell) (user-error "No bbh session in this buffer")))
+         (composer (agent-shell-viewport--buffer :shell-buffer shell :existing-only t))
+         (window (and composer (get-buffer-window composer))))
+    (unless window (user-error "No composer on screen; M-x eng/bbh-layout restores it"))
+    (select-window window)
+    (goto-char (point-max))
+    (evil-insert-state)))
+
+;; Doom's evil-org binds its own o, O, A and I in org buffers.
+(dolist (command '(evil-insert evil-append evil-insert-line evil-append-line
+                   evil-open-below evil-open-above evil-substitute evil-change-whole-line
+                   evil-org-open-below evil-org-open-above evil-org-append-line evil-org-insert-line))
+  (evil-define-key 'normal eng/bbh-transcript-mode-map
+    (vector 'remap command) #'eng/bbh-transcript-compose))
 
 (defvar-local eng/bbh-composer nil)
 (put 'eng/bbh-composer 'permanent-local t)

@@ -1205,6 +1205,21 @@ in a narrow frame, and the thread beside it. Returns the list's window."
     (unless (get-buffer-window target) (eng/bbh-inbox--layout))
     (select-window (get-buffer-window target))))
 
+(defun eng/bbh-threads-answer ()
+  "Answer the selected thread's ask in your own words, as i does beside the list.
+On the read-only list evil's i would only enter insert state, where j, k
+and RET then do nothing (Bombadil, T174)."
+  (interactive)
+  (let ((list (selected-window)))
+    (eng/bbh-inbox-other-pane)
+    (condition-case err (eng/bbh-inbox-answer)
+      (user-error (select-window list) (signal (car err) (cdr err))))))
+
+(defun eng/bbh-threads-read-only ()
+  "Say that the thread list takes no text, instead of entering insert state."
+  (interactive)
+  (user-error "The thread list is read-only; i answers the selected thread's ask"))
+
 (defun eng/bbh-threads-ret ()
   "On the archived row show or hide the archived threads, else open the thread's Worker."
   (interactive)
@@ -1284,6 +1299,7 @@ focus the window it is in, or nil when no frame is open."
     ("]t" eng/bbh-inbox-next-waiting "Next thread waiting on you")
     ("[t" eng/bbh-inbox-previous-waiting "Previous thread waiting on you")
     ("o" eng/bbh-inbox-other-pane "Go to the selected thread")
+    ("i" eng/bbh-threads-answer "Answer the selected thread's ask in your own words")
     ("TAB" eng/bbh-inbox-other-pane "Go to the selected thread")
     ("RET" eng/bbh-threads-ret "Open the thread's Worker, or show the archived threads")
     ("A" eng/bbh-inbox-approve "Approve the review")
@@ -1315,7 +1331,11 @@ Bare C-h and C-l still move between the panes, as between any windows.")
   (dolist (key eng/bbh-threads-keys)
     (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
   ;; C-n sends the selected thread's draft here too, as in the Inbox.
-  (evil-local-set-key 'normal (kbd "C-n") #'eng/bbh-inbox-send))
+  (evil-local-set-key 'normal (kbd "C-n") #'eng/bbh-inbox-send)
+  ;; The other ways into insert state, which would leave the list deaf.
+  (dolist (command '(evil-insert-line evil-append evil-append-line evil-open-below evil-open-above
+                     evil-substitute evil-change-whole-line))
+    (evil-local-set-key 'normal (vector 'remap command) #'eng/bbh-threads-read-only)))
 
 (define-derived-mode eng/bbh-threads-mode special-mode "bbh threads"
   "The super-agent's threads, one per line, beside the selected one.

@@ -568,6 +568,23 @@ and the transcript keeps q and focus moves in normal state."
     (with-current-buffer transcript
       (bbh-test--keys-in 'normal '(("q" . bury-buffer) ("C-j" . eng/focus-down) ("C-k" . eng/focus-up))))))
 
+(ert-deftest bbh-insert-keys-in-the-transcript-type-in-the-composer ()
+  ;; i in the read-only transcript put it in insert state, where j and G
+  ;; only said the buffer is read-only (Bombadil, T174).
+  (bbh-test--with-shell (shell composer transcript)
+    (with-current-buffer composer (insert "draft"))
+    (dolist (key '("i" "a" "A" "o"))
+      (with-current-buffer composer (goto-char (1- (point-max))))
+      (select-window (get-buffer-window transcript))
+      (evil-normal-state)
+      (call-interactively (key-binding (kbd key)))
+      (should (eq (window-buffer (selected-window)) composer))
+      (should (evil-insert-state-p))
+      ;; After the draft, not inside its last word.
+      (should (= (point) (point-max)))
+      (with-current-buffer transcript (should (evil-normal-state-p)))
+      (evil-normal-state))))
+
 (ert-deftest bbh-mail-wakes-an-idle-shell-and-keeps-the-draft ()
   (bbh-test--with-shell (shell composer transcript)
     (with-current-buffer composer (insert "half typed"))
@@ -888,13 +905,15 @@ showed as `Router: bbh super: invalid invalid' (Bombadil, T174)."
           (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
           (let ((composer (eng/bbh-layout shell))
                 (old (bbh-test--acp "super-W13")))
-            (with-current-buffer composer (insert "half-typed draft"))
+            (with-current-buffer composer (evil-insert-state) (insert "half-typed draft"))
             (signal-process old 'SIGKILL)
             (should (bbh-test--wait (lambda () (let ((new (bbh-test--acp "super-W13"))) (and new (not (eq new old))))) 30))
             (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
             (with-current-buffer composer
               (should (derived-mode-p 'agent-shell-viewport-edit-mode))
               (should (equal "half-typed draft" (string-trim (buffer-string))))
+              ;; The restart lands while you type, so you keep typing.
+              (should (evil-insert-state-p))
               ;; One blank row above the draft, not two.
               (should (= 1 (seq-count (lambda (o) (equal "\n" (overlay-get o 'before-string)))
                                       (overlays-in (point-min) (point-max))))))))
@@ -1655,6 +1674,19 @@ SPEC is (VIEW ORG LOG)."
       (should (equal "T3" (eng/bbh-inbox--at-point)))
       (eng/bbh-inbox-next-waiting)
       (should (equal "T1" eng/bbh-inbox--selected))
+      ;; i on the list answers the selected thread's ask beside it, not
+      ;; insert state on the read-only list (Bombadil, T174); the other
+      ;; insert keys only say so.
+      (should (eq 'eng/bbh-threads-answer (bbh-test--key "i")))
+      (should (eq 'eng/bbh-threads-read-only (command-remapping 'evil-open-above)))
+      (save-selected-window
+        (select-window (get-buffer-window "*bbh threads*"))
+        (eng/bbh-threads-answer)
+        (should (equal "*bbh inbox*" (buffer-name (window-buffer (selected-window)))))
+        (should (eng/bbh-inbox--in-answer-p))
+        (should (evil-insert-state-p))
+        (evil-normal-state))
+      (with-current-buffer "*bbh threads*" (should (evil-normal-state-p)))
       ;; o goes to the thread and back.
       (eng/bbh-inbox-other-pane)
       (should (equal "*bbh inbox*" (buffer-name (window-buffer (selected-window))))))
