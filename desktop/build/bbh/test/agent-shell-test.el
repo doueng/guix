@@ -876,6 +876,31 @@ showed as `Router: bbh super: invalid invalid' (Bombadil, T174)."
       (when-let* ((s (eng/bbh-super--shell "super-W11"))) (eng/bbh-super--kill s))
       (delete-directory ws t))))
 
+(ert-deftest bbh-a-restarted-process-keeps-the-composer-and-its-draft ()
+  ;; When a shell needs a new client, agent-shell turns its viewport into the
+  ;; read-only view of the last turn and erases it.  A bbh composer is that
+  ;; viewport, so a restart after bbh died (T162) took the composer and the
+  ;; half-typed draft away (Bombadil, T174).
+  (let* ((ws (make-temp-file "bbh-super-ws" t))
+         (shell (get-buffer (eng/bbh-super-open "super-W13" ws "T13 test" nil))))
+    (unwind-protect
+        (save-window-excursion
+          (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
+          (let ((composer (eng/bbh-layout shell))
+                (old (bbh-test--acp "super-W13")))
+            (with-current-buffer composer (insert "half-typed draft"))
+            (signal-process old 'SIGKILL)
+            (should (bbh-test--wait (lambda () (let ((new (bbh-test--acp "super-W13"))) (and new (not (eq new old))))) 30))
+            (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
+            (with-current-buffer composer
+              (should (derived-mode-p 'agent-shell-viewport-edit-mode))
+              (should (equal "half-typed draft" (string-trim (buffer-string))))
+              ;; One blank row above the draft, not two.
+              (should (= 1 (seq-count (lambda (o) (equal "\n" (overlay-get o 'before-string)))
+                                      (overlays-in (point-min) (point-max))))))))
+      (when-let* ((s (eng/bbh-super--shell "super-W13"))) (eng/bbh-super--kill s))
+      (delete-directory ws t))))
+
 (ert-deftest bbh-a-restarted-plain-session-continues-its-conversation ()
   (bbh-test--with-shell (shell composer transcript)
     (let ((id (eng/bbh--conversation shell)))

@@ -440,6 +440,31 @@ A client shut down on purpose has no process any more, so it is left alone."
 
 (advice-add 'acp--start-client :after #'eng/bbh--watch-process)
 
+(defun eng/bbh--keep-composer (handle &rest args)
+  "Run HANDLE, `agent-shell--handle', without taking a bbh composer away.
+When a shell needs a new client, as after its bbh died, agent-shell turns the
+shell's viewport into its read-only view of the last turn and erases it.  A
+bbh composer is that viewport and the shell's only input, so it comes back
+in edit mode with the draft and point it had (T174)."
+  (let* ((shell (or (plist-get args :shell-buffer) (current-buffer)))
+         (composer (and (eng/bbh--shell-p shell) (featurep 'agent-shell-viewport)
+                        (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)))
+         (saved (and (buffer-live-p composer)
+                     (with-current-buffer composer
+                       (and eng/bbh-composer (derived-mode-p 'agent-shell-viewport-edit-mode)
+                            (cons (buffer-substring (point-min) (point-max)) (point)))))))
+    (unwind-protect (apply handle args)
+      (when (and saved (buffer-live-p composer))
+        (with-current-buffer composer
+          (unless (derived-mode-p 'agent-shell-viewport-edit-mode)
+            (let ((inhibit-read-only t))
+              (agent-shell-viewport-edit-mode)
+              (erase-buffer)
+              (insert (car saved))
+              (goto-char (min (cdr saved) (point-max))))))))))
+
+(advice-add 'agent-shell--handle :around #'eng/bbh--keep-composer)
+
 ;;; Turn-end guard
 
 ;; agent-shell clears a shell's busy flag near the end of its prompt reply
@@ -1355,6 +1380,9 @@ The key hints and conversation id are in `eng/bbh-keys'.  % is escaped because t
 
 (defvar-local eng/bbh-composer-padding nil
   "Overlay that shows one blank row above the composer's draft.")
+;; The composer's major mode restarts when it returns from a view, and the
+;; overlay stays, so a second one would double the blank row.
+(put 'eng/bbh-composer-padding 'permanent-local t)
 
 (defun eng/bbh-composer-padding ()
   "Leave one blank row between the composer header and the draft.
