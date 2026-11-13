@@ -384,6 +384,57 @@ still reads links."
     (should (equal "the docs" (match-string 2 "see [[https://example.org][the docs]] here")))
     (kill-buffer)))
 
+(ert-deftest bbh-transcript-streaming-keeps-a-scrolled-up-reader-in-place ()
+  "A reader who moved up into a reply that is still streaming stays where
+they are when the next chunk arrives, while a window at the end follows it.
+Bombadil found each chunk pulling the reader back to the reply's start."
+  (with-current-buffer (get-buffer-create "bbh streaming test")
+    (eng/bbh-transcript-mode)
+    (setq eng/bbh-transcript--tools (make-hash-table :test #'equal))
+    (eng/bbh-transcript--prompt "go")
+    (eng/bbh-transcript--reply-chunk "First paragraph of the reply.\n\nSecond paragraph, ")
+    (let* ((reader (selected-window))
+           (follower (split-window reader)))
+      (set-window-buffer reader (current-buffer))
+      (set-window-buffer follower (current-buffer))
+      (set-window-point follower (point-max))
+      (let ((here (save-excursion (goto-char (point-min)) (search-forward "paragraph of") (point))))
+        (set-window-point reader here)
+        (eng/bbh-transcript--reply-chunk "still streaming.\n\n```clojure\n(+ 1 2)")
+        (should (= here (window-point reader)))
+        (should (= (point-max) (window-point follower)))
+        ;; More code in the open fence changes the text at its #+end_src.
+        (eng/bbh-transcript--reply-chunk "\n(+ 3 4)")
+        (should (= here (window-point reader)))
+        ;; Each hidden span is a markup line, and each markup line is hidden.
+        (dolist (overlay (overlays-in (point-min) (point-max)))
+          (when (overlay-get overlay 'eng/bbh-markup)
+            (should (string-match-p "#\\+\\(begin\\|end\\)_"
+                                    (buffer-substring (overlay-start overlay) (overlay-end overlay))))))
+        (save-excursion
+          (goto-char (point-min))
+          (while (re-search-forward "^#\\+\\(begin\\|end\\)_src" nil t)
+            (should (seq-some (lambda (o) (overlay-get o 'eng/bbh-markup)) (overlays-at (match-beginning 0))))))
+        (eng/bbh-transcript--reply-chunk "\n```\nDone.")
+        (should (= here (window-point reader)))
+        (should (= (point-max) (window-point follower))))
+      (delete-window follower))
+    ;; A fence opened in one chunk gets its first line in the next, right
+    ;; under its begin line, which stays hidden.
+    (setq eng/bbh-transcript--reply nil)
+    (eng/bbh-transcript--prompt "again")
+    (eng/bbh-transcript--reply-chunk "```clojure\n")
+    (eng/bbh-transcript--reply-chunk "(+ 5 6)")
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "^#\\+\\(begin\\|end\\)_src" nil t)
+        (should (seq-some (lambda (o) (overlay-get o 'eng/bbh-markup)) (overlays-at (match-beginning 0))))))
+    (should (equal (buffer-string)
+                   (concat "* go\n\nFirst paragraph of the reply.\n\nSecond paragraph, still streaming.\n\n"
+                           "#+begin_src clojure\n(+ 1 2)\n(+ 3 4)\n#+end_src\nDone.\n"
+                           "\n* again\n\n#+begin_src clojure\n(+ 5 6)\n#+end_src\n")))
+    (kill-buffer)))
+
 (ert-deftest bbh-resuming-this-conversation-keeps-the-transcript ()
   (save-window-excursion
     (delete-other-windows)

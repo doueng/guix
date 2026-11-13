@@ -661,6 +661,12 @@ strips `display' text properties from whole blocks on partial redisplays."
   (save-excursion
     (setq beg (progn (goto-char beg) (line-beginning-position))
           end (progn (goto-char (min end (point-max))) (min (point-max) (1+ (line-end-position)))))
+    ;; From the line before: a begin line's overlay ends at the start of the
+    ;; next line and an end line's starts at the newline before it, so an
+    ;; edit that keeps the text before it, as a streaming reply's does, can
+    ;; cut either short.
+    (when (> beg (point-min))
+      (setq beg (progn (goto-char (1- beg)) (line-beginning-position))))
     (dolist (overlay (overlays-in beg end))
       (when (overlay-get overlay 'eng/bbh-markup) (delete-overlay overlay)))
     (goto-char beg)
@@ -761,15 +767,30 @@ The heading wraps instead of truncating, so no line of the prompt shows twice."
                (if (string-empty-p rest) ""
                  (concat "#+begin_quote\n" (eng/bbh--md->org rest) "\n#+end_quote\n")))))))
 
+(defun eng/bbh-transcript--replace-tail (start text)
+  "Make the transcript from START to its end read TEXT, changing only what
+follows the first difference.  Each chunk renders the streaming reply again,
+and deleting all of it moved a reader's point inside it back to its start."
+  (let* ((old (buffer-substring-no-properties start (point-max)))
+         (diff (compare-strings old nil nil text nil nil)))
+    (unless (eq diff t)
+      (let ((same (1- (abs diff))))
+        (delete-region (+ start same) (point-max))
+        (goto-char (point-max))
+        (insert (substring text same))))))
+
 (defun eng/bbh-transcript--reply-chunk (text)
   (eng/bbh-transcript--edit
    (lambda ()
      (let* ((reply (or eng/bbh-transcript--reply
                        (setq eng/bbh-transcript--reply (cons (point-marker) ""))))
             (md (setcdr reply (concat (cdr reply) text))))
-       (delete-region (car reply) (point-max))
-       (unless (string-blank-p md)
-         (insert (eng/bbh-transcript--separator) (eng/bbh--md->org (string-trim md)) "\n"))))))
+       (eng/bbh-transcript--replace-tail
+        (car reply)
+        (if (string-blank-p md)
+            ""
+          (concat (save-excursion (goto-char (car reply)) (eng/bbh-transcript--separator))
+                  (eng/bbh--md->org (string-trim md)) "\n")))))))
 
 (defun eng/bbh-transcript--tool (id tool)
   (setq eng/bbh-transcript--reply nil)
