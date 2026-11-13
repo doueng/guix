@@ -1,15 +1,7 @@
-;;; The feed reader (~/projects/langchain/reader) as a system service on the
-;;; remote builder, published on the tailnet at
-;;; https://guix-builder.tailbf68ad.ts.net/ (docs/remote-builder-plan.html).
-;;;
-;;; The reader is a Python Cloudflare Worker run by `wrangler dev' (node and
-;;; Cloudflare's workerd from the checkout's node_modules) plus the suggester,
-;;; a Python service behind its Find button.  Its npm and PyPI dependencies are
-;;; not in Guix, so this is not a package: `make reader-push' copies the
-;;; checkout, with its prebuilt public/js/main.js, to %reader-home/app, and
-;;; Guix supplies node, the glibc loader workerd needs, python and uv.  The
-;;; Durable Object state (sources, headlines, suggestions) lives in
-;;; %reader-home/state, outside the code, so a push never touches it.
+;;; Its npm and PyPI dependencies are not in Guix, so this is not a package:
+;;; `make reader-push' copies the checkout to %reader-home/app.  The Durable
+;;; Object state lives in %reader-home/state, outside the code, so a push never
+;;; touches it.
 (define-module (engstrand system reader)
   #:use-module (engstrand features tailscale)
   #:use-module (gnu packages admin)

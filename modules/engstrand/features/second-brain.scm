@@ -6,10 +6,6 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-second-brain))
 
-;; The second brain runs on the builder (modules/engstrand/system/second-brain.scm),
-;; but Chrome's bookmarks live here.  Every hour `second-brain-push chrome'
-;; hashes the bookmarks file and sends it over the tailnet only when it
-;; changed; an unreachable builder, as when the laptop is offline, stays quiet.
 (define %second-brain-push-service
   (simple-service 'familiar-second-brain-push home-shepherd-service-type
     (list (shepherd-service

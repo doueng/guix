@@ -1,6 +1,4 @@
-;; Print the folded system facts that activation will use, and fail on
-;; file-system options that early boot would pass verbatim to mount(2).
-;; Run with: guix repl -L modules -- desktop/system-facts.scm
+;; Fails on file-system options that early boot would pass verbatim to mount(2).
 (use-modules (engstrand config)
              (gnu services)
              (gnu services base)

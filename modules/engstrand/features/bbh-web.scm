@@ -8,12 +8,8 @@
 
 ;; The bbh checkout is mutable and the services follow it, as the shell does.
 
-;; The super-agent controller: the store, the command socket, the dispatcher
-;; that feeds bbh mailboxes, and the website.  It publishes the website with
-;; `tailscale serve', which the operator setting in tailscaled lets this user
-;; do without root.  tailscaled also keeps that mapping in its state, and the
-;; site listens on loopback, so a publish that fails while tailscaled is still
-;; starting is only logged and the service needs nothing from Tailscale.
+;; tailscaled keeps the serve mapping in its state and the site listens on
+;; loopback, so a publish that fails while tailscaled is starting is only logged.
 (define %bbh-super-service
   (simple-service 'familiar-bbh-super home-shepherd-service-type
     (list (shepherd-service
@@ -35,9 +31,6 @@
                           #:log-file (string-append home "/.local/state/bbh-super.log"))))))
            (stop #~(make-kill-destructor))))))
 
-;; The super-agent's surfaces: one terminal Emacs daemon holding a buffer per
-;; Worker, the Router and the Inbox. The controller opens them through
-;; emacsclient -s bbh-super, and `bbh inbox' attaches a terminal frame.
 (define %bbh-emacs-service
   (simple-service 'familiar-bbh-emacs home-shepherd-service-type
     (list (shepherd-service

@@ -1,6 +1,3 @@
-;;; The remote aarch64 builder on Hetzner (docs/remote-builder-plan.html).
-;;; It builds and publishes what the laptop's make pull, home-apply and switch
-;;; need, reachable only over the tailnet.
 (define-module (engstrand system builder)
   #:use-module (asahi guix config)
   #:use-module (engstrand features tailscale)
@@ -31,8 +28,8 @@
   #:export (%builder-server-type
             make-builder-os))
 
-;; CAX21: 4 vCPU, 8 GB, 80 GB, about 10.5 EUR/month (chosen 2026-11-09 over
-;; the CAX31 at 21).  Rescale up with the server off; keep the disk to come back.
+;; CAX21: 4 vCPU, 8 GB, 80 GB.  Rescale up with the server off; keep the disk
+;; to come back.
 (define %builder-server-type "cax21")
 (define %prebuild-home "/var/lib/prebuild")
 
@@ -176,9 +173,7 @@ to your address."
                               %prebuild-activation)
               (simple-service 'prebuild-jobs mcron-service-type %prebuild-jobs)
               (append
-               ;; The feed reader, on the tailnet at https://guix-builder.tailbf68ad.ts.net/.
                %reader-services
-               ;; The second brain, at https://guix-builder.tailbf68ad.ts.net:8443/.
                %brain-services
                (modify-services (operating-system-user-services base)
                 (delete openssh-service-type)

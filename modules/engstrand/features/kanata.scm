@@ -8,8 +8,8 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-kanata))
 
-;; hyprkan sends layer changes here. The build has no cmd feature, so clients
-;; can switch layers and reload but cannot run commands.
+;; The build has no cmd feature, so clients can switch layers and reload but
+;; cannot run commands.
 (define %kanata-address "127.0.0.1:7333")
 
 (define %kanata-service

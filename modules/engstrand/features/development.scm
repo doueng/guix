@@ -26,7 +26,6 @@
                 "gopls"
                 "nixfmt"
                 "python"
-                ;; Doom :lang python: LSP server, formatter, test runner.
                 "python-lsp-server"
                 "python-black"
                 "python-pytest"
@@ -37,13 +36,11 @@
                 "cmake"
                 "fennel"
                 "go"
-                ;; hcloud, for the remote builder (docs/remote-builder-plan.html).
                 "hetznercloud-cli"
                 "lua"
                 "pandoc"
                 ;; libsqlite3 for bbh super, loaded through babashka's FFI.
                 "sqlite"
-                ;; TLC for the bbh TLA+ models, `make bbh-tla-check`.
                 "tla2tools"
                 "xxd"
                 "unzip"

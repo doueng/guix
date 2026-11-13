@@ -1,5 +1,3 @@
-;; Apple Neural Engine support from omarchy-ane: the DRM accel driver and the
-;; T8103 device-tree nodes it binds to.  Both take the kernel they belong to.
 (define-module (engstrand packages omarchy-ane)
   #:use-module (gnu packages bootloaders)
   #:use-module (guix build-system copy)

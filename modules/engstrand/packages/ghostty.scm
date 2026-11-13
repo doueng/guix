@@ -1,9 +1,6 @@
-;; Ghostty, built from its release tarball on the remote builder.  Ghostty
-;; 1.4 needs Zig 0.17, newer than Guix's, so zig-0.17 below is upstream's
-;; static release binary, used only to build.  Upstream's PACKAGING.md is the
-;; recipe: fetch the build.zig.zon dependencies into one directory with zig
-;; fetch, then zig build --system on it, linking Guix's GTK, fonts and image
-;; libraries.  updates bumps neither; a new release means new versions,
+;; Ghostty 1.4 needs Zig 0.17, newer than Guix's, so zig-0.17 below is
+;; upstream's static release binary, used only to build, following upstream's
+;; PACKAGING.md.  updates bumps neither; a new release means new versions,
 ;; hashes and %ghostty-zig-deps (from its build.zig.zon.json).
 (define-module (engstrand packages ghostty)
   #:use-module (gnu packages base)
@@ -192,8 +189,6 @@ through /tmp/zig-env instead of /usr/bin/env.")
                                             (else ".tar.gz"))))
        (sha256 (base32 sha))))))
 
-;; Build-side setup for zig: a private cache, the /tmp/zig-env link and a
-;; libc file naming Guix's glibc and gcc's crt files.
 (define zig-environment-definition
   #~(define (zig-environment env libc)
       (symlink env "/tmp/zig-env")
@@ -208,8 +203,6 @@ through /tmp/zig-env instead of /usr/bin/env.")
                     libc libc libc (dirname crtbegin)))))
       (setenv "ZIG_LIBC" "/tmp/zig-libc")))
 
-;; Every dependency unpacked the way zig build --system wants it: zig fetch
-;; checks the hash and leaves p/HASH.tar.gz, unpacked here into the output.
 (define ghostty-zig-deps
   (package
     (name "ghostty-zig-deps")

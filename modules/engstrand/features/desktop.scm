@@ -16,7 +16,6 @@
 
 (define %desktop-home-packages
   (append (list bluetui
-                ;; Dictation on Cmd+M; Hyprland starts it (startup.lua).
                 hex
                 ghostty)
           (map specification->package
@@ -26,7 +25,6 @@
                  "xdg-desktop-portal-gtk"
                  "xdg-desktop-portal-hyprland"
                  "wl-clipboard"
-                 ;; Clipboard history (desktop/bin/clipboard-history).
                  "cliphist"
                  "wtype"))))
 
@@ -44,11 +42,9 @@
           "font-google-noto-emoji"
           "adwaita-icon-theme"))))
 
-;; oilfm (https://github.com/doueng/oilfm is not published; the source is ~/projects/oilfm)
-;; is built like dusk: make oilfm, run through desktop/bin/oilfm. Hyprland's PATH lacks
-;; ~/.local/bin, so the entry names the wrapper by its full path, spelled out because the
-;; system reconfigure evaluates this as root (getenv "HOME" gave /root). Written by hand because
-;; xdg-desktop-entry would spell MimeType as Mimetype.
+;; Hyprland's PATH lacks ~/.local/bin, so the entry names the wrapper by its full
+;; path, spelled out because the system reconfigure evaluates this as root.
+;; Written by hand because xdg-desktop-entry would spell MimeType as Mimetype.
 (define %oilfm-desktop-file
   (plain-file "oilfm.desktop"
               (string-append "[Desktop Entry]
@@ -64,8 +60,6 @@ MimeType=inode/directory;
 StartupWMClass=oilfm
 ")))
 
-;; md-view renders markdown with pandoc and opens it in Chrome (desktop/bin/md-view).
-;; Only xdg-open and portal callers use it; Emacs and Neovim open .md files themselves.
 (define %md-view-desktop-file
   (plain-file "md-view.desktop"
               (string-append "[Desktop Entry]
@@ -161,12 +155,8 @@ MimeType=text/markdown;text/x-markdown;
       (templates "$HOME")
       (videos "$HOME"))))
 
-;; Clipboard history: wl-paste --watch hands each new clipboard entry to
-;; desktop/bin/clipboard-history, which stores it with cliphist unless a
-;; password manager marked it sensitive, a password manager has focus, or it
-;; is over 5 MiB; Cmd+Caps+V picks one.  Shepherd starts before Hyprland and
-;; has no WAYLAND_DISPLAY, so the script waits for the session's socket and
-;; follows the next one when Hyprland restarts.
+;; Shepherd starts before Hyprland and has no WAYLAND_DISPLAY, so the script
+;; waits for the session's socket and follows the next one when Hyprland restarts.
 (define %clipboard-history-service
   (simple-service 'familiar-clipboard-history home-shepherd-service-type
     (list (shepherd-service

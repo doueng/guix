@@ -64,12 +64,9 @@ tailscaled keeps in its state and that this restates at boot and deploy."
                       ((> tries 1) (sleep 1) (loop (- tries 1)))
                       (else #f)))))))
 
-;; Taildrop: files sent to this laptop from the phone land in
-;; ~/Downloads/Taildrop with a notification (desktop/bin/taildrop receive).
 ;; tailscaled's operator setting lets this user run `tailscale file get'
 ;; without root.  Home Shepherd cannot require the system's tailscaled, so the
-;; script waits for it, backing off while it is down or starting, and the order
-;; at boot does not matter.  It needs the session bus for notifications.
+;; script waits for it, backing off while it is down or starting.
 (define %taildrop-receive-service
   (simple-service 'familiar-taildrop-receive home-shepherd-service-type
     (list (shepherd-service

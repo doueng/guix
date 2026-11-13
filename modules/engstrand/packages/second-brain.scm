@@ -1,9 +1,6 @@
-;;; The second brain (~/projects/second-brain, T147): a bookmark store with a
-;;; phone page, written in babashka over the sqlite3 command.  The checkout
-;;; has no remote, so the source is its files, minus the gitignored data/ and
-;;; VCS directories; SECOND_BRAIN_DIR names another checkout.  Without a
-;;; checkout the package has no source, so loading this module never fails.
-;;; It runs on the builder as modules/engstrand/system/second-brain.scm.
+;;; The checkout has no remote, so the source is its files, minus the gitignored
+;;; data/ and VCS directories.  Without a checkout the package has no source, so
+;;; loading this module never fails.
 (define-module (engstrand packages second-brain)
   #:use-module (engstrand packages babashka)
   #:use-module (gnu packages base)
@@ -52,8 +49,6 @@
               (when tests?
                 (setenv "HOME" (getcwd))
                 (invoke #$(file-append babashka "/bin/bb") "test"))))
-          ;; bin/second-brain TASK ARGS... runs a bb.edn task; data goes to
-          ;; BRAIN_DB (default data/brain.db under the current directory).
           (add-after 'install 'wrap
             (lambda _
               (let ((bin (string-append #$output "/bin/second-brain")))

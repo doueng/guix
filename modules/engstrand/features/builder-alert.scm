@@ -6,11 +6,6 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-builder-alert))
 
-;; The remote builder's nightly prebuild runs at 03:00 with nobody watching.
-;; Every hour `builder-prebuild alert --notify' reads its status over ssh and
-;; sends a desktop notification when it failed, hangs or stopped running, once
-;; per problem.  The checkout is mutable and the timer follows it, like the
-;; research lab; an unreachable builder, as when the laptop is offline, stays quiet.
 (define %builder-alert-service
   (simple-service 'familiar-builder-alert home-shepherd-service-type
     (list (shepherd-service

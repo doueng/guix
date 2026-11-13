@@ -1,6 +1,4 @@
-;; Hex, local voice dictation (anomalyco/hex), from its prebuilt Linux release.
-;; The wrapper mirrors upstream nix/package.nix: the libraries Hex links or
-;; dlopens, PipeWire's ALSA plugin, and wtype and wl-clipboard for paste.
+;; The wrapper mirrors upstream nix/package.nix.
 (define-module (engstrand packages hex)
   #:use-module (gnu packages base)
   #:use-module (gnu packages elf)

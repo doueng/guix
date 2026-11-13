@@ -29,9 +29,8 @@
   #:use-module (srfi srfi-1)
   #:export (make-base-os))
 
-;; The daemon's key for offloading to the remote builder
-;; (docs/remote-builder-plan.html).  Only root reads the key; the .pub is
-;; world-readable so an agent can copy it to modules/engstrand/builder/offload.pub.
+;; Only root reads the key; the .pub is world-readable so an agent can copy it
+;; to modules/engstrand/builder/offload.pub.
 (define %offload-key-activation
   (simple-service 'familiar-offload-key activation-service-type
     (with-imported-modules '((guix build utils))
@@ -220,7 +219,6 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
                      (inherit config)
                      (channels channels)
                      (authorized-keys (append %asahi-substitute-keys
-                                              ;; The remote builder, when its key is in the repo.
                                               (if %builder? (list %builder-signing-key) '())
                                               (guix-configuration-authorized-keys config)))
                      ;; The builder has what a prebuild built, including the custom

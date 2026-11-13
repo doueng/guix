@@ -1,8 +1,3 @@
-;; Newer releases of Guix packages, opted in one line each.  `updates' reports
-;; how far Guix trails upstream (source release), opts a package in with
-;; `updates apply release/NAME' and bumps it with source latest; apply builds
-;; each one on the builder, then the whole tree in the prebuild, before you
-;; switch.
 (define-module (engstrand packages latest)
   #:use-module (guix gexp)
   #:use-module (guix git-download)
@@ -65,7 +60,6 @@
         (((string-append "func " #$test "\\(t \\*testing\\.T\\) \\{") all)
          (string-append all "\n\tt.Skip(\"not in the build sandbox\")")))))
 
-;; What a newer release needs besides its version and hash, by name.
 (define %tweaks
   `(("direnv"
      . ,(lambda (p)

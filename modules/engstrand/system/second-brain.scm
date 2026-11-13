@@ -1,12 +1,5 @@
-;;; The second brain (T147, ~/projects/second-brain) as a system service on the
-;;; remote builder, published on the tailnet at
-;;; https://guix-builder.tailbf68ad.ts.net:8443/ (docs/remote-builder-plan.html).
-;;;
-;;; The app is a Guix package, (engstrand packages second-brain), so a deploy
-;;; ships the code.  Its data lives in %brain-home/data, outside the store, and
-;;; desktop/build/second-brain/builder.bb runs the page, the imports and the
-;;; nightly job.  The laptop pushes Chrome's bookmarks with a key that can run
-;;; only the importer (desktop/bin/second-brain-push).
+;;; Its data lives in %brain-home/data, outside the store.  The laptop pushes
+;;; Chrome's bookmarks with a key that can run only the importer.
 (define-module (engstrand system second-brain)
   #:use-module (engstrand features tailscale)
   #:use-module (engstrand packages assets)
@@ -30,7 +23,6 @@
 (define %brain-home "/var/lib/second-brain")
 (define %brain-port 8790)
 
-;; builder.bb SUBCOMMAND with the tools it calls on PATH.
 (define (glue subcommand)
   (program-file (string-append "second-brain-" subcommand)
     #~(begin
