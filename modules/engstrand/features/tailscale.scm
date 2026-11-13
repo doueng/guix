@@ -4,6 +4,7 @@
   #:use-module (gnu packages base)
   #:use-module (gnu packages dns)
   #:use-module (gnu packages linux)
+  #:use-module (gnu home services shepherd)
   #:use-module (gnu services)
   #:use-module (gnu services shepherd)
   #:use-module (guix gexp)
@@ -63,8 +64,38 @@ tailscaled keeps in its state and that this restates at boot and deploy."
                       ((> tries 1) (sleep 1) (loop (- tries 1)))
                       (else #f)))))))
 
+;; Taildrop: files sent to this laptop from the phone land in
+;; ~/Downloads/Taildrop with a notification (desktop/bin/taildrop receive).
+;; tailscaled's operator setting lets this user run `tailscale file get'
+;; without root.  Home Shepherd cannot require the system's tailscaled, so the
+;; script waits for it, backing off while it is down or starting, and the order
+;; at boot does not matter.  It needs the session bus for notifications.
+(define %taildrop-receive-service
+  (simple-service 'familiar-taildrop-receive home-shepherd-service-type
+    (list (shepherd-service
+           (provision '(taildrop-receive))
+           (requirement '(dbus))
+           (documentation "Move files sent over Taildrop into ~/Downloads/Taildrop and notify.")
+           (respawn? #t)
+           (respawn-limit #~'(5 . 60))
+           (respawn-delay 5)
+           (start #~(lambda ()
+                      (let ((home (getenv "HOME")))
+                        ((make-forkexec-constructor
+                          (list (string-append home "/.local/bin/taildrop") "receive")
+                          #:environment-variables
+                          (cons* (string-append "PATH=" #$(file-append tailscale "/bin")
+                                                ":" home "/.guix-home/profile/bin"
+                                                ":/run/current-system/profile/bin")
+                                 (filter (lambda (variable)
+                                           (not (string-prefix? "PATH=" variable)))
+                                         (default-environment-variables)))
+                          #:log-file (string-append home "/.local/state/taildrop-receive.log"))))))
+           (stop #~(make-kill-destructor))))))
+
 (define (feature-familiar-tailscale)
   (feature-package-set
    'familiar-tailscale
    #:system-packages (list tailscale)
-   #:system-services (list %tailscale-service)))
+   #:system-services (list %tailscale-service)
+   #:home-services (list %taildrop-receive-service)))

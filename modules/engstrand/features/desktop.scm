@@ -5,11 +5,13 @@
   #:use-module (engstrand packages hex)
   #:use-module (asahi guix systems desktop)
   #:use-module (gnu home services)
+  #:use-module (gnu home services shepherd)
   #:use-module (gnu home services xdg)
   #:use-module (gnu packages)
   #:use-module (guix gexp)
   #:use-module (gnu services)
   #:use-module (gnu services desktop)
+  #:use-module (gnu services shepherd)
   #:export (feature-familiar-desktop))
 
 (define %desktop-home-packages
@@ -24,6 +26,8 @@
                  "xdg-desktop-portal-gtk"
                  "xdg-desktop-portal-hyprland"
                  "wl-clipboard"
+                 ;; Clipboard history (desktop/bin/clipboard-history).
+                 "cliphist"
                  "wtype"))))
 
 (define %desktop-system-packages
@@ -154,6 +158,33 @@ MimeType=text/markdown;text/x-markdown;
       (templates "$HOME")
       (videos "$HOME"))))
 
+;; Clipboard history: wl-paste --watch hands each new clipboard entry to
+;; desktop/bin/clipboard-history, which stores it with cliphist unless a
+;; password manager marked it sensitive, a password manager has focus, or it
+;; is over 5 MiB; Cmd+Caps+V picks one.  Shepherd starts before Hyprland and
+;; has no WAYLAND_DISPLAY, so the script waits for the session's socket and
+;; follows the next one when Hyprland restarts.
+(define %clipboard-history-service
+  (simple-service 'familiar-clipboard-history home-shepherd-service-type
+    (list (shepherd-service
+           (provision '(clipboard-history))
+           (documentation "Record the Wayland clipboard history with cliphist.")
+           (respawn? #t)
+           (respawn-limit #~'(5 . 60))
+           (respawn-delay 5)
+           (start #~(lambda ()
+                      (let ((home (getenv "HOME")))
+                        ((make-forkexec-constructor
+                          (list (string-append home "/.local/bin/clipboard-history") "watch")
+                          #:environment-variables
+                          (cons* (string-append "PATH=" home "/.guix-home/profile/bin"
+                                                ":/run/current-system/profile/bin")
+                                 (filter (lambda (variable)
+                                           (not (string-prefix? "PATH=" variable)))
+                                         (default-environment-variables)))
+                          #:log-file (string-append home "/.local/state/clipboard-history.log"))))))
+           (stop #~(make-kill-destructor))))))
+
 (define (feature-familiar-desktop)
   (feature-package-set
    'familiar-desktop
@@ -165,4 +196,5 @@ MimeType=text/markdown;text/x-markdown;
                            (list %home-mime-service
                                  %home-desktop-entries
                                  %home-flatpak-desktop-entries
-                                 %home-user-dirs-service))))
+                                 %home-user-dirs-service
+                                 %clipboard-history-service))))

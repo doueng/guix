@@ -49,7 +49,8 @@
 ;; Cmd+T do nothing rather than delete a path component or transpose characters.
 (deflayermap (cmd)
   c (unmod $meta lctl ins)
-  v (unmod $meta lsft ins)
+  ;; Cmd+Caps+V stays Super+Ctrl+V for Hyprland: clipboard history.
+  v (fork (unmod $meta lsft ins) v (lctl rctl))
   x (unmod $meta lsft del)
   z (switch ((base-layer terminal)) XX break ((base-layer intellij)) (unmod $meta lctl z) break () (fork (unmod $meta lctl z) (unmod (lmet rmet lsft rsft) lctl y) (lsft rsft)) break)
   a (unmod $meta lctl a)

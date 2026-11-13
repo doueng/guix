@@ -32,6 +32,14 @@
     "↓LGui ↓LShift ↓M ↑M ↑LShift ↑LGui"]
    ["Cmd+C copies with Ctrl+Insert" "d:lmet d:c u:c u:lmet"
     "↓LGui ↑LGui ↓LCtrl ↓Insert ↑LCtrl ↑Insert ↓LGui ↑LGui"]
+   ["Cmd+V pastes with Shift+Insert" "d:lmet d:v u:v u:lmet"
+    "↓LGui ↑LGui ↓LShift ↓Insert ↑LShift ↑Insert ↓LGui ↑LGui"]
+   ["Cmd+Caps+V reaches Hyprland as Super+Ctrl+V for clipboard history" "d:lmet d:caps d:v u:v u:caps u:lmet"
+    "↓LGui ↓LCtrl ↓V ↑V ↑LCtrl ↑LGui"]
+   ["Caps+Cmd+V reaches Hyprland as Super+Ctrl+V" "d:caps d:lmet d:v u:v u:lmet u:caps"
+    "↓LCtrl ↓LGui ↓V ↑V ↑LGui ↑LCtrl"]
+   ["Terminal Cmd+Caps+V reaches Hyprland too" "ls:terminal d:lmet d:caps d:v u:v u:caps u:lmet"
+    "↓LGui ↓LCtrl ↓V ↑V ↑LCtrl ↑LGui"]
    ["Unmapped Cmd chords reach Hyprland as Super" "d:lmet d:b u:b u:lmet"
     "↓LGui ↓B ↑B ↑LGui"]
    ["Cmd+F reaches Hyprland as Super+F for window hints" "d:lmet d:f u:f u:lmet"

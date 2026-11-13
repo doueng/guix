@@ -115,6 +115,9 @@ hl.bind("SUPER + F", hl.dsp.exec_cmd("~/.local/bin/winhint"))
 hl.bind("ALT + SPACE", keys.herdr_menu)
 -- Yank: copy visible Herdr text by hint, from any window.
 hl.bind("SUPER + Y", keys.herdr_yank)
+-- Clipboard history: Cmd+Caps+V, which kanata leaves as Super+Ctrl+V. Picks an
+-- entry in Dusk, copies it and pastes it.
+hl.bind("SUPER + CTRL + V", hl.dsp.exec_cmd("~/.local/bin/clipboard-history pick"))
 
 require("keybindings")
 require("leader")

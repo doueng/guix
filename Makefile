@@ -20,7 +20,8 @@ COMMON := -L "$(MODULES)"
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test \
-        doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check
+        doom-check doom-baseline bbh-runs bbh-tla-check skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check \
+        clipboard-history-test taildrop-test
 
 help:
 	@echo 'lint          fast checks for every change: Scheme compiles, scripts parse, docs agree'
@@ -68,6 +69,8 @@ help:
 	@echo 'keybindings-check kanata-check plus generated-binding, Hyprland, Emacs and Neovim tests'
 	@echo 'hypr-nested-check test Hyprland keybindings in a nested session'
 	@echo 'clipboard-check yank and paste between Emacs, Neovim and the Wayland clipboard (uses the live clipboard)'
+	@echo 'clipboard-history-test check what clipboard-history stores and skips, in a throwaway cliphist db'
+	@echo 'taildrop-test unit checks for the Taildrop send and receive script'
 
 # desktop/build/checks/checks.edn maps paths to the checks that cover them.
 REV ?= @
@@ -263,6 +266,12 @@ $(KANATA_SIM):
 # Talks to the live compositor and running Emacs daemons, then restores the clipboard text.
 clipboard-check:
 	bb desktop/build/clipboard/check.bb
+
+clipboard-history-test:
+	bb desktop/build/clipboard/history-test.bb
+
+taildrop-test:
+	bb desktop/build/taildrop/test.bb
 
 kanata-check: $(KANATA_SIM)
 	@test "$$("$(GUIX)" show kanata | sed -n 's/^version: //p')" = "$(KANATA_VERSION)" || \

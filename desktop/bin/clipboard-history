@@ -1,0 +1,111 @@
+#!/usr/bin/env bb
+;; Clipboard history with cliphist, picked in the Dusk launcher.
+;;
+;;   clipboard-history watch   Record each new clipboard entry; waits for a Wayland
+;;                             session and follows it across restarts (Home service).
+;;   clipboard-history store   wl-paste --watch runs this per copy, content on stdin.
+;;   clipboard-history pick    Choose an entry (Cmd+Caps+V): copy it and paste it.
+;;   clipboard-history wipe    Forget the whole history.
+;;
+;; Skipped: copies that a password manager marks sensitive (wl-paste sets
+;; CLIPBOARD_STATE=sensitive for x-kde-passwordManagerHint, and cliphist drops
+;; them), copies made while a password manager's window has focus, and entries
+;; over max-bytes. The history keeps the newest max-items entries.
+;; Emacs and Neovim copy through wl-copy (T42), so their kills are recorded and
+;; a picked entry reaches them as the system clipboard.
+(require '[babashka.classpath :as classpath]
+         '[babashka.fs :as fs]
+         '[babashka.process :as p]
+         '[cheshire.core :as json]
+         '[clojure.string :as str])
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[dusk.palette :as dusk] '[session])
+
+(def max-items 200)
+(def max-bytes (* 5 1024 1024))
+;; Password managers and password prompts, by window class, and by title for
+;; those that run in a browser tab or app window.
+(def secret-class-re
+  #"(?i)1password|bitwarden|keepass|enpass|proton.?pass|passwordsafe|org\.gnome\.world\.secrets|seahorse|pinentry|gcr-prompter|polkit")
+(def secret-title-re #"(?i)1password|bitwarden|keepassxc|proton pass|password manager")
+
+(def self (str (fs/real-path *file*)))
+
+(defn log [& xs]
+  (binding [*out* *err*]
+    (println (str (java.time.LocalDateTime/now)) (str/join " " xs))))
+
+(defn cliphist [& args]
+  (into ["cliphist" "-max-items" (str max-items)] args))
+
+(defn watch! []
+  (loop []
+    (let [env (session/await-wayland-env)]
+      (log "watching" (get env "WAYLAND_DISPLAY"))
+      ;; Exits with the compositor; then wait for the next one.
+      @(p/process ["wl-paste" "--watch" self "store"] {:extra-env env :out :inherit :err :inherit})
+      (Thread/sleep 2000)
+      (recur))))
+
+(defn secret-window? []
+  (let [r (p/sh {:continue true} "hyprctl" "-j" "activewindow")
+        w (when (zero? (:exit r)) (try (json/parse-string (:out r)) (catch Exception _ nil)))]
+    (boolean (and (map? w)
+                  (or (re-find secret-class-re (str (get w "class") " " (get w "initialClass")))
+                      (re-find secret-title-re (str (get w "title"))))))))
+
+(defn read-capped
+  "Bytes from IN, or nil when there are more than LIMIT."
+  [^java.io.InputStream in limit]
+  (let [buf (.readNBytes in (int (inc limit)))]
+    (when (<= (alength buf) limit) buf)))
+
+(defn store! []
+  (let [state (System/getenv "CLIPBOARD_STATE")]
+    (cond
+      (= "sensitive" state) nil
+      ;; cliphist forgets the newest entry when a client clears the clipboard.
+      (= "clear" state) (p/sh (cliphist "store") {:in ""})
+      (secret-window?) nil
+      :else (if-let [bytes (read-capped System/in max-bytes)]
+              (when (pos? (alength bytes))
+                @(p/process (cliphist "store") {:in (java.io.ByteArrayInputStream. bytes)}))
+              (log "skipped an entry over" max-bytes "bytes")))))
+
+(defn launcher-closed? []
+  (not (str/includes? (:out (p/sh {:continue true} "hyprctl" "layers")) "dusk-launcher")))
+
+(defn paste! []
+  ;; Dusk replies before the compositor unmaps its launcher, so wait until the
+  ;; window has the keyboard back. Shift+Insert is what kanata sends for Cmd+V.
+  (loop [tries 40]
+    (when (and (pos? tries) (not (launcher-closed?)))
+      (Thread/sleep 25)
+      (recur (dec tries))))
+  (Thread/sleep 50)
+  (p/sh {:continue true} "wtype" "-M" "shift" "-k" "Insert" "-m" "shift"))
+
+(defn choose! []
+  (let [lines (str/split-lines (:out (p/sh (cliphist "list"))))
+        entries (for [line lines :when (seq line)
+                      :let [[_ preview] (str/split line #"\t" 2)]]
+                  {:label (str/trim (str/replace (or preview "") #"\s+" " ")) :value line})
+        value (dusk/pick! "Clipboard history"
+                     (concat entries [{:label "Clear clipboard history" :value "wipe"}]))]
+    (cond
+      (nil? value) nil
+      (= "wipe" value) (p/sh (cliphist "wipe"))
+      :else (let [decoded (p/process (cliphist "decode") {:in value :out :stream})]
+              @(p/process ["wl-copy"] {:in (:out decoded)})
+              (paste!)))))
+
+(defn -main [& [cmd]]
+  (case cmd
+    "watch" (watch!)
+    "store" (store!)
+    "pick" (choose!)
+    "wipe" (p/sh (cliphist "wipe"))
+    (do (println "usage: clipboard-history watch | store | pick | wipe") (System/exit 2))))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (apply -main *command-line-args*))

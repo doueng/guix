@@ -80,6 +80,8 @@
    :doom "+ghostel/toggle" :nvim "<cmd>lua Snacks.terminal()<cr>" :idea "<Action>(ActivateTerminalToolWindow)"}
   {:keys ["o" "b"] :label "Browser workspace" :doom-match :analogous :desktop ["focus" {:workspace 2}]}
   {:keys ["o" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}
+  ;; Taildrop: pick the clipboard (oilfm gy copies a path), a screenshot or a download.
+  {:keys ["o" "s"] :label "Send to phone" :desktop-command ["~/.local/bin/taildrop" "send"]}
   {:keys ["p" "p"] :label "Switch project" :doom-match :exact :doom "projectile-switch-project"
    :idea "<Action>(ManageRecentProjects)" :herdr {:plugin "fullerzz.sesh" :action "open-picker"}}
   {:keys ["TAB" "."] :label "Switch workspace" :doom-match :exact :doom "+workspace/switch-to" :herdr :choose-workspace}

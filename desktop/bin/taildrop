@@ -1,0 +1,197 @@
+#!/usr/bin/env bb
+;; Taildrop between this laptop and the phone, over Tailscale.
+;;
+;;   taildrop receive           Move files sent to this laptop into ~/Downloads/Taildrop
+;;                              and notify; loops forever (the taildrop-receive Home service).
+;;   taildrop send FILE...      Send FILEs to a device, the phone first.
+;;   taildrop send              Pick what to send: the clipboard, a recent screenshot or download.
+;;   taildrop send --clipboard  Send the clipboard: copied files or a path (oilfm gy),
+;;                              an image, or else the text as a .txt file.
+;;   taildrop targets           List the devices that accept files.
+;;
+;; tailscaled's operator setting (OperatorUser) lets this user run
+;; `tailscale file get' and `file cp' without root.
+(require '[babashka.classpath :as classpath]
+         '[babashka.fs :as fs]
+         '[babashka.process :as p]
+         '[clojure.string :as str])
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[dusk.palette :as dusk] '[session])
+
+(def inbox (str (fs/home) "/Downloads/Taildrop"))
+
+(defn log [& xs]
+  (binding [*out* *err*]
+    (println (str (java.time.LocalDateTime/now)) (str/join " " xs))))
+
+(defn sh [& args] (apply p/sh {:continue true} args))
+
+(defn notify!
+  "Show a notification; with ACTIONS, pairs of id and label, wait up to ten
+  minutes for a click and return the id clicked, else nil."
+  [title body & {:keys [icon actions]}]
+  (let [argv (cond-> ["notify-send" "-a" "Taildrop"]
+               icon (into ["-i" icon])
+               true (into (mapcat (fn [[id label]] ["-A" (str id "=" label)]) actions))
+               true (into [title body]))
+        proc (p/process argv {:out :string :err :string})
+        result (deref proc (* 10 60 1000) nil)]
+    (if result
+      (not-empty (str/trim (:out result)))
+      (do (p/destroy-tree proc) nil))))
+
+;; Receive
+
+(def image-re #"(?i)\.(png|jpe?g|gif|webp|heic|heif|avif)$")
+
+(defn open! [path]
+  ;; The service has the D-Bus address but no Wayland display.
+  (if-let [env (session/wayland-env)]
+    (p/process ["xdg-open" path] {:extra-env env :out :discard :err :discard})
+    (log "no Wayland session to open" path)))
+
+(defn announce! [paths]
+  (let [one (first paths)
+        n (count paths)
+        names (if (= 1 n)
+                (str "In ~/" (fs/relativize (fs/home) inbox))
+                (str/join "\n" (map fs/file-name (take 8 paths))))
+        click (notify! (if (= 1 n) (str "Received " (fs/file-name one)) (str "Received " n " files"))
+                       (str names (when (> n 8) "\n…"))
+                       :icon (when (re-find image-re one) one)
+                       :actions (if (= 1 n)
+                                  [["default" "Open"] ["folder" "Show folder"]]
+                                  [["folder" "Show folder"]]))]
+    (case click
+      "default" (open! one)
+      "folder" (open! inbox)
+      nil)))
+
+(defn listing [] (set (map str (fs/list-dir inbox))))
+
+(defn receive! []
+  (fs/create-dirs inbox)
+  (log "receiving into" inbox)
+  ;; get --wait returns once it has moved what arrived; the next pass waits
+  ;; again. While tailscaled is down or starting, back off up to a minute.
+  (loop [failures 0]
+    (let [before (listing)
+          r (sh "tailscale" "file" "get" "--wait" "--conflict=rename" inbox)
+          new (sort (remove before (listing)))]
+      (when (seq new)
+        (log "received" (str/join ", " (map fs/file-name new)))
+        (future (try (announce! new) (catch Exception e (log "notify failed:" (ex-message e))))))
+      (if (zero? (:exit r))
+        (recur 0)
+        (do (log "tailscale file get:" (str/trim (str (:out r) (:err r))))
+            (Thread/sleep (min 60000 (* 2000 (inc failures))))
+            (recur (inc failures)))))))
+
+;; Send
+
+(defn targets
+  "Devices that accept files, as maps of :name :online?, phones and tablets
+  first, then online ones."
+  []
+  (let [r (sh "tailscale" "file" "cp" "--targets")]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "tailscale file cp --targets: " (str/trim (str (:out r) (:err r)))) {})))
+    (->> (str/split-lines (:out r))
+         (keep #(let [[_ name status] (str/split % #"\t")]
+                  (when name {:name name :online? (not (str/starts-with? (str status) "offline")) :status status})))
+         (sort-by (juxt (complement :online?) #(not (re-find #"(?i)iphone|ipad" (:name %))) :name)))))
+
+(defn choose-target []
+  (let [ts (targets)
+        online (filter :online? ts)]
+    (cond
+      (empty? ts) (throw (ex-info "No device accepts files on this tailnet" {}))
+      (= 1 (count online)) (:name (first online))
+      :else (dusk/pick! "Send to" (for [t ts] {:label (str (:name t) (when-not (:online? t) (str "  (" (:status t) ")")))
+                                           :value (:name t)})))))
+
+(defn uri->path [uri]
+  (when-let [[_ p] (re-matches #"file://[^/]*(/.*)" (str/trim uri))]
+    (java.net.URLDecoder/decode (str/replace p "+" "%2B") "UTF-8")))
+
+(defn clipboard-types []
+  (set (str/split-lines (:out (sh "wl-paste" "--list-types")))))
+
+(defn stage-dir [] (str (fs/create-temp-dir {:prefix "taildrop-"})))
+
+(defn stamp [] (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss")))
+
+(defn clipboard-files
+  "Files for the clipboard, and a temporary directory to remove afterwards."
+  []
+  (let [types (clipboard-types)
+        image (first (filter #(str/starts-with? % "image/") (sort types)))]
+    (cond
+      (types "text/uri-list")
+      {:files (vec (keep uri->path (str/split-lines (:out (sh "wl-paste" "-n" "-t" "text/uri-list")))))}
+
+      image
+      (let [dir (stage-dir)
+            f (str dir "/clipboard-" (stamp) "." (str/replace (subs image 6) #"[^a-z0-9]+.*" ""))]
+        (with-open [out (java.io.FileOutputStream. f)]
+          (.transferTo (:out (p/process ["wl-paste" "-n" "-t" image] {:out :stream})) out))
+        {:files [f] :tmp dir})
+
+      (some #(str/starts-with? % "text/") types)
+      (let [text (:out (sh "wl-paste" "-n"))
+            lines (remove str/blank? (map str/trim (str/split-lines text)))
+            paths (map #(str/replace % #"^~(?=/|$)" (str (fs/home))) lines)]
+        (if (and (seq paths) (every? #(and (fs/absolute? %) (fs/exists? %)) paths))
+          {:files (vec paths)}
+          (let [dir (stage-dir) f (str dir "/clipboard-" (stamp) ".txt")]
+            (spit f text)
+            {:files [f] :tmp dir})))
+
+      :else {:files []})))
+
+(defn recent-files []
+  (->> (concat (fs/glob (str (fs/home) "/Pictures") "screenshot-*")
+               (remove #(= inbox (str %)) (fs/list-dir (str (fs/home) "/Downloads"))))
+       (filter fs/regular-file?)
+       (remove fs/hidden?)
+       (sort-by #(- (.toMillis (fs/last-modified-time %))))
+       (take 12)
+       (map str)))
+
+(defn choose-files []
+  (let [value (dusk/pick! "Send to phone"
+                     (cons {:label "Clipboard: copied file, path, image or text" :value "clipboard"}
+                           (for [f (recent-files)]
+                             {:label (str (fs/file-name f) "  " (fs/file-name (fs/parent f))) :value f})))]
+    (cond (nil? value) nil
+          (= "clipboard" value) (clipboard-files)
+          :else {:files [value]})))
+
+(defn send! [{:keys [files tmp]}]
+  (try
+    (when (empty? files) (throw (ex-info "Nothing to send" {})))
+    (doseq [f files] (when-not (fs/regular-file? f) (throw (ex-info (str "Not a file: " f) {}))))
+    (when-let [target (choose-target)]
+      (let [what (if (= 1 (count files)) (fs/file-name (first files)) (str (count files) " files"))
+            r (apply sh "tailscale" "file" "cp" (concat files [(str target ":")]))]
+        (if (zero? (:exit r))
+          (notify! (str "Sent " what " to " target) "")
+          (throw (ex-info (str "Sending " what " to " target " failed: " (str/trim (str (:out r) (:err r)))) {})))))
+    (finally (when tmp (fs/delete-tree tmp)))))
+
+(defn -main [& [cmd & args]]
+  (try
+    (case cmd
+      "receive" (receive!)
+      "targets" (doseq [t (targets)] (println (:name t) (if (:online? t) "online" (:status t))))
+      "send" (cond (= ["--clipboard"] args) (send! (clipboard-files))
+                   (seq args) (send! {:files (mapv #(str (fs/absolutize %)) args)})
+                   :else (some-> (choose-files) send!))
+      (do (println "usage: taildrop receive | send [--clipboard | FILE...] | targets") (System/exit 2)))
+    (catch clojure.lang.ExceptionInfo e
+      (log (ex-message e))
+      (notify! "Taildrop" (ex-message e))
+      (System/exit 1))))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (apply -main *command-line-args*))

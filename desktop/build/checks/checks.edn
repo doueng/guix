@@ -55,6 +55,13 @@
            "desktop/build/clipboard/**"]
    ;; Slow only because it borrows the live clipboard and Emacs daemons.
    :slow ["make clipboard-check"]}
+  {:name "clipboard history"
+   :paths ["desktop/bin/clipboard-history" "desktop/lib/session.clj" "desktop/build/clipboard/history-test.bb"]
+   :checks ["make lint" "make clipboard-history-test"]}
+  {:name "taildrop"
+   :paths ["desktop/bin/taildrop" "desktop/lib/session.clj" "desktop/build/taildrop/**"
+           "modules/engstrand/features/tailscale.scm"]
+   :checks ["make lint" "make taildrop-test"]}
   {:name "herdr sesh picker"
    :paths ["desktop/build/herdr/sesh/**"]
    :checks ["cd desktop/build/herdr/sesh && bb tests.bb"]}

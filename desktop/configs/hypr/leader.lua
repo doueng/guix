@@ -41,6 +41,7 @@ hl.define_submap("leader-o", function()
     hl.bind(mods .. "T", keys.leave(hl.dsp.exec_cmd("~/.local/bin/keyleader run o t")))
     hl.bind(mods .. "B", keys.leave(hl.dsp.focus({ workspace = 2 }), "Cmd+Space o b", "Browser workspace"))
     hl.bind(mods .. "I", keys.leave(hl.dsp.focus({ workspace = 4 }), "Cmd+Space o i", "IntelliJ workspace"))
+    hl.bind(mods .. "S", keys.leave(hl.dsp.exec_cmd("~/.local/bin/keyleader run o s")))
   end
   hl.bind("escape", keys.cancel("leader-o", "Cmd+Space o", "Escape"))
   hl.bind("catchall", keys.cancel("leader-o", "Cmd+Space o"))
