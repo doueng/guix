@@ -54,7 +54,6 @@ Environment:
                       (die 1 (str "error: unsupported repository format: " input)))
         host (str/replace host #"^.*@" "")
         parts (remove str/blank? (str/split path #"/"))
-        ;; For GitHub-like deep links, use owner/repo only.
         parts (if (deep-link-segments (nth parts 2 nil)) (take 2 parts) parts)
         parts (concat (butlast parts) [(str/replace (or (last parts) "") #"\.git$" "")])]
     (when (< (count parts) 2)
@@ -78,7 +77,6 @@ Environment:
                     (do (p/shell {:out :string} "git" "clone" "--filter=blob:none" origin checkout) "cloned"))
       _ (when-not (fs/directory? (str checkout "/.git"))
           (die 3 (str "error: checkout path is not a git repository: " checkout)))
-      ;; Normalize origin to the canonical HTTPS URL, adding it when missing.
       current (git checkout "remote" "get-url" "origin")
       _ (cond (not (zero? (:exit current))) (git! checkout "remote" "add" "origin" origin)
               (not= origin (str/trim (:out current))) (git! checkout "remote" "set-url" "origin" origin))

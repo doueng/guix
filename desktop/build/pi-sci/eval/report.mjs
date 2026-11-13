@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-// Summarize a run directory from eval/run.mjs: per-profile outcomes and costs,
-// per-task pass counts, paired deltas against a baseline profile, and per-prompt
-// cumulative cost for multi-prompt tasks. Grades come from results.jsonl;
-// metrics are recomputed from each trial's events. REPORT_FORMAT=json prints
-// the same tables as JSON.
+// REPORT_FORMAT=json prints the same tables as JSON.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { listCost, priceFor, promptSegments, readEvents, summarize } from "./metrics.mjs";

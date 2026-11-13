@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Append a well-formed row to a show-me-your-work decision log (TSV).
 ;; Usage: log.bb <logfile> <phase> <decision> <why> <evidence> <result>
 (require '[babashka.fs :as fs] '[clojure.string :as str])
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// Re-run each trial's grader against its kept workspace and rewrite
-// results.jsonl, keeping the old file as results.jsonl.bak. Use after fixing
-// a grader; trials are not rerun.
+// Keeps the old results.jsonl as results.jsonl.bak.  Use after fixing a
+// grader; trials are not rerun.
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { TASKS } from "./registry.mjs";

@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// Run the same goal-only tasks against several Pi harness profiles with one
-// model and write one record per trial. See eval/README.md.
 import { spawn } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { appendFile, chmod, mkdir, symlink, writeFile } from "node:fs/promises";
