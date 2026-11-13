@@ -91,11 +91,14 @@ MimeType=text/markdown;text/x-markdown;
 ;; naming the system profile's flatpak.  Copies carry a marker, and a copy whose
 ;; source is gone or fixed is removed.  Delete this service once
 ;; ~/.local/share/applications holds no X-Familiar-Flatpak-Copy entry.
+;; Guix Home runs activation snippets inside a let*, where use-modules takes
+;; effect only after the snippet is expanded, so it can import procedures but
+;; not macros such as cut.
 (define %home-flatpak-desktop-entries
   (simple-service 'familiar-flatpak-desktop-entries home-activation-service-type
     #~(begin
         (use-modules (guix build utils) (ice-9 regex) (ice-9 textual-ports)
-                     (srfi srfi-1) (srfi srfi-26))
+                     (srfi srfi-1))
         (let* ((home (getenv "HOME"))
                (target (string-append home "/.local/share/applications"))
                (marker "X-Familiar-Flatpak-Copy=")
@@ -108,7 +111,7 @@ MimeType=text/markdown;text/x-markdown;
                                   '()))
                             (list (string-append home "/.local/share/flatpak/exports/share/applications")
                                   "/var/lib/flatpak/exports/share/applications")))
-               (read-file (cut call-with-input-file <> get-string-all)))
+               (read-file (lambda (file) (call-with-input-file file get-string-all))))
           (mkdir-p target)
           ;; Drop stale copies first, so a fixed or removed app falls back to flatpak's entry.
           (for-each (lambda (copy)
