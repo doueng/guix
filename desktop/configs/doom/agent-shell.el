@@ -1045,6 +1045,62 @@ fontified again."
 
 (advice-add 'org-src-font-lock-fontify-block :around #'eng/bbh--cached-src-fontify)
 
+(defvar eng/bbh-transcript-precolor-chars 1000000
+  "How far above and below its window a transcript is colored while idle.
+Coloring all of a 1.9 MB transcript takes about 1.3 s of idle time once,
+and its faces about 1 MB.")
+
+(defun eng/bbh-transcript--uncolored-near (window)
+  "The uncolored text nearest WINDOW's start within reach, as (BEG . END), or nil."
+  (let* ((start (window-start window))
+         (lo (max (point-min) (- start eng/bbh-transcript-precolor-chars)))
+         (hi (min (point-max) (+ start eng/bbh-transcript-precolor-chars)))
+         (below (text-property-any start hi 'fontified nil))
+         (above (let ((p (if (and (> start lo) (get-text-property (1- start) 'fontified))
+                             (previous-single-property-change start 'fontified nil lo)
+                           start)))
+                  (and (> p lo) (not (get-text-property (1- p) 'fontified)) p))))
+    (cond ((and below (or (not above) (<= (- below start) (- start above))))
+           (cons below (min hi (+ below jit-lock-chunk-size))))
+          ;; Start at a shown line, as redisplay does: org colors the newline
+          ;; after a block by whichever delimiter line it fontifies first.
+          (above (cons (save-excursion
+                         (goto-char (max lo (- above jit-lock-chunk-size)))
+                         (beginning-of-line)
+                         (while (and (> (point) lo) (invisible-p (point))) (forward-line -1))
+                         (point))
+                       above)))))
+
+(defun eng/bbh-transcript--precolor-window (window deadline)
+  "Color WINDOW's transcript outward from its start until DEADLINE or input.
+This is what redisplay would do on scrolling there, so the colors are the
+same, but it costs nothing then.  Return non-nil if text in reach is left."
+  (with-current-buffer (window-buffer window)
+    (let (chunk)
+      (while (and (setq chunk (eng/bbh-transcript--uncolored-near window))
+                  (< (float-time) deadline)
+                  (not (input-pending-p)))
+        (with-demoted-errors "bbh precolor: %S"
+          (jit-lock-fontify-now (car chunk) (cdr chunk))))
+      chunk)))
+
+(defun eng/bbh-transcript--precolor ()
+  "Color the transcripts on screen a little at a time while Emacs is idle."
+  (let ((deadline (+ (float-time) 0.05)) more)
+    (walk-windows
+     (lambda (window)
+       (when (and (with-current-buffer (window-buffer window)
+                    (and (derived-mode-p 'eng/bbh-transcript-mode) jit-lock-mode))
+                  (eng/bbh-transcript--precolor-window window deadline))
+         (setq more t)))
+     'nomini 'visible)
+    (when (and more (current-idle-time))
+      (run-with-idle-timer (time-add (current-idle-time) 0.01) nil #'eng/bbh-transcript--precolor))))
+
+(defvar eng/bbh-transcript--precolor-timer nil)
+(when (timerp eng/bbh-transcript--precolor-timer) (cancel-timer eng/bbh-transcript--precolor-timer))
+(setq eng/bbh-transcript--precolor-timer (run-with-idle-timer 0.5 t #'eng/bbh-transcript--precolor))
+
 (defconst eng/bbh-transcript--markup
   '((eng/bbh--fontify-nested-blocks))
   "Format nested blocks as code.  `eng/bbh-transcript--decorate' hides their markup.")

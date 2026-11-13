@@ -307,6 +307,67 @@ here; the budget allows 0.7)."
       (should (memq 'font-lock-keyword-face (ensure-list (get-text-property (match-beginning 0) 'face)))))
     (kill-buffer)))
 
+(defun bbh-test--transcript-with-code (buffer-name blocks)
+  "A transcript BUFFER-NAME of BLOCKS prompts, code blocks and folded results, shown at its end."
+  (let ((buffer (get-buffer-create buffer-name)))
+    (with-current-buffer buffer
+      (eng/bbh-transcript-mode)
+      (let ((noninteractive nil)) (font-lock-mode 1))
+      (let ((inhibit-read-only t))
+        (dotimes (i blocks)
+          (insert (format "* prompt %d *bold* and =code=\n\n" i)
+                  "#+begin_src emacs-lisp\n"
+                  (mapconcat (lambda (n) (format "(defun f%d (x) \"doc\" (when x '(%d :k)))" n n))
+                             (number-sequence 1 40) "\n")
+                  "\n#+end_src\n#+begin_result done 2\n=> 1\n=> 2\n#+end_result\n\nDone.\n\n"))
+        (eng/bbh-transcript--decorate (point-min) (point-max))
+        (goto-char (point-min))
+        (while (re-search-forward "^#\\+begin_result " nil t)
+          (save-excursion (beginning-of-line) (org-fold-hide-block-toggle t t)))))
+    (set-window-buffer (selected-window) buffer)
+    (with-current-buffer buffer
+      (goto-char (point-max))
+      (set-window-start (selected-window) (save-excursion (vertical-motion -20) (point))))
+    buffer))
+
+(ert-deftest bbh-transcript-precolors-around-its-window-while-idle ()
+  "Idle time colors the transcript outward from its window, with the colors
+redisplay gives it, so scrolling back runs no major mode.  It stops at its
+deadline and leaves text out of reach alone."
+  (let* ((eng/bbh-transcript-precolor-chars 60000)
+         (window (selected-window))
+         (buffer (bbh-test--transcript-with-code "bbh precolor test" 60))
+         (calls 0)
+         (count (lambda (&rest _) (cl-incf calls))))
+    (with-current-buffer buffer
+      (let ((start (window-start window)))
+        ;; A deadline already past does nothing and says that work is left.
+        (should (eng/bbh-transcript--precolor-window window (float-time)))
+        (should-not (text-property-any (max (point-min) (- start 60000)) start 'fontified t))
+        (let ((t0 (float-time)))
+          (should-not (eng/bbh-transcript--precolor-window window (+ (float-time) 30)))
+          (message "precolor: %.3f s for %d chars" (- (float-time) t0) (- start (max (point-min) (- start 60000)))))
+        (should-not (text-property-any (save-excursion (goto-char (- start 60000)) (line-end-position 2))
+                                       (point-max) 'fontified nil))
+        (should (text-property-any (point-min) (- start 60000) 'fontified nil))
+        ;; Scrolling back through it now runs no major mode and costs little.
+        (advice-add 'org-src-get-lang-mode-if-bound :before count)
+        (unwind-protect
+            (let ((t0 (float-time)))
+              (goto-char start)
+              (while (> (point) (- start 50000))
+                (vertical-motion -20)
+                (unless (get-text-property (point) 'fontified)
+                  (run-hook-with-args 'fontification-functions (point))))
+              (should (= calls 0))
+              (should (< (- (float-time) t0) 0.5)))
+          (advice-remove 'org-src-get-lang-mode-if-bound count))
+        (let ((precolored (bbh-test--face-runs)))
+          (kill-buffer)
+          (with-current-buffer (bbh-test--transcript-with-code "bbh precolor reference" 60)
+            (should (equal precolored (bbh-test--face-runs)))
+            (kill-buffer)))))))
+
 (ert-deftest bbh-transcript-links-do-not-backtrack-on-escaped-quotes ()
   "A tool call quoting JSON puts [[ before runs of escaped quotes.  Org's
 link regexp takes time exponential in their number to fail there, and hung
