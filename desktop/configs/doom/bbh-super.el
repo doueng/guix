@@ -1384,7 +1384,9 @@ thread list, in its own mode, stays one truncated line per thread."
   ;; C-n sends from anywhere in the Inbox, in normal and insert state, so it
   ;; sends after a pick as after a typed answer; a completion popup keeps it.
   (dolist (state '(normal insert))
-    (evil-local-set-key state (kbd "C-n") (eng/bbh-send-key #'eng/bbh-inbox-send)))
+    (evil-local-set-key state (kbd "C-n") (eng/bbh-send-key #'eng/bbh-inbox-send))
+    ;; C-c C-c sends nowhere, as in the composer, rather than org's tags prompt.
+    (evil-local-set-key state (kbd "C-c C-c") #'undefined))
   (evil-local-set-key 'insert (kbd "C-c C-k") #'eng/bbh-inbox-clear))
 
 (define-derived-mode eng/bbh-inbox-mode org-mode "bbh inbox"

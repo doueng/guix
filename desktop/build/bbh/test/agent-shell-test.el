@@ -68,6 +68,9 @@ keys act in normal state."
                                  ("]t" . eng/bbh-inbox-next-waiting)))
     (bbh-test--keys-in 'insert '(("C-n" . eng/bbh-inbox-send) ("C-c C-k" . eng/bbh-inbox-clear)))
     (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send)
+    ;; Nor org's C-c C-c, whose tags prompt on a heading froze the Inbox (T174).
+    (dolist (state '(normal insert))
+      (bbh-test--keys-in state '(("C-c C-c" . undefined))))
     (evil-change-state 'insert)
     (dolist (key '("s" "g" "]" "2" "m"))
       (should (memq (key-binding (kbd key)) '(self-insert-command org-self-insert-command))))
