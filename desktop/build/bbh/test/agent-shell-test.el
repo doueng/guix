@@ -240,6 +240,73 @@ block it marked multiline once, and nothing may add to that."
           (kill-buffer))
       (advice-remove 'org-src-font-lock-fontify-block count))))
 
+(defun bbh-test--face-runs ()
+  "Every run of the `face' property in the buffer, after fontifying it all."
+  (let ((p (point-min)))
+    (while (setq p (text-property-any p (point-max) 'fontified nil))
+      (jit-lock-fontify-now p (+ p jit-lock-chunk-size))))
+  (let ((p (point-min)) runs)
+    (while (< p (point-max))
+      (let ((e (next-single-property-change p 'face nil (point-max))))
+        (push (list p e (get-text-property p 'face)) runs)
+        (setq p e)))
+    (nreverse runs)))
+
+(ert-deftest bbh-transcript-fontifies-each-code-block-natively-once ()
+  "A transcript's history never changes, so once its code has been colored
+font-lock copies the faces back instead of running the code's major mode
+again.  The colors stay the same, and refontifying the whole transcript
+takes a fraction of the first pass, where the major mode runs (about 1/6
+here; the budget allows 0.7)."
+  (let* ((calls 0)
+         (count (lambda (&rest _) (cl-incf calls))))
+    ;; Only the uncached path looks up the major mode.
+    (with-current-buffer (get-buffer-create "bbh native cache test")
+      (eng/bbh-transcript-mode)
+      (let ((noninteractive nil)) (font-lock-mode 1))
+      (let ((inhibit-read-only t))
+        (dotimes (i 30)
+          (insert (format "* prompt %d\n\n" i)
+                  "#+begin_src emacs-lisp\n"
+                  (mapconcat (lambda (n) (format "(defun f%d (x) \"doc\" (when x (setq y '(%d :k ?c))))" n n))
+                             (number-sequence 1 150) "\n")
+                  "\n#+end_src\n\nDone.\n\n")))
+      (advice-add 'org-src-get-lang-mode-if-bound :before count)
+      (unwind-protect
+          (let* ((t0 (float-time))
+                 (cold (bbh-test--face-runs))
+                 (cold-time (- (float-time) t0))
+                 (cold-calls calls))
+            (font-lock-flush)
+            (setq calls 0 t0 (float-time))
+            (let ((warm (bbh-test--face-runs))
+                  (warm-time (- (float-time) t0)))
+              (message "native cache: cold %.3f s, warm %.3f s" cold-time warm-time)
+              (should (equal cold warm))
+              (should (>= cold-calls 30))
+              (should (= calls 0))
+              (should (< warm-time (* 0.7 cold-time)))))
+        (advice-remove 'org-src-get-lang-mode-if-bound count)
+        (kill-buffer)))))
+
+(ert-deftest bbh-transcript-native-cache-follows-a-growing-block ()
+  "A code block still streaming in is fontified again once it has grown."
+  (with-current-buffer (get-buffer-create "bbh native grow test")
+    (eng/bbh-transcript-mode)
+    (let ((noninteractive nil)) (font-lock-mode 1))
+    (let ((inhibit-read-only t))
+      (insert "#+begin_src emacs-lisp\n(setq a 1)\n#+end_src\n")
+      (bbh-test--face-runs)
+      (goto-char (point-min))
+      (search-forward "(setq a 1)")
+      (insert "\n(defun g ())")
+      (font-lock-flush)
+      (bbh-test--face-runs)
+      (goto-char (point-min))
+      (search-forward "defun")
+      (should (memq 'font-lock-keyword-face (ensure-list (get-text-property (match-beginning 0) 'face)))))
+    (kill-buffer)))
+
 (ert-deftest bbh-transcript-links-do-not-backtrack-on-escaped-quotes ()
   "A tool call quoting JSON puts [[ before runs of escaped quotes.  Org's
 link regexp takes time exponential in their number to fail there, and hung

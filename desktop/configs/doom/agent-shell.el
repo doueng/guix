@@ -1018,6 +1018,33 @@ font-lock reached, so it fontifies the same block again for every chunk."
             (add-face-text-property beg end 'org-block t))))))
   nil)
 
+(defun eng/bbh--cached-src-fontify (fontify lang start end)
+  "Run FONTIFY, `org-src-font-lock-fontify-block', once per transcript block.
+A transcript's history never changes, so the faces LANG's mode gives the
+code between START and END stay right.  Keep them in `eng/bbh-src-face'
+and copy them back when font-lock comes by again: font-lock clears faces
+before it refontifies, and the native pass was half of the time spent
+scrolling.  A block that has grown since, as one still streaming in, is
+fontified again."
+  (if (not (derived-mode-p 'eng/bbh-transcript-mode))
+      (funcall fontify lang start end)
+    (let ((key (get-text-property start 'eng/bbh-src))
+          (pos start))
+      (if (and key (equal (car key) lang) (= (cdr key) (- end start))
+               (not (text-property-not-all start end 'eng/bbh-src key)))
+          (while (< pos end)
+            (let ((next (next-single-property-change pos 'eng/bbh-src-face nil end)))
+              (put-text-property pos next 'face (get-text-property pos 'eng/bbh-src-face))
+              (setq pos next)))
+        (funcall fontify lang start end)
+        (put-text-property start end 'eng/bbh-src (cons lang (- end start)))
+        (while (< pos end)
+          (let ((next (next-single-property-change pos 'face nil end)))
+            (put-text-property pos next 'eng/bbh-src-face (get-text-property pos 'face))
+            (setq pos next)))))))
+
+(advice-add 'org-src-font-lock-fontify-block :around #'eng/bbh--cached-src-fontify)
+
 (defconst eng/bbh-transcript--markup
   '((eng/bbh--fontify-nested-blocks))
   "Format nested blocks as code.  `eng/bbh-transcript--decorate' hides their markup.")
