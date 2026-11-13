@@ -56,6 +56,10 @@
                :requires ([bbh.test-runner] [bbh.heavy])
                :task (do (bbh.heavy/reexec-held! (concat ["bb"] (some->> (System/getProperty "babashka.config") (vector "--config")) ["test"] *command-line-args*))
                          (bbh.test-runner/-main))}
+         test:bombadil {:doc "Bombadil types into the split Inbox in a capped emacs -nw on a throwaway churning controller and checks test/bombadil/inbox.ts. Not in bb test. Args: [--time S] [--seed N] [--reproduce DIR] [--keep]."
+                        :requires ([bbh.heavy])
+                        :task (do (bbh.heavy/reexec-held! (concat ["bb"] (some->> (System/getProperty "babashka.config") (vector "--config")) ["test:bombadil"] *command-line-args*))
+                                  ((requiring-resolve 'bbh.bombadil/-main-args) *command-line-args*))}
          test:props {:doc "Run only the property tests, PROPS_SCALE (default 20) times their default trials; BBH_PROP_SEED replays a failure's seed."
                      :requires ([bbh.test-runner] [bbh.heavy])
                      :task (do (bbh.heavy/reexec-held! (concat ["bb"] (some->> (System/getProperty "babashka.config") (vector "--config")) ["test:props"]))

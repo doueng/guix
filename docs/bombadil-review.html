@@ -32,7 +32,10 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <h1>Bombadil for oilfm and the bbh Emacs UI</h1>
 
 <p class=sub>T174 · W190 · 2026-11-13 · Tags: <span class='tag measured'>measured</span> I ran it or read it in source here; <span class='tag inferred'>inferred</span> my reading, not tested; <span class='tag guess'>guess</span> effort estimates.</p>
-<nav><a href='#verdict'>Verdict</a><a href='#what'>What it is</a><a href='#run'>Run here</a><a href='#oilfm'>oilfm</a><a href='#bbh'>bbh Emacs</a><a href='#alt'>Alternatives</a><a href='#src'>Sources</a></nav>
+<nav><a href='#result'>Result</a><a href='#verdict'>Verdict</a><a href='#what'>What it is</a><a href='#run'>Run here</a><a href='#oilfm'>oilfm</a><a href='#bbh'>bbh Emacs</a><a href='#alt'>Alternatives</a><a href='#src'>Sources</a></nav>
+
+<h2 id=result>Result of the Emacs prototype</h2>
+<div class='card good'><b>Built and kept (W191).</b> <code>make bombadil</code> drives the split Inbox in a capped <code>emacs -nw</code> on a throwaway churning controller. It checks 12 screen properties at about 7 screens/s. Within its first hour it found two real bugs, both now fixed with ERT tests: the thread list could hide the thread that needs you above its window, and C-c C-c opened org's Tags prompt and stalled the Inbox. After the fixes, two 10-minute runs passed. It also surfaced four smaller issues, reported to their owners. Full report: <a href='bombadil-inbox-report.html'>bombadil-inbox-report.html</a>. <span class='tag measured'>measured</span></div>
 
 <h2 id=verdict>Verdict</h2>
 <div class='card bad'><b>oilfm: skip Bombadil.</b> It cannot drive a native Wayland window. Also, the brief is out of date: oilfm is no longer Zig on zgui. T122 rewrote it in Rust on gpui. It already has proptest planner properties and a headless gpui <code>TestApp</code> that types keys and checks files on disk. The cheap win is a proptest <i>random key sequence</i> test on that harness, about half a day <span class='tag guess'>guess</span>.</div>

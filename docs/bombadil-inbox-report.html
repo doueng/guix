@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Bombadil drives the bbh split Inbox in a real terminal: 12 properties, two bugs found and fixed, two clean 10-minute runs, and make bombadil to run it.">
+<meta name="bbh-doc" content="T174">
+<title>Bombadil on the bbh Inbox: prototype result</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Bombadil on the bbh Inbox: prototype result</h1>
+
+<p class=sub>T174 · W191 · 2026-11-13 · Tags: <span class='tag measured'>measured</span> I ran it here; <span class='tag inferred'>inferred</span> my reading of code or logs.</p>
+<nav><a href='#outcome'>Outcome</a><a href='#how'>How it runs</a><a href='#specs'>Properties</a><a href='#runs'>Runs</a><a href='#found'>Findings</a><a href='#use'>Use it</a><a href='#limits'>Limits</a></nav>
+
+<h2 id=outcome>Outcome</h2>
+<div class='card good'><b>Goal:</b> black-box property tests of the bbh Emacs Inbox in a real terminal, per the review. <b>Result:</b> the prototype works on this Asahi machine and paid off. In its first hour it found two real bugs in the split Inbox, both now fixed with ERT regression tests. After the fixes, two 10-minute runs passed with about 4,200 screens each. It is a separate target, <code>make bombadil</code> (or <code>bb test:bombadil</code>), with a time budget. It is not part of <code>bb test</code> or <code>make verify</code>. <span class='tag measured'>measured</span></div>
+<div class='card warn'><b>Reported, not fixed:</b> four smaller issues: an <code>i</code>/send race, cryptic refusal messages, “Sent” for an empty send, and a stray “Process … finished” echo. See <a href='#found'>Findings</a>.</div>
+
+<h2 id=how>How it runs</h2>
+<svg viewBox='0 0 660 150' role=img aria-label='harness'>
+<g font-size='12.5' text-anchor='middle'>
+<rect x='5' y='20' width='150' height='60' rx='8' fill='#e4f3ea' stroke='#2e7d4f'/><text x='80' y='44'>fixture controller</text><text x='80' y='62'>seeded fake Workers</text>
+<rect x='190' y='20' width='120' height='60' rx='8' fill='#f7efdc' stroke='#8a6a1f'/><text x='250' y='44'>bbh inbox CLI</text><text x='250' y='62'>this checkout</text>
+<rect x='345' y='20' width='140' height='60' rx='8' fill='#e6f0f5' stroke='#2f6f8f'/><text x='415' y='44'>emacs -Q -nw</text><text x='415' y='62'>evil + bbh-super.el</text>
+<rect x='520' y='20' width='135' height='60' rx='8' fill='#f0e9f6' stroke='#7a4fa0'/><text x='587' y='44'>Bombadil PTY</text><text x='587' y='62'>inbox.ts properties</text>
+<path d='M155 50h35M310 50h35M485 50h35' stroke='#5d6678' stroke-width='2' marker-end='url(#a)'/>
+<path d='M80 80v40h335v-40' fill='none' stroke='#5d6678' stroke-dasharray='4 3'/><text x='250' y='138'>push: the controller pokes the Inbox's listener on every commit</text>
+</g><defs><marker id='a' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='7' markerHeight='7' orient='auto'><path d='M0 0L10 5L0 10z' fill='#5d6678'/></marker></defs></svg>
+<ul>
+<li><b>Binary:</b> Bombadil 0.7.10, the static aarch64 release, as the Guix package <code>(engstrand packages bombadil)</code>, pinned by hash. It is not in the home profile; the runner builds it with <code>guix build -L modules</code> on demand.</li>
+<li><b>Isolation (T75, T163):</b> HOME and the XDG dirs are a temp root. BBH_ and WF_ session variables are dropped, and <code>BBH_EMACS_SERVER</code> names a daemon that does not exist, so the controller's sweep fails harmlessly instead of reaching bbh-super. The runner checks all of this before it starts. It holds the heavy-job slot, refuses to start under 2.5 GB MemAvailable, and runs Emacs under a soft 1.5 GB address-space cap that the bbh it spawns lifts for itself, since babashka cannot start under it.</li>
+<li><b>Fixture:</b> <code>bbh.super/start!</code> with a stub launch, which needs no Emacs and no jj. A churn thread, seeded, makes threads and Workers, asks with unique texts <code>q&lt;n&gt; &lt;word&gt;?</code>, notes, and finishes Workers about every 0.8–2.5 s. It also takes the mailbox for them.</li>
+<li><b>Screen:</b> 140×40, so the list sits beside the thread. The pushed-reload idle delay is 0.05 s instead of 0.5 s. Bombadil types about every 130 ms, so with 0.5 s no push would ever reload, and the shorter delay keeps pushes racing keys.</li>
+</ul>
+
+<h2 id=specs>Properties</h2>
+<p>Each property reads only the screen. The spec is <span class=cite>/home/engstrand/guix/desktop/build/bbh/test/bombadil/inbox.ts</span>. A property that compares two redraws waits 1–2 s for the second one, because one sample can land mid-redraw.</p>
+<div class=table><table>
+<tr><th>Property</th><th>Checks</th><th>Brief's ask</th></tr>
+<tr><td><code>rowWithAsksNeverWorking</code></td><td>A list row with open asks (<code>N?</code>) shows ●, never ◐</td><td>never waiting while working, as drawn</td></tr>
+<tr><td><code>paneAndListAgreeOnWaiting</code></td><td>A thread the pane shows waiting or with an ask is not ◐ in the list (outside insert state, where the pane holds on purpose)</td><td>same</td></tr>
+<tr><td><code>listShowsEveryThreadThatNeedsYou</code></td><td>When the list mode line says All, the ● rows equal the header's “N need you”</td><td>new: found bug 1</td></tr>
+<tr><td><code>listFillsItsWindow</code></td><td>No rows hide above while blank lines show below the list</td><td>new: found bug 1's long-list case</td></tr>
+<tr><td><code>sentAskCloses</code></td><td>A picked ask is gone within 8 s after C-n or s, unless the controller refuses the draft as stale</td><td>answering closes an ask</td></tr>
+<tr><td><code>closedAskStaysClosed</code></td><td>An ask that left its thread never shows again</td><td>…exactly once</td></tr>
+<tr><td><code>cnNeverUndefined</code></td><td>C-n never echoes “is undefined”, in the list, the pane, and normal and insert state</td><td>C-n always sends</td></tr>
+<tr><td><code>ccNeverSends</code>, <code>ccOpensNoPrompt</code></td><td>C-c C-c is followed by no “Sent” and opens no prompt</td><td>C-c C-c never sends; found bug 2</td></tr>
+<tr><td><code>selectionStaysPut</code></td><td>The selected thread changes only after a motion key, or when its row goes</td><td>refresh keeps point on the thread</td></tr>
+<tr><td><code>listCursorOnSelected</code></td><td>In the list, the cursor sits on the selected row</td><td>same</td></tr>
+<tr><td><code>insertStateTypes</code></td><td>A word typed in insert state in an Answer appears on screen</td><td>typing inserts</td></tr>
+</table></div>
+<p>Generators: j/k, ]t/[t, TAB/o, 1/2/., i, words, space, ESC, C-n, s, gr, and C-c C-c (only about 2 s after a send, so a late “Sent” is not blamed on it). Each run ends with a <code>keys:</code> line that counts the keys it sent, so a property whose key never came shows up. An early version gated C-c C-c on 8 s and sent it zero times in 3 minutes, which that line now makes visible. C-g quits any prompt. They never send RET, q, SPC, C-x, J, D, a, x, A, S, u, gv or gn.</p>
+
+<h2 id=runs>Runs</h2>
+<div class=table><table>
+<tr><th>Run</th><th>Seed</th><th>Length</th><th>Screens</th><th>Result</th></tr>
+<tr><td>Before fixes</td><td>899858, 796330</td><td>4–8 s</td><td>50–130</td><td>The list hid a thread that needs you</td></tr>
+<tr><td>Before fixes</td><td>653018</td><td>60 s</td><td>900</td><td>C-c C-c opened the Tags prompt; the Inbox stayed stuck in it</td></tr>
+<tr><td>Red, kept for repro</td><td>257902</td><td>4 s</td><td>26</td><td>listShowsEveryThreadThatNeedsYou; <code>--reproduce</code> failed again on the old code and passed on the fix</td></tr>
+<tr><td>After fix 1a</td><td>358874</td><td>262 s</td><td>1,914</td><td>The long-list case: rows hid above with blank lines below. This led to fix 1b.</td></tr>
+<tr><td>Spec tuning</td><td>769318, 720499</td><td>50–106 s</td><td>365–762</td><td>The i/send race (finding 3) and stale refusals (finding 4). The spec now allows both.</td></tr>
+<tr><td><b>Final</b></td><td>767157</td><td>600 s</td><td>4,281</td><td><b>pass</b></td></tr>
+<tr><td><b>Final</b></td><td>348515</td><td>600 s</td><td>4,138</td><td><b>pass</b></td></tr>
+</table></div>
+<p>Throughput is about 7 screens/s at a 100 ms quiescence wait, against 76/s for bare <code>emacs -nw</code> at 5 ms. The longer wait is deliberate: at 40 ms the screen lagged one key behind, and properties blamed the wrong key. A trace takes roughly 0.3–0.5 MB per screen, so the runner deletes the temp root when a run passes and keeps it when one fails. <span class='tag measured'>measured</span></p>
+
+<h2 id=found>Findings</h2>
+<div class='card good'><b>1. Fixed: the thread list could hide the thread that needs you.</b> <code>eng/bbh-inbox--draw-list</code> kept the selected row on the same screen line after every reload. When a thread sorted above the selection, for example because its Worker just asked, the window started below it. The header said “1 need you”, no ● row was visible, and up to 30 blank lines sat under the list. Now the window never starts lower than the point that puts the list's end at its bottom, so a list that fits starts at the top. A long list still keeps its screen line. Regression tests: <code>bbh-inbox-split-reload-fills-the-window-before-hiding-rows-above</code> and <code>bbh-inbox-split-reload-keeps-a-long-lists-screen-line</code>, plus the old test now expects the new row to show. All three fail on the old code.</div>
+<div class='card good'><b>2. Fixed: C-c C-c in the Inbox opened org's Tags prompt.</b> On a heading, <code>org-ctrl-c-ctrl-c</code> asked “Tags:” in the minibuffer. Reloads stopped drawing until C-g, and the existing test only checked that C-c C-c was not send. It is now <code>undefined</code> in normal and insert state, as in the composer (T125's rule). <code>bbh-inbox-and-thread-list-keys-under-evil</code> asserts it.</div>
+<div class='card warn'><b>3. Reported: <code>i</code> right after a send can strand insert state.</b> Press C-n, then <code>i</code> before the send returns. The refresh that follows removes the Answer you entered, and you stay in insert state on read-only text (“Text is read-only”). Nothing is lost, since the pick already answered that ask. A fix would leave insert state when a render removes the Answer under point. Seed 769318. <span class='tag measured'>measured</span></div>
+<div class='card warn'><b>4. Reported: refusal messages are cryptic, and an empty send says “Sent”.</b> A send refused because the asks changed since the pick echoes <code>bbh inbox: stale: stale</code>. A closed ask gives <code>no-such-ask: no-such-ask</code>. Neither says what to do (C-c C-k discards the draft, then pick again). Separately, <code>bbh inbox send</code> with nothing in the draft sends nothing but exits 0, so the Inbox echoes “Sent T5”. The log showed that repeatedly. <span class='tag inferred'>inferred</span> from <span class=cite>/home/engstrand/guix/desktop/build/bbh/src/bbh/super/pane.clj</span> send! and the messages log. Owner: T125 (C-n send).</div>
+<div class='card warn'><b>5. Reported: a stray echo.</b> “Process bbh-inbox-cmd stderr finished” sometimes reaches the echo area. <code>eng/bbh-inbox--run</code>'s sentinel kills the stderr buffer before that pipe's own default sentinel runs. Cosmetic. <span class='tag inferred'>inferred</span></div>
+<div class='card'><b>Not a bug: pushed reloads wait for idleness.</b> With a key every 130 ms, the 0.5 s idle reload never ran, and the view stayed stale for many seconds (a finished Worker's asks still showed). That is the design (none runs while you type), so the test shortens the delay instead.</div>
+
+<h2 id=use>Use it</h2>
+<pre><code>make bombadil                         # 120 s, random seed
+make bombadil BOMBADIL_TIME=600 SEED=767157
+cd desktop/build/bbh &amp;&amp; bb test:bombadil --time 60 --keep
+bb test:bombadil --seed N --reproduce /tmp/bbh-bombadil…/trace --keep</code></pre>
+<p>Every run prints the keys it sent. A failure also prints the property, the screen it judged, the seed, the trace directory, and the exact reproduce command. <code>--reproduce</code> replays the trace's keys against a fixture churned from the same seed. Replay is best effort: the fixture's timing is not replayed, but the bug above reproduced on its first try. Files: <span class=cite>/home/engstrand/guix/desktop/build/bbh/test/bbh/bombadil.clj</span> <span class=cite>/home/engstrand/guix/desktop/build/bbh/test/bombadil/inbox.el</span> <span class=cite>/home/engstrand/guix/modules/engstrand/packages/bombadil.scm</span></p>
+
+<h2 id=limits>Limits</h2>
+<ul>
+<li>Emacs runs with <code>-Q</code> plus evil and the bbh code, not Doom, so Doom keymap interactions such as SPC, evil-org and corfu are not covered.</li>
+<li>Only the split Inbox is driven. The Router and Worker composers need a live agent session, so their C-n and C-c C-c stay with the ERT tests.</li>
+<li>Bombadil's <code>shrink</code> is still experimental and unused. Traces are big, and failing roots stay in /tmp until you delete them.</li>
+<li>It is not in <code>make verify</code>. checks.edn lists it under <code>:slow</code> for the bbh Emacs files, so <code>make affected</code> suggests it.</li>
+</ul>
+
+</main></body></html>
