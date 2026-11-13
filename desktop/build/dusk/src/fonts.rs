@@ -1,5 +1,3 @@
-//! Font and icon discovery.
-//!
 //! GPUI's Linux text system (cosmic-text/fontdb) reads `/etc/fonts/fonts.conf`
 //! directly, but Guix's fontconfig reads its own store config, so the two can
 //! disagree (an `/etc/fonts`, when one exists, need not list DejaVu). Before

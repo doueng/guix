@@ -1,4 +1,3 @@
-// Standalone release benchmark for the exact EDN wire messages Emacs sends.
 #[path = "src/edn.rs"]
 mod edn;
 use std::{env, fs, hint::black_box, time::Instant};

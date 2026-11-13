@@ -45,7 +45,6 @@ fn parse_hex(s: &str) -> Option<Hsla> {
     Some(rgba(rgba_value).into())
 }
 
-/// A length prop: number => px * scale, "N%" => relative, :full => 100%, :auto.
 pub fn length(v: &Value, scale: f32) -> Option<Length> {
     match v {
         Value::Int(_) | Value::Float(_) => Some(px(v.as_f64()? as f32 * scale).into()),
