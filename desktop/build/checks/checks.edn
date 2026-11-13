@@ -90,7 +90,7 @@
            "desktop/build/bbh/test/tty-visit-test.el"
            "desktop/build/bbh/bb.edn"]
    :checks ["cd desktop/build/bbh && bb test:transcript-scroll"]}
-  {:name "bbh inbox bombadil"
+  {:name "bbh bombadil"
    :paths ["desktop/configs/doom/{agent-shell,bbh-super}.el" "desktop/build/bbh/test/bombadil/**"
            "desktop/build/bbh/test/bbh/bombadil.clj" "modules/engstrand/packages/bombadil.scm"]
    :slow ["make bombadil"]}

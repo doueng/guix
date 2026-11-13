@@ -40,4 +40,16 @@
                       (write-region (concat (format-time-string "%T.%3N ") (apply #'format format-string args) "\n")
                                     nil log t 'silent)))))))
 
+;; The controller's refusals, counted in the mode line: the echo area
+;; shows each for a moment, and the next key clears it before Bombadil may
+;; look, so the spec reads this count instead.
+(defvar bbh-bombadil--refusals 0)
+(advice-add 'message :after
+            (lambda (format-string &rest args)
+              (when (and format-string
+                         (string-match-p "\\`bbh inbox: \\(stale\\|no-such-ask\\|changed\\)" (apply #'format format-string args)))
+                (setq bbh-bombadil--refusals (1+ bbh-bombadil--refusals))
+                (force-mode-line-update t))))
+(setq global-mode-string '(:eval (format " refused:%d" bbh-bombadil--refusals)))
+
 (eng/bbh-inbox)

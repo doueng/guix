@@ -54,7 +54,7 @@ help:
 	@echo 'pi-sci-test   build and verify SCI codemode with the installed Pi'
 	@echo 'bbh-runs      write the newest $(BBH_RUNS) bbh conversations, prompts, tool calls and workflows to $(BBH_RUNS_OUT)'
 	@echo 'bbh-tla-check model-check the bbh super and wf state machines with TLA+ (desktop/build/bbh/verify/tla)'
-	@echo 'bombadil      Bombadil types into the bbh Inbox in a capped emacs -nw for BOMBADIL_TIME s (default 120); SEED=N replays a fixture'
+	@echo 'bombadil      Bombadil types into the bbh Inbox, then the Worker view, in a capped emacs -nw for BOMBADIL_TIME s each (default 120); VIEW=inbox|worker runs one, SEED=N replays a fixture'
 	@echo 'skill-diet-check check the skill-diet links and the bbh eval adapter'
 	@echo 'pierre-diff-ansi install the highlighter behind jjui diff previews'
 	@echo 'pierre-diff-ansi-test highlight a sample diff and check the bbh highlights.js bundle'
@@ -190,8 +190,9 @@ bbh-tla-check:
 	cd desktop/build/bbh && bb verify:tla
 
 BOMBADIL_TIME ?= 120
+BOMBADIL_VIEWS = $(or $(VIEW),inbox worker)
 bombadil:
-	cd desktop/build/bbh && bb test:bombadil --time $(BOMBADIL_TIME) $(if $(SEED),--seed $(SEED))
+	cd desktop/build/bbh && for view in $(BOMBADIL_VIEWS); do bb test:bombadil --view $$view --time $(BOMBADIL_TIME) $(if $(SEED),--seed $(SEED)) || exit 1; done
 
 SKILL_DIET := desktop/pi/agent/skills/skill-diet
 skill-diet-check:

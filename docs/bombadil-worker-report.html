@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Bombadil drives the Router and Worker transcripts and composer in a real terminal: eight bugs found and fixed with ERT tests, scroll steps under 130 ms in 5 MB transcripts, clean 10-minute runs, make bombadil runs both views.">
+<meta name="bbh-doc" content="T174">
+<title>Bombadil on the bbh Worker view</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Bombadil on the bbh Worker view</h1>
+<p class=sub>T174 · W192 · 2026-11-14 · Tags: <span class='tag measured'>measured</span> I ran it here; <span class='tag inferred'>inferred</span> my reading of code or logs.</p><nav><a href='#outcome'>Outcome</a><a href='#found'>Bugs</a><a href='#how'>How it runs</a><a href='#specs'>Properties</a><a href='#runs'>Runs</a><a href='#spec-lessons'>Spec lessons</a><a href='#open'>Open</a><a href='#use'>Use it</a></nav>
+<h2 id=outcome>Outcome</h2>
+<div class='card good'><b>Goal:</b> extend the Bombadil tests of the bbh Emacs UI from the Inbox to the Worker view: the Router and Worker transcripts, the composer, mailbox wakes and session state. Scrolling large transcripts gets time bounds and a hang watchdog. <b>Result:</b> <code>make bombadil</code> now runs the Inbox and then the Worker view. The Worker view drives a real Router and two Workers on a churning controller, over a 5 MB transcript made from anonymized real conversations. It found <b>eight real bugs</b>, all fixed, each with an ERT regression test that fails without its fix. Scrolling stays far under its budget: the slowest scroll step in the final 10-minute run took 121 ms against a 1 s bound, and the longest stall between commands was 795 ms. <span class='tag measured'>measured</span></div>
+<div class='card warn'><b>Not fixed, by choice:</b> C-n while a restarted session is still starting says <i>Starting agent, please wait</i> and keeps the draft, so you press C-n again. The spec accepts that as a stated refusal. Queueing the draft instead would be a design change in agent-shell's send path.</div>
+
+<h2 id=found>Bugs found and fixed</h2>
+<div class=table><table>
+<tr><th>What you would have seen</th><th>Cause</th><th>Commit</th></tr>
+<tr><td>Up to 8 blank rows under the end of a transcript after G, under long folded tool output.</td><td><code>eng/bbh-transcript--latest-start</code> counted screen lines backwards over invisible text.</td><td>osypvosm</td></tr>
+<tr><td>Scrolled up into a reply that was still streaming, each chunk pulled you back to the reply's start. A code line could also vanish under a stale overlay.</td><td>Each chunk replaced the whole reply, and <code>eng/bbh-transcript--decorate</code> left an overlay from the line above.</td><td>vvxzzyqz</td></tr>
+<tr><td>C-n on an empty Router composer showed <code>Router: bbh super: invalid invalid</code>.</td><td>The blank text went to the controller, which refused it.</td><td>mlvtstst</td></tr>
+<tr><td>After a Worker's bbh died and restarted (T162 path), the composer became agent-shell's read-only view of the last turn, and the half-typed draft was gone.</td><td>agent-shell rebuilds its viewport for a new client.</td><td>tpmkyqqy</td></tr>
+<tr><td>That restart also dropped you from insert to normal state mid-word, so the next letters ran as commands.</td><td>Re-entering the edit mode resets evil's state.</td><td>qmtnuluz</td></tr>
+<tr><td><code>i</code> in a transcript, or in the Inbox thread list, put that read-only buffer into insert state. j, k, G and RET then only said <i>Buffer is read-only</i> or did nothing.</td><td>evil's insert keys were unbound there. Now <code>i a o A …</code> in a transcript go to the composer in insert state, and <code>i</code> in the thread list answers the selected thread's ask, as it does in the pane beside it.</td><td>qmtnuluz</td></tr>
+<tr><td>Scrolled into a reply whose earlier text renders again, as when a closing backtick turns <code>`foo</code> into <code>~foo~</code>, your cursor jumped back to where the change began.</td><td>The rewrite deleted text holding the window's point marker.</td><td>ouxxwmlp</td></tr>
+<tr><td>Text typed right after C-n to the Router vanished a moment later.</td><td>The composer was erased when the controller's async <code>say!</code> answered, along with whatever you had typed since.</td><td>mpvwksnt</td></tr>
+</table></div>
+
+<h2 id=how>How it runs</h2>
+<ul>
+<li><b>Same harness as the Inbox</b> (W191): Bombadil 0.7.10 in a 140x40 PTY, Emacs <code>-Q -nw</code> with evil and this checkout's agent-shell.el and bbh-super.el, a temp HOME, the heavy-job slot, and a memory cap. <code>bb test:bombadil --view worker</code> picks this view.</li>
+<li><b>Real sessions:</b> a real controller opens a Router and Workers through emacsclient on the run's own Emacs server. They are real <code>bbh acp</code> processes answering from a script model. A script step can now stream its text in chunks (bbh.models), so output lands mid-scroll as with a real model.</li>
+<li><b>Churn:</b> mail to Workers and the Router, asks, notes, finishes, and SIGKILLs of Workers (the T162 restart path). A seeded share of turn ends throws, the T163 fault: a 10-minute run injects about 150–270 of them.</li>
+<li><b>Large transcripts:</b> the first Worker gets a 5 MB replay of real conversations, anonymized per run: every word is replaced by a pseudo-word of the same length, keeping the shapes of code blocks, tables and long lines. A second Worker gets 2.5 MB.</li>
+<li><b>What the spec sees:</b> worker.el tags the composer's status line <code>[T1 N F TOP CHECK]</code>: thread, evil state, follows the end or scrolled, transcript at its first line, and whether any Emacs-side check failed.</li>
+</ul>
+
+<h2 id=specs>Properties</h2>
+<h3>Screen properties, worker.ts</h3>
+<ul>
+<li>C-n sends from the composer in normal and insert state; the draft leaves, or the echo area says why not. C-c C-c never sends.</li>
+<li>A word typed in insert state lands in the composer within a second, unless it was sent first; the transcript shows only words that were sent.</li>
+<li>The composer stays on screen unless a key left the view; no refusal shows as <code>bbh super: x x</code>.</li>
+<li>Working ends within 90 s (T163); no error repeats on consecutive lines (T162); a thread the Inbox shows done is not Working in its view.</li>
+<li>After G the transcript ends on its bottom rows, unless it is short enough to show from its first line.</li>
+</ul>
+<h3>Emacs-side checks, worker.el</h3>
+<ul>
+<li><b>Time bounds:</b> every command plus its redisplay under 1 s; no stall over 1 s between commands, measured from a 0.5 s heartbeat timer; a watchdog that SIGUSR2s Emacs for a backtrace and fails the run after 15 s without timers.</li>
+<li><b>Windows after each command:</b> point visible, start inside the buffer, no blank rows below the end.</li>
+<li><b>Output:</b> a window following the end still follows; a scrolled-up window keeps its point and start, through the edit and the redisplay after it.</li>
+<li><b>State:</b> a selected transcript or thread list is never in insert state.</li>
+</ul>
+
+<h2 id=runs>Runs</h2>
+<p>About 40 Worker-view runs of 1.5 to 10 minutes while building this. Each failing run named a property and a reproducible seed; each was a real bug (fixed above), a spec that read the screen too literally, or the open finding below. <span class='tag measured'>measured</span></p>
+<div class=table><table>
+<tr><th>Final runs</th><th>Result</th></tr>
+<tr><td><code>make bombadil BOMBADIL_TIME=600</code>, Inbox view</td><td>clean: 600 s, 4,159 screens, 666 sends</td></tr>
+<tr><td>Worker view, 600 s</td><td>clean: 600 s, 4,006 screens, 385 sends, 320 injected turn-end failures, seed 723134</td></tr>
+<tr><td>Worker view, 600 s, earlier code (before the last three fixes)</td><td>clean: 3,765 screens, 274 injected turn-end failures, no stall over 750 ms</td></tr>
+</table></div>
+<h3>Scroll timings in 5 MB transcripts, command plus redisplay, ms</h3>
+<div class=table><table><tr><th>step</th><th>n</th><th>p50</th><th>p95</th><th>max</th><th>largest buffer</th></tr><tr><td><code>stall between commands, over 750</code></td><td>2</td><td>795</td><td>795</td><td>795</td><td>0 chars</td></tr>
+<tr><td><code>composer eng/bbh-send</code></td><td>384</td><td>11</td><td>164</td><td>264</td><td>52 chars</td></tr>
+<tr><td><code>composer self-insert-command</code></td><td>3240</td><td>5</td><td>12</td><td>139</td><td>59 chars</td></tr>
+<tr><td><code>output arriving</code></td><td>2141</td><td>1</td><td>5</td><td>122</td><td>5.5 MB</td></tr>
+<tr><td><code>eng/bbh-output-page-up</code></td><td>64</td><td>19</td><td>41</td><td>121</td><td>35 chars</td></tr>
+<tr><td><code>evil-scroll-up</code></td><td>104</td><td>16</td><td>41</td><td>119</td><td>5.5 MB</td></tr>
+<tr><td><code>evil-scroll-down</code></td><td>119</td><td>16</td><td>40</td><td>111</td><td>5.5 MB</td></tr>
+<tr><td><code>evil-goto-line</code></td><td>148</td><td>14</td><td>36</td><td>70</td><td>5.5 MB</td></tr>
+<tr><td><code>evil-scroll-page-down</code></td><td>83</td><td>18</td><td>39</td><td>59</td><td>5.5 MB</td></tr>
+<tr><td><code>scroll-down-command</code></td><td>74</td><td>21</td><td>45</td><td>56</td><td>5.5 MB</td></tr>
+<tr><td><code>scroll-up-command</code></td><td>79</td><td>23</td><td>40</td><td>56</td><td>5.5 MB</td></tr>
+<tr><td><code>eng/bbh-output-page-down</code></td><td>67</td><td>21</td><td>39</td><td>50</td><td>35 chars</td></tr>
+<tr><td><code>evil-scroll-page-up</code></td><td>67</td><td>20</td><td>39</td><td>43</td><td>5.5 MB</td></tr>
+<tr><td><code>evil-goto-first-line</code></td><td>72</td><td>11</td><td>26</td><td>29</td><td>5.5 MB</td></tr>
+<tr><td><code>evil-previous-line</code></td><td>17</td><td>9</td><td>25</td><td>25</td><td>35 chars</td></tr>
+<tr><td><code>evil-next-line</code></td><td>12</td><td>12</td><td>16</td><td>16</td><td>20 chars</td></tr></table></div>
+<p>Scrolls in the composer (C-u, C-d, M-j, M-k there) show the composer's size; they scroll the 5 MB transcript beside it. The two stalls, 795 ms each, were between commands while output arrived, under the 1 s bound. <span class='tag measured'>measured</span></p>
+
+<h2 id=spec-lessons>What the spec had to learn</h2>
+<p>A terminal screen can lag Emacs by a key or two, and Emacs can lag the keys. Each of these first showed up as a false violation: <span class='tag inferred'>inferred</span></p>
+<ul>
+<li>A slow keystroke's redraw lands a state late, so typed words get a second to show, and words typed but not yet drawn count as sent.</li>
+<li>ESC can still show insert state for a moment, so a word only counts as typed in insert state after a key that cannot change the state.</li>
+<li>A sample can land mid-redraw while output streams, so the bottom of the transcript gets a second to settle after G.</li>
+<li>Emacs skips redisplay while typed-ahead keys wait, so worker.el redisplays before it checks the windows. Output can land inside a command, as while gg waits for its second key, so a window that command moves is not blamed on the output.</li>
+<li>The Inbox's refusals flash in the echo area until the next key, so inbox.el now counts them in the mode line, which the spec reads.</li>
+<li>Typing inside a word, as vim's i after ESC does, only splits it, so C-c C-c counts as sending only if the composer also got shorter.</li>
+</ul>
+
+<h2 id=open>Open finding</h2>
+<div class='card warn'><b>Blank rows after re-entering the Router view.</b> Once in about 40 minutes of runs: C-c r from the Router's own composer left its 19-row transcript window on a start that fits only 11 rows, with 8 blank rows below the end. The post-command clamp should pull such a start back, and the next command did. A replay of the same keys on a small transcript in the TTY test did not reproduce it, so it stays open, not guessed at. Evidence: <code>open-finding/</code> in the wf evidence, from seed 600333. <span class='tag measured'>measured</span></div>
+
+<h2 id=use>Use it</h2>
+<pre><code>make bombadil                        # Inbox, then Worker view, 120 s each
+make bombadil VIEW=worker BOMBADIL_TIME=600
+cd desktop/build/bbh &amp;&amp; bb test:bombadil --view worker --seed N --reproduce DIR --keep</code></pre>
+<p>A failure prints the property, the screen, and a reproduce line. With <code>--keep</code> the temp root holds steps.log (every command's time, state and buffer), checks.log, messages.log, faults.log and the trace.</p>
+
+</main></body></html>

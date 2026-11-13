@@ -24,6 +24,7 @@ type View = {
   section: string | null; // its section heading, such as WAITING
   asks: string[]; // ask texts the right pane shows
   picked: string[]; // of those, the ones with a picked option
+  refusals: number; // the controller's refusals so far, from inbox.el's mode-line count
   listCursor: string | null; // the list row the terminal cursor is on
   inPane: boolean; // the cursor is in the right pane
   insert: boolean; // the selected window is in evil insert state
@@ -92,6 +93,7 @@ const view = extract((s): View => {
     lines[legend + 1].slice(0, SPLIT).trim() === "";
   const inPane = cur.column > SPLIT;
   const tag = inPane ? mode.slice(SPLIT + 1) : mode.slice(0, SPLIT);
+  const refusals = Math.max(0, ...[...mode.matchAll(/refused:(\d+)/g)].map((m) => parseInt(m[1], 10)));
   const key = typed(s.lastAction);
   if (key === CN || key === "s") { sinceSend = 0; sentSinceCc = true; } else sinceSend++;
   if (key === CCCC) sentSinceCc = false;
@@ -102,7 +104,7 @@ const view = extract((s): View => {
     seenUnder[head[1]] = asks.slice();
   }
   return {
-    rows, selected: head ? head[1] : null, section, asks, picked, listCursor, inPane,
+    rows, selected: head ? head[1] : null, section, asks, picked, refusals, listCursor, inPane,
     insert: tag.includes("<I>"), echo: lines[n - 1].trim(), text: right.join("\n"), key,
     prevKey: before, closed: closed.slice(), sinceSend, sentSinceCc, minibuffer: cur.row === n - 1, badge: badge && badge[1] ? parseInt(badge[1], 10) : null, fits, wasted,
   };
@@ -152,14 +154,16 @@ export const paneAndListAgreeOnWaiting = always(
 
 // Sending a picked answer closes its ask within a few seconds, unless the
 // controller refuses the draft because the thread's asks changed since the
-// pick (it says so: stale, changed, no-such-ask).
+// pick (it says so: stale, changed, no-such-ask).  The echo area shows that
+// only until the next key, so inbox.el also counts refusals in the mode line.
 const refused = () => /stale|changed; look again|no-such-ask/.test(v().echo);
 export const sentAskCloses = always(() => {
   const picked = v().picked;
   const normal = !v().insert;
+  const refusals = v().refusals;
   return now(() => normal && picked.length > 0)
     .and(next(() => v().key === CN || (v().key === "s" && v().inPane)))
-    .implies(eventually(() => picked.every((a) => !shows(a)) || refused()).within(8, "seconds"));
+    .implies(eventually(() => picked.every((a) => !shows(a)) || refused() || v().refusals > refusals).within(8, "seconds"));
 });
 
 // An ask closes once: after its thread showed it gone, it never shows again.

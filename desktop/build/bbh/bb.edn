@@ -56,7 +56,7 @@
                :requires ([bbh.test-runner] [bbh.heavy])
                :task (do (bbh.heavy/reexec-held! (concat ["bb"] (some->> (System/getProperty "babashka.config") (vector "--config")) ["test"] *command-line-args*))
                          (bbh.test-runner/-main))}
-         test:bombadil {:doc "Bombadil types into the split Inbox in a capped emacs -nw on a throwaway churning controller and checks test/bombadil/inbox.ts. Not in bb test. Args: [--time S] [--seed N] [--reproduce DIR] [--keep]."
+         test:bombadil {:doc "Bombadil types into the split Inbox, or with --view worker the Router and Worker transcript and composer, in a capped emacs -nw on a throwaway churning controller and checks test/bombadil/<view>.ts. Not in bb test. Args: [--view inbox|worker] [--time S] [--seed N] [--reproduce DIR] [--keep]."
                         :requires ([bbh.heavy])
                         :task (do (bbh.heavy/reexec-held! (concat ["bb"] (some->> (System/getProperty "babashka.config") (vector "--config")) ["test:bombadil"] *command-line-args*))
                                   ((requiring-resolve 'bbh.bombadil/-main-args) *command-line-args*))}

@@ -19,15 +19,21 @@
 (defn- script
   "Replies read in order from an EDN file of steps: a string answers, {:code ...}
   calls the clojure tool, and {:text ...} answers too. A map step's :usage is
-  the request's usage record. For tests and demos."
+  the request's usage record, and {:text ... :chunks n :chunk-ms ms} streams
+  the text in n pieces ms apart, as a model does. For tests and demos."
   [path]
   (let [steps (atom (edn/read-string (slurp path)))]
     (fn [_ {:keys [on-text]}]
       (let [step (or (first @steps) "(script exhausted)")
-            text (if (string? step) step (:text step))]
+            text (if (string? step) step (:text step))
+            chunks (max 1 (min (count (str text)) (or (:chunks step) 1)))
+            size (quot (+ (count (str text)) (dec chunks)) chunks)]
         (swap! steps rest)
         (if text
-          (do (on-text text) {:message {:role "assistant" :content text} :usage (:usage step)})
+          (do (doseq [[i piece] (map-indexed vector (map (partial apply str) (partition-all size text)))]
+                (when (and (pos? i) (:chunk-ms step)) (Thread/sleep (long (:chunk-ms step))))
+                (on-text piece))
+              {:message {:role "assistant" :content text} :usage (:usage step)})
           {:message {:role "assistant" :content ""
                      :tool_calls [{:id (str (random-uuid)) :type "function"
                                    :function {:name "clojure" :arguments (json/generate-string (select-keys step [:code]))}}]}
