@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Build the ANE module and DTB packages for asahi-linux-keyd and check that the
-;; module matches the kernel and only the T8103 trees gain the ANE nodes.
 (require '[babashka.fs :as fs]
          '[babashka.process :refer [shell]]
          '[clojure.string :as str])

@@ -1,8 +1,4 @@
 #!/usr/bin/env bb
-;; Checks that Emacs and Neovim share the Wayland clipboard both ways, also when
-;; started without WAYLAND_DISPLAY, as the shepherd-run Emacs daemons are.
-;; Each case yanks a fresh token in the editor and compares it with wl-paste,
-;; then copies a token with wl-copy and reads it back in the editor.
 ;; Usage: bb desktop/build/clipboard/check.bb [--daemon NAME]...
 ;; The user's clipboard text is restored at the end.
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
@@ -43,8 +39,6 @@
 
 (defn elisp-str [s] (pr-str s))
 
-;; Emacs --batch with the Doom clipboard settings, as a daemon without
-;; WAYLAND_DISPLAY and as a session frame with it.
 (defn emacs-batch [env form]
   (-> (p/sh {:env env} "emacs" "--batch" "-Q" "-l" (str root "/desktop/configs/doom/clipboard.el")
             "--eval" (str "(princ (format \"%s\" " form "))"))
@@ -59,7 +53,6 @@
     (check! (str "wl-copy -> emacs --batch paste (" label ")") t
             (emacs-batch env "(current-kill 0)"))))
 
-;; Running Emacs daemons, e.g. bbh-super, through emacsclient.
 (defn daemon-names []
   (let [args (vec *command-line-args*)
         named (keep-indexed (fn [i a] (when (= a "--daemon") (get args (inc i)))) args)]
@@ -75,7 +68,6 @@
     (let [t (token "wl")]
       (wl-copy t)
       (check! (str "wl-copy -> emacsclient -s " d " paste") (pr-str t) (ec "(current-kill 0)")))
-    ;; Pasting over a visual selection must leave the copied text on the clipboard.
     (let [t (token "visual")]
       (wl-copy t)
       (ec (str "(if (fboundp 'evil-visual-paste) "

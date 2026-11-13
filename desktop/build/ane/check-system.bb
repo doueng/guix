@@ -1,7 +1,4 @@
 #!/usr/bin/env bb
-;; Build the system and its bootloader and check that the boot trees carry the
-;; ANE node, the system's kernel tree can autoload ane.ko, and udev opens
-;; /dev/accel to the video group.
 (require '[babashka.fs :as fs]
          '[babashka.process :refer [shell]]
          '[clojure.string :as str])

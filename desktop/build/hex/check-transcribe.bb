@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Build Hex, check that it sees the Apple GPU through Vulkan, and transcribe
-;; LibriSpeech clips with the installed model, failing above 10% word error rate.
 (require '[babashka.fs :as fs]
          '[babashka.process :refer [shell]]
          '[clojure.string :as str])

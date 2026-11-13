@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Tests for md-view's rendering: bb desktop/build/md-view/test.bb
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str]
          '[clojure.test :refer [deftest is run-tests]])
 

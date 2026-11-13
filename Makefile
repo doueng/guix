@@ -73,7 +73,6 @@ help:
 	@echo 'clipboard-history-test check what clipboard-history stores and skips, in a throwaway cliphist db'
 	@echo 'taildrop-test unit checks for the Taildrop send and receive script'
 
-# desktop/build/checks/checks.edn maps paths to the checks that cover them.
 REV ?= @
 lint:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/checks/lint.bb
@@ -150,17 +149,12 @@ builder-check:
 builder-test:
 	bb desktop/build/builder/test.bb
 
-# The feed reader on the builder (modules/engstrand/system/reader.scm).
-# `desktop/bin/reader-push state' moves its state once; see the plan.
 reader-push:
 	desktop/bin/reader-push code
 
 reader-status:
 	desktop/bin/reader-push status
 
-# The second brain on the builder (modules/engstrand/system/second-brain.scm).
-# desktop/bin/second-brain-push imports Safari and X exports; a Home timer
-# pushes Chrome's bookmarks.
 second-brain-status:
 	desktop/bin/second-brain-push status
 

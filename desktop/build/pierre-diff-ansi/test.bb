@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Smoke test: main.ts highlights a small git diff, and browser.ts still
-;; bundles to the tracked bbh highlights.js.
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 
 (def here (str (fs/parent (fs/absolutize *file*))))

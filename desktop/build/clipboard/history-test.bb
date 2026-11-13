@@ -1,5 +1,3 @@
-;; Checks that desktop/bin/clipboard-history stores ordinary copies and skips
-;; password-manager hints and oversized entries, in a throwaway cliphist db.
 ;; It never reads or changes the live clipboard.
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]

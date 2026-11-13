@@ -1,7 +1,6 @@
 ;; guix repl -L modules -- scheme.scm PATH...
-;; Compile every .scm file under each PATH with warnings, writing objects to a
-;; temporary directory. Exit 1 on any read error or warning. Loading alone misses
-;; unbound variables inside procedure bodies; compiling catches them.
+;; Loading alone misses unbound variables inside procedure bodies; compiling
+;; catches them.
 (use-modules (system base compile) (ice-9 ftw) (srfi srfi-1) (guix build utils))
 
 ;; (gnu) rebinds core `delete' for the modify-services clause; that is intended.

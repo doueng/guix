@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Tests for builder-prebuild's status parsing and alerts: bb desktop/build/builder/test.bb
 (require '[babashka.fs :as fs] '[clojure.test :refer [deftest is run-tests]])
 (load-file (str (fs/path (fs/parent *file*) "../../bin/builder-prebuild")))
 (alias 'bp 'builder-prebuild)

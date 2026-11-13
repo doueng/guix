@@ -1,9 +1,5 @@
 #!/usr/bin/env bb
 ;; bb affected.bb [--run] [--slow] [REV]
-;; Print the checks that cover the files changed in REV (default @), from
-;; checks.edn, and the changed files no rule covers. With --run, run the checks
-;; and exit 1 if any fails; --run always runs make lint first, and --slow
-;; also runs the slow ones.
 (load-file (str (babashka.fs/parent *file*) "/common.clj"))
 (require '[checks.common :as c] '[clojure.string :as str] '[babashka.process :as p])
 

@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; The second brain's glue on the builder, run by
-;; modules/engstrand/system/second-brain.scm as the second-brain user:
 ;;   builder.bb serve     the page on 127.0.0.1:8790, open only to the tailnet
 ;;                        login that owns the builder (BRAIN_OWNER)
 ;;   builder.bb receive   sshd's forced command for the laptop's push key: reads
@@ -24,8 +22,6 @@
 
 (defn die [& msg] (binding [*out* *err*] (apply println msg)) (System/exit 1))
 
-;; --- serve
-
 (defn owner-login
   "The login that owns this node, from `tailscale status --json', or nil."
   [status]
@@ -47,8 +43,6 @@
     (println "second-brain: serving to the builder's tailnet owner")
     (p/exec {:extra-env {"BRAIN_OWNER" owner "BRAIN_DB" db}}
             "second-brain" "serve" "--port" port)))
-
-;; --- receive
 
 (def kinds
   {"chrome" {:file "chrome.json" :args ["import-chrome"]}
@@ -88,8 +82,6 @@
     (let [r @(apply p/process {:out :inherit :err :inherit :extra-env {"BRAIN_DB" db}}
                         (concat ["flock" "-w" "600" lock "nice" "-n" "10" "second-brain"] args))]
       (System/exit (:exit r)))))
-
-;; --- nightly
 
 (defn step [& args]
   (println (str (java.time.Instant/now)) (str/join " " args))

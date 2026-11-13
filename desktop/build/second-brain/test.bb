@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Tests for builder.bb's pure parts: which pushes the receiver accepts, and
-;; how it finds the builder's tailnet owner.  Run with `make second-brain-test'.
 (require '[clojure.test :refer [deftest is run-tests]])
 (load-file (str (babashka.fs/parent *file*) "/builder.bb"))
 (alias 'b 'second-brain-builder)

@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Tests for updates' cache, rows and changelog links: bb desktop/build/updates/test.bb
 (require '[babashka.fs :as fs] '[clojure.string :as str] '[clojure.test :refer [deftest is run-tests]])
 (load-file (str (fs/path (fs/parent *file*) "../../bin/updates")))
 (alias 'u 'updates)

@@ -1,5 +1,3 @@
-;; Offline test of skill-diet's bbh eval adapter: drives it with bbh's script
-;; engine and checks result.json and the isolation the eval relies on.
 ;;   bb desktop/build/skill-diet/adapter-test.bb
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]

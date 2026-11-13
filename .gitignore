@@ -1,4 +1,3 @@
-# Private installation records, diagnostics, and local test artifacts.
 local/
 __pycache__/
 

@@ -1,7 +1,4 @@
 #!/usr/bin/env bb
-;; Fast checks that run on every change: Scheme compiles without warnings,
-;; scripts and data files parse, no shell scripts are tracked, and the Makefile,
-;; AGENTS.md and checks.edn agree with each other.
 (load-file (str (babashka.fs/parent *file*) "/common.clj"))
 (require '[checks.common :as c] '[babashka.fs :as fs] '[cheshire.core :as json]
          '[clojure.edn :as edn] '[clojure.string :as str] 'edamame.core)

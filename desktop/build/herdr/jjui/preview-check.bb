@@ -1,8 +1,6 @@
 #!/usr/bin/env bb
-;; Reproducible check that jjui's preview works in the herdr-jjui popup: run
-;; the preview command (jj jjui-show-fancy, from desktop/configs/jj/config.toml)
-;; with the environment the popup gives jjui. The Herdr server starts outside a
-;; login shell, so its PATH lacks ~/.local/bin, where pierre-diff-ansi lives.
+;; The Herdr server starts outside a login shell, so its PATH lacks
+;; ~/.local/bin, where pierre-diff-ansi lives.
 ;; Usage: bb preview-check.bb [REPO]   (needs the stowed jj config)
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 (load-file (str (fs/parent *file*) "/jjui.bb"))
