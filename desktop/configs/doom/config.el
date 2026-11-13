@@ -6,8 +6,6 @@
       ;; interactive terminal shell remains Fish.
       shell-file-name (or (executable-find "bash") "/bin/sh"))
 
-;; Quit Emacs, delete frames and kill process buffers without asking. Saving
-;; unsaved files still asks.
 (setq confirm-kill-emacs nil
       confirm-kill-processes nil)
 (global-set-key [remap delete-frame] nil)
@@ -198,7 +196,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
       ;; default background during rapid scrolling. A realistic local-terminal
       ;; rate makes Emacs repaint rows instead.
       baud-rate 1000000
-      ;; Never show temporarily unfontified text while scrolling.
       fast-but-imprecise-scrolling nil
       jit-lock-defer-time nil)
 
@@ -458,7 +455,6 @@ ultimately to plain `find-file' when the current directory is not a project."
 
 (add-hook 'inferior-python-mode-hook #'visual-line-mode)
 
-;; Keep REPL windows pinned to the newest output and prompt.
 (after! comint
   (setq comint-scroll-to-bottom-on-output t
         comint-scroll-to-bottom-on-input t))

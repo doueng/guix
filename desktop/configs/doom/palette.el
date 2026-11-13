@@ -1,9 +1,7 @@
 ;;; palette.el --- Choose M-x commands in the Dusk palette -*- lexical-binding: t; -*-
 
-;; M-x and SPC SPC open the desktop's Dusk palette instead of the minibuffer.
-;; Dusk only chooses the command. execute-extended-command still runs it, so
-;; prefix arguments, argument prompts and history behave as in M-x. The global
-;; palette (Cmd+Space Space) calls eng/palette-M-x over this Emacs's server.
+;; Dusk only chooses the command; execute-extended-command still runs it, so
+;; prefix arguments, argument prompts and history behave as in M-x.
 
 (require 'server)
 
