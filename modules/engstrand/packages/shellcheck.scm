@@ -4,7 +4,6 @@
 
 (define shellcheck-version "0.11.0")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public shellcheck
   (let ((version shellcheck-version))
     (release-binary

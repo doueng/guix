@@ -196,15 +196,13 @@ This is a lightweight way to apply config changes without restarting Emacs."
       ;; The local Ghostty PTY reports 9600 baud, which makes Emacs favor
       ;; insert/delete-line terminal operations. Those expose Ghostty's darker
       ;; default background during rapid scrolling. A realistic local-terminal
-      ;; rate makes Emacs repaint rows instead; this also emitted fewer bytes in
-      ;; the C-u/C-d trace.
+      ;; rate makes Emacs repaint rows instead.
       baud-rate 1000000
       ;; Never show temporarily unfontified text while scrolling.
       fast-but-imprecise-scrolling nil
       jit-lock-defer-time nil)
 
 (after! flycheck
-  ;; Don't run syntax checks from save; explicit/manual or idle checks are enough.
   (setq flycheck-check-syntax-automatically '(mode-enabled idle-change)))
 
 ;; Disable line highlighting completely to prevent rendering artifacts. Doom can

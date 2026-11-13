@@ -753,10 +753,6 @@ function applyEditor(pi: ExtensionAPI, ctx: ExtensionContext) {
 	})();
 }
 
-// =============================================================================
-// Extension Export
-// =============================================================================
-
 export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", () => {
 		process.stdout.write(CURSOR_RESTORE);

@@ -6,6 +6,7 @@
   #:use-module (asahi guix services udev)
   #:use-module (asahi guix systems base)
   #:use-module (asahi guix systems desktop)
+  #:use-module (engstrand packages flatpak)
   #:use-module (engstrand system bootloader)
   #:use-module (engstrand system builder-keys)
   #:use-module (gnu)
@@ -142,7 +143,7 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
               (options "umask=0077"))
             %base-file-systems))
     (packages
-     (cons* flatpak ncurses git neovim brightnessctl alsa-utils
+     (cons* flatpak/stable-exports ncurses git neovim brightnessctl alsa-utils
             (operating-system-packages asahi-base-os)))
     (services
      (append

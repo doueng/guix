@@ -1280,11 +1280,8 @@ keys, so a send key on C-n would otherwise win while the popup is open."
     ;; agent-shell's own send keys, such as normal-state ZZ, take bbh's path too,
     ;; so the Router's input always goes through the controller.
     (local-set-key [remap agent-shell-viewport-compose-send] #'eng/bbh-send)
-    ;; C-n sends; C-c C-c does not, neither agent-shell's own nor an evil
-    ;; binding left by older code before a Doom reload.
+    ;; C-n sends; agent-shell's own C-c C-c does not.
     (local-set-key (kbd "C-c C-c") #'undefined)
-    (dolist (state '(normal insert))
-      (evil-local-set-key state (kbd "C-c C-c") nil))
     (dolist (binding `(("C-n" . ,(eng/bbh-send-key #'eng/bbh-send))
                        ("M-RET" . eng/bbh-send)
                        ("C-c C-k" . agent-shell-viewport-interrupt)
@@ -1385,15 +1382,6 @@ Other runs in the repository are never read, so the header matches the session's
         (let ((data (eng/bbh-workflow--fetch (buffer-local-value 'default-directory shell) session)))
           (with-current-buffer shell (setq eng/bbh-workflow--data data))
           (force-mode-line-update t))))))
-
-;; A side panel once listed the run's phases.  Loading this file again, as a
-;; Doom reload does, closes it in live frames and drops its commands.
-(when-let* ((panel (get-buffer "*bbh workflow*"))) (kill-buffer panel))
-(dolist (fn '(eng/bbh-workflow-show eng/bbh-workflow-toggle eng/bbh-workflow-refresh-if-shown
-              eng/bbh-workflow-next eng/bbh-workflow-previous eng/bbh-workflow-mode
-              eng/bbh-workflow--apply eng/bbh-workflow--render eng/bbh-workflow--move
-              eng/bbh-workflow--current-index))
-  (fmakunbound fn))
 
 (defun eng/bbh-cider-connect ()
   "Connect CIDER to the REPL of the bbh session in the current buffer."

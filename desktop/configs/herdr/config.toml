@@ -114,7 +114,6 @@ description = "bbh inbox: threads that need you"
 width = "85%"
 height = "80%"
 
-# Pick an open Herdr workspace with a workspace-only fzf selector.
 [[keys.command]]
 key = "prefix+b"
 type = "popup"
@@ -123,14 +122,12 @@ description = "focus an open workspace"
 width = "70%"
 height = "50%"
 
-# Pick a workspace from Herdr, configured sessions, or zoxide history.
 [[keys.command]]
 key = "prefix+shift+o"
 type = "plugin_action"
 command = "fullerzz.sesh.open-picker"
 description = "choose a project workspace"
 
-# Return to the previously focused workspace.
 [[keys.command]]
 key = "prefix+shift+b"
 type = "plugin_action"
@@ -174,7 +171,6 @@ command = "annotate.open"
 description = "review documents in this folder"
 
 [ui]
-# Close workspaces and their last tab without asking.
 confirm_close = false
 # Sort the agent panel as an attention queue (blocked/done before idle agents).
 agent_panel_sort = "spaces"

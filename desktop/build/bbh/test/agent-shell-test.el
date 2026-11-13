@@ -68,10 +68,6 @@ keys act in normal state."
                                  ("]t" . eng/bbh-inbox-next-waiting)))
     (bbh-test--keys-in 'insert '(("C-n" . eng/bbh-inbox-send) ("C-c C-k" . eng/bbh-inbox-clear)))
     (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send)
-    ;; An Inbox from before a Doom reload loses its C-c C-c on setup.
-    (evil-local-set-key 'normal (kbd "C-c C-c") #'eng/bbh-inbox-send)
-    (eng/bbh-inbox--setup)
-    (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send)
     (evil-change-state 'insert)
     (dolist (key '("s" "g" "]" "2" "m"))
       (should (memq (key-binding (kbd key)) '(self-insert-command org-self-insert-command))))
@@ -384,10 +380,6 @@ and the transcript keeps q and focus moves in normal state."
                                    ("M-k" . eng/bbh-output-page-up) ("M-j" . eng/bbh-output-page-down))))
       (bbh-test--keys-in 'normal '(("g?" . eng/bbh-keys) ("C-d" . eng/bbh-output-page-down)
                                    ("C-u" . eng/bbh-output-page-up)))
-      (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-send)
-      ;; A composer from before a Doom reload loses its C-c C-c on setup.
-      (evil-local-set-key 'insert (kbd "C-c C-c") #'eng/bbh-send)
-      (eng/bbh-setup-composer)
       (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-send)
       (bbh-test--popup-keeps-ctrl-n '(normal insert))
       (evil-normal-state))

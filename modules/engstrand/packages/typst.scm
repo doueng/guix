@@ -4,7 +4,6 @@
 
 (define typst-version "0.15.1")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public typst
   (let ((version typst-version))
     (release-binary

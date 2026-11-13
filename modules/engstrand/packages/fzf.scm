@@ -4,7 +4,6 @@
 
 (define fzf-version "0.75.0")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public fzf
   (let ((version fzf-version))
     (release-binary

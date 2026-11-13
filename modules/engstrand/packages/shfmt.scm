@@ -4,7 +4,6 @@
 
 (define shfmt-version "3.14.1")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public shfmt
   (let ((version shfmt-version))
     (release-binary

@@ -347,7 +347,8 @@
 
 (deftest sections-derive-from-a-fixed-event-list-as-the-table-says
   (let [base [{:seq 1 :at "2026-11-02T10:00:00Z" :kind :thread-created :thread "T1" :data {:id "T1" :title "t"}}
-              {:seq 2 :at "2026-11-02T10:00:01Z" :kind :worker-attached :thread "T1" :data {:id "W1" :conversation "c" :generation 1}}]
+              {:seq 2 :at "2026-11-02T10:00:01Z" :kind :worker-started :thread "T1" :data {:id "W1" :state :starting :generation 1}}
+              {:seq 2 :at "2026-11-02T10:00:01Z" :kind :worker-running :thread "T1" :data {:id "W1" :conversation "c" :outbox "o0" :text "go"}}]
         ask (fn [n & {:as more}] {:seq n :kind :ask-opened :thread "T1" :data (merge {:id "a1" :worker "W1" :kind :question :text "?" :options [{:id "y" :label "Y"}] :stopped false} more)})
         reply {:seq 4 :kind :reply-sent :thread "T1" :data {:id "r1" :thread "T1" :worker "W1" :picks {"a1" "y"} :note "" :dismiss #{} :outbox "o1" :conversation "c" :text "m"}}
         section (fn [events cursor]
@@ -1878,9 +1879,6 @@
         (jj-in (:workspace w2) "new")
         (is (= :wip (:error (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
             "a commit still described wip does not land")
-        (jj-in (:workspace w2) "describe" "-r" "@-" "-m" "wip(T2 W2): busy")
-        (is (= :wip (:error (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
-            "nor one in the older wip form without the prefix")
         (jj-in (:workspace w2) "describe" "-r" "@-" "-m" "two")
         (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
         (is (= ["[T2] two" "start"] (line-of repo (landed c "W2"))))

@@ -79,7 +79,6 @@
    ["IntelliJ Cmd+C still copies" "ls:intellij d:lmet d:c u:c u:lmet"
     "↓LGui ↑LGui ↓LCtrl ↓Insert ↑LCtrl ↑Insert ↓LGui ↑LGui"]
    ["IntelliJ keeps Caps as Escape" "ls:intellij d:caps u:caps" "↓Escape ↑Escape"]
-   ;; fish ignores Shift+Home, so the shared Shift+Home Backspace deleted one character.
    ["Terminal Cmd+Backspace deletes to the line start with Ctrl+U" "ls:terminal d:lmet d:bspc u:bspc u:lmet"
     "↓LGui ↑LGui ↓LCtrl ↓U ↑LCtrl ↑U ↓LGui ↑LGui"]
    ["Terminal Cmd+C still copies" "ls:terminal d:lmet d:c u:c u:lmet"

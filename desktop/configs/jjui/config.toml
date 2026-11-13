@@ -1,6 +1,3 @@
-# jjui performance config for large repos
-# See: https://github.com/idursun/jjui
-
 [revisions]
 # jjui defaults to jj's revsets.log if this is unset. Keep this explicit so the
 # graph includes connector revisions instead of showing "(elided revisions)".

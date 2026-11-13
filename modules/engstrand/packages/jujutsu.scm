@@ -4,7 +4,6 @@
 
 (define jujutsu-version "0.47.1")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public jujutsu
   (let ((version jujutsu-version))
     (release-binary

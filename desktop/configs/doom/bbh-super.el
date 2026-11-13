@@ -1377,9 +1377,6 @@ thread list, in its own mode, stays one truncated line per thread."
   ;; sends after a pick as after a typed answer; a completion popup keeps it.
   (dolist (state '(normal insert))
     (evil-local-set-key state (kbd "C-n") (eng/bbh-send-key #'eng/bbh-inbox-send)))
-  ;; C-c C-c does not send; clear it from an Inbox set up by older code.
-  (dolist (state '(normal insert))
-    (evil-local-set-key state (kbd "C-c C-c") nil))
   (evil-local-set-key 'insert (kbd "C-c C-k") #'eng/bbh-inbox-clear))
 
 (define-derived-mode eng/bbh-inbox-mode org-mode "bbh inbox"
@@ -1456,16 +1453,11 @@ list beside the selected thread, or with gv every thread in one buffer."
       (switch-to-buffer buffer))))
 
 ;; Loading this file again, as a Doom reload does, brings a live Inbox up to
-;; the new code: its buffer setup and the listener.  An Inbox from before it
-;; was an org outline starts the mode again and reloads, and its preview goes.
-(when-let* ((buffer (get-buffer "*bbh inbox preview*"))) (kill-buffer buffer))
+;; the new code: its buffer setup and the listener.
 (when-let* ((buffer (get-buffer "*bbh inbox*")))
   (with-current-buffer buffer
     (when (derived-mode-p 'eng/bbh-inbox-mode)
-      (if (derived-mode-p 'org-mode)
-          (eng/bbh-inbox--setup)
-        (eng/bbh-inbox-mode)
-        (eng/bbh-inbox-refresh))
+      (eng/bbh-inbox--setup)
       (eng/bbh-inbox--listen))))
 (when-let* ((buffer (get-buffer "*bbh threads*")))
   (with-current-buffer buffer

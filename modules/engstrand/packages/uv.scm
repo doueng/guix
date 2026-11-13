@@ -4,7 +4,6 @@
 
 (define uv-version "0.13.7")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public uv
   (let ((version uv-version))
     (release-binary

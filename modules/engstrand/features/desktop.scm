@@ -81,12 +81,12 @@ MimeType=text/markdown;text/x-markdown;
                   `(("applications/oilfm.desktop" ,%oilfm-desktop-file)
                     ("applications/md-view.desktop" ,%md-view-desktop-file))))
 
-;; Flatpak writes its own /gnu/store path into every exported desktop entry, so a
-;; guix gc after a flatpak upgrade breaks xdg-open and the launcher. The exports under
-;; /var/lib/flatpak are ostree checkouts flatpak rewrites on each deploy, so instead of
-;; editing them, activation copies each entry into ~/.local/share/applications, which
-;; shadows XDG_DATA_DIRS, with Exec naming the system profile's flatpak. Copies carry a
-;; marker, and a copy whose source is gone or fixed is removed.
+;; Entries flatpak exported before flatpak/stable-exports name a /gnu/store flatpak,
+;; which a guix gc breaks.  Until each app is deployed again, activation copies its
+;; entry into ~/.local/share/applications, which shadows XDG_DATA_DIRS, with Exec
+;; naming the system profile's flatpak.  Copies carry a marker, and a copy whose
+;; source is gone or fixed is removed.  Delete this service once
+;; ~/.local/share/applications holds no X-Familiar-Flatpak-Copy entry.
 (define %home-flatpak-desktop-entries
   (simple-service 'familiar-flatpak-desktop-entries home-activation-service-type
     #~(begin

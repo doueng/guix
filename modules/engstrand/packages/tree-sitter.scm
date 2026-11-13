@@ -4,7 +4,6 @@
 
 (define tree-sitter-version "0.27.2")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public tree-sitter
   (let ((version tree-sitter-version))
     (release-binary

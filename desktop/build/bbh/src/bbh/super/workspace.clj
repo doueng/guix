@@ -47,8 +47,8 @@
   [dir revset]
   (remove str/blank? (str/split-lines (jj-out dir "log" "--no-graph" "-r" revset "-T" "commit_id.short() ++ \" \" ++ description.first_line() ++ \"\\n\""))))
 
-;; Matches the placeholder (wip) and the older form without the thread prefix, wip(T63 W60).
-(def ^:private wip-description "description(regex:\"^(.T[0-9]+. )?wip[(]\")")
+;; Matches the placeholder `wip`, as in [T63] wip(W60).
+(def ^:private wip-description "description(regex:\"^.T[0-9]+. wip[(]\")")
 
 ;; A Worker's working-copy change before it has work: empty, undescribed or still described by wip.
 (def ^:private placeholder (str "(empty() & (description(exact:\"\") | " wip-description "))"))

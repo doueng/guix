@@ -3,8 +3,7 @@
   the result each returned. The state is nothing but `bbh.super.model/fold` over
   the events, from the newest snapshot on; `commit!` runs a command as one
   transaction."
-  (:require [babashka.fs :as fs]
-            [bbh.sqlite :as sq]
+  (:require [bbh.sqlite :as sq]
             [bbh.super.model :as model]
             [clojure.edn :as edn]))
 
@@ -33,54 +32,11 @@
   [db state]
   (sq/with-transaction db (append! db [{:kind :snapshot :data {:state state}}])))
 
-;; ---- version 1: the state lived in one table per record kind ----------------
-
-(def ^:private v1-tables [:counters :threads :workers :asks :replies :outbox :tokens :router])
-
-(def ^:private v1-states
-  "States that version 1 rows still hold and no fold writes any more."
-  {:outbox {:acked :done :processed :done} :asks {:delivered :sent} :replies {:delivered :sent}
-   :workers {:waiting :working}})
-
-(def ^:private v1-fields
-  "Fields that version 1 rows still hold and nothing reads any more."
-  {:threads [:execution :watchdog-of] :workers [:lease :capabilities :locks :restarts :restart-at :restart-error]
-   :outbox [:sent-at :triage :granted]})
-
-(defn- v1-state
-  "The state a version 1 DB materialized in its tables, in today's shape. Its
-  log cannot stand in for it: folds changed since, so a replay disagrees."
-  [db]
-  (reduce (fn [state kind]
-            (assoc state kind
-                   (into {} (for [{:keys [id data]} (sq/query db (str "select id, data from " (name kind)))
-                                  :let [record (edn/read-string data)]]
-                              [(edn/read-string id)
-                               (if (map? record)
-                                 (cond-> (apply dissoc record (v1-fields kind))
-                                   (:state record) (update :state #(get-in v1-states [kind %] %)))
-                                 record)]))))
-          model/empty-state v1-tables))
-
-(defn- migrate-v1!
-  "Bring a version 1 DB at PATH to version 2: a backup beside it, the version
-  column, and its tables' state as a snapshot event. The tables stay as they
-  were, unused."
-  [db path]
-  (when path
-    (let [backup (str path ".v1.bak")]
-      (fs/delete-if-exists backup)
-      (sq/execute! db ["vacuum into ?" backup])))
-  (sq/with-transaction db
-    (sq/execute! db "alter table events add column v integer not null default 1")
-    (append! db [{:kind :snapshot :data {:state (update (v1-state db) :router dissoc :heartbeat)}}])
-    (sq/execute! db (str "pragma user_version=" schema-version))))
-
 ;; ---- the store ---------------------------------------------------------------
 
 (defn open
   "Open or create the database at PATH (nil for memory), with the pragmas the
-  design names, migrated to the current schema. Returns the connection."
+  design names, creating the current schema in a new one. Returns the connection."
   [path]
   (let [db (sq/open path)]
     (doseq [pragma ["pragma journal_mode=wal" "pragma synchronous=full" "pragma foreign_keys=on"]]
@@ -89,7 +45,6 @@
       0 (sq/with-transaction db
           (doseq [ddl schema] (sq/execute! db ddl))
           (sq/execute! db (str "pragma user_version=" schema-version)))
-      1 (migrate-v1! db path)
       nil)
     db))
 

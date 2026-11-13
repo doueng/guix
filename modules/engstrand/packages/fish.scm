@@ -4,7 +4,6 @@
 
 (define fish-version "4.9.3")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public fish
   (let ((version fish-version))
     (release-binary

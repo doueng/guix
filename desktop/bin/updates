@@ -58,9 +58,7 @@
 
 ;; Channels whose branch head breaks with the others, held at a commit that works.
 ;; Drop an entry once upstream fixes the incompatibility.
-(def channel-holds
-  {"guix" {:commit "704ad8ced8ac2a6f94ddaf6edbfa1ae7d154dd44"
-           :reason "rde contrib/packages/node.scm uses node-bootstrap, removed by guix 66d30bdf6d3"}})
+(def channel-holds {})
 
 (defn channel-refresh [items]
   (for [{:keys [name url branch] :as item} items

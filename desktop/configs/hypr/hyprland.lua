@@ -37,8 +37,7 @@ hl.env("XCURSOR_SIZE", "20")
 
 require("startup")
 
--- IntelliJ windows land on workspace 4. Opening the empty workspace no longer
--- starts it: Alt+4 and Cmd+I started it by accident.
+-- IntelliJ windows land on workspace 4.
 hl.window_rule({ name = "intellij-workspace", match = { class = "jetbrains-idea" }, workspace = "4" })
 
 -- Cmd application shortcuts. Terminal bindings focus the Herdr terminal,

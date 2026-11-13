@@ -4,7 +4,6 @@
 
 (define hyperfine-version "2.0.0")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public hyperfine
   (let ((version hyperfine-version))
     (release-binary

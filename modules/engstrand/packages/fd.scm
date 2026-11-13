@@ -4,7 +4,6 @@
 
 (define fd-version "10.5.2")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public fd
   (let ((version fd-version))
     (release-binary

@@ -4,7 +4,6 @@
 
 (define dasel-version "3.11.2")
 
-;; Guix lags upstream, so this is upstream's aarch64 release; updates bumps it.
 (define-public dasel
   (let ((version dasel-version))
     (release-binary

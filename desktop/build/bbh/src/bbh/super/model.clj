@@ -832,7 +832,8 @@
 (def retired-events
   "Event kinds no command emits any more. An old log still holds them, so they
   fold to nothing."
-  #{:message-routed :router-triaged :lease-moved :lease-granted :restart-attempted :restart-failed :worker-restarted})
+  #{:message-routed :router-triaged :lease-moved :lease-granted :restart-attempted :restart-failed :worker-restarted
+    :thread-linked :worker-attached})
 
 (defmethod fold* :default [state {:keys [kind]}]
   (if (retired-events kind)
@@ -885,17 +886,6 @@
       (assoc-in [:threads id] {:id id :title title :resources #{} :worker nil :history []
                                :asks-version seq :resolved-at nil :summary nil
                                :milestone-seq seq})))
-
-;; Only old logs hold this event.
-(defmethod fold* :thread-linked [state {{:keys [resource]} :data :keys [thread]}]
-  (update-in state [:threads thread :resources] conj resource))
-
-;; Only old logs hold this event; their later events need the Worker it made.
-(defmethod fold* :worker-attached [state {{:keys [id conversation generation]} :data :keys [thread]}]
-  (-> state (bump :workers)
-      (assoc-in [:workers id] {:id id :thread thread :generation generation :conversation conversation
-                               :state :working})
-      (assoc-in [:threads thread :worker] id)))
 
 (defmethod fold* :worker-started [state {{:keys [id] :as worker} :data :keys [thread]}]
   (-> state (bump :workers)
