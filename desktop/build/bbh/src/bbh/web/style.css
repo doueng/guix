@@ -1,5 +1,3 @@
-/* Financial Times idiom, after reader's public/css/reader.css: paper pink, serif
-   text, sans chrome, hairline rules, claret and teal accents, square corners. */
 :root {
   color-scheme: light;
   --paper: #fff1e5;
@@ -238,8 +236,6 @@ th {
 .attach:focus-within { outline: 2px solid var(--teal); outline-offset: 2px; }
 
 
-/* The inbox, after the Emacs split view: a list of threads and the selected
-   thread. One column on a phone, list then thread; two panes from 900px. */
 .app { display: grid; grid-template-columns: 1fr; height: 100dvh; }
 .list, .detail { height: 100dvh; overflow-y: auto; overscroll-behavior: contain; }
 .list { display: flex; flex-direction: column; }
@@ -359,7 +355,6 @@ button:disabled { opacity: 0.5; }
 .toast b { color: #ffd27a; }
 .toast button { flex: none; min-height: 40px; padding: 0 14px; color: var(--black); background: #ffd27a; border: 0; font: 600 14px/1 var(--sans); }
 
-/* The docs: a searchable list of explainers, and one shown full-screen. */
 .docs .search { flex: none; margin: 10px 12px 4px; }
 .doclist { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
 .row.doc { grid-template-columns: minmax(0, 1fr) auto; }

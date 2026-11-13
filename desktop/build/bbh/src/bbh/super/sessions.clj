@@ -11,8 +11,6 @@
             [bbh.super.process :as process]
             [clojure.string :as str]))
 
-;; ---- reading the machine ---------------------------------------------------
-
 (defn- proc-bytes [path]
   ;; slurp reads procfs files as empty, since they report size 0.
   (try (String. (fs/read-all-bytes path)) (catch Exception _ nil)))
@@ -73,8 +71,6 @@
      :swap-used-mb (when (and (kb "SwapTotal") (kb "SwapFree")) (quot (- (kb "SwapTotal") (kb "SwapFree")) 1024))
      :earlyoom-last (last-earlyoom-kill)}))
 
-;; ---- killing -----------------------------------------------------------------
-
 (defn- signal! [sig target]
   (zero? (:exit (p/shell {:continue true :out :discard :err :discard} "kill" (str "-" sig) "--" (str target)))))
 
@@ -97,8 +93,6 @@
         (signal! "KILL" (str "-" pid))
         (Thread/sleep 100)
         (not (process/matches? s)))))
-
-;; ---- deciding ----------------------------------------------------------------
 
 (defn owners
   "Each conversation a Worker of STATE ran in, to that Worker."

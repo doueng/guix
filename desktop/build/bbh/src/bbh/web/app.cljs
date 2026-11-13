@@ -249,10 +249,6 @@
         (not live) [:div.status "This session ended"]
         busy [:div.status "Working"]))
 
-;; ---- the inbox: what the controller knows, read through /api/super ----------
-;;
-;; The page mirrors the Emacs split view: a list of threads, newest first within
-;; the controller's sections, and the selected thread with its open asks first.
 ;; The controller pushes `changed` on /api/super/stream; the page refetches then,
 ;; and polls slowly only while the stream is down.
 
@@ -340,8 +336,6 @@
                          (fn [] (js/clearTimeout @soon)
                            (reset! soon (js/setTimeout #(do (sync-super!) (sync-agents!)) 250)))))))
 
-;; ---- list ----------------------------------------------------------------
-
 (def glyphs {"on-you" "●" "working" "◐" "stuck" "✖" "done" "✓" "archived" "▪" "quiet" "·"})
 
 (def needs-you #{"stopped" "holding-up" "waiting" "needs-attention"})
@@ -423,8 +417,6 @@
      (when (and (= f "all") (pos? n-archived))
        [:button.fold {:type "button" :on {:click #(filter! "archived")}} (str "▸ " n-archived " archived")])
      (say-view s)]))
-
-;; ---- the selected thread ----------------------------------------------------
 
 (defonce timers (atom {}))
 
@@ -614,8 +606,6 @@
      (when current (status-view live (:busy conversation) error))
      (when live (attachments-view current (get attachments current)))
      (when live (composer-view current sending))]))
-
-;; ---- the docs: HTML explainers, served read-only by /docs/view -------------
 
 (defn- sync-docs! []
   (-> (request "/api/docs" {})

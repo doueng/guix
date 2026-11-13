@@ -32,8 +32,6 @@
 (defn- new-token []
   (let [b (byte-array 24)] (.nextBytes (SecureRandom.) b) (apply str (map #(format "%02x" %) b))))
 
-;; ---- controller ---------------------------------------------------------
-
 (defn notify-views!
   "Tell every Inbox view registered under DIR to reload its rows, and the hooks
   of this process, such as the website's stream. A port that refuses the
@@ -67,8 +65,6 @@
                        [before r]))]
     (when-not (or (:repeat? r) (= (shown before) (shown (:state r)))) (notify-views! dir))
     r))
-
-;; ---- Workers: a record first, then the workspace, the wf run and the buffer --
 
 (defn- policy
   "The controller's policy over the defaults: its :policy when given, else
@@ -504,8 +500,6 @@
       (.write out "\n")
       (.flush out))))
 
-;; ---- dispatcher ---------------------------------------------------------
-
 (defn- conversation-root [{:keys [conversations]} id]
   (let [dir (conversation/dir conversations id)]
     (if (fs/exists? dir) (conversation/root dir) dir)))
@@ -540,8 +534,6 @@
     (run! c :controller {:id (str "job-exited-" (pr-str [(:id w) job])) :command :job-exited!
                          :args {:worker (:id w) :job job :exit exit :log (str base ".log")
                                 :seen (fs/exists? (str base ".seen"))}})))
-
-;; ---- reaping the sessions of Workers that ended ---------------------------
 
 (defn end-session!
   "Tell the super-agent's Emacs that CONVERSATION's Worker ended: its buffer

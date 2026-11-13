@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Render docs/super-agent.md as one HTML page for review, with mockups of the
-;; three surfaces and the journeys as step cards tagged by surface.
 ;; Run from desktop/build/bbh: bb docs/super-agent.bb
 (require '[babashka.fs :as fs]
          '[bbh.web.markdown :as md]

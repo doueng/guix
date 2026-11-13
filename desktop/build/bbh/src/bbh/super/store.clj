@@ -32,8 +32,6 @@
   [db state]
   (sq/with-transaction db (append! db [{:kind :snapshot :data {:state state}}])))
 
-;; ---- the store ---------------------------------------------------------------
-
 (defn open
   "Open or create the database at PATH (nil for memory), with the pragmas the
   design names, creating the current schema in a new one. Returns the connection."

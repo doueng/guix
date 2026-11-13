@@ -17,8 +17,6 @@
   "What policy.edn says about notifications when it says nothing."
   {:do-not-disturb false :notify-delay-seconds 5 :notify-long-minutes 10 :notify-expire-ms 5000})
 
-;; ---- what waits on the person -------------------------------------------
-
 (defn waiting
   "Everything in STATE that waits on the person now, by key: [:ask id],
   [:needs-human worker] (critical) and [:session-ended worker]. Each has :at,
@@ -183,8 +181,6 @@
     (spit (str f) (pr-str {:do-not-disturb on}))
     on))
 
-;; ---- the notifier: pending, shown, and its effects ------------------------
-
 (def replay-grace-ms
   "How long before a controller's start an item may have begun and still be
   shown by it: one that began earlier is history, which a restart replays
@@ -276,8 +272,6 @@
           (swap! shown dissoc k))
         (save! notifier)))
     due))
-
-;; ---- the desktop's effects ---------------------------------------------
 
 (defn- uid []
   (some->> (slurp "/proc/self/status") (re-find #"(?m)^Uid:\s+(\d+)") second))

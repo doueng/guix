@@ -10,8 +10,6 @@
 (defn- refuse [error & {:keys [message] :as more}]
   (throw (ex-info (or message (name error)) (assoc (dissoc more :message) :error error))))
 
-;; ---- authorization ------------------------------------------------------
-
 (def ^:private grants
   {:router #{:thread! :start-worker! :steer! :cancel! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
@@ -37,8 +35,6 @@
             (when (and (:worker args) (not= (:worker args) id)) (refuse :forbidden :command command :worker (:worker args)))
             (-> cmd (assoc-in [:args :thread] thread) (assoc-in [:args :worker] id)))
           :else cmd)))
-
-;; ---- decide -------------------------------------------------------------
 
 (defn- next-id [state kind prefix]
   (str prefix (inc (get-in state [:counters kind] 0))))
@@ -184,8 +180,6 @@
   (when for {:for for :origin (request-origin state principal for)}))
 
 (declare fold* worker-of)
-
-;; ---- what a finished Worker still owes -------------------------------------
 
 (def effect-order
   "The effects a Worker's end can leave to the controller, in the order it
@@ -672,8 +666,6 @@
                              {:kind :thread-resolved :thread thread :data {}}])
      :result thread}))
 
-;; ---- routing ------------------------------------------------------------
-
 (def ^:private number-words
   (merge (zipmap ["zero" "one" "two" "three" "four" "five" "six" "seven" "eight" "nine" "ten" "eleven" "twelve"
                   "thirteen" "fourteen" "fifteen" "sixteen" "seventeen" "eighteen" "nineteen"] (range 20))
@@ -817,8 +809,6 @@
   with :error on refusal."
   [state principal cmd]
   (decide* state (assoc (authorize state principal cmd) :principal principal)))
-
-;; ---- fold ---------------------------------------------------------------
 
 (defn- bump [state kind] (update-in state [:counters kind] (fnil inc 0)))
 
@@ -1003,8 +993,6 @@
       :workers (assoc r :state (shown-state state r) :asks (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:asks state)))))
                         :replies (vec (sort (keep #(when (= id (:worker %)) (:id %)) (vals (:replies state))))))
       r)))
-
-;; ---- sections -----------------------------------------------------------
 
 (def section-order [:stopped :holding-up :waiting :needs-attention :sent :new :working :quiet :archived])
 
