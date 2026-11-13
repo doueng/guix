@@ -68,12 +68,20 @@ conversation."
                  eng/bbh-usage-last nil))
          (eng/bbh-inbox-switch (eng/bbh--shell)))
        (if (eng/bbh-super--to-router-p (eng/bbh--shell))
-           (let ((composer (current-buffer)))
-             ;; As agent-shell says for a Worker; the controller would refuse blank text.
-             (when (string-empty-p draft) (user-error "Nothing to send"))
+           (let ((composer (current-buffer))
+                 ;; As agent-shell says for a Worker; the controller would refuse blank text.
+                 (_ (when (string-empty-p draft) (user-error "Nothing to send")))
+                 ;; The controller answers later, and what you type meanwhile
+                 ;; follows the sent draft, so only the draft goes then.
+                 (sent (copy-marker (point-max))))
              (eng/bbh-super--say-from (eng/bbh--shell) draft
                                       (lambda () (when (buffer-live-p composer)
-                                                   (with-current-buffer composer (erase-buffer))))))
+                                                   (with-current-buffer composer
+                                                     (delete-region (point-min) sent)
+                                                     (save-excursion
+                                                       (goto-char (point-min))
+                                                       (when (looking-at "[ \t\n]+") (replace-match "")))
+                                                     (set-marker sent nil))))))
          (agent-shell-viewport-compose-send t))))))
 
 (defun eng/bbh-super-say (text &optional on-done)

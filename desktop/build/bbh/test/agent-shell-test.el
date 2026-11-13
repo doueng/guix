@@ -862,6 +862,24 @@ showed as `Router: bbh super: invalid invalid' (Bombadil, T174)."
             (should (equal "" (buffer-string)))))
       (kill-buffer router))))
 
+(ert-deftest bbh-typing-after-a-send-to-the-router-is-kept ()
+  "The controller takes a draft for the Router asynchronously, and the composer
+used to be erased when it answered, with whatever you typed meanwhile
+(Bombadil, T174).  Only the sent text goes."
+  (let* ((router (generate-new-buffer "Router test"))
+         (done nil))
+    (with-current-buffer router (setq eng/bbh-super-conversation "router"))
+    (unwind-protect
+        (cl-letf (((symbol-function 'eng/bbh--shell) (lambda () router))
+                  ((symbol-function 'eng/bbh-super-say) (lambda (_text &optional on-done) (setq done on-done))))
+          (with-temp-buffer
+            (insert "first message")
+            (eng/bbh-send)
+            (insert " next one")
+            (funcall done)
+            (should (equal "next one" (buffer-string)))))
+      (kill-buffer router))))
+
 (ert-deftest bbh-super-end-frees-a-finished-workers-session-and-keeps-its-buffer ()
   ;; The controller ends a finished Worker's session to free its memory. Its
   ;; process goes, its buffers stay readable, and no client is made again.
