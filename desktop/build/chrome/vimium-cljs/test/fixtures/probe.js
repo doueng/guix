@@ -50,7 +50,7 @@
   let lastMode = '';
   window.__probeFacts = () => {
     const mode = document.documentElement.dataset.vimiumCljsMode || 'normal';
-    if (mode !== lastMode) { lastMode = mode; probe.hintsSince = mode === 'hints' ? Date.now() : 0; }
+    if (mode !== lastMode) { lastMode = mode; probe.hintsSince = mode === 'hints' ? Date.now() : 0; probe.hintsScrollY = Math.round(scrollY); }
     const links = deepAll(document, 'a[href]').map((a) => ({ id: a.id, visible: visible(a), hint: a.dataset.vimiumCljsHint || null }));
     const hl = window.CSS && CSS.highlights;
     return {
@@ -58,6 +58,7 @@
       ready: document.documentElement.dataset.vimiumCljsReady === '1',
       mode,
       hintsMs: probe.hintsSince ? Date.now() - probe.hintsSince : 0,
+      hintsScrollY: probe.hintsScrollY,
       scrollY: Math.round(scrollY),
       maxScrollY: Math.max(0, document.documentElement.scrollHeight - innerHeight),
       links,

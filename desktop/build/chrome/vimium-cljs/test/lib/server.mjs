@@ -30,21 +30,25 @@ export function startServer(control) {
 }
 
 /** Control handler that drives whichever page SESSION() returns. */
+// An input event sent to a frame that the event itself removes (Escape closing the
+// Vomnibar) is never acknowledged, so input calls give up after a second.
+const within = (p, ms) => Promise.race([p, sleep(ms)]);
+
 export function controller(cdp, session) {
   return async (op, q) => {
     const s = await session();
     if (op === 'keys') {
       for (const [down, up] of keyEvents(q.seq || '')) {
-        await cdp('Input.dispatchKeyEvent', down, s);
-        await cdp('Input.dispatchKeyEvent', up, s);
+        await within(cdp('Input.dispatchKeyEvent', down, s), 1000);
+        await within(cdp('Input.dispatchKeyEvent', up, s), 1000);
         await sleep(Number(q.gap || 30));
       }
       return true;
     }
     if (op === 'click') {
       const p = { x: Number(q.x), y: Number(q.y), button: 'left', clickCount: 1 };
-      await cdp('Input.dispatchMouseEvent', { ...p, type: 'mousePressed' }, s);
-      await cdp('Input.dispatchMouseEvent', { ...p, type: 'mouseReleased' }, s);
+      await within(cdp('Input.dispatchMouseEvent', { ...p, type: 'mousePressed' }, s), 1000);
+      await within(cdp('Input.dispatchMouseEvent', { ...p, type: 'mouseReleased' }, s), 1000);
       return true;
     }
     throw new Error('unknown op ' + op);
