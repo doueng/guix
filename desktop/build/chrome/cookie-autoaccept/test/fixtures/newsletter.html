@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- A fixed newsletter box: not a cookie notice, must stay visible -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>A fixed newsletter box: not a cookie notice, must stay visible</h1>
+<p>Article text.</p>
+<div id="notice" style="position:fixed;bottom:0;left:0;right:0;background:#fff;padding:16px;z-index:9">
+  <p>Subscribe to our newsletter for weekly deals and discounts!</p>
+  <button>Subscribe</button>
+</div>
+</body></html>

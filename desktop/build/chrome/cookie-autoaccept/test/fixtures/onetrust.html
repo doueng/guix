@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- OneTrust banner (structure of cdn.cookielaw.org otBannerSdk) -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>OneTrust banner (structure of cdn.cookielaw.org otBannerSdk)</h1>
+<p>Article text.</p>
+<div id="onetrust-consent-sdk"><div id="onetrust-banner-sdk" class="bar" role="region">
+  <p id="onetrust-policy-text">We use cookies to personalise content and ads.</p>
+  <button id="onetrust-pc-btn-handler">Cookie settings</button>
+  <button id="onetrust-reject-all-handler" onclick="mark('rejected');this.closest('.bar').style.display='none'">Reject all</button>
+  <button id="onetrust-accept-btn-handler" onclick="mark('accepted');this.closest('.bar').style.display='none'">Accept all cookies</button>
+</div></div>
+</body></html>

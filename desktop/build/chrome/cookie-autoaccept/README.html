@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Chrome extension that answers cookie consent popups (accept by default), built on DuckDuckGo autoconsent: install, update, tests">
+<meta name="bbh-doc" content="T178">
+<title>Cookie autoaccept</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95em}
+</style></head>
+<body><main>
+<h1>Cookie autoaccept</h1>
+
+<p><b>What it does:</b> when a page shows a cookie consent popup, the extension answers it for you. By default it clicks <i>accept</i>. You can switch to <i>reject</i>, and you can turn it off for single sites. It does the work locally and sends nothing anywhere.</p>
+
+<h2>Prior art</h2>
+<p><a href="https://www.i-dont-care-about-cookies.eu/">I don't care about cookies</a> and <a href="https://consentomatic.au.dk/">Consent-O-Matic</a> already do this; Consent-O-Matic can also reject. This extension is a thin shell around DuckDuckGo's <a href="https://github.com/duckduckgo/autoconsent">autoconsent</a> rules: about 1600 rules covering OneTrust, Cookiebot, Didomi, Quantcast, TrustArc, Usercentrics, Sourcepoint, the IAB TCF CMPs and many single sites. autoconsent is <b>MPL-2.0</b>, not MIT. MPL-2.0 is per-file copyleft, so the vendored files stay unmodified and keep their LICENSE, and our own files are unaffected.</p>
+
+<h2>Install in the flatpak Chrome</h2>
+<p>The Chrome flatpak cannot read <code>~/projects</code> by default. It can read <code>~/Downloads</code> and <code>~/Documents</code>. Pick one of the two options below.</p>
+<h3>A. Let Chrome read the repo, read-only (recommended)</h3>
+<pre>flatpak override --user \
+  --filesystem=/home/engstrand/projects/cookie-autoaccept:ro \
+  com.google.Chrome</pre>
+<ol>
+<li>Quit Chrome completely, then start it again.</li>
+<li>Open <code>chrome://extensions</code> and switch on <b>Developer mode</b> (top right).</li>
+<li>Click <b>Load unpacked</b> and choose <code>/home/engstrand/projects/cookie-autoaccept</code>.</li>
+<li>Pin the cookie icon from the puzzle-piece menu if you want to see the badge.</li>
+</ol>
+<h3>B. Copy it somewhere Chrome can already read</h3>
+<pre>rsync -a --delete \
+  --exclude .jj --exclude .git --exclude test \
+  /home/engstrand/projects/cookie-autoaccept/ \
+  ~/Documents/cookie-autoaccept/</pre>
+<p>Then do steps 2 and 3 above, choosing <code>~/Documents/cookie-autoaccept</code>.</p>
+
+<h2>Update</h2>
+<ul>
+<li><b>Our code:</b> after a change lands in the repo (rerun the rsync if you use option B), click the reload arrow on the extension's card in <code>chrome://extensions</code>, then reload any open tabs.</li>
+<li><b>autoconsent rules:</b> run <code>scripts/update-autoconsent.sh 18.6.0</code> (or whatever version you want). It is the only step that uses the network. It checks the npm sha512, copies the four files and rewrites <code>vendor/autoconsent/VERSION</code>. Then run <code>npm test &amp;&amp; npm run e2e</code>, commit with jj, and reload the extension.</li>
+</ul>
+
+<h2>Using it</h2>
+<p>Click the toolbar icon to open the popup. It shows what happened on the current site, for example <i>Accepted cookies (Onetrust)</i>, <i>Hid 1 cookie banner (generic)</i> or <i>No cookie popup seen</i>. It also has two controls:</p>
+<ul>
+<li><b>On for this site</b>: unticking it stops the extension on that hostname (a leading www. is ignored).</li>
+<li><b>Accept / Reject cookies</b>: one global choice for every site.</li>
+</ul>
+<p>Changing either control reloads the tab. A ✓ badge means the extension handled the popup on that tab.</p>
+
+<h2>How it works</h2>
+<svg viewBox="0 0 240 250" width="100%" style="max-width:340px" role="img" aria-label="data flow">
+<defs><marker id="a" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#555"/></marker></defs>
+<g font-size="12" font-family="sans-serif">
+<rect x="10" y="5" width="220" height="50" rx="6" fill="#eef" stroke="#88a"/>
+<text x="20" y="25">content scripts, every frame</text><text x="20" y="43">autoconsent + generic fallback</text>
+<path d="M80 55 V92" stroke="#555" marker-end="url(#a)"/><text x="86" y="78">init, results</text>
+<path d="M160 95 V58" stroke="#555" marker-end="url(#a)"/><text x="166" y="78">rules</text>
+<rect x="10" y="97" width="220" height="60" rx="6" fill="#efe" stroke="#8a8"/>
+<text x="20" y="117">service worker</text><text x="20" y="133">rules, settings, snippets,</text><text x="20" y="149">per-tab report</text>
+<path d="M120 157 V190" stroke="#555" marker-end="url(#a)"/><text x="126" y="178">report</text>
+<rect x="10" y="195" width="220" height="50" rx="6" fill="#fee" stroke="#a88"/>
+<text x="20" y="215">popup</text><text x="20" y="233">status, site toggle, mode</text>
+</g></svg>
+<ul>
+<li>At <code>document_idle</code>, every frame (including iframes and about:blank frames) runs the unmodified autoconsent content bundle. It asks the service worker for rules. The worker sends only the rules that can apply to that frame: about 430 KB for a top frame and much less for an iframe.</li>
+<li>autoconsent detects the CMP, including inside open shadow roots, and watches for banners that appear late. Then it clicks accept (optIn) or reject (optOut). Some CMPs need page JavaScript, such as <code>Cookiebot</code> or <code>UC_UI</code>. For those, the worker runs one of autoconsent's own snippet functions in the page. It never runs a code string.</li>
+<li>Generic fallback: 3 s after the page is idle (again at 7 s and 12 s, and on page changes for 30 s), a small script looks for a visible fixed or sticky element, or dialog, that talks about cookies or consent and has a button. It looks in the page, in open shadow roots, and in small consent iframes. In accept mode it clicks the best accept button (Accept all, Allow all, Alle akzeptieren, Tout accepter, Acepto, OK and so on). It never clicks a button that mentions subscribing, paying, settings, rejecting or necessary-only. If no such button exists, or in reject mode, it hides the banner instead. It waits while autoconsent is working on a popup. It also runs after autoconsent reports success, because some upstream accept rules click buttons that are gone and leave the banner up.</li>
+<li>In reject mode, autoconsent's heuristic also clicks reject buttons it has no rule for. In accept mode that heuristic is off, because upstream has no heuristic accept. DuckDuckGo ships opt-out only, so upstream's accept steps are less maintained than its reject steps; the generic fallback covers that gap.</li>
+</ul>
+
+<h2>Permissions and privacy</h2>
+<ul>
+<li><code>storage</code> holds your settings. The per-tab status is kept in memory only and is gone when the browser closes.</li>
+<li><code>scripting</code> plus host access to all sites is needed to run the snippet functions in the page. This is the same reach the all-sites content script already has, so the install warning is unchanged.</li>
+<li>No <code>tabs</code>, <code>cookies</code> or <code>webNavigation</code> permission, no remote code, no network requests and no telemetry.</li>
+</ul>
+
+<h2>Tests</h2>
+<pre>npm test     # 22 unit tests (node --test)
+npm run e2e  # 14 checks, headless flatpak Chrome, ~45 s</pre>
+<p>The e2e run starts <code>flatpak run com.google.Chrome --headless=new</code> with a throwaway profile and read-only access to the repo. It loads the extension over the DevTools pipe (<code>Extensions.loadUnpacked</code>), because branded Chrome ignores <code>--load-extension</code>. Then it opens the fixture pages in <code>test/fixtures</code>. The fixtures are small rebuilds of each CMP's DOM and API, not saved copies of live pages: OneTrust, Cookiebot (old and current template), Didomi, Quantcast, TrustArc, Usercentrics in shadow DOM, Sourcepoint in a cross-origin iframe, an unknown pay-or-consent iframe, and home-made banners. The run checks that:<ul><li>the accept button is the one pressed;</li><li>reject mode presses reject, and with no rule it hides rather than accepts;</li><li>a banner added late in shadow DOM is caught;</li><li>a newsletter box stays;</li><li>a disabled site is left alone.</li></ul> Set <code>CHROME=/path/to/chromium</code> to use another browser.</p>
+
+<h2>Live check</h2>
+<p>On 14 November 2026 I ran the extension in headless Chrome on seven live sites: the Guardian, Le Monde, cookiebot.com, Spiegel, the BBC, Marca and IKEA Sweden. After 12 s, none of them showed a consent banner or wall. IKEA was handled by autoconsent's OneTrust rule and cookiebot.com by the fallback after the stale Cookiebot rule. The Guardian and Spiegel were handled by the fallback inside their consent frames, and Le Monde and Marca by the fallback on their pay-or-consent walls. The BBC page was clear at the end of the run. Before the fallback could click, none of the first four was handled. Stack Overflow and Zeit served bot checks to headless Chrome, so they tell us nothing.</p>
+<h2>Known limits</h2>
+<ul>
+<li>Running at <code>document_idle</code> (as asked) can briefly show a banner before it is handled. Upstream runs at <code>document_start</code> to hide banners before they paint.</li>
+<li>When the fallback hides a banner instead of clicking it, no choice is recorded, so that site may ask again on the next visit.</li>
+<li>The fallback picks buttons by their text. A banner with an unusual accept label is hidden instead of accepted. If it ever presses the wrong button on a site, turn that site off from the popup.</li>
+<li>A site that never loads a known CMP and uses an unusual layout will still show its banner. You can turn the site off, or report it upstream.</li>
+</ul>
+
+</main></body></html>

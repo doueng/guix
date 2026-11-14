@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- Current Cookiebot template: the upstream optIn rule clicks ids this template lacks and still reports success -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>Current Cookiebot template: the upstream optIn rule clicks ids this template lacks and still reports success</h1>
+<p>Article text.</p>
+<script>window.Cookiebot = { hasResponse: false, dialog: { visible: true }, withdraw() {}, hide() {} };</script>
+<div id="CybotCookiebotDialog" class="bar" role="dialog">
+  <h2>This website uses cookies</h2>
+  <p>We use cookies to personalise content and ads.</p>
+  <button id="CybotCookiebotDialogBodyButtonDecline" onclick="mark('rejected')">Deny</button>
+  <button id="CybotCookiebotDialogBodyLevelButtonCustomize">Customize ›</button>
+  <button id="CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll" onclick="mark('accepted');Cookiebot.hasResponse=true;Cookiebot.dialog.visible=false;this.parentNode.style.display='none'">Allow all</button>
+</div>
+</body></html>

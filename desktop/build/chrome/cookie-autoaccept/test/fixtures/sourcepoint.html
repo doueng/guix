@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- Sourcepoint (message in a cross-origin iframe) -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>Sourcepoint (message in a cross-origin iframe)</h1>
+<p>Article text.</p>
+<div id="sp_message_container_1234" class="bar" style="height:160px">
+  <iframe id="sp_message_iframe_1234" style="width:100%;height:150px;border:0"></iframe>
+</div>
+<script>
+  // Serve the message from the other loopback name, so the frame is cross-origin like the real one.
+  const other = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+  document.getElementById('sp_message_iframe_1234').src = `http://${other}:${location.port}/index.html?message_id=1234`;
+  window.addEventListener('message', () => { document.getElementById('sp_message_container_1234').style.display = 'none'; });
+</script>
+</body></html>

@@ -1,0 +1,14 @@
+@duckduckgo/autoconsent 18.5.0 (MPL-2.0, see LICENSE in this directory)
+source: https://registry.npmjs.org/@duckduckgo/autoconsent/-/autoconsent-18.5.0.tgz
+integrity: sha512-10S404Q9DvLHPWkHpirx1AR9oep6nGdy2PtKCRCsYFX2KiSOfEYbWrP8mmV1wv4ofuXxrGdpIzVyBnl1MjsMBQ==
+git: https://github.com/duckduckgo/autoconsent tag v18.5.0 (7aa056fac72a608da4806880a5cdfe3950549d74)
+files, unmodified:
+  content.bundle.js    <- package/dist/addon-mv3/content.bundle.js
+  autoconsent.esm.js   <- package/dist/autoconsent.esm.js (the service worker imports evalSnippets from it)
+  rules.json           <- package/rules/rules.json
+  LICENSE              <- package/LICENSE
+sha256:
+59cd4cee4819c017c41affdeb40258e363905d9c479dec9eb232f11f3c1c7dac  autoconsent.esm.js
+549a32f141e9f89d2d621f7b7a5adaf507db7aafa0ef2eb8ac0c2d8245b3f300  content.bundle.js
+fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85  LICENSE
+96250ecc7299587c34dc74c3418951806ba1392d46980ce180834d10191228c8  rules.json

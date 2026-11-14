@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- Didomi notice (structure of sdk.privacy-center.org) -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>Didomi notice (structure of sdk.privacy-center.org)</h1>
+<p>Article text.</p>
+<div id="didomi-host"><div id="didomi-notice" class="didomi-notice-banner bar">
+  <p>We and our partners use cookies.</p>
+  <button id="didomi-notice-disagree-button" onclick="mark('rejected');document.getElementById('didomi-host').innerHTML=''">Disagree</button>
+  <button id="didomi-notice-agree-button" onclick="mark('accepted');document.getElementById('didomi-host').innerHTML=''">Agree and close</button>
+</div></div>
+</body></html>

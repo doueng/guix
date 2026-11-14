@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- TrustArc banner (structure of consent.trustarc.com notice) -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>TrustArc banner (structure of consent.trustarc.com notice)</h1>
+<p>Article text.</p>
+<div id="truste-consent-track" class="bar"><div id="truste-consent-content">
+  <p>This site uses cookies and related technologies.</p>
+  <button id="truste-show-consent">More options</button>
+  <button id="truste-consent-required" onclick="mark('rejected');document.getElementById('truste-consent-track').style.display='none'">Required only</button>
+  <button id="truste-consent-button" onclick="mark('accepted');document.getElementById('truste-consent-track').style.display='none'">Agree and proceed</button>
+</div></div>
+</body></html>

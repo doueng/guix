@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- Quantcast Choice (structure of quantcast.mgr.consensu.org cmp2) -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>Quantcast Choice (structure of quantcast.mgr.consensu.org cmp2)</h1>
+<p>Article text.</p>
+<div id="qc-cmp2-container"><div id="qc-cmp2-main"><div id="qc-cmp2-ui" class="bar">
+  <p>We value your privacy. We and our partners store cookies.</p>
+  <div class="qc-cmp2-summary-buttons">
+    <button mode="secondary" onclick="mark('rejected');document.getElementById('qc-cmp2-ui').remove()">Disagree</button>
+    <button mode="primary" onclick="mark('accepted');document.getElementById('qc-cmp2-ui').remove()">Agree</button>
+  </div>
+</div></div></div>
+</body></html>

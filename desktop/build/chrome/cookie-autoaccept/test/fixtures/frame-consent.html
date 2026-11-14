@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- Pay-or-consent message in a cross-origin iframe that no rule knows (like the Guardian's) -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>Pay-or-consent message in a cross-origin iframe that no rule knows (like the Guardian's)</h1>
+<p>Article text.</p>
+<div id="wall" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9">
+  <iframe id="msg" style="width:500px;height:260px;border:0;background:#fff;margin:80px auto;display:block"></iframe>
+</div>
+<script>
+  const other = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+  document.getElementById('msg').src = `http://${other}:${location.port}/consent-message.html`;
+  window.addEventListener('message', () => document.getElementById('wall').remove());
+</script>
+</body></html>

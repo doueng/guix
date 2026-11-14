@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- Usercentrics v3 (UI in an open shadow root, API in window.UC_UI) -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>Usercentrics v3 (UI in an open shadow root, API in window.UC_UI)</h1>
+<p>Article text.</p>
+<div id="usercentrics-root"></div>
+<script>
+  const host = document.getElementById('usercentrics-root');
+  const root = host.attachShadow({ mode: 'open' });
+  root.innerHTML = '<div data-testid="uc-container" style="position:fixed;bottom:0;left:0;right:0;background:#fff;padding:16px">' +
+    '<p>We use cookies and similar technologies.</p>' +
+    '<button data-testid="uc-deny-all-button">Deny</button><button data-testid="uc-accept-all-button">Accept all</button></div>';
+  const close = () => { host.style.display = 'none'; return true; };
+  root.querySelector('[data-testid=uc-deny-all-button]').onclick = () => { mark('rejected'); close(); };
+  root.querySelector('[data-testid=uc-accept-all-button]').onclick = () => { mark('accepted'); close(); };
+  let accepted = false;
+  window.UC_UI = {
+    acceptAllConsents() { accepted = true; mark('accepted'); return Promise.resolve(true); },
+    denyAllConsents() { mark('rejected'); return Promise.resolve(true); },
+    closeCMP: close,
+    areAllConsentsAccepted: () => accepted,
+  };
+</script>
+</body></html>
