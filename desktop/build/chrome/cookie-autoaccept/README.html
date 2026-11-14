@@ -38,6 +38,7 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 <p><a href="https://www.i-dont-care-about-cookies.eu/">I don't care about cookies</a> and <a href="https://consentomatic.au.dk/">Consent-O-Matic</a> already do this; Consent-O-Matic can also reject. This extension is a thin shell around DuckDuckGo's <a href="https://github.com/duckduckgo/autoconsent">autoconsent</a> rules: about 1600 rules covering OneTrust, Cookiebot, Didomi, Quantcast, TrustArc, Usercentrics, Sourcepoint, the IAB TCF CMPs and many single sites. autoconsent is <b>MPL-2.0</b>, not MIT. MPL-2.0 is per-file copyleft, so the vendored files stay unmodified and keep their LICENSE, and our own files are unaffected.</p>
 
 <h2>Install in the flatpak Chrome</h2>
+<p>First build the unpacked extension: <code>npm ci</code> once, then <code>npm run build</code> writes it to <code>dist/</code>.</p>
 <p>The Chrome flatpak cannot read <code>~/projects</code> by default. It can read <code>~/Downloads</code> and <code>~/Documents</code>. Pick one of the two options below.</p>
 <h3>A. Let Chrome read the repo, read-only (recommended)</h3>
 <pre>flatpak override --user \
@@ -46,19 +47,18 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 <ol>
 <li>Quit Chrome completely, then start it again.</li>
 <li>Open <code>chrome://extensions</code> and switch on <b>Developer mode</b> (top right).</li>
-<li>Click <b>Load unpacked</b> and choose <code>/home/engstrand/projects/cookie-autoaccept</code>.</li>
+<li>Click <b>Load unpacked</b> and choose <code>/home/engstrand/projects/cookie-autoaccept/dist</code>.</li>
 <li>Pin the cookie icon from the puzzle-piece menu if you want to see the badge.</li>
 </ol>
 <h3>B. Copy it somewhere Chrome can already read</h3>
 <pre>rsync -a --delete \
-  --exclude .jj --exclude .git --exclude test \
-  /home/engstrand/projects/cookie-autoaccept/ \
+  /home/engstrand/projects/cookie-autoaccept/dist/ \
   ~/Documents/cookie-autoaccept/</pre>
 <p>Then do steps 2 and 3 above, choosing <code>~/Documents/cookie-autoaccept</code>.</p>
 
 <h2>Update</h2>
 <ul>
-<li><b>Our code:</b> after a change lands in the repo (rerun the rsync if you use option B), click the reload arrow on the extension's card in <code>chrome://extensions</code>, then reload any open tabs.</li>
+<li><b>Our code:</b> after a change lands in the repo, run <code>npm run build</code> (and rerun the rsync if you use option B), click the reload arrow on the extension's card in <code>chrome://extensions</code>, then reload any open tabs.</li>
 <li><b>autoconsent rules:</b> run <code>scripts/update-autoconsent.sh 18.6.0</code> (or whatever version you want). It is the only step that uses the network. It checks the npm sha512, copies the four files and rewrites <code>vendor/autoconsent/VERSION</code>. Then run <code>npm test &amp;&amp; npm run e2e</code>, commit with jj, and reload the extension.</li>
 </ul>
 

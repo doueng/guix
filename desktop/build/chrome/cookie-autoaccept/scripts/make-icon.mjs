@@ -1,4 +1,4 @@
-// Writes icons/icon128.png: a cookie, drawn pixel by pixel so no image tool is needed.
+// Writes ext/icons/icon128.png: a cookie, drawn pixel by pixel so no image tool is needed.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 
@@ -38,8 +38,8 @@ const ihdr = Buffer.alloc(13);
 ihdr.writeUInt32BE(N, 0);
 ihdr.writeUInt32BE(N, 4);
 ihdr.set([8, 6, 0, 0, 0], 8);
-mkdirSync('icons', { recursive: true });
-writeFileSync('icons/icon128.png', Buffer.concat([
+mkdirSync('ext/icons', { recursive: true });
+writeFileSync('ext/icons/icon128.png', Buffer.concat([
   Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
   chunk('IHDR', ihdr),
   chunk('IDAT', deflateSync(px)),

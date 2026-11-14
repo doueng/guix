@@ -4,12 +4,12 @@
   "version": "0.1.0",
   "description": "Answers cookie consent popups for you (accept by default, or reject), using DuckDuckGo autoconsent rules. No telemetry.",
   "minimum_chrome_version": "111",
-  "background": { "service_worker": "src/background.js", "type": "module" },
+  "background": { "service_worker": "js/background.js", "type": "module" },
   "content_scripts": [
-    { "matches": ["<all_urls>"], "js": ["src/page-start.js"], "run_at": "document_start" },
+    { "matches": ["<all_urls>"], "js": ["js/page-start.js"], "run_at": "document_start" },
     {
       "matches": ["<all_urls>"],
-      "js": ["vendor/autoconsent/content.bundle.js", "src/fallback-core.js", "src/fallback.js"],
+      "js": ["vendor/autoconsent/content.bundle.js", "js/fallback-core.js", "js/fallback.js"],
       "run_at": "document_idle",
       "all_frames": true,
       "match_origin_as_fallback": true
@@ -17,6 +17,6 @@
   ],
   "host_permissions": ["<all_urls>"],
   "permissions": ["storage", "scripting", "declarativeNetRequestWithHostAccess"],
-  "action": { "default_title": "Cookie autoaccept", "default_popup": "src/popup.html", "default_icon": "icons/icon128.png" },
+  "action": { "default_title": "Cookie autoaccept", "default_popup": "popup.html", "default_icon": "icons/icon128.png" },
   "icons": { "128": "icons/icon128.png" }
 }

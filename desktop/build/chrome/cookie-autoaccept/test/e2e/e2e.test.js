@@ -11,6 +11,8 @@ import { join, resolve, normalize } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const FIXTURES = join(ROOT, 'test/fixtures');
+// The unpacked extension that npm run build writes.
+const DIST = join(ROOT, 'dist');
 const flatpak = spawnSync('flatpak', ['info', 'com.google.Chrome'], { stdio: 'ignore' }).status === 0;
 const chrome = process.env.CHROME || (flatpak ? null : ['chromium', 'chromium-browser'].find((c) => spawnSync('which', [c]).status === 0));
 const skip = !flatpak && !chrome ? 'no headless Chrome found (install the com.google.Chrome flatpak or set CHROME)' : false;
@@ -109,14 +111,15 @@ before(async () => {
   if (skip) return;
   port = await startServer();
   cdp = launch();
-  ({ id: extensionId } = await cdp('Extensions.loadUnpacked', { path: ROOT }));
+  ({ id: extensionId } = await cdp('Extensions.loadUnpacked', { path: DIST }));
 });
 
-after(() => {
+after(async () => {
   for (const s of browser?.stdio ?? []) s?.destroy();
-  browser?.kill();
+  // Chrome writes to its profile while it exits; remove the profile after that.
+  if (browser && browser.exitCode === null) await new Promise((ok) => { browser.once('exit', ok); browser.kill(); setTimeout(ok, 5000); });
   server?.close();
-  if (profile) rmSync(profile, { recursive: true, force: true });
+  if (profile) rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
 const accepts = ['onetrust', 'cookiebot', 'didomi', 'quantcast', 'trustarc', 'usercentrics', 'sourcepoint', 'cookiebot-v2', 'frame-consent', 'generic'];

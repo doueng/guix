@@ -17,6 +17,8 @@ import { join, normalize, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const FIXTURES = join(ROOT, 'test/fixtures');
+// The unpacked extension that npm run build writes.
+const DIST = join(ROOT, 'dist');
 const PROBE = readFileSync(join(import.meta.dirname, 'probe.js'));
 const SPEC = join(import.meta.dirname, 'spec.ts');
 const CMP_SCRIPTS = join(import.meta.dirname, 'cmp');
@@ -186,7 +188,7 @@ function harness(cdp, extensionId, site) {
         return chrome.action.openPopup({ windowId: t.windowId }).then(() => 'ok', (e) => String(e.message));
       })()`);
       if (opened !== 'ok') return failed(opened);
-      const p = await attach((t) => t.type === 'page' && t.url === `chrome-extension://${extensionId}/src/popup.html`);
+      const p = await attach((t) => t.type === 'page' && t.url === `chrome-extension://${extensionId}/popup.html`);
       if (!p) return failed('popup target not found');
       let status = null;
       for (let i = 0; i < 50 && (status === null || status === '...'); i++) {
@@ -213,7 +215,7 @@ function harness(cdp, extensionId, site) {
   async function setSettings(s) {
     await evaluate(await worker(), `chrome.storage.local.set({ settings: ${JSON.stringify(s)} }).then(() => true)`);
     // The worker re-registers the early script for the new settings; pages must not load before it has.
-    const want = `src/early-${s.mode}.js`;
+    const want = `js/early-${s.mode}.js`;
     for (let i = 0; i < 50; i++) {
       const js = await evaluate(await worker(), "chrome.scripting.getRegisteredContentScripts({ ids: ['early'] }).then(([e]) => e ? e.js[0] + ' ' + JSON.stringify(e.excludeMatches ?? []) : '')");
       if (js.startsWith(want) && s.disabledSites.every((d) => js.includes(`*://${d}/*`))) return;
@@ -288,7 +290,7 @@ async function main() {
   process.on('SIGINT', () => { cleanup(); process.exit(130); });
   try {
     const port = await debuggerPort(profile);
-    const { id: extensionId } = await cdp('Extensions.loadUnpacked', { path: ROOT });
+    const { id: extensionId } = await cdp('Extensions.loadUnpacked', { path: DIST });
     Object.assign(control, harness(cdp, extensionId, () => site));
     const start = startSettings(o.seed);
     await control.setSettings(start);

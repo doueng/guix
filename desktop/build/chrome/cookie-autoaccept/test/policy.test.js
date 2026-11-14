@@ -49,12 +49,12 @@ test('accept mode keeps the heuristic off, since upstream heuristic has no optIn
 test('the early script carries the mode and stays off disabled sites and their subdomains', () => {
   const s = setSiteEnabled({ mode: 'reject' }, 'news.com', false);
   const e = earlyScript(setSiteEnabled(s, '127.0.0.1', false));
-  assert.equal(e.js[0], 'src/early-reject.js');
-  assert.equal(e.js.at(-1), 'src/early.js');
+  assert.equal(e.js[0], 'js/early-reject.js');
+  assert.equal(e.js.at(-1), 'js/early.js');
   assert.deepEqual(e.excludeMatches, ['*://news.com/*', '*://*.news.com/*', '*://127.0.0.1/*']);
   assert.equal(e.runAt, 'document_start');
   assert.equal(e.allFrames, true);
-  assert.equal(earlyScript(undefined).js[0], 'src/early-accept.js');
+  assert.equal(earlyScript(undefined).js[0], 'js/early-accept.js');
   assert.deepEqual(sitePatterns('localhost'), ['*://localhost/*', '*://*.localhost/*']);
 });
 

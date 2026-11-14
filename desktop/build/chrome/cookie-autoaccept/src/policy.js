@@ -50,14 +50,14 @@ export function sitePatterns(site) {
 }
 
 /**
- * The early content script (src/early.js) for these settings: the mode's file first, so the mode is known at
+ * The early content script (js/early.js) for these settings: the mode's file first, so the mode is known at
  * document_start without a storage read, and no disabled site.
  */
 export function earlyScript(settings) {
   const s = normalizeSettings(settings);
   return {
     id: 'early',
-    js: [`src/early-${s.mode}.js`, 'src/cmps.js', 'src/prehide-selectors.js', 'src/early.js'],
+    js: [`js/early-${s.mode}.js`, 'js/cmps.js', 'js/prehide-selectors.js', 'js/early.js'],
     matches: ['<all_urls>'],
     excludeMatches: s.disabledSites.flatMap(sitePatterns),
     runAt: 'document_start',
