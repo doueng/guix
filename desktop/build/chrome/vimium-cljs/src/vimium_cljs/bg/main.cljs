@@ -422,7 +422,25 @@
         "vomnibar-open" (do (.then (target-tab msg tab) #(vomnibar-open! % msg)) nil)
         nil))))
 
+;; ---- reloads and updates ------------------------------------------------------------
+
+(defn- inject-open-tabs!
+  "Chrome does not inject content scripts into tabs that were open when the extension was
+  installed, reloaded or updated, so their keys would do nothing until a page reload. Inject
+  into every frame now; the old script in each frame steps aside (content/main init).
+  Pages the extension may not script (chrome://, the Web Store) just fail."
+  []
+  (-> (js/chrome.tabs.query #js {})
+      (.then (fn [tabs]
+               (doseq [^js t tabs :when (not (.-discarded t))]
+                 (let [target #js {:tabId (.-id t) :allFrames true}]
+                   (-> (js/chrome.scripting.insertCSS #js {:target target :files #js ["content.css"]})
+                       (.catch (fn [_] nil)))
+                   (-> (js/chrome.scripting.executeScript #js {:target target :files #js ["js/content.js"]})
+                       (.catch (fn [_] nil)))))))))
+
 (defn init []
+  (js/chrome.runtime.onInstalled.addListener (fn [_] (inject-open-tabs!)))
   (js/chrome.runtime.onMessage.addListener
    (fn [msg sender respond]
      (let [r (try (handle msg sender) (catch :default e (js/console.error e) nil))]

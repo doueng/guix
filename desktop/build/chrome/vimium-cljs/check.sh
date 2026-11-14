@@ -10,4 +10,4 @@ if grep -l -E '(^|[^.a-zA-Z_$])eval\(|new Function\(' ext/js/*.js; then echo 'ev
 ls -l ext/js/*.js | awk '{print $5, $9}'
 node scripts/check-load.mjs
 node scripts/check-guide.mjs
-node --test --test-concurrency=1 test/e2e/run.mjs
+node --test --test-concurrency=1 test/e2e/run.mjs test/e2e/reload.mjs

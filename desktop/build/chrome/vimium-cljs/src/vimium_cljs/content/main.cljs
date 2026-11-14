@@ -472,16 +472,43 @@
   (when (test-page?)
     (.setAttribute (.-documentElement js/document) "data-vimium-cljs-ready" "1")))
 
+;; ---- reloads and updates -----------------------------------------------------------
+;; When the extension reloads or updates, Chrome leaves the old script running in open tabs,
+;; cut off from the new worker, and the worker injects a new one (bg/main inject-open-tabs!).
+;; The orphan must step aside: it would otherwise swallow keys meant for the worker (w and e
+;; did nothing) and, listening first in the capture phase, stop the new script seeing them.
+
+(defonce ^:private listening (js/AbortController.))
+
+(defn orphaned?
+  "True once this script's extension was reloaded, updated or removed."
+  []
+  (nil? (some-> js/chrome .-runtime .-id)))
+
+(defn- retire-if-orphaned! []
+  (when (orphaned?)
+    (.abort listening)
+    (when (identical? listening (.-__vimiumCljs js/window)) (set! (.-__vimiumCljs js/window) nil))
+    true))
+
+(def ^:private takeover-event "vimium-cljs:takeover")
+
+(defn- listen! [^js target type f capture?]
+  (.addEventListener target type f #js {:capture capture? :signal (.-signal listening)}))
+
 (defn init []
+  ;; Tell an orphan to retire (synchronously, so its window flag is gone before we look).
+  (.dispatchEvent js/window (js/Event. takeover-event))
   (when-not (.-__vimiumCljs js/window)
-    (set! (.-__vimiumCljs js/window) true)
-    (.addEventListener js/window "keydown" on-keydown true)
-    (.addEventListener js/window "keyup" on-keyup true)
-    (.addEventListener js/window "keypress" on-keyup true)
-    (.addEventListener js/window "focus" on-focus true)
-    (.addEventListener js/window "mousedown" (fn [^js e] (when (.-isTrusted e) (reset! user-acted true))) true)
+    (set! (.-__vimiumCljs js/window) listening)
+    (listen! js/window takeover-event (fn [_] (retire-if-orphaned!)) false)
+    (listen! js/window "keydown" (fn [e] (when-not (retire-if-orphaned!) (on-keydown e))) true)
+    (listen! js/window "keyup" on-keyup true)
+    (listen! js/window "keypress" on-keyup true)
+    (listen! js/window "focus" on-focus true)
+    (listen! js/window "mousedown" (fn [^js e] (when (.-isTrusted e) (reset! user-acted true))) true)
     (scroll/install!)
-    (.addEventListener js/window "message" on-window-message)
+    (listen! js/window "message" on-window-message false)
     (.addEventListener js/document "DOMContentLoaded" mark-ready!)
     (js/chrome.runtime.onMessage.addListener on-message)
     (ui/set-user-css! config/link-hint-css)
