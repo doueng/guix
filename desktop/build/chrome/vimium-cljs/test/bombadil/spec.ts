@@ -56,6 +56,46 @@ export const scrollingMoves = always(() => {
     : l.after.scrollY < l.before.scrollY || l.before.scrollY <= 0;
 });
 
+// ---- Vomnibar --------------------------------------------------------------
+// The vomnibar action (below) opens it with o, types, then presses Escape or Enter,
+// and records what the frame showed (through /__ctl/vomnibar) and the open tabs.
+
+type Vom = { open: boolean; focused: boolean; value: string; items: { url: string; type: string; title: string }[] };
+type VomLast = { kind: "vomnibar"; text: string; target: string | null; end: string; openMs: number; opened: Facts; typed: Vom;
+  mid: Facts; closed: Vom; pageFocused: boolean; before: Facts; after: Facts;
+  tabsBefore: { urls: string[]; active: string }; tabsAfter: { urls: string[]; active: string } };
+const vl = () => { const l = f()?.last as any; return l && l.kind === "vomnibar" ? l as VomLast : null; };
+
+/** o opens the Vomnibar, its input focused, within 750 ms. */
+export const vomnibarOpensFast = always(() => { const l = vl(); return !l || (l.typed.open && l.openMs <= 750); });
+
+/** Every key typed fast into the Vomnibar lands in its input. */
+export const vomnibarKeepsKeystrokes = always(() => { const l = vl(); return !l || l.typed.value === l.text; });
+
+/** While it is open, keys never reach the page: no page keydowns, no scrolling, no field input. */
+export const vomnibarKeysStayOut = always(() => {
+  const l = vl();
+  return !l || (l.mid.pageKeys === l.opened.pageKeys && l.mid.scrollY === l.opened.scrollY && l.mid.fieldKeys === l.opened.fieldKeys);
+});
+
+/** Escape closes it and gives focus back to the page and the element that had it. */
+export const vomnibarEscapeCloses = always(() => {
+  const l = vl();
+  return !l || l.end !== "esc" || (!l.closed.open && l.pageFocused && l.after.active === l.before.active);
+});
+
+/** An open page's exact title or URL ranks that page first. */
+export const vomnibarExactMatchFirst = always(() => {
+  const l = vl();
+  return !l || !l.target || l.typed.items[0]?.url === l.target;
+});
+
+/** Picking a page open in a tab switches to that tab and never opens a second one. */
+export const vomnibarNoDuplicateTabs = always(() => {
+  const l = vl();
+  return !l || l.end !== "enter" || (l.tabsAfter.urls.length === l.tabsBefore.urls.length && l.tabsAfter.active === l.target);
+});
+
 /** After /needle<enter>, every match is highlighted and one is current. */
 export const findHighlightsMatches = always(() => {
   const l = f()?.last;
@@ -108,6 +148,42 @@ const typeInto = registerCustomAction("typeInto", async (document, window, id: s
   await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>")}`);
 });
 
+// Text to type: the exact title or URL of another open fixture page (the runner opens them
+// in background tabs), or text that matches nothing open.
+const pages: Record<string, string> = { "/tube.html": "vimium-cljs YouTube-like fixture", "/notes.html": "Vomnibar field notes" };
+const vomnibar = registerCustomAction("vomnibar", async (_d, window, what: string, end: string) => {
+  const w = window as any;
+  const path = Object.keys(pages).find((p) => p !== w.location.pathname)!;
+  const target = what === "title" || what === "url" ? `${w.location.origin}${path}` : null;
+  const text = what === "title" ? pages[path] : what === "url" ? `${w.location.host}${path}` : what;
+  if (end === "enter" && !target) end = "esc";
+  await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>")}`);
+  await settle(100);
+  const tabsBefore = await ctl("/__ctl/tabs");
+  const before = probeOf(w);
+  const t0 = Date.now();
+  await ctl("/__ctl/keys?seq=o");
+  let v = await ctl("/__ctl/vomnibar");
+  while (!(v.open && v.focused) && Date.now() - t0 < 3000) { await settle(15); v = await ctl("/__ctl/vomnibar"); }
+  const openMs = Date.now() - t0;
+  const opened = probeOf(w);
+  await ctl(`/__ctl/keys?gap=0&seq=${encodeURIComponent(text)}`);
+  await settle(350);
+  const typed = await ctl("/__ctl/vomnibar");
+  const mid = probeOf(w);
+  await ctl(`/__ctl/keys?seq=${end === "enter" ? "<enter>" : "<esc>"}`);
+  await settle(300);
+  const closed = await ctl("/__ctl/vomnibar");
+  const tabsAfter = await ctl("/__ctl/tabs");
+  const pageFocused = w.document.hasFocus();
+  if (end === "enter") { await ctl("/__ctl/front"); await settle(200); }
+  if (w.__probe) w.__probe.last = { kind: "vomnibar", text, target, end, openMs, opened, typed, mid,
+    closed, pageFocused, before, after: probeOf(w), tabsBefore, tabsAfter, seq: text };
+});
+
+const vomnibarActions = actions(() =>
+  ["title", "url", "zq xv", "fixtrue", "j k gg"].flatMap((what) => ["esc", "enter"].map((end) => vomnibar(what, end))));
+
 const keyActions = weighted([
   [6, actions(() => ["j", "k", "j", "jj", "d", "u", "gg", "G"].map((s) => press(s)))],
   [5, actions(() => [press("f")])],
@@ -120,6 +196,7 @@ const keyActions = weighted([
 
 export const explore = weighted([
   [12, keyActions],
+  [4, vomnibarActions],
   [4, clicks],
   [3, scroll],
   [1, back],

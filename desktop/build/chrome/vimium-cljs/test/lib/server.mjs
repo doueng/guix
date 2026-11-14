@@ -5,10 +5,19 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, normalize } from 'node:path';
 import { keyEvents } from './keys.mjs';
-import { ROOT, sleep } from './chrome.mjs';
+import { ROOT, sleep, evaluate, workerSession } from './chrome.mjs';
 
 const FIXTURES = join(ROOT, 'test/fixtures');
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript' };
+
+// What the Vomnibar frame shows: whether it is open with the input focused, the input's
+// value and the rows (as the page cannot look into the extension's frame).
+const vomnibarState = `(() => {
+  const q = document.getElementById('query'), v = document.getElementById('vomnibar');
+  return { open: !!q && !v.hidden, focused: document.hasFocus() && document.activeElement === q, value: q ? q.value : '',
+    items: [...document.querySelectorAll('#list li')].map((li) => ({ url: li.dataset.url, type: li.querySelector('.badge').textContent,
+      title: li.querySelector('.title').textContent, selected: li.classList.contains('selected') })) };
+})()`;
 
 export function startServer(control) {
   const server = createServer(async (req, res) => {
@@ -34,9 +43,23 @@ export function startServer(control) {
 // Vomnibar) is never acknowledged, so input calls give up after a second.
 const within = (p, ms) => Promise.race([p, sleep(ms)]);
 
-export function controller(cdp, session) {
+export function controller(cdp, session, extensionId) {
+  const frames = new Map();
   return async (op, q) => {
+    if (op === 'vomnibar') {
+      const { targetInfos } = await cdp('Target.getTargets');
+      const t = targetInfos.find((t) => t.url.includes('ui.html#vomnibar'));
+      if (!t) return { open: false, focused: false, value: '', items: [] };
+      if (!frames.has(t.targetId)) frames.set(t.targetId, (await cdp('Target.attachToTarget', { targetId: t.targetId, flatten: true })).sessionId);
+      return evaluate(cdp, frames.get(t.targetId), vomnibarState).catch(() => ({ open: false, focused: false, value: '', items: [] }));
+    }
+    if (op === 'tabs') {
+      const w = await workerSession(cdp, extensionId);
+      return evaluate(cdp, w, `Promise.all([chrome.tabs.query({}), chrome.tabs.query({active: true, lastFocusedWindow: true})])
+        .then(([all, [a]]) => ({ urls: all.map((t) => t.url), active: a && a.url }))`);
+    }
     const s = await session();
+    if (op === 'front') { await cdp('Page.bringToFront', {}, s); return true; }
     if (op === 'keys') {
       for (const [down, up] of keyEvents(q.seq || '')) {
         await within(cdp('Input.dispatchKeyEvent', down, s), 1000);

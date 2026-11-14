@@ -34,7 +34,7 @@ const b = await launch({ port: devtoolsPort });
 let session = null, sessionTarget = null;
 async function pageSession() {
   const { targetInfos } = await b.cdp('Target.getTargets');
-  const t = targetInfos.find((t) => t.type === 'page' && t.url.startsWith(`http://127.0.0.1:${port}`));
+  const t = targetInfos.find((t) => t.type === 'page' && t.url.startsWith(`http://127.0.0.1:${port}`) && !ours.has(t.targetId));
   if (!t) throw new Error('no fixture page');
   if (t.targetId !== sessionTarget) {
     session = (await b.cdp('Target.attachToTarget', { targetId: t.targetId, flatten: true })).sessionId;
@@ -42,7 +42,11 @@ async function pageSession() {
   }
   return session;
 }
-const { server, port } = await startServer(controller(b.cdp, pageSession));
+const { server, port } = await startServer(controller(b.cdp, pageSession, b.extensionId));
+// Background tabs for the Vomnibar properties to find and switch to.
+const ours = new Set();
+for (const path of ['tube.html', 'notes.html'])
+  ours.add((await b.cdp('Target.createTarget', { url: `http://127.0.0.1:${port}/${path}`, background: true })).targetId);
 // Wait for the DevTools port.
 for (let i = 0; i < 50; i++) {
   try { await fetch(`http://127.0.0.1:${devtoolsPort}/json/version`); break; } catch { await sleep(200); }

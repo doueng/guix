@@ -26,12 +26,12 @@ const sessions = {};
 async function attach(targetId) {
   page = sessions[targetId] ??= (await b.cdp('Target.attachToTarget', { targetId, flatten: true })).sessionId;
 }
-async function open(path = '/') {
+async function open(path = '/', frames = 2) {
   const { targetId } = await b.cdp('Target.createTarget', { url: `http://127.0.0.1:${port}${path}` });
   await attach(targetId);
   await b.cdp('Page.enable', {}, page);
   await b.cdp('Page.bringToFront', {}, page);
-  const f = await until((f) => f.ready && Object.keys(f.frames).length >= 2, 10000);
+  const f = await until((f) => f.ready && Object.keys(f.frames).length >= frames, 10000);
   assert.ok(f.ready, 'content script ready');
   return targetId;
 }
@@ -274,6 +274,39 @@ test('visual mode extends the selection; marks jump back', T, async () => {
   assert.equal((await facts()).scrollY, y, 'mark a');
   await keys('``', 300);
   assert.equal((await facts()).scrollY, (await facts()).maxScrollY, 'back to the previous position');
+});
+
+test("Vomnibar: an open tab's exact title ranks first, Enter switches without a duplicate, Escape gives focus back", T, async () => {
+  const notes = await open('/notes.html', 0);
+  const home = await open('/');
+  const ctlv = controller(b.cdp, async () => page, b.extensionId);
+  const tabs0 = await ctlv('tabs');
+  // Escape gives focus back to the field that had it.
+  await clickOn("document.getElementById('text')");
+  await keys('<esc>', 150);
+  await evaluate(b.cdp, page, "document.getElementById('text').focus(), true");
+  const w = await workerSession(b.cdp, b.extensionId);
+  await evaluate(b.cdp, w, 'chrome.tabs.query({active: true, lastFocusedWindow: true}).then(t => vimiumCljsVomnibarCommand(t[0])).then(() => true)');
+  let v;
+  for (let i = 0; i < 40 && !(v?.open && v.focused); i++) { await sleep(50); v = await ctlv('vomnibar'); }
+  assert.ok(v.open && v.focused, 'open with the input focused');
+  await keys('<esc>', 1200);
+  assert.equal((await ctlv('vomnibar')).open, false, 'closed');
+  assert.equal((await facts()).active, 'text', 'focus back in the field');
+  // o, the exact title, Enter.
+  await evaluate(b.cdp, page, 'document.activeElement.blur(), true');
+  await keys('o', 500);
+  await ctl()('keys', { seq: 'Vomnibar field notes', gap: 0 });
+  await sleep(400);
+  v = await ctlv('vomnibar');
+  assert.equal(v.value, 'Vomnibar field notes', 'no keystroke lost');
+  assert.equal(v.items[0]?.url, `http://127.0.0.1:${port}/notes.html`, 'exact title first: ' + JSON.stringify(v.items.slice(0, 3)));
+  assert.equal(v.items[0]?.type, 'Tab');
+  await keys('<enter>', 800);
+  const tabs1 = await ctlv('tabs');
+  assert.equal(tabs1.urls.length, tabs0.urls.length, 'no new tab');
+  assert.equal(tabs1.active, `http://127.0.0.1:${port}/notes.html`, 'switched to the notes tab');
+  for (const t of [notes, home]) await b.cdp('Target.closeTarget', { targetId: t });
 });
 
 test('the Vomnibar command (Ctrl+L) opens the Vomnibar in the page', T, async () => {

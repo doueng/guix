@@ -17,6 +17,8 @@ npm run bombadil      # property run over the fixtures (Bombadil from the guix r
 
 Layout: `src/vimium_cljs/{keys,commands,config,hints,exclusions,rank}.cljs` are pure and tested;
 `bg/` is the service worker, `content/` the content script, `ui/` the Vomnibar, help and offscreen pages. `ext/` is the unpacked extension.
+`node scripts/vomnibar-lab.mjs DIR [query ...]` screenshots the Vomnibar (light and dark) over a seeded profile;
+`node scripts/vomnibar-keys.mjs` counts keystrokes for common Vomnibar tasks.
 
 ## Changing keys and settings
 
