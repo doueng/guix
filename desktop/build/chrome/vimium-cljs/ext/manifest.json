@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Vimium (cljs)",
+  "version": "0.1.0",
+  "description": "Vimium-style keyboard navigation, rewritten in ClojureScript.",
+  "minimum_chrome_version": "116",
+  "icons": { "128": "icons/icon128.png" },
+  "background": { "service_worker": "js/bg.js" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "permissions": ["tabs", "bookmarks", "history", "storage", "sessions", "webNavigation",
+                  "offscreen", "clipboardRead", "clipboardWrite"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["js/content.js"],
+      "css": ["content.css"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["ui.html", "ui.css", "js/ui.js"], "matches": ["<all_urls>"] }
+  ]
+}

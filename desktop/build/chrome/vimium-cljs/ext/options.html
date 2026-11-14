@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vimium (cljs) options</title>
+<link rel="stylesheet" href="options.css">
+</head>
+<body>
+<h1>Vimium (cljs) options</h1>
+<section>
+  <h2>Import from Vimium</h2>
+  <p>In Vimium's options page, use <em>Backup and restore → Download backup</em>, then pick that file here. It is read as data; nothing in it runs.</p>
+  <input type="file" id="import-file" accept=".json,application/json">
+  <details><summary>or paste the JSON</summary>
+    <textarea id="import-text" rows="6"></textarea><button id="import-paste">Import pasted JSON</button>
+  </details>
+  <div id="import-report"></div>
+</section>
+<section id="summary"></section>
+<section>
+  <h2>Keys</h2>
+  <label>Custom key mappings (<code>map key command</code>, <code>unmap key</code>, <code>unmapAll</code>, <code>mapkey a b</code>)
+    <textarea id="keyMappings" rows="10" spellcheck="false"></textarea></label>
+  <pre id="mapping-errors" class="errors"></pre>
+  <label>Link hint characters <input id="linkHintCharacters"></label>
+  <label><input type="checkbox" id="ignoreKeyboardLayout"> Ignore keyboard layout (read physical keys)</label>
+</section>
+<section>
+  <h2>Excluded URLs</h2>
+  <label>One rule per line: a pattern (* is any text) then the keys to pass to the page; no keys disables the extension there.
+    <textarea id="exclusionRules" rows="5" spellcheck="false"></textarea></label>
+</section>
+<section>
+  <h2>Behaviour</h2>
+  <label>Scroll step (px) <input id="scrollStepSize" type="number" min="1"></label>
+  <label><input type="checkbox" id="smoothScroll"> Smooth scrolling</label>
+  <label><input type="checkbox" id="grabBackFocus"> Don't let pages steal focus on load</label>
+  <label><input type="checkbox" id="regexFindMode"> Treat find queries as regular expressions</label>
+  <label><input type="checkbox" id="hideHud"> Hide the HUD</label>
+  <label>Previous-page link patterns <input id="previousPatterns"></label>
+  <label>Next-page link patterns <input id="nextPatterns"></label>
+  <label>New tab <select id="newTabDestination"><option value="browserNewTabPage">Browser's new tab page</option><option value="customUrl">Custom URL</option></select></label>
+  <label>Custom new-tab URL <input id="newTabCustomUrl"></label>
+</section>
+<section>
+  <h2>Vomnibar</h2>
+  <label>Default search URL <input id="searchUrl"></label>
+  <label>Search engines (<code>keyword: url-with-%s Name</code>)
+    <textarea id="searchEngines" rows="5" spellcheck="false"></textarea></label>
+</section>
+<section>
+  <h2>Link hint CSS</h2>
+  <textarea id="userDefinedLinkHintCss" rows="6" spellcheck="false"></textarea>
+</section>
+<p class="buttons"><button id="save">Save</button> <button id="export">Export JSON</button> <button id="reset">Reset to defaults</button> <span id="status"></span></p>
+<section>
+  <h2>Not ported</h2>
+  <ul id="left-out"></ul>
+  <p>Logic ported from <a href="https://github.com/philc/vimium">Vimium</a>, MIT License, Copyright (c) 2010 Phil Crosby, Ilya Sukhar. See LICENSE.vimium.txt.</p>
+</section>
+<script src="js/options.js"></script>
+</body>
+</html>
