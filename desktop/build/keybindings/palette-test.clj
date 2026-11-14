@@ -40,7 +40,7 @@
          (run-with (str "chrome:" (first (keep-indexed #(when (= "New tab" (:label %2)) %1) (palette/config :chrome)))) {}))))
 
 (deftest chords-release-in-reverse
-  (is (= ["29:1" "42:1" "20:1" "20:0" "42:0" "29:0"] (palette/chord-events "ctrl+shift+t"))))
+  (is (= ["29:1" "42:1" "20:1" "20:0" "42:0" "29:0"] (keyleader/chord-events "ctrl+shift+t"))))
 
 (deftest an-editor-that-does-not-answer-falls-back-to-the-list
   (let [shown (atom nil) rows (atom [])]

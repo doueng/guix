@@ -5,7 +5,8 @@
 ;; :nvim, :doom and :idea (editor commands; IdeaVim stops at its own splits),
 ;; :desktop (a Hyprland dispatcher such as ["focus" {:workspace 2}], see
 ;; desktop/lib/hypr/dispatch.clj, or an action keyword), :desktop-command
-;; (argv), :herdr (CLI vector, action keyword, or {:plugin ID :action ID}).
+;; (argv), :chrome (a chord keyleader sends instead of :choose-window while Chrome
+;; is focused), :herdr (CLI vector, action keyword, or {:plugin ID :action ID}).
 ;; A single key, such as [","], is a frequent action and must not be a group key.
 ;; :doom-match records how the meaning compares with upstream Doom at the same
 ;; keys: :exact, :analogous (same idea, different object) or :differs. The
@@ -56,7 +57,7 @@
   {:keys ["w" "="] :label "Balance windows" :doom-match :exact :nvim "<C-w>=" :doom "balance-windows"}
   {:keys ["b" "b"] :label "Choose buffer, tab or window" :doom-match :exact :idea "<Action>(Switcher)"
    :nvim "<cmd>Telescope buffers sort_mru=true ignore_current_buffer=true<cr>"
-   :doom "switch-to-buffer" :desktop :choose-window :herdr :choose-tab}
+    :doom "switch-to-buffer" :desktop :choose-window :chrome "ctrl+shift+k" :herdr :choose-tab}
   {:keys ["b" "n"] :label "Next buffer, tab or window" :doom-match :exact :idea "<Action>(NextTab)" :nvim "<cmd>bnext<cr>" :doom "next-buffer"
    :desktop ["window.cycle_next"] :herdr :next-tab}
   {:keys ["b" "p"] :label "Previous buffer, tab or window" :doom-match :exact :idea "<Action>(PreviousTab)" :nvim "<cmd>bprevious<cr>"

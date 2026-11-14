@@ -33,8 +33,25 @@
 (def action-keywords {:desktop #{:choose-window}
                       :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane :edit-scrollback
                                :choose-workspace :choose-agent}})
-(def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :herdr :doom-match})
+(def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :chrome :herdr :doom-match})
 (def doom-matches #{:exact :analogous :differs})
+
+(def keycodes
+  "Linux key codes for ydotool, by the names chords use."
+  (merge (zipmap (map str "1234567890") [2 3 4 5 6 7 8 9 10 11])
+         (zipmap (map str "qwertyuiop") (range 16 26))
+         (zipmap (map str "asdfghjkl") (range 30 39))
+         (zipmap (map str "zxcvbnm") (range 44 51))
+         {"ctrl" 29 "shift" 42 "alt" 56 "esc" 1 "enter" 28 "/" 53}))
+
+(defn chord-events
+  "ydotool key events for CHORD, such as \"ctrl+shift+t\": press in order, release in reverse."
+  [chord]
+  (let [codes (mapv #(or (keycodes %) (throw (ex-info (str "No keycode for " %) {:chord chord})))
+                    (str/split chord #"\+"))]
+    (concat (map #(str % ":1") codes) (map #(str % ":0") (rseq codes)))))
+
+(defn- chord? [v] (and (string? v) (every? keycodes (str/split v #"\+"))))
 
 (defn- text? [v] (and (string? v) (not (str/blank? v))))
 (defn- argv? [v] (and (vector? v) (seq v) (every? string? v)))
@@ -54,6 +71,9 @@
       (and (has? :desktop) (not (or ((action-keywords :desktop) (:desktop b)) (hypr/valid? (:desktop b)))))
       "desktop must be :choose-window or a dispatcher such as [\"focus\" {:workspace 2}]"
       (and (has? :desktop-command) (not (argv? (:desktop-command b)))) "desktop-command must be an argv vector"
+      (and (has? :chrome) (not (chord? (:chrome b)))) "chrome must be a chord such as \"ctrl+shift+k\""
+      (and (has? :chrome) (not= :choose-window (:desktop b)))
+      "chrome replaces a keyleader desktop action; a Hyprland dispatcher never reaches keyleader"
       (and (has? :herdr) (not (or ((action-keywords :herdr) (:herdr b))
                                   (and (argv? (:herdr b)) (= "pane" (first (:herdr b))))
                                   (and (map? (:herdr b)) (= #{:plugin :action} (set (keys (:herdr b))))
@@ -291,6 +311,9 @@
       (keyguide/run-entry! entry)
       (keylog/log! "action" "hyprland" (str desktop-leader " Space") (:label entry)))))
 
+(defn chrome-focused? []
+  (= "google-chrome" (:class (json/parse-string (run! ["hyprctl" "-j" "activewindow"]) true))))
+
 (defn run-desktop! [grammar keys]
   (if (= keys ["SPC"])
     ;; The palette offers the focused program's commands as well as these.
@@ -300,6 +323,8 @@
       (if (:nav b)
         (move-desktop-focus! (:nav b) pressed)
         (do (cond
+              ;; Chrome's tabs are its buffers: send the vimium-cljs command's key instead.
+              (and (:chrome b) (chrome-focused?)) (run! (into ["ydotool" "key"] (chord-events (:chrome b))))
               (:desktop-command b) (spawn! (:desktop-command b))
               (= :choose-window (:desktop b)) (choose-window!)
               (vector? (:desktop b)) (hypr/dispatch! (:desktop b)))

@@ -74,7 +74,7 @@ Single keys after the leader carry the most frequent actions, as in Doom. Groups
 | w d | Close the window or pane | Editors, Herdr |
 | w m | Maximize or zoom | All |
 | w = | Balance windows | Neovim, Doom |
-| b b | Choose a buffer, Herdr tab, or desktop window | All |
+| b b | Choose a buffer, Herdr tab, or desktop window. In Chrome, search its tabs: keyleader sends Ctrl+Shift+K, vimium-cljs's Search open tabs command (leader.edn `:chrome`) | All |
 | b n, b p | Next or previous buffer, Herdr tab, or window in the workspace | All |
 | b d | Close the buffer or Herdr tab | Editors, Herdr |
 | f s, f r | Save, recent files | Editors |

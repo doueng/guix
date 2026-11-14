@@ -124,19 +124,6 @@
     (for [e (concat from-leader (config :idea))]
       (assoc (select-keys e [:label :keys]) :source "IntelliJ" :value (str "idea:" (:action e))))))
 
-(def keycodes
-  (merge (zipmap (map str "1234567890") [2 3 4 5 6 7 8 9 10 11])
-         (zipmap (map str "qwertyuiop") (range 16 26))
-         (zipmap (map str "asdfghjkl") (range 30 39))
-         (zipmap (map str "zxcvbnm") (range 44 51))
-         {"ctrl" 29 "shift" 42 "alt" 56 "esc" 1 "enter" 28 "/" 53}))
-
-(defn chord-events
-  "ydotool key events for CHORD, such as \"ctrl+shift+t\": press in order, release in reverse."
-  [chord]
-  (let [codes (mapv #(or (keycodes %) (throw (ex-info (str "No keycode for " %) {:chord chord})))
-                    (str/split chord #"\+"))]
-    (concat (map #(str % ":1") codes) (map #(str % ":0") (rseq codes)))))
 
 (defn launcher-closed?
   []
@@ -156,7 +143,7 @@
   "Send keys to the focused window."
   [{:keys [type chord]}]
   (await-keyboard!)
-  (cond chord @(p/process (into ["ydotool" "key"] (chord-events chord)))
+  (cond chord @(p/process (into ["ydotool" "key"] (keyleader/chord-events chord)))
         type @(p/process ["ydotool" "type" type])))
 
 (defn run-entry! [grammar ctx value]

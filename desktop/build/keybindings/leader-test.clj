@@ -164,6 +164,22 @@
       (keyleader/term-nav! grammar "left"))
     (is (= [["forward" "herdr" "Ctrl+h" "Forwarded to emacs"]] @rows))))
 
+(defn desktop-run-with [class keys]
+  (let [calls (atom [])]
+    (with-redefs [keyleader/run! (fn [argv & _] (swap! calls conj (vec argv))
+                                   (if (= "hyprctl" (first argv)) (str "{\"class\":\"" class "\"}") ""))
+                  keyleader/choose-window! (fn [] (swap! calls conj :choose-window))
+                  keylog/log! (fn [& _] nil)]
+      (keyleader/run-desktop! grammar keys))
+    (remove #(and (vector? %) (= "hyprctl" (first %))) @calls)))
+
+(deftest b-b-searches-chrome-tabs-and-picks-windows-elsewhere
+  (is (= [["ydotool" "key" "29:1" "42:1" "37:1" "37:0" "42:0" "29:0"]]
+         (desktop-run-with "google-chrome" ["b" "b"])))
+  (is (= [:choose-window] (desktop-run-with "com.mitchellh.ghostty" ["b" "b"])))
+  (is (re-find #"chrome must be a chord" (keyleader/binding-problem {:keys ["b" "b"] :label "x" :desktop :choose-window :chrome "ctrl+f13"})))
+  (is (re-find #"never reaches keyleader" (keyleader/binding-problem {:keys ["b" "n"] :label "x" :desktop ["window.cycle_next"] :chrome "ctrl+k"}))))
+
 (deftest grammar-rejects-ambiguity
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate leader sequence"
         (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
