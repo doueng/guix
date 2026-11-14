@@ -249,55 +249,119 @@
                  false)))))
 
 ;; ---- Vomnibar ---------------------------------------------------------------------
+;; Candidates are the open tabs (live), history and bookmarks (read once and cached, so each
+;; keystroke ranks them locally: acronyms and typos match what chrome.history.search would
+;; filter out). rank/ scores them; the user's picks, kept in storage.local, feed it.
 
-(defn- tab-item [^js t] {:type "tab" :title (.-title t) :url (.-url t) :tabId (.-id t) :windowId (.-windowId t)})
+(def ^:private max-rows 10)
+(def ^:private day-ms (* 1000 60 60 24))
 
-(defn- tab-items [query ^js current]
-  (-> (js/Promise.all #js [(js/chrome.tabs.query #js {}) (recency)])
-      (.then (fn [[tabs ids]]
-               (let [order (into {} (map-indexed (fn [i id] [id i]) ids))
-                     sorted (sort-by (fn [^js t] [(if (= (.-id t) (some-> current .-id)) 1 0) (get order (.-id t) 1e6)]) tabs)]
-                 (rank/rank query (map tab-item sorted) (js/Date.now)))))))
+(defonce ^:private cache (atom nil))
+(defn- drop-cache! [& _] (reset! cache nil))
 
-(defn- bookmark-items [query]
-  (-> (if (str/blank? query) (js/chrome.bookmarks.getRecent 50) (js/chrome.bookmarks.search query))
-      (.then (fn [bs] (rank/rank query (keep (fn [^js b] (when (.-url b) {:type "bookmark" :title (.-title b) :url (.-url b)})) bs) (js/Date.now))))))
+(defn- bookmark-leaves [^js nodes]
+  (mapcat (fn [^js n] (if (.-url n)
+                        [{:type "bookmark" :title (.-title n) :url (.-url n) :added (.-dateAdded n)}]
+                        (bookmark-leaves (or (.-children n) #js []))))
+          nodes))
 
-(defn- history-items [query]
-  (-> (js/chrome.history.search #js {:text query :maxResults 300 :startTime 0})
-      (.then (fn [hs]
-               ;; The popup Vomnibar is a page of ours, so it lands in history; leave it out.
-               (let [own (js/chrome.runtime.getURL "")]
-                 (rank/rank query (keep (fn [^js h] (when-not (str/starts-with? (.-url h) own)
-                                                      {:type "history" :title (.-title h) :url (.-url h) :time (.-lastVisitTime h)}))
-                                        hs)
-                            (js/Date.now)))))))
+(defn- history+bookmarks []
+  (or @cache
+      (reset! cache
+              (-> (js/Promise.all #js [(js/chrome.history.search #js {:text "" :maxResults 3000
+                                                                      :startTime (- (js/Date.now) (* 180 day-ms))})
+                                       (js/chrome.bookmarks.getTree)])
+                  (.then (fn [[hs tree]]
+                           ;; The popup Vomnibar is a page of ours, so it lands in history; leave it out.
+                           (let [own (js/chrome.runtime.getURL "")]
+                             {:history (rank/prepare (keep (fn [^js h] (when-not (str/starts-with? (.-url h) own)
+                                                                        {:type "history" :title (.-title h) :url (.-url h)
+                                                                         :time (.-lastVisitTime h) :visits (.-visitCount h)
+                                                                         :typed (.-typedCount h)}))
+                                                      hs))
+                              :bookmarks (rank/prepare (bookmark-leaves tree))})))
+                  (.catch (fn [e] (drop-cache!) (throw e)))))))
+
+(defn- picks []
+  (-> (js/chrome.storage.local.get "vomnibarPicks")
+      (.then (fn [^js r] (into {} (map (fn [[k v]] [k {:n (v "n") :t (v "t") :q (v "q")}]))
+                               (js->clj (or (.-vomnibarPicks r) #js {})))))))
+
+(defn- note-pick! [url query]
+  (-> (picks)
+      (.then (fn [ps]
+               (let [k (rank/pick-key url)
+                     q (str/lower-case (str/trim (or query "")))
+                     old (get ps k)
+                     ps (assoc ps k {:n (inc (or (:n old) 0)) :t (js/Date.now)
+                                     :q (vec (take 5 (distinct (remove str/blank? (cons q (:q old))))))})]
+                 (js/chrome.storage.local.set
+                  (clj->js {"vomnibarPicks" (into {} (take 300 (sort-by (comp - :t val) ps)))})))))))
+
+(defn- tab-item [^js t] {:type "tab" :title (.-title t) :url (.-url t) :tabId (.-id t) :windowId (.-windowId t)
+                         :time (.-lastAccessed t)})
+
+(defn- typed-item [query]
+  (when-not (str/blank? query)
+    (let [url (rank/->url query config/search-engines config/search-url)]
+      (if-let [[_ e more] (rank/engine-of query config/search-engines)]
+        {:type "search" :engine (:name e) :title more :url url}
+        {:type (if (rank/url-like? query) "url" "search") :title (str/trim query) :url url}))))
 
 (defn vomnibar-query [mode query ^js tab]
-  (case mode
-    "tabs" (-> (tab-items query tab) (.then #(vec (take 20 %))))
-    "bookmarks" (-> (bookmark-items query) (.then #(vec (take 20 %))))
-    ;; omni and edit
-    (-> (js/Promise.all #js [(tab-items query tab) (bookmark-items query) (history-items query) (typed->url query)])
-        (.then (fn [[ts bs hs typed]]
-                 (let [typed-item (when-not (str/blank? query)
-                                    {:type (if (rank/url-like? query) "url" "search") :title query :url typed})
-                       items (concat (when typed-item [typed-item])
-                                     (when-not (str/blank? query) (take 3 ts))
-                                     (take 4 bs) hs)]
-                   (->> items
-                        (reduce (fn [[seen acc] i] (if (seen (:url i)) [seen acc] [(conj seen (:url i)) (conj acc i)])) [#{} []])
-                        second
-                        (take 12)
-                        vec)))))))
+  (-> (js/Promise.all #js [(js/chrome.tabs.query #js {}) (recency) (picks)
+                           (if (= mode "tabs") (p nil) (history+bookmarks))])
+      (.then
+       (fn [[tabs ids ps hb]]
+         (let [now (js/Date.now)
+               cur (some-> tab .-id)
+               cur-url (some-> tab .-url rank/pick-key)
+               order (into {} (map-indexed (fn [i id] [id i]) ids))
+               by-recency (sort-by (fn [^js t] [(if (= (.-id t) cur) 1 0) (get order (.-id t) 1e6)]) tabs)
+               blank? (str/blank? query)]
+           (case mode
+             "tabs" (vec (take 20 (if blank? (map tab-item by-recency) (rank/rank query (map tab-item tabs) now ps))))
+             "bookmarks" (vec (take 20 (if blank?
+                                         (sort-by (comp - :added) (:bookmarks hb))
+                                         (rank/rank query (:bookmarks hb) now ps))))
+             ;; omni and edit: never offer the page you are on.
+             (let [others (remove #(= cur-url (rank/pick-key (:url %))))
+                   ;; A tab's frecency is its page's: visits from history, the later of the two times.
+                   visited (into {} (map (juxt (comp rank/pick-key :url) identity)) (:history hb))
+                   with-visits (fn [t] (if-let [h (visited (rank/pick-key (:url t)))]
+                                         (assoc t :visits (:visits h) :typed (:typed h) :time (max (or (:time t) 0) (or (:time h) 0)))
+                                         t))
+                   tab-items (into [] (comp (map tab-item) others (map with-visits)) (remove #(= cur (.-id ^js %)) by-recency))]
+               (if blank?
+                 (->> (concat (take 4 tab-items) (sort-by (comp - :time) (:history hb)))
+                      (sequence others) rank/dedupe-urls (take max-rows) vec)
+                 (rank/omni-list query (typed-item query)
+                                 (rank/rank query (into tab-items others (concat (:bookmarks hb) (:history hb))) now ps)
+                                 max-rows)))))))))
 
-(defn vomnibar-open! [^js tab ^js msg]
+(defn- same-page [url]
+  (str/replace (rank/pick-key url) #"#.*$" ""))
+
+(defn vomnibar-open!
+  "Opens the picked item, or the typed text. A URL already open in another tab switches
+  to that tab instead of opening it twice."
+  [^js tab ^js msg]
   (let [item (js->clj (.-item msg) :keywordize-keys true)
-        new-tab (.-newTab msg)]
-    (cond
-      (= "tab" (:type item)) (activate-tab! (clj->js {:id (:tabId item) :windowId (:windowId item)}))
-      (:url item) (open-url! tab (:url item) {:new-tab new-tab :active true})
-      (seq (.-text msg)) (-> (typed->url (.-text msg)) (.then #(open-url! tab % {:new-tab new-tab :active true}))))))
+        new-tab (.-newTab msg)
+        query (.-query msg)]
+    (-> (if (:url item) (p (:url item)) (typed->url (or (.-text msg) "")))
+        (.then (fn [url]
+                 (when (seq url)
+                   (note-pick! url query)
+                   (if (= "tab" (:type item))
+                     (activate-tab! (clj->js {:id (:tabId item) :windowId (:windowId item)}))
+                     (-> (js/chrome.tabs.query #js {})
+                         (.then (fn [tabs]
+                                  (if-let [t (first (filter (fn [^js t] (and (not= (.-id t) (some-> tab .-id))
+                                                                             (= (same-page (.-url t)) (same-page url))))
+                                                            tabs))]
+                                    (activate-tab! t)
+                                    (open-url! tab url {:new-tab new-tab :active true}))))))))))))
 
 ;; Chrome's own Ctrl+L focuses the address bar and is not reserved from extensions: the user
 ;; assigns it to the "vomnibar" command in chrome://extensions/shortcuts (Chrome will not
@@ -374,6 +438,10 @@
   ;; DevTools key events never reach Chrome's shortcuts, so the e2e suite runs the command here.
   (unchecked-set js/globalThis "vimiumCljsVomnibarCommand" vomnibar-command!)
   (js/chrome.tabs.onActivated.addListener (fn [^js info] (note-active! (.-tabId info))))
+  (js/chrome.history.onVisited.addListener drop-cache!)
+  (js/chrome.history.onVisitRemoved.addListener drop-cache!)
+  (doseq [^js ev [js/chrome.bookmarks.onCreated js/chrome.bookmarks.onRemoved js/chrome.bookmarks.onChanged]]
+    (.addListener ev drop-cache!))
   (js/chrome.tabs.onRemoved.addListener (fn [id] (swap! sessions dissoc id)))
   (js/chrome.tabs.onUpdated.addListener (fn [id ^js info] (when (= "loading" (.-status info)) (swap! sessions dissoc id))))
   ;; A page changing its URL in place (history.pushState, a new #fragment) is navigation to

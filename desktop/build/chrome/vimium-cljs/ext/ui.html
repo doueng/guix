@@ -7,8 +7,13 @@
 </head>
 <body>
 <div id="vomnibar" hidden>
-  <input id="query" autocomplete="off" spellcheck="false">
-  <ul id="list"></ul>
+  <div id="bar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="query" autocomplete="off" spellcheck="false" aria-label="Search">
+    <span id="chip"></span>
+  </div>
+  <ul id="list" role="listbox"></ul>
+  <div id="keys"><span><kbd>↵</kbd>open</span><span><kbd>⇧↵</kbd>new tab</span><span><kbd>Tab</kbd>or <kbd>^n</kbd>next</span><span><kbd>^↵</kbd>search as typed</span><span><kbd>Esc</kbd>close</span></div>
 </div>
 <div id="help" hidden>
   <header>

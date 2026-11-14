@@ -21,7 +21,7 @@
 .vimiumHintMarker .matchingCharacter { color: #d4ac3a; }
 .vimiumHintMarker.hidden { display: none; }
 iframe.ui { position: fixed; z-index: 2147483647; border: 0; background: transparent; color-scheme: normal; }
-iframe.vomnibar { left: 50%; top: 70px; width: 80vw; max-width: 900px; height: 480px; transform: translateX(-50%); }
+iframe.vomnibar { left: 50%; top: 54px; width: min(964px, calc(80vw + 64px)); height: 600px; transform: translateX(-50%); }
 iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh; transform: translateX(-50%); }
 ")
 
@@ -143,11 +143,16 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
 
 ;; ---- framed pages (Vomnibar, help) ------------------------------------------
 
-(defn close-frame! []
+(defn close-frame!
+  "Removes the framed page and gives focus back to the element that had it."
+  []
   (when-let [^js f (:frame @state)]
-    (.remove f)
-    (swap! state dissoc :frame :frame-kind)
-    (.focus js/window)))
+    (let [^js back (:focus-back @state)]
+      (.remove f)
+      (swap! state dissoc :frame :frame-kind :focus-back)
+      (.focus js/window)
+      (when (and back (.-isConnected back) (not= back (.-body js/document)))
+        (.focus back #js {:preventScroll true})))))
 
 (defn frame-kind [] (:frame-kind @state))
 
@@ -155,10 +160,13 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
   "Shows the extension page ui.html#KIND?QUERY in a frame over the page."
   [kind query]
   (close-frame!)
+  (swap! state assoc :focus-back (.-activeElement js/document))
   (let [^js f (el "iframe" (str "ui " kind))]
     (set! (.-src f) (str (js/chrome.runtime.getURL "ui.html") "#" kind (when (seq query) (str "?" query))))
     (.setAttribute f "allow" "clipboard-write")
-    (.addEventListener f "load" (fn [_] (.focus f)))
+    ;; The page inside focuses its own input; focusing the frame again from here would
+    ;; drop that focus and lose the keys typed meanwhile, so only focus it if it has none.
+    (.addEventListener f "load" (fn [_] (when-not (identical? f (.-activeElement js/document)) (.focus f))))
     (.appendChild (attach!) f)
     (swap! state assoc :frame f :frame-kind kind)
     f))
