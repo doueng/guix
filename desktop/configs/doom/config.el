@@ -49,7 +49,13 @@ This is a lightweight way to apply config changes without restarting Emacs."
 
 (defun eng/enable-tty-mouse ()
   (unless (display-graphic-p)
-    (xterm-mouse-mode 1)))
+    (xterm-mouse-mode 1)
+    ;; Emacs without X preloads no mwheel, so a terminal frame left the
+    ;; wheel and the touchpad unbound: each event only said <wheel-up> is
+    ;; undefined.  The mode is on by default but binds the wheel only once
+    ;; turned on.
+    (require 'mwheel)
+    (mouse-wheel-mode 1)))
 (dolist (hook '(tty-setup-hook window-setup-hook))
   (add-hook hook #'eng/enable-tty-mouse))
 

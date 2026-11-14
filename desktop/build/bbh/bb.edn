@@ -125,4 +125,4 @@
                                                               (println test verdict)
                                                               verdict)
                                                             (finally (babashka.fs/delete-if-exists result)))))]
-                                         (when-not (every? #{"ok"} (doall verdicts)) (System/exit 1)))}}}
+                                         (when-not (every? (fn [v] (clojure.string/starts-with? v "ok")) (doall verdicts)) (System/exit 1)))}}}

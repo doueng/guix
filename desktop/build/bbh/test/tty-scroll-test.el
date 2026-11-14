@@ -114,7 +114,63 @@ back from the end overcounted."
     (unless (pos-visible-in-window-p (point-max) window)
       (error "the latest start over folded tool output leaves the end below the window"))))
 
+(defun bbh-tty--wheel (direction window times)
+  "Turn the wheel TIMES notches in DIRECTION over WINDOW, as a touchpad
+does: faster than Emacs redisplays, so only every third event redraws."
+  (dotimes (i times)
+    (execute-kbd-macro (vector (list direction (posn-at-point (window-start window) window))))
+    (when (= 2 (% i 3)) (redisplay t))))
+
+(defvar bbh-tty--wheel-ms nil "Milliseconds per wheel event, for the verdict.")
+
+(defun bbh-tty--check-wheel ()
+  "The wheel over a transcript scrolls it from the composer, a few lines an
+event: up from the end, where `mwheel-scroll' and the clamp bounced the
+window between the end and two lines above it (T175), and back down to
+the end, which it then follows.  The clamp lays the end out again only
+when the text or a fold changed, not on every event."
+  (let* ((window (bbh-tty--rendered 30))
+         (shell (bbh-tty--composer window))
+         (layouts 0)
+         (count (lambda (&rest _) (setq layouts (1+ layouts)))))
+    (ignore shell)
+    (set-window-start window (eng/bbh-transcript--latest-start window))
+    (redisplay t)
+    (advice-add 'eng/bbh-transcript--latest-start :before count)
+    (unwind-protect
+        (let ((t0 (float-time))
+              (start (window-start window)))
+          (dotimes (i 60)
+            (bbh-tty--wheel 'wheel-up window 1)
+            (unless (< (window-start window) start)
+              (error "wheel-up %d from the end left the start at %d, from %d" i (window-start window) start))
+            (setq start (window-start window)))
+          (bbh-tty--wheel 'wheel-down window 200)
+          (setq bbh-tty--wheel-ms (/ (* 1000 (- (float-time) t0)) 260))
+          (bbh-tty--assert-no-overscroll window "the wheel down to the end")
+          (unless (= (window-point window) (with-current-buffer (window-buffer window) (point-max)))
+            (error "the wheel down to the end does not follow the end"))
+          (unless (eq (window-buffer (selected-window)) (get-buffer "bbh composer"))
+            (error "the wheel moved focus out of the composer"))
+          (when (> layouts 2)
+            (error "the clamp laid the end out %d times in 260 wheel events" layouts)))
+      (advice-remove 'eng/bbh-transcript--latest-start count))
+    ;; Showing or folding output near the end moves the latest start, and
+    ;; the wheel and the clamp follow it, though no text changed.
+    (dolist (fold '(off t))
+      (with-current-buffer (window-buffer window)
+        (save-excursion
+          (goto-char (point-max))
+          (re-search-backward "^#\\+begin_result ")
+          (org-fold-hide-block-toggle fold t)))
+      (bbh-tty--wheel 'wheel-down window 100)
+      (bbh-tty--assert-no-overscroll window (format "the wheel after %s the last output" (if (eq fold 'off) "showing" "folding")))
+      (unless (= (window-start window) (eng/bbh-transcript--latest-start window))
+        (error "after %s the last output the wheel stops at %d, not the end's start %d"
+               (if (eq fold 'off) "showing" "folding") (window-start window) (eng/bbh-transcript--latest-start window))))))
+
 (defun bbh-tty--check ()
+  (bbh-tty--check-wheel)
   (bbh-tty--check-composer)
   (bbh-tty--check-folded-end)
   (let ((window (bbh-tty--transcript 200)))
@@ -154,7 +210,7 @@ back from the end overcounted."
 
 (defun bbh-tty--run ()
   (let ((result (condition-case err
-                    (progn (bbh-tty--check) "ok")
+                    (progn (bbh-tty--check) (format "ok %.1f ms per wheel event" bbh-tty--wheel-ms))
                   (error (format "error: %s" (error-message-string err))))))
     (with-temp-file (getenv "BBH_TTY_RESULT") (insert result "\n"))
     (kill-emacs 0)))

@@ -767,6 +767,33 @@ there to the end, less the window's, are the screen lines to skip."
           (when (> excess 0) (vertical-motion excess window)))
         (point)))))
 
+(defun eng/bbh-transcript--folds-after (pos)
+  "Where text from POS to the end turns visible or invisible."
+  (let (changes)
+    (while (< pos (point-max))
+      (setq pos (next-single-char-property-change pos 'invisible))
+      (push pos changes))
+    changes))
+
+(defun eng/bbh-transcript--latest-start-cached (window)
+  "`eng/bbh-transcript--latest-start' for WINDOW, laid out again only when
+it can have moved.  It lays out the last two screens, and the clamp asks
+for it after every command, so each event of a touchpad scroll paid 5 to
+8 ms for it.  The start depends on the window's size and on the text
+from it to the end and how much of that is folded, so those are the key.
+Fontifying, which changes only faces, keeps it."
+  (with-current-buffer (window-buffer window)
+    (let ((key (list (current-buffer) (buffer-chars-modified-tick)
+                     (window-body-height window) (window-body-width window)))
+          (cached (window-parameter window 'eng/bbh-latest-start)))
+      (if (and cached (equal key (car cached))
+               (equal (nth 2 cached) (eng/bbh-transcript--folds-after (max (point-min) (1- (cadr cached))))))
+          (cadr cached)
+        (let ((start (eng/bbh-transcript--latest-start window)))
+          (set-window-parameter window 'eng/bbh-latest-start
+                                (list key start (eng/bbh-transcript--folds-after (max (point-min) (1- start)))))
+          start)))))
+
 (defun eng/bbh-transcript--clamp-scroll ()
   "Pull back any window that scrolled past the end of a transcript.
 The last line then stays on the window's bottom row instead of leaving
@@ -777,12 +804,47 @@ another buffer is current."
   (walk-windows
    (lambda (window)
      (when (with-current-buffer (window-buffer window) (derived-mode-p 'eng/bbh-transcript-mode))
-       (let ((latest (eng/bbh-transcript--latest-start window)))
+       (let ((latest (eng/bbh-transcript--latest-start-cached window)))
          (when (> (window-start window) latest)
            (set-window-start window latest)))))
    'nomini 'visible))
 
 (add-hook 'post-command-hook #'eng/bbh-transcript--clamp-scroll)
+
+(defun eng/bbh-transcript-wheel-scroll (event)
+  "Scroll the transcript under the mouse by the lines of one wheel EVENT.
+A touchpad sends a wheel event for each row it travels, faster than Emacs
+redisplays.  `mwheel-scroll' then ran `scroll-down' on a display one
+event old, and near the end, where folded results and hidden block
+markup make lines lay out unlike their text, that could jump the window
+thousands of characters forward; the clamp pulled it back, so scrolling
+up from the end stalled there.  This moves the window start itself with
+`vertical-motion', which lays text out as redisplay does, never past the
+latest start, keeps point on screen, and follows the end again once it
+gets there.  It scrolls by the first count in
+`mouse-wheel-scroll-amount', 2 when mwheel was never loaded, as in a
+terminal frame, where the wheel had no binding at all.  It leaves the
+composer selected."
+  (interactive "e")
+  (let* ((window (posn-window (event-start event)))
+         (window (if (windowp window) window (selected-window)))
+         (back (memq (event-basic-type event) '(wheel-up mouse-4)))
+         (amount (or (seq-find #'natnump (bound-and-true-p mouse-wheel-scroll-amount)) 2))
+         (lines (* amount (event-line-count event))))
+    (with-current-buffer (window-buffer window)
+      (let* ((latest (eng/bbh-transcript--latest-start-cached window))
+             (start (save-excursion
+                      (goto-char (window-start window))
+                      (vertical-motion (if back (- lines) lines) window)
+                      (min (point) latest)))
+             (last-row (save-excursion
+                         (goto-char start)
+                         (vertical-motion (1- (window-body-height window)) window)
+                         (point))))
+        (set-window-start window start)
+        (set-window-point window (if (and (not back) (= start latest))
+                                     (point-max)
+                                   (max start (min (window-point window) last-row))))))))
 
 (defun eng/bbh-transcript--separator ()
   (if (bobp) "" "\n"))
@@ -1274,6 +1336,8 @@ Font-lock and org-element look both regexps up in the current buffer."
     (message (if eng/bbh-transcript-tools-shown "Tool results expanded" "Tool results folded"))))
 
 (define-key eng/bbh-transcript-mode-map (kbd "C-c C-t") #'eng/bbh-toggle-tools)
+(dolist (event '(wheel-up wheel-down double-wheel-up double-wheel-down triple-wheel-up triple-wheel-down mouse-4 mouse-5))
+  (define-key eng/bbh-transcript-mode-map (vector event) #'eng/bbh-transcript-wheel-scroll))
 
 (when (fboundp 'map!)
   (map! :map eng/bbh-transcript-mode-map
