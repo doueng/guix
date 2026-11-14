@@ -68,7 +68,7 @@ Single keys after the leader carry the most frequent actions, as in Doom. Groups
 | ` | Last buffer or window | Neovim, Doom, desktop |
 | . | Find a file, launch an application on the desktop, or choose a Herdr workspace | Doom, IntelliJ, desktop, Herdr. Neovim's own Space . finds a file |
 | d | Close the pane | Herdr. Doom's SPC d is its debugger group, so editors use w d; Alt+w closes a desktop window |
-| e | Edit scrollback in `$EDITOR` | Herdr |
+| e | Edit scrollback in `$EDITOR`. In Chrome, show or hide the tab list in the side panel: keyleader sends Ctrl+Shift+E, vimium-cljs's tab-panel command (leader.edn `:chrome`) | Herdr, Chrome |
 | w h, w j, w k, w l | Focus left, down, up, or right | All |
 | w s, w v | Split below, split right | Editors, Herdr |
 | w d | Close the window or pane | Editors, Herdr |

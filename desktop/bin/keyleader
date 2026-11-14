@@ -18,7 +18,7 @@
 (def desktop-leader-mod {:hypr "SUPER" :modmask 64})
 
 (def contexts
-  {:desktop #(or (:nav %) (:desktop %) (:desktop-command %))
+  {:desktop #(or (:nav %) (:desktop %) (:desktop-command %) (:chrome %))
    :herdr #(or (:nav %) (:herdr %))
    :nvim #(or (:nav %) (:nvim %))
    :doom #(or (:nav %) (:doom %))
@@ -33,7 +33,7 @@
 (def action-keywords {:desktop #{:choose-window}
                       :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane :edit-scrollback
                                :choose-workspace :choose-agent}})
-(def binding-fields #{:keys :label :nav :nvim :doom :idea :desktop :desktop-command :chrome :herdr :doom-match})
+(def binding-fields #{:keys :label :desktop-label :nav :nvim :doom :idea :desktop :desktop-command :chrome :herdr :doom-match})
 (def doom-matches #{:exact :analogous :differs})
 
 (def keycodes
@@ -63,8 +63,9 @@
     (cond
       (seq (remove binding-fields (keys b))) (str "unknown fields " (vec (remove binding-fields (keys b))))
       (not (text? (:label b))) "the label must be nonblank text"
+      (and (has? :desktop-label) (not (text? (:desktop-label b)))) "the desktop label must be nonblank text"
       (and (has? :nav) (not (directions (:nav b)))) "nav must be left, down, up or right"
-      (and (has? :nav) (some has? [:nvim :doom :idea :desktop :desktop-command :herdr]))
+      (and (has? :nav) (some has? [:nvim :doom :idea :desktop :desktop-command :chrome :herdr]))
       "nav already defines every context, so it takes no other action"
       (some #(and (has? %) (not (text? (get b %)))) [:nvim :doom :idea]) "editor actions must be nonblank text"
       (and (has? :desktop) (has? :desktop-command)) "use either :desktop or :desktop-command"
@@ -72,7 +73,7 @@
       "desktop must be :choose-window or a dispatcher such as [\"focus\" {:workspace 2}]"
       (and (has? :desktop-command) (not (argv? (:desktop-command b)))) "desktop-command must be an argv vector"
       (and (has? :chrome) (not (chord? (:chrome b)))) "chrome must be a chord such as \"ctrl+shift+k\""
-      (and (has? :chrome) (not= :choose-window (:desktop b)))
+      (and (has? :chrome) (vector? (:desktop b)))
       "chrome replaces a keyleader desktop action; a Hyprland dispatcher never reaches keyleader"
       (and (has? :herdr) (not (or ((action-keywords :herdr) (:herdr b))
                                   (and (argv? (:herdr b)) (= "pane" (first (:herdr b))))
@@ -119,15 +120,20 @@
 (defn in-context [grammar context]
   (filter (contexts context) (:bindings grammar)))
 
+(defn label-in
+  "B's label in CONTEXT: :desktop-label on the desktop when the desktop action differs."
+  [context b]
+  (or (when (= :desktop context) (:desktop-label b)) (:label b)))
+
 (defn menu
   "Rows shown after the leader, or after a group key, in CONTEXT."
   [grammar context group]
   (let [bs (in-context grammar context)
         grouped (filter #(= 2 (count (:keys %))) bs)]
     (if group
-      (for [b grouped :when (= group (first (:keys b)))] [(second (:keys b)) (:label b)])
+      (for [b grouped :when (= group (first (:keys b)))] [(second (:keys b)) (label-in context b)])
       (concat [["SPC" "Command palette"]]
-              (for [b bs :when (= 1 (count (:keys b)))] [(first (:keys b)) (:label b)])
+              (for [b bs :when (= 1 (count (:keys b)))] [(first (:keys b)) (label-in context b)])
               (for [[k label] (:groups grammar) :when (some #(= k (first (:keys %))) grouped)]
                 [k (str label " ...")])))))
 
@@ -283,7 +289,7 @@
   Each :value is \"leader:\" and the keys."
   [grammar context leader source]
   (for [b (in-context grammar context) :when (not (:nav b)) :let [keys (str/join " " (:keys b))]]
-    {:label (:label b) :keys (str leader " " keys) :source source :value (str "leader:" keys)}))
+    {:label (label-in context b) :keys (str leader " " keys) :source source :value (str "leader:" keys)}))
 
 (defn leader-keys [value]
   (some-> (re-matches #"leader:(.+)" value) second (str/split #" ")))
@@ -323,12 +329,13 @@
       (if (:nav b)
         (move-desktop-focus! (:nav b) pressed)
         (do (cond
-              ;; Chrome's tabs are its buffers: send the vimium-cljs command's key instead.
+              ;; In Chrome, send the vimium-cljs command's key instead, such as its tab search for b b.
+              ;; A binding with only :chrome does nothing elsewhere.
               (and (:chrome b) (chrome-focused?)) (run! (into ["ydotool" "key"] (chord-events (:chrome b))))
               (:desktop-command b) (spawn! (:desktop-command b))
               (= :choose-window (:desktop b)) (choose-window!)
               (vector? (:desktop b)) (hypr/dispatch! (:desktop b)))
-            (keylog/log! "action" "hyprland" pressed (:label b)))))))
+            (keylog/log! "action" "hyprland" pressed (label-in :desktop b)))))))
 
 (defn hypr-key [k]
   (get {"=" "equal" "SPC" "SPACE" "/" "slash" "," "comma" "." "period" "`" "grave" "TAB" "TAB"}
@@ -362,7 +369,7 @@
         run (fn [keys] (str "keys.leave(hl.dsp.exec_cmd(" (q (str "~/.local/bin/keyleader run " (str/join " " (map shell-word keys)))) "))"))
         action (fn [b] (if-let [d (desktop-dispatcher b)]
                          (str "keys.leave(" (hypr/lua d) ", "
-                              (q (str desktop-leader " " (str/join " " (:keys b)))) ", " (q (:label b)) ")")
+                              (q (str desktop-leader " " (str/join " " (:keys b)))) ", " (q (label-in :desktop b)) ")")
                          (run (:keys b))))]
     (str/join
      "\n"

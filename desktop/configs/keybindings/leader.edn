@@ -5,8 +5,10 @@
 ;; :nvim, :doom and :idea (editor commands; IdeaVim stops at its own splits),
 ;; :desktop (a Hyprland dispatcher such as ["focus" {:workspace 2}], see
 ;; desktop/lib/hypr/dispatch.clj, or an action keyword), :desktop-command
-;; (argv), :chrome (a chord keyleader sends instead of :choose-window while Chrome
-;; is focused), :herdr (CLI vector, action keyword, or {:plugin ID :action ID}).
+;; (argv), :chrome (a chord keyleader sends instead of the desktop action while Chrome
+;; is focused; alone, the binding does nothing outside Chrome), :desktop-label (the
+;; label on the desktop when it differs from :label), :herdr (CLI vector, action
+;; keyword, or {:plugin ID :action ID}).
 ;; A single key, such as [","], is a frequent action and must not be a group key.
 ;; :doom-match records how the meaning compares with upstream Doom at the same
 ;; keys: :exact, :analogous (same idea, different object) or :differs. The
@@ -40,7 +42,9 @@
   ;; Alt+W alone closes a desktop window (bindings.edn), so the desktop leader has no close.
   {:keys ["d"] :label "Close pane" :doom-match :differs :herdr :close-pane}
   {:keys ["a"] :label "Agents" :doom-match :differs :herdr :choose-agent}
-  {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
+  ;; In Chrome, Ctrl+Shift+E is vimium-cljs's tab-panel command: the tab list in the side panel.
+  {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback
+   :desktop-label "Chrome tab list (side panel)" :chrome "ctrl+shift+e"}
   {:keys ["w" "h"] :label "Focus left" :doom-match :exact :nav "left"}
   {:keys ["w" "j"] :label "Focus down" :doom-match :exact :nav "down"}
   {:keys ["w" "k"] :label "Focus up" :doom-match :exact :nav "up"}
