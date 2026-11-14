@@ -460,6 +460,32 @@ not where the change began (Bombadil, T174)."
       (delete-window follower))
     (kill-buffer)))
 
+(ert-deftest bbh-transcript-output-puts-a-following-window-on-its-latest-start ()
+  "Output keeps a window that follows the end on the start that puts the end
+on its bottom row, whatever its length.  It arrives between commands, and
+with only point moved, redisplay recentred on a jump longer than
+`scroll-conservatively' and left half the window blank (T181).  A window
+scrolled up keeps its start."
+  (save-window-excursion
+    (with-current-buffer (get-buffer-create "bbh follow test")
+      (eng/bbh-transcript-mode)
+      (let* ((follower (selected-window))
+             (reader (split-window follower)))
+        (set-window-buffer follower (current-buffer))
+        (set-window-buffer reader (current-buffer))
+        (eng/bbh-transcript--edit (lambda () (dotimes (i 30) (insert (format "line %d\n" i)))))
+        (set-window-point follower (point-max))
+        (set-window-point reader (point-min))
+        (set-window-start reader (point-min))
+        (dolist (lines '(3 40 300))
+          (eng/bbh-transcript--edit (lambda () (dotimes (i lines) (insert (format "more %d\n" i)))))
+          (should (= (point-max) (window-point follower)))
+          (should (> (window-start follower) (point-min)))
+          (should (= (eng/bbh-transcript--latest-start follower) (window-start follower)))
+          (should (= (point-min) (window-start reader)))
+          (should (= (point-min) (window-point reader)))))
+      (kill-buffer))))
+
 (ert-deftest bbh-resuming-this-conversation-keeps-the-transcript ()
   (save-window-excursion
     (delete-other-windows)

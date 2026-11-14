@@ -726,7 +726,12 @@ strips `display' text properties from whole blocks on partial redisplays."
 CHANGE rewrites only the tail, so the text before any position that is not
 at the end stays put, and a reader there keeps it.  A reader inside the
 rewritten tail, as when a closing backtick renders their line again, keeps
-the same position rather than falling back to where the rewrite began."
+the same position rather than falling back to where the rewrite began.
+A window that followed the end shows the latest output at once: output
+arrives from the process filter, between commands, and with only its point
+moved, redisplay recentred on the end when it had gone further than
+`scroll-conservatively' lines, leaving half the window blank until the
+next key ran the clamp (T181)."
   (let* ((inhibit-read-only t)
          (eng/bbh-transcript--dirty nil)
          (windows (mapcar (lambda (w) (list w (window-point w) (window-start w)))
@@ -742,7 +747,7 @@ the same position rather than falling back to where the rewrite began."
     (goto-char (if at-end (point-max) (min here (point-max))))
     (pcase-dolist (`(,w ,pt ,start) windows)
       (if (= pt end)
-          (set-window-point w (point-max))
+          (eng/bbh-transcript--follow w)
         (set-window-point w (min pt (point-max)))
         (unless (= start (window-start w))
           (set-window-start w (min start (point-max)) t))))))
@@ -766,6 +771,11 @@ there to the end, less the window's, are the screen lines to skip."
         (let ((excess (- (funcall count) rows)))
           (when (> excess 0) (vertical-motion excess window)))
         (point)))))
+
+(defun eng/bbh-transcript--follow (window)
+  "Put WINDOW's point at the end of its transcript and the end on its bottom row."
+  (set-window-point window (with-current-buffer (window-buffer window) (point-max)))
+  (set-window-start window (eng/bbh-transcript--latest-start-cached window)))
 
 (defun eng/bbh-transcript--folds-after (pos)
   "Where text from POS to the end turns visible or invisible."
@@ -797,7 +807,11 @@ Fontifying, which changes only faces, keeps it."
 (defun eng/bbh-transcript--clamp-scroll ()
   "Pull back any window that scrolled past the end of a transcript.
 The last line then stays on the window's bottom row instead of leaving
-empty rows below it. This runs from the global `post-command-hook'
+empty rows below it.  A window whose point is at the end but whose start
+is earlier, as when a command such as `switch-to-buffer' shows the
+transcript with the start it had when last shown, moves to the latest
+start too: redisplay would recentre on the end and leave rows blank.
+This runs from the global `post-command-hook'
 because Emacs does not support repositioning a window from
 `window-scroll-functions', and the composer scrolls the transcript while
 another buffer is current."
@@ -805,7 +819,9 @@ another buffer is current."
    (lambda (window)
      (when (with-current-buffer (window-buffer window) (derived-mode-p 'eng/bbh-transcript-mode))
        (let ((latest (eng/bbh-transcript--latest-start-cached window)))
-         (when (> (window-start window) latest)
+         (when (or (> (window-start window) latest)
+                   (and (/= (window-start window) latest)
+                        (= (window-point window) (with-current-buffer (window-buffer window) (point-max)))))
            (set-window-start window latest)))))
    'nomini 'visible))
 
@@ -1583,7 +1599,7 @@ called interactively, restore this layout for the current session."
     ;; command's clamp, so a transcript following its end shows its latest
     ;; output now.
     (when (= (window-point output) (with-current-buffer transcript (point-max)))
-      (set-window-start output (eng/bbh-transcript--latest-start output)))
+      (eng/bbh-transcript--follow output))
     (select-window input)
     ;; Normal state, so leader keys work at once.  This may run outside a
     ;; command, from the Inbox's sentinel or the controller's emacsclient,

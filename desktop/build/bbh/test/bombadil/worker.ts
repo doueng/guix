@@ -233,6 +233,20 @@ function overscrolled(y: View): boolean {
 export const bottomHasNoOverscroll = always(
   now(() => v().key === "G" && overscrolled(v())).implies(eventually(() => !overscrolled(v())).within(1, "seconds")));
 
+// A transcript that follows its end shows it on its bottom rows, wherever
+// the cursor is: after entering the view and after output arrives, too, which
+// worker.el also checks once Emacs has redisplayed.  Filter output used to
+// leave half the window blank until the next key (T181).  Within a second,
+// since a sample can land mid-redraw.
+function followingHalfBlank(y: View): boolean {
+  if (!y.worker || y.follow !== "F" || y.atTop) return false;
+  let blank = 0;
+  for (let i = y.transcript.length - 1; i >= 0 && y.transcript[i].trim() === ""; i--) blank++;
+  return blank > 2 && blank < y.transcript.length;
+}
+export const followingShowsLatest = always(
+  now(() => followingHalfBlank(v())).implies(eventually(() => !followingHalfBlank(v())).within(1, "seconds")));
+
 // ---- actions -------------------------------------------------------------
 // Never RET in the Worker view, q, x, d, :, C-x or C-c C-k: they leave,
 // delete or stop.  WAIT does nothing, to let output arrive.

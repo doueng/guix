@@ -114,7 +114,67 @@
         (redisplay t)
         (let ((window (get-buffer-window (buffer-local-value 'eng/bbh-transcript router))))
           (unless (= (window-start window) (point-min))
-            (error "a transcript read from its top moved to %d" (window-start window))))))))
+            (error "a transcript read from its top moved to %d" (window-start window)))))
+      ;; T181: output that arrives between commands, from the process filter,
+      ;; keeps every window following the end on its latest output.  A burst
+      ;; longer than `scroll-conservatively' made redisplay recentre on the
+      ;; end and leave the bottom half of the window blank until the next key.
+      (bbh-visit--check-output worker)
+      ;; A command that shows the transcript other than through the layout,
+      ;; after output arrived while it was hidden, shows that output.
+      (let ((transcript (buffer-local-value 'eng/bbh-transcript router)))
+        (eng/bbh-super-visit (buffer-name router))
+        (let ((window (get-buffer-window transcript)))
+          (with-selected-window window (goto-char (point-max))))
+        (bbh-visit--leave router)
+        (bbh-visit--append transcript 100)
+        (global-set-key (kbd "<f8>") (lambda () (interactive)
+                                                (let ((switch-to-buffer-preserve-window-point nil))
+                                                  (switch-to-buffer transcript))))
+        (execute-kbd-macro (kbd "<f8>"))
+        (redisplay t)
+        (let ((blank (bbh-visit--blank-rows (selected-window))))
+          (unless (eql blank 0)
+            (error "switch-to-buffer to a transcript at its end shows %s (point %d of %d, start %d, latest %d)"
+                   (if blank (format "%d blank rows" blank) "no latest output")
+                   (window-point) (point-max) (window-start) (eng/bbh-transcript--latest-start (selected-window)))))))))
+
+(defun bbh-visit--blank-rows (window)
+  "Rows of WINDOW below the end of its buffer, or nil when the end is off screen."
+  (with-current-buffer (window-buffer window)
+    (when (pos-visible-in-window-p (point-max) window)
+      (- (window-body-height window)
+         (count-screen-lines (window-start window) (point-max) t window)))))
+
+(defun bbh-visit--check-output (shell)
+  "Output from a timer, outside any command, to SHELL's transcript in two windows."
+  (eng/bbh-super-visit (buffer-name shell))
+  (let* ((transcript (buffer-local-value 'eng/bbh-transcript shell))
+         (window (get-buffer-window transcript))
+         (other (with-selected-window window (split-window-right))))
+    (redisplay t)
+    (dolist (lines '(3 40 100))
+      (let ((done nil))
+        (run-at-time 0 nil (lambda () (bbh-visit--append transcript lines) (setq done t)))
+        (while (not done) (sit-for 0.05)))
+      (redisplay t)
+      (dolist (w (list window other))
+        (let ((blank (bbh-visit--blank-rows w)))
+          (unless (eql blank 0)
+            (error "after %d lines of output a following window shows %s (start %d of %d)"
+                   lines (if blank (format "%d blank rows" blank) "no latest output")
+                   (window-start w) (with-current-buffer transcript (point-max)))))))
+    ;; A window scrolled up keeps its place while output arrives.
+    (with-selected-window other (goto-char (point-min)) (set-window-start other (point-min)))
+    (redisplay t)
+    (let ((done nil))
+      (run-at-time 0 nil (lambda () (bbh-visit--append transcript 100) (setq done t)))
+      (while (not done) (sit-for 0.05)))
+    (redisplay t)
+    (unless (= (window-start other) (with-current-buffer transcript (point-min)))
+      (error "output moved a window read from its top to %d" (window-start other)))
+    (unless (eql (bbh-visit--blank-rows window) 0)
+      (error "output beside a scrolled-up window left the following one off its end"))))
 
 (defun bbh-visit--run ()
   (let ((result (condition-case err

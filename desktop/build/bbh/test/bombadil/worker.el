@@ -223,7 +223,15 @@ one following the end still does, and one scrolled up keeps its point and start.
       (pcase-dolist (`(,w ,start ,pt ,following) windows)
         (when (window-live-p w)
           (cond (following
-                 (unless (bbh-bombadil--following-p w)
+                 (if (bbh-bombadil--following-p w)
+                     ;; Once redisplayed, between commands, it shows the end
+                     ;; on its bottom row, not recentred with blank rows below (T181).
+                     (unless bbh-bombadil--in-command
+                       (run-with-idle-timer
+                        0 nil
+                        (lambda ()
+                          (when (and (= step bbh-bombadil--step) (not bbh-bombadil--in-command))
+                            (bbh-bombadil--check-windows "after output")))))
                    (bbh-bombadil-violation "output left a following window of %s at %d, not the end %d"
                                            (buffer-name) (window-point w) (point-max))))
                 ((/= (window-point w) pt)
@@ -245,6 +253,14 @@ one following the end still does, and one scrolled up keeps its point and start.
                                                 (buffer-name buffer) start (window-start w)))))))))))))
 
 (advice-add 'eng/bbh-transcript--edit :around #'bbh-bombadil--around-edit)
+
+;; Entering a view: the controller's emacsclient and the Inbox's sentinel
+;; show it outside any command, so the per-command check misses them.  Once
+;; redisplayed, its transcript shows its latest output (T181).
+(advice-add 'eng/bbh-super-visit :after
+            (lambda (name)
+              (when bbh-bombadil--ready
+                (run-with-idle-timer 0 nil (lambda () (bbh-bombadil--check-windows (format "after showing %s" name)))))))
 
 ;; A retry repeats neither its prompt nor its error (T162): since the last
 ;; prompt, the transcript shows each error once.
