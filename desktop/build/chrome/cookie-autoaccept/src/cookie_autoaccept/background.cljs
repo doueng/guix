@@ -179,6 +179,8 @@
                true)
            (do (.catch answer (fn [_]))
                false))))))
-  ;; The content bundle opens a port to signal liveness; nothing to do with it.
-  (js/chrome.runtime.onConnect.addListener (fn [_]))
+  ;; The autoconsent content bundle opens a port in every frame and never uses it. Close it at once: a port left open
+  ;; is closed by Chrome when its page moves into the back/forward cache, and that closed channel shows on
+  ;; chrome://extensions as an unchecked runtime.lastError. Nothing uses the port, so nothing reconnects it.
+  (js/chrome.runtime.onConnect.addListener (fn [^js port] (.disconnect port)))
   (js/chrome.tabs.onRemoved.addListener (fn [tab-id] (js/chrome.storage.session.remove (report-key tab-id)))))

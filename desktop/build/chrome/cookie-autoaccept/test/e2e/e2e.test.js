@@ -17,7 +17,7 @@ const flatpak = spawnSync('flatpak', ['info', 'com.google.Chrome'], { stdio: 'ig
 const chrome = process.env.CHROME || (flatpak ? null : ['chromium', 'chromium-browser'].find((c) => spawnSync('which', [c]).status === 0));
 const skip = !flatpak && !chrome ? 'no headless Chrome found (install the com.google.Chrome flatpak or set CHROME)' : false;
 
-let server, port, browser, profile, cdp, extensionId;
+let server, port, browser, profile, cdp, extensionId, listeners;
 
 function startServer() {
   server = createServer((req, res) => {
@@ -42,12 +42,14 @@ function launch() {
   browser = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
   let id = 0, buf = '';
   const waiting = new Map();
+  listeners = new Set();
   browser.stdio[4].on('data', (d) => {
     buf += d;
     let i;
     while ((i = buf.indexOf('\0')) >= 0) {
       const msg = JSON.parse(buf.slice(0, i));
       buf = buf.slice(i + 1);
+      if (msg.method) for (const l of listeners) l(msg);
       const w = waiting.get(msg.id);
       if (w) {
         waiting.delete(msg.id);
@@ -201,6 +203,78 @@ test('reject mode rejects', { skip }, async () => {
   assert.ok(ok, 'banner still visible');
   assert.equal(title, 'pending');
   assert.equal(report?.hidden, 1);
+});
+
+// Chrome closes an extension port, and fails a message, when the page keeping it moves into the back/forward cache.
+// An extension that leaves that error unread gets "Unchecked runtime.lastError: The page keeping the extension port
+// is moved into back/forward cache, so the message channel is closed" on chrome://extensions.
+test('back/forward navigation leaves no unchecked runtime.lastError and the banner stays answered', { skip }, async () => {
+  await setSettings({ mode: 'accept', disabledSites: [] });
+  const logged = [];
+  let sessionId;
+  const text = (m) => {
+    const p = m.params ?? {};
+    if (m.method === 'Runtime.consoleAPICalled') return p.args.map((a) => a.value ?? a.description ?? '').join(' ');
+    if (m.method === 'Runtime.exceptionThrown') return p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text;
+    if (m.method === 'Log.entryAdded') return p.entry?.text;
+    return null;
+  };
+  const listen = (m) => {
+    const t = text(m);
+    if (t && /lastError|back\/forward cache|message channel/i.test(t)) logged.push(`${m.sessionId === sessionId ? 'page' : 'worker'} ${m.method}: ${t}`);
+  };
+  listeners.add(listen);
+  const watch = async (sessionId) => {
+    await cdp('Runtime.enable', {}, sessionId);
+    await cdp('Log.enable', {}, sessionId);
+  };
+  await watch(await workerSession());
+  const { targetId } = await cdp('Target.createTarget', { url: 'about:blank' });
+  sessionId = (await cdp('Target.attachToTarget', { targetId, flatten: true })).sessionId;
+  try {
+    await cdp('Page.enable', {}, sessionId);
+    await watch(sessionId);
+    const until = async (expr, timeout = 15000) => {
+      for (let t = Date.now(); Date.now() - t < timeout; await sleep(250)) {
+        if (await evaluate(sessionId, `document.readyState === 'complete' && Boolean(${expr})`).catch(() => false)) return true;
+      }
+      return false;
+    };
+    const go = async (url, expr) => {
+      await cdp('Page.navigate', { url }, sessionId);
+      assert.ok(await until(expr), `${url}: ${expr}`);
+    };
+    const history = async (delta) => {
+      const { currentIndex, entries } = await cdp('Page.getNavigationHistory', {}, sessionId);
+      await cdp('Page.navigateToHistoryEntry', { entryId: entries[currentIndex + delta].id }, sessionId);
+      await sleep(500);
+    };
+    const consent = `http://localhost:${port}/onetrust.html`;
+    const other = `http://localhost:${port}/none.html`;
+    await go(consent, `document.title === 'accepted'`);
+    await evaluate(sessionId, 'window.stayed = true');
+    // Leave the page while the extension's port is open, come back, and go on again: twice.
+    for (let i = 0; i < 2; i++) {
+      await go(other, `location.pathname === '/none.html'`);
+      await history(-1);
+      assert.ok(await until(`location.pathname === '/onetrust.html'`), 'back');
+      assert.equal(await evaluate(sessionId, 'window.stayed === true'), true, 'the page did not come back from the back/forward cache');
+      assert.equal(await evaluate(sessionId, 'document.title'), 'accepted');
+      await history(1);
+      assert.ok(await until(`location.pathname === '/none.html'`), 'forward');
+      await history(-1);
+      assert.ok(await until(`location.pathname === '/onetrust.html'`), 'back again');
+    }
+    // A banner page restored from the cache is still answered, and a new one still is.
+    assert.equal(await evaluate(sessionId, 'document.title'), 'accepted');
+    await go(`http://localhost:${port}/didomi.html`, `document.title !== 'pending'`);
+    assert.equal(await evaluate(sessionId, 'document.title'), 'accepted');
+    await sleep(1000);
+    assert.deepEqual(logged, []);
+  } finally {
+    listeners.delete(listen);
+    await cdp('Target.closeTarget', { targetId });
+  }
 });
 
 test('a disabled site is left alone', { skip }, async () => {
