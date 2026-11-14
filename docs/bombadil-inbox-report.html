@@ -104,7 +104,7 @@ bb test:bombadil --seed N --reproduce /tmp/bbh-bombadil…/trace --keep</code></
 <h2 id=limits>Limits</h2>
 <ul>
 <li>Emacs runs with <code>-Q</code> plus evil and the bbh code, not Doom, so Doom keymap interactions such as SPC, evil-org and corfu are not covered.</li>
-<li>Only the split Inbox is driven. The Router and Worker composers need a live agent session, so their C-n and C-c C-c stay with the ERT tests.</li>
+<li>This page covers the split Inbox. The Router and Worker view has its own spec, run by the same target: <a href='bombadil-worker-report.html'>bombadil-worker-report.html</a>.</li>
 <li>Bombadil's <code>shrink</code> is still experimental and unused. Traces are big, and failing roots stay in /tmp until you delete them.</li>
 <li>It is not in <code>make verify</code>. checks.edn lists it under <code>:slow</code> for the bbh Emacs files, so <code>make affected</code> suggests it.</li>
 </ul>
