@@ -319,6 +319,18 @@ test('the Vomnibar command (Ctrl+L) opens the Vomnibar in the page', T, async ()
   await keys('<esc>', 300);
 });
 
+test('the vomnibar-tabs command (Ctrl+Shift+K, sent by Cmd+Space b b) opens the tab selector in the page', T, async () => {
+  await open();
+  const w = await workerSession(b.cdp, b.extensionId);
+  const cmd = await evaluate(b.cdp, w, "chrome.commands.getAll().then(cs => cs.find(c => c.name === 'vomnibar-tabs')?.shortcut || '')");
+  assert.equal(cmd, 'Ctrl+Shift+K', 'suggested key assigned');
+  await evaluate(b.cdp, w, "chrome.tabs.query({active: true, lastFocusedWindow: true}).then(t => vimiumCljsVomnibarCommand(t[0], 'tabs')).then(() => true)");
+  await sleep(600);
+  const frames = await extensionFrames();
+  assert.ok(frames.some((u) => u.includes('#vomnibar?mode=tabs') && !u.includes('popup=1')), `in-page tab Vomnibar: ${frames}`);
+  await keys('<esc>', 300);
+});
+
 test('the Vomnibar command opens a popup on chrome:// pages and the choice opens in that tab', T, async () => {
   const { targetId } = await b.cdp('Target.createTarget', { url: 'chrome://version' });
   const s = (await b.cdp('Target.attachToTarget', { targetId, flatten: true })).sessionId;

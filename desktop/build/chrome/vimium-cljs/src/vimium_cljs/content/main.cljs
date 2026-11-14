@@ -456,7 +456,7 @@
     "top-command" (do (when-let [f (local-commands (.-name msg))] (f (or (.-count msg) 1))) false)
     ;; The worker's Ctrl+L command. A page without focus (the address bar has it) cannot
     ;; take it back, so it answers false and the worker opens the popup Vomnibar instead.
-    "vomnibar" (let [ok (.hasFocus js/document)] (when ok (vomnibar! "omni" false)) (respond ok) false)
+    "vomnibar" (let [ok (.hasFocus js/document)] (when ok (vomnibar! (or (.-mode msg) "omni") false)) (respond ok) false)
     "focus-frame" (do (.focus js/window) (dom/flash! (.-documentElement js/document)) false)
     "scroll-to" (do (jump-to! {:x (.-x msg) :y (.-y msg)}) false)
     "ping" (do (respond true) false)

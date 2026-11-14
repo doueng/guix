@@ -377,20 +377,22 @@
     (-> (js/chrome.tabs.get id) (.catch (fn [_] sender-tab)))
     (p sender-tab)))
 
-(defn- vomnibar-popup! [^js tab]
+(defn- vomnibar-popup! [mode ^js tab]
   (js/chrome.windows.create
-   #js {:url (js/chrome.runtime.getURL (str "ui.html#vomnibar?mode=omni&popup=1"
+   #js {:url (js/chrome.runtime.getURL (str "ui.html#vomnibar?mode=" mode "&popup=1"
                                             (when tab (str "&tabId=" (.-id tab)))))
         :type "popup" :width 900 :height 520 :focused true}))
 
-(defn- vomnibar-command! [^js tab]
+(defn- vomnibar-command!
+  "Open the Vomnibar in MODE (\"omni\", \"tabs\") over TAB's page, or in a popup when the page can't take it."
+  [mode ^js tab]
   (-> (if tab (p tab) (-> (js/chrome.tabs.query #js {:active true :lastFocusedWindow true}) (.then first)))
       (.then (fn [^js tab]
                (if-not tab
-                 (vomnibar-popup! nil)
-                 (-> (js/chrome.tabs.sendMessage (.-id tab) #js {:type "vomnibar"} #js {:frameId 0})
+                 (vomnibar-popup! mode nil)
+                 (-> (js/chrome.tabs.sendMessage (.-id tab) #js {:type "vomnibar" :mode mode} #js {:frameId 0})
                      (.catch (fn [_] false))
-                     (.then (fn [shown] (when-not shown (vomnibar-popup! tab))))))))))
+                     (.then (fn [shown] (when-not shown (vomnibar-popup! mode tab))))))))))
 
 ;; ---- messages ------------------------------------------------------------------------
 
@@ -431,12 +433,14 @@
   (js/chrome.commands.onCommand.addListener
    (fn [name ^js tab]
      (case name
-       "vomnibar" (vomnibar-command! tab)
+       "vomnibar" (vomnibar-command! "omni" tab)
+       ;; The desktop leader's b b (Cmd+Space b b) sends this command's key in Chrome.
+       "vomnibar-tabs" (vomnibar-command! "tabs" tab)
        "tab-panel" (-> (js/chrome.sidePanel.open #js {:windowId (.-windowId tab)})
                        (.catch (fn [e] (js/console.warn "vimium-cljs: side panel" e))))
        nil)))
   ;; DevTools key events never reach Chrome's shortcuts, so the e2e suite runs the command here.
-  (unchecked-set js/globalThis "vimiumCljsVomnibarCommand" vomnibar-command!)
+  (unchecked-set js/globalThis "vimiumCljsVomnibarCommand" (fn [tab mode] (vomnibar-command! (or mode "omni") tab)))
   (js/chrome.tabs.onActivated.addListener (fn [^js info] (note-active! (.-tabId info))))
   (js/chrome.history.onVisited.addListener drop-cache!)
   (js/chrome.history.onVisitRemoved.addListener drop-cache!)

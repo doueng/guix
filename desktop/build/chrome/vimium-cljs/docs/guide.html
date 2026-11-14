@@ -55,6 +55,8 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 
 <h2>Ctrl+L opens the Vomnibar</h2>
 <p>Once Ctrl+L is set at <code>chrome://extensions/shortcuts</code>, it opens the Vomnibar instead of focusing the address bar, from the page, from the address bar itself and from <code>chrome://</code> pages. Chrome sends it to the extension's service worker, so no page script and no desktop remap is involved, and Ctrl+L in every other application is unchanged. When the page can't take the keyboard (focus is in the address bar, or the page is a <code>chrome://</code> page or the Web Store, where extensions can't run), the Vomnibar opens in a small popup window that acts on the tab you were in. <kbd>Esc</kbd> closes it. Cmd+L stays the right arrow; <kbd>Alt+d</kbd> still focuses the address bar.</p>
+<h2>Cmd+Space b b searches open tabs</h2>
+<p>As Doom's SPC b b switches buffers, the desktop leader's <kbd>Cmd+Space b b</kbd> opens the Vomnibar on your open tabs when Chrome is focused. Hyprland takes Cmd+Space before Chrome sees it, so the leader sends Ctrl+Shift+K, the suggested key of the extension's <b>Search open tabs</b> command; it works from the address bar and <code>chrome://</code> pages too. In other windows b b still picks a window.</p>
 
 <h2>What it does</h2>
 <table>

@@ -32,6 +32,13 @@ The manifest's `vomnibar` command opens the Vomnibar. Chrome won't auto-assign C
 own address-bar shortcut uses it, so set it once at chrome://extensions/shortcuts. After that it works from
 the page, the address bar and chrome:// pages, the last two through a popup Vomnibar.
 
+## Cmd+Space b b
+
+The `vomnibar-tabs` command opens the Vomnibar on your open tabs, like Doom's SPC b b. Its suggested key
+Ctrl+Shift+K is free in Chrome, so a fresh load assigns it; an already-loaded copy may need it set once at
+chrome://extensions/shortcuts. The desktop leader in the guix repo (Hyprland grabs Cmd+Space before Chrome sees it)
+sends Ctrl+Shift+K for b b when Chrome is focused. Works on chrome:// pages and from the address bar too, via the popup.
+
 ## Tab list side panel
 
 The `tab-panel` command opens the window's tabs in Chrome's side panel (`ext/panel.html`): click switches,

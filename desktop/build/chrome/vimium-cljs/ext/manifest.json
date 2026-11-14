@@ -23,6 +23,8 @@
   ],
   "commands": {
     "vomnibar": { "description": "Open the Vomnibar" },
+    "vomnibar-tabs": { "description": "Search open tabs (desktop leader b b)",
+                       "suggested_key": { "default": "Ctrl+Shift+K" } },
     "tab-panel": { "description": "Open the tab list in the side panel" }
   },
   "web_accessible_resources": [
