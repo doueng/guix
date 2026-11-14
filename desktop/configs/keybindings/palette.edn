@@ -29,7 +29,7 @@
   {:label "New tab" :keys "Ctrl+T" :chord "ctrl+t"}
   {:label "New window" :keys "Ctrl+N" :chord "ctrl+n"}
   {:label "New incognito window" :keys "Ctrl+Shift+N" :chord "ctrl+shift+n"}
-  {:label "Address bar" :keys "Ctrl+L" :chord "ctrl+l"}
+  {:label "Address bar" :keys "Alt+D" :chord "alt+d"}
   {:label "History" :keys "Ctrl+H" :chord "ctrl+h"}
   {:label "Downloads" :keys "Ctrl+J" :chord "ctrl+j"}
   {:label "Bookmark manager" :keys "Ctrl+Shift+O" :chord "ctrl+shift+o"}
