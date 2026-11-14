@@ -1,0 +1,193 @@
+#!/usr/bin/env bb
+;; ext-reload: build an unpacked Chrome extension of yours, activate or reload it in the running
+;; Flatpak Chrome and reload the tabs its content scripts match. No clicks, no DevTools port.
+;;
+;;   ext-reload NAME [--no-build] [--tabs all|active|none]   build, reload, reload tabs
+;;   ext-reload list                                          registry and what Chrome has loaded
+;;   ext-reload serve                                         the hub (the ext-reload Home service)
+;;   ext-reload setup                                         put the helper extension in place
+;;
+;; NAME comes from ~/.config/ext-reload/extensions.edn, which Guix writes
+;; (modules/engstrand/features/chrome-extensions.scm). Chrome is driven by a small helper extension,
+;; desktop/build/ext-reload/reloader, that holds a WebSocket to the hub on 127.0.0.1:7357 and uses
+;; chrome.management to disable and enable the target, which rereads an unpacked extension from disk.
+(ns ext-reload
+  (:require [babashka.fs :as fs]
+            [babashka.http-client :as http]
+            [babashka.process :as process]
+            [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.string :as str]
+            [org.httpkit.server :as server]))
+
+(def port (parse-long (or (System/getenv "EXT_RELOAD_PORT") "7357")))
+(def home (System/getenv "HOME"))
+(def config-file (or (System/getenv "EXT_RELOAD_CONFIG") (str home "/.config/ext-reload/extensions.edn")))
+(def reloader-src (or (System/getenv "EXT_RELOAD_HELPER_SRC")
+                      (str (fs/normalize (fs/path (fs/parent (fs/canonicalize *file*)) "../build/ext-reload/reloader")))))
+;; Inside the sandbox's own directory, so Chrome reads it without a Flatpak override or restart.
+(def reloader-dir (or (System/getenv "EXT_RELOAD_HELPER_DIR")
+                      (str home "/.var/app/com.google.Chrome/data/ext-reload/reloader")))
+(def reloader-id "hhphiidacaejhbolcnboolfapncammkf")
+
+(defn die [& msg] (binding [*out* *err*] (apply println msg)) (System/exit 1))
+(defn expand [path] (str/replace-first path #"^~(?=/|$)" home))
+
+(defn registry []
+  (if (fs/exists? config-file)
+    (update-vals (edn/read-string (slurp config-file))
+                 #(update % :dir expand))
+    (die "No registry at" config-file "- it comes from the Guix Home feature chrome-extensions.")))
+
+(defn manifest [{:keys [dir ext]}]
+  (json/parse-string (slurp (str (fs/path dir (or ext "ext") "manifest.json"))) true))
+
+;; ---------------------------------------------------------------- helper extension
+
+(defn helper-version [dir]
+  (when (fs/exists? (fs/path dir "manifest.json"))
+    (:version (json/parse-string (slurp (str (fs/path dir "manifest.json"))) true))))
+
+(defn install-helper!
+  "Copies the helper extension into reloader-dir when it differs; returns true when it changed."
+  []
+  (let [files (map #(str (fs/relativize reloader-src %)) (fs/glob reloader-src "**" {:hidden false}))
+        same? (every? #(and (fs/exists? (fs/path reloader-dir %))
+                            (= (slurp (str (fs/path reloader-src %))) (slurp (str (fs/path reloader-dir %)))))
+                      (filter #(fs/regular-file? (fs/path reloader-src %)) files))]
+    (when-not same?
+      (fs/delete-tree reloader-dir)
+      (fs/create-dirs (fs/parent reloader-dir))
+      (fs/copy-tree reloader-src reloader-dir)
+      true)))
+
+;; ---------------------------------------------------------------- hub
+
+(def clients (atom #{}))
+(def pending (atom {}))
+(def counter (atom 0))
+
+(defn log [& xs] (println (str (java.time.LocalDateTime/now)) (str/join " " xs)) (flush))
+
+(defn send-json! [ch m] (server/send! ch (json/generate-string m)))
+
+(defn on-message [ch text]
+  (let [{:keys [id op version] :as msg} (json/parse-string text true)]
+    (cond
+      id (when-let [p (get @pending id)] (deliver p msg))
+      (= op "hello") (do (log "helper connected, version" version)
+                         (when (and version (not= version (helper-version reloader-dir)))
+                           (log "helper is stale, asking it to reload")
+                           (send-json! ch {:op "self-reload"}))))))
+
+(defn ws-handler [req]
+  (if (not= (get-in req [:headers "origin"]) (str "chrome-extension://" reloader-id))
+    {:status 403 :body "forbidden"}
+    (server/as-channel req {:on-open (fn [ch] (swap! clients conj ch))
+                            :on-close (fn [ch _] (swap! clients disj ch))
+                            :on-receive on-message})))
+
+(defn command! [m]
+  (if-let [ch (first @clients)]
+    (let [id (swap! counter inc) p (promise)]
+      (swap! pending assoc id p)
+      (send-json! ch (assoc m :id id))
+      (let [r (deref p 20000 {:ok false :error "timeout"})]
+        (swap! pending dissoc id)
+        r))
+    {:ok false :error "helper-not-connected"}))
+
+(defn api-handler [{:keys [uri request-method headers body] :as req}]
+  (cond
+    (= uri "/reloader") (ws-handler req)
+    ;; The header keeps web pages out: a cross-site request with it needs a CORS preflight, which fails.
+    (not= "1" (get headers "x-ext-reload")) {:status 403 :body "forbidden"}
+    (and (= request-method :get) (= uri "/status"))
+    {:status 200 :body (json/generate-string {:ok true :helpers (count @clients)})}
+    (and (= request-method :post) (= uri "/command"))
+    (let [m (json/parse-string (slurp body) true)
+          r (command! m)]
+      (log (:op m) (:name m "") (pr-str (dissoc r :id)))
+      {:status 200 :headers {"content-type" "application/json"} :body (json/generate-string r)})
+    :else {:status 404 :body "not found"}))
+
+(defn serve []
+  (when (install-helper!)
+    (log "installed helper at" reloader-dir))
+  (server/run-server api-handler {:ip "127.0.0.1" :port port})
+  (log (str "hub on 127.0.0.1:" port))
+  ;; A message at least every 30 s keeps the helper's service worker alive.
+  (future (loop [] (Thread/sleep 20000) (doseq [ch @clients] (send-json! ch {:op "ping"})) (recur)))
+  @(promise))
+
+;; ---------------------------------------------------------------- client
+
+(defn hub! [m]
+  (try
+    (-> (http/post (str "http://127.0.0.1:" port "/command")
+                   {:headers {"x-ext-reload" "1" "content-type" "application/json"}
+                    :body (json/generate-string m) :timeout 30000})
+        :body (json/parse-string true))
+    (catch java.net.ConnectException _
+      (die "The hub is not running. Start it with: herd start ext-reload"))))
+
+(def setup-hint
+  (str "Load the helper once: chrome://extensions, Developer mode on, Load unpacked, then pick\n  " reloader-dir))
+
+(defn explain [{:keys [error name]} entry]
+  (case error
+    "helper-not-connected" (die (str "Chrome's ext-reload helper is not connected (is Chrome running?).\n" setup-hint))
+    "not-installed" (die (str "Chrome has no unpacked extension named " (pr-str name) ". Load it once: "
+                              "chrome://extensions, Load unpacked, pick\n  " (fs/path (:dir entry) (or (:ext entry) "ext"))))
+    "did-not-load" (die "Chrome would not load the rebuilt extension; chrome://extensions shows its error.")
+    (die "ext-reload:" error)))
+
+(defn build! [nm {:keys [dir build]}]
+  (when (seq build)
+    (println (str "ext-reload: building " nm ": " (str/join " " build)))
+    (let [{:keys [exit]} @(process/process build {:dir dir :inherit true})]
+      (when-not (zero? exit) (die "ext-reload: build failed with exit" exit)))))
+
+(defn reload [nm opts]
+  (let [entry (or (get (registry) nm) (die "Unknown extension" nm "- known:" (str/join ", " (keys (registry)))))
+        _ (when-not (:no-build opts) (build! nm entry))
+        m (manifest entry)
+        matches (vec (distinct (mapcat :matches (:content_scripts m))))
+        r (hub! {:op "reload" :name (:name m) :matches matches :tabs (:tabs opts "all")})]
+    (if (:ok r)
+      (do (doseq [x (:extensions r)]
+            (println (format "ext-reload: %s %s %s (%s)" (if (:activated r) "activated" "reloaded") (:name x) (:version x) (:id x))))
+          (println (format "ext-reload: reloaded %d tab%s" (:tabs r) (if (= 1 (:tabs r)) "" "s"))))
+      (explain r entry))))
+
+(defn list-all []
+  (doseq [[nm e] (sort (registry))]
+    (println (format "%-20s %s" nm (fs/path (:dir e) (or (:ext e) "ext")))))
+  (let [r (hub! {:op "list"})]
+    (if (:ok r)
+      (do (println "\nUnpacked in Chrome:")
+          (doseq [x (:extensions r)]
+            (println (format "  %-24s %-8s %s %s" (:name x) (:version x) (:id x) (if (:enabled x) "" "(disabled)")))))
+      (explain r nil))))
+
+(defn parse-opts [args]
+  (loop [[a & more] args opts {}]
+    (case a
+      nil opts
+      "--no-build" (recur more (assoc opts :no-build true))
+      "--tabs" (if (#{"all" "active" "none"} (first more))
+                 (recur (rest more) (assoc opts :tabs (first more)))
+                 (die "--tabs takes all, active or none"))
+      (recur more (update opts :names (fnil conj []) a)))))
+
+(defn -main [& args]
+  (let [{:keys [names] :as opts} (parse-opts args)]
+    (case (first names)
+      (nil "-h" "--help") (println (str/join "\n" (->> (str/split-lines (slurp *file*)) (drop 1) (take 8) (map #(subs % (min 3 (count %)))))))
+      "serve" (serve)
+      "setup" (do (install-helper!) (println setup-hint))
+      "list" (list-all)
+      (doseq [nm names] (reload nm opts)))))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (apply -main *command-line-args*))

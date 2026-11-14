@@ -26,6 +26,9 @@
   {:name "updates"
    :paths ["desktop/bin/updates" "desktop/build/updates/**"]
    :checks ["make lint" "make updates-test"]}
+  {:name "ext-reload"
+   :paths ["desktop/bin/ext-reload" "desktop/build/ext-reload/**" "modules/engstrand/features/chrome-extensions.scm"]
+   :checks ["make lint" "make ext-reload-test"]}
   {:name "md-view"
    :paths ["desktop/bin/md-view" "desktop/build/md-view/**"]
    :checks ["make lint" "make md-view-test"]}

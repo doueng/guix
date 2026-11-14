@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "ext-reload",
+  "version": "1.0.0",
+  "description": "Reloads your unpacked extensions and their tabs when the ext-reload command asks. Talks only to ws://127.0.0.1:7357.",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs4JkPipnIcReqn0HatN4MGf2Dy6v6QwTNeRxn60wxm4/aaSDbarC3KYqRQHkDGi6jt3g+U+RIqVDUQAhpynItw/HMbTnceW3WYl03yiiJUFuMjdQXLUDrTxPneOc6/pIO/744faMs+Et3rtEaVBY46uvW9Wre/as1OISSsb58y+dTpozEsgXNZVhmOTwm9wt6Qob72+jPgb/J35dqakNFMRFu7ZOLo/RhqQlGmFfB2cBcylhGT6UaMNoaO86hccVCH1OvpV+nYqfLkbOAN/RCyVboHE57oCh7h6r0T/2dLIyGPfp+7WDdbs4YUfLfN6cT1HJ/xe6/ViBrzIPYvk6+wIDAQAB",
+  "background": { "service_worker": "bg.js" },
+  "permissions": ["management", "tabs", "alarms"]
+}

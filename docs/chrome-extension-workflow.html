@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="How Chrome 157 Flatpak can install and reload dev extensions; pick: ext-reload helper + hub">
+<meta name="bbh-doc" content="T189">
+<title>Reloading your Chrome extensions with one command</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Reloading your Chrome extensions with one command</h1>
+
+<p><b>Pick: a small helper extension plus a local hub, behind one command, <code>ext-reload NAME</code>.</b> It builds the extension, reloads it from disk in your running Chrome (or turns it on if it was off), then reloads the open tabs its content scripts match. It does this without clicks and without opening a DevTools port. Guix declares it in <code>modules/engstrand/features/chrome-extensions.scm</code>: the list of extensions, the Flatpak read grants and the hub service.</p>
+
+<h2>What Chrome is here</h2>
+<ul>
+<li>Flathub Flatpak <code>com.google.Chrome</code> 157.0.8103.38, branded stable. Guix only sets it as the default browser through MIME settings.</li>
+<li>The profile is Chrome's default one, <code>~/.var/app/com.google.Chrome/config/google-chrome</code>.</li>
+<li>Your Flatpak overrides already give Chrome read-only access to <code>~/projects/vimium-cljs/ext</code> and <code>~/projects/cookie-autoaccept</code>. Your current loads still go through <code>/run/flatpak/doc/…</code> portal paths.</li>
+</ul>
+
+<h2>The options, tested on this Chrome</h2>
+<table>
+<tr><th>Option</th><th>Works on 157?</th><th>Reload loop</th><th>Verdict</th></tr>
+<tr><td><code>--load-extension</code> in chrome-flags</td><td><b>No.</b> I tested it in a throwaway profile, and Chrome ignored it even with <code>--disable-features=DisableLoadExtensionCommandLineSwitch</code>.</td><td>n/a</td><td>Dead</td></tr>
+<tr><td>Policy: <code>ExtensionInstallForcelist</code> or <code>ExtensionSettings</code> with a local <code>update_url</code> and a packed CRX</td><td>Yes. The Flatpak wrapper links in host <code>/etc/opt/chrome/policies/managed</code>.</td><td>Slow. Each change needs a repack, a version bump and an update check (about every 5 h, or a click on Update). Root also has to write <code>/etc</code>, which means <code>make switch</code>.</td><td>Fine for installing finished extensions, bad for development</td></tr>
+<tr><td>DevTools: <code>--remote-debugging-port</code> with <code>Extensions.loadUnpacked</code></td><td><b>No</b> on your profile. Since Chrome 136, remote debugging is refused on the default data directory. <code>loadUnpacked</code> also needs <code>--remote-debugging-pipe</code>, which only the process that launched Chrome can hold.</td><td>Instant, but it would mean a second profile</td><td>Good for headless tests (your repos already use it), not for the browser you use every day. An open port also gives any local process control of your logged-in browser.</td></tr>
+<tr><td>Dev-only reload hook in each extension (it watches a hub and calls <code>chrome.runtime.reload()</code>)</td><td>Yes</td><td>Instant</td><td>Works, but it puts dev code into both repos and keeps their service workers alive</td></tr>
+<tr><td><b>Helper extension + hub</b> (chosen)</td><td><b>Yes.</b> I tested that <code>chrome.management.setEnabled(id,false)</code> then <code>(id,true)</code> rereads an unpacked extension from disk.</td><td>Instant. Reloading a built extension takes under a second.</td><td><b>Pick.</b> One generic helper covers every extension, and neither repo changes.</td></tr>
+<tr><td>Guix package that builds the extensions into the store</td><td>Partly. The Flatpak sandbox cannot see <code>/gnu/store</code>, so the files would need copying out anyway. The shadow-cljs and npm builds also need the network.</td><td>Needs <code>guix home reconfigure</code> for every edit</td><td>Too heavy for a dev loop. Guix declares the setup instead.</td></tr>
+</table>
+
+<h2>How the pick works</h2>
+<svg viewBox='0 0 640 150' width='100%' role='img' aria-label='ext-reload flow'>
+<style>text{font:13px sans-serif} rect{fill:#f4f1ea;stroke:#555;rx:6}</style>
+<rect x='5' y='45' width='130' height='50'/><text x='70' y='68' text-anchor='middle'>ext-reload NAME</text><text x='70' y='85' text-anchor='middle'>build, then POST</text>
+<rect x='200' y='45' width='130' height='50'/><text x='265' y='68' text-anchor='middle'>hub :7357</text><text x='265' y='85' text-anchor='middle'>shepherd service</text>
+<rect x='395' y='45' width='110' height='50'/><text x='450' y='68' text-anchor='middle'>helper ext</text><text x='450' y='85' text-anchor='middle'>WebSocket</text>
+<rect x='550' y='10' width='85' height='40'/><text x='592' y='35' text-anchor='middle'>your ext</text>
+<rect x='550' y='95' width='85' height='40'/><text x='592' y='120' text-anchor='middle'>its tabs</text>
+<path d='M135 70H200M330 70H395M505 60L550 32M505 82L550 113' stroke='#555' fill='none' marker-end='url(#a)'/>
+<defs><marker id='a' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0 0L10 5L0 10z' fill='#555'/></marker></defs>
+</svg>
+<ol>
+<li><code>ext-reload vimium-cljs</code> looks up the name in <code>~/.config/ext-reload/extensions.edn</code>, which Guix writes, and runs that project's own build (<code>./build.sh</code> or <code>npm run build</code>).</li>
+<li>It reads the manifest's <code>name</code> and <code>content_scripts.matches</code>, then posts them to the hub on 127.0.0.1:7357. The hub refuses requests that lack an <code>X-Ext-Reload</code> header, which keeps web pages out.</li>
+<li>The helper extension (fixed id <code>hhphiidacaejhbolcnboolfapncammkf</code>) holds a WebSocket to the hub. It finds the unpacked extension by name, disables and re-enables it so Chrome reads it from disk again, and reloads the matching tabs. Pass <code>--tabs active</code> or <code>--tabs none</code> to narrow that. It replies with the version and the tab count, or tells you that Chrome would not load the build.</li>
+<li>The helper lives in <code>~/.var/app/com.google.Chrome/data/ext-reload/reloader</code>, a folder the sandbox can always read, so it needs no override and no restart. The hub copies it there from the repo when it starts. If the copy changed, the hub tells the running helper to reload itself.</li>
+</ol>
+
+<h2>What is still manual, once</h2>
+<ul>
+<li>Load the helper with Load unpacked once. Chrome offers no way to add an extension from outside except policy (root plus a packed CRX). Chrome remembers it after that.</li>
+<li>Each new extension you develop needs Load unpacked once, using its real path under <code>~/projects</code>. After that, <code>ext-reload</code> handles it, including turning it back on if it was off. When an extension is missing, the command prints the exact path to load.</li>
+<li>Guix gives Chrome read access to each project directory rather than its <code>ext/</code>. cookie-autoaccept's build deletes and recreates <code>ext/</code>, and a Flatpak grant on that folder would keep pointing at the deleted one. A new grant takes effect after Chrome restarts.</li>
+</ul>
+
+<h2>Commands</h2>
+<pre>ext-reload vimium-cljs            # build, reload, reload matching tabs
+ext-reload cookie-autoaccept --no-build --tabs active
+ext-reload list                   # registry and the unpacked extensions Chrome has
+herd status ext-reload            # the hub; log in ~/.local/state/ext-reload.log
+make ext-reload-test              # end to end in a throwaway headless Chrome</pre>
+
+</main></body></html>

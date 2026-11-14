@@ -19,7 +19,7 @@ COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
-        builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test \
+        builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test ext-reload-test \
         doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check \
         clipboard-history-test taildrop-test parinfer-check parinfer-fix
 
@@ -49,6 +49,7 @@ help:
 	@echo 'second-brain-test test the second brain glue on the builder'
 	@echo 'updates-test  test the updates cache, rows and changelog links'
 	@echo 'md-view-test  test the markdown-to-Chrome renderer'
+	@echo 'ext-reload-test build, reload and retab a test extension through the ext-reload hub in a headless Chrome'
 	@echo 'home-build    build Home without activating it'
 	@echo 'home-apply    activate Home, then stow live configs'
 	@echo 'stow          build SCI and install live config links using GNU Stow'
@@ -174,6 +175,9 @@ updates-test:
 
 md-view-test:
 	bb desktop/build/md-view/test.bb
+
+ext-reload-test:
+	node desktop/build/ext-reload/test.mjs
 
 PI_SCI := desktop/build/pi-sci
 PI_SCI_OUTPUTS := $(PI_SCI)/dist/sci.js $(addprefix $(PI_SCI)/dist/pi-,grep.mjs find.mjs read.mjs)
