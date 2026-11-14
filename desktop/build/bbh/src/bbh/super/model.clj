@@ -72,10 +72,10 @@
                             [(format "[%s reply %s]" thread id)
                              (when (seq picks) (str/join "\n" (map ask-line picks)))
                              (when (seq answers) (str/join "\n" (for [[ask text] answers] (format "- %s: %s" (get-in state [:asks ask :text]) text))))
-                           (when (seq approved)
-                             (str/join "\n" (for [[ask revision] approved]
-                                               (format "Approved %s at revision %s (evidence %s)." ask revision
-                                                       (subs (str (get-in state [:asks ask :evidence-sha]) "        ") 0 8)))))
+                             (when (seq approved)
+                               (str/join "\n" (for [[ask revision] approved]
+                                                 (format "Approved %s at revision %s (evidence %s)." ask revision
+                                                         (subs (str (get-in state [:asks ask :evidence-sha]) "        ") 0 8)))))
                              (when (seq dismiss) (str "Not answered, do not wait: " (str/join ", " dismiss)))
                              (when-not (str/blank? note) note)
                              (format "When this reply is handled, run (super-answered! \"%s\")." id)]))))
@@ -325,12 +325,12 @@
   "The first mailbox message of Worker W: its brief and how it reports."
   [{:keys [id thread brief workflow origin repo]} wf-run workspace]
   (str/join "\n\n" [(format "[%s brief for %s]" thread id)
-                       brief
-                       (format "Requested from %s." (some-> origin name))
-                       (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
-                               id thread wf-run (name workflow))
-                       (format "Work only in your jj workspace %s, your current directory. %s is the main checkout: read it if you need to, but do not edit it. Its working-copy change is described [<thread>] wip(<worker>) so jj log shows whose it is; commit your work there with a real description that starts with [<thread>], as in jj commit -m '[T12] bbh super: ...' (landing adds the prefix to any that lack it): (super-done!) lands it on the tip of the person's line and removes the workspace. When it returns :conflicts instead, resolve them in your workspace and call it again."
-                               workspace repo)]))
+                    brief
+                    (format "Requested from %s." (some-> origin name))
+                    (format "You are Worker %s of thread %s. Your wf run is %s (%s workflow; WF_RUN is set, so `wf status` shows it). Use (super-ask! ...) when you need the person and (super-done!) when the run is done."
+                            id thread wf-run (name workflow))
+                    (format "Work only in your jj workspace %s, your current directory. %s is the main checkout: read it if you need to, but do not edit it. Its working-copy change is described [<thread>] wip(<worker>) so jj log shows whose it is; commit your work there with a real description that starts with [<thread>], as in jj commit -m '[T12] bbh super: ...' (landing adds the prefix to any that lack it): (super-done!) lands it on the tip of the person's line and removes the workspace. When it returns :conflicts instead, resolve them in your workspace and call it again."
+                            workspace repo)]))
 
 (defn- worker-of
   "Worker WORKER of STATE, or a refusal when there is none or, with STATES, when
@@ -949,7 +949,7 @@
       (update-in [:workers id] dissoc :health)
       (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
       (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
-                                 :text text :state :pending :message nil})))
+                                  :text text :state :pending :message nil})))
 
 (defmethod fold* :job-exited [state {{:keys [worker job exit log outbox conversation text]} :data :keys [thread]}]
   (cond-> (assoc-in state [:workers worker :jobs job] {:id job :exit exit :log log})
@@ -1166,4 +1166,3 @@
     (-> state (assoc-in [:replies id :state] :answered)
         (assoc-in [:outbox (:outbox reply) :state] :done)
         (set-states :asks (concat (keys (:picks reply)) (keys (:answers reply)) (keys (:approved reply))) :answered))))
-

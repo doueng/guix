@@ -43,7 +43,7 @@
     (when (or (seq unknown) (seq missing))
       (throw (ex-info (str fname " "
                            (str/join " and " (remove nil? [(when (seq unknown) (str "does not accept " (str/join ", " unknown)))
-                                                            (when (seq missing) (str "requires " (str/join ", " missing)))]))
+                                                           (when (seq missing) (str "requires " (str/join ", " missing)))]))
                            ". Accepted keys: " (str/join ", " (sort (map str accepted))) ".")
                       {})))))
 

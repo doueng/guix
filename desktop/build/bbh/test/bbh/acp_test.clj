@@ -19,8 +19,8 @@
         _ (spit script (pr-str steps))
         _ (spit init "")
         proc (apply p/process {:env (merge (sysenv/getenv) {"XDG_DATA_HOME" (str dir) "BBH_INIT" init
-                                                       "BBH_MODEL" (str "script/" script)})
-                         :err :string}
+                                                            "BBH_MODEL" (str "script/" script)})
+                               :err :string}
                         "bb" "-m" "bbh.main" "acp" args)
         queue (LinkedBlockingQueue.)]
     (future

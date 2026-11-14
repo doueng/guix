@@ -334,7 +334,7 @@ function setAll(open){document.querySelectorAll('details').forEach(d=>d.open=ope
                [:td model] [:td turns] [:td calls]
                [:td (for [r (:runs c) :let [s (first (:events r))]]
                       [:div (some-> (:workflow s) name) " " [:span {:class (str "badge status-" (run-status (:events r)))}
-                                                           (run-status (:events r))]])]])]
+                                                             (run-status (:events r))]])]])]
            (for [c conversations] (conversation-section c false))]]])))
 
 (defn -main

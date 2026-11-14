@@ -34,13 +34,13 @@
 
 (defun eng/key-coach--post-command ()
   (when-let* ((hint (eng/key-coach-observe
-                   this-command (float-time)
-                   (and (eq (bound-and-true-p evil-state) 'normal)
-                        buffer-file-name (not buffer-read-only)
-                        (not current-prefix-arg)
-                        (not executing-kbd-macro)
-                        (not defining-kbd-macro)
-                        (not (minibufferp))))))
+                     this-command (float-time)
+                     (and (eq (bound-and-true-p evil-state) 'normal)
+                          buffer-file-name (not buffer-read-only)
+                          (not current-prefix-arg)
+                          (not executing-kbd-macro)
+                          (not defining-kbd-macro)
+                          (not (minibufferp))))))
     (message "Key coach. %s" hint)))
 
 (defun eng/key-coach-report ()

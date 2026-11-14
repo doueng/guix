@@ -395,7 +395,7 @@
                                     (new-rows before after)))
                  (bad :handle-not-routed result))
                refused (when-not (contains? (cond-> #{} (nil? router) (conj :no-router) (get-in before [:threads handle :worker]) (conj :not-running))
-                                             (:error refused))
+                                            (:error refused))
                          (bad :say-refused refused))
                :else (when-not (and (= :router (:to result)) (some #(= router (:conversation %)) (new-rows before after)))
                        (bad :not-for-the-router result))))

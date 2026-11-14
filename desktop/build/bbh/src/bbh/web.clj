@@ -342,17 +342,17 @@
   ([conversations owner] (handler conversations owner (super/super-dir)))
   ([conversations owner super-dir] (handler conversations owner super-dir docs/roots))
   ([conversations owner super-dir doc-roots]
-  (super/on-change! super-dir ::stream #(broadcast! super-dir "event: changed\ndata: 1\n\n"))
-  (fn [{:keys [uri headers] :as request}]
-    (let [login (headers "tailscale-user-login")]
-      (cond (or (nil? login) (not= login (owner))) (json-response 403 {:error "Tailnet owner only"})
-            (str/starts-with? uri "/api/super/") (super-api super-dir request)
-            (= uri "/api/docs") (if (= :get (:request-method request))
-                                    (json-response 200 (docs/listing (doc-roots)))
-                                    (json-response 405 {:error "Method not allowed"}))
-            (= uri "/docs/view") (doc-page (doc-roots) request)
-            (str/starts-with? uri "/api/") (api conversations request)
-            :else (or (asset uri) (json-response 404 {:error "Not found"})))))))
+   (super/on-change! super-dir ::stream #(broadcast! super-dir "event: changed\ndata: 1\n\n"))
+   (fn [{:keys [uri headers] :as request}]
+     (let [login (headers "tailscale-user-login")]
+       (cond (or (nil? login) (not= login (owner))) (json-response 403 {:error "Tailnet owner only"})
+             (str/starts-with? uri "/api/super/") (super-api super-dir request)
+             (= uri "/api/docs") (if (= :get (:request-method request))
+                                     (json-response 200 (docs/listing (doc-roots)))
+                                     (json-response 405 {:error "Method not allowed"}))
+             (= uri "/docs/view") (doc-page (doc-roots) request)
+             (str/starts-with? uri "/api/") (api conversations request)
+             :else (or (asset uri) (json-response 404 {:error "Not found"})))))))
 
 (defn- remembered
   "F's first non-nil answer, kept."

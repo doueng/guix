@@ -25,7 +25,7 @@
                  (tokenize code lang))]
     (if tokens
       (vec (interpose "\n" (map (fn [line] (into [:span] (map token-view) line))
-                                 (js->clj tokens :keywordize-keys true))))
+                                (js->clj tokens :keywordize-keys true))))
       [code])))
 
 (def highlighted (memoize highlight))
@@ -505,8 +505,8 @@
     "reply-sent" (str/join "; " (remove str/blank? (concat (for [[a o] (:picks data)
                                                                    :let [ask (some #(when (= (name a) (:id %)) %) asks)]]
                                                                (or (some #(when (= o (:id %)) (:label %)) (:options ask)) o))
-                                                             (vals (:answers data))
-                                                             [(when (seq (:dismiss data)) "dismissed") (:note data)])))
+                                                           (vals (:answers data))
+                                                           [(when (seq (:dismiss data)) "dismissed") (:note data)])))
     "worker-started" (str (:id data) " started")
     "worker-finished" (str (:id data) " " (:state data) (when-let [l (:landed data)] (str ", landed " (subs l 0 (min 8 (count l))))))
     "worker-steered" "by the Router"
@@ -563,7 +563,7 @@
        (when w (str " · " (:id w) " " (name (:state w))))
        (when session
          (list " · " [:a {:href (str "#s/" session)
-                         :on {:click (fn [e] (.preventDefault e) (go! (str "#s/" session)))}} "Transcript ›"]))]]
+                          :on {:click (fn [e] (.preventDefault e) (go! (str "#s/" session)))}} "Transcript ›"]))]]
      [:div.body
       (cond (nil? t) [:p.empty (or inbox-error "Loading")]
             :else

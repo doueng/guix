@@ -98,7 +98,7 @@ prompt, two tool calls whose long output is folded, and a reply."
        (format "call-%d-%d" i k)
        `((:raw-input . ((code . ,(format "(step %d)" k)))) (:status . "completed")
          (:content . (((content . ((text . ,(concat (format "```clojure\n(step %d)\n```\n\n```\nfirst\n" k)
-                                                     (make-string 4500 ?a) "\nlast\n```"))))))))))
+                                                    (make-string 4500 ?a) "\nlast\n```"))))))))))
     (eng/bbh-transcript--reply-chunk "Done.\n\n```clojure\n(a b)\n```")
     (setq eng/bbh-transcript--reply nil))
   (goto-char (point-max))

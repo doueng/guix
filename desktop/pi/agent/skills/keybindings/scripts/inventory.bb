@@ -62,7 +62,7 @@
    :when
    m]
   (when (re-matches #"prefix.*|ctrl\+.*|[a-z]" (nth m 2))
-            (emit! "herdr" (nth m 2) (nth m 1) "herdr/config.toml" ln))))
+        (emit! "herdr" (nth m 2) (nth m 1) "herdr/config.toml" ln))))
 (defn
  nvim!
  []

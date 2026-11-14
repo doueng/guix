@@ -123,7 +123,7 @@
   (cond
     (re-matches #"J\d+\..*" title) (journey s)
     :else (into [:div (heading s)] (concat (when-let [m (mockups title)] [m])
-                                            (md/render (str/join "\n" body))))))
+                                           (md/render (str/join "\n" body))))))
 
 (defn toc [secs]
   (into [:nav] (for [{:keys [level title]} secs :when (= 2 level)]

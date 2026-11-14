@@ -93,7 +93,7 @@
           (is (= [[false false "off"] [true true "off"]]
                  (for [{:keys [args]} @started]
                    [(boolean (some #{"--resume"} args))
-                    (boolean (some #(str/includes? % "BANANA") (when (some #{"--resume"} args) args)) )
+                    (boolean (some #(str/includes? % "BANANA") (when (some #{"--resume"} args) args)))
                     (second (drop-while #(not= "--system-prompt-snapshot" %) args))]))
               "the restart resumes with the new prompt, and Claude Code must not swap the recorded one back in")
           (finally (session/close! s)))))))

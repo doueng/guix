@@ -108,11 +108,11 @@
                        (current-file-path)
                        (when (not ((. (require :config.palette) :open)))
                         (_G.Snacks.picker {:title "Command Palette"
-                                          :multi [(command-palette-actions-source)
-                                                  :commands
-                                                  :keymaps]
-                                          :confirm command-palette-confirm
-                                          :layout {:preset :vscode}})))
+                                           :multi [(command-palette-actions-source)
+                                                   :commands
+                                                   :keymaps]
+                                           :confirm command-palette-confirm
+                                           :layout {:preset :vscode}})))
                      {:desc "Command Palette"})
                 [:<leader>/ false]
                 [:<leader>ff false]

@@ -21,8 +21,7 @@
     (latest "wtype" "0.5" "1klib837nkl9l10ndzc6cq5agydx4v62v7jm7yncns6z2gjzf1ym" "atx/wtype" (gnu packages freedesktop) wtype)
     (latest "nixfmt" "1.5.0" "0y8kwlfs03c79nxn76ill9zx52vhxpdnibz88lpaq0dzfd2sd2v0" "NixOS/nixfmt" (gnu packages haskell-apps) nixfmt)
     (latest "btop" "1.4.8" "1jsdy4k915hzyfqyks516wcb8w7mcj175pq3jw8yfavwlx1z3s1n" "aristocratos/btop" (gnu packages admin) btop)
-    (latest "neovim" "0.12.6" "0h7y3szk0jrw80l5ib0nninzmqxypfkjjmd51hsn1y0cg2k9py0y" "neovim/neovim" (gnu packages vim) neovim)
-    ))
+    (latest "neovim" "0.12.6" "0h7y3szk0jrw80l5ib0nninzmqxypfkjjmd51hsn1y0cg2k9py0y" "neovim/neovim" (gnu packages vim) neovim)))
 
 (define (replace-version text old new)
   (match (string-contains text old)

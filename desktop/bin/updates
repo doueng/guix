@@ -162,7 +162,7 @@
 
 (defn guix-apply! [_]
   (channel-apply! (filter outdated? (with-latest (read-cache) (map #(assoc % :source "channel")
-                                                                      (channel-items))))))
+                                                                    (channel-items))))))
 
 ;; Tailscale publishes its binaries elsewhere but tags the same versions here.
 (def github-repos {"tailscale" {:repo "tailscale/tailscale" :prefix "v"}})

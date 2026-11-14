@@ -35,7 +35,7 @@
     (is (nil? (:verdict (grade/parse-verdict "no verdict line"))))
     (let [m (grade/metrics dir)
           md (grade/report {"W1/b" {:state :graded :data {:arm "b" :trace dir :original m :original-wf "done" :replay m :wf "done"
-                                                         :blocked 0 :judge {:verdict :same}}}})]
+                                                          :blocked 0 :judge {:verdict :same}}}})]
       (is (str/includes? md (str "| " (fs/file-name dir) " | original |  | done | 2 | 1 | 50% (1/2) | 1 | 12k | 0k | 1.0 |  |  |")))
       (is (str/includes? md "| W1/b | b | graded | done | 2 | 1 | 50% (1/2) | 1 | 12k | 0k | 1.0 | 0 | same |"))
       (is (str/includes? md "| b | 1 | 50% (1/2) | 2 | 12k | {:same 1} |")))

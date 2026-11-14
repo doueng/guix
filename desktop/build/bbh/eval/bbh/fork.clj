@@ -223,14 +223,14 @@ exec \"$@\"")
   after an error counts once, as its last result."
   [results]
   (let [results (vals (into {} (map (juxt (juxt :id :arm :sample) identity) results)))]
-  (str "| arm | forks | calls | file work | helper share | list cost |\n|---|---|---|---|---|---|\n"
-       (str/join (for [[arm rs] (sort-by key (group-by :arm results))
-                       :let [work (filter (comp #{"shell" "helper"} :choice) rs)
-                             helper (count (filter (comp #{"helper"} :choice) work))]]
-                   (format "| %s | %d | %d | %d | %s | $%.2f |\n" arm (count rs) (count (filter :code rs)) (count work)
-                           (if (seq work) (format "%d%% (%d/%d)" (Math/round (* 100.0 (/ helper (count work)))) helper (count work)) "-")
-                           (double (reduce + (keep :cost rs))))))
-       (step-table results))))
+   (str "| arm | forks | calls | file work | helper share | list cost |\n|---|---|---|---|---|---|\n"
+        (str/join (for [[arm rs] (sort-by key (group-by :arm results))
+                        :let [work (filter (comp #{"shell" "helper"} :choice) rs)
+                              helper (count (filter (comp #{"helper"} :choice) work))]]
+                    (format "| %s | %d | %d | %d | %s | $%.2f |\n" arm (count rs) (count (filter :code rs)) (count work)
+                            (if (seq work) (format "%d%% (%d/%d)" (Math/round (* 100.0 (/ helper (count work)))) helper (count work)) "-")
+                            (double (reduce + (keep :cost rs))))))
+        (step-table results))))
 
 (defn- parse-args [args]
   (loop [[a v & more :as as] args opts {:arms {} :roots []}]

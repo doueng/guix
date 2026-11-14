@@ -35,16 +35,16 @@
   (simple-service 'familiar-offload-key activation-service-type
     (with-imported-modules '((guix build utils))
       #~(begin
-        (use-modules (guix build utils))
-          (let ((key "/etc/guix/offload/id_ed25519"))
-            (unless (file-exists? key)
-              (mkdir-p "/etc/guix/offload")
-              (chmod "/etc/guix/offload" #o755)
-              (system* #$(file-append openssh "/bin/ssh-keygen")
-                       "-q" "-t" "ed25519" "-N" "" "-C" "asahi-guix offload"
-                       "-f" key)
-              (chmod key #o600)
-              (chmod (string-append key ".pub") #o644)))))))
+         (use-modules (guix build utils))
+         (let ((key "/etc/guix/offload/id_ed25519"))
+           (unless (file-exists? key)
+             (mkdir-p "/etc/guix/offload")
+             (chmod "/etc/guix/offload" #o755)
+             (system* #$(file-append openssh "/bin/ssh-keygen")
+                      "-q" "-t" "ed25519" "-N" "" "-C" "asahi-guix offload"
+                      "-f" key)
+             (chmod key #o600)
+             (chmod (string-append key ".pub") #o644)))))))
 
 ;; The remote builder (docs/remote-builder-plan.html), on when its signing key
 ;; and ssh host key are in modules/engstrand/builder/, as they are committed:

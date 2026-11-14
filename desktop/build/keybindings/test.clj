@@ -74,7 +74,7 @@
         (keyguide/validate! [{:id "w" :entries [{:id "h" :tip "tip" :command ["true"]}]}])))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate desktop shortcut"
         (keyguide/validate! [{:id "w" :entries [{:id "h" :hypr ["CTRL ALT" "H" ["focus" {:direction "left"}]]}
-                                               {:id "j" :hypr ["CTRL ALT" "H" ["focus" {:direction "down"}]]}]}])))
+                                                {:id "j" :hypr ["CTRL ALT" "H" ["focus" {:direction "down"}]]}]}])))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid Hyprland binding"
         (keyguide/validate! [{:id "w" :entries [{:id "h" :hypr ["CTRL ALT" "H" "movefocus" "l"]}]}]))
       "the old dispatcher strings are rejected"))

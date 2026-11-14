@@ -91,7 +91,7 @@
 
 (defn check []
   (let [ok? (zero? (:exit (p/shell {:continue true :out :string :err :string}
-                                    "curl" "-fsS" "--max-time" "10" (str publish "/nix-cache-info"))))]
+                                   "curl" "-fsS" "--max-time" "10" (str publish "/nix-cache-info"))))]
     (println (if ok? "publish: ok" (str "publish: unreachable at " publish)))
     (when ok?
       (apply p/shell {:continue true}
@@ -183,14 +183,14 @@
 (defn prune-roots
   ([] (prune-roots (str state "/roots")))
   ([dir]
-  (let [revs (->> (fs/list-dir dir)
-                  (sort-by #(fs/last-modified-time % {:nofollow-links true}))
-                  reverse
-                  (map #(second (re-find #"-([0-9a-f]{40})$" (str (fs/file-name %)))))
-                  distinct)]
-    (doseq [old (drop keep-revisions revs)
-            root (fs/glob dir (str "*-" old))]
-      (fs/delete root)))))
+   (let [revs (->> (fs/list-dir dir)
+                   (sort-by #(fs/last-modified-time % {:nofollow-links true}))
+                   reverse
+                   (map #(second (re-find #"-([0-9a-f]{40})$" (str (fs/file-name %)))))
+                   distinct)]
+     (doseq [old (drop keep-revisions revs)
+             root (fs/glob dir (str "*-" old))]
+       (fs/delete root)))))
 
 (defn manifests [work]
   (sort (map #(fs/relativize work %) (fs/glob work "desktop/build/*/manifest.scm"))))
@@ -241,8 +241,8 @@
         (println "prebuild ok" rev)
         (catch Exception e
           (spit status-file (pr-str {:rev rev :state :failed :ok? false :started started :checked checked
-                                    :finished (str (java.time.Instant/now)) :log log
-                                    :error (or (some->> (:cmd (ex-data e)) (str/join " ")) (ex-message e))}))
+                                     :finished (str (java.time.Instant/now)) :log log
+                                     :error (or (some->> (:cmd (ex-data e)) (str/join " ")) (ex-message e))}))
           (die "prebuild failed:" (or (some->> (:cmd (ex-data e)) (str/join " ")) (ex-message e)) "; log" log))))))
 
 (defn nightly []

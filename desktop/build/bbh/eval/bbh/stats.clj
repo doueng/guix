@@ -56,7 +56,7 @@
      :totals (assoc (reduce (fn [acc c] (merge-with + acc (select-keys c [:prompts :calls :timeouts :restarts :errors])))
                             {:conversations (count convs) :prompts 0 :calls 0 :timeouts 0 :restarts 0 :errors 0}
                             (map #(assoc % :conversations 0) convs))
-                     :cost (some->> (seq (keep :cost convs)) (reduce +))
+                    :cost (some->> (seq (keep :cost convs)) (reduce +))
                      :wall-ms (some->> (seq (keep :wall-ms convs)) (reduce +)))
      :runs runs
      :run-statuses (frequencies (map :status runs))

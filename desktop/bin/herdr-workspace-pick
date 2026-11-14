@@ -108,14 +108,14 @@
 (defn pick [rows header]
   (let [input (str/join "\n" (map #(str (:id %) "\t" (:display %)) rows))
         result (herdr/run! ["fzf"
-                      "--border"
-                      "--delimiter" "\t"
-                      "--header" header
-                      "--layout" "reverse"
-                      "--no-multi"
-                      "--no-sort"
-                      "--prompt" "Workspace> "
-                      "--with-nth" "2"]
+                            "--border"
+                            "--delimiter" "\t"
+                            "--header" header
+                            "--layout" "reverse"
+                            "--no-multi"
+                            "--no-sort"
+                            "--prompt" "Workspace> "
+                            "--with-nth" "2"]
                      {:in input})]
     (some-> (:out result)
             str/trim

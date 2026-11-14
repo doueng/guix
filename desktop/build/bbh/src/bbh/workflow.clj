@@ -161,8 +161,8 @@
     (cond
       (= :pending (outcome results)) []
       (= :pass (outcome results)) (if-let [nxt (:next spec)]
-                                (enter wf st nxt)
-                                [{:type :done}])
+                                   (enter wf st nxt)
+                                   [{:type :done}])
       :else (enter wf st (or (:on-fail spec) phase)))))
 
 (defn- sha256 [s]

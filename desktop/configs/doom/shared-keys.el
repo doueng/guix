@@ -28,5 +28,4 @@
       :desc "Terminal" "o t" (eng/keylog-command "Space o t" "Terminal" #'+ghostel/toggle)
       :desc "Switch project" "p p" (eng/keylog-command "Space p p" "Switch project" #'projectile-switch-project)
       :desc "Switch workspace" "TAB ." (eng/keylog-command "Space TAB ." "Switch workspace" #'+workspace/switch-to)
-      :desc "Last workspace" "TAB `" (eng/keylog-command "Space TAB `" "Last workspace" #'+workspace/other)
-      )
+      :desc "Last workspace" "TAB `" (eng/keylog-command "Space TAB `" "Last workspace" #'+workspace/other))

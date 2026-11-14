@@ -102,7 +102,7 @@
       (empty? ts) (throw (ex-info "No device accepts files on this tailnet" {}))
       (= 1 (count online)) (:name (first online))
       :else (dusk/pick! "Send to" (for [t ts] {:label (str (:name t) (when-not (:online? t) (str "  (" (:status t) ")")))
-                                           :value (:name t)})))))
+                                               :value (:name t)})))))
 
 (defn uri->path [uri]
   (when-let [[_ p] (re-matches #"file://[^/]*(/.*)" (str/trim uri))]

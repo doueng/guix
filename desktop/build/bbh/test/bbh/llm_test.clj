@@ -53,14 +53,14 @@
                   llm/retry-delays-ms [0 0 0]]
       (is (= "ok" (get-in ((llm/openrouter "test") {} {:on-text identity :on-open identity
                                                          :on-retry #(swap! notes conj %)})
-                           [:message :content]))))
+                          [:message :content]))))
     (is (= ["OpenRouter 429, retrying in 0 s." "OpenRouter 503, retrying in 0 s."] @notes))))
 
 (deftest errors-say-whether-the-context-overflowed
   (letfn [(failure [status body]
             (with-redefs [http/post (fn [& _] (response status body))
                           auth/api-key (fn [& _] "test-key")
-                  llm/model-info (constantly nil)
+                          llm/model-info (constantly nil)
                           llm/retry-delays-ms [0]]
               (try ((llm/openrouter "test") {} {:on-text identity :on-open identity})
                    (catch clojure.lang.ExceptionInfo e (assoc (ex-data e) :message (ex-message e))))))]
@@ -79,7 +79,7 @@
                   llm/model-info (constantly nil)]
       (is (= "hello world" (get-in ((llm/openrouter "test") {}
                                      {:on-text #(swap! text conj %) :on-open identity})
-                                    [:message :content])))
+                                   [:message :content])))
       (is (= ["hello world"] @text))
       (is (thrown? java.io.IOException (.read stream))))))
 

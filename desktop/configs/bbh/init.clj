@@ -39,6 +39,7 @@ This session is a Worker of bbh super: a thread's work, with a controller that r
 - (super-ask! {:kind :question :text \"...\" :options [{:id \"no\" :label \"No\"} ...] :recommended \"no\" :details \"...\" :evidence \"/abs/path\" :stopped true}) files a question (or :action, or :review with :revision, the commit id to approve from `jj log -r @- --no-graph -T commit_id`) and returns its id. Keep :text to the question in one line (the controller refuses a longer one) and each option :label to a few words. Put the context they need to decide, your pick and why, the evidence and the risk in :details, which the inbox folds, or in a file named by :evidence. The person can answer by picking an option or in their own words. An approval names that revision and the wf evidence as it was when you asked, so ask for review only once the evidence is final. With :stopped true, end your turn after it; the reply arrives as a new prompt. Omit :stopped when you can go on meanwhile.
 - (super-answered! \"reply-id\") after you have acted on a reply, naming the id the mailbox message gave.
 - Never evaluate in, attach to or benchmark the live bbh-super Emacs: it runs every session, and Workers froze it twice. Your emacsclient refuses it. Run Emacs checks in batch Emacs, one at a time after free -m, or with emacs-throwaway, which caps memory and can start a daemon of your own.
+- Keep Lisp files parinfer-stable, since the person's editors reindent any that are not: closing parens trail their line and indentation follows nesting. bb /home/engstrand/guix/desktop/build/checks/parinfer.bb --root . checks a repo, or the files you name, and --fix repairs them; in ~/guix make lint runs it.
 - (super-note! \"text\") updates the thread's summary line; (super-milestone! \"text\") marks progress worth the person's notice.
 - An explanation you write for the person, such as an answer, plan, audit, review, comparison or design, is one self-contained HTML file, not markdown: inline CSS and SVG, no network resources, readable at phone width. (explainer! path {:title :description :thread \"T12\" :body html}) writes one in the shared style. Its <meta name=\"bbh-doc\" content=\"T<thread>\"> and <meta name=\"description\"> list it in the phone's Docs when it sits in ~/guix/docs, /tmp or your wf evidence directory. Your reply names the file by its full path.
 - (super-done!) when the wf run is done, (super-failed! \"why\") when it cannot finish. Both end the Worker. super-done! first rebases your revision onto the tip of the person's line, then removes your workspace, and refuses, saying why, while your working copy has uncommitted changes or the line has two tips; then ask which, and call (super-done! {:onto \"<commit id>\"}). When the rebase leaves conflicts it returns {:conflicts :todo} and keeps you running: resolve them yourself, then call super-done! again.")
@@ -239,15 +240,15 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
 
 (defn manifest []
   (cond-> {:system (if (= "router" (System/getenv "BBH_ROLE"))
-             (str router-helpers "\n\n" copyable-refs)
-             (str base-prompt "\n- " copyable-refs
-                  "\n\n" helper-reference
-                  "\n\n" pi-helpers
-                  (when (System/getenv "BBH_SUPER_TOKEN") (str "\n\n" super-helpers))
-                  "\n\nWorking directory: " (fs/cwd)
-                  (some->> (skill-index) (str "\n\n"))
-                  (when-let [p (project-instructions)]
-                    (str "\n\n# Project instructions\n\n" p))))}
+                    (str router-helpers "\n\n" copyable-refs)
+                    (str base-prompt "\n- " copyable-refs
+                         "\n\n" helper-reference
+                         "\n\n" pi-helpers
+                         (when (System/getenv "BBH_SUPER_TOKEN") (str "\n\n" super-helpers))
+                         "\n\nWorking directory: " (fs/cwd)
+                         (some->> (skill-index) (str "\n\n"))
+                         (when-let [p (project-instructions)]
+                           (str "\n\n# Project instructions\n\n" p))))}
     (not= "router" (System/getenv "BBH_ROLE")) (assoc :tool-description tool-description)))
 
 (defn commands
@@ -567,8 +568,8 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
   reading is left unchanged unless :force true."
   [path old & more]
   (let [[edits {:keys [all force]}] (if (string? old)
-                                [[[old (first more)]] (apply hash-map (rest more))]
-                                [old (apply hash-map more)])
+                                     [[[old (first more)]] (apply hash-map (rest more))]
+                                     [old (apply hash-map more)])
         {:keys [content] :as src} (decode-for-edit path)
         [result summaries] (reduce (fn [[c acc] [i [o n]]]
                                      (let [{c :content s :summary}
@@ -811,9 +812,9 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
       "wc" (when (and (#{["-l"]} (vec (filter #(str/starts-with? % "-") args))) (seq files))
              (str "(ls" (apply str (map #(str " " (pr-str (under dir %))) files)) ")"))
       ("find" "fd") (let [[root & opts] (if (and (= w "find") (seq args) (not (str/starts-with? (first args) "-"))) args (cons "." args))
-                         opts (vec opts)
-                         nm (some (fn [[k v]] (when (#{"-name" "-iname"} k) v)) (partition 2 1 opts))
-                         others (remove #{"-name" "-iname" nm "-type" "f" "d"} opts)]
+                          opts (vec opts)
+                          nm (some (fn [[k v]] (when (#{"-name" "-iname"} k) v)) (partition 2 1 opts))
+                          others (remove #{"-name" "-iname" nm "-type" "f" "d"} opts)]
                      (when (and (= w "find") (empty? others))
                        (str "(ls " (pr-str (str (str/replace (under dir root) #"/$" "") "/**" (when nm (str "/" nm)))) ")")))
       nil)))

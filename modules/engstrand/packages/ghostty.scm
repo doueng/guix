@@ -220,45 +220,45 @@ through /tmp/zig-env instead of /usr/bin/env.")
       #~(let ()
           #$zig-environment-definition
           (modify-phases %standard-phases
-          (replace 'unpack (lambda _ #t))
-          (delete 'configure)
-          (delete 'install)
-          (replace 'build
-            (lambda* (#:key inputs #:allow-other-keys)
-              (zig-environment (search-input-file inputs "/bin/env")
-                               (assoc-ref inputs "libc"))
-              (mkdir-p #$output)
-              (mkdir-p "/tmp/zig-fetch")
-              (with-directory-excursion "/tmp/zig-fetch"
-                (for-each
-                 (match-lambda
-                   ((hash file)
-                    (let* ((port (open-pipe* OPEN_READ "zig" "fetch" file))
-                           (got (read-line port)))
-                      (unless (zero? (status:exit-val (close-pipe port)))
-                        (error "zig fetch failed:" file))
-                      (unless (equal? got hash)
-                        (error "zig hash mismatch:" file got hash))
-                      (invoke "tar" "-xzf"
-                              (string-append "/tmp/zig-cache/p/" hash ".tar.gz")
-                              "-C" #$output)
-                      ;; The archive keeps its single top directory, which
-                      ;; zig strips when it unpacks a package itself.
-                      (let* ((dir (string-append #$output "/" hash))
-                             (entries (scandir dir (negate (cut member <> '("." ".."))))))
-                        (match entries
-                          ((top)
-                           (let ((top (string-append dir "/" top))
-                                 (tmp (string-append dir ".top")))
-                             (when (eq? 'directory (stat:type (lstat top)))
-                               (rename-file top tmp)
-                               (rmdir dir)
-                               (rename-file tmp dir))))
-                          (_ #t))))))
-                 '#$(map (match-lambda
-                           ((name hash url sha)
-                            #~(#$hash #$(zig-dep-origin (list name hash url sha)))))
-                         %ghostty-zig-deps)))))))))
+           (replace 'unpack (lambda _ #t))
+           (delete 'configure)
+           (delete 'install)
+           (replace 'build
+             (lambda* (#:key inputs #:allow-other-keys)
+               (zig-environment (search-input-file inputs "/bin/env")
+                                (assoc-ref inputs "libc"))
+               (mkdir-p #$output)
+               (mkdir-p "/tmp/zig-fetch")
+               (with-directory-excursion "/tmp/zig-fetch"
+                 (for-each
+                  (match-lambda
+                    ((hash file)
+                     (let* ((port (open-pipe* OPEN_READ "zig" "fetch" file))
+                            (got (read-line port)))
+                       (unless (zero? (status:exit-val (close-pipe port)))
+                         (error "zig fetch failed:" file))
+                       (unless (equal? got hash)
+                         (error "zig hash mismatch:" file got hash))
+                       (invoke "tar" "-xzf"
+                               (string-append "/tmp/zig-cache/p/" hash ".tar.gz")
+                               "-C" #$output)
+                       ;; The archive keeps its single top directory, which
+                       ;; zig strips when it unpacks a package itself.
+                       (let* ((dir (string-append #$output "/" hash))
+                              (entries (scandir dir (negate (cut member <> '("." ".."))))))
+                         (match entries
+                           ((top)
+                            (let ((top (string-append dir "/" top))
+                                  (tmp (string-append dir ".top")))
+                              (when (eq? 'directory (stat:type (lstat top)))
+                                (rename-file top tmp)
+                                (rmdir dir)
+                                (rename-file tmp dir))))
+                           (_ #t))))))
+                  '#$(map (match-lambda
+                            ((name hash url sha)
+                             #~(#$hash #$(zig-dep-origin (list name hash url sha)))))
+                          %ghostty-zig-deps)))))))))
     (native-inputs (list zig-0.17 coreutils))
     (synopsis "Zig packages Ghostty builds with")
     (description "The build.zig.zon dependencies of Ghostty, as zig fetch
@@ -286,32 +286,32 @@ unpacks them.")
       #~(let ()
           #$zig-environment-definition
           (modify-phases %standard-phases
-          (delete 'configure)
-          (add-before 'build 'zig-environment
-            (lambda* (#:key inputs #:allow-other-keys)
-              (zig-environment (search-input-file inputs "/bin/env")
-                               (assoc-ref inputs "libc"))
-              ;; Guix's bzip2 ships no bzip2.pc, which the freetype link asks for.
-              (let ((bzip2 (dirname (dirname (search-input-file inputs "/lib/libbz2.so")))))
-                (mkdir-p "/tmp/pkgconfig")
-                (call-with-output-file "/tmp/pkgconfig/bzip2.pc"
-                  (lambda (port)
-                    (format port "Name: bzip2~%Description: bzip2~%Version: 1.0.8~%Libs: -L~a/lib -lbz2~%Cflags: -I~a/include~%"
-                            bzip2 bzip2)))
-                (setenv "PKG_CONFIG_PATH"
-                        (string-append "/tmp/pkgconfig:" (getenv "PKG_CONFIG_PATH"))))))
-          (replace 'build
-            (lambda* (#:key parallel-build? #:allow-other-keys)
-              (invoke "zig" "build"
-                      "--prefix" #$output
-                      "--system" #$ghostty-zig-deps
-                      "-Doptimize=ReleaseFast" "-Dcpu=baseline"
-                      "-Demit-docs=false"
-                      #$(string-append "-Dversion-string=" version)
-                      (string-append "-Dinstalled-exe-path=" #$output "/bin/ghostty")
-                      (string-append "-j" (number->string
-                                             (if parallel-build? (parallel-job-count) 1))))))
-          (delete 'install)))))
+           (delete 'configure)
+           (add-before 'build 'zig-environment
+             (lambda* (#:key inputs #:allow-other-keys)
+               (zig-environment (search-input-file inputs "/bin/env")
+                                (assoc-ref inputs "libc"))
+               ;; Guix's bzip2 ships no bzip2.pc, which the freetype link asks for.
+               (let ((bzip2 (dirname (dirname (search-input-file inputs "/lib/libbz2.so")))))
+                 (mkdir-p "/tmp/pkgconfig")
+                 (call-with-output-file "/tmp/pkgconfig/bzip2.pc"
+                   (lambda (port)
+                     (format port "Name: bzip2~%Description: bzip2~%Version: 1.0.8~%Libs: -L~a/lib -lbz2~%Cflags: -I~a/include~%"
+                             bzip2 bzip2)))
+                 (setenv "PKG_CONFIG_PATH"
+                         (string-append "/tmp/pkgconfig:" (getenv "PKG_CONFIG_PATH"))))))
+           (replace 'build
+             (lambda* (#:key parallel-build? #:allow-other-keys)
+               (invoke "zig" "build"
+                       "--prefix" #$output
+                       "--system" #$ghostty-zig-deps
+                       "-Doptimize=ReleaseFast" "-Dcpu=baseline"
+                       "-Demit-docs=false"
+                       #$(string-append "-Dversion-string=" version)
+                       (string-append "-Dinstalled-exe-path=" #$output "/bin/ghostty")
+                       (string-append "-j" (number->string
+                                              (if parallel-build? (parallel-job-count) 1))))))
+           (delete 'install)))))
     (native-inputs (list zig-0.17 coreutils gettext-minimal ncurses pkg-config
                          (list glib "bin")))
     (inputs (list bzip2 fontconfig freetype gtk gtk4-layer-shell harfbuzz

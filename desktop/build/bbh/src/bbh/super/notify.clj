@@ -38,10 +38,10 @@
                                    (and (= :failed (:state w)) latest? (not (:resolved-at t))) :needs-human)]
                   :when kind]
               [[kind (:id w)] (cond-> {:thread (:thread w) :worker (:id w)
-                               :urgency (if (= :needs-human kind) :critical :normal)
-                               :at (if by-health (get-in w [:health :since]) (:state-at w))
-                               :text (or (when by-health (get-in w [:health :problem])) late (:reason w)
-                                         (if (= :needs-human kind) "It needs your help." "Its session ended."))}
+                                       :urgency (if (= :needs-human kind) :critical :normal)
+                                       :at (if by-health (get-in w [:health :since]) (:state-at w))
+                                       :text (or (when by-health (get-in w [:health :problem])) late (:reason w)
+                                                 (if (= :needs-human kind) "It needs your help." "Its session ended."))}
                                 ;; A late Worker became news at its deadline, not when it entered the state.
                                 (and late (not by-health) (:state-at w))
                                 (assoc :news-at (+ (:state-at w) (model/deadlines (:state w) 0))))]))))

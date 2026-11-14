@@ -437,7 +437,7 @@
         (println (format "bombadil: exit %d after %d s, %s states, seed %d" exit secs (or (count keys) "?") seed))
         ;; Which keys the generators reached, so a property whose key never came is visible.
         (println "keys:" (->> (frequencies (clojure.core/keep key-name keys))
-                                (sort-by (comp - val)) (map (fn [[k n]] (str k " " n))) (str/join ", ")))
+                              (sort-by (comp - val)) (map (fn [[k n]] (str k " " n))) (str/join ", ")))
         (when summary
           (spit (str (fs/path root "summary.edn")) (pr-str summary))
           (println "timings (ms):")

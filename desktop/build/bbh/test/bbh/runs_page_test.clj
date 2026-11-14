@@ -26,10 +26,10 @@
     (jsonl! (fs/path conv "messages.jsonl")
             [{:role "user" :content "<skill name=\"poteto-mode\">Run a workflow.</skill>\n\nFix <b>the</b> page"}
              {:role "assistant" :content "" :tool_calls [{:id "call-1" :type "function"
-                                                         :function {:name "clojure" :arguments (json/generate-string {:code "(sh \"wf start change\")"})}}]}
+                                                          :function {:name "clojure" :arguments (json/generate-string {:code "(sh \"wf start change\")"})}}]}
              {:role "tool" :tool_call_id "call-1" :content "out:\nrun 20261027-100001-000-change\nworkflow change"}
              {:role "assistant" :content "" :tool_calls [{:id "call-2" :type "function"
-                                                         :function {:name "clojure" :arguments (json/generate-string {:code "(slurp big)"})}}]}
+                                                          :function {:name "clojure" :arguments (json/generate-string {:code "(slurp big)"})}}]}
              {:role "tool" :tool_call_id "call-2" :content (str "[bbh] Full output (9 chars) saved to " spilled ". Read parts with read-lines.\nFULL...")}
              {:role "assistant" :content "Done. See `page.clj`."}])
     (fs/create-dirs (fs/parent spilled))
@@ -72,4 +72,3 @@
     (is (str/includes? html "<span class=\"badge status-done\">done</span>"))
     (is (str/includes? html "VERDICT: pass, reviewer checked it"))
     (is (str/includes? html "# Shape\nA map."))))
-

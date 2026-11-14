@@ -284,8 +284,7 @@
         (is (= [:closed] (map :state (vals (:replies @(:state c))))) "closed, a state of its own: nobody answered it")
         (is (not= :sent (section)))
         (is (wait-for #(= [] (bbh.inbox/pending (str (fs/path conversations "super-W1"))))) "its message is deleted unread")
-        (let [reply (ffirst (:replies @(:state c)))
-]
+        (let [reply (ffirst (:replies @(:state c)))]
           (call dir {:command :start-worker! :args {:thread "T1" :workflow :investigation :brief "again" :repo (str (fs/home))}})
           (is (= :ok (ffirst (call dir {:command :answered! :args {:thread "T1" :reply reply}}))))
           (is (= [:closed] (map :state (vals (:replies @(:state c))))) "a later Worker cannot answer what it never took")
@@ -400,8 +399,8 @@
 
 (deftest the-split-view-lists-a-line-per-thread-and-the-selected-threads-progress
   (let [sections {:sections [{:section :stopped :threads [{:id "T1" :title "Alt+W\tcloses\nwindows" :status :on-you
-                                                         :updated-at (str (java.time.Instant/now)) :milestone-seq 7 :read-seq 5 :worker "W1"
-                                                         :asks [{:id "a1"}]}]}
+                                                           :updated-at (str (java.time.Instant/now)) :milestone-seq 7 :read-seq 5 :worker "W1"
+                                                           :asks [{:id "a1"}]}]}
                              {:section :quiet :threads [{:id "T2" :title "done one" :status :done :milestone-seq 3 :read-seq 3 :asks []}]}]}]
     (is (= ["#+thread: id=T1\tsection=stopped\tstatus=on-you\tasks=1\tage=now\tunseen=1\tworker=W1\ttitle=Alt+W closes windows"
             "#+thread: id=T2\tsection=quiet\tstatus=done\tasks=0\tage=\tunseen=0\tworker=\ttitle=done one"]
@@ -515,7 +514,7 @@
         repo (str (fs/create-dirs (fs/path dir "repo")))
         workspace (str (fs/create-dirs (fs/path dir "T1-2")))
         thread {:id "T1" :workers [{:id "W1" :repo repo :workspace (str (fs/path dir "T1-1"))}
-                                     {:id "W2" :repo repo :workspace workspace}]}]
+                                   {:id "W2" :repo repo :workspace workspace}]}]
     (is (= workspace (bbh.super.pane/workdir thread)))
     (fs/delete workspace)
     (is (= repo (bbh.super.pane/workdir thread)))
@@ -544,17 +543,17 @@
   its dir, the repo and the atom of launches. POLICY adds to the policy."
   ([f] (with-workers {} f))
   ([policy f]
-  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-w"}))
-        conversations (str (fs/create-temp-dir {:prefix "bbh-super-wconv"}))
-        repo (jj-repo)
-        launches (atom [])
-        c (super/start! {:dir dir :conversations conversations :scan-ms 10
-                         :policy (merge {:workers 2} policy)
-                         :launch {:wf-start! (fn [workspace w] (str "run-" (:id w)))
-                                  :open! (fn [spec] (swap! launches conj spec) (str "wC:p" (count @launches)))
-                                  :release! (constantly nil)}})]
-    (try (f c dir repo launches)
-         (finally (super/stop! c))))))
+   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-w"}))
+         conversations (str (fs/create-temp-dir {:prefix "bbh-super-wconv"}))
+         repo (jj-repo)
+         launches (atom [])
+         c (super/start! {:dir dir :conversations conversations :scan-ms 10
+                          :policy (merge {:workers 2} policy)
+                          :launch {:wf-start! (fn [workspace w] (str "run-" (:id w)))
+                                   :open! (fn [spec] (swap! launches conj spec) (str "wC:p" (count @launches)))
+                                   :release! (constantly nil)}})]
+     (try (f c dir repo launches)
+          (finally (super/stop! c))))))
 
 (defn- start-worker [dir thread & {:as more}]
   (call dir {:command :start-worker! :args (merge {:thread thread :workflow :change :brief (str "work on " thread) :repo (:repo more) :check "true"} more)}))
@@ -746,7 +745,7 @@
         (super/observe-jobs! c)
         (is (= ["o1"] (keys (:outbox @(:state c)))) "only the brief")
         (is (= :forbidden (:error (call dir {:token token :command :job-exited!
-                                            :args {:job "fake" :exit 0 :log "fake.log"}}))))
+                                             :args {:job "fake" :exit 0 :log "fake.log"}}))))
         (spit (str (fs/path jobs "partial.exit")) "0")
         (is (wait-for #(= 0 (get-in @(:state c) [:workers "W1" :jobs "partial" :exit]))))))))
 
@@ -1070,9 +1069,9 @@
         proc (babashka.process/process
                {:out :string :err :string}
                "bb" "-cp" "src" "-e"
-                (str "(require '[bbh.super :as s] '[babashka.fs :as fs]) (s/start! (assoc " (pr-str opts)
-                     " :launch {:workspace! (fn [_ w] (str (fs/create-dirs (fs/path " (pr-str (str root)) " (:thread w)))))"
-                     " :open! (fn [{:keys [token]}] (spit " (pr-str (str root "/token")) " token) \"buf\")})) @(promise)"))
+               (str "(require '[bbh.super :as s] '[babashka.fs :as fs]) (s/start! (assoc " (pr-str opts)
+                    " :launch {:workspace! (fn [_ w] (str (fs/create-dirs (fs/path " (pr-str (str root)) " (:thread w)))))"
+                    " :open! (fn [{:keys [token]}] (spit " (pr-str (str root "/token")) " token) \"buf\")})) @(promise)"))
         base (str (fs/path conversations "super-W1" "jobs" "survivor"))]
     (try
       (is (wait-for #(fs/exists? (fs/path dir "port"))))
@@ -1574,7 +1573,7 @@
 
 (deftest a-finished-workers-open-asks-are-superseded
   (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                                               (start-cmd "a1" "T1") (running "W1")
+                                       (start-cmd "a1" "T1") (running "W1")
                                                [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :review :text "ok?" :revision "abc" :evidence-sha "none"}}]
                                                [[:worker "W1"] {:id "f1" :command :finish-worker! :args {:state-after :failed}}]])]
     (is (= :superseded (get-in state [:asks "a1" :state])))
@@ -1653,7 +1652,7 @@
               (is (= {:thread "T1" :draft true :option 2 :sent true} (voice/submit! "Yes, for a week, send." :target :selected)))
               (is (= [{"a1" "week"}] (replies)))
               (call dir {:token token :command :ask! :args {:kind :question :text "Which build?" :recommended "small"
-                                                           :options [{:id "big" :label "Big"} {:id "small" :label "Small"}]}})
+                                                            :options [{:id "big" :label "Big"} {:id "small" :label "Small"}]}})
               (is (= {:thread "T1" :draft true :option 2 :sent true} (voice/submit! "the recommended one, send" :target :selected)))
               (call dir {:token token :command :ask! :args {:kind :question :text "Again?" :options [{:id "y" :label "Yes"} {:id "n" :label "No"}]}})
               (is (= {:thread "T1" :draft true :option 1 :sent true} (voice/submit! "Option 1 and send" :target :selected)))

@@ -119,7 +119,7 @@
                                 :args {:worker (:id w) :workspace workspace :wf-run wf-run
                                        :conversation (fs/file-name conversation) :started-at (System/currentTimeMillis)}})
         buffer (open! {:repo (:repo w) :workspace workspace :thread (:thread w) :title (:title t) :model (:model w)
-                     :conversation (fs/file-name conversation) :token token :wf-run wf-run})]
+                       :conversation (fs/file-name conversation) :token token :wf-run wf-run})]
     (run! c :controller {:id (str "running-" (:id w)) :command :worker-running!
                          :args {:started-at (System/currentTimeMillis) :worker (:id w) :conversation (fs/file-name conversation) :wf-run wf-run :workspace workspace :buffer buffer}})))
 
@@ -754,18 +754,18 @@ still running (T163)."
     (when (some #(not= :summary (:delivery %)) batch)
       (doseq [{:keys [id text delivery] :as o} batch]
         (send! o (str (when-not (= :summary delivery) (str id " ")) text) nil)))
-  (doseq [{:keys [id conversation text message] :as o} rows
-          :when (not (and (= :pending (:state o)) (= router conversation)))]
-    (if (model/dead-letter? @state o)
-      ;; Its Worker has finished, so the row is dropped and its file deleted unread.
-      (do (run! c :controller {:id (str "dropped-" id) :command :outbox-dropped! :args {:outbox id}})
-          ;; A pending row may have a file too, written by a pass that died before recording it.
-          (inbox/ack! {:root (conversation-root c conversation)} (or message (model/message-id id))))
-      (case (:state o)
-        :pending (send! o text (#{:steer :cancel} (:delivery o)))
-        :sent (when-not (inbox/waiting-since (conversation-root c conversation) message)
-                (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
-        nil)))))
+   (doseq [{:keys [id conversation text message] :as o} rows
+           :when (not (and (= :pending (:state o)) (= router conversation)))]
+     (if (model/dead-letter? @state o)
+       ;; Its Worker has finished, so the row is dropped and its file deleted unread.
+       (do (run! c :controller {:id (str "dropped-" id) :command :outbox-dropped! :args {:outbox id}})
+           ;; A pending row may have a file too, written by a pass that died before recording it.
+           (inbox/ack! {:root (conversation-root c conversation)} (or message (model/message-id id))))
+       (case (:state o)
+         :pending (send! o text (#{:steer :cancel} (:delivery o)))
+         :sent (when-not (inbox/waiting-since (conversation-root c conversation) message)
+                 (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
+         nil)))))
 
 (defn- fire-timers!
   "One pass over what is due on C's state by its clock: each Worker deadline is
@@ -853,7 +853,7 @@ still running (T163)."
                                (catch Exception e (binding [*out* *err*] (println "bbh super: observing sessions failed:" (ex-message e))))))
                         (observe-jobs! c) (dispatch! c) (watch-ended! c)
                         (fire-timers! c)
-                           (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
+                        (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))
       (.setDaemon true) (.start)))
     (when web (serve-web! c web))

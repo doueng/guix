@@ -90,6 +90,8 @@
                        (filter (fn [f] (str/ends-with? f ".json")) files))]
    ["edn" #(parse-each (fn [s] (edn/read-string {:default tagged-literal} (str "[" s "]")))
                        (filter (fn [f] (str/ends-with? f ".edn")) files))]
+   ["parinfer" #(let [{:keys [exit out err]} (c/sh "bb" "desktop/build/checks/parinfer.bb")]
+                   (when-not (zero? exit) [(str/trim (str out err))]))]
    ["makefile" makefile-problems]
    ["checks.edn" rule-problems]])
 

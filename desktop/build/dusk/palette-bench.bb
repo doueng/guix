@@ -25,6 +25,6 @@
     (assert (some #(= "save-buffer" (get-in % [:children 0 :children 0])) rows)
             "save-buffer must be among the results")
     (spit output-path (json/generate-string
-                      {:runtime_parse_ms parse-ms :open_ms open-ms :empty_render_ms empty-render-ms
-                       :search_ms search-ms :render_ms render-ms :layout_encode_ms encode-ms
-                       :navigation_ms navigation-ms :visible_rows (count rows) :layout_bytes (count encoded)}))))
+                       {:runtime_parse_ms parse-ms :open_ms open-ms :empty_render_ms empty-render-ms
+                        :search_ms search-ms :render_ms render-ms :layout_encode_ms encode-ms
+                        :navigation_ms navigation-ms :visible_rows (count rows) :layout_bytes (count encoded)}))))

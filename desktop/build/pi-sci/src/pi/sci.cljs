@@ -274,26 +274,26 @@
         runtime (into {} (map (fn [[n f]] [n (if (#{'all 'all-settled} n) f (effect f))]) runtime))
         ctx (sci/init {:deny forbidden
                        :namespaces (merge {'pi.tools tool-map
-                                    'pi.result commands/result-bindings
-                                    'pi.catalog catalog-map
-                                    'pi.models model-map
-                                    'pi.runtime runtime
-                                    'pi.json {'parse #(from-wire (js/JSON.parse %))
-                                              'generate #(js/JSON.stringify (to-wire %))}
-                                    'clojure.string (sci/copy-ns clojure.string (sci/create-ns 'clojure.string))
-                                    'clojure.set (sci/copy-ns clojure.set (sci/create-ns 'clojure.set))
-                                    'clojure.core (merge numbers (select-keys runtime '[println prn]))
-                                    'Math math
-                                    'user runtime
-                                    'session (merge runtime (:bindings library))}
+                                           'pi.result commands/result-bindings
+                                           'pi.catalog catalog-map
+                                           'pi.models model-map
+                                           'pi.runtime runtime
+                                           'pi.json {'parse #(from-wire (js/JSON.parse %))
+                                                     'generate #(js/JSON.stringify (to-wire %))}
+                                           'clojure.string (sci/copy-ns clojure.string (sci/create-ns 'clojure.string))
+                                           'clojure.set (sci/copy-ns clojure.set (sci/create-ns 'clojure.set))
+                                           'clojure.core (merge numbers (select-keys runtime '[println prn]))
+                                           'Math math
+                                           'user runtime
+                                           'session (merge runtime (:bindings library))}
                                           (into {} (map (fn [[ns info]] [ns (:bindings info)]) command-namespaces)))
                        :ns-aliases (merge {'tools 'pi.tools
-                                    'result 'pi.result
-                                    'catalog 'pi.catalog
-                                    'models 'pi.models
-                                    'json 'pi.json
-                                    'str 'clojure.string
-                                    'set 'clojure.set}
+                                           'result 'pi.result
+                                           'catalog 'pi.catalog
+                                           'models 'pi.models
+                                           'json 'pi.json
+                                           'str 'clojure.string
+                                           'set 'clojure.set}
                                           (into {} (map (fn [[ns info]] [(:alias info) ns]) command-namespaces)))})]
     (reset! context ctx)
     (try
@@ -324,15 +324,15 @@
                               (when (library/declaration? form) (library/descriptor form raw-source allowed-namespaces))
                               (recur (conj forms [form raw-source]))))))))
             boxed-result (reduce
-                    (fn [promise [form raw-source]]
-                      (.then promise
-                             (fn [_]
-                               (if (library/declaration? form)
-                                 (do ((:declare! library) form raw-source) [nil])
-                                 (let [body (with-meta (list 'clojure.core/fn [] [form]) {:async true})]
-                                   (sci/binding [sci/ns (sci/find-ns ctx 'user) sci/file "codemode.clj"]
-                                     (sci/eval-form ctx (list body))))))))
-                    (js/Promise.resolve [nil]) forms)
+                          (fn [promise [form raw-source]]
+                            (.then promise
+                                   (fn [_]
+                                     (if (library/declaration? form)
+                                       (do ((:declare! library) form raw-source) [nil])
+                                       (let [body (with-meta (list 'clojure.core/fn [] [form]) {:async true})]
+                                         (sci/binding [sci/ns (sci/find-ns ctx 'user) sci/file "codemode.clj"]
+                                           (sci/eval-form ctx (list body))))))))
+                          (js/Promise.resolve [nil]) forms)
             result (.then boxed-result first)]
         (.then result
              (fn [value]

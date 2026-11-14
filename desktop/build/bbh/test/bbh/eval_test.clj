@@ -113,9 +113,9 @@
 
 (deftest tool-use-counts-file-work-in-sh-against-helpers
   (let [dir (calls-conversation! [(call "a" "($ \"cd src && grep -n foo *.clj | head\") (sh \"jj\" \"log\")")
-                            (call "b" "(read-lines \"x.clj\") (println \"(sh \\\"cat y\\\")\")")
-                            (call "c" "(sh (str \"sed -i s/a/b/ \" f)) (job \"ls -la\") (edit! \"x\" \"a\" \"b\") (grep \"foo\")")
-                            (call "d" "(sh \"bash -c 'wc -l a'\") (ls \"src\") (sh \"timeout 5 rg x\")")])
+                                  (call "b" "(read-lines \"x.clj\") (println \"(sh \\\"cat y\\\")\")")
+                                  (call "c" "(sh (str \"sed -i s/a/b/ \" f)) (job \"ls -la\") (edit! \"x\" \"a\" \"b\") (grep \"foo\")")
+                                  (call "d" "(sh \"bash -c 'wc -l a'\") (ls \"src\") (sh \"timeout 5 rg x\")")])
         s (tool-use/summarize (traces/load-trace dir))]
     (is (= {:calls 4 :shell-commands 5 :bash-c 1
             :shell {:search 2 :edit 1}

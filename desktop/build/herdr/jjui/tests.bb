@@ -55,7 +55,7 @@
           seen (fake-herdr sock open?)
           {:keys [exit err]} (babashka.process/shell {:continue true :out :string :err :string
                                                           :extra-env {"HERDR_SOCKET_PATH" sock}}
-                                                         bb "jjui.bb" dir "bbh" "inbox")]
+                                                     bb "jjui.bb" dir "bbh" "inbox")]
       (is (= 0 exit) (str "popup open: " open? "; " err))
       (is (= ["plugin.pane.open" dir (if open? {:HERDR_JJUI_THEN "[\"bbh\",\"inbox\"]"} {})]
              (last @seen)) (str "popup open: " open?)))))

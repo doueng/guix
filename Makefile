@@ -21,10 +21,12 @@ COMMON := -L "$(MODULES)"
         home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test \
         doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check \
-        clipboard-history-test taildrop-test
+        clipboard-history-test taildrop-test parinfer-check parinfer-fix
 
 help:
-	@echo 'lint          fast checks for every change: Scheme compiles, scripts parse, docs agree'
+	@echo 'lint          fast checks for every change: Scheme compiles, scripts parse, Lisp is parinfer-stable, docs agree'
+	@echo 'parinfer-check list Lisp files parinfer would change on open (ROOT=dir for another repo)'
+	@echo 'parinfer-fix  reindent those files with parinfer paren mode (ROOT=dir for another repo)'
 	@echo 'affected      list the checks covering files changed in REV (default @)'
 	@echo 'verify        run lint and the affected checks; SLOW=1 adds the slow ones'
 	@echo 'pull          update the user Guix profile from $(CHANNELS)'
@@ -74,6 +76,12 @@ help:
 	@echo 'taildrop-test unit checks for the Taildrop send and receive script'
 
 REV ?= @
+parinfer-check:
+	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/checks/parinfer.bb $(if $(ROOT),--root "$(ROOT)")
+
+parinfer-fix:
+	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/checks/parinfer.bb --fix $(if $(ROOT),--root "$(ROOT)")
+
 lint:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/checks/lint.bb
 

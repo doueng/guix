@@ -74,4 +74,4 @@
                               (catch Exception e [(str id ": " (ex-message e))])))
                        sources)]
     (str/join "\n" (concat (apply concat sections)
-                            [(format "This session: $%.4f" (double (or spent 0)))]))))
+                           [(format "This session: $%.4f" (double (or spent 0)))]))))

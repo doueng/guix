@@ -165,10 +165,10 @@
   [id events n]
   (for [{:keys [at kind] :as e} (take-last n (filter (comp progress-kinds :kind) events))]
     (str "#+progress: " (str/join "\t" [id
-                                       (try (.format progress-time (.atZone (java.time.Instant/parse at) (java.time.ZoneId/systemDefault)))
-                                            (catch Exception _ ""))
-                                       (progress-kinds kind)
-                                       (one-line (progress-text e))]))))
+                                        (try (.format progress-time (.atZone (java.time.Instant/parse at) (java.time.ZoneId/systemDefault)))
+                                             (catch Exception _ ""))
+                                        (progress-kinds kind)
+                                        (one-line (progress-text e))]))))
 
 (defn- open-ask
   "Thread T's open ask ASK, else with no ASK its newest open ask."
