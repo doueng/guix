@@ -149,7 +149,7 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
   (when-let [^js f (:frame @state)]
     (let [^js back (:focus-back @state)]
       (.remove f)
-      (swap! state dissoc :frame :frame-kind :focus-back)
+      (swap! state dissoc :frame :frame-kind :focus-back :typed)
       (.focus js/window)
       (when (and back (.-isConnected back) (not= back (.-body js/document)))
         (.focus back #js {:preventScroll true})))))
@@ -168,7 +168,42 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
     ;; drop that focus and lose the keys typed meanwhile, so only focus it if it has none.
     (.addEventListener f "load" (fn [_] (when-not (identical? f (.-activeElement js/document)) (.focus f))))
     (.appendChild (attach!) f)
-    (swap! state assoc :frame f :frame-kind kind)
+    (swap! state assoc :frame f :frame-kind kind :typed {:text "" :enter false})
     f))
+
+;; Keys typed after the Vomnibar is asked for but before its frame has loaded reach the page.
+;; The page keeps them here (:typed, until the frame says it is ready) and hands them over.
+
+(defn typing-ahead?
+  "Whether keys should be kept for a frame that is still loading."
+  []
+  (boolean (and (:typed @state) (= "vomnibar" (:frame-kind @state)))))
+
+(defn type-ahead!
+  "Keeps KEY (a character, Backspace or Enter) for the loading frame."
+  [key]
+  (swap! state update :typed
+         (fn [{:keys [text] :as t}]
+           (case key
+             "Backspace" (assoc t :text (subs text 0 (max 0 (dec (count text)))))
+             "Enter" (assoc t :enter true)
+             (if (:enter t) t (assoc t :text (str text key)))))))
+
+(defn more-keys!
+  "Keys typed in a child frame while it asked the top page for the Vomnibar: they came before
+  anything typed here, so they go first, into what is kept or straight to the frame."
+  [text enter]
+  (if (:typed @state)
+    (swap! state update :typed (fn [t] (-> t (update :text #(str text %)) (update :enter #(or % enter)))))
+    (when-let [^js w (some-> ^js (:frame @state) .-contentWindow)]
+      (.postMessage w #js {:type "vimium-cljs:keys" :text text :enter enter} "*"))))
+
+(defn frame-ready!
+  "The frame has loaded: give it the keys kept for it and stop keeping them."
+  []
+  (when-let [{:keys [text enter]} (:typed @state)]
+    (swap! state dissoc :typed)
+    (when-let [^js w (some-> ^js (:frame @state) .-contentWindow)]
+      (.postMessage w #js {:type "vimium-cljs:keys" :text text :enter enter} "*"))))
 
 (defn frame-window [] (some-> ^js (:frame @state) .-contentWindow))

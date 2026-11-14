@@ -363,6 +363,79 @@ test('the Vomnibar command opens a popup on chrome:// pages and the choice opens
   assert.ok(!targetInfos.some((t) => t.targetId === popup.targetId), 'popup closed');
 });
 
+test('the popup Vomnibar fills its window: no margin, no scrollbar, keys at the bottom', T, async () => {
+  const { targetId } = await b.cdp('Target.createTarget', { url: 'chrome://version' });
+  const w = await workerSession(b.cdp, b.extensionId);
+  await evaluate(b.cdp, w, `chrome.tabs.query({}).then(ts => vimiumCljsVomnibarCommand(ts.find(t => t.url.startsWith('chrome://version')), 'tabs')).then(() => true)`);
+  let popup;
+  for (let i = 0; i < 30 && !popup; i++) {
+    popup = (await b.cdp('Target.getTargets')).targetInfos.find((t) => t.type === 'page' && t.url.includes('popup=1'));
+    if (!popup) await sleep(100);
+  }
+  assert.ok(popup, 'popup Vomnibar');
+  const ps = (await b.cdp('Target.attachToTarget', { targetId: popup.targetId, flatten: true })).sessionId;
+  let box;
+  for (let i = 0; i < 30 && !box?.rows; i++) {
+    await sleep(100);
+    box = await evaluate(b.cdp, ps, `(() => { const r = document.getElementById('vomnibar').getBoundingClientRect(), k = document.getElementById('keys').getBoundingClientRect();
+      return { left: r.left, top: r.top, right: innerWidth - r.right, bottom: innerHeight - r.bottom, keysBottom: innerHeight - k.bottom,
+        rows: document.querySelectorAll('#list li').length, page: getComputedStyle(document.body).backgroundColor,
+        card: getComputedStyle(document.getElementById('vomnibar')).backgroundColor,
+        scroll: document.documentElement.scrollHeight > innerHeight || innerWidth > document.documentElement.clientWidth }; })()`).catch(() => null);
+  }
+  assert.deepEqual([box.left, box.top, box.right, box.bottom, box.keysBottom], [0, 0, 0, 0, 0], `card edge to edge: ${JSON.stringify(box)}`);
+  assert.equal(box.page, box.card, 'no other colour around the card');
+  assert.equal(box.scroll, false, 'no scrollbar');
+  await b.cdp('Target.closeTarget', { targetId: popup.targetId });
+  await b.cdp('Target.closeTarget', { targetId });
+});
+
+test('a new tab is the Vomnibar, focused, and opens what you pick in that tab', T, async () => {
+  const w = await workerSession(b.cdp, b.extensionId);
+  const before = await evaluate(b.cdp, w, 'chrome.tabs.query({}).then(ts => ts.length)');
+  await evaluate(b.cdp, w, 'chrome.tabs.create({}).then(() => true)');
+  let nt;
+  for (let i = 0; i < 40 && !nt; i++) {
+    nt = (await b.cdp('Target.getTargets')).targetInfos.find((t) => t.type === 'page' && t.url.endsWith('/ui.html?newtab'));
+    if (!nt) await sleep(100);
+  }
+  assert.ok(nt, 'chrome://newtab moved on to ui.html?newtab');
+  const s = (await b.cdp('Target.attachToTarget', { targetId: nt.targetId, flatten: true })).sessionId;
+  let st;
+  for (let i = 0; i < 30 && !st?.rows; i++) {
+    await sleep(100);
+    st = await evaluate(b.cdp, s, `({ input: document.activeElement?.id, rows: document.querySelectorAll('#list li').length, title: document.title,
+      shown: !document.getElementById('vomnibar').hidden })`).catch(() => null);
+  }
+  assert.deepEqual([st.input, st.shown, st.title], ['query', true, 'New Tab'], JSON.stringify(st));
+  assert.equal(await evaluate(b.cdp, w, 'chrome.tabs.query({}).then(ts => ts.length)'), before + 1, 'one new tab, the new tab page closed');
+  const target = `http://127.0.0.1:${port}/frame.html?from-new-tab`;
+  page = s;
+  await ctl()('keys', { seq: '<esc>' }); // Escape clears the text and leaves the page open
+  assert.ok(await evaluate(b.cdp, s, "!document.getElementById('vomnibar').hidden"), 'Escape keeps the new tab page');
+  await evaluate(b.cdp, s, `(() => { const q = document.getElementById('query'); q.value = ${JSON.stringify(target)}; q.dispatchEvent(new Event('input')); return true; })()`);
+  await ctl()('keys', { seq: '<enter>' });
+  let url;
+  for (let i = 0; i < 30 && url !== target; i++) { await sleep(100); ({ targetInfo: { url } } = await b.cdp('Target.getTargetInfo', { targetId: nt.targetId })); }
+  assert.equal(url, target, 'opened in the new tab itself');
+  await b.cdp('Target.closeTarget', { targetId: nt.targetId });
+});
+
+test('keys typed right after Ctrl+L, before the Vomnibar has loaded, land in it', T, async () => {
+  await open();
+  const w = await workerSession(b.cdp, b.extensionId);
+  const f0 = await facts();
+  await evaluate(b.cdp, w, 'chrome.tabs.query({active: true, lastFocusedWindow: true}).then(t => { vimiumCljsVomnibarCommand(t[0]); return true; })');
+  await ctl()('keys', { seq: 'jjkk notes', gap: 0 });
+  const ctlv = controller(b.cdp, async () => page, b.extensionId);
+  let v;
+  for (let i = 0; i < 30 && v?.value !== 'jjkk notes'; i++) { await sleep(50); v = await ctlv('vomnibar'); }
+  assert.equal(v.value, 'jjkk notes', 'every key in the input');
+  const f1 = await facts();
+  assert.deepEqual([f1.scrollY, f1.pageKeys, f1.mode], [f0.scrollY, f0.pageKeys, 'normal'], 'no key reached the page');
+  await keys('<esc>', 300);
+});
+
 test('the side-panel tab list shows the window\'s tabs; a click switches, × closes', T, async () => {
   const a = await open('/?panel-a');
   await open('/?panel-b');

@@ -1,12 +1,17 @@
 :root {
+  --page: #f1f3f4;
   --bg: #ffffff; --fg: #1f1f1f; --muted: #6b6f76; --line: rgba(0,0,0,.08); --sel: #e8f0fe; --accent: #1a66d6;
   --mark: #1a66d6; --chip: #f1f3f4; --shadow: 0 10px 28px rgba(0,0,0,.16), 0 1px 4px rgba(0,0,0,.10);
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #202124; --fg: #e8eaed; --muted: #9aa0a6; --sel: #2f3a4d;
+  :root { --page: #17181a; --bg: #202124; --fg: #e8eaed; --muted: #9aa0a6; --sel: #2f3a4d;
           --accent: #8ab4f8; --mark: #8ab4f8; --chip: #303134; --line: rgba(255,255,255,.13); --shadow: 0 10px 28px rgba(0,0,0,.45), 0 1px 4px rgba(0,0,0,.3); }
 }
 html, body { margin: 0; background: transparent; font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--fg); }
+/* No scrollbars anywhere: the list scrolls under the keys and keeps the selected row in view. */
+html, body, #list { scrollbar-width: none; }
+::-webkit-scrollbar { display: none; }
+html { overflow: hidden; }
 #vomnibar { margin: 16px 32px 48px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
 #bar { display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 52px; }
 #bar svg { flex: none; width: 18px; height: 18px; color: var(--muted); }
@@ -14,7 +19,7 @@ html, body { margin: 0; background: transparent; font: 14px/1.4 system-ui, -appl
 #query::placeholder { color: var(--muted); }
 #chip { flex: none; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--chip); border-radius: 6px; padding: 2px 8px; }
 #chip:empty { display: none; }
-#list { list-style: none; margin: 0; padding: 4px 6px 6px; border-top: 1px solid var(--line); }
+#list { list-style: none; margin: 0; padding: 4px 6px 6px; border-top: 1px solid var(--line); max-height: 400px; overflow-y: auto; }
 #list:empty { display: none; }
 #list li { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 10px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 #list li.selected { background: var(--sel); }
@@ -30,7 +35,19 @@ html, body { margin: 0; background: transparent; font: 14px/1.4 system-ui, -appl
 #list .num { flex: none; width: 1.2em; text-align: center; font: 600 12px ui-monospace, monospace; color: var(--muted); }
 #keys { display: flex; gap: 18px; padding: 7px 16px 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 #keys kbd { font: 600 12px system-ui, sans-serif; color: var(--fg); background: var(--chip); border-radius: 4px; padding: 0 4px; margin-right: 4px; }
-body.popup #vomnibar { margin: 0; border: 0; border-radius: 0; box-shadow: none; min-height: 100vh; }
+/* The popup window (pages without our content script): the card is the whole window, list
+   rows from the top and the keys at the bottom, in the card's colour edge to edge. */
+/* Not in the frame: an iframe whose color-scheme differs from the page's gets an opaque backdrop. */
+:root:has(body.popup), :root:has(body.newtab) { color-scheme: light dark; }
+body.popup { background: var(--bg); }
+body.newtab { background: var(--page); }
+body.popup #vomnibar { margin: 0; border: 0; border-radius: 0; box-shadow: none; height: 100vh;
+  display: flex; flex-direction: column; box-sizing: border-box; }
+body.popup #list { flex: 1 1 auto; max-height: none; }
+body.popup #list:empty { display: block; }
+/* The new tab page: the card where the overlay would be, on a plain page. */
+body.newtab { min-height: 100vh; }
+body.newtab #vomnibar { width: min(900px, calc(100vw - 64px)); margin: 70px auto 0; box-sizing: border-box; }
 #help { color: #222; }
 #help { background: #fff; border: 1px solid #aaa; border-radius: 8px; box-shadow: 0 6px 30px rgba(0,0,0,.35); padding: 12px 18px; height: calc(100vh - 28px); overflow: auto; box-sizing: border-box; }
 #help header { display: flex; justify-content: space-between; align-items: center; }

@@ -45,7 +45,8 @@ async function pageSession() {
 const { server, port } = await startServer(controller(b.cdp, pageSession, b.extensionId));
 // Background tabs for the Vomnibar properties to find and switch to.
 const ours = new Set();
-for (const path of ['tube.html', 'notes.html'])
+// Nine more make the tab search (p) longer than its ten visible rows, so it has to scroll.
+for (const path of ['tube.html', 'notes.html', ...Array.from({ length: 9 }, (_, i) => `frame.html?tab=${i}`)])
   ours.add((await b.cdp('Target.createTarget', { url: `http://127.0.0.1:${port}/${path}`, background: true })).targetId);
 // Wait for the DevTools port.
 for (let i = 0; i < 50; i++) {

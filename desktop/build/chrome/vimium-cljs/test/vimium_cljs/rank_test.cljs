@@ -35,6 +35,30 @@
   (is (= 1 (r/edit-distance "abc" "abd")))
   (is (= 3 (r/edit-distance "" "abc"))))
 
+(defn- rand-str [n] (apply str (repeatedly n #(rand-nth "abcde-"))))
+
+(deftest typo-length-agrees-with-edit-distance
+  ;; The table typo-length fills (one pass, given up early) must give what edit-distance
+  ;; does for each of the lengths n, n-1, n+1, first that fits.
+  (let [typo-length @#'r/typo-length]
+    (dotimes [_ 3000]
+      (let [t (rand-str (+ 4 (rand-int 6)))
+            s (rand-str (+ 1 (rand-int 14)))
+            i (rand-int (count s))
+            budget (if (>= (count t) 8) 2 1)
+            n (count t)
+            want (some (fn [l] (when (and (pos? l) (<= (+ i l) (count s)) (<= (r/edit-distance t (subs s i (+ i l))) budget)) l))
+                       [n (dec n) (inc n)])]
+        (is (= want (typo-length t s i budget)) (pr-str t s i))))))
+
+(deftest cached-ranking-matches-uncached
+  ;; Ranking a prepared vector again caches each term's matches; the rows must be the same
+  ;; as ranking the same items with nothing cached, keystroke after keystroke.
+  (let [prepared (r/prepare items)
+        strip (fn [rows] (map #(select-keys % [:title :score :match]) rows))]
+    (doseq [q ["g" "gi" "git" "git v" "git vi" "git vim" "vim" "vimuim" "hn" "news ex" "zz" ""]]
+      (is (= (strip (r/rank q (seq (r/prepare items)) now {})) (strip (r/rank q prepared now {}))) q))))
+
 (deftest ranking
   (is (= "Hacker News" (top "hn")) "acronym")
   (is (= "Hacker News" (top "hacker news")) "exact title")

@@ -13,19 +13,22 @@ const flatpak = spawnSync('flatpak', ['info', 'com.google.Chrome'], { stdio: 'ig
 const chromeBin = process.env.CHROME || (flatpak ? null : ['chromium', 'chromium-browser'].find((c) => spawnSync('which', [c]).status === 0));
 export const available = !!(flatpak || chromeBin);
 
-export async function launch({ port, width = 1024, height = 768, ext = join(ROOT, 'ext') } = {}) {
+// `display` (":99") runs a headed Chrome on that X server instead (an Xvfb for checks that need
+// Chrome's own UI: the address bar, popup windows, the new tab page's focus).
+export async function launch({ port, width = 1024, height = 768, ext = join(ROOT, 'ext'), display, flags: extra = [] } = {}) {
   const profile = mkdtempSync(join(tmpdir(), 'vimium-cljs-e2e-'));
   const flags = [
-    '--headless=new', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-gpu',
+    ...(display ? ['--ozone-platform=x11', '--window-position=0,0'] : ['--headless=new']), `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--disable-sync', '--disable-background-networking', '--remote-debugging-pipe', '--enable-unsafe-extension-debugging',
     `--window-size=${width},${height}`, '--js-flags=--max-old-space-size=512',
     ...(port ? [`--remote-debugging-port=${port}`, '--remote-allow-origins=*'] : []),
-    'about:blank',
+    ...extra, 'about:blank',
   ];
   const [cmd, args] = chromeBin
     ? [chromeBin, flags]
-    : ['flatpak', ['run', `--filesystem=${ROOT}:ro`, `--filesystem=${ext}`, `--filesystem=${profile}`, 'com.google.Chrome', ...flags]];
-  const proc = spawn(cmd, args, { stdio: ['ignore', 'ignore', process.env.CHROME_LOG ? 'inherit' : 'ignore', 'pipe', 'pipe'] });
+    : ['flatpak', ['run', `--filesystem=${ROOT}:ro`, `--filesystem=${ext}`, `--filesystem=${profile}`,
+       ...(display ? ['--socket=x11', '--nosocket=wayland', `--env=DISPLAY=${display}`] : []), 'com.google.Chrome', ...flags]];
+  const proc = spawn(cmd, args, { env: display ? { ...process.env, DISPLAY: display } : process.env, stdio: ['ignore', 'ignore', process.env.CHROME_LOG ? 'inherit' : 'ignore', 'pipe', 'pipe'] });
   let id = 0, buf = '';
   const waiting = new Map();
   const listeners = new Set();

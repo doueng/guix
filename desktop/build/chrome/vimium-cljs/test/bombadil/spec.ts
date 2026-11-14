@@ -57,14 +57,32 @@ export const scrollingMoves = always(() => {
 });
 
 // ---- Vomnibar --------------------------------------------------------------
-// The vomnibar action (below) opens it with o, types, then presses Escape or Enter,
+// The vomnibar action (below) opens it with o (or p, tab search), types, then presses Escape or Enter,
 // and records what the frame showed (through /__ctl/vomnibar) and the open tabs.
 
-type Vom = { open: boolean; focused: boolean; value: string; items: { url: string; type: string; title: string }[] };
-type VomLast = { kind: "vomnibar"; text: string; target: string | null; end: string; openMs: number; opened: Facts; typed: Vom;
-  mid: Facts; closed: Vom; pageFocused: boolean; before: Facts; after: Facts;
+type Vom = { open: boolean; focused: boolean; value: string; for: string | null; scrollbars: string[]; selectedVisible: boolean;
+  items: { url: string; type: string; title: string }[] };
+type VomLast = { kind: "vomnibar"; key: string; text: string; target: string | null; end: string; openMs: number; opened: Facts;
+  typed: Vom; resultsMs: number; moved: Vom | null; mid: Facts; closed: Vom; pageFocused: boolean; before: Facts; after: Facts;
   tabsBefore: { urls: string[]; active: string }; tabsAfter: { urls: string[]; active: string } };
 const vl = () => { const l = f()?.last as any; return l && l.kind === "vomnibar" ? l as VomLast : null; };
+
+/** Rows for the typed text show within 150 ms of the last key: ranking stays in the frame, one pass per frame. */
+export const vomnibarResultsFast = always(() => { const l = vl(); return !l || l.resultsMs <= 150; });
+
+/** No scrollbar shows in the Vomnibar, and the selected row stays in view as Tab moves it past the tenth. */
+export const vomnibarNoScrollbars = always(() => {
+  const l = vl();
+  return !l || [l.typed, l.moved].every((v) => !v || (v.scrollbars.length === 0 && v.selectedVisible));
+});
+
+/** Keys typed right after o, before the frame has loaded, all land in the input and none reach the page. */
+export const vomnibarTypeAhead = always(() => {
+  const l = f()?.last as any;
+  if (!l || l.kind !== "typeAhead") return true;
+  return l.typed.value === l.text && l.typed.focused && l.after.pageKeys === l.before.pageKeys && l.after.mode === "normal"
+    && l.after.scrollY === l.before.scrollY;
+});
 
 /** o opens the Vomnibar, its input focused, within 750 ms. */
 export const vomnibarOpensFast = always(() => { const l = vl(); return !l || (l.typed.open && l.openMs <= 750); });
@@ -151,7 +169,7 @@ const typeInto = registerCustomAction("typeInto", async (document, window, id: s
 // Text to type: the exact title or URL of another open fixture page (the runner opens them
 // in background tabs), or text that matches nothing open.
 const pages: Record<string, string> = { "/tube.html": "vimium-cljs YouTube-like fixture", "/notes.html": "Vomnibar field notes" };
-const vomnibar = registerCustomAction("vomnibar", async (_d, window, what: string, end: string) => {
+const vomnibar = registerCustomAction("vomnibar", async (_d, window, key: string, what: string, end: string) => {
   const w = window as any;
   const path = Object.keys(pages).find((p) => p !== w.location.pathname)!;
   const target = what === "title" || what === "url" ? `${w.location.origin}${path}` : null;
@@ -162,14 +180,25 @@ const vomnibar = registerCustomAction("vomnibar", async (_d, window, what: strin
   const tabsBefore = await ctl("/__ctl/tabs");
   const before = probeOf(w);
   const t0 = Date.now();
-  await ctl("/__ctl/keys?seq=o");
+  await ctl(`/__ctl/keys?seq=${key}`);
   let v = await ctl("/__ctl/vomnibar");
   while (!(v.open && v.focused) && Date.now() - t0 < 3000) { await settle(15); v = await ctl("/__ctl/vomnibar"); }
   const openMs = Date.now() - t0;
   const opened = probeOf(w);
   await ctl(`/__ctl/keys?gap=0&seq=${encodeURIComponent(text)}`);
-  await settle(350);
-  const typed = await ctl("/__ctl/vomnibar");
+  const t1 = Date.now();
+  let typed = await ctl("/__ctl/vomnibar");
+  while (typed.for !== text && Date.now() - t1 < 2000) { await settle(5); typed = await ctl("/__ctl/vomnibar"); }
+  const resultsMs = Date.now() - t1;
+  await settle(300);
+  typed = await ctl("/__ctl/vomnibar");
+  // Escape leaves whatever is selected, so move past the tenth row first.
+  let moved = null;
+  if (end === "esc") {
+    await ctl(`/__ctl/keys?gap=0&seq=${"<tab>".repeat(12)}`);
+    await settle(150);
+    moved = await ctl("/__ctl/vomnibar");
+  }
   const mid = probeOf(w);
   await ctl(`/__ctl/keys?seq=${end === "enter" ? "<enter>" : "<esc>"}`);
   await settle(300);
@@ -177,12 +206,31 @@ const vomnibar = registerCustomAction("vomnibar", async (_d, window, what: strin
   const tabsAfter = await ctl("/__ctl/tabs");
   const pageFocused = w.document.hasFocus();
   if (end === "enter") { await ctl("/__ctl/front"); await settle(200); }
-  if (w.__probe) w.__probe.last = { kind: "vomnibar", text, target, end, openMs, opened, typed, mid,
+  if (w.__probe) w.__probe.last = { kind: "vomnibar", key, text, target, end, openMs, opened, typed, resultsMs, moved, mid,
     closed, pageFocused, before, after: probeOf(w), tabsBefore, tabsAfter, seq: text };
 });
 
-const vomnibarActions = actions(() =>
-  ["title", "url", "zq xv", "fixtrue", "j k gg"].flatMap((what) => ["esc", "enter"].map((end) => vomnibar(what, end))));
+// o is the Vomnibar and p (config.cljs) the tab search, which lists enough tabs to scroll.
+const typeAhead = registerCustomAction("typeAhead", async (_d, window, key: string, text: string) => {
+  const w = window as any;
+  await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>")}`);
+  await settle(100);
+  const before = probeOf(w);
+  await ctl(`/__ctl/keys?gap=0&seq=${encodeURIComponent(key + text)}`);
+  const t0 = Date.now();
+  let typed = await ctl("/__ctl/vomnibar");
+  while (!(typed.open && typed.focused && typed.value === text) && Date.now() - t0 < 1500) { await settle(15); typed = await ctl("/__ctl/vomnibar"); }
+  const after = probeOf(w);
+  await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>")}`);
+  await settle(250);
+  if (w.__probe) w.__probe.last = { kind: "typeAhead", seq: key + text, text, typed, before, after };
+});
+
+const vomnibarActions = weighted([
+  [3, actions(() => ["title", "url", "zq xv", "fixtrue", "j k gg"].flatMap((what) => ["esc", "enter"].map((end) => vomnibar("o", what, end))))],
+  [2, actions(() => ["", "frame", "title"].flatMap((what) => ["esc", "enter"].map((end) => vomnibar("p", what, end))))],
+  [2, actions(() => ["notes", "jjkk", "field n"].flatMap((t) => ["o", "p"].map((k) => typeAhead(k, t))))],
+]);
 
 const keyActions = weighted([
   [6, actions(() => ["j", "k", "j", "jj", "d", "u", "gg", "G"].map((s) => press(s)))],

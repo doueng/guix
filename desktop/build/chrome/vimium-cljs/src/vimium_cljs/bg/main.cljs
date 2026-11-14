@@ -108,7 +108,7 @@
   (let [id (.-id tab)]
     (case name
       "reload" (js/chrome.tabs.reload id #js {:bypassCache (boolean (get options "hard"))})
-      "createTab" (let [url (not-empty config/new-tab-url)]
+      "createTab" (let [url (or (not-empty config/new-tab-url) (js/chrome.runtime.getURL "ui.html?newtab"))]
                     (dotimes [i n]
                       (js/chrome.tabs.create (clj->js (cond-> {:index (+ (.-index tab) 1 i)} url (assoc :url url))))))
       "nextTab" (select-relative! tab n)
@@ -249,38 +249,8 @@
                  false)))))
 
 ;; ---- Vomnibar ---------------------------------------------------------------------
-;; Candidates are the open tabs (live), history and bookmarks (read once and cached, so each
-;; keystroke ranks them locally: acronyms and typos match what chrome.history.search would
-;; filter out). rank/ scores them; the user's picks, kept in storage.local, feed it.
-
-(def ^:private max-rows 10)
-(def ^:private day-ms (* 1000 60 60 24))
-
-(defonce ^:private cache (atom nil))
-(defn- drop-cache! [& _] (reset! cache nil))
-
-(defn- bookmark-leaves [^js nodes]
-  (mapcat (fn [^js n] (if (.-url n)
-                        [{:type "bookmark" :title (.-title n) :url (.-url n) :added (.-dateAdded n)}]
-                        (bookmark-leaves (or (.-children n) #js []))))
-          nodes))
-
-(defn- history+bookmarks []
-  (or @cache
-      (reset! cache
-              (-> (js/Promise.all #js [(js/chrome.history.search #js {:text "" :maxResults 3000
-                                                                      :startTime (- (js/Date.now) (* 180 day-ms))})
-                                       (js/chrome.bookmarks.getTree)])
-                  (.then (fn [[hs tree]]
-                           ;; The popup Vomnibar is a page of ours, so it lands in history; leave it out.
-                           (let [own (js/chrome.runtime.getURL "")]
-                             {:history (rank/prepare (keep (fn [^js h] (when-not (str/starts-with? (.-url h) own)
-                                                                        {:type "history" :title (.-title h) :url (.-url h)
-                                                                         :time (.-lastVisitTime h) :visits (.-visitCount h)
-                                                                         :typed (.-typedCount h)}))
-                                                      hs))
-                              :bookmarks (rank/prepare (bookmark-leaves tree))})))
-                  (.catch (fn [e] (drop-cache!) (throw e)))))))
+;; The Vomnibar page reads and ranks its candidates itself (vimium-cljs.vomnibar); the worker
+;; opens what it picks and remembers the pick, which ranks it higher next time.
 
 (defn- picks []
   (-> (js/chrome.storage.local.get "vomnibarPicks")
@@ -297,47 +267,6 @@
                                      :q (vec (take 5 (distinct (remove str/blank? (cons q (:q old))))))})]
                  (js/chrome.storage.local.set
                   (clj->js {"vomnibarPicks" (into {} (take 300 (sort-by (comp - :t val) ps)))})))))))
-
-(defn- tab-item [^js t] {:type "tab" :title (.-title t) :url (.-url t) :tabId (.-id t) :windowId (.-windowId t)
-                         :time (.-lastAccessed t)})
-
-(defn- typed-item [query]
-  (when-not (str/blank? query)
-    (let [url (rank/->url query config/search-engines config/search-url)]
-      (if-let [[_ e more] (rank/engine-of query config/search-engines)]
-        {:type "search" :engine (:name e) :title more :url url}
-        {:type (if (rank/url-like? query) "url" "search") :title (str/trim query) :url url}))))
-
-(defn vomnibar-query [mode query ^js tab]
-  (-> (js/Promise.all #js [(js/chrome.tabs.query #js {}) (recency) (picks)
-                           (if (= mode "tabs") (p nil) (history+bookmarks))])
-      (.then
-       (fn [[tabs ids ps hb]]
-         (let [now (js/Date.now)
-               cur (some-> tab .-id)
-               cur-url (some-> tab .-url rank/pick-key)
-               order (into {} (map-indexed (fn [i id] [id i]) ids))
-               by-recency (sort-by (fn [^js t] [(if (= (.-id t) cur) 1 0) (get order (.-id t) 1e6)]) tabs)
-               blank? (str/blank? query)]
-           (case mode
-             "tabs" (vec (take 20 (if blank? (map tab-item by-recency) (rank/rank query (map tab-item tabs) now ps))))
-             "bookmarks" (vec (take 20 (if blank?
-                                         (sort-by (comp - :added) (:bookmarks hb))
-                                         (rank/rank query (:bookmarks hb) now ps))))
-             ;; omni and edit: never offer the page you are on.
-             (let [others (remove #(= cur-url (rank/pick-key (:url %))))
-                   ;; A tab's frecency is its page's: visits from history, the later of the two times.
-                   visited (into {} (map (juxt (comp rank/pick-key :url) identity)) (:history hb))
-                   with-visits (fn [t] (if-let [h (visited (rank/pick-key (:url t)))]
-                                         (assoc t :visits (:visits h) :typed (:typed h) :time (max (or (:time t) 0) (or (:time h) 0)))
-                                         t))
-                   tab-items (into [] (comp (map tab-item) others (map with-visits)) (remove #(= cur (.-id ^js %)) by-recency))]
-               (if blank?
-                 (->> (concat (take 4 tab-items) (sort-by (comp - :time) (:history hb)))
-                      (sequence others) rank/dedupe-urls (take max-rows) vec)
-                 (rank/omni-list query (typed-item query)
-                                 (rank/rank query (into tab-items others (concat (:bookmarks hb) (:history hb))) now ps)
-                                 max-rows)))))))))
 
 (defn- same-page [url]
   (str/replace (rank/pick-key url) #"#.*$" ""))
@@ -368,7 +297,8 @@
 ;; auto-assign a suggested key that a browser shortcut has). The command arrives here even
 ;; when focus is in the address bar. The page cannot take focus back from the address bar,
 ;; and a tab without our content script (chrome:// pages, the Web Store) has no page UI, so
-;; both get the Vomnibar in a popup window that acts on that tab.
+;; both get the Vomnibar in a popup window that acts on that tab. Our new tab page has the
+;; Vomnibar already, so there the command only focuses it (or switches it to tab search).
 
 (defn- target-tab
   "The tab a Vomnibar message acts on: the one it names (a popup Vomnibar) or the sender's."
@@ -377,11 +307,25 @@
     (-> (js/chrome.tabs.get id) (.catch (fn [_] sender-tab)))
     (p sender-tab)))
 
+;; The popup is sized to the Vomnibar with ten rows, as Hyprland's chrome-extension-popup rule.
 (defn- vomnibar-popup! [mode ^js tab]
   (js/chrome.windows.create
    #js {:url (js/chrome.runtime.getURL (str "ui.html#vomnibar?mode=" mode "&popup=1"
                                             (when tab (str "&tabId=" (.-id tab)))))
         :type "popup" :width 900 :height 520 :focused true}))
+
+(defn- new-tab-page?
+  "Whether TAB shows our new tab page (ui.html?newtab, where chrome://newtab sends it)."
+  [^js tab]
+  (str/starts-with? (or (.-url tab) "") (js/chrome.runtime.getURL "ui.html?newtab")))
+
+(defn- show-in-tab
+  "Asks TAB to show the Vomnibar in MODE; resolves to whether it could (it has focus)."
+  [mode ^js tab]
+  (-> (if (new-tab-page? tab)
+        (js/chrome.runtime.sendMessage #js {:type "vomnibar-show" :mode mode :tabId (.-id tab)})
+        (js/chrome.tabs.sendMessage (.-id tab) #js {:type "vomnibar" :mode mode} #js {:frameId 0}))
+      (.catch (fn [_] false))))
 
 (defn- vomnibar-command!
   "Open the Vomnibar in MODE (\"omni\", \"tabs\") over TAB's page, or in a popup when the page can't take it."
@@ -390,8 +334,7 @@
       (.then (fn [^js tab]
                (if-not tab
                  (vomnibar-popup! mode nil)
-                 (-> (js/chrome.tabs.sendMessage (.-id tab) #js {:type "vomnibar" :mode mode} #js {:frameId 0})
-                     (.catch (fn [_] false))
+                 (-> (show-in-tab mode tab)
                      (.then (fn [shown] (when-not shown (vomnibar-popup! mode tab))))))))))
 
 ;; ---- messages ------------------------------------------------------------------------
@@ -404,6 +347,7 @@
       (case (.-type msg)
         "command" (do (run-command! (.-name msg) tab frame (or (.-count msg) 1) (.-explicit msg) (js->clj (.-options msg))) nil)
         "top-command" (do (to-frame tab-id 0 {:type "top-command" :name (.-name msg) :count (.-count msg)}) nil)
+        "vomnibar-keys" (do (to-frame tab-id 0 {:type "vomnibar-keys" :text (.-text msg) :enter (.-enter msg)}) nil)
         "tab-url" (.-url tab)
         "hints-start" (do (hints-start! tab-id frame (.-mode msg)) nil)
         "hints-key" (do (hints-key! tab-id (.-key msg)) nil)
@@ -416,9 +360,6 @@
                                           (clj->js {"globalMarks" (assoc m (.-letter msg) {"url" (.-url msg) "tabId" tab-id
                                                                                               "scroll" (js->clj (.-scroll msg))})}))))))
         "mark-goto-global" (mark-goto! (.-letter msg))
-        "vomnibar-query" (-> (target-tab msg tab)
-                             (.then #(vomnibar-query (.-mode msg) (or (.-query msg) "") %))
-                             (.then clj->js))
         "vomnibar-open" (do (.then (target-tab msg tab) #(vomnibar-open! % msg)) nil)
         nil))))
 
@@ -460,10 +401,6 @@
   ;; DevTools key events never reach Chrome's shortcuts, so the e2e suite runs the command here.
   (unchecked-set js/globalThis "vimiumCljsVomnibarCommand" (fn [tab mode] (vomnibar-command! (or mode "omni") tab)))
   (js/chrome.tabs.onActivated.addListener (fn [^js info] (note-active! (.-tabId info))))
-  (js/chrome.history.onVisited.addListener drop-cache!)
-  (js/chrome.history.onVisitRemoved.addListener drop-cache!)
-  (doseq [^js ev [js/chrome.bookmarks.onCreated js/chrome.bookmarks.onRemoved js/chrome.bookmarks.onChanged]]
-    (.addListener ev drop-cache!))
   (js/chrome.tabs.onRemoved.addListener (fn [id] (swap! sessions dissoc id)))
   (js/chrome.tabs.onUpdated.addListener (fn [id ^js info] (when (= "loading" (.-status info)) (swap! sessions dissoc id))))
   ;; A page changing its URL in place (history.pushState, a new #fragment) is navigation to

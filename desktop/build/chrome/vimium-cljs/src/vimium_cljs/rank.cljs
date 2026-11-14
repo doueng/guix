@@ -56,9 +56,9 @@
   [t s s* starts?]
   (let [n (count s*) m (count t) acc #js []]
     (loop [ti 0 si 0]
-      (cond (= ti m) acc
+      (cond (== ti m) acc
             (>= si n) nil
-            (and (= (.charCodeAt t ti) (.charCodeAt s* si)) (or (not starts?) (word-start? s si)))
+            (and (== (.charCodeAt t ti) (.charCodeAt s* si)) (or (not starts?) (word-start? s si)))
             (do (.push acc si) (recur (inc ti) (inc si)))
             :else (recur ti (inc si))))))
 
@@ -86,19 +86,54 @@
        (aset d (* i w) i)
        (loop [j 1]
          (when (< j w)
-          (let [cost (if (= (.charCodeAt a (dec i)) (.charCodeAt b (dec j))) 0 1)
+          (let [cost (if (== (.charCodeAt a (dec i)) (.charCodeAt b (dec j))) 0 1)
                 v (min (inc (aget d (+ (* (dec i) w) j)))
                        (inc (aget d (+ (* i w) (dec j))))
                        (+ (aget d (+ (* (dec i) w) (dec j))) cost))
                 v (if (and (> i 1) (> j 1)
-                           (= (.charCodeAt a (dec i)) (.charCodeAt b (- j 2)))
-                           (= (.charCodeAt a (- i 2)) (.charCodeAt b (dec j))))
+                           (== (.charCodeAt a (dec i)) (.charCodeAt b (- j 2)))
+                           (== (.charCodeAt a (- i 2)) (.charCodeAt b (dec j))))
                     (min v (inc (aget d (+ (* (- i 2) w) (- j 2)))))
                     v)]
             (aset d (+ (* i w) j) v)
             (recur (inc j)))))
        (recur (inc i))))
     (aget d (+ (* n w) m))))
+
+(def ^:private dp (js/Int32Array. 4096))
+
+(defn- typo-length
+  "The length l (tried as N, N-1, N+1) of the text at I in S* that is within BUDGET edits of
+  T (Damerau, as edit-distance), or nil. One table for all three lengths, in a reused buffer,
+  given up once two rows in a row are over budget (no later row can come back under it)."
+  [t s* i budget]
+  (let [n (count t)
+        m (min (inc n) (- (count s*) i))
+        w (inc m)]
+    (when (and (pos? m) (<= (* (inc n) w) (.-length dp)))
+      (dotimes [j w] (aset dp j j))
+      (let [done (loop [r 1 prev-over false]
+                   (if (> r n)
+                     true
+                     (do (aset dp (* r w) r)
+                         (let [over (loop [j 1 lo r]
+                                      (if (> j m)
+                                        (> lo budget)
+                                        (let [a (.charCodeAt t (dec r)) b (.charCodeAt s* (+ i (dec j)))
+                                              v (min (inc (aget dp (+ (* (dec r) w) j)))
+                                                     (inc (aget dp (+ (* r w) (dec j))))
+                                                     (+ (aget dp (+ (* (dec r) w) (dec j))) (if (== a b) 0 1)))
+                                              v (if (and (> r 1) (> j 1)
+                                                         (== a (.charCodeAt s* (+ i (- j 2))))
+                                                         (== (.charCodeAt t (- r 2)) b))
+                                                  (min v (inc (aget dp (+ (* (- r 2) w) (- j 2)))))
+                                                  v)]
+                                          (aset dp (+ (* r w) j) v)
+                                          (recur (inc j) (min lo v)))))]
+                           (if (and over prev-over) false (recur (inc r) over))))))]
+        (when done
+          (some (fn [l] (when (and (pos? l) (<= l m) (<= (aget dp (+ (* n w) l)) budget)) l))
+                [n (dec n) (inc n)]))))))
 
 (defn- typo-match
   "T (4+ characters) one edit (two from 8 characters) from the start of a word in S."
@@ -111,11 +146,9 @@
         (loop [i 0]
           (when (< i len)
             (let [c (.charCodeAt s* i)]
-              (or (when (and (or (= c c0) (= c c1)) (word-start? s i))
-                    (some (fn [l]
-                            (when (and (pos? l) (<= (+ i l) len) (<= (edit-distance t (subs s* i (+ i l))) budget))
-                              [0.4 [[i (+ i l)]]]))
-                          [n (dec n) (inc n)]))
+              (or (when (and (or (== c c0) (== c c1)) (word-start? s i))
+                    (when-let [l (typo-length t s* i budget)]
+                      [0.4 [[i (+ i l)]]]))
                   (recur (inc i))))))))))
 
 (defn- field [s] (let [s (or s "")] #js [s (str/lower-case s)]))
@@ -125,7 +158,7 @@
   [t s* limit]
   (loop [i 0 n 0]
     (cond (> n limit) n
-          (= i (count t)) n
+          (== i (count t)) n
           :else (recur (inc i) (if (neg? (.indexOf s* (.charAt t i))) (inc n) n)))))
 
 (defn- match-field
@@ -152,18 +185,24 @@
 
 (defn- prepared [ts] (mapv (fn [t] (let [sm (smart? t)] [(if sm t (str/lower-case t)) sm])) ts))
 
+(defn- term-match
+  "[:title or :url, [score ranges]] for term T where it scores best, or nil."
+  [t sm ^js tf ^js uf]
+  (let [tm (match-field t sm tf)
+        um (match-field t sm uf)
+        um (when um [(* 0.9 (first um)) (second um)])]
+    (cond (and tm um) (if (>= (first tm) (first um)) [:title tm] [:url um])
+          tm [:title tm]
+          um [:url um])))
+
 (defn- relevance
-  "[relevance per-term-matches] when every term matches the title or the display URL."
-  [pts q ^js tf ^js uf]
-  (let [ms (reduce (fn [acc [t sm]]
-                     (let [tm (match-field t sm tf)
-                           um (match-field t sm uf)
-                           um (when um [(* 0.9 (first um)) (second um)])
-                           m (cond (and tm um) (if (>= (first tm) (first um)) [:title tm] [:url um])
-                                   tm [:title tm]
-                                   um [:url um])]
-                       (if m (conj acc m) (reduced nil))))
-                   [] pts)]
+  "[relevance per-term-matches] when every term matches the title or the display URL.
+  IPTS are [k [t sm]] for the K-th prepared term; MATCH, called as (match k [t sm]), finds a term's match (term-match, or
+  a cached one)."
+  [ipts q ^js tf ^js uf match]
+  (let [ms (reduce (fn [acc [k pt]]
+                     (if-let [m (match k pt)] (conj acc m) (reduced nil)))
+                   [] ipts)]
     (when ms
       (let [lt (str/trim (aget tf 1)) lu (aget uf 1)
             exact? (or (= q lt) (= q lu) (= q (first (str/split lu #"/"))))]
@@ -187,7 +226,7 @@
   title or the display URL, else nil."
   [ts {:keys [title url]}]
   (let [pts (prepared ts) tf (field title) uf (field (display-url url))]
-    (when-let [[rel ms] (relevance pts (str/lower-case (str/join " " ts)) tf uf)]
+    (when-let [[rel ms] (relevance (map-indexed vector pts) (str/lower-case (str/join " " ts)) tf uf (fn [_ [t sm]] (term-match t sm tf uf)))]
       {:relevance rel :match (highlights pts ms tf uf)})))
 
 (def ^:private day-ms (* 1000 60 60 24))
@@ -206,36 +245,70 @@
 
 (defn pick-key [url] (str/lower-case (display-url url)))
 
+(defn item-key "ITEM's pick-key, from prepare when it ran." [item] (or (::key item) (pick-key (:url item))))
+
+;; Per-term matches for a prepared vector of items (the Vomnibar's candidates, ranked again on
+;; every keystroke): item vector -> Map of term -> JS array of [where match] (false: none) by
+;; item index. Held weakly, so it goes with the candidates.
+(defonce ^:private term-caches (js/WeakMap.))
+
+(defn- term-cache [items]
+  (when (and (vector? items) (seq items) (::tf (first items)))
+    (or (let [^js c (.get term-caches items)]
+          (if (and c (> (.-size c) 64)) (do (.clear c) c) c))
+        (let [c (js/Map.)] (.set term-caches items c) c))))
+
 (defn rank
   "The best 100 items matching QUERY, best first, each with :score and :match. PICKS
   maps pick-key -> {:n :t :q}. An empty query orders by frecency alone."
   ([query items now] (rank query items now {}))
   ([query items now picks]
    (let [ts (terms query)
-         pts (prepared ts)
+         ;; Terms already matched against these items (earlier keystrokes) go first: a
+         ;; cached term costs a lookup, and a new term is only tried on items the others match.
+         ^js cache (term-cache items)
+         pts (cond->> (prepared ts) cache (sort-by (fn [[t sm]] (if (.has cache (str sm t)) 0 1))))
+         arrays (when cache (mapv (fn [[t sm]] (let [k (str sm t)]
+                                                 (or (.get cache k) (let [a (js/Array. (count items))] (.set cache k a) a))))
+                                  pts))
+         ipts (vec (map-indexed vector pts))
          q (str/lower-case (str/join " " ts))
-         scored (->> items
-                     (keep (fn [i]
-                             (let [pick (when (seq picks) (get picks (pick-key (:url i))))
-                                   base (+ (frecency now i pick) (if (= "tab" (:type i)) 0.3 0))]
-                               (if (empty? ts)
-                                 (assoc i :score base :match {:title [] :url []})
-                                 (let [tf (or (::tf i) (field (:title i))) uf (or (::uf i) (field (display-url (:url i))))]
-                                   (when-let [[rel ms] (relevance pts q tf uf)]
-                                     (assoc i :score (+ (* 3 rel) base (pick-bonus q pick)) :relevance rel
-                                            ::found [ms tf uf])))))))
-                     (sort-by (comp - :score)))]
+         base (fn [i pick] (+ (frecency now i pick) (if (identical? "tab" (:type i)) 0.3 0)))
+         pick-of (fn [i] (when (seq picks) (get picks (item-key i))))
+         ^js found #js []]
+     (reduce (fn [idx i]
+               (do
+                 (if (empty? ts)
+                   (.push found #js [(base i (pick-of i)) i])
+                   (let [tf (or (::tf i) (field (:title i))) uf (or (::uf i) (field (display-url (:url i))))
+                         match (if arrays
+                                 (fn [k [t sm]]
+                                   (let [^js a (nth arrays k) m (aget a idx)]
+                                     (if (undefined? m)
+                                       (let [m (term-match t sm tf uf)] (aset a idx (or m false)) m)
+                                       (when m m))))
+                                 (fn [_ [t sm]] (term-match t sm tf uf)))]
+                     (when-let [[rel ms] (relevance ipts q tf uf match)]
+                       (let [pick (pick-of i)]
+                         (.push found #js [(+ (* 3 rel) (base i pick) (pick-bonus q pick)) i rel ms tf uf])))))
+                 (inc idx)))
+             0 items)
+     (.sort found (fn [^js a ^js b] (- (aget b 0) (aget a 0))))
      ;; Highlight ranges only for the rows that can be shown.
-     (into [] (map-indexed (fn [n i]
-                             (if-let [[ms tf uf] (::found i)]
-                               (cond-> (dissoc i ::found ::tf ::uf) (< n 40) (assoc :match (highlights pts ms tf uf)))
-                               (dissoc i ::tf ::uf))))
-           (take 100 scored)))))
+     (into [] (map-indexed (fn [n ^js f]
+                             (let [i (dissoc (aget f 1) ::tf ::uf)]
+                               (if (empty? ts)
+                                 (assoc i :score (aget f 0) :match {:title [] :url []})
+                                 (cond-> (assoc i :score (aget f 0) :relevance (aget f 2))
+                                   (< n 40) (assoc :match (highlights pts (aget f 3) (aget f 4) (aget f 5))))))))
+           (.slice found 0 100)))))
 
 (defn prepare
-  "ITEMS with their title and display URL folded once, for items ranked again and again."
+  "ITEMS with their title, display URL and pick-key folded once, for items ranked again and again."
   [items]
-  (mapv #(assoc % ::tf (field (:title %)) ::uf (field (display-url (:url %)))) items))
+  (mapv #(let [d (display-url (:url %))]
+           (assoc % ::tf (field (:title %)) ::uf (field d) ::key (str/lower-case d)))
+        items))
 
 (defn strong?
   "Whether a ranked item beats searching the typed text: every term a substring at a
@@ -250,7 +323,7 @@
   "One item per URL (ignoring scheme, www., trailing slash and #fragment), placed where
   its first item was: the open tab if there is one, else a bookmark, else the first."
   [items]
-  (let [k #(str/replace (pick-key (:url %)) #"#.*$" "")
+  (let [k #(str/replace (item-key %) #"#.*$" "")
         best (reduce (fn [m i] (update m (k i) #(if (and % (<= (type-rank (:type %) 3) (type-rank (:type i) 3))) % i)))
                      {} items)]
     (second (reduce (fn [[seen acc] i]
@@ -269,7 +342,7 @@
         plain-search? (and typed (= "search" (:type typed)) (not (:engine typed)))]
     (vec (take n (cond (nil? typed) ranked
                        (and plain-search? (seq ranked) (strong? (first ranked))) (concat [(first ranked) typed] (rest ranked))
-                       :else (cons typed (remove #(= (pick-key (:url %)) (pick-key (:url typed))) ranked)))))))
+                       :else (cons typed (remove #(= (item-key %) (pick-key (:url typed))) ranked)))))))
 
 (defn highlight
   "[[text matched?] ...] covering S, from RANGES [[start end] ...]."

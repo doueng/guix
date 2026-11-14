@@ -14,7 +14,14 @@ const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript' };
 // value and the rows (as the page cannot look into the extension's frame).
 const vomnibarState = `(() => {
   const q = document.getElementById('query'), v = document.getElementById('vomnibar');
+  const l = document.getElementById('list'), sel = l && l.querySelector('li.selected');
+  // An element shows a scrollbar when it overflows and its scrollbar takes room.
+  const scrollbars = [document.documentElement, document.body, l].filter((e) => e && e.scrollHeight > e.clientHeight + 1
+    && getComputedStyle(e).overflowY !== 'hidden' && (e === document.documentElement ? innerWidth > e.clientWidth : e.offsetWidth - e.clientWidth > (parseFloat(getComputedStyle(e).borderLeftWidth) || 0) * 2)).map((e) => e.id || e.tagName);
+  const r = sel && sel.getBoundingClientRect(), lr = l && l.getBoundingClientRect();
   return { open: !!q && !v.hidden, focused: document.hasFocus() && document.activeElement === q, value: q ? q.value : '',
+    for: l ? l.dataset.for ?? null : null, scrollbars,
+    selectedVisible: !sel || (r.top >= lr.top - 1 && r.bottom <= lr.bottom + 1 && r.top >= 0 && r.bottom <= innerHeight),
     items: [...document.querySelectorAll('#list li')].map((li) => ({ url: li.dataset.url, type: li.querySelector('.badge').textContent,
       title: li.querySelector('.title').textContent, selected: li.classList.contains('selected') })) };
 })()`;

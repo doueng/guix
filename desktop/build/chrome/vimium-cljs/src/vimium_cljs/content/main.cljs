@@ -369,6 +369,21 @@
    "openCopiedUrlInNewTab" (fn [_] (send! {:type "command" :name "openCopiedUrlInNewTab"}))
    "toggleViewSource" (fn [_] (send! {:type "command" :name "toggleViewSource"}))})
 
+;; A child frame asks the top page for the Vomnibar (its frame goes there) and keeps the keys
+;; typed meanwhile, until the Vomnibar takes focus from it; then the top page gets them.
+(defonce ^:private forwarding (atom nil))
+
+(defn- forward-keys! []
+  (when-let [{:keys [text enter timer]} @forwarding]
+    (reset! forwarding nil)
+    (js/clearTimeout timer)
+    (when (or (seq text) enter) (send! {:type "vomnibar-keys" :text text :enter enter}))))
+
+(defn- start-forwarding! []
+  (forward-keys!)
+  (reset! forwarding {:text "" :enter false :timer (js/setTimeout forward-keys! 1500)})
+  (.addEventListener js/window "blur" forward-keys! #js {:once true}))
+
 (defn run-command!
   [{:keys [command options]} count]
   (let [info (commands/by-name command)
@@ -376,7 +391,8 @@
         n (if (:once info) 1 (* n (or count 1)))]
     (cond
       (:bg info) (send! {:type "command" :name command :count n :explicit (some? count) :options options})
-      (and (:top info) (not top?)) (send! {:type "top-command" :name command :count n})
+      (and (:top info) (not top?)) (do (when (str/starts-with? command "Vomnibar.") (start-forwarding!))
+                                       (send! {:type "top-command" :name command :count n}))
       :else (when-let [f (local-commands command)]
               (f n)))))
 
@@ -399,8 +415,31 @@
                         (seq (:ranges @find/state)) (do (consume! e) (find/clear!))
                         :else nil)))))))
 
+(defn- type-ahead-key!
+  "Keeps a key typed for a Vomnibar that is still loading (here or, from a child frame, in the
+  top page). True when it took the key."
+  [^js e]
+  (let [k (.-key e)]
+    (cond
+      (or (.-ctrlKey e) (.-altKey e) (.-metaKey e)) false
+      (not (or (= 1 (count k)) (#{"Backspace" "Enter"} k))) false
+      @forwarding (do (consume! e)
+                      (swap! forwarding (fn [{:keys [text enter] :as f}]
+                                          (case k
+                                            "Backspace" (assoc f :text (subs text 0 (max 0 (dec (count text)))))
+                                            "Enter" (assoc f :enter true)
+                                            (if enter f (assoc f :text (str text k))))))
+                      true)
+      (ui/typing-ahead?) (do (consume! e) (ui/type-ahead! k) true)
+      :else false)))
+
 (defn on-keydown [^js e]
-  (when (and (.-isTrusted e) (not (own-ui? e)))
+  ;; A key consumed here has its keypress and keyup suppressed until that keyup. When the keyup
+  ;; went elsewhere (focus moved into the Vomnibar between down and up), this new keydown says
+  ;; so: forget it, or the key's next keypress in a field would be dropped.
+  (when (.-isTrusted e) (swap! suppressed disj (.-code e)))
+  (when (and (.-isTrusted e) (not (own-ui? e))
+             (not (and (or @forwarding (ui/typing-ahead?)) (type-ahead-key! e))))
     (reset! user-acted true)
     (let [ev (ev->map e)
           {:keys [mapkeys vim-escape? ignore-layout]} conf
@@ -454,6 +493,7 @@
     "hints-exit" (do (hints-exit!) false)
     "hud" (do (hud! (.-text msg)) false)
     "top-command" (do (when-let [f (local-commands (.-name msg))] (f (or (.-count msg) 1))) false)
+    "vomnibar-keys" (do (ui/more-keys! (.-text msg) (.-enter msg)) false)
     ;; The worker's Ctrl+L command. A page without focus (the address bar has it) cannot
     ;; take it back, so it answers false and the worker opens the popup Vomnibar instead.
     "vomnibar" (let [ok (.hasFocus js/document)] (when ok (vomnibar! (or (.-mode msg) "omni") false)) (respond ok) false)
@@ -464,9 +504,11 @@
     false))
 
 (defn- on-window-message [^js e]
-  (when (and (identical? (.-source e) (ui/frame-window))
-             (= "vimium-cljs:close" (.-data e)))
-    (ui/close-frame!)))
+  (when (identical? (.-source e) (ui/frame-window))
+    (case (.-data e)
+      "vimium-cljs:close" (ui/close-frame!)
+      "vimium-cljs:ready" (ui/frame-ready!)
+      nil)))
 
 (defn- mark-ready! []
   (when (test-page?)

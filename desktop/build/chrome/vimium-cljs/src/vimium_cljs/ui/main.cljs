@@ -1,12 +1,13 @@
-;; Extension pages shown in a frame over the page (the Vomnibar and the help
-;; dialog) and the offscreen clipboard document. One bundle; the location
+;; Extension pages: the Vomnibar (in a frame over the page, in a popup window, or as the new
+;; tab page), the help dialog and the offscreen clipboard document. One bundle; the location
 ;; picks the page. The Vomnibar follows Vimium's pages/vomnibar_page.js (MIT).
 (ns vimium-cljs.ui.main
   (:require [clojure.string :as str]
             [vimium-cljs.commands :as commands]
             [vimium-cljs.keys :as keys]
             [vimium-cljs.config :as config]
-            [vimium-cljs.rank :as rank]))
+            [vimium-cljs.rank :as rank]
+            [vimium-cljs.vomnibar :as vomnibar]))
 
 (defn- $ ^js [sel] (.querySelector js/document sel))
 
@@ -24,22 +25,34 @@
     [kind (js/URLSearchParams. (or q ""))]))
 
 ;; The worker opens the Vomnibar in its own popup window, naming the tab to act on, when
-;; the active tab runs no content script (chrome:// pages, the Web Store).
+;; the active tab runs no content script (chrome:// pages, the Web Store) or the page cannot
+;; take focus (the address bar or side panel has it).
 (defn- popup? [] (= "1" (.get (second (params)) "popup")))
 (defn- target-tab [] (some-> (.get (second (params)) "tabId") js/Number))
+;; ui.html with no #kind is the new tab page (manifest chrome_url_overrides). Chrome gives a new
+;; tab page's keyboard focus to the address bar, and keeps it there through navigation; it
+;; picks the address bar or the page only when a tab becomes active. So the new tab page puts
+;; ui.html?newtab in a tab of its own, in its place, which gets the page's focus, and closes.
+(defn- new-tab-page? [] (= "?newtab" (.-search js/location)))
+
+(declare reset-query!)
 
 (defn- close! []
-  (if (popup?)
-    (.close js/window)
-    (.postMessage (.-parent js/window) "vimium-cljs:close" "*")))
+  (cond (new-tab-page?) (reset-query!)
+        (popup?) (.close js/window)
+        :else (.postMessage (.-parent js/window) "vimium-cljs:close" "*")))
 
 ;; ---- Vomnibar -------------------------------------------------------------------
 ;; Keys: Enter opens the selected row (Shift: new tab, Ctrl: the typed text as is), Tab or
 ;; Ctrl-n/j and Shift-Tab or Ctrl-p/k move, 1-9 pick a row in tab search while the query
 ;; is empty, Ctrl+V of a URL into the empty input opens it (Ctrl+Shift+V only pastes).
 ;; Alt+digits stay with Hyprland's workspaces.
+;;
+;; The page reads its candidates (tabs, history, bookmarks, picks) once when it opens and
+;; ranks them here, once per animation frame, so a burst of keys costs one ranking and no
+;; message to the service worker.
 
-(defonce vstate (atom {:items [] :selected 0 :seq 0 :pending nil}))
+(defonce vstate (atom {:items [] :selected 0 :cands nil :loaded nil :frame nil}))
 
 (def ^:private badge {"tab" "Tab" "bookmark" "Bookmark" "history" "History" "search" "Search" "url" "Go"})
 
@@ -91,7 +104,7 @@
              (cond search? (el "span" "url" (when-not engine (str "Search " search-host)))
                    (= type "url") (el "span" "url" "")
                    :else (marked "url" (rank/display-url url) (:url match))))
-    (when (and (numbered? mode) (< i 9)) (.append li (el "span" "num" (str (inc i)))))
+    (when (numbered? mode) (.append li (el "span" "num" (when (< i 9) (str (inc i))))))
     (.append li (icon item) text (el "span" "badge" (badge type type)))
     (.addEventListener li "mousedown" (fn [^js e] (.preventDefault e)))
     (.addEventListener li "click" (fn [^js e] (swap! vstate assoc :selected i) (open! (.-shiftKey e))))
@@ -105,36 +118,126 @@
       (.appendChild list (row mode i item selected)))
     (some-> ^js (.querySelector list "li.selected") (.scrollIntoView #js {:block "nearest"}))))
 
-(defn- query! [mode q]
-  (let [n (:seq (swap! vstate update :seq inc))
-        pr (-> (js/chrome.runtime.sendMessage (clj->js {:type "vomnibar-query" :mode mode :query q :tabId (target-tab)}))
-               (.then (fn [items]
-                        (when (= n (:seq @vstate))
-                          (swap! vstate assoc :items (js->clj (or items #js []) :keywordize-keys true) :selected 0 :pending nil :for q)
-                          (render!)))))]
-    (swap! vstate assoc :pending pr)
-    pr))
+;; ---- candidates ----------------------------------------------------------------------
+
+(def ^:private day-ms (* 1000 60 60 24))
+
+(defn- bookmark-leaves [^js nodes]
+  (mapcat (fn [^js n] (if (.-url n)
+                        [{:type "bookmark" :title (.-title n) :url (.-url n) :added (.-dateAdded n)}]
+                        (bookmark-leaves (or (.-children n) #js []))))
+          nodes))
+
+(defn- tab-map [^js t]
+  (when t {:id (.-id t) :title (.-title t) :url (.-url t) :windowId (.-windowId t) :lastAccessed (.-lastAccessed t)}))
+
+(defn- current-tab
+  "The tab the Vomnibar acts on: the one a popup names, else the tab this page is in (the
+  page under the frame, or the new tab page)."
+  []
+  (if-let [id (target-tab)]
+    (-> (js/chrome.tabs.get id) (.catch (fn [_] nil)))
+    (-> (js/chrome.tabs.getCurrent)
+        (.then (fn [t] (or t (-> (js/chrome.tabs.query #js {:active true :currentWindow true}) (.then first))))))))
+
+(defn- load-candidates
+  "Reads what the Vomnibar ranks, straight from Chrome (the latest HISTORY-MAX pages), and
+  prepares it once."
+  [mode history-max]
+  (let [all? (not= mode "tabs")]
+    (-> (js/Promise.all
+         #js [(js/chrome.tabs.query #js {}) (current-tab)
+              (js/chrome.storage.session.get "recency")
+              (js/chrome.storage.local.get "vomnibarPicks")
+              (if all? (js/chrome.history.search #js {:text "" :maxResults history-max :startTime (- (js/Date.now) (* 180 day-ms))}) #js [])
+              (if all? (js/chrome.bookmarks.getTree) #js [])])
+        (.then (fn [[tabs cur ^js rec ^js picks hs tree]]
+                 (vomnibar/candidates
+                  {:tabs (mapv tab-map tabs)
+                   :cur (tab-map cur)
+                   :recency (vec (or (some-> (.-recency rec) js->clj) []))
+                   :picks (into {} (map (fn [[k v]] [k {:n (v "n") :t (v "t") :q (v "q")}]))
+                                (js->clj (or (.-vomnibarPicks picks) #js {})))
+                   :history (map (fn [^js h] {:type "history" :title (.-title h) :url (.-url h) :time (.-lastVisitTime h)
+                                              :visits (.-visitCount h) :typed (.-typedCount h)})
+                                 hs)
+                   :bookmarks (bookmark-leaves tree)
+                   :own (js/chrome.runtime.getURL "")}))))))
+
+(declare refresh!)
+
+(defn- reload!
+  "Reads the candidates again. The latest pages come first, so rows show before the full
+  history (3000 pages take Chrome ~90 ms) is in; :loaded resolves once it is."
+  [mode]
+  (let [gen (:gen (swap! vstate update :gen inc))
+        mine? #(= gen (:gen @vstate))
+        ;; One after the other: Chrome answers history queries in turn, so the small one
+        ;; would wait behind the big one.
+        full (-> (load-candidates mode 40)
+                 (.then (fn [c] (when (mine?) (swap! vstate assoc :cands c :for nil) (refresh!))))
+                 (.then #(load-candidates mode 3000))
+                 (.then (fn [c] (when (mine?) (swap! vstate assoc :cands c :for nil) (refresh!)) c)))]
+    (swap! vstate assoc :loaded full)
+    full))
+
+;; ---- results ---------------------------------------------------------------------------
+
+(defn- show!
+  "Ranks the candidates for TEXT and draws the rows, unless they already show TEXT."
+  [text]
+  (let [{:keys [cands mode for]} @vstate]
+    (when (and cands (not= text for))
+      (swap! vstate assoc :for text :selected 0
+             :items (vomnibar/rows cands mode text (js/Date.now) {:engines config/search-engines :search-url config/search-url}))
+      (render!)
+      ;; Which text the rows are for, for the tests that time them.
+      (set! (.. ($ "#list") -dataset -for) text))))
+
+(defn- refresh!
+  "Shows the rows for what is typed at the next frame: keys typed before it cost one ranking."
+  []
+  (when-not (:frame @vstate)
+    (swap! vstate assoc :frame
+           (js/requestAnimationFrame
+            (fn [_] (swap! vstate assoc :frame nil) (show! (.-value ($ "#query"))))))))
 
 (defn- open!
-  "Opens the selected row once the results for what is typed have arrived, so a fast
-  Enter never opens a result for an older query. AS-TYPED opens the typed text."
+  "Opens the selected row for what is typed (ranking it first if a frame has not shown it
+  yet, so a fast Enter never opens a result for older text). AS-TYPED opens the typed text."
   ([new-tab] (open! new-tab false))
   ([new-tab as-typed]
-   (let [text (.-value ($ "#query"))
-         mode (:mode @vstate)]
-     (-> (if (= text (:for @vstate)) (js/Promise.resolve (:pending @vstate)) (query! mode text))
-         (.then (fn [_]
-                  (let [{:keys [items selected]} @vstate
-                        item (when-not as-typed (get items selected))]
-                    (when (or item (not (str/blank? text)))
-                      (-> (js/chrome.runtime.sendMessage (clj->js {:type "vomnibar-open" :newTab (boolean new-tab) :query text
-                                                                    :item item :text (when-not item text) :tabId (target-tab)}))
-                          (.finally close!))))))))))
+   (-> (:loaded @vstate)
+       (.then (fn [_]
+                (let [text (.-value ($ "#query"))
+                      _ (show! text)
+                      {:keys [items selected]} @vstate
+                      item (when-not as-typed (get items selected))]
+                  (when (or item (not (str/blank? text)))
+                    (-> (js/chrome.runtime.sendMessage
+                         (clj->js {:type "vomnibar-open" :newTab (boolean new-tab) :query text
+                                   :item (some-> item (select-keys [:type :url :tabId :windowId]))
+                                   :text (when-not item text) :tabId (target-tab)}))
+                        (.finally close!)))))))))
+
+(defn- reset-query! []
+  (let [^js input ($ "#query")]
+    (set! (.-value input) "")
+    (.dispatchEvent input (js/Event. "input"))))
 
 (defn- show-chip! [mode q]
   (set! (.-textContent ($ "#chip"))
         (or (some-> (rank/engine-of q config/search-engines) second :name)
             (case mode "tabs" "Tabs" "bookmarks" "Bookmarks" nil))))
+
+(defn- set-mode!
+  "Shows the Vomnibar in MODE and reads its candidates."
+  [mode]
+  (let [^js input ($ "#query")]
+    (swap! vstate assoc :mode mode :for nil)
+    (reload! mode)
+    (set! (.-placeholder input) (case mode "tabs" "Switch to tab" "bookmarks" "Search bookmarks" "Search or type a URL"))
+    (show-chip! mode (.-value input))))
 
 (defn vomnibar! [^js ps]
   (let [mode (or (.get ps "mode") "omni")
@@ -145,13 +248,13 @@
                        (when (pos? n)
                          (swap! vstate update :selected #(mod (+ % d) n))
                          (render!))))]
-    (swap! vstate assoc :mode mode)
-    (when (popup?) (.add (.-classList js/document.body) "popup"))
-    (set! (.-hidden ($ "#vomnibar")) false)
-    (set! (.-placeholder input) (case mode "tabs" "Switch to tab" "bookmarks" "Search bookmarks" "Search or type a URL"))
     (when (= mode "edit") (set! (.-value input) (or (.get ps "url") "")))
-    (show-chip! mode (.-value input))
-    (.addEventListener input "input" (fn [_] (show-chip! mode (.-value input)) (query! mode (.-value input))))
+    (set-mode! mode)
+    (cond (popup?) (.add (.-classList js/document.body) "popup")
+          (new-tab-page?) (do (.add (.-classList js/document.body) "newtab")
+                              (set! (.-title js/document) "New Tab")))
+    (set! (.-hidden ($ "#vomnibar")) false)
+    (.addEventListener input "input" (fn [_] (show-chip! (:mode @vstate) (.-value input)) (refresh!)))
     (.addEventListener input "paste"
                        (fn [^js e]
                          (let [t (str/trim (.getData (.-clipboardData e) "text"))]
@@ -171,16 +274,17 @@
                              (do (.preventDefault e) (move 1))
                              (or (= k "ArrowUp") (and (= k "Tab") s) (and c (#{"p" "k"} k)))
                              (do (.preventDefault e) (move -1))
-                             (and (re-matches #"[1-9]" k) (not c) (not (.-altKey e)) (numbered? mode)
+                             (and (re-matches #"[1-9]" k) (not c) (not (.-altKey e)) (numbered? (:mode @vstate))
                                   (< (dec (js/Number k)) (count (:items @vstate))))
                              (do (.preventDefault e) (swap! vstate assoc :selected (dec (js/Number k))) (open! (or new-tab s)))
                              (and c s (= (str/lower-case k) "v")) (reset! plain-paste true)
-                             (and (= k "Delete") s (= mode "tabs"))
+                             (and (= k "Delete") s (= (:mode @vstate) "tabs"))
                              (let [{:keys [items selected]} @vstate]
                                (when-let [t (get items selected)]
                                  (.preventDefault e)
-                                 (-> (js/chrome.tabs.remove (:tabId t)) (.then #(query! mode (.-value input))))))))))
-    (.addEventListener js/window "blur" (fn [_] (js/setTimeout #(when-not (.hasFocus js/document) (close!)) 50)))
+                                 (-> (js/chrome.tabs.remove (:tabId t)) (.then #(reload! (:mode @vstate))))))))))
+    (when-not (new-tab-page?)
+      (.addEventListener js/window "blur" (fn [_] (js/setTimeout #(when-not (.hasFocus js/document) (close!)) 50))))
     ;; The page focuses the frame when it loads, which can drop the input's focus without
     ;; the window losing it; take focus back, and type a key that landed outside the input.
     (.addEventListener js/window "focus" (fn [_] (.focus input)))
@@ -196,7 +300,33 @@
                        true)
     (.focus input)
     (when (= mode "edit") (.select input))
-    (query! mode (.-value input))))
+    ;; Keys typed while this frame loaded went to the page, which kept them for us: put
+    ;; them before anything typed here since, and press Enter if one was typed.
+    (when (not= js/window (.-parent js/window))
+      (.addEventListener js/window "message"
+                         (fn [^js e]
+                           (let [^js d (.-data e)]
+                             (when (and (identical? (.-source e) (.-parent js/window)) (= "vimium-cljs:keys" (some-> d .-type)))
+                               (when (seq (.-text d))
+                                 (set! (.-value input) (str (.-text d) (.-value input)))
+                                 (.dispatchEvent input (js/Event. "input")))
+                               (when (.-enter d) (open! new-tab))))))
+      (.postMessage (.-parent js/window) "vimium-cljs:ready" "*"))
+    ;; The worker's Ctrl+L on the new tab page: focus the input here, or say no and it opens a popup.
+    (when (new-tab-page?)
+      (-> (js/chrome.tabs.getCurrent)
+          (.then (fn [^js me]
+                   (js/chrome.runtime.onMessage.addListener
+                    (fn [^js msg _ respond]
+                      (when (and (= "vomnibar-show" (.-type msg)) me (= (.-tabId msg) (.-id me)))
+                        (let [ok (.hasFocus js/document)]
+                          (when ok
+                            (when (not= (.-mode msg) (:mode @vstate))
+                              (set-mode! (.-mode msg)))
+                            (.focus input) (.select input))
+                          (respond ok)))
+                      false))))))
+    nil))
 
 ;; ---- help ---------------------------------------------------------------------------
 
@@ -242,6 +372,14 @@
   (if (str/ends-with? (.-pathname js/location) "offscreen.html")
     (offscreen!)
     (let [[kind ps] (params)]
-      (case kind
-        "help" (help!)
-        (vomnibar! ps)))))
+      (cond
+        (= kind "help") (help!)
+        (new-tab-page?) (vomnibar! ps)
+        (str/blank? kind) (-> (js/chrome.tabs.getCurrent)
+                              (.then (fn [^js t]
+                                       (-> (js/chrome.tabs.create
+                                            (clj->js (cond-> {:url (js/chrome.runtime.getURL "ui.html?newtab") :active (.-active t)
+                                                              :index (.-index t) :windowId (.-windowId t)}
+                                                       (.-openerTabId t) (assoc :openerTabId (.-openerTabId t)))))
+                                           (.then #(js/chrome.tabs.remove (.-id t)))))))
+        :else (vomnibar! ps)))))

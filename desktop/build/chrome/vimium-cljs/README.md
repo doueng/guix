@@ -18,7 +18,9 @@ npm run bombadil      # property run over the fixtures (Bombadil from the guix r
 Layout: `src/vimium_cljs/{keys,commands,config,hints,exclusions,rank}.cljs` are pure and tested;
 `bg/` is the service worker, `content/` the content script, `ui/` the Vomnibar, help and offscreen pages. `ext/` is the unpacked extension.
 `node scripts/vomnibar-lab.mjs DIR [query ...]` screenshots the Vomnibar (light and dark) over a seeded profile;
-`node scripts/vomnibar-keys.mjs` counts keystrokes for common Vomnibar tasks.
+`node scripts/vomnibar-keys.mjs` counts keystrokes for common Vomnibar tasks;
+`node scripts/vomnibar-perf.mjs` times opening and each keystroke over 5000 history entries and 60 tabs;
+`DISPLAY=:99 node scripts/vomnibar-live.mjs DIR` screenshots a headed Chrome on an Xvfb (page, new tab, popup) while xdotool types.
 
 ## Changing keys and settings
 
@@ -30,7 +32,13 @@ extension's card at chrome://extensions. `npm test` checks the config is well fo
 
 The manifest's `vomnibar` command opens the Vomnibar. Chrome won't auto-assign Ctrl+L to an extension because its
 own address-bar shortcut uses it, so set it once at chrome://extensions/shortcuts. After that it works from
-the page, the address bar and chrome:// pages, the last two through a popup Vomnibar.
+the page, the address bar and chrome:// pages, the last two through a popup Vomnibar that fills its window.
+
+## New tab
+
+The extension replaces Chrome's new tab page with the Vomnibar (`ui.html?newtab`), focused, so `t` or Ctrl+T and
+typing goes straight to a search. Chrome focuses the address bar on a new tab page, so the replacement opens
+`ui.html?newtab` in its place and closes itself. `new-tab-url` in config.cljs still overrides what `t` opens.
 
 ## Cmd+Space b b
 
