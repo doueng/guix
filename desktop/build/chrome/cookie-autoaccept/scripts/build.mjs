@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const DIST = join(ROOT, 'dist');
-export const BUILDS = [];
+export const BUILDS = ['background', 'popup'];
 const VENDOR = ['content.bundle.js', 'autoconsent.esm.js', 'rules.json', 'LICENSE'];
 
 function run(cmd, args) {
@@ -20,6 +20,12 @@ export function shadow(args) {
   const java = spawnSync('java', ['-version'], { stdio: 'ignore' }).status === 0;
   if (java) run('npx', ['shadow-cljs', ...args]);
   else run('guix', ['shell', 'openjdk@25:jdk', '--', 'npx', 'shadow-cljs', ...args]);
+}
+
+if (process.argv.includes('--test')) {
+  // Compiles the cljs.test build to out/test.cjs; npm test runs it.
+  shadow(['compile', 'test']);
+  process.exit(0);
 }
 
 rmSync(DIST, { recursive: true, force: true });

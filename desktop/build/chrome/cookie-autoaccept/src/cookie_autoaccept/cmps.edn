@@ -1,0 +1,17 @@
+;; The CMPs the extension can answer before they run: the script hosts that identify each one and its banner roots.
+;; Their consent values are in cmps.cljs. Read at compile time by cookie-autoaccept.data.
+[{:name "onetrust"
+  :hosts ["cookielaw.org" "onetrust.com" "optanon.blob.core.windows.net"]
+  :prehide ["#onetrust-banner-sdk" "#onetrust-consent-sdk" ".onetrust-pc-dark-filter"]}
+ {:name "cookiebot"
+  :hosts ["cookiebot.com" "cookiebot.eu"]
+  :prehide ["#CybotCookiebotDialog" "#CybotCookiebotDialogBodyUnderlay"]}
+ {:name "didomi"
+  :hosts ["privacy-center.org"]
+  :prehide ["#didomi-host" "#didomi-popup" "#didomi-notice"]}
+ {:name "usercentrics"
+  :hosts ["usercentrics.eu"]
+  :prehide ["#usercentrics-root" "#usercentrics-cmp-ui"]}
+ {:name "quantcast"
+  :hosts ["quantcast.com" "consensu.org" "inmobi.com"]
+  :prehide ["#qc-cmp2-container" "#qc-cmp2-main"]}]

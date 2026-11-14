@@ -1,0 +1,18 @@
+;; Release builds write into dist/js; npm run build adds the static files. See scripts/build.mjs.
+{:source-paths ["src" "test"]
+ :dependencies []
+ :builds
+ {:background {:target :esm
+               :output-dir "dist/js"
+               :modules {:background {:init-fn cookie-autoaccept.background/init}}
+               ;; Imported as is at run time from dist/vendor, not bundled: autoconsent stays the vendored file.
+               :js-options {:keep-as-import #{"../vendor/autoconsent/autoconsent.esm.js"}}
+               :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  :popup {:target :esm
+          :output-dir "dist/js"
+          :modules {:popup {:init-fn cookie-autoaccept.popup/init}}
+          :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  :test {:target :node-test
+         :output-to "out/test.cjs"
+         :ns-regexp "-test$"
+         :compiler-options {:warnings-as-errors true}}}}

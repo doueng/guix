@@ -167,6 +167,29 @@ test('a banner added after the prehide release is hidden before the adding task 
   }
 });
 
+test('blocking a site blocks the CMP script hosts there, and nowhere once it is off', { skip }, async () => {
+  const rules = async (want) => {
+    const s = await workerSession();
+    let r = [];
+    for (let i = 0; i < 50; i++) {
+      r = await evaluate(s, 'chrome.declarativeNetRequest.getDynamicRules()');
+      if (r.length === want) break;
+      await sleep(100);
+    }
+    return r;
+  };
+  await setSettings({ mode: 'accept', disabledSites: [], blockSites: ['shop.example'] });
+  const [rule, ...more] = await rules(1);
+  assert.equal(more.length, 0);
+  assert.equal(rule.action.type, 'block');
+  assert.deepEqual(rule.condition.initiatorDomains, ['shop.example']);
+  for (const host of ['cookielaw.org', 'cookiebot.com', 'privacy-center.org', 'usercentrics.eu', 'inmobi.com']) {
+    assert.ok(rule.condition.requestDomains.includes(host), host);
+  }
+  await setSettings({ mode: 'accept', disabledSites: [], blockSites: [] });
+  assert.deepEqual(await rules(0), []);
+});
+
 test('reject mode rejects', { skip }, async () => {
   await setSettings({ mode: 'reject', disabledSites: [] });
   for (const cmp of ['onetrust', 'didomi', 'sourcepoint']) {
