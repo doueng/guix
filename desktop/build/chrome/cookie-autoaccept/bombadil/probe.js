@@ -20,6 +20,10 @@
     popup: null,
     bannerSince: null,
     blockedSince: null,
+    keepHiddenSince: null,
+    // Consent values present before this load, so a CMP stand-in can tell a value written during the load.
+    startCookies: document.cookie,
+    startLocal: (() => { try { return Object.keys(localStorage); } catch { return []; } })(),
   };
   try {
     const x = new XMLHttpRequest();
@@ -158,6 +162,11 @@
     if (block) state.blockedSince ??= now;
     else state.blockedSince = null;
     const marks = everywhere('[data-cookie-autoaccept]').map((el) => el.getAttribute('data-cookie-autoaccept'));
+    const keepHidden = everywhere('[data-keep]').filter((el) => !shown(el)).map((el) => el.id || el.tagName);
+    if (keepHidden.length) state.keepHiddenSince ??= now;
+    else state.keepHiddenSince = null;
+    const early = document.getElementById('cookie-autoaccept-prehide');
+    const cmp = window.__cmp || null;
     return {
       pageId: state.pageId,
       path: state.path,
@@ -166,18 +175,34 @@
       ready: document.readyState === 'complete',
       ageMs: Math.round(performance.now()),
       bannerVisible: visible.length > 0,
+      cmpBannerVisible: kinds.includes('cmp'),
+      cmpFrames,
       bannerKinds: kinds,
       bannerMs: state.bannerSince === null ? 0 : now - state.bannerSince,
       consentCount: consent.length,
       blocker: block,
       blockedMs: state.blockedSince === null ? 0 : now - state.blockedSince,
-      keepHidden: everywhere('[data-keep]').filter((el) => !shown(el)).map((el) => el.id || el.tagName),
+      keepHidden,
+      keepHiddenMs: state.keepHiddenSince === null ? 0 : now - state.keepHiddenSince,
+      earlyScript: Boolean(early),
+      prehideActive: Boolean(early && early.media !== 'not all'),
+      cmp: cmp && { name: cmp.name, uiBuilt: cmp.uiBuilt, stored: cmp.stored },
+      cmpBlocked: Boolean(window.__cmpBlocked),
       autoconsentStyles: document.querySelectorAll(AUTOCONSENT_STYLES).length,
       marks,
       acts: state.acts.slice(-40),
       popup: state.popup,
     };
   }
+  // Bombadil samples states after the page settles, which misses a banner shown for a few frames and then answered.
+  // So count every animation frame in which a known CMP's banner is visible, for the first 20 s of the page.
+  let cmpFrames = 0;
+  const tick = () => {
+    if (everywhere('[data-consent-ui="cmp"]').some(shown)) cmpFrames++;
+    if (performance.now() < 20000) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+
   window.__probeFacts = facts;
   window.__probe = state;
 })();

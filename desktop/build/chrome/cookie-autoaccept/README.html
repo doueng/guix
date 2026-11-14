@@ -32,7 +32,7 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 <body><main>
 <h1>Cookie autoaccept</h1>
 
-<p><b>What it does:</b> when a page shows a cookie consent popup, the extension answers it for you. By default it clicks <i>accept</i>. You can switch to <i>reject</i>, and you can turn it off for single sites. It does the work locally and sends nothing anywhere.</p>
+<p><b>What it does:</b> when a page shows a cookie consent popup, the extension answers it for you. By default it clicks <i>accept</i>. You can switch to <i>reject</i>, and you can turn it off for single sites. Known consent banners are hidden before they paint. For OneTrust, Cookiebot, Didomi, Usercentrics and InMobi (Quantcast) Choice, the answer is stored before their script even runs, so their banner is never built. You can also block consent scripts on single sites. It does the work locally and sends nothing anywhere.</p>
 
 <h2>Prior art</h2>
 <p><a href="https://www.i-dont-care-about-cookies.eu/">I don't care about cookies</a> and <a href="https://consentomatic.au.dk/">Consent-O-Matic</a> already do this; Consent-O-Matic can also reject. This extension is a thin shell around DuckDuckGo's <a href="https://github.com/duckduckgo/autoconsent">autoconsent</a> rules: about 1600 rules covering OneTrust, Cookiebot, Didomi, Quantcast, TrustArc, Usercentrics, Sourcepoint, the IAB TCF CMPs and many single sites. autoconsent is <b>MPL-2.0</b>, not MIT. MPL-2.0 is per-file copyleft, so the vendored files stay unmodified and keep their LICENSE, and our own files are unaffected.</p>
@@ -66,6 +66,7 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 <p>Click the toolbar icon to open the popup. It shows what happened on the current site, for example <i>Accepted cookies (Onetrust)</i>, <i>Hid 1 cookie banner (generic)</i> or <i>No cookie popup seen</i>. It also has two controls:</p>
 <ul>
 <li><b>On for this site</b>: unticking it stops the extension on that hostname (a leading www. is ignored).</li>
+<li><b>Block consent scripts on this site</b>: off by default. It stops the known consent managers' scripts from loading on that site. The popup warns that embedded videos, maps, comments or checkout can break, because sites often wait for consent before they load them.</li>
 <li><b>Accept / Reject cookies</b>: one global choice for every site.</li>
 </ul>
 <p>Changing either control reloads the tab. A ✓ badge means the extension handled the popup on that tab. When a CMP rule says it answered, the popup shows <i>Found X, checking...</i> until the fallback has looked at the page after that answer (at most about 3 s), because some rules report success and leave the banner up.</p>
@@ -85,6 +86,12 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 <text x="20" y="215">popup</text><text x="20" y="233">status, site toggle, mode</text>
 </g></svg>
 <ul>
+<li>Also at <code>document_start</code>, in every frame of an enabled site, the <b>early script</b> runs (<code>src/early.js</code>). The worker registers it with <code>chrome.scripting.registerContentScripts</code> and leaves out the disabled sites. The mode is baked in through a one-line file, because a content script cannot read storage before the page starts.
+  <ul>
+  <li><b>Prehide</b>: it hides 699 known banner selectors with opacity 0, before anything paints. They come from autoconsent's site-independent rules, its built-in CMPs and a few generic id and class patterns; <code>scripts/build-prehide.mjs</code> generates <code>src/prehide-selectors.js</code>. Opacity, not display, so autoconsent and the fallback still see and answer the banner. The worker releases the hiding once the fallback has scanned the page after the CMP's answer, or when a rule could not click. Otherwise it ends by itself after 10 s. A banner root added after the release (a late CMP) is hidden again before it paints.</li>
+  <li><b>Pre-answer</b>: in the top frame it watches for script elements from a known CMP host, such as <code>cdn.cookielaw.org</code>, <code>consent.cookiebot.com</code>, <code>sdk.privacy-center.org</code>, <code>*.usercentrics.eu</code> or <code>cmp.inmobi.com</code>. When one is added, and before it runs, it writes the consent that CMP reads at start, for accept or reject, unless the page already holds a value: OneTrust <code>OptanonConsent</code> and <code>OptanonAlertBoxClosed</code>, Cookiebot <code>CookieConsent</code>, Didomi <code>didomi_token</code>, Usercentrics <code>uc_user_interaction</code>, and a TCF v2.2 consent string in <code>euconsent-v2</code>. The table is <code>src/cmps.js</code>. The popup then says, for example, <i>Accepted cookies before the banner showed (onetrust)</i>.</li>
+  </ul></li>
+<li>Per-site blocking uses <code>declarativeNetRequest</code> dynamic rules: one rule blocks scripts and frames from the CMP hosts, and only when the page is on a site you turned blocking on for.</li>
 <li>At <code>document_start</code>, a one-line script in the top frame tells the service worker a new page began, so the tab's report starts fresh before any iframe exists. An iframe's CMP can then finish before the top frame is idle without its result being lost.</li>
 <li>At <code>document_idle</code>, every frame (including iframes and about:blank frames) runs the unmodified autoconsent content bundle. It asks the service worker for rules. The worker sends only the rules that can apply to that frame: about 430 KB for a top frame and much less for an iframe.</li>
 <li>autoconsent detects the CMP, including inside open shadow roots, and watches for banners that appear late. Then it clicks accept (optIn) or reject (optOut). Some CMPs need page JavaScript, such as <code>Cookiebot</code> or <code>UC_UI</code>. For those, the worker runs one of autoconsent's own snippet functions in the page. It never runs a code string.</li>
@@ -96,14 +103,15 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 <ul>
 <li><code>storage</code> holds your settings. The per-tab status is kept in memory only and is gone when the browser closes.</li>
 <li><code>scripting</code> plus host access to all sites is needed to run the snippet functions in the page. This is the same reach the all-sites content script already has, so the install warning is unchanged.</li>
-<li>No <code>tabs</code>, <code>cookies</code> or <code>webNavigation</code> permission, no remote code, no network requests and no telemetry.</li>
+<li><code>declarativeNetRequestWithHostAccess</code> is needed for per-site blocking. Given the host access above, it adds no install warning.</li>
+<li>No <code>tabs</code>, <code>cookies</code> or <code>webNavigation</code> permission, no remote code, no network requests and no telemetry. The early script writes consent cookies with <code>document.cookie</code>, as the page itself would.</li>
 </ul>
 
 <h2>Tests</h2>
-<pre>npm test          # 27 unit tests (node --test)
-npm run e2e       # 14 checks, headless flatpak Chrome, ~45 s
+<pre>npm test          # 36 unit tests (node --test)
+npm run e2e       # 15 checks, headless flatpak Chrome, ~45 s
 npm run bombadil  # Bombadil explores the fixtures for 5 min; not part of npm test</pre>
-<p>The e2e run starts <code>flatpak run com.google.Chrome --headless=new</code> with a throwaway profile and read-only access to the repo. It loads the extension over the DevTools pipe (<code>Extensions.loadUnpacked</code>), because branded Chrome ignores <code>--load-extension</code>. Then it opens the fixture pages in <code>test/fixtures</code>. The fixtures are small rebuilds of each CMP's DOM and API, not saved copies of live pages: OneTrust, Cookiebot (old and current template), Didomi, Quantcast, TrustArc, Usercentrics in shadow DOM, Sourcepoint in a cross-origin iframe, an unknown pay-or-consent iframe, and home-made banners. The run checks that:<ul><li>the accept button is the one pressed;</li><li>reject mode presses reject, and with no rule it hides rather than accepts;</li><li>a banner added late in shadow DOM is caught;</li><li>a newsletter box stays;</li><li>a disabled site is left alone.</li></ul> Set <code>CHROME=/path/to/chromium</code> to use another browser.</p>
+<p>The e2e run starts <code>flatpak run com.google.Chrome --headless=new</code> with a throwaway profile and read-only access to the repo. It loads the extension over the DevTools pipe (<code>Extensions.loadUnpacked</code>), because branded Chrome ignores <code>--load-extension</code>. Then it opens the fixture pages in <code>test/fixtures</code>. The fixtures are small rebuilds of each CMP's DOM and API, not saved copies of live pages: OneTrust, Cookiebot (old and current template), Didomi, Quantcast, TrustArc, Usercentrics in shadow DOM, Sourcepoint in a cross-origin iframe, an unknown pay-or-consent iframe, and home-made banners. The run checks that:<ul><li>the accept button is the one pressed;</li><li>reject mode presses reject, and with no rule it hides rather than accepts;</li><li>a banner added late in shadow DOM is caught;</li><li>a banner added after the prehide was released is hidden again within the task that added it;</li><li>a newsletter box stays;</li><li>a disabled site is left alone.</li></ul> Set <code>CHROME=/path/to/chromium</code> to use another browser.</p>
 
 <h3>Bombadil</h3>
 <p><code>npm run bombadil</code> runs <a href="https://github.com/antithesishq/bombadil">Bombadil</a> 0.7.10 against one headless Chrome with the extension loaded, over the fixture site served on <code>localhost</code> and <code>127.0.0.1</code> with no network. Bombadil clicks, scrolls, goes back and forward, reloads and waits. Through the harness it also opens the real popup, reads it, toggles the site and switches accept or reject. After every step it checks these properties:</p>
@@ -114,17 +122,32 @@ npm run bombadil  # Bombadil explores the fixtures for 5 min; not part of npm te
 <li>it clicks only inside consent UI, never a link that navigates or a form button;</li>
 <li>once the banner is gone, no overlay or scroll lock blocks the page for more than 3 s;</li>
 <li>non-consent boxes (newsletter, mail sign-up) stay;</li>
-<li>the popup's status line is true of what the page saw.</li>
+<li>the popup's status line is true of what the page saw;</li>
+<li>a known CMP's banner never shows on an enabled site, in any state or in any animation frame the probe sees during the page's first 20 s;</li>
+<li>a CMP whose script the extension saw coming builds no banner;</li>
+<li>prehide hides a non-consent element for 12 s at most;</li>
+<li>CMP scripts are blocked only on sites with blocking turned on, and always there.</li>
 </ul>
+<p>The CMP stand-ins (<code>bombadil/cmp/*.js</code>) are served under real CMP host names: Chrome's <code>--host-resolver-rules</code> maps them to the fixture server, so nothing reaches the network. OneTrust uses its legacy host <code>optanon.blob.core.windows.net</code>, because <code>cdn.cookielaw.org</code> is HSTS-preloaded and Chrome would ask it over https.</p>
 <p>Options: <code>npm run bombadil -- --time 600</code> sets the budget in seconds (default 300); <code>--page modal-lock.html</code> keeps it on one fixture; <code>--seed N</code> picks the starting settings. A failure prints the property, the seed and the trace directory, and <code>--reproduce DIR</code> replays that trace from the same settings. Bombadil 0.7.10 has no seed of its own; its trace is the replay. It needs <code>bombadil</code> on PATH, <code>$BOMBADIL</code>, or the pinned Guix package in <code>~/guix</code> (T174), which the script builds on demand. Files: <code>bombadil/run.mjs</code> (harness), <code>spec.ts</code> (properties and actions) and <code>probe.js</code> (injected into each fixture page to see what the extension did).</p>
 <p>Chrome: Guix has <code>ungoogled-chromium</code> but no aarch64 substitute (on 14 November 2026 it would build Chromium and clang from source), so the harness uses the flatpak Chrome headless with a throwaway profile, like the e2e run. Set <code>CHROME=/path/to/chromium</code> to use another browser. The report of the first runs is <code>docs/bombadil-report.html</code>.</p>
 
 <h2>Live check</h2>
 <p>On 14 November 2026 I ran the extension in headless Chrome on seven live sites: the Guardian, Le Monde, cookiebot.com, Spiegel, the BBC, Marca and IKEA Sweden. After 12 s, none of them showed a consent banner or wall. IKEA was handled by autoconsent's OneTrust rule and cookiebot.com by the fallback after the stale Cookiebot rule. The Guardian and Spiegel were handled by the fallback inside their consent frames, and Le Monde and Marca by the fallback on their pay-or-consent walls. The BBC page was clear at the end of the run. Before the fallback could click, none of the first four was handled. Stack Overflow and Zeit served bot checks to headless Chrome, so they tell us nothing.</p>
+<h2>Trade-offs of answering early</h2>
+<ul>
+<li><b>Pre-answer formats are guesses.</b> Each value is what that CMP reads today, as far as I know it. A CMP that also checks a server-side stamp, a newer vendor list (the TC string claims list version 100) or its own record ignores the value and shows its banner. Then prehide and autoconsent handle it as before. The Bombadil fixtures model these checks; they cannot show that the live CMPs accept the values. On 14 November 2026, IKEA (OneTrust) and Marca (Didomi) took the stored value and built no banner. cookiebot.com and usercentrics.com ignored it and showed their banner, which autoconsent then answered.</li>
+<li><b>A value already stored wins.</b> The early script never overwrites a consent value, so a choice you made by hand, or one made while the extension was in the other mode, stays. Switching to reject does not withdraw consents given earlier.</li>
+<li><b>Prehide can hide the wrong thing for a while.</b> The generic patterns (ids and classes with cookie-banner, cookie-consent, cookie-notice, cookiebanner) can match a page element, such as a bakery's cookie banner of actual cookies. It is invisible until the release, about 3 s after the page is idle, and 10 s at most.</li>
+<li><b>Iframes on a disabled site</b>: the early script is left out by the frame's own URL. An iframe from another site, on a disabled site, hides its banners for the few milliseconds it takes to ask the worker, then shows them.</li>
+<li><b>Cost per page</b>: the early script is 36 KB (25 KB of selectors, 7 KB gzipped) in every frame, plus a style with 699 rules, some with <code>:has()</code>. autoconsent's own prehide already applied most of these at idle. For 30 s after the page starts, each subtree the page adds after the release is matched against the selectors in the same task, so a late banner is hidden again before anything can paint it.</li>
+<li><b>Blocking</b> keeps the CMP from loading at all, so nothing ever records a choice. Ad and analytics scripts that wait for a consent signal stay off, and so do embeds that wait for one. That is why it is per site and off by default.</li>
+</ul>
+
 <h2>Known limits</h2>
 <ul>
 <li>The fallback stops watching for new banners 30 s after the page is idle, so a banner added later stays.</li>
-<li>Running at <code>document_idle</code> (as asked) can briefly show a banner before it is handled. Upstream runs at <code>document_start</code> to hide banners before they paint.</li>
+<li>A banner that is not in the prehide list, such as a home-made one, can still show until autoconsent or the fallback handles it, usually within 3 s of the page being idle.</li>
 <li>When the fallback hides a banner instead of clicking it, no choice is recorded, so that site may ask again on the next visit.</li>
 <li>The fallback picks buttons by their text. A banner with an unusual accept label is hidden instead of accepted. If it ever presses the wrong button on a site, turn that site off from the popup.</li>
 <li>A site that never loads a known CMP and uses an unusual layout will still show its banner. You can turn the site off, or report it upstream.</li>

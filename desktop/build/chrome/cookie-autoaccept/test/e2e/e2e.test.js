@@ -139,6 +139,31 @@ test('leaves a newsletter box alone', { skip }, async () => {
   assert.ok(!ok, 'newsletter box was hidden');
 });
 
+// A banner added after the prehide was released must be hidden before anything else in the page sees it: hiding it
+// in the next animation frame let earlier callbacks in that frame, or a paint after a ResizeObserver, see it.
+test('a banner added after the prehide release is hidden before the adding task ends', { skip }, async () => {
+  const { targetId } = await cdp('Target.createTarget', { url: `http://localhost:${port}/none.html` });
+  const { sessionId } = await cdp('Target.attachToTarget', { targetId, flatten: true });
+  try {
+    let released = false;
+    for (let t = Date.now(); !released && Date.now() - t < 15000; await sleep(250)) {
+      released = await evaluate(sessionId, `document.getElementById('cookie-autoaccept-prehide')?.media === 'not all'`).catch(() => false);
+    }
+    assert.ok(released, 'prehide never released');
+    const opacity = await evaluate(sessionId, `(async () => {
+      const el = document.createElement('div');
+      el.id = 'onetrust-banner-sdk';
+      el.textContent = 'We use cookies';
+      document.body.append(el);
+      await Promise.resolve();
+      return getComputedStyle(el).opacity;
+    })()`);
+    assert.equal(opacity, '0');
+  } finally {
+    await cdp('Target.closeTarget', { targetId });
+  }
+});
+
 test('reject mode rejects', { skip }, async () => {
   await setSettings({ mode: 'reject', disabledSites: [] });
   for (const cmp of ['onetrust', 'didomi', 'sourcepoint']) {

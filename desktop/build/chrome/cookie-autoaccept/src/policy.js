@@ -1,13 +1,14 @@
 // Pure decision logic shared by the service worker and the popup. No chrome.* here, so node --test can run it.
 
 export const MODES = ['accept', 'reject'];
-export const DEFAULT_SETTINGS = Object.freeze({ mode: 'accept', disabledSites: [] });
+export const DEFAULT_SETTINGS = Object.freeze({ mode: 'accept', disabledSites: [], blockSites: [] });
 
-/** Settings as stored, repaired: unknown mode falls back to accept, sites deduplicated. */
+const siteList = (v) => [...new Set(Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s) : [])];
+
+/** Settings as stored, repaired: unknown mode falls back to accept, site lists deduplicated. */
 export function normalizeSettings(raw) {
   const mode = MODES.includes(raw?.mode) ? raw.mode : DEFAULT_SETTINGS.mode;
-  const sites = Array.isArray(raw?.disabledSites) ? raw.disabledSites.filter((s) => typeof s === 'string' && s) : [];
-  return { mode, disabledSites: [...new Set(sites)] };
+  return { mode, disabledSites: siteList(raw?.disabledSites), blockSites: siteList(raw?.blockSites) };
 }
 
 /** The key a per-site toggle is stored under: the http(s) hostname without a leading www., else null. */
@@ -30,6 +31,51 @@ export function setSiteEnabled(settings, site, enabled) {
   const s = normalizeSettings(settings);
   const rest = s.disabledSites.filter((d) => d !== site);
   return { ...s, disabledSites: enabled ? rest : [...rest, site] };
+}
+
+export function isBlockingOn(settings, site) {
+  return site !== null && normalizeSettings(settings).blockSites.includes(site);
+}
+
+export function setSiteBlocking(settings, site, on) {
+  const s = normalizeSettings(settings);
+  const rest = s.blockSites.filter((d) => d !== site);
+  return { ...s, blockSites: on ? [...rest, site] : rest };
+}
+
+/** Match patterns for a site key: the host and its subdomains (an IP address has none). */
+export function sitePatterns(site) {
+  const ip = /^[\d.]+$/.test(site) || site.includes(':');
+  return ip ? [`*://${site}/*`] : [`*://${site}/*`, `*://*.${site}/*`];
+}
+
+/**
+ * The early content script (src/early.js) for these settings: the mode's file first, so the mode is known at
+ * document_start without a storage read, and no disabled site.
+ */
+export function earlyScript(settings) {
+  const s = normalizeSettings(settings);
+  return {
+    id: 'early',
+    js: [`src/early-${s.mode}.js`, 'src/cmps.js', 'src/prehide-selectors.js', 'src/early.js'],
+    matches: ['<all_urls>'],
+    excludeMatches: s.disabledSites.flatMap(sitePatterns),
+    runAt: 'document_start',
+    allFrames: true,
+    persistAcrossSessions: true,
+  };
+}
+
+/** declarativeNetRequest rules that block the CMP script hosts on the sites with blocking on, and nowhere else. */
+export function blockRules(settings, cmpHosts) {
+  const sites = normalizeSettings(settings).blockSites;
+  if (!sites.length) return [];
+  return [{
+    id: 1,
+    priority: 1,
+    action: { type: 'block' },
+    condition: { requestDomains: [...new Set(cmpHosts)], initiatorDomains: sites, resourceTypes: ['script', 'sub_frame'] },
+  }];
 }
 
 /**
@@ -82,6 +128,8 @@ export function emptyReport(site, settings) {
     done: false,
     // Whether the main frame's fallback scanned the page after the rule reported its result.
     checked: false,
+    // The CMP the early script answered before its script ran, if any.
+    preanswered: null,
     hidden: 0,
     clicked: 0,
   };
@@ -112,6 +160,8 @@ export function reduceReport(report, msg) {
       return { ...report, hidden: report.hidden + (Number(msg.count) || 0) };
     case 'fallbackClicked':
       return { ...report, clicked: (report.clicked || 0) + (Number(msg.count) || 0) };
+    case 'preanswered':
+      return { ...report, preanswered: msg.cmp };
     case 'fallbackScanned':
       return msg.afterResult && report.result !== null && !report.checked ? { ...report, checked: true } : report;
     default:
@@ -150,6 +200,7 @@ export function describeReport(report) {
   if (report.popup && report.result === false) return `Found ${report.cmp} but could not click it.`;
   if (report.popup) return `Found ${report.cmp}, working...`;
   if (report.hidden > 0) return `Hid ${banners(report.hidden)} (generic).`;
+  if (report.preanswered) return `${verb} cookies before the banner showed (${report.preanswered}).`;
   if (report.done) return `Handled ${report.cmp} (hidden, no popup shown).`;
   return 'No cookie popup seen.';
 }
@@ -157,6 +208,6 @@ export function describeReport(report) {
 /** Badge text for the toolbar icon. */
 export function badgeFor(report) {
   if (!report || report.disabled) return '';
-  if ((report.popup && report.result && report.checked) || report.hidden > 0 || report.clicked > 0) return '✓';
+  if ((report.popup && report.result && report.checked) || report.preanswered || report.hidden > 0 || report.clicked > 0) return '✓';
   return '';
 }

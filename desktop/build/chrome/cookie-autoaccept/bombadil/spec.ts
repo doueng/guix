@@ -10,6 +10,8 @@ import { back, clicks, forward, reload, scroll, waitOnce } from "@antithesishq/b
 const BANNER_MS = 15000;
 // After the banner is gone, an overlay or scroll lock may linger this long.
 const BLOCKED_MS = 3000;
+// The early script releases its prehide after 10 s at most; sampling adds a little.
+const PREHIDE_MS = 12000;
 
 type Act = {
   kind: "click" | "decision" | "submit";
@@ -27,16 +29,23 @@ type Facts = {
   pageId: string;
   path: string;
   host: string;
-  settings: { mode: string; disabled: boolean } | null;
+  settings: { mode: string; disabled: boolean; blocked: boolean } | null;
   ready: boolean;
   ageMs: number;
   bannerVisible: boolean;
+  cmpBannerVisible: boolean;
+  cmpFrames: number;
   bannerKinds: string[];
   bannerMs: number;
   consentCount: number;
   blocker: string | null;
   blockedMs: number;
   keepHidden: string[];
+  keepHiddenMs: number;
+  earlyScript: boolean;
+  prehideActive: boolean;
+  cmp: { name: string; uiBuilt: boolean; stored: string | null } | null;
+  cmpBlocked: boolean;
   autoconsentStyles: number;
   marks: string[];
   acts: Act[];
@@ -69,7 +78,7 @@ export const disabledSiteUntouched = always(() => {
   if (!x || !x.settings || !x.settings.disabled) return true;
   const userDecided = x.acts.some((a) => a.kind === "decision" && a.by === "user");
   const hidden = x.ready && x.consentCount > 0 && !x.bannerVisible && !userDecided;
-  return byScript(x).length === 0 && x.marks.length === 0 && x.autoconsentStyles === 0 && !hidden;
+  return byScript(x).length === 0 && x.marks.length === 0 && x.autoconsentStyles === 0 && !x.earlyScript && !hidden;
 });
 
 export const rejectNeverAccepts = always(() => {
@@ -87,9 +96,33 @@ export const pageStaysUsable = always(() => {
   return !x || x.blockedMs <= BLOCKED_MS;
 });
 
+// Prehiding may catch something that only looks like a banner, but never for longer than its timeout.
 export const nonConsentUiStays = always(() => {
   const x = f();
-  return !x || x.keepHidden.length === 0;
+  return !x || x.keepHiddenMs <= PREHIDE_MS;
+});
+
+// A known CMP's banner is hidden before it paints and stays hidden until it is answered: not in any state, nor in
+// any animation frame the probe saw.
+export const cmpBannerNeverShows = always(() => {
+  const x = f();
+  return !enabled(x) || (!x.cmpBannerVisible && x.cmpFrames === 0);
+});
+
+// A CMP whose script the extension saw coming finds its answer stored and builds no banner.
+export const preansweredCmpBuildsNoUi = always(() => {
+  const x = f();
+  return !enabled(x) || !x.cmp || !x.cmp.uiBuilt;
+});
+
+export const blockingOnlyWhereTurnedOn = always(() => {
+  const x = f();
+  return !x || !x.settings || (x.cmpBlocked ? x.settings.blocked : true);
+});
+
+export const blockingBlocks = always(() => {
+  const x = f();
+  return !x || !x.settings || !x.settings.blocked || !x.cmp;
 });
 
 /** Whether the popup's status line is true of the page facts. */
@@ -117,7 +150,8 @@ export const popupTellsTheTruth = always(() => {
 
 // ---- actions --------------------------------------------------------------
 
-// Opens the real popup through the harness; op is read, toggle-site, accept or reject (the last three reload the tab).
+// Opens the real popup through the harness; op is read, toggle-site, toggle-block, accept or reject (all but read
+// reload the tab).
 const popup = registerCustomAction("popup", async (_document, window, op: string) => {
   const w = window as unknown as { __probeFacts?: () => Facts; __probe?: { popup: unknown } };
   const before = w.__probeFacts ? w.__probeFacts() : null;
@@ -140,6 +174,8 @@ const popupActions = weighted([
   [1, actions(() => [popup("toggle-site")]).when(() => !disabled())],
   [8, actions(() => [popup("toggle-site")]).when(disabled)],
   [3, actions(() => [popup(f()?.settings?.mode === "reject" ? "accept" : "reject")])],
+  [1, actions(() => [popup("toggle-block")]).when(() => !f()?.settings?.blocked)],
+  [6, actions(() => [popup("toggle-block")]).when(() => !!f()?.settings?.blocked)],
 ]);
 
 // Nearly every page offers twenty links to other fixtures, so plain clicks would leave each page at once.

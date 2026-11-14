@@ -4,14 +4,18 @@ import { readFileSync } from 'node:fs';
 import {
   autoconsentConfig,
   badgeFor,
+  blockRules,
   describeReport,
+  earlyScript,
   emptyReport,
   fallbackAnswer,
   filterRules,
   isEnabledFor,
   normalizeSettings,
   reduceReport,
+  setSiteBlocking,
   setSiteEnabled,
+  sitePatterns,
   shouldRunFallback,
   siteKey,
   startReport,
@@ -25,9 +29,10 @@ test('default is accept, enabled everywhere', () => {
 });
 
 test('garbage settings are repaired rather than trusted', () => {
-  assert.deepEqual(normalizeSettings({ mode: 'eat', disabledSites: ['a.com', 'a.com', 3, ''] }), {
+  assert.deepEqual(normalizeSettings({ mode: 'eat', disabledSites: ['a.com', 'a.com', 3, ''], blockSites: 'x' }), {
     mode: 'accept',
     disabledSites: ['a.com'],
+    blockSites: [],
   });
 });
 
@@ -39,6 +44,29 @@ test('reject mode opts out and lets the heuristic click reject buttons', () => {
 
 test('accept mode keeps the heuristic off, since upstream heuristic has no optIn', () => {
   assert.equal(autoconsentConfig({ mode: 'accept' }, true).heuristicMode, 'off');
+});
+
+test('the early script carries the mode and stays off disabled sites and their subdomains', () => {
+  const s = setSiteEnabled({ mode: 'reject' }, 'news.com', false);
+  const e = earlyScript(setSiteEnabled(s, '127.0.0.1', false));
+  assert.equal(e.js[0], 'src/early-reject.js');
+  assert.equal(e.js.at(-1), 'src/early.js');
+  assert.deepEqual(e.excludeMatches, ['*://news.com/*', '*://*.news.com/*', '*://127.0.0.1/*']);
+  assert.equal(e.runAt, 'document_start');
+  assert.equal(e.allFrames, true);
+  assert.equal(earlyScript(undefined).js[0], 'src/early-accept.js');
+  assert.deepEqual(sitePatterns('localhost'), ['*://localhost/*', '*://*.localhost/*']);
+});
+
+test('blocking is off until a site turns it on, and then only for that site', () => {
+  const hosts = ['cookielaw.org', 'cookiebot.com'];
+  assert.deepEqual(blockRules(undefined, hosts), []);
+  const on = setSiteBlocking({}, 'shop.com', true);
+  const [rule] = blockRules(on, hosts);
+  assert.equal(rule.action.type, 'block');
+  assert.deepEqual(rule.condition.initiatorDomains, ['shop.com']);
+  assert.deepEqual(rule.condition.requestDomains, hosts);
+  assert.deepEqual(blockRules(setSiteBlocking(on, 'shop.com', false), hosts), []);
 });
 
 test('site key strips www and ignores non-web pages', () => {
@@ -168,6 +196,13 @@ test('a subframe\'s result survives the main frame\'s later init; a new page sta
   assert.equal(describeReport(r), 'Accepted cookies (Sourcepoint-frame).');
   r = startReport(r, { type: 'pageStart', mainFrame: true, ...ctx });
   assert.equal(describeReport(r), 'No cookie popup seen.');
+});
+
+test('a CMP answered before it ran is reported, in the mode it was answered in', () => {
+  const r = reduceReport(emptyReport('shop.com', { mode: 'reject' }), { type: 'preanswered', cmp: 'onetrust' });
+  assert.equal(describeReport(r), 'Rejected cookies before the banner showed (onetrust).');
+  assert.equal(badgeFor(r), '\u2713');
+  assert.equal(describeReport(emptyReport('shop.com', {})), 'No cookie popup seen.');
 });
 
 test('unknown messages leave the report unchanged', () => {

@@ -16,7 +16,7 @@
     }
   ],
   "host_permissions": ["<all_urls>"],
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "declarativeNetRequestWithHostAccess"],
   "action": { "default_title": "Cookie autoaccept", "default_popup": "src/popup.html", "default_icon": "icons/icon128.png" },
   "icons": { "128": "icons/icon128.png" }
 }

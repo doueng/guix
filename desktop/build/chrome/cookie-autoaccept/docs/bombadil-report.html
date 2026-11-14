@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<meta name="description" content="Bombadil property tests for the cookie consent extension: specs, four bugs found and fixed, run time">
+<meta name="description" content="Bombadil property tests for the cookie consent extension: specs, bugs found and fixed, pre-paint hiding and pre-answering, run time">
 <meta name="bbh-doc" content="T178">
 <title>Bombadil on cookie-autoaccept</title>
 <style>
@@ -44,6 +44,19 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td>4</td><td>page stays usable</td><td>On a modal with a separate dimmed backdrop and no reject button, reject mode hid the dialog. The backdrop stayed over the page for good.</td><td>After hiding a banner, the top frame also hides an empty fixed layer that covers 90% or more of the viewport, with no text and no media.</td></tr>
 </table></div>
 <p>Two other failures were in the harness, not the extension, and are fixed there. In one, a click inside a shadow root looked like a script click, because <code>window.event</code> is undefined there. In the other, <code>chrome.action.openPopup</code> sometimes found no focused window.</p>
+
+<h2>Phase 2: hiding before paint and answering early</h2>
+<p>The extension now also runs an early script at <code>document_start</code> in every frame of an enabled site. It hides 699 known banner selectors with opacity 0 until the page has been answered. In the top frame, it writes the consent value that OneTrust, Cookiebot, Didomi, Usercentrics or InMobi (Quantcast) Choice reads, as soon as that CMP's script tag appears. Per-site blocking of CMP scripts through <code>declarativeNetRequest</code> is optional and off by default. The README lists the trade-offs.</p>
+<p>Four properties were added. Their checks run against fixtures whose CMP stand-in scripts load from the real CMP host names, which Chrome maps to the local server, plus a OneTrust page that is not idle for 1.5 s and a bakery page whose hero only looks like a banner.</p>
+<div class='table'><table>
+<tr><th>Property</th><th>Rule</th><th>Bug injected on purpose</th><th>Caught</th></tr>
+<tr><td>cmpBannerNeverShows</td><td>On an enabled site, a known CMP's banner is never visible, either in a state or in any animation frame the probe counts during the page's first 20 s.</td><td>empty prehide stylesheet</td><td>2 s</td></tr>
+<tr><td>preansweredCmpBuildsNoUi</td><td>A CMP whose script the extension saw coming builds no banner.</td><td>pre-answer ignores the mode</td><td>1 s, by rejectNeverAccepts</td></tr>
+<tr><td>nonConsentUiStays</td><td>Prehide hides a non-consent element for 12 s at most.</td><td></td><td></td></tr>
+<tr><td>blockingOnlyWhereTurnedOn, blockingBlocks</td><td>CMP scripts are blocked on sites with blocking turned on, and only there.</td><td>block on every site</td><td>0 s</td></tr>
+</table></div>
+<p>A fourth injected bug, registering the early script on disabled sites too, was stopped by the harness's own check of the registration before Bombadil started. <span class='tag measured'>measured</span></p>
+<div class='card bad'><b>Finding 5: a late banner could be seen for one frame.</b> In a sweep of every fixture (40 s each), <code>late-onetrust.html</code> failed <i>cmpBannerNeverShows</i> with seed 924754453. Its OneTrust banner arrives 6 s after load, after the prehide was released. The early script hid a newly added banner again only in its next animation frame callback. So an earlier callback in that frame, here the probe's frame counter, saw the banner at full opacity. A banner added from a <code>ResizeObserver</code> callback, which runs after a frame's animation callbacks and before its paint, would also have painted for one frame. <b>Fix:</b> the mutation observer now matches each added subtree against the selectors in its own callback, a microtask of the task that added the banner. The cost is a <code>matches</code> and <code>querySelectorAll</code> on each added subtree, for 30 s. <b>Regression test:</b> a new e2e check appends a OneTrust root after the release and reads its opacity one microtask later. It got <code>1</code> on the old code and gets <code>0</code> now. Afterwards, the failing trace replays clean, late-onetrust passes on four seeds, and a 300 s run over the whole site (177 states, 58 page loads, seven of the eight mode, disabled and blocking combinations) passes. <span class='tag measured'>measured</span></div>
 
 <h2>Specs</h2>
 <p>These properties are checked on every state. Each one reads facts that a probe script gathers inside every fixture page and frame: untrusted clicks (an extension's <code>el.click()</code>), consent choices made through the fixture's handler, marks the fallback left, autoconsent's style elements, whether the consent UI is visible, and what blocks the page.</p>

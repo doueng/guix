@@ -19,6 +19,16 @@ const ROOT = resolve(import.meta.dirname, '..');
 const FIXTURES = join(ROOT, 'test/fixtures');
 const PROBE = readFileSync(join(import.meta.dirname, 'probe.js'));
 const SPEC = join(import.meta.dirname, 'spec.ts');
+const CMP_SCRIPTS = join(import.meta.dirname, 'cmp');
+// Real CMP script hosts the fixtures load from; Chrome resolves them to the fixture server (--host-resolver-rules).
+const CMP_HOSTS = {
+  // OneTrust's legacy CDN: cdn.cookielaw.org is HSTS-preloaded, so Chrome would ask it over https.
+  'optanon.blob.core.windows.net': 'onetrust',
+  'consent.cookiebot.com': 'cookiebot',
+  'sdk.privacy-center.org': 'didomi',
+  'web.cmp.usercentrics.eu': 'usercentrics',
+  'cmp.inmobi.com': 'quantcast',
+};
 // Pages that only make sense inside a frame of another page.
 const FRAME_ONLY = new Set(['consent-message.html', 'index.html']);
 
@@ -65,13 +75,15 @@ function startSettings(seed) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
   };
-  return { mode: rnd() < 0.5 ? 'reject' : 'accept', disabledSites: rnd() < 0.25 ? ['localhost'] : [] };
+  return { mode: rnd() < 0.5 ? 'reject' : 'accept', disabledSites: rnd() < 0.25 ? ['localhost'] : [], blockSites: [] };
 }
 
 // ---- Chrome over a CDP pipe -----------------------------------------------------------------------------------
 
-function launchChrome(profile, headed) {
+function launchChrome(profile, headed, sitePort) {
+  const rules = Object.keys(CMP_HOSTS).map((h) => `MAP ${h} 127.0.0.1:${sitePort}`).join(',');
   const flags = [
+    `--host-resolver-rules=${rules}`,
     ...(headed ? [] : ['--headless=new']), `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
     '--disable-gpu', '--disable-sync', '--disable-background-networking', '--disable-component-update',
     '--remote-debugging-pipe', '--remote-debugging-port=0', '--enable-unsafe-extension-debugging', 'about:blank',
@@ -148,9 +160,11 @@ function harness(cdp, extensionId, site) {
 
   async function settings(host) {
     const s = await evaluate(await worker(), "chrome.storage.local.get('settings').then((r) => r.settings ?? null)");
+    const site = host.replace(/^www\./, '');
     const mode = s?.mode === 'reject' ? 'reject' : 'accept';
-    const disabled = Array.isArray(s?.disabledSites) && s.disabledSites.includes(host.replace(/^www\./, ''));
-    return { mode, disabled };
+    const disabled = Array.isArray(s?.disabledSites) && s.disabledSites.includes(site);
+    const blocked = Array.isArray(s?.blockSites) && s.blockSites.includes(site);
+    return { mode, disabled, blocked };
   }
 
   const failed = (error) => {
@@ -181,6 +195,7 @@ function harness(cdp, extensionId, site) {
       }
       const click = {
         'toggle-site': "document.getElementById('enabled')",
+        'toggle-block': "document.getElementById('blocking')",
         accept: "document.querySelector('input[name=mode][value=accept]')",
         reject: "document.querySelector('input[name=mode][value=reject]')",
       }[op];
@@ -197,6 +212,14 @@ function harness(cdp, extensionId, site) {
   }
   async function setSettings(s) {
     await evaluate(await worker(), `chrome.storage.local.set({ settings: ${JSON.stringify(s)} }).then(() => true)`);
+    // The worker re-registers the early script for the new settings; pages must not load before it has.
+    const want = `src/early-${s.mode}.js`;
+    for (let i = 0; i < 50; i++) {
+      const js = await evaluate(await worker(), "chrome.scripting.getRegisteredContentScripts({ ids: ['early'] }).then(([e]) => e ? e.js[0] + ' ' + JSON.stringify(e.excludeMatches ?? []) : '')");
+      if (js.startsWith(want) && s.disabledSites.every((d) => js.includes(`*://${d}/*`))) return;
+      await sleep(100);
+    }
+    throw new Error('the early content script was not registered');
   }
   return { settings, setSettings, popup };
 }
@@ -209,10 +232,20 @@ function startServer(control) {
     const host = (req.headers.host || '').split(':')[0];
     const port = server.address().port;
     try {
+      if (CMP_HOSTS[host]) {
+        const delay = Number(url.searchParams.get('delay')) || 0;
+        if (delay) await sleep(delay);
+        return res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' })
+          .end(readFileSync(join(CMP_SCRIPTS, `${CMP_HOSTS[host]}.js`)));
+      }
       if (url.pathname === '/__probe.js') return res.writeHead(200, { 'content-type': 'text/javascript' }).end(PROBE);
       if (url.pathname === '/__state') return json(res, await control.settings(host));
       if (url.pathname === '/__ctl/popup') return json(res, await control.popup(url.searchParams.get('op') || 'read'));
       if (url.pathname === '/favicon.ico') return res.writeHead(204).end();
+      if (url.pathname === '/__slow.js') {
+        await sleep(Number(url.searchParams.get('delay')) || 0);
+        return res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' }).end('');
+      }
       if (url.pathname === '/') {
         return html(res, `<!doctype html><html><head><meta charset="utf-8"><title>fixtures</title></head><body><h1>Consent fixtures on ${host}</h1>${nav(port, host)}</body></html>`);
       }
@@ -240,23 +273,25 @@ async function main() {
   const bombadil = bombadilBin();
   const profile = mkdtempSync(join(tmpdir(), 'cookie-autoaccept-bombadil-'));
   const out = mkdtempSync(join(tmpdir(), o.reproduce ? 'cookie-autoaccept-replay-' : 'cookie-autoaccept-trace-'));
-  const { browser, cdp } = launchChrome(profile, o.headed);
-  let server, code = 1;
+  // The server comes first: Chrome maps the CMP hosts to its port. Its control calls are wired once Chrome is up.
+  const control = {};
+  const server = await startServer(control);
+  const site = server.address().port;
+  const { browser, cdp } = launchChrome(profile, o.headed, site);
+  let code = 1;
   const cleanup = () => {
     for (const s of browser.stdio ?? []) s?.destroy();
     browser.kill();
-    server?.close();
+    server.close();
     rmSync(profile, { recursive: true, force: true });
   };
   process.on('SIGINT', () => { cleanup(); process.exit(130); });
   try {
     const port = await debuggerPort(profile);
     const { id: extensionId } = await cdp('Extensions.loadUnpacked', { path: ROOT });
-    const ctl = harness(cdp, extensionId, () => server.address().port);
+    Object.assign(control, harness(cdp, extensionId, () => site));
     const start = startSettings(o.seed);
-    await ctl.setSettings(start);
-    server = await startServer(ctl);
-    const site = server.address().port;
+    await control.setSettings(start);
     const origin = `http://localhost:${site}/${o.page ?? ''}`;
     const allowed = o.page
       ? [`http://localhost:${site}/${o.page}*`]
