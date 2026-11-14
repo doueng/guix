@@ -8,7 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { launch, available, sleep, setSettings, ROOT } from '../lib/chrome.mjs';
+import { launch, available, sleep, ROOT } from '../lib/chrome.mjs';
 import { startServer, controller } from '../lib/server.mjs';
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : dflt; };
@@ -29,8 +29,6 @@ if (!available) { console.error('bombadil: no headless Chrome (install the com.g
 const bin = bombadilBin();
 const devtoolsPort = 9200 + Math.floor(Math.random() * 600);
 const b = await launch({ port: devtoolsPort });
-const USER_KEYS = 'map i focusInput\nmap w previousTab\nmap e nextTab\nunmap J\nunmap K\nmap h goBack\nmap l goForward\nmap p Vomnibar.activateTabSelection\nmap <c-o> visitPreviousTab\nunmap N';
-await setSettings(b.cdp, b.extensionId, { keyMappings: USER_KEYS, grabBackFocus: true, exclusionRules: [] });
 
 // Key events go to the page Bombadil drives: the fixture page target, attached over the pipe.
 let session = null, sessionTarget = null;

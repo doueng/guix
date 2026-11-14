@@ -6,6 +6,6 @@ set -euo pipefail
 cd "$(dirname "$0")"
 guix shell openjdk@25:jdk node -- bash -c '
   [ -d node_modules ] || npm install --no-audit --no-fund
-  npx shadow-cljs release bg content ui options
+  npx shadow-cljs release bg content ui
   node scripts/check-load.mjs' 2>&1 \
   | grep -v -E 'sun.misc|terminally deprecated|Please consider reporting|will be removed'

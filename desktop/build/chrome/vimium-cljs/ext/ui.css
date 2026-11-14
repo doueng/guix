@@ -19,5 +19,5 @@ html, body { margin: 0; background: transparent; font: 14px/1.4 system-ui, sans-
 #help td.name { color: #999; font-size: 11px; }
 #help tr.unbound { color: #aaa; }
 #help kbd { font: 12px monospace; background: #f3f3f3; border: 1px solid #ccc; border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; margin-left: 3px; }
-#help footer { margin-top: 12px; color: #777; font-size: 12px; }
+#help footer, #help .note { margin-top: 12px; color: #777; font-size: 12px; }
 #help button { border: 0; background: none; font-size: 20px; cursor: pointer; }

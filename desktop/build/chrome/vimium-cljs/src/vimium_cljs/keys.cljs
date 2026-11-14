@@ -149,6 +149,17 @@
    {:order [] :entries {} :mapkeys {} :errors []}
    (config-lines text)))
 
+(defn mappings-text
+  "Vimium mapping text for config/key-mappings entries: [key command {option value}]
+  maps, [key nil] unmaps. An option whose value is true is a bare flag."
+  [entries]
+  (str/join "\n"
+            (for [[k cmd opts] entries]
+              (if cmd
+                (str/join " " (concat ["map" k cmd]
+                                      (for [[o v] opts] (if (true? v) (name o) (str (name o) "=" v)))))
+                (str "unmap " k)))))
+
 (defn effective-mappings
   "Vimium's defaults followed by the user's mapping text."
   [user-text]

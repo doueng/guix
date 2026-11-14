@@ -5,7 +5,7 @@
   (:require [clojure.string :as str]
             [vimium-cljs.commands :as commands]
             [vimium-cljs.keys :as keys]
-            [vimium-cljs.settings :as settings]))
+            [vimium-cljs.config :as config]))
 
 (defn- $ ^js [sel] (.querySelector js/document sel))
 
@@ -17,12 +17,20 @@
      (when text (set! (.-textContent e) text))
      e)))
 
-(defn- close! [] (.postMessage (.-parent js/window) "vimium-cljs:close" "*"))
-
 (defn- params []
   (let [h (.-hash js/location)
         [kind q] (str/split (subs h (min 1 (count h))) #"\?" 2)]
     [kind (js/URLSearchParams. (or q ""))]))
+
+;; The worker opens the Vomnibar in its own popup window, naming the tab to act on, when
+;; the active tab runs no content script (chrome:// pages, the Web Store).
+(defn- popup? [] (= "1" (.get (second (params)) "popup")))
+(defn- target-tab [] (some-> (.get (second (params)) "tabId") js/Number))
+
+(defn- close! []
+  (if (popup?)
+    (.close js/window)
+    (.postMessage (.-parent js/window) "vimium-cljs:close" "*")))
 
 ;; ---- Vomnibar -------------------------------------------------------------------
 
@@ -45,7 +53,7 @@
 
 (defn- query! [mode q]
   (let [n (:seq (swap! vstate update :seq inc))]
-    (-> (js/chrome.runtime.sendMessage #js {:type "vomnibar-query" :mode mode :query q})
+    (-> (js/chrome.runtime.sendMessage (clj->js {:type "vomnibar-query" :mode mode :query q :tabId (target-tab)}))
         (.then (fn [items]
                  (when (= n (:seq @vstate))
                    (let [items (js->clj (or items #js []) :keywordize-keys true)]
@@ -57,7 +65,7 @@
   (let [{:keys [items selected]} @vstate
         item (get items selected)]
     (-> (js/chrome.runtime.sendMessage (clj->js {:type "vomnibar-open" :newTab (boolean new-tab)
-                                                  :item item :text (when-not item text)}))
+                                                  :item item :text (when-not item text) :tabId (target-tab)}))
         (.finally close!))))
 
 (defn vomnibar! [^js ps]
@@ -101,26 +109,22 @@
   (.addEventListener js/document "keydown"
                      (fn [^js e] (when (or (= "Escape" (.-key e)) (= "?" (.-key e)) (and (.-ctrlKey e) (= "[" (.-key e))))
                                    (.preventDefault e) (close!))))
-  (.addEventListener ($ "#options-link") "click" (fn [^js e] (.preventDefault e) (js/chrome.runtime.openOptionsPage) (close!)))
   (.addEventListener ($ "#close") "click" (fn [_] (close!)))
-  (-> (js/chrome.storage.local.get "settings")
-      (.then (fn [^js r]
-               (let [s (settings/merged (js->clj (or (.-settings r) #js {})))
-                     ck (keys/command-keys (keys/effective-mappings (get s "keyMappings")))
-                     ^js body ($ "#commands")]
-                 (doseq [[g title] commands/groups]
-                   (let [^js sec (el "section" nil)
-                         ^js tbl (el "table" nil)]
-                     (.appendChild sec (el "h2" nil title))
-                     (doseq [[name group desc] commands/table :when (= g group)
-                             :let [ks (get ck name)]]
-                       (let [^js tr (el "tr" (when (empty? ks) "unbound"))
-                             ^js kt (el "td" "keys")]
-                         (doseq [k ks] (.appendChild kt (el "kbd" nil (key-label k))))
-                         (.append tr kt (el "td" nil desc) (el "td" "name" name))
-                         (.appendChild tbl tr)))
-                     (.appendChild sec tbl)
-                     (.appendChild body sec)))))))
+  (let [ck (keys/command-keys (keys/effective-mappings (keys/mappings-text config/key-mappings)))
+        ^js body ($ "#commands")]
+    (doseq [[g title] commands/groups]
+      (let [^js sec (el "section" nil)
+            ^js tbl (el "table" nil)]
+        (.appendChild sec (el "h2" nil title))
+        (doseq [[name group desc] commands/table :when (= g group)
+                :let [ks (get ck name)]]
+          (let [^js tr (el "tr" (when (empty? ks) "unbound"))
+                ^js kt (el "td" "keys")]
+            (doseq [k ks] (.appendChild kt (el "kbd" nil (key-label k))))
+            (.append tr kt (el "td" nil desc) (el "td" "name" name))
+            (.appendChild tbl tr)))
+        (.appendChild sec tbl)
+        (.appendChild body sec))))
   (.focus js/window))
 
 ;; ---- offscreen clipboard ---------------------------------------------------------------

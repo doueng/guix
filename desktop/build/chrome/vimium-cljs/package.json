@@ -3,12 +3,12 @@
   "private": true,
   "description": "A Vimium-style Chrome MV3 extension in ClojureScript",
   "scripts": {
-    "build": "shadow-cljs release bg content ui options",
+    "build": "shadow-cljs release bg content ui",
     "test": "shadow-cljs compile test && node out/test.js",
     "e2e": "node --test --test-concurrency=1 test/e2e/run.mjs",
     "e2e:content": "node --test --test-concurrency=1 --test-name-pattern='keys typed|scrolling|find mode|visual mode' test/e2e/run.mjs",
     "e2e:worker": "node --test --test-concurrency=1 --test-name-pattern='link hints|F opens|tabs:' test/e2e/run.mjs",
-    "e2e:ui": "node --test --test-concurrency=1 --test-name-pattern='mappings|exclusion|options page' test/e2e/run.mjs",
+    "e2e:ui": "node --test --test-concurrency=1 --test-name-pattern='mappings|Vomnibar' test/e2e/run.mjs",
     "check-load": "node scripts/check-load.mjs",
     "guide": "node scripts/check-guide.mjs",
     "bombadil": "node test/bombadil/run.mjs"

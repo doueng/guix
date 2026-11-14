@@ -6,7 +6,6 @@
   "minimum_chrome_version": "116",
   "icons": { "128": "icons/icon128.png" },
   "background": { "service_worker": "js/bg.js" },
-  "options_ui": { "page": "options.html", "open_in_tab": true },
   "permissions": ["tabs", "bookmarks", "history", "storage", "sessions", "webNavigation",
                   "offscreen", "clipboardRead", "clipboardWrite"],
   "host_permissions": ["<all_urls>"],
@@ -21,6 +20,9 @@
       "match_origin_as_fallback": true
     }
   ],
+  "commands": {
+    "vomnibar": { "description": "Open the Vomnibar" }
+  },
   "web_accessible_resources": [
     { "resources": ["ui.html", "ui.css", "js/ui.js"], "matches": ["<all_urls>"] }
   ]

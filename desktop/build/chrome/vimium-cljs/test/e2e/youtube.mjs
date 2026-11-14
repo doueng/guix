@@ -4,7 +4,7 @@
 // With no arguments it is the YouTube regression check: on a long results page, click
 // Subscriptions in the guide (YouTube navigates in place), go back, press j five times, and
 // exit 1 unless the page scrolled and the guide did not. Needs network; logged out.
-import { launch, sleep, evaluate, setSettings } from '../lib/chrome.mjs';
+import { launch, sleep, evaluate } from '../lib/chrome.mjs';
 import { controller } from '../lib/server.mjs';
 
 const url = process.argv[2] || 'https://www.youtube.com/results?search_query=clojure';
@@ -15,7 +15,6 @@ const back = process.env.BACK || regression;
 const height = Number(process.env.HEIGHT || 600);
 const b = await launch({ width: 1400, height });
 try {
-  await setSettings(b.cdp, b.extensionId, { grabBackFocus: true, exclusionRules: [] });
   // Skip YouTube's cookie-consent interstitial (SOCS=CAI is "reject all").
   await b.cdp('Storage.setCookies', { cookies: [{ name: 'SOCS', value: 'CAI', domain: '.youtube.com', path: '/', secure: true }] });
   const { targetId } = await b.cdp('Target.createTarget', { url });

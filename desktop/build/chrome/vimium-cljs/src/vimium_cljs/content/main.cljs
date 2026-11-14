@@ -13,11 +13,10 @@
             [vimium-cljs.content.visual :as visual]
             [vimium-cljs.exclusions :as exclusions]
             [vimium-cljs.keys :as keys]
-            [vimium-cljs.settings :as settings]))
+            [vimium-cljs.config :as config]))
 
 (def top? (identical? js/window (.-top js/window)))
 
-(defonce conf (atom nil))          ; {:settings :trie :mapkeys :vim-escape? :ignore-layout}
 (defonce key-state (atom keys/initial))
 (defonce mode (atom {:name :normal}))
 (defonce top-rule (atom nil))      ; exclusion rule for the tab's URL, from the worker (subframes)
@@ -26,8 +25,6 @@
 (defonce hints (atom nil))         ; this frame's part of a hint session
 (defonce previous-position (atom nil))
 (defonce hints-requested (atom false)) ; f pressed, hints not shown yet
-
-(defn setting [k] (get-in @conf [:settings k]))
 
 (defn send!
   "Message to the service worker; resolves to its reply, or nil if the
@@ -38,23 +35,22 @@
         (.catch (fn [_] nil)))
     (catch :default _ (js/Promise.resolve nil))))
 
-(defn hud! [text] (when-not (setting "hideHud") (ui/hud! text 2000)))
+(defn hud! [text] (when-not config/hide-hud (ui/hud! text 2000)))
 
-;; ---- settings and exclusions --------------------------------------------------
+;; ---- key map and exclusions ---------------------------------------------------
 
-(defn apply-settings! [stored]
-  (let [s (settings/merged (js->clj (or stored #js {})))
-        m (keys/effective-mappings (get s "keyMappings"))
+;; Built from vimium-cljs.config when the script loads.
+(def conf
+  (let [m (keys/effective-mappings (keys/mappings-text config/key-mappings))
         t (keys/trie m)]
-    (reset! conf {:settings s :trie t :mapkeys (:mapkeys m)
-                  :vim-escape? (not (contains? t "<c-[>"))
-                  :ignore-layout (get s "ignoreKeyboardLayout")})
-    (ui/set-user-css! (get s "userDefinedLinkHintCss"))))
+    {:trie t :mapkeys (:mapkeys m)
+     :vim-escape? (not (contains? t "<c-[>"))
+     :ignore-layout config/ignore-keyboard-layout}))
 
 (defn rule
   "{:enabled :pass-keys} for this frame, merging the tab URL's rule."
   []
-  (let [rules (setting "exclusionRules")
+  (let [rules config/exclusions
         own (exclusions/rule-for-url rules (.-href js/location))
         top (when-not top? (when-let [u @top-rule] (exclusions/rule-for-url rules u)))
         rs (remove nil? [own top])]
@@ -197,7 +193,7 @@
 
 ;; ---- find -------------------------------------------------------------------------
 
-(defn- regex? [] (boolean (setting "regexFindMode")))
+(defn- regex? [] (boolean config/regex-find-mode))
 
 (defn enter-find! []
   (let [before (position)
@@ -311,8 +307,8 @@
 
 ;; ---- commands -----------------------------------------------------------------------
 
-(defn- step-size [] (or (setting "scrollStepSize") 60))
-(defn- smooth? [] (boolean (setting "smoothScroll")))
+(defn- step-size [] config/scroll-step)
+(defn- smooth? [] (boolean config/smooth-scroll))
 
 (defn open-ui! [kind query]
   (ui/open-frame! kind query))
@@ -340,8 +336,8 @@
    "goForward" (fn [n] (.go js/history n))
    "goUp" (fn [n] (set! (.-href js/location) (url-up (.-href js/location) n)))
    "goToRoot" (fn [_] (set! (.-href js/location) (str (.-origin js/location) "/")))
-   "goNext" (fn [_] (when-not (follow-rel! (setting "nextPatterns") "next") (hud! "No next link")))
-   "goPrevious" (fn [_] (when-not (follow-rel! (setting "previousPatterns") "prev") (hud! "No previous link")))
+   "goNext" (fn [_] (when-not (follow-rel! config/next-patterns "next") (hud! "No next link")))
+   "goPrevious" (fn [_] (when-not (follow-rel! config/previous-patterns "prev") (hud! "No previous link")))
    "enterInsertMode" (fn [_] (set-mode! :insert) (ui/hud! "Insert mode"))
    "passNextKey" (fn [n] (set-mode! :pass-next :left n) (ui/hud! "Pass next key"))
    "focusInput" (fn [n] (focus-input! n))
@@ -391,7 +387,7 @@
 (defn- normal-key! [^js e ks esc?]
   (let [{:keys [enabled pass-keys]} (rule)]
     (when enabled
-      (let [{:keys [state result] :as r} (keys/step (:trie @conf) @key-state ks esc? pass-keys)]
+      (let [{:keys [state result] :as r} (keys/step (:trie conf) @key-state ks esc? pass-keys)]
         (reset! key-state state)
         (case result
           :command (do (consume! e) (run-command! (:command r) (:count r)))
@@ -404,10 +400,10 @@
                         :else nil)))))))
 
 (defn on-keydown [^js e]
-  (when (and (.-isTrusted e) @conf (not (own-ui? e)))
+  (when (and (.-isTrusted e) (not (own-ui? e)))
     (reset! user-acted true)
     (let [ev (ev->map e)
-          {:keys [mapkeys vim-escape? ignore-layout]} @conf
+          {:keys [mapkeys vim-escape? ignore-layout]} conf
           ks (keys/key-string ev mapkeys ignore-layout)
           esc? (keys/escape? ev ks vim-escape?)
           target (dom/event-target e)
@@ -442,7 +438,7 @@
 ;; ---- grabBackFocus -----------------------------------------------------------------
 
 (defn- on-focus [^js e]
-  (when (and (setting "grabBackFocus") (not @user-acted) (.-isTrusted e))
+  (when (and config/grab-back-focus (not @user-acted) (.-isTrusted e))
     (let [t (dom/event-target e)]
       (when (dom/editable? t) (.blur ^js t)))))
 
@@ -458,6 +454,9 @@
     "hints-exit" (do (hints-exit!) false)
     "hud" (do (hud! (.-text msg)) false)
     "top-command" (do (when-let [f (local-commands (.-name msg))] (f (or (.-count msg) 1))) false)
+    ;; The worker's Ctrl+L command. A page without focus (the address bar has it) cannot
+    ;; take it back, so it answers false and the worker opens the popup Vomnibar instead.
+    "vomnibar" (let [ok (.hasFocus js/document)] (when ok (vomnibar! "omni" false)) (respond ok) false)
     "focus-frame" (do (.focus js/window) (dom/flash! (.-documentElement js/document)) false)
     "scroll-to" (do (jump-to! {:x (.-x msg) :y (.-y msg)}) false)
     "ping" (do (respond true) false)
@@ -470,7 +469,7 @@
     (ui/close-frame!)))
 
 (defn- mark-ready! []
-  (when (and @conf (test-page?))
+  (when (test-page?)
     (.setAttribute (.-documentElement js/document) "data-vimium-cljs-ready" "1")))
 
 (defn init []
@@ -485,17 +484,7 @@
     (.addEventListener js/window "message" on-window-message)
     (.addEventListener js/document "DOMContentLoaded" mark-ready!)
     (js/chrome.runtime.onMessage.addListener on-message)
-    (-> (js/chrome.storage.local.get "settings")
-        (.then (fn [^js r]
-                 (apply-settings! (.-settings r))
-                 (mark-ready!)
-                 ;; grabBackFocus: undo an autofocus that happened before the settings arrived.
-                 (when (and (setting "grabBackFocus") (not @user-acted))
-                   (let [^js a (dom/deep-active-element)]
-                     (when (dom/editable? a) (.blur a)))))))
-    (js/chrome.storage.onChanged.addListener
-     (fn [^js changes area]
-       (when (and (= area "local") (.-settings changes))
-         (apply-settings! (.. changes -settings -newValue)))))
+    (ui/set-user-css! config/link-hint-css)
+    (when-not (= "loading" (.-readyState js/document)) (mark-ready!))
     (when-not top?
       (-> (send! {:type "tab-url"}) (.then (fn [u] (reset! top-rule u)))))))

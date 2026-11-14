@@ -77,16 +77,3 @@ export async function workerSession(cdp, extensionId) {
   }
   throw new Error('extension service worker not found');
 }
-
-export async function setSettings(cdp, extensionId, settings) {
-  for (let i = 0; ; i++) {
-    try {
-      const s = await workerSession(cdp, extensionId);
-      return await evaluate(cdp, s, `chrome.storage.local.set({ settings: ${JSON.stringify(settings)} }).then(() => true)`);
-    } catch (e) {
-      // The worker may still be starting (no chrome yet); try again.
-      if (i > 20) throw e;
-      await sleep(250);
-    }
-  }
-}

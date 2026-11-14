@@ -6,13 +6,9 @@
   (:require [clojure.string :as str]
             [vimium-cljs.hints :as hints]
             [vimium-cljs.rank :as rank]
-            [vimium-cljs.settings :as settings]))
+            [vimium-cljs.config :as config]))
 
 (defn- p [x] (js/Promise.resolve x))
-
-(defn get-settings []
-  (-> (js/chrome.storage.local.get "settings")
-      (.then (fn [^js r] (settings/merged (js->clj (or (.-settings r) #js {})))))))
 
 (defn- to-frame [tab-id frame-id msg]
   (-> (js/chrome.tabs.sendMessage tab-id (clj->js msg) #js {:frameId frame-id})
@@ -72,8 +68,7 @@
     :else (js/chrome.tabs.update (.-id tab) #js {:url url})))
 
 (defn- typed->url [text]
-  (-> (get-settings)
-      (.then (fn [s] (rank/->url text (settings/search-engines (get s "searchEngines")) (get s "searchUrl"))))))
+  (p (rank/->url text config/search-engines config/search-url)))
 
 ;; ---- commands --------------------------------------------------------------------
 
@@ -113,12 +108,9 @@
   (let [id (.-id tab)]
     (case name
       "reload" (js/chrome.tabs.reload id #js {:bypassCache (boolean (get options "hard"))})
-      "createTab" (-> (get-settings)
-                      (.then (fn [s]
-                               (let [url (when (= "customUrl" (get s "newTabDestination"))
-                                           (not-empty (get s "newTabCustomUrl")))]
-                                 (dotimes [i n]
-                                   (js/chrome.tabs.create (clj->js (cond-> {:index (+ (.-index tab) 1 i)} url (assoc :url url)))))))))
+      "createTab" (let [url (not-empty config/new-tab-url)]
+                    (dotimes [i n]
+                      (js/chrome.tabs.create (clj->js (cond-> {:index (+ (.-index tab) 1 i)} url (assoc :url url))))))
       "nextTab" (select-relative! tab n)
       "previousTab" (select-relative! tab (- n))
       "firstTab" (-> (window-tabs tab) (.then (fn [ts] (activate-tab! (nth ts (min (dec (count ts)) (dec n)))))))
@@ -177,14 +169,14 @@
   ;; counting their links is dropped instead of shown.
   (let [n (swap! starts inc)]
     (swap! sessions assoc tab-id {:pending n})
-  (-> (js/Promise.all #js [(frame-ids tab-id) (get-settings)])
-      (.then (fn [[ids s]]
+  (-> (frame-ids tab-id)
+      (.then (fn [ids]
                (-> (js/Promise.all (clj->js (map (fn [f] (-> (to-frame tab-id f {:type "hints-collect" :mode mode})
                                                                 (.then (fn [n] #js [f (or n 0)])))) ids)))
                    (.then (fn [pairs]
                             (let [counts (mapv vec pairs)
                                   total (reduce + (map second counts))
-                                  assigned (hints/assign (get s "linkHintCharacters") (filter (comp pos? second) counts))]
+                                  assigned (hints/assign config/link-hint-characters (filter (comp pos? second) counts))]
                               (cond
                                 (not= n (:pending (get @sessions tab-id)))
                                 (doseq [[f _] counts] (to-frame tab-id f {:type "hints-exit"}))
@@ -273,7 +265,13 @@
 
 (defn- history-items [query]
   (-> (js/chrome.history.search #js {:text query :maxResults 300 :startTime 0})
-      (.then (fn [hs] (rank/rank query (map (fn [^js h] {:type "history" :title (.-title h) :url (.-url h) :time (.-lastVisitTime h)}) hs) (js/Date.now))))))
+      (.then (fn [hs]
+               ;; The popup Vomnibar is a page of ours, so it lands in history; leave it out.
+               (let [own (js/chrome.runtime.getURL "")]
+                 (rank/rank query (keep (fn [^js h] (when-not (str/starts-with? (.-url h) own)
+                                                      {:type "history" :title (.-title h) :url (.-url h) :time (.-lastVisitTime h)}))
+                                        hs)
+                            (js/Date.now)))))))
 
 (defn vomnibar-query [mode query ^js tab]
   (case mode
@@ -301,6 +299,35 @@
       (:url item) (open-url! tab (:url item) {:new-tab new-tab :active true})
       (seq (.-text msg)) (-> (typed->url (.-text msg)) (.then #(open-url! tab % {:new-tab new-tab :active true}))))))
 
+;; Chrome's own Ctrl+L focuses the address bar and is not reserved from extensions: the user
+;; assigns it to the "vomnibar" command in chrome://extensions/shortcuts (Chrome will not
+;; auto-assign a suggested key that a browser shortcut has). The command arrives here even
+;; when focus is in the address bar. The page cannot take focus back from the address bar,
+;; and a tab without our content script (chrome:// pages, the Web Store) has no page UI, so
+;; both get the Vomnibar in a popup window that acts on that tab.
+
+(defn- target-tab
+  "The tab a Vomnibar message acts on: the one it names (a popup Vomnibar) or the sender's."
+  [^js msg ^js sender-tab]
+  (if-let [id (.-tabId msg)]
+    (-> (js/chrome.tabs.get id) (.catch (fn [_] sender-tab)))
+    (p sender-tab)))
+
+(defn- vomnibar-popup! [^js tab]
+  (js/chrome.windows.create
+   #js {:url (js/chrome.runtime.getURL (str "ui.html#vomnibar?mode=omni&popup=1"
+                                            (when tab (str "&tabId=" (.-id tab)))))
+        :type "popup" :width 900 :height 520 :focused true}))
+
+(defn- vomnibar-command! [^js tab]
+  (-> (if tab (p tab) (-> (js/chrome.tabs.query #js {:active true :lastFocusedWindow true}) (.then first)))
+      (.then (fn [^js tab]
+               (if-not tab
+                 (vomnibar-popup! nil)
+                 (-> (js/chrome.tabs.sendMessage (.-id tab) #js {:type "vomnibar"} #js {:frameId 0})
+                     (.catch (fn [_] false))
+                     (.then (fn [shown] (when-not shown (vomnibar-popup! tab))))))))))
+
 ;; ---- messages ------------------------------------------------------------------------
 
 (defn handle [^js msg ^js sender]
@@ -323,8 +350,10 @@
                                           (clj->js {"globalMarks" (assoc m (.-letter msg) {"url" (.-url msg) "tabId" tab-id
                                                                                               "scroll" (js->clj (.-scroll msg))})}))))))
         "mark-goto-global" (mark-goto! (.-letter msg))
-        "vomnibar-query" (-> (vomnibar-query (.-mode msg) (or (.-query msg) "") tab) (.then clj->js))
-        "vomnibar-open" (do (vomnibar-open! tab msg) nil)
+        "vomnibar-query" (-> (target-tab msg tab)
+                             (.then #(vomnibar-query (.-mode msg) (or (.-query msg) "") %))
+                             (.then clj->js))
+        "vomnibar-open" (do (.then (target-tab msg tab) #(vomnibar-open! % msg)) nil)
         nil))))
 
 (defn init []
@@ -334,6 +363,9 @@
        (if (instance? js/Promise r)
          (do (.then r respond (fn [e] (js/console.error e) (respond nil))) true)
          (do (when (some? r) (respond r)) false)))))
+  (js/chrome.commands.onCommand.addListener (fn [name ^js tab] (when (= name "vomnibar") (vomnibar-command! tab))))
+  ;; DevTools key events never reach Chrome's shortcuts, so the e2e suite runs the command here.
+  (unchecked-set js/globalThis "vimiumCljsVomnibarCommand" vomnibar-command!)
   (js/chrome.tabs.onActivated.addListener (fn [^js info] (note-active! (.-tabId info))))
   (js/chrome.tabs.onRemoved.addListener (fn [id] (swap! sessions dissoc id)))
   (js/chrome.tabs.onUpdated.addListener (fn [id ^js info] (when (= "loading" (.-status info)) (swap! sessions dissoc id))))
@@ -341,8 +373,4 @@
   ;; the user, and the content script cannot see pushState, so tell the frame (as Vimium does).
   (let [url-changed (fn [^js d] (to-frame (.-tabId d) (.-frameId d) {:type "url-changed"}))]
     (js/chrome.webNavigation.onHistoryStateUpdated.addListener url-changed)
-    (js/chrome.webNavigation.onReferenceFragmentUpdated.addListener url-changed))
-  (js/chrome.runtime.onInstalled.addListener
-   (fn [^js details]
-     (when (= "install" (.-reason details))
-       (js/chrome.runtime.openOptionsPage)))))
+    (js/chrome.webNavigation.onReferenceFragmentUpdated.addListener url-changed)))

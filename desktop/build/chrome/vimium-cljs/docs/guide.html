@@ -31,14 +31,14 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <body><main>
 <h1>Vimium (cljs): load, use, test</h1>
 
-<p>Vimium (cljs) is your own Vimium, rewritten in ClojureScript as a Chrome Manifest V3 extension. It reads your Vimium export, keeps your key mappings, and runs in the flatpak Chrome next to Vimium or instead of it.</p>
+<p>Vimium (cljs) is your own Vimium, rewritten in ClojureScript as a Chrome Manifest V3 extension. Your settings from your Vimium export are compiled in from one source file, and it runs in the flatpak Chrome next to Vimium or instead of it.</p>
 
 <h2>Load it in the flatpak Chrome</h2>
 <ol>
 <li>Build it (after every checkout or pull; Java and node come from guix):<pre>/home/engstrand/projects/vimium-cljs/build.sh</pre>The compiled scripts in <code>ext/js/</code> are build output and not in the repo, so without this step Chrome says <b>Could not load background script</b> and <b>Could not load manifest</b>. The script ends by loading <code>ext/</code> in a headless flatpak Chrome and prints Chrome's own error if it would not load. <code>./check.sh</code> runs the build, the unit tests, the same load check and the e2e suite in one go.</li>
 <li>Let the flatpak see the extension folder (once, read-only):<pre>flatpak override --user --filesystem=/home/engstrand/projects/vimium-cljs/ext:ro com.google.Chrome</pre>Restart Chrome after this. T178 did the same for the cookie extension.</li>
-<li>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b> (top right), click <b>Load unpacked</b> and pick <code>/home/engstrand/projects/vimium-cljs/ext</code> (the <code>ext</code> folder, not the repo folder above it, which has no manifest.json: Chrome then says <b>Manifest file is missing or unreadable</b>). The extension is called <b>Vimium (cljs)</b>, version 0.1.0. Its options page opens on first install.</li>
-<li>On the options page, choose your export, <code>/home/engstrand/Downloads/vimium-options.json</code>, under <b>Import from Vimium</b>. The flatpak can read Downloads. The import only parses the JSON: it lists what it took, drops the duplicate typelit.io rule and notes options it does not use.</li>
+<li>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b> (top right), click <b>Load unpacked</b> and pick <code>/home/engstrand/projects/vimium-cljs/ext</code> (the <code>ext</code> folder, not the repo folder above it, which has no manifest.json: Chrome then says <b>Manifest file is missing or unreadable</b>). The extension is called <b>Vimium (cljs)</b>, version 0.1.0.</li>
+<li>For Ctrl+L: open <code>chrome://extensions/shortcuts</code>, find <b>Vimium (cljs)</b>, <b>Open the Vomnibar</b>, click the pencil and press Ctrl+L. Chrome will not hand an extension a key that one of its own shortcuts uses until you do this once.</li>
 <li>After a rebuild, click the reload arrow on the extension's card in <code>chrome://extensions</code>, then reload open tabs.</li>
 </ol>
 
@@ -47,9 +47,14 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <ul>
 <li><b>Instead of Vimium:</b> switch Vimium off with its toggle in <code>chrome://extensions</code>. Its settings stay, so switching back is one click.</li>
 <li><b>Side by side:</b> keep Vimium in your main profile and load Vimium (cljs) in a second Chrome profile (profile menu → Add). Each profile has its own extensions.</li>
-<li><b>Per site:</b> add an exclusion rule in one extension for the sites where the other should run.</li>
+<li><b>Per site:</b> add an exclusion rule (Vimium's options page, or <code>exclusions</code> in the config file below) for the sites where the other should run.</li>
 </ul>
-<p>Your guix repo's Vimium aliases (<code>/home/engstrand/guix/desktop/configs/vimium/keybindings.txt</code>: g? gb g/ gh gl) are not in the export. To use them, paste those lines into <b>Custom key mappings</b>.</p>
+<h2>Change keys and settings</h2>
+<p>There is no options page. Every setting is plain ClojureScript data in <code>/home/engstrand/projects/vimium-cljs/src/vimium_cljs/config.cljs</code>: your key mappings, link-hint characters, search engines, exclusions, scrolling and the rest, as your Vimium export had them. Edit it, run <code>./build.sh</code>, then click the reload arrow on the extension's card in <code>chrome://extensions</code>. A mapping is <code>["w" "previousTab"]</code>; <code>["N" nil]</code> unmaps a key; <kbd>?</kbd> on a page lists every command name. <code>npm test</code> checks that the file is well formed.</p>
+<p>Your guix repo's Vimium aliases (<code>/home/engstrand/guix/desktop/configs/vimium/keybindings.txt</code>: g? gb g/ gh gl) were not in the export, so they are not in the config. Add them as mappings to use them.</p>
+
+<h2>Ctrl+L opens the Vomnibar</h2>
+<p>Once Ctrl+L is set at <code>chrome://extensions/shortcuts</code>, it opens the Vomnibar instead of focusing the address bar, from the page, from the address bar itself and from <code>chrome://</code> pages. Chrome sends it to the extension's service worker, so no page script and no desktop remap is involved, and Ctrl+L in every other application is unchanged. When the page can't take the keyboard (focus is in the address bar, or the page is a <code>chrome://</code> page or the Web Store, where extensions can't run), the Vomnibar opens in a small popup window that acts on the tab you were in. <kbd>Esc</kbd> closes it. Cmd+L stays the right arrow; <kbd>Alt+d</kbd> still focuses the address bar.</p>
 
 <h2>What it does</h2>
 <table>
@@ -68,19 +73,19 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td><kbd>?</kbd></td><td>help: every command with your current keys</td></tr>
 </table>
 <p>Keys typed in inputs, textareas, contenteditable areas and inputs inside shadow DOM always go to the page. <kbd>Esc</kbd> leaves the field. go.dev and typelit.io are excluded, as in your Vimium. grabBackFocus is on, so pages can't grab focus on load.</p>
-<p><b>Key clashes:</b> none. Kanata turns Cmd chords into Ctrl ones and Cmd+hjkl into arrows, and Hyprland takes Alt+digits, Alt+W and Alt+Space. Nothing sends Ctrl+O, Alt+F, Alt+P or Alt+M, so those reach the page. Extensions can't run on <code>chrome://</code> pages or the Web Store, so there the global key guide (Cmd+/) still applies.</p>
+<p><b>Key clashes:</b> none. Kanata turns Cmd chords into Ctrl ones and Cmd+hjkl into arrows, and Hyprland takes Alt+digits, Alt+W and Alt+Space. Nothing sends Ctrl+O, Alt+F, Alt+P or Alt+M, so those reach the page. Extensions can't run on <code>chrome://</code> pages or the Web Store, so there only Ctrl+L works and the global key guide (Cmd+/) still applies.</p>
 
 <h2>Not ported</h2>
 <p>Filtered (type-the-link-text) hints, the <kbd>:</kbd> command Vomnibar, setZoom, download and incognito hint modes, Vimium's new-tab page, the toolbar popup that edits exclusions, search-engine completion, and find history. Your config uses none of them.</p>
 
 <h2>How it is built</h2>
-<p>There is one shadow-cljs <code>:browser</code> build per entry point, each released with <code>:advanced</code> into <code>ext/js/</code>: <code>bg</code> (the service worker), <code>content</code> (every frame, at document_start), <code>ui</code> (the Vomnibar, help and offscreen clipboard pages) and <code>options</code>. MV3 forbids eval, and shadow-cljs dev builds load code through eval, so the extension only runs release builds. <code>check.sh</code> fails if any bundle contains eval. Pure logic (keys, mappings, hints, exclusions, import, ranking, which element a scroll moves) lives in plain namespaces that <code>npm test</code> runs on node. T178's cookie extension can use the same pattern.</p>
+<p>There is one shadow-cljs <code>:browser</code> build per entry point, each released with <code>:advanced</code> into <code>ext/js/</code>: <code>bg</code> (the service worker), <code>content</code> (every frame, at document_start), <code>ui</code> (the Vomnibar, help and offscreen clipboard pages). MV3 forbids eval, and shadow-cljs dev builds load code through eval, so the extension only runs release builds. <code>check.sh</code> fails if any bundle contains eval. Pure logic (keys, mappings, the config, hints, exclusions, ranking, which element a scroll moves) lives in plain namespaces that <code>npm test</code> runs on node. T178's cookie extension can use the same pattern.</p>
 <p>Hints across frames work as in Vimium. Every frame counts its visible clickable elements, the service worker hands out one set of unique hint strings, and each frame draws its own markers in a closed shadow root that the page can't style or read.</p>
 
 <h2>Tests</h2>
 <ul>
-<li><code>npm test</code>: 23 cljs.test tests (key parsing, your mappings, the key state machine, hint strings, exclusions, the import, ranking and typed URLs, and choosing the scroll target).</li>
-<li><code>npm run e2e</code>: 13 checks in one headless flatpak Chrome over local fixture pages, about 40 s. <code>test/fixtures/tube.html</code> mimics YouTube's subscriptions feed (web components, a fixed scrolling guide) for the scroll-target checks. <code>node test/e2e/youtube.mjs</code> runs the same kind of check on the real YouTube. Split by stage: <code>e2e:content</code>, <code>e2e:worker</code> and <code>e2e:ui</code>.</li>
+<li><code>npm test</code>: 24 cljs.test tests (key parsing, your mappings, that the config is well formed and matches your export, the key state machine, hint strings, exclusions, ranking and typed URLs, and choosing the scroll target).</li>
+<li><code>npm run e2e</code>: 13 checks, including the Ctrl+L command run from the worker (DevTools keys never reach Chrome's own shortcuts), in one headless flatpak Chrome over local fixture pages, about 40 s. <code>test/fixtures/tube.html</code> mimics YouTube's subscriptions feed (web components, a fixed scrolling guide) for the scroll-target checks. <code>node test/e2e/youtube.mjs</code> runs the same kind of check on the real YouTube. Split by stage: <code>e2e:content</code>, <code>e2e:worker</code> and <code>e2e:ui</code>.</li>
 <li><code>npm run bombadil</code>: Bombadil explores the fixture site with random clicks, scrolls and key presses, and checks on every state that hints cover every visible link (including the shadow DOM and both iframes), that keys typed into fields never fire commands, that j and k scroll, and that find highlights every match. Its first runs found three bugs, all fixed with tests: Escape racing a hint start, a cross-origin frame left in hint mode, and j scrolling a blurred textarea.</li>
 </ul>
 <p>Logic is ported from <a href="https://github.com/philc/vimium">Vimium</a>, MIT License, Copyright (c) 2010 Phil Crosby, Ilya Sukhar. The license is in <code>ext/LICENSE.vimium.txt</code>.</p>

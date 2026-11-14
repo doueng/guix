@@ -10,7 +10,6 @@ const ext = join(ROOT, 'ext');
 const m = JSON.parse(readFileSync(join(ext, 'manifest.json'), 'utf8'));
 const files = [
   m.background?.service_worker,
-  m.options_ui?.page,
   ...Object.values(m.icons ?? {}),
   ...(m.content_scripts ?? []).flatMap((c) => [...(c.js ?? []), ...(c.css ?? [])]),
   ...(m.web_accessible_resources ?? []).flatMap((w) => w.resources),

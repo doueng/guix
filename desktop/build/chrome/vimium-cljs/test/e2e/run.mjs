@@ -2,13 +2,11 @@
 // trusted key events. Run `npm run build` first. Skips when no Chrome is found.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, available, sleep, evaluate, setSettings, workerSession } from '../lib/chrome.mjs';
+import { launch, available, sleep, evaluate, workerSession } from '../lib/chrome.mjs';
 import { startServer, controller } from '../lib/server.mjs';
 
 const skip = available ? false : 'no headless Chrome (install the com.google.Chrome flatpak or set CHROME)';
 const T = { skip, timeout: 40000 };
-// The user's mapping text from their Vimium export.
-const USER_KEYS = 'map i focusInput\nmap w previousTab\nmap e nextTab\nunmap J\nunmap K\nmap h goBack\nmap l goForward\nmap p Vomnibar.activateTabSelection\nmap <c-o> visitPreviousTab\nunmap N';
 
 let b, srv, port, page;
 const ctl = () => controller(b.cdp, async () => page);
@@ -55,7 +53,6 @@ before(async () => {
   if (skip) return;
   b = await launch();
   ({ port, server: srv } = await startServer((op, q) => ctl()(op, q)));
-  await setSettings(b.cdp, b.extensionId, { keyMappings: USER_KEYS, grabBackFocus: true, exclusionRules: [] });
 });
 after(() => { b?.close(); srv?.closeAllConnections(); srv?.close(); setTimeout(() => process.exit(process.exitCode ?? 0), 2000).unref(); });
 
@@ -279,37 +276,44 @@ test('visual mode extends the selection; marks jump back', T, async () => {
   assert.equal((await facts()).scrollY, (await facts()).maxScrollY, 'back to the previous position');
 });
 
-test('an exclusion rule turns the keys off on matching pages', T, async () => {
-  await setSettings(b.cdp, b.extensionId, { keyMappings: USER_KEYS, exclusionRules: [{ pattern: 'http://127.0.0.1:*/*', passKeys: '' }] });
+test('the Vomnibar command (Ctrl+L) opens the Vomnibar in the page', T, async () => {
   await open();
-  const f0 = await facts();
-  await keys('jjf', 400);
-  const f = await facts();
-  assert.equal(f.scrollY, f0.scrollY);
-  assert.equal(f.mode, 'normal');
-  assert.equal(f.pageKeys, f0.pageKeys + 3);
-  await setSettings(b.cdp, b.extensionId, { keyMappings: USER_KEYS, exclusionRules: [{ pattern: 'http://127.0.0.1:*/*', passKeys: 'j' }] });
-  await sleep(200);
-  await keys('j', 400);
-  assert.equal((await facts()).scrollY, f0.scrollY, 'j is a pass key');
-  await keys('d', 400);
-  assert.ok((await facts()).scrollY > f0.scrollY, 'd still works');
-  await setSettings(b.cdp, b.extensionId, { keyMappings: USER_KEYS, exclusionRules: [] });
+  const w = await workerSession(b.cdp, b.extensionId);
+  await evaluate(b.cdp, w, 'chrome.tabs.query({active: true, lastFocusedWindow: true}).then(t => vimiumCljsVomnibarCommand(t[0])).then(() => true)');
+  await sleep(600);
+  const frames = await extensionFrames();
+  assert.ok(frames.some((u) => u.includes('#vomnibar') && !u.includes('popup=1')), `in-page Vomnibar: ${frames}`);
+  await keys('<esc>', 300);
 });
 
-test('the options page imports a Vimium export', T, async () => {
-  const { targetId } = await b.cdp('Target.createTarget', { url: `chrome-extension://${b.extensionId}/options.html` });
+test('the Vomnibar command opens a popup on chrome:// pages and the choice opens in that tab', T, async () => {
+  const { targetId } = await b.cdp('Target.createTarget', { url: 'chrome://version' });
   const s = (await b.cdp('Target.attachToTarget', { targetId, flatten: true })).sessionId;
-  await sleep(800);
-  const exported = JSON.stringify({ keyMappings: 'map x scrollDown', linkHintCharacters: 'asdf', settingsVersion: '2.4.2',
-    exclusionRules: [{ passKeys: '', pattern: 'https?://a.example/*' }, { passKeys: '', pattern: 'https?://a.example/*' }] });
-  await evaluate(b.cdp, s, `document.getElementById('import-text').value = ${JSON.stringify(exported)}; document.getElementById('import-paste').click(); true`);
+  await b.cdp('Page.bringToFront', {}, s);
   await sleep(500);
-  const report = await evaluate(b.cdp, s, 'document.getElementById("import-report").textContent');
-  assert.match(report, /duplicate/);
   const w = await workerSession(b.cdp, b.extensionId);
-  const stored = await evaluate(b.cdp, w, 'chrome.storage.local.get("settings").then(r => r.settings)');
-  assert.equal(stored.keyMappings, 'map x scrollDown');
-  assert.equal(stored.linkHintCharacters, 'asdf');
-  assert.equal(stored.exclusionRules.length, 1);
+  await evaluate(b.cdp, w, `chrome.tabs.query({}).then(ts => vimiumCljsVomnibarCommand(ts.find(t => t.url.startsWith('chrome://version')))).then(() => true)`);
+  let popup;
+  for (let i = 0; i < 30 && !popup; i++) {
+    const { targetInfos } = await b.cdp('Target.getTargets');
+    popup = targetInfos.find((t) => t.type === 'page' && t.url.includes('ui.html#vomnibar') && t.url.includes('popup=1'));
+    if (!popup) await sleep(100);
+  }
+  assert.ok(popup, 'popup Vomnibar');
+  const ps = (await b.cdp('Target.attachToTarget', { targetId: popup.targetId, flatten: true })).sessionId;
+  for (let i = 0; i < 30; i++) {
+    if (await evaluate(b.cdp, ps, "!!document.getElementById('query') && !document.getElementById('vomnibar').hidden").catch(() => false)) break;
+    await sleep(100);
+  }
+  const target = `http://127.0.0.1:${port}/frame.html`;
+  await evaluate(b.cdp, ps, `(() => { const q = document.getElementById('query'); q.value = ${JSON.stringify(target)};
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true; })()`);
+  let url;
+  for (let i = 0; i < 30 && url !== target; i++) {
+    await sleep(100);
+    ({ targetInfo: { url } } = await b.cdp('Target.getTargetInfo', { targetId }));
+  }
+  assert.equal(url, target, 'the chrome:// tab went to the chosen URL');
+  const { targetInfos } = await b.cdp('Target.getTargets');
+  assert.ok(!targetInfos.some((t) => t.targetId === popup.targetId), 'popup closed');
 });

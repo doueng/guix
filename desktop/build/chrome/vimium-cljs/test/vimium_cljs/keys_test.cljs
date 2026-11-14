@@ -36,6 +36,10 @@
   (is (= ["<space>" "x"] (k/parse-key-sequence "<Space>x")))
   (is (= ["<" "<"] (k/parse-key-sequence "<<")) "<< is two keys"))
 
+(deftest config-entries-as-text
+  (is (= "map j scrollDown count=3\nmap r reload hard\nunmap J"
+         (k/mappings-text [["j" "scrollDown" {"count" 3}] ["r" "reload" {:hard true}] ["J" nil]]))))
+
 (deftest options
   (is (= {} (k/parse-options "")))
   (is (= {"hard" true} (k/parse-options "hard")))

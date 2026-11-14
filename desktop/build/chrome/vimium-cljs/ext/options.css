@@ -1,9 +1,0 @@
-body { font: 14px/1.5 system-ui, sans-serif; max-width: 52rem; margin: 1rem auto; padding: 0 1rem; color: #222; }
-h1 { font-size: 1.5rem; }
-h2 { font-size: 1.1rem; border-bottom: 1px solid #ddd; margin-top: 1.6rem; }
-label { display: block; margin: .5rem 0; }
-textarea, input:not([type=checkbox]), select { display: block; width: 100%; box-sizing: border-box; font: 13px monospace; padding: 4px; margin-top: 2px; }
-input[type=checkbox] { margin-right: .4rem; }
-.errors { color: #b00020; white-space: pre-wrap; }
-#summary { background: #f7f7f2; border: 1px solid #e3e3d8; border-radius: 6px; padding: .2rem 1rem; margin-top: 1rem; }
-.buttons { position: sticky; bottom: 0; background: #fff; padding: .6rem 0; border-top: 1px solid #ddd; }
