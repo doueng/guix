@@ -49,7 +49,8 @@ export const keysNeverFireInFields = always(() => {
 export const scrollingMoves = always(() => {
   const l = f()?.last;
   if (!l || l.kind !== "press" || (l.seq !== "j" && l.seq !== "k") || l.before.mode !== "normal") return true;
-  if (l.before.active && /^(INPUT|TEXTAREA|text|area|editable|shadowinput|host)$/.test(l.before.active)) return true;
+  // Keys go to a focused field, or to a focused iframe (whose own field may have focus).
+  if (l.before.active && /^(INPUT|TEXTAREA|IFRAME|text|area|editable|shadowinput|host|same|cross)$/.test(l.before.active)) return true;
   return l.seq === "j"
     ? l.after.scrollY > l.before.scrollY || l.before.scrollY >= l.before.maxScrollY - 1
     : l.after.scrollY < l.before.scrollY || l.before.scrollY <= 0;

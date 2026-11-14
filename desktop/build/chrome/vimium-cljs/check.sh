@@ -8,4 +8,5 @@ guix shell openjdk@25:jdk node -- bash -c 'npx shadow-cljs compile test && node 
   | grep -v -E 'sun.misc|terminally deprecated|Please consider reporting|will be removed'
 if grep -l -E '(^|[^.a-zA-Z_$])eval\(|new Function\(' ext/js/*.js; then echo 'eval in a bundle' >&2; exit 1; fi
 ls -l ext/js/*.js | awk '{print $5, $9}'
+node scripts/check-guide.mjs
 node --test --test-concurrency=1 test/e2e/run.mjs
