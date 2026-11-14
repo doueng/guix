@@ -56,11 +56,47 @@
                                            :else :lost)})))
          (fs/glob (conversation/file root :jobs) "*.cmd"))))
 
+(defn- stat-field
+  "Field N after the command of /proc/PID/stat: 0 state, 2 pgrp, 3 session."
+  [pid n]
+  (try (let [s (String. (fs/read-all-bytes (str "/proc/" pid "/stat")))]
+         (nth (str/split (subs s (+ 2 (str/last-index-of s ")"))) #"\s+") n nil))
+       (catch Exception _ nil)))
+
+(defn session-members
+  "The live pids in the session SID leads, whatever process group each is in.
+  Zombies are left out: they are dead already and only wait for their parent."
+  [sid]
+  (vec (for [d (fs/list-dir "/proc")
+             :let [pid (parse-long (str (fs/file-name d)))]
+             :when (and pid (= (str sid) (stat-field pid 3))
+                        (not (#{"Z" "X"} (stat-field pid 0))))]
+         pid)))
+
+(defn kill-session!
+  "SIGKILL every process left in the session SID led, in passes, so a process
+  forked meanwhile goes too. Linux reuses no pid that still names a session,
+  so this is safe after the leader is gone. Returns whether the session is
+  empty."
+  [sid]
+  (loop [n 5]
+    (let [ms (session-members sid)]
+      (cond (empty? ms) true
+            (zero? n) false
+            :else (do (doseq [m ms]
+                        (p/shell {:out :discard :err :discard :continue true} "kill" "-KILL" "--" (str m)))
+                      (Thread/sleep 50)
+                      (recur (dec n)))))))
+
 (defn stop-job!
-  "Kill only the verified detached session group. Return false on missing identity."
+  "Kill the verified detached job: its process group and every other process
+  still in the session it leads. A job runs under setsid, so a browser or
+  server it launched in a group of its own, as Chrome under a test script,
+  still shares its session (T179). Return false on missing identity."
   [{:keys [pid] :as job}]
   (if (and (matches? job)
            (= (str pid) (str/trim (:out (p/shell {:out :string :err :string :continue true} "ps" "-o" "pgid=" "-p" (str pid))))))
     (let [r (p/shell {:out :string :err :string :continue true} "kill" "-KILL" "--" (str "-" pid))]
+      (kill-session! pid)
       (zero? (:exit r)))
     false))

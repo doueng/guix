@@ -103,14 +103,18 @@
 
 (defn- session-group!
   "A process group standing in for a session, its leader and a child each a
-  sleep, as {:pid :start}."
+  sleep, and a sleep in a group of its own inside its session, as a browser a
+  test starts, as {:pid :start :other {:pid :start}}."
   []
   (let [pid-file (str (fs/create-temp-file))
-        _ (p/shell "setsid" "-f" "bash" "-c" (str "echo $$ > " pid-file "; sleep 60 & exec sleep 60"))
+        other-file (str (fs/create-temp-file))
+        _ (p/shell "setsid" "-f" "bash" "-c" (str "echo $$ > " pid-file "; sleep 60 & set -m; sleep 60 & echo $! > " other-file
+                                                "; set +m; exec sleep 60"))
         _ (wait-for #(seq (str/trim (slurp pid-file))) 3000)
         pid (parse-long (str/trim (slurp pid-file)))]
     (wait-for #(process/identity-of pid) 3000)
-    (process/identity-of pid)))
+    (wait-for #(seq (str/trim (slurp other-file))) 3000)
+    (assoc (process/identity-of pid) :other (process/identity-of (parse-long (str/trim (slurp other-file)))))))
 
 (deftest a-workers-session-is-killed-when-it-ends-and-its-buffer-is-ended-first
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super"}))
@@ -148,6 +152,8 @@
         (is (= ["super-W1"] @ended) "Emacs was told first, so the buffer stays and does not respawn")
         (is (= "" (str/trim (:out (p/shell {:out :string :continue true} "pgrep" "-g" (str (:pid g))))))
             "nothing is left in its process group")
+        (is (some? (:other g)))
+        (is (wait-for #(not (process/matches? (:other g))) 3000) "nor in another group of its session (T184)")
         (super/observe-machine! c)
         (is (= 0 (:active-workers @(:machine c))))
         (is (= [] (first @swept)) "no Worker had ended at the first pass")
@@ -158,7 +164,8 @@
         (is (= (:machine (:ok (client/call! dir {:command :sections}))) @(:machine c)) "bbh super list shows it"))
       (finally
         (super/stop! c)
-        (some-> @group :pid (#(p/shell {:continue true :err :discard} "kill" "-KILL" "--" (str "-" %))))))))
+        (some-> @group :pid (#(p/shell {:continue true :err :discard} "kill" "-KILL" "--" (str "-" %))))
+        (some-> @group :other :pid (#(p/shell {:continue true :err :discard} "kill" "-KILL" "--" (str "-" %))))))))
 
 (deftest a-pid-that-does-not-lead-its-group-is-never-signalled
   (let [proc (p/process "sleep" "30")

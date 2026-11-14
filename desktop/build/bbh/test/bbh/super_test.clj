@@ -845,6 +845,34 @@
               (finally (when (bbh.super.process/matches? after) (bbh.super.process/stop-job! after)))))
           (finally (when (bbh.super.process/matches? during) (bbh.super.process/stop-job! during))))))))
 
+(deftest a-done-worker-leaves-no-job-or-what-it-started-running
+  ;; T184: W206's test script started Chrome in a process group of its own
+  ;; inside its job's session, and Chrome outlived the job's stop.
+  (with-workers
+    (fn [c dir repo _]
+      (call dir {:command :thread! :args {:title "t"}})
+      (start-worker dir "T1" :repo repo)
+      (let [root (fs/path (:conversations c) "super-W1")
+            base (str (fs/path root "jobs" "browser"))
+            child-file (str base ".child")]
+        (fs/create-dirs (fs/parent base))
+        (spit (str base ".cmd") "node headed.mjs")
+        (babashka.process/shell {:out :discard :err :discard} "setsid" "-f" "bash" "-c"
+                                (str "echo $$ > " (pr-str (str base ".pid"))
+                                     "; set -m; sleep 60 & echo $! > " (pr-str child-file) "; wait"))
+        (is (wait-for #(seq (bbh.super.process/read-text child-file))))
+        (let [job (bbh.super.process/identity-of (parse-long (bbh.super.process/read-text (str base ".pid"))))
+              child (bbh.super.process/identity-of (parse-long (bbh.super.process/read-text child-file)))]
+          (spit (str base ".start") (:start job))
+          (try
+            (is (some? child))
+            (is (= {:ok "W1"} (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})))
+            (is (wait-for #(nil? (bbh.super.process/identity-of (:pid job)))) "its job is stopped")
+            (is (wait-for #(not (bbh.super.process/matches? child))) "what the job started in another group is stopped too")
+            (finally
+              (doseq [p [job child] :when (bbh.super.process/matches? p)]
+                (babashka.process/shell {:continue true :err :discard} "kill" "-KILL" (str (:pid p)))))))))))
+
 (defn- effect-events [c]
   (locking (:db c)
     (mapv (juxt :kind (comp :kind :data)) (filter #(#{:effect-done :effect-failed} (:kind %)) (store/events (:db c))))))

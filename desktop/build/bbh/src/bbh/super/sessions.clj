@@ -77,20 +77,24 @@
 (defn kill!
   "End session S, {:pid :start}, with its whole process group: TERM, then KILL
   after GRACE-MS. Only when its pid is still the process that started at
-  :start and leads its own group, so a reused pid is never signalled. Returns
-  true when the session is gone."
+  :start and leads its own group, so a reused pid is never signalled. Then
+  KILL what is left in the Unix session it leads, as a browser a test started
+  in a group of its own (T184). Returns true when the session is gone."
   [{:keys [pid] :as s} & {:keys [grace-ms] :or {grace-ms 3000}}]
   (if-not (and (process/matches? s) (= (str pid) (pgid pid)))
     ;; Its leader is gone, as when Emacs shut the client down: kill whatever
     ;; still runs in the group it led.
     (if (process/matches? s)
       false
-      (do (doseq [m (group pid)] (signal! "KILL" m)) true))
+      (do (doseq [m (group pid)] (signal! "KILL" m))
+          (process/kill-session! pid)
+          true))
     (do (signal! "TERM" (str "-" pid))
         (let [end (+ (System/currentTimeMillis) grace-ms)]
           (while (and (process/matches? s) (< (System/currentTimeMillis) end)) (Thread/sleep 100)))
         ;; What is left of the group, the leader or children that ignored TERM.
         (signal! "KILL" (str "-" pid))
+        (process/kill-session! pid)
         (Thread/sleep 100)
         (not (process/matches? s)))))
 
