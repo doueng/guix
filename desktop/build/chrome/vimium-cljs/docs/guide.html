@@ -35,12 +35,9 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 
 <h2>Load it in the flatpak Chrome</h2>
 <ol>
-<li>Build it once (needs Java from guix):<pre>cd /home/engstrand/projects/vimium-cljs
-npm install
-npm run build      # = guix shell openjdk@25:jdk node -- npx shadow-cljs release bg content ui options</pre>
-<code>./check.sh</code> runs the build, the unit tests and the e2e suite in one go.</li>
+<li>Build it (after every checkout or pull; Java and node come from guix):<pre>/home/engstrand/projects/vimium-cljs/build.sh</pre>The compiled scripts in <code>ext/js/</code> are build output and not in the repo, so without this step Chrome says <b>Could not load background script</b> and <b>Could not load manifest</b>. The script ends by loading <code>ext/</code> in a headless flatpak Chrome and prints Chrome's own error if it would not load. <code>./check.sh</code> runs the build, the unit tests, the same load check and the e2e suite in one go.</li>
 <li>Let the flatpak see the extension folder (once, read-only):<pre>flatpak override --user --filesystem=/home/engstrand/projects/vimium-cljs/ext:ro com.google.Chrome</pre>Restart Chrome after this. T178 did the same for the cookie extension.</li>
-<li>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b> (top right), click <b>Load unpacked</b> and pick <code>/home/engstrand/projects/vimium-cljs/ext</code>. The extension is called <b>Vimium (cljs)</b>, version 0.1.0. Its options page opens on first install.</li>
+<li>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b> (top right), click <b>Load unpacked</b> and pick <code>/home/engstrand/projects/vimium-cljs/ext</code> (the <code>ext</code> folder, not the repo folder above it, which has no manifest.json: Chrome then says <b>Manifest file is missing or unreadable</b>). The extension is called <b>Vimium (cljs)</b>, version 0.1.0. Its options page opens on first install.</li>
 <li>On the options page, choose your export, <code>/home/engstrand/Downloads/vimium-options.json</code>, under <b>Import from Vimium</b>. The flatpak can read Downloads. The import only parses the JSON: it lists what it took, drops the duplicate typelit.io rule and notes options it does not use.</li>
 <li>After a rebuild, click the reload arrow on the extension's card in <code>chrome://extensions</code>, then reload open tabs.</li>
 </ol>
