@@ -175,20 +175,3 @@
                                               :ctrlKey (boolean ctrl) :shiftKey (boolean shift) :metaKey (boolean meta)
                                               :detail 1 :button 0})))))
 
-;; ---- scrolling ------------------------------------------------------------
-
-(defn- overflow-scrolls? [^js el axis]
-  (let [^js s (js/getComputedStyle el)
-        o (if (= axis :y) (.-overflowY s) (.-overflowX s))]
-    (and (not= "hidden" o) (not= "visible" o) (not= "clip" o))))
-
-(defn can-scroll? [^js el axis dir]
-  (let [[pos size client] (if (= axis :y)
-                            [(.-scrollTop el) (.-scrollHeight el) (.-clientHeight el)]
-                            [(.-scrollLeft el) (.-scrollWidth el) (.-clientWidth el)])
-        root? (identical? el (.-scrollingElement js/document))]
-    (and (> size (+ client 1))
-         (or root? (overflow-scrolls? el axis))
-         (cond (pos? dir) (< (+ pos client) (- size 1))
-               (neg? dir) (> pos 0)
-               :else true))))

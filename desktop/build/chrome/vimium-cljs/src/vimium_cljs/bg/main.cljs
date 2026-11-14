@@ -337,6 +337,11 @@
   (js/chrome.tabs.onActivated.addListener (fn [^js info] (note-active! (.-tabId info))))
   (js/chrome.tabs.onRemoved.addListener (fn [id] (swap! sessions dissoc id)))
   (js/chrome.tabs.onUpdated.addListener (fn [id ^js info] (when (= "loading" (.-status info)) (swap! sessions dissoc id))))
+  ;; A page changing its URL in place (history.pushState, a new #fragment) is navigation to
+  ;; the user, and the content script cannot see pushState, so tell the frame (as Vimium does).
+  (let [url-changed (fn [^js d] (to-frame (.-tabId d) (.-frameId d) {:type "url-changed"}))]
+    (js/chrome.webNavigation.onHistoryStateUpdated.addListener url-changed)
+    (js/chrome.webNavigation.onReferenceFragmentUpdated.addListener url-changed))
   (js/chrome.runtime.onInstalled.addListener
    (fn [^js details]
      (when (= "install" (.-reason details))

@@ -152,6 +152,66 @@ test('scrolling: j k d u G gg', T, async () => {
   assert.equal((await facts()).scrollY, 0, 'gg to top');
 });
 
+// test/fixtures/tube.html mimics YouTube's subscriptions feed: web components, a fixed guide
+// that scrolls by itself, and the feed. The keys must scroll the feed, not the guide, until
+// the user clicks into the guide; a guide link that navigates in place hands them back.
+const tube = () => evaluate(b.cdp, page, 'window.__tube()');
+async function openTube(layout) {
+  const { targetId } = await b.cdp('Target.createTarget', { url: `http://127.0.0.1:${port}/tube.html?layout=${layout}` });
+  await attach(targetId);
+  await b.cdp('Page.enable', {}, page);
+  await b.cdp('Page.bringToFront', {}, page);
+  for (let i = 0; i < 100 && !(await tube().catch(() => ({}))).ready; i++) await sleep(100);
+  assert.ok((await tube()).ready, 'content script ready');
+}
+const inGuide = (id) => `document.querySelector('tube-app').shadowRoot.getElementById('${id}')`;
+
+for (const [layout, main, max] of [['page', 'page', 'pageMax'], ['app', 'feed', 'feedMax']]) {
+  test(`scrolling a YouTube-like page (${layout} scrolls): j and G move the ${main}, not the guide`, T, async () => {
+    await openTube(layout);
+    await keys('jj', 500);
+    let t = await tube();
+    assert.ok(t[main] > 0, `jj scrolls the ${main}: ${JSON.stringify(t)}`);
+    assert.equal(t.guide, 0, 'the guide stays');
+    await keys('G', 400);
+    t = await tube();
+    assert.equal(t[main], t[max], `G to the ${main}'s bottom: ${JSON.stringify(t)}`);
+    assert.equal(t.guide, 0, 'the guide stays after G');
+    await keys('gg', 400);
+    assert.equal((await tube())[main], 0, 'gg to the top');
+
+    // Clicking into the guide makes it the target.
+    await clickOn(inGuide('g3'));
+    // That link navigated in place (pushState): the user has moved on, so the target resets.
+    t = await tube();
+    assert.match(t.url, /feed=3/);
+    await keys('jj', 500);
+    t = await tube();
+    assert.ok(t[main] > 0, `after a guide link navigates in place, j scrolls the ${main}: ${JSON.stringify(t)}`);
+    assert.equal(t.guide, 0, 'and not the guide');
+
+    await clickOn(inGuide('g1'));
+    await keys('gg', 400);
+    // A click in the guide that is not a navigation: j then scrolls the guide.
+    await clickOn(inGuide('guide-title'));
+    const before = await tube();
+    await keys('jj', 500);
+    t = await tube();
+    assert.ok(t.guide > 0, `after a click in the guide, j scrolls it: ${JSON.stringify(t)}`);
+    assert.equal(t[main], before[main], `and not the ${main}`);
+    await keys('G', 400);
+    t = await tube();
+    assert.ok(t.guide > 100, 'G scrolls the guide to its end');
+    assert.equal(t[main], before[main], `G leaves the ${main}`);
+    // At the guide's end, j falls through to what contains it: the page (in the app layout
+    // the feed is the guide's sibling, so nothing moves, as in Vimium).
+    if (layout === 'page') {
+      await keys('jj', 500);
+      assert.ok((await tube()).page > before.page, "past the guide's end, j scrolls the page");
+    }
+  });
+}
+
 test('find mode highlights every match, n moves, Escape clears', T, async () => {
   await open();
   await keys('/needle', 300);

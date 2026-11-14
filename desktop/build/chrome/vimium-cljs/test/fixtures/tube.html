@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="vimium-cljs-test" content="1">
+<title>vimium-cljs YouTube-like fixture</title>
+<!-- Mimics https://www.youtube.com/feed/subscriptions: web components with open shadow roots,
+     a masthead, a position:fixed guide that scrolls by itself, and the feed. With ?layout=page
+     the document scrolls (as YouTube does); with ?layout=app the body is fixed and the feed
+     scrolls inside <tube-page>'s shadow root. Guide links navigate in place with
+     history.pushState, as YouTube does. window.__tube() reports the scroll positions. -->
+<style>body { margin: 0; font: 14px/1.4 sans-serif; }</style>
+<script src="/probe.js"></script>
+</head>
+<body>
+<tube-app></tube-app>
+<script>
+const layout = new URLSearchParams(location.search).get('layout') || 'page';
+if (layout === 'app') document.body.style.cssText = 'height:100vh;overflow:hidden';
+const app = document.querySelector('tube-app');
+const sr = app.attachShadow({ mode: 'open' });
+sr.innerHTML = `
+<style>
+  :host { display: block; }
+  tube-masthead { position: fixed; top: 0; left: 0; right: 0; height: 56px; background: #fff; border-bottom: 1px solid #ddd; z-index: 2; display: block; }
+  tube-guide { position: fixed; top: 56px; bottom: 0; left: 0; width: 240px; overflow-y: auto; background: #f7f7f7; display: block; z-index: 1; }
+  tube-guide a { display: block; padding: 10px 24px; color: #111; text-decoration: none; }
+  tube-page { display: block; margin-left: 240px; padding-top: 56px; }
+</style>
+<tube-masthead><button id="guide-button">☰</button> Tube</tube-masthead>
+<tube-guide id="guide"></tube-guide>
+<tube-page id="page"></tube-page>`;
+const guide = sr.getElementById('guide');
+guide.innerHTML = '<h3 id="guide-title" style="margin:0;padding:10px 24px">Subscriptions</h3>';
+for (let i = 0; i < 40; i++) {
+  const a = document.createElement('a');
+  a.id = 'g' + i; a.href = `/tube.html?layout=${layout}&feed=${i}`; a.textContent = 'Channel ' + i;
+  a.addEventListener('click', (e) => { e.preventDefault(); history.pushState({}, '', a.href); });
+  guide.append(a);
+}
+const footer = document.createElement('p');
+footer.id = 'guide-footer'; footer.style.padding = '10px 24px'; footer.textContent = 'About Press Copyright';
+guide.append(footer);
+const page = sr.getElementById('page');
+const psr = page.attachShadow({ mode: 'open' });
+psr.innerHTML = `
+<style>
+  #feed { ${layout === 'app' ? 'height: calc(100vh - 56px); overflow-y: auto;' : ''} }
+  .video { height: 180px; margin: 12px; background: linear-gradient(#ccd, #eef); }
+</style>
+<div id="feed"><h2 id="feed-title">Subscriptions</h2></div>`;
+const feed = psr.getElementById('feed');
+for (let i = 0; i < 40; i++) {
+  const v = document.createElement('div');
+  v.className = 'video'; v.textContent = 'Video ' + i;
+  feed.append(v);
+}
+window.__tube = () => ({
+  url: location.href,
+  ready: document.documentElement.dataset.vimiumCljsReady === '1',
+  page: Math.round(scrollY),
+  pageMax: Math.max(0, document.scrollingElement.scrollHeight - innerHeight),
+  guide: Math.round(guide.scrollTop),
+  feed: Math.round(feed.scrollTop),
+  feedMax: Math.max(0, feed.scrollHeight - feed.clientHeight),
+});
+</script>
+</body></html>
