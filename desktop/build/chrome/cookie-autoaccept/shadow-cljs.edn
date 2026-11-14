@@ -12,6 +12,20 @@
           :output-dir "dist/js"
           :modules {:popup {:init-fn cookie-autoaccept.popup/init}}
           :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  ;; Content scripts: classic scripts, one self-contained module each, so a document_start script carries only what
+  ;; it uses.
+  :early {:target :browser
+          :output-dir "dist/js"
+          :modules {:early {:init-fn cookie-autoaccept.early/init}}
+          :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  :page-start {:target :browser
+               :output-dir "dist/js"
+               :modules {:page-start {:init-fn cookie-autoaccept.page-start/init}}
+               :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  :fallback {:target :browser
+             :output-dir "dist/js"
+             :modules {:fallback {:init-fn cookie-autoaccept.fallback/init}}
+             :compiler-options {:warnings-as-errors true :infer-externs :auto}}
   :test {:target :node-test
          :output-to "out/test.cjs"
          :ns-regexp "-test$"

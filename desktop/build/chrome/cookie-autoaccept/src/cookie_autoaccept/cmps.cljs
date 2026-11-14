@@ -69,7 +69,7 @@
   "The consent values the CMP named cmp-name reads at start, for mode (accept or reject): an array of
   {store: cookie|local, name, value}. now is the time in ms, id a fresh random id."
   [cmp-name mode now id]
-  (let [on (= mode "accept")
+  (let [on (identical? mode "accept")
         iso (.toISOString (js/Date. now))]
     (case cmp-name
       "onetrust"
@@ -108,7 +108,7 @@
   "The CMP whose script is served from host (a hostname), or nil."
   [host]
   (let [h (.toLowerCase (str (or host "")))]
-    (.find cmps (fn [^js c] (.some (.-hosts c) (fn [d] (or (= h d) (.endsWith h (str "." d)))))))))
+    (.find cmps (fn [^js c] (.some (.-hosts c) (fn [d] (or (identical? h d) (.endsWith h (str "." d)))))))))
 
 (defn cookie-string
   "The cookie string to assign to document.cookie for one write."

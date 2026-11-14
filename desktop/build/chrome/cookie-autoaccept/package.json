@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node scripts/build.mjs --test && node out/test.cjs && node --test test/*.test.js",
+    "test": "node scripts/build.mjs --test && node out/test.cjs",
     "check": "npm run build && npm test",
     "e2e": "npm run build && node --test --test-concurrency=1 test/e2e/*.test.js",
     "bombadil": "npm run build && node bombadil/run.mjs"

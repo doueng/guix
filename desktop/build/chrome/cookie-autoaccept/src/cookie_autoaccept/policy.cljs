@@ -55,7 +55,7 @@
   [settings]
   (let [s (normalize-settings settings)]
     {:id "early"
-     :js [(str "js/early-" (:mode s) ".js") "js/cmps.js" "js/prehide-selectors.js" "js/early.js"]
+     :js [(str "js/early-" (:mode s) ".js") "js/early.js"]
      :matches ["<all_urls>"]
      :excludeMatches (vec (mapcat site-patterns (:disabledSites s)))
      :runAt "document_start"

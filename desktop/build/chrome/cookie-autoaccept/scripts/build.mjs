@@ -2,12 +2,12 @@
 // ext/ and the vendored autoconsent files the extension loads. Load dist/ in chrome://extensions.
 // Java comes from PATH, else from Guix (guix shell openjdk@25:jdk).
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const DIST = join(ROOT, 'dist');
-export const BUILDS = ['background', 'popup'];
+export const BUILDS = ['background', 'popup', 'early', 'page-start', 'fallback'];
 const VENDOR = ['content.bundle.js', 'autoconsent.esm.js', 'rules.json', 'LICENSE'];
 
 function run(cmd, args) {
@@ -35,7 +35,6 @@ if (BUILDS.length) {
   rmSync(join(DIST, 'js', 'manifest.edn'), { force: true });
 }
 cpSync(join(ROOT, 'ext'), DIST, { recursive: true });
-for (const f of readdirSync(join(ROOT, 'src')).filter((f) => f.endsWith('.js'))) cpSync(join(ROOT, 'src', f), join(DIST, 'js', f));
 mkdirSync(join(DIST, 'vendor/autoconsent'), { recursive: true });
 for (const f of VENDOR) cpSync(join(ROOT, 'vendor/autoconsent', f), join(DIST, 'vendor/autoconsent', f));
 if (!existsSync(join(DIST, 'manifest.json'))) throw new Error('dist/manifest.json missing');

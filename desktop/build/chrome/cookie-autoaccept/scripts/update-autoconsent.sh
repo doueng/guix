@@ -28,4 +28,4 @@ cp x/package/dist/addon-mv3/content.bundle.js x/package/dist/autoconsent.esm.js 
   echo "sha256:"
   (cd "$d" && sha256sum autoconsent.esm.js content.bundle.js LICENSE rules.json)
 } > "$d/VERSION"
-echo "vendored autoconsent $version; now run: npm test && npm run e2e"
+echo "vendored autoconsent $version; now run: npm run check && npm run e2e"
