@@ -1,0 +1,26 @@
+;; One :browser build per extension entry point, each written to ext/js/<build>.js.
+;; MV3 forbids eval, and shadow-cljs dev builds load code with eval, so the
+;; extension only ever runs release builds (:advanced). `npm test` runs the
+;; pure namespaces on node.
+{:source-paths ["src" "test"]
+ :dependencies []
+ :builds
+ {:bg      {:target :browser
+            :output-dir "ext/js"
+            :modules {:bg {:init-fn vimium-cljs.bg.main/init}}
+            :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  :content {:target :browser
+            :output-dir "ext/js"
+            :modules {:content {:init-fn vimium-cljs.content.main/init}}
+            :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  :ui      {:target :browser
+            :output-dir "ext/js"
+            :modules {:ui {:init-fn vimium-cljs.ui.main/init}}
+            :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  :options {:target :browser
+            :output-dir "ext/js"
+            :modules {:options {:init-fn vimium-cljs.options.main/init}}
+            :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  :test    {:target :node-test
+            :output-to "out/test.js"
+            :ns-regexp "-test$"}}}

@@ -1,0 +1,14 @@
+{
+  "name": "vimium-cljs",
+  "private": true,
+  "description": "A Vimium-style Chrome MV3 extension in ClojureScript",
+  "scripts": {
+    "build": "shadow-cljs release bg content ui options",
+    "test": "shadow-cljs compile test && node out/test.js",
+    "e2e": "node test/e2e/run.mjs",
+    "bombadil": "node test/bombadil/run.mjs"
+  },
+  "devDependencies": {
+    "shadow-cljs": "^3.2.1"
+  }
+}
