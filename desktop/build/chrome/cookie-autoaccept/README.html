@@ -38,7 +38,7 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 <p><a href="https://www.i-dont-care-about-cookies.eu/">I don't care about cookies</a> and <a href="https://consentomatic.au.dk/">Consent-O-Matic</a> already do this; Consent-O-Matic can also reject. This extension is a thin shell around DuckDuckGo's <a href="https://github.com/duckduckgo/autoconsent">autoconsent</a> rules: about 1600 rules covering OneTrust, Cookiebot, Didomi, Quantcast, TrustArc, Usercentrics, Sourcepoint, the IAB TCF CMPs and many single sites. autoconsent is <b>MPL-2.0</b>, not MIT. MPL-2.0 is per-file copyleft, so the vendored files stay unmodified and keep their LICENSE, and our own files are unaffected.</p>
 
 <h2>Install in the flatpak Chrome</h2>
-<p>First build the unpacked extension: <code>npm ci</code> once, then <code>npm run build</code> writes it to <code>dist/</code>. If you loaded an earlier version from the repo root, remove that entry and load <code>dist/</code> instead. An unpacked extension's id comes from its folder, so the new entry starts with default settings: turn your disabled sites off again.</p>
+<p>Load the folder <code>/home/engstrand/projects/cookie-autoaccept/ext</code>. It is the built extension and is committed, so a checkout loads as is, with no build. <code>static/</code> holds the files the build copies into it; it is not loadable. <code>npm run check-ext</code> says whether a folder holds every file its manifest names. If you loaded an earlier version from <code>dist/</code> or the repo root, remove that entry and load <code>ext/</code> instead. An unpacked extension's id comes from its folder, so a new entry starts with default settings: turn your disabled sites off again.</p>
 <p>The Chrome flatpak cannot read <code>~/projects</code> by default. It can read <code>~/Downloads</code> and <code>~/Documents</code>. Pick one of the two options below.</p>
 <h3>A. Let Chrome read the repo, read-only (recommended)</h3>
 <pre>flatpak override --user \
@@ -47,18 +47,18 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 <ol>
 <li>Quit Chrome completely, then start it again.</li>
 <li>Open <code>chrome://extensions</code> and switch on <b>Developer mode</b> (top right).</li>
-<li>Click <b>Load unpacked</b> and choose <code>/home/engstrand/projects/cookie-autoaccept/dist</code>.</li>
+<li>Click <b>Load unpacked</b> and choose <code>/home/engstrand/projects/cookie-autoaccept/ext</code>.</li>
 <li>Pin the cookie icon from the puzzle-piece menu if you want to see the badge.</li>
 </ol>
 <h3>B. Copy it somewhere Chrome can already read</h3>
 <pre>rsync -a --delete \
-  /home/engstrand/projects/cookie-autoaccept/dist/ \
+  /home/engstrand/projects/cookie-autoaccept/ext/ \
   ~/Documents/cookie-autoaccept/</pre>
 <p>Then do steps 2 and 3 above, choosing <code>~/Documents/cookie-autoaccept</code>.</p>
 
 <h2>Update</h2>
 <ul>
-<li><b>Our code:</b> after a change lands in the repo, run <code>npm run build</code> (and rerun the rsync if you use option B), click the reload arrow on the extension's card in <code>chrome://extensions</code>, then reload any open tabs.</li>
+<li><b>Our code:</b> after a change lands in the repo (it brings the rebuilt <code>ext/</code>; rerun the rsync if you use option B), click the reload arrow on the extension's card in <code>chrome://extensions</code>, then reload any open tabs.</li>
 <li><b>autoconsent rules:</b> run <code>scripts/update-autoconsent.sh 18.6.0</code> (or whatever version you want). It is the only step that uses the network. It checks the npm sha512, copies the four files and rewrites <code>vendor/autoconsent/VERSION</code>. Then run <code>npm run check &amp;&amp; npm run e2e</code>, commit with jj, and reload the extension. The prehide selectors are read from the new rules at build time.</li>
 </ul>
 
@@ -108,9 +108,9 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 </ul>
 
 <h2>Code and build</h2>
-<p>The extension is written in ClojureScript and compiled with <a href="https://github.com/thheller/shadow-cljs">shadow-cljs</a> 3.5.11, pinned in <code>package.json</code> and <code>package-lock.json</code>. Its Maven dependencies come from <code>~/.m2</code>, so once <code>npm ci</code> has run, builds work offline. Java comes from <code>PATH</code>, or else from Guix (<code>guix shell openjdk@25:jdk</code>). Each entry point is its own release build (<code>shadow-cljs.edn</code>), so <code>dist/</code> holds no eval-based dev runtime and no remote code:</p>
+<p>The extension is written in ClojureScript and compiled with <a href="https://github.com/thheller/shadow-cljs">shadow-cljs</a> 3.5.11, pinned in <code>package.json</code> and <code>package-lock.json</code>. Its Maven dependencies come from <code>~/.m2</code>, so once <code>npm ci</code> has run, builds work offline. Java comes from <code>PATH</code>, or else from Guix (<code>guix shell openjdk@25:jdk</code>). Each entry point is its own release build (<code>shadow-cljs.edn</code>), so <code>ext/</code> holds no eval-based dev runtime and no remote code:</p>
 <div class="table"><table>
-<tr><th>Build</th><th>Namespace</th><th>Runs</th><th>dist/js size (gzip)</th></tr>
+<tr><th>Build</th><th>Namespace</th><th>Runs</th><th>ext/js size (gzip)</th></tr>
 <tr><td>background (:esm)</td><td>background, policy, cmps</td><td>MV3 module service worker; imports the vendored <code>autoconsent.esm.js</code> as is</td><td>124 KB (29 KB)</td></tr>
 <tr><td>popup (:esm)</td><td>popup, policy</td><td>the toolbar popup</td><td>112 KB (25 KB)</td></tr>
 <tr><td>early (:browser)</td><td>early, cmps, prehide list</td><td>document_start, every frame of an enabled site</td><td>26 KB (9.5 KB)</td></tr>
@@ -118,12 +118,13 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 <tr><td>fallback (:browser)</td><td>fallback, fallback-core</td><td>document_idle, every frame, after the vendored <code>content.bundle.js</code></td><td>7.3 KB (3.2 KB)</td></tr>
 </table></div>
 <p>The content scripts use JavaScript interop only and compare with <code>identical?</code>, so <code>cljs.core</code>'s collections stay out of them. Before the port the early script loaded 36 KB (11.3 KB gzipped) in four files and the fallback 11.6 KB. The worker and popup use Clojure maps for settings and reports, which costs about 100 KB of <code>cljs.core</code> each. They are not on a page's load path. Settings, tab reports and messages keep the JSON shapes they had in JavaScript, so stored settings survive the update.</p>
-<p>Layout: <code>src/cookie_autoaccept/</code> holds the namespaces, <code>cmps.edn</code> (the CMP table) and <code>data.clj</code> (compile-time macros). <code>ext/</code> holds the static files: manifest, popup.html, icon and the two one-line mode files. <code>vendor/autoconsent/</code> is unchanged. <code>scripts/build.mjs</code> runs the release builds and copies the static files into <code>dist/</code>.</p>
+<p>Layout: <code>src/cookie_autoaccept/</code> holds the namespaces, <code>cmps.edn</code> (the CMP table) and <code>data.clj</code> (compile-time macros). <code>static/</code> holds the static files: manifest, popup.html, icon and the two one-line mode files. <code>vendor/autoconsent/</code> is unchanged. <code>scripts/build.mjs</code> runs the release builds and copies the static files into <code>ext/</code>, then checks that every file the manifest names is there. The build is deterministic, so commit <code>ext/</code> with the source change that rebuilt it.</p>
 
 <h2>Tests</h2>
-<pre>npm run build     # the unpacked extension in dist/ (shadow-cljs release builds)
+<pre>npm run build     # the unpacked extension in ext/ (shadow-cljs release builds), then check-ext
+npm run check-ext # does ext/ (or the folder named) hold every file manifest.json and popup.html name?
 npm test          # 36 unit tests (cljs.test, compiled to out/test.cjs and run with node)
-npm run check     # build, then the unit tests
+npm run check     # build, check-ext, then the unit tests
 npm run e2e       # 16 checks, headless flatpak Chrome, ~45 s
 npm run bombadil  # Bombadil explores the fixtures for 5 min; not part of npm test</pre>
 <p>The e2e run starts <code>flatpak run com.google.Chrome --headless=new</code> with a throwaway profile and read-only access to the repo. It loads the extension over the DevTools pipe (<code>Extensions.loadUnpacked</code>), because branded Chrome ignores <code>--load-extension</code>. Then it opens the fixture pages in <code>test/fixtures</code>. The fixtures are small rebuilds of each CMP's DOM and API, not saved copies of live pages: OneTrust, Cookiebot (old and current template), Didomi, Quantcast, TrustArc, Usercentrics in shadow DOM, Sourcepoint in a cross-origin iframe, an unknown pay-or-consent iframe, and home-made banners. The run checks that:<ul><li>the accept button is the one pressed;</li><li>reject mode presses reject, and with no rule it hides rather than accepts;</li><li>a banner added late in shadow DOM is caught;</li><li>a banner added after the prehide was released is hidden again within the task that added it;</li><li>turning blocking on for a site installs the CMP-host rule for that site only, and turning it off removes it;</li><li>a newsletter box stays;</li><li>a disabled site is left alone.</li></ul> Set <code>CHROME=/path/to/chromium</code> to use another browser.</p>

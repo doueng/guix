@@ -1,12 +1,14 @@
-// Builds the unpacked extension in dist/: the shadow-cljs release builds into dist/js, then the static files from
-// ext/ and the vendored autoconsent files the extension loads. Load dist/ in chrome://extensions.
+// Builds the unpacked extension in ext/: the shadow-cljs release builds into ext/js, then the static files from
+// static/ and the vendored autoconsent files the extension loads. Load ext/ in chrome://extensions. ext/ is committed,
+// so a checkout loads without a build; the build is deterministic, so rebuilding changes ext/ only when src/ changed.
 // Java comes from PATH, else from Guix (guix shell openjdk@25:jdk).
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { checkExtension } from './check-manifest.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const DIST = join(ROOT, 'dist');
+const OUT = join(ROOT, 'ext');
 export const BUILDS = ['background', 'popup', 'early', 'page-start', 'fallback'];
 const VENDOR = ['content.bundle.js', 'autoconsent.esm.js', 'rules.json', 'LICENSE'];
 
@@ -28,14 +30,14 @@ if (process.argv.includes('--test')) {
   process.exit(0);
 }
 
-rmSync(DIST, { recursive: true, force: true });
-mkdirSync(join(DIST, 'js'), { recursive: true });
+rmSync(OUT, { recursive: true, force: true });
+mkdirSync(join(OUT, 'js'), { recursive: true });
 if (BUILDS.length) {
   shadow(['release', ...BUILDS]);
-  rmSync(join(DIST, 'js', 'manifest.edn'), { force: true });
+  rmSync(join(OUT, 'js', 'manifest.edn'), { force: true });
 }
-cpSync(join(ROOT, 'ext'), DIST, { recursive: true });
-mkdirSync(join(DIST, 'vendor/autoconsent'), { recursive: true });
-for (const f of VENDOR) cpSync(join(ROOT, 'vendor/autoconsent', f), join(DIST, 'vendor/autoconsent', f));
-if (!existsSync(join(DIST, 'manifest.json'))) throw new Error('dist/manifest.json missing');
-console.log('built dist/');
+cpSync(join(ROOT, 'static'), OUT, { recursive: true });
+mkdirSync(join(OUT, 'vendor/autoconsent'), { recursive: true });
+for (const f of VENDOR) cpSync(join(ROOT, 'vendor/autoconsent', f), join(OUT, 'vendor/autoconsent', f));
+checkExtension(OUT);
+console.log('built ext/');

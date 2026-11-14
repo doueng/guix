@@ -1,29 +1,29 @@
-;; Release builds write into dist/js; npm run build adds the static files. See scripts/build.mjs.
+;; Release builds write into ext/js; npm run build adds the static files. See scripts/build.mjs.
 {:source-paths ["src" "test"]
  :dependencies []
  :builds
  {:background {:target :esm
-               :output-dir "dist/js"
+               :output-dir "ext/js"
                :modules {:background {:init-fn cookie-autoaccept.background/init}}
-               ;; Imported as is at run time from dist/vendor, not bundled: autoconsent stays the vendored file.
+               ;; Imported as is at run time from ext/vendor, not bundled: autoconsent stays the vendored file.
                :js-options {:keep-as-import #{"../vendor/autoconsent/autoconsent.esm.js"}}
                :compiler-options {:warnings-as-errors true :infer-externs :auto}}
   :popup {:target :esm
-          :output-dir "dist/js"
+          :output-dir "ext/js"
           :modules {:popup {:init-fn cookie-autoaccept.popup/init}}
           :compiler-options {:warnings-as-errors true :infer-externs :auto}}
   ;; Content scripts: classic scripts, one self-contained module each, so a document_start script carries only what
   ;; it uses.
   :early {:target :browser
-          :output-dir "dist/js"
+          :output-dir "ext/js"
           :modules {:early {:init-fn cookie-autoaccept.early/init}}
           :compiler-options {:warnings-as-errors true :infer-externs :auto}}
   :page-start {:target :browser
-               :output-dir "dist/js"
+               :output-dir "ext/js"
                :modules {:page-start {:init-fn cookie-autoaccept.page-start/init}}
                :compiler-options {:warnings-as-errors true :infer-externs :auto}}
   :fallback {:target :browser
-             :output-dir "dist/js"
+             :output-dir "ext/js"
              :modules {:fallback {:init-fn cookie-autoaccept.fallback/init}}
              :compiler-options {:warnings-as-errors true :infer-externs :auto}}
   :test {:target :node-test

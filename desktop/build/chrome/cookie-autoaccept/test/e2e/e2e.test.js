@@ -12,7 +12,7 @@ import { join, resolve, normalize } from 'node:path';
 const ROOT = resolve(import.meta.dirname, '../..');
 const FIXTURES = join(ROOT, 'test/fixtures');
 // The unpacked extension that npm run build writes.
-const DIST = join(ROOT, 'dist');
+const DIST = join(ROOT, 'ext');
 const flatpak = spawnSync('flatpak', ['info', 'com.google.Chrome'], { stdio: 'ignore' }).status === 0;
 const chrome = process.env.CHROME || (flatpak ? null : ['chromium', 'chromium-browser'].find((c) => spawnSync('which', [c]).status === 0));
 const skip = !flatpak && !chrome ? 'no headless Chrome found (install the com.google.Chrome flatpak or set CHROME)' : false;

@@ -18,7 +18,7 @@ import { join, normalize, resolve } from 'node:path';
 const ROOT = resolve(import.meta.dirname, '..');
 const FIXTURES = join(ROOT, 'test/fixtures');
 // The unpacked extension that npm run build writes.
-const DIST = join(ROOT, 'dist');
+const DIST = join(ROOT, 'ext');
 const PROBE = readFileSync(join(import.meta.dirname, 'probe.js'));
 const SPEC = join(import.meta.dirname, 'spec.ts');
 const CMP_SCRIPTS = join(import.meta.dirname, 'cmp');
