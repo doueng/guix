@@ -76,6 +76,21 @@ function M.herdr_menu()
   end
 end
 
+-- Alt+E in Chrome toggles the vimium-cljs tab list in the side panel: send
+-- Ctrl+Shift+E, the extension's tab-panel command. Every other window gets
+-- Alt+E back, so Emacs M-e and fish's Alt+E edit_command_buffer still work.
+function M.chrome_tab_list()
+  local active = hl.get_active_window()
+  if active and active.class == "google-chrome" then
+    hl.dispatch(hl.dsp.send_key_state({ mods = "CTRL SHIFT", key = "e", state = "down" }))
+    hl.dispatch(hl.dsp.send_key_state({ mods = "CTRL SHIFT", key = "e", state = "up" }))
+    M.log("Alt+E", "Chrome tab list (side panel)")
+  else
+    hl.dispatch(hl.dsp.send_key_state({ mods = "ALT", key = "e", state = "down" }))
+    hl.dispatch(hl.dsp.send_key_state({ mods = "ALT", key = "e", state = "up" }))
+  end
+end
+
 function M.herdr_yank()
   if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "f" } }) then
     M.log("Cmd+Y", "Copy visible text by hint")

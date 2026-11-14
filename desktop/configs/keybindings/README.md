@@ -56,6 +56,7 @@ Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typi
 
 Herdr and the desktop never treat a bare Space as the leader, so typing a space always types a space.
 Alt+Space sends Ctrl+b Space to the Herdr terminal. From another window it first focuses the Herdr terminal, or starts one when none is open.
+Alt+E in Chrome shows or hides the tab list in the side panel: Hyprland sends Ctrl+Shift+E, vimium-cljs's tab-panel command (`hypr/keys.lua`). Every other window receives Alt+E unchanged, so Emacs M-e and fish's Alt+E still work.
 The desktop leader is a Hyprland submap. It captures the following keys before any application sees them. A panel at the bottom of the screen lists the next keys. Escape or any unbound key cancels.
 `keyleader listen` draws the panel. It follows Hyprland's submap events and asks Dusk to show the menu for the active submap. Hyprland starts it at login.
 Release Cmd after Cmd+Space. A key also works with Cmd still held unless kanata rewrites that Cmd chord first, as it does Cmd+W, Cmd+S and Cmd+h/j/k/l.
@@ -68,7 +69,7 @@ Single keys after the leader carry the most frequent actions, as in Doom. Groups
 | ` | Last buffer or window | Neovim, Doom, desktop |
 | . | Find a file, launch an application on the desktop, or choose a Herdr workspace | Doom, IntelliJ, desktop, Herdr. Neovim's own Space . finds a file |
 | d | Close the pane | Herdr. Doom's SPC d is its debugger group, so editors use w d; Alt+w closes a desktop window |
-| e | Edit scrollback in `$EDITOR`. In Chrome, show or hide the tab list in the side panel: keyleader sends Ctrl+Shift+E, vimium-cljs's tab-panel command (leader.edn `:chrome`) | Herdr, Chrome |
+| e | Edit scrollback in `$EDITOR`. Alt+E, not the leader, toggles Chrome's tab list | Herdr |
 | w h, w j, w k, w l | Focus left, down, up, or right | All |
 | w s, w v | Split below, split right | Editors, Herdr |
 | w d | Close the window or pane | Editors, Herdr |
@@ -186,6 +187,7 @@ No global keyboard listener or browser content script has been added.
 | Alt+Space w d closes a window | Cmd+Space d, Alt+Space d closes a Herdr pane | Most used desktop leader action. w d still works |
 | Ctrl+Alt+w, Cmd+Space d and Cmd+Space w d close a window | Alt+w only | Requested. One chord closes an app everywhere. Emacs M-w copy is shadowed again |
 | Ctrl+b a opens the agent picker | Also Alt+Space a | Requested |
+| Cmd+Space e toggles Chrome's tab list | Alt+E, in Chrome only | Requested (T185). Other windows get Alt+E, keeping Emacs M-e and fish's edit_command_buffer |
 | Ctrl+b Space s l copies visible text by hint | Cmd+Y, from any window. s l and Ctrl+b f still work | Yank in two keys. One-key s would clash with the Search group |
 | Ctrl+b Space . was unbound | It chooses a Herdr workspace, like TAB . | `.` opens the main picker in every context |
 | Ctrl+j/k in the bbh transcript move by org heading, Ctrl+k in insert state types a digraph | They move focus | Ctrl+h/j/k/l is focus everywhere. gj, gk, ]h and [h move by heading, as in Doom's evil-org |

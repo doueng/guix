@@ -42,9 +42,8 @@
   ;; Alt+W alone closes a desktop window (bindings.edn), so the desktop leader has no close.
   {:keys ["d"] :label "Close pane" :doom-match :differs :herdr :close-pane}
   {:keys ["a"] :label "Agents" :doom-match :differs :herdr :choose-agent}
-  ;; In Chrome, Ctrl+Shift+E is vimium-cljs's tab-panel command: the tab list in the side panel.
-  {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback
-   :desktop-label "Chrome tab list (side panel)" :chrome "ctrl+shift+e"}
+  ;; Alt+E toggles Chrome's tab list (hypr/keys.lua), so the desktop leader has no e.
+  {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
   {:keys ["w" "h"] :label "Focus left" :doom-match :exact :nav "left"}
   {:keys ["w" "j"] :label "Focus down" :doom-match :exact :nav "down"}
   {:keys ["w" "k"] :label "Focus up" :doom-match :exact :nav "up"}

@@ -164,13 +164,13 @@
       (keyleader/term-nav! grammar "left"))
     (is (= [["forward" "herdr" "Ctrl+h" "Forwarded to emacs"]] @rows))))
 
-(defn desktop-run-with [class keys]
+(defn desktop-run-with [class keys & [g]]
   (let [calls (atom [])]
     (with-redefs [keyleader/run! (fn [argv & _] (swap! calls conj (vec argv))
                                    (if (= "hyprctl" (first argv)) (str "{\"class\":\"" class "\"}") ""))
                   keyleader/choose-window! (fn [] (swap! calls conj :choose-window))
                   keylog/log! (fn [& _] nil)]
-      (keyleader/run-desktop! grammar keys))
+      (keyleader/run-desktop! (or g grammar) keys))
     (remove #(and (vector? %) (= "hyprctl" (first %))) @calls)))
 
 (deftest b-b-searches-chrome-tabs-and-picks-windows-elsewhere
@@ -178,12 +178,15 @@
          (desktop-run-with "google-chrome" ["b" "b"])))
   (is (= [:choose-window] (desktop-run-with "com.mitchellh.ghostty" ["b" "b"])))
   (is (re-find #"chrome must be a chord" (keyleader/binding-problem {:keys ["b" "b"] :label "x" :desktop :choose-window :chrome "ctrl+f13"})))
-  (is (= [["ydotool" "key" "29:1" "42:1" "18:1" "18:0" "42:0" "29:0"]]
-         (desktop-run-with "google-chrome" ["e"]))
-      "e toggles vimium-cljs's tab-list side panel in Chrome")
-  (is (= [] (desktop-run-with "com.mitchellh.ghostty" ["e"])) "a Chrome-only binding does nothing elsewhere")
+  (let [chrome-only (update grammar :bindings conj {:keys ["x"] :label "Herdr thing" :herdr :edit-scrollback
+                                                     :desktop-label "Chrome thing" :chrome "ctrl+shift+e"})]
+    (is (= [["ydotool" "key" "29:1" "42:1" "18:1" "18:0" "42:0" "29:0"]]
+           (desktop-run-with "google-chrome" ["x"] chrome-only))
+        "a :chrome binding sends its chord in Chrome")
+    (is (= [] (desktop-run-with "com.mitchellh.ghostty" ["x"] chrome-only)) "a Chrome-only binding does nothing elsewhere")
+    (is (some #{["x" "Chrome thing"]} (keyleader/menu chrome-only :desktop nil)) "the desktop menu shows its own label"))
   (is (nil? (keyleader/binding-problem {:keys ["e"] :label "x" :chrome "ctrl+shift+e"})))
-  (is (some #{["e" "Chrome tab list (side panel)"]} (keyleader/menu grammar :desktop nil)) "the desktop menu shows its own label")
+  (is (not-any? #(= "e" (first %)) (keyleader/menu grammar :desktop nil)) "Alt+E, not Cmd+Space e, toggles Chrome's tab list")
   (is (some #{["e" "Edit scrollback"]} (keyleader/menu grammar :herdr nil)))
   (is (re-find #"never reaches keyleader" (keyleader/binding-problem {:keys ["b" "n"] :label "x" :desktop ["window.cycle_next"] :chrome "ctrl+k"}))))
 

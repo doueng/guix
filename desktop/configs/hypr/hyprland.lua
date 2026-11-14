@@ -120,6 +120,7 @@ hl.bind("SUPER + F", hl.dsp.exec_cmd("~/.local/bin/winhint"))
 
 hl.bind("ALT + SPACE", keys.herdr_menu)
 hl.bind("SUPER + Y", keys.herdr_yank)
+hl.bind("ALT + E", keys.chrome_tab_list)
 -- Cmd+Caps+V, which kanata leaves as Super+Ctrl+V.
 hl.bind("SUPER + CTRL + V", hl.dsp.exec_cmd("~/.local/bin/clipboard-history pick"))
 

@@ -45,8 +45,8 @@
                  (set (map str/upper-case (str/split chord #" \+ "))))]
     (is (= (count chords) (count (distinct chords))))
     (is (not-any? #(and (contains? % "ALT") (<= 2 (count %) 3) (not (contains? % "CTRL"))
-                       (not (some (set (cons "SPACE" (map str "W0123456789"))) %))) chords)
-        "Alt plus a key belongs to applications, except Alt+Space, Alt+W (close window) and Alt+digits (workspaces)")))
+                       (not (some (set (cons "SPACE" (map str "WE0123456789"))) %))) chords)
+        "Alt plus a key belongs to applications, except Alt+Space, Alt+W (close window), Alt+E (Chrome tab list, passed through elsewhere) and Alt+digits (workspaces)")))
 
 (defn chord-keys
   "The set of upper-cased keys in a Hyprland chord such as \"SUPER + COMMA\" or a
