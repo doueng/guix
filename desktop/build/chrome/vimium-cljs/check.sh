@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 [ -d node_modules ] || npm install
-guix shell openjdk@25:jdk node -- bash -c 'npx shadow-cljs compile test && node out/test.js && npx shadow-cljs release bg content ui' 2>&1 \
+guix shell openjdk@25:jdk node -- bash -c 'npx shadow-cljs compile test && node out/test.js && npx shadow-cljs release bg content ui panel' 2>&1 \
   | grep -v -E 'sun.misc|terminally deprecated|Please consider reporting|will be removed'
 if grep -l -E '(^|[^.a-zA-Z_$])eval\(|new Function\(' ext/js/*.js; then echo 'eval in a bundle' >&2; exit 1; fi
 ls -l ext/js/*.js | awk '{print $5, $9}'

@@ -30,5 +30,11 @@ The manifest's `vomnibar` command opens the Vomnibar. Chrome won't auto-assign C
 own address-bar shortcut uses it, so set it once at chrome://extensions/shortcuts. After that it works from
 the page, the address bar and chrome:// pages, the last two through a popup Vomnibar.
 
+## Tab list side panel
+
+The `tab-panel` command opens the window's tabs in Chrome's side panel (`ext/panel.html`): click switches,
+middle-click or × closes. It is meant for a Chrome with no tab strip or address bar (Hyprland's
+`fullscreen_state = "0 2"` rule in the guix repo). Assign it a key at chrome://extensions/shortcuts, like Ctrl+L.
+
 Logic ported from [Vimium](https://github.com/philc/vimium), MIT, Copyright (c) 2010 Phil Crosby, Ilya Sukhar
 (ext/LICENSE.vimium.txt).

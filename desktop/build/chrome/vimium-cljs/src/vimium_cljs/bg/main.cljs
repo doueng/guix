@@ -363,7 +363,14 @@
        (if (instance? js/Promise r)
          (do (.then r respond (fn [e] (js/console.error e) (respond nil))) true)
          (do (when (some? r) (respond r)) false)))))
-  (js/chrome.commands.onCommand.addListener (fn [name ^js tab] (when (= name "vomnibar") (vomnibar-command! tab))))
+  ;; sidePanel.open needs the user gesture, so it runs right in the command handler.
+  (js/chrome.commands.onCommand.addListener
+   (fn [name ^js tab]
+     (case name
+       "vomnibar" (vomnibar-command! tab)
+       "tab-panel" (-> (js/chrome.sidePanel.open #js {:windowId (.-windowId tab)})
+                       (.catch (fn [e] (js/console.warn "vimium-cljs: side panel" e))))
+       nil)))
   ;; DevTools key events never reach Chrome's shortcuts, so the e2e suite runs the command here.
   (unchecked-set js/globalThis "vimiumCljsVomnibarCommand" vomnibar-command!)
   (js/chrome.tabs.onActivated.addListener (fn [^js info] (note-active! (.-tabId info))))

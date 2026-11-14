@@ -1,0 +1,11 @@
+:root { color-scheme: light dark; }
+body { margin: 0; padding: 4px 0; font: 13px system-ui, sans-serif; background: Canvas; color: CanvasText; }
+.tab { display: flex; align-items: center; gap: 8px; margin: 1px 4px; padding: 5px 6px 5px 8px; border-radius: 6px; cursor: default; }
+.tab:hover { background: color-mix(in srgb, CanvasText 8%, transparent); }
+.tab.active { background: color-mix(in srgb, CanvasText 16%, transparent); font-weight: 500; }
+.tab.discarded .title { opacity: 0.6; }
+.icon { width: 16px; height: 16px; flex: none; }
+.title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.close { flex: none; visibility: hidden; border: 0; background: none; color: inherit; font-size: 15px; line-height: 1; padding: 0 2px; border-radius: 4px; }
+.tab:hover .close, .tab.active .close { visibility: visible; }
+.close:hover { background: color-mix(in srgb, CanvasText 15%, transparent); }

@@ -4,10 +4,11 @@
   "version": "0.1.0",
   "description": "Vimium-style keyboard navigation, rewritten in ClojureScript.",
   "minimum_chrome_version": "116",
+  "side_panel": { "default_path": "panel.html" },
   "icons": { "128": "icons/icon128.png" },
   "background": { "service_worker": "js/bg.js" },
   "permissions": ["tabs", "bookmarks", "history", "storage", "sessions", "webNavigation",
-                  "offscreen", "clipboardRead", "clipboardWrite"],
+                  "offscreen", "clipboardRead", "clipboardWrite", "sidePanel"],
   "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
@@ -21,7 +22,8 @@
     }
   ],
   "commands": {
-    "vomnibar": { "description": "Open the Vomnibar" }
+    "vomnibar": { "description": "Open the Vomnibar" },
+    "tab-panel": { "description": "Open the tab list in the side panel" }
   },
   "web_accessible_resources": [
     { "resources": ["ui.html", "ui.css", "js/ui.js"], "matches": ["<all_urls>"] }

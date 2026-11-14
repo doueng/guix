@@ -17,6 +17,10 @@
             :output-dir "ext/js"
             :modules {:ui {:init-fn vimium-cljs.ui.main/init}}
             :compiler-options {:warnings-as-errors true :infer-externs :auto}}
+  :panel   {:target :browser
+            :output-dir "ext/js"
+            :modules {:panel {:init-fn vimium-cljs.panel.main/init}}
+            :compiler-options {:warnings-as-errors true :infer-externs :auto}}
   :test    {:target :node-test
             :output-to "out/test.js"
             :ns-regexp "-test$"}}}

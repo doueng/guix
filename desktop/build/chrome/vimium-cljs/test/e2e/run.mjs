@@ -317,3 +317,22 @@ test('the Vomnibar command opens a popup on chrome:// pages and the choice opens
   const { targetInfos } = await b.cdp('Target.getTargets');
   assert.ok(!targetInfos.some((t) => t.targetId === popup.targetId), 'popup closed');
 });
+
+test('the side-panel tab list shows the window\'s tabs; a click switches, × closes', T, async () => {
+  const a = await open('/?panel-a');
+  await open('/?panel-b');
+  const { targetId } = await b.cdp('Target.createTarget', { url: `chrome-extension://${b.extensionId}/panel.html` });
+  const s = (await b.cdp('Target.attachToTarget', { targetId, flatten: true })).sessionId;
+  const titles = () => evaluate(b.cdp, s, '[...document.querySelectorAll(".tab")].map(r => r.title)');
+  let rows = [];
+  for (let i = 0; i < 30 && !rows.some((t) => t.includes('?panel-b')); i++) { await sleep(100); rows = await titles().catch(() => []); }
+  assert.ok(rows.some((t) => t.includes('?panel-a')) && rows.some((t) => t.includes('?panel-b')), `rows: ${rows}`);
+  await evaluate(b.cdp, s, `[...document.querySelectorAll('.tab')].find(r => r.title.includes('?panel-a')).click(), true`);
+  await sleep(400);
+  assert.ok((await activeTabUrl()).endsWith('/?panel-a'), 'clicking a row activates its tab');
+  await evaluate(b.cdp, s, `[...document.querySelectorAll('.tab')].find(r => r.title.includes('?panel-b')).querySelector('.close').click(), true`);
+  await sleep(400);
+  rows = await titles();
+  assert.ok(!rows.some((t) => t.includes('?panel-b')), 'the closed tab left the list');
+  await attach(a);
+});
