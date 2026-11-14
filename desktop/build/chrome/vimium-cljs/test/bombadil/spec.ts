@@ -77,8 +77,11 @@ const press = registerCustomAction("press", async (_d, window, seq: string) => {
   if (w.__probe) w.__probe.last = { kind: "press", seq, before, after: probeOf(w) };
 });
 
-const find = registerCustomAction("find", async (_d, window) => {
+const find = registerCustomAction("find", async (document, window) => {
   const w = window as any;
+  // Find runs in the focused frame, as in Vimium; search the top page.
+  const a = document.activeElement as HTMLElement | null;
+  if (a && a.tagName === "IFRAME") a.blur();
   const before = probeOf(w);
   await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>/needle<enter>")}`);
   await settle(400);
