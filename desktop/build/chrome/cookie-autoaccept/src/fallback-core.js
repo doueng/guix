@@ -10,10 +10,13 @@
 
   /**
    * banner: { text, overlay: fixed/sticky/dialog root or a whole small frame, buttons: clickable controls,
-   * pageShare: its share of the page's text, 0..1 }. True when it looks like a cookie notice we may act on.
+   * fields: visible text-entry fields, pageShare: its share of the page's text, 0..1 }.
+   * True when it looks like a cookie notice we may act on.
    */
   function isConsentBanner(banner) {
     if (!banner || !banner.overlay || !(banner.buttons > 0)) return false;
+    // A cookie notice never asks you to type: a field means a sign-up, login or contact form.
+    if (banner.fields > 0) return false;
     const text = String(banner.text || '').replace(/\s+/g, ' ').trim();
     if (text.length < MIN_TEXT || text.length > MAX_TEXT) return false;
     if (!COOKIEISH.test(text) && !(CONSENT.test(text) && /\bpartners?\b/i.test(text))) return false;
@@ -53,5 +56,13 @@
     return inFrame ? 'none' : 'hide';
   }
 
-  global.cookieAutoaccept = Object.assign(global.cookieAutoaccept || {}, { isConsentBanner, pickAcceptButton, fallbackAction });
+  /**
+   * Whether a fixed element left over the page after hiding a banner is that banner's backdrop: it covers nearly the
+   * whole viewport ({ coverage: 0..1 }) and shows no text and no media of its own.
+   */
+  function isBackdrop({ coverage, text, media }) {
+    return coverage >= 0.9 && !media && String(text || '').trim().length < 20;
+  }
+
+  global.cookieAutoaccept = Object.assign(global.cookieAutoaccept || {}, { isConsentBanner, pickAcceptButton, fallbackAction, isBackdrop });
 })(globalThis);

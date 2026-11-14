@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- A home-made modal: a separate dimmed backdrop and overflow:hidden on body, both cleared by its buttons -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>Consent modal with a backdrop and scroll lock</h1>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<div id="backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9"></div>
+<div id="consent-modal" data-consent-ui role="dialog" aria-modal="true" style="position:fixed;top:30%;left:20%;right:20%;background:#fff;padding:20px;z-index:10">
+  <p>We and our partners use cookies for analytics and personalised ads.</p>
+  <button onclick="done('rejected')">Reject all</button>
+  <button onclick="done('accepted')">Accept all</button>
+</div>
+<script>
+  document.body.style.overflow = 'hidden';
+  function done(what) {
+    mark(what);
+    document.getElementById('backdrop').remove();
+    document.getElementById('consent-modal').remove();
+    document.body.style.overflow = '';
+  }
+</script>
+</body></html>

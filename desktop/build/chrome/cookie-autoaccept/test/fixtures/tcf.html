@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- An IAB TCF v2.2 CMP no autoconsent rule knows: __tcfapi stub and its own banner -->
+<script>
+  // Records which button the extension pressed, for the e2e test to read.
+  window.mark = (what) => { document.title = what; };
+  window.addEventListener('message', (e) => { if (e.data && e.data.consent) window.mark(e.data.consent); });
+</script>
+<style>.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #999;padding:16px;z-index:9999}</style>
+</head>
+<body>
+<h1>Unknown TCF v2 CMP</h1>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Article text. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<div id="tcf-cmp" data-consent-ui class="bar">
+  <p>We and our 842 partners store and/or access information on a device, such as cookies, and process personal data for personalised ads and content.</p>
+  <button onclick="choose('rejected')">Reject all</button>
+  <button>Manage options</button>
+  <button onclick="choose('accepted')">Accept all</button>
+</div>
+<script>
+  let tcData = { tcString: '', eventStatus: 'cmpuishown', cmpStatus: 'loaded', gdprApplies: true };
+  window.__tcfapi = (cmd, version, cb) => { if (cmd === 'ping') cb({ cmpLoaded: true, gdprApplies: true }); else if (cmd === 'getTCData' || cmd === 'addEventListener') cb(tcData, true); };
+  function choose(what) {
+    mark(what);
+    tcData = { ...tcData, tcString: what === 'accepted' ? 'CPaccept' : 'CPreject', eventStatus: 'useractioncomplete' };
+    document.getElementById('tcf-cmp').remove();
+  }
+</script>
+</body></html>

@@ -11,7 +11,7 @@
 <body>
 <h1>Home-made banner with no known CMP: accept mode clicks OK, reject mode hides it</h1>
 <p>Article text.</p>
-<div id="notice" style="position:fixed;bottom:0;left:0;right:0;background:#fff;padding:16px;z-index:9">
+<div id="notice" data-consent-ui style="position:fixed;bottom:0;left:0;right:0;background:#fff;padding:16px;z-index:9">
   <p>This site uses cookies to improve your experience and analyse traffic.</p>
   <button>Settings</button>
   <button onclick="mark('accepted');document.getElementById('notice').remove()">OK</button>

@@ -80,9 +80,20 @@ export function emptyReport(site, settings) {
     popup: false,
     result: null,
     done: false,
+    // Whether the main frame's fallback scanned the page after the rule reported its result.
+    checked: false,
     hidden: 0,
     clicked: 0,
   };
+}
+
+/**
+ * The tab's report when a frame starts: a new main-frame document starts a fresh one, and otherwise (a frame's
+ * init) it keeps what other frames reported, since a CMP in a subframe can finish before the main frame's init.
+ */
+export function startReport(report, { type, mainFrame, site, settings }) {
+  if (type === 'pageStart' && mainFrame) return emptyReport(site, settings);
+  return report ?? emptyReport(site, settings);
 }
 
 /** Fold one content-script message into the tab's report. Unknown messages leave it unchanged. */
@@ -94,13 +105,15 @@ export function reduceReport(report, msg) {
       return { ...report, cmp: msg.cmp, popup: true };
     case 'optInResult':
     case 'optOutResult':
-      return { ...report, cmp: msg.cmp, result: Boolean(msg.result) };
+      return { ...report, cmp: msg.cmp, result: Boolean(msg.result), checked: false };
     case 'autoconsentDone':
       return { ...report, cmp: msg.cmp, done: true, result: report.result ?? true };
     case 'fallbackHidden':
       return { ...report, hidden: report.hidden + (Number(msg.count) || 0) };
     case 'fallbackClicked':
       return { ...report, clicked: (report.clicked || 0) + (Number(msg.count) || 0) };
+    case 'fallbackScanned':
+      return msg.afterResult && report.result !== null && !report.checked ? { ...report, checked: true } : report;
     default:
       return report;
   }
@@ -114,16 +127,29 @@ export function shouldRunFallback(report) {
   return Boolean(report) && !report.disabled && !(report.popup && report.result === null && !report.done);
 }
 
+/**
+ * The service worker's answer to the fallback's query. afterResult says the rule's result was in when the scan
+ * started, so that scan checks the rule's claim: some rules report success and leave the banner up.
+ */
+export function fallbackAnswer(report) {
+  return { run: shouldRunFallback(report), mode: report.mode, disabled: report.disabled, afterResult: report.result !== null };
+}
+
+const banners = (n) => `${n} cookie banner${n > 1 ? 's' : ''}`;
+
 /** One line for the popup. */
 export function describeReport(report) {
   if (!report || report.site === null) return 'Not a web page.';
   if (report.disabled) return 'Off for this site.';
   const verb = report.mode === 'accept' ? 'Accepted' : 'Rejected';
   if (report.clicked > 0) return `Accepted cookies (generic button${report.cmp ? `, after ${report.cmp}` : ''}).`;
+  // A banner the fallback still had to hide after a rule's result means the rule's claim did not hold.
+  if (report.hidden > 0 && report.result !== null) return `Hid ${banners(report.hidden)} (generic, after ${report.cmp}).`;
+  if (report.popup && report.result === true && !report.checked) return `Found ${report.cmp}, checking...`;
   if (report.popup && report.result === true) return `${verb} cookies (${report.cmp}).`;
   if (report.popup && report.result === false) return `Found ${report.cmp} but could not click it.`;
   if (report.popup) return `Found ${report.cmp}, working...`;
-  if (report.hidden > 0) return `Hid ${report.hidden} cookie banner${report.hidden > 1 ? 's' : ''} (generic).`;
+  if (report.hidden > 0) return `Hid ${banners(report.hidden)} (generic).`;
   if (report.done) return `Handled ${report.cmp} (hidden, no popup shown).`;
   return 'No cookie popup seen.';
 }
@@ -131,6 +157,6 @@ export function describeReport(report) {
 /** Badge text for the toolbar icon. */
 export function badgeFor(report) {
   if (!report || report.disabled) return '';
-  if ((report.popup && report.result) || report.hidden > 0 || report.clicked > 0) return '✓';
+  if ((report.popup && report.result && report.checked) || report.hidden > 0 || report.clicked > 0) return '✓';
   return '';
 }

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Bombadil property tests for the cookie consent extension: specs, four bugs found and fixed, run time">
+<meta name="bbh-doc" content="T178">
+<title>Bombadil on cookie-autoaccept</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Bombadil on cookie-autoaccept</h1>
+
+<p class=sub>T178 · W199 · 14 November 2026 · cookie-autoaccept with Bombadil 0.7.10, headless flatpak Chrome 157 on aarch64 Guix</p>
+
+<div class='card good'><b>Result.</b> Bombadil found <b>four real bugs</b> in the extension during its first runs. All four are fixed, and each has a unit test that fails on the old code. After the fixes: a 10-minute run over the whole fixture site passed, as did a 45 s focused run on each of the 19 fixtures. Three bugs injected on purpose were each caught within 5 to 23 s. <span class='tag measured'>measured</span></div>
+
+<h2>Findings</h2>
+<div class='table'><table>
+<tr><th>#</th><th>Property</th><th>What happened</th><th>Fix</th></tr>
+<tr><td>1</td><td>popup tells the truth</td><td>On the current Cookiebot template, the popup said <i>Accepted cookies (Cybotcookiebot).</i> while the banner was still up. The upstream rule reports success without clicking anything, and the fallback only clicks it 3 s later.</td><td>A rule's claim shows as <i>Found X, checking...</i> until the top frame's fallback has scanned the page after it. In reject mode, a banner hidden after the claim reads <i>Hid 1 cookie banner (generic, after X).</i>, not <i>Rejected</i>.</td></tr>
+<tr><td>2</td><td>non-consent UI stays</td><td>A mail sign-up dialog saying <i>you consent to receive our marketing emails</i> was hidden in reject mode. In accept mode the fallback would have pressed <i>I agree</i> and submitted the form.</td><td>A banner with a visible text field (email, text, password and so on) is never treated as a cookie notice.</td></tr>
+<tr><td>3</td><td>popup tells the truth</td><td>On Sourcepoint, the consent frame accepted within 0.2 s, but the popup said <i>No cookie popup seen.</i> The top frame's <code>init</code> comes at <code>document_idle</code>, after its iframes have loaded, and it reset the tab's report, wiping the frame's result.</td><td>A one-line <code>document_start</code> script in the top frame resets the report when a page begins. <code>init</code> keeps whatever the frames reported. No new permission is needed.</td></tr>
+<tr><td>4</td><td>page stays usable</td><td>On a modal with a separate dimmed backdrop and no reject button, reject mode hid the dialog. The backdrop stayed over the page for good.</td><td>After hiding a banner, the top frame also hides an empty fixed layer that covers 90% or more of the viewport, with no text and no media.</td></tr>
+</table></div>
+<p>Two other failures were in the harness, not the extension, and are fixed there. In one, a click inside a shadow root looked like a script click, because <code>window.event</code> is undefined there. In the other, <code>chrome.action.openPopup</code> sometimes found no focused window.</p>
+
+<h2>Specs</h2>
+<p>These properties are checked on every state. Each one reads facts that a probe script gathers inside every fixture page and frame: untrusted clicks (an extension's <code>el.click()</code>), consent choices made through the fixture's handler, marks the fallback left, autoconsent's style elements, whether the consent UI is visible, and what blocks the page.</p>
+<div class='table'><table>
+<tr><th>Property</th><th>Rule</th></tr>
+<tr><td>bannerGoesAway</td><td>On an enabled site, a visible consent banner is gone within 15 s of being seen. A pay-or-consent wall is exempt in reject mode, since it can only be paid or accepted.</td></tr>
+<tr><td>disabledSiteUntouched</td><td>On a disabled site: no script clicks or decisions, no fallback marks, no autoconsent styles, and no consent UI hidden without the user's choice.</td></tr>
+<tr><td>rejectNeverAccepts</td><td>In reject mode, no script click on an accept button and no script <i>accepted</i> decision, including inside frames.</td></tr>
+<tr><td>clicksStayInConsentUi</td><td>Every script click lands inside consent UI and never on a link that navigates or on a form's submit button. No script form submit.</td></tr>
+<tr><td>pageStaysUsable</td><td>With no banner visible, nothing fixed covers half the viewport, and html and body are not scroll-locked, for more than 3 s.</td></tr>
+<tr><td>nonConsentUiStays</td><td>The newsletter box and the mail sign-up stay visible.</td></tr>
+<tr><td>popupTellsTheTruth</td><td>When the real popup is opened, its status line matches the page: <i>Off</i> exactly when disabled; <i>Accepted</i> only in accept mode with evidence; <i>Rejected</i> only in reject mode with no accept; <i>Hid N</i> equals the hidden marks; <i>No cookie popup seen</i> only if nothing was done.</td></tr>
+</table></div>
+<p>Actions: in-page clicks, link clicks, scrolling, back, forward, reload and wait. Dwells of 2 to 4.5 s, weighted up while a page is younger than 12 s, give late banners and the fallback's retries time to happen. The harness opens the real popup through <code>chrome.action.openPopup</code> to read it, toggle the site, or switch accept and reject; these choices are weighted so that disabled sites get re-enabled.</p>
+
+<h2>Fixtures</h2>
+<p>Nineteen top-level pages and two frame pages are served on <code>localhost</code> and <code>127.0.0.1</code> with no network: OneTrust, OneTrust loaded 6 s late, Cookiebot (old and current template), Didomi, Quantcast, TrustArc, Usercentrics in shadow DOM, Sourcepoint in a cross-origin frame, an unknown TCF v2 CMP with <code>__tcfapi</code>, a pay-or-consent frame, generic banners (plain, late in shadow DOM, late in light DOM at 9 s), two modals with a backdrop and scroll lock, a newsletter box, a mail sign-up form, and a page with no banner. Seven of these are new; the rest are the e2e fixtures, now marked with <code>data-consent-ui</code> or <code>data-keep</code>.</p>
+
+<h2>Run time and cost</h2>
+<ul>
+<li>Final 10-minute run: 363 states, 93 page loads, 16 of the 19 top-level fixtures, all four mode and site combinations, and 23 popup reads. <span class='tag measured'>measured</span></li>
+<li>About one action per 1.6 s, because dwells dominate. One Chrome runs at a time, plus Bombadil, a 14 MB static binary.</li>
+<li><code>npm run bombadil</code> defaults to 300 s. It is not part of <code>npm test</code> or the e2e run.</li>
+</ul>
+
+<h2>Chromium on aarch64 Guix</h2>
+<p><code>ungoogled-chromium 156</code> is in Guix, but no substitute server had it for aarch64. <code>guix build --dry-run</code> would build Chromium and clang 23 from source, which takes many hours on this machine. <span class='tag measured'>measured</span> The harness therefore runs the flatpak Chrome headless with a throwaway profile and read-only access to the repo. It loads the extension over the DevTools pipe (<code>Extensions.loadUnpacked</code>) and gives Bombadil a debugging port. Your daily Chrome profile is not touched. <code>CHROME=/path/to/chromium</code> switches to any Chromium binary.</p>
+
+<h2>Reproducing</h2>
+<pre>npm run bombadil                          # 300 s over the whole site
+npm run bombadil -- --time 600 --seed 7   # starts in reject mode with localhost disabled
+npm run bombadil -- --page sourcepoint.html
+npm run bombadil -- --reproduce /tmp/cookie-autoaccept-trace-XXXX</pre>
+<p>On failure the harness prints the violated property with the page facts, the seed and the trace directory. Bombadil 0.7.10 has no seed of its own: its trace is the replay, and the seed fixes the starting settings. The replay of finding 4's trace passed once the fix was in.</p>
+
+<h2>Limits</h2>
+<ul>
+<li>Exploration is random, so a short run can miss a combination. The sweep runs, 45 s per fixture with <code>--page</code>, are what covered every page.</li>
+<li>The probe sees only open shadow roots, and frames only through what they post to their parent.</li>
+<li>Bombadil cuts a custom action off at about 5 s, so a long stay is several dwells in a row.</li>
+</ul>
+
+</main></body></html>

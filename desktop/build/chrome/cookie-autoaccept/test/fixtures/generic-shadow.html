@@ -15,6 +15,7 @@
   setTimeout(() => {
     const host = document.createElement('cookie-note');
     host.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#fff;z-index:9';
+    host.setAttribute('data-consent-ui', '');
     document.body.append(host);
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = '<p>We use cookies for analytics and need your consent.</p><button>Reject</button><button>Accept all</button>';

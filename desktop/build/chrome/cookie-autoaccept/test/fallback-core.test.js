@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const ctx = vm.createContext({});
 vm.runInContext(readFileSync(new URL('../src/fallback-core.js', import.meta.url), 'utf8'), ctx);
-const { isConsentBanner, pickAcceptButton, fallbackAction } = ctx.cookieAutoaccept;
+const { isConsentBanner, pickAcceptButton, fallbackAction, isBackdrop } = ctx.cookieAutoaccept;
 
 const banner = (text, extra = {}) => ({ text, overlay: true, buttons: 2, pageShare: 0.05, ...extra });
 
@@ -20,6 +20,23 @@ test('ignores overlays that are not about consent', () => {
   assert.ok(!isConsentBanner(banner('Subscribe to our newsletter for weekly deals and discounts!')));
   assert.ok(!isConsentBanner(banner('Sign in to continue. Password required. We use cookies.')));
   assert.ok(!isConsentBanner(banner('Read our privacy policy and terms of service before you buy.')));
+});
+
+// Found by Bombadil: a mailing-list dialog says "you consent to receive our marketing emails"; reject mode
+// hid it, and accept mode would have pressed its I agree button and submitted the form.
+test('ignores a dialog that asks you to type, such as an email sign-up', () => {
+  const signup = 'Join our mailing list. By clicking I agree you consent to receive our marketing emails about new products.';
+  assert.ok(!isConsentBanner(banner(signup, { fields: 1 })));
+  assert.ok(isConsentBanner(banner('We use cookies to improve your experience.', { fields: 0 })));
+});
+
+// Found by Bombadil: reject mode hid a consent modal but left its separate dimmed backdrop over the page.
+test('an empty full-viewport layer left after hiding a banner is its backdrop; content is not', () => {
+  assert.ok(isBackdrop({ coverage: 1, text: '', media: false }));
+  assert.ok(isBackdrop({ coverage: 0.95, text: '  ', media: false }));
+  assert.ok(!isBackdrop({ coverage: 1, text: 'Welcome back! Here is your dashboard with today\'s numbers.', media: false }));
+  assert.ok(!isBackdrop({ coverage: 1, text: '', media: true }), 'a full-screen video or map');
+  assert.ok(!isBackdrop({ coverage: 0.3, text: '', media: false }), 'a small empty box');
 });
 
 test('needs a fixed overlay with a control', () => {

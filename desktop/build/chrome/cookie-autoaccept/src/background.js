@@ -5,12 +5,13 @@ import {
   autoconsentConfig,
   badgeFor,
   emptyReport,
+  fallbackAnswer,
   filterRules,
   isEnabledFor,
   normalizeSettings,
   reduceReport,
-  shouldRunFallback,
   siteKey,
+  startReport,
 } from './policy.js';
 
 let rulesPromise = null;
@@ -51,10 +52,13 @@ async function handle(msg, sender) {
   const site = siteKey(sender.tab.url);
 
   switch (msg.type) {
+    case 'pageStart':
+      if (frameId === 0) await updateReport(tabId, async () => startReport(null, { type: 'pageStart', mainFrame: true, site, settings: await getSettings() }));
+      return undefined;
     case 'init': {
       const settings = await getSettings();
       const enabled = isEnabledFor(settings, site);
-      if (frameId === 0) await updateReport(tabId, () => emptyReport(site, settings));
+      await updateReport(tabId, (r) => startReport(r, { type: 'init', mainFrame: frameId === 0, site, settings }));
       const rules = enabled ? filterRules(await loadRules(), { url: msg.url || sender.url, mainFrame: frameId === 0 }) : [];
       await chrome.tabs.sendMessage(
         tabId,
@@ -80,7 +84,7 @@ async function handle(msg, sender) {
     }
     case 'fallbackQuery': {
       const report = await updateReport(tabId, async (r) => r ?? emptyReport(site, await getSettings()));
-      return { run: shouldRunFallback(report), mode: report.mode, disabled: report.disabled };
+      return fallbackAnswer(report);
     }
     case 'cmpDetected':
     case 'popupFound':
@@ -89,6 +93,8 @@ async function handle(msg, sender) {
     case 'autoconsentDone':
     case 'fallbackHidden':
     case 'fallbackClicked':
+    case 'fallbackScanned':
+      if (msg.type === 'fallbackScanned' && frameId !== 0) return undefined;
       await updateReport(tabId, async (r) => reduceReport(r ?? emptyReport(site, await getSettings()), msg));
       return undefined;
     default:

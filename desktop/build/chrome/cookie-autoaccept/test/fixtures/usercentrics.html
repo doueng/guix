@@ -15,7 +15,7 @@
 <script>
   const host = document.getElementById('usercentrics-root');
   const root = host.attachShadow({ mode: 'open' });
-  root.innerHTML = '<div data-testid="uc-container" style="position:fixed;bottom:0;left:0;right:0;background:#fff;padding:16px">' +
+  root.innerHTML = '<div data-testid="uc-container" data-consent-ui style="position:fixed;bottom:0;left:0;right:0;background:#fff;padding:16px">' +
     '<p>We use cookies and similar technologies.</p>' +
     '<button data-testid="uc-deny-all-button">Deny</button><button data-testid="uc-accept-all-button">Accept all</button></div>';
   const close = () => { host.style.display = 'none'; return true; };

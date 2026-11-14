@@ -6,6 +6,7 @@ import {
   badgeFor,
   describeReport,
   emptyReport,
+  fallbackAnswer,
   filterRules,
   isEnabledFor,
   normalizeSettings,
@@ -13,6 +14,7 @@ import {
   setSiteEnabled,
   shouldRunFallback,
   siteKey,
+  startReport,
 } from '../src/policy.js';
 
 test('default is accept, enabled everywhere', () => {
@@ -95,6 +97,7 @@ test('a handled popup produces an accepted report and a badge', () => {
   assert.equal(shouldRunFallback(r), false);
   r = reduceReport(r, { type: 'optInResult', cmp: 'onetrust', result: true });
   r = reduceReport(r, { type: 'autoconsentDone', cmp: 'onetrust' });
+  r = reduceReport(r, { type: 'fallbackScanned', afterResult: fallbackAnswer(r).afterResult });
   assert.equal(describeReport(r), 'Accepted cookies (onetrust).');
   assert.equal(badgeFor(r), '\u2713');
 });
@@ -124,6 +127,47 @@ test('the fallback waits while autoconsent works, then may still act on a banner
   r = reduceReport(r, { type: 'fallbackClicked', count: 1 });
   assert.equal(describeReport(r), 'Accepted cookies (generic button, after Cybotcookiebot).');
   assert.equal(badgeFor(r), '\u2713');
+});
+
+// Found by Bombadil: the popup said 'Accepted cookies (Cybotcookiebot).' while the banner was still up,
+// because the rule reports success without clicking anything; the fallback only clicks seconds later.
+test('a rule\'s claim is not reported until the page was scanned after it', () => {
+  let r = reduceReport(emptyReport('shop.com', {}), { type: 'popupFound', cmp: 'Cybotcookiebot' });
+  const before = fallbackAnswer(r);
+  r = reduceReport(r, { type: 'optInResult', cmp: 'Cybotcookiebot', result: true });
+  assert.equal(describeReport(r), 'Found Cybotcookiebot, checking...');
+  assert.equal(badgeFor(r), '');
+  // A scan that started before the result checks nothing.
+  r = reduceReport(r, { type: 'fallbackScanned', afterResult: before.afterResult });
+  assert.equal(describeReport(r), 'Found Cybotcookiebot, checking...');
+  const after = fallbackAnswer(r);
+  assert.equal(after.run, true);
+  r = reduceReport(r, { type: 'fallbackScanned', afterResult: after.afterResult });
+  assert.equal(describeReport(r), 'Accepted cookies (Cybotcookiebot).');
+  assert.equal(badgeFor(r), '\u2713');
+});
+
+test('in reject mode, a banner hidden after a rule\'s claim is reported as hidden, not rejected', () => {
+  let r = reduceReport(emptyReport('shop.com', { mode: 'reject' }), { type: 'popupFound', cmp: 'Cybotcookiebot' });
+  r = reduceReport(r, { type: 'optOutResult', cmp: 'Cybotcookiebot', result: true });
+  r = reduceReport(r, { type: 'fallbackHidden', count: 1 });
+  r = reduceReport(r, { type: 'fallbackScanned', afterResult: true });
+  assert.equal(describeReport(r), 'Hid 1 cookie banner (generic, after Cybotcookiebot).');
+});
+
+// Found by Bombadil: the Sourcepoint frame accepted before the main frame's init, which then wiped the
+// report, so the popup said 'No cookie popup seen.'
+test('a subframe\'s result survives the main frame\'s later init; a new page starts afresh', () => {
+  const ctx = { site: 'news.com', settings: {} };
+  let r = startReport(null, { type: 'pageStart', mainFrame: true, ...ctx });
+  r = startReport(r, { type: 'init', mainFrame: false, ...ctx });
+  r = reduceReport(r, { type: 'popupFound', cmp: 'Sourcepoint-frame' });
+  r = reduceReport(r, { type: 'optInResult', cmp: 'Sourcepoint-frame', result: true });
+  r = reduceReport(r, { type: 'fallbackScanned', afterResult: true });
+  r = startReport(r, { type: 'init', mainFrame: true, ...ctx });
+  assert.equal(describeReport(r), 'Accepted cookies (Sourcepoint-frame).');
+  r = startReport(r, { type: 'pageStart', mainFrame: true, ...ctx });
+  assert.equal(describeReport(r), 'No cookie popup seen.');
 });
 
 test('unknown messages leave the report unchanged', () => {

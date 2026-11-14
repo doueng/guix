@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "e2e": "node --test --test-concurrency=1 test/e2e/*.test.js"
+    "e2e": "node --test --test-concurrency=1 test/e2e/*.test.js",
+    "bombadil": "node bombadil/run.mjs"
   }
 }

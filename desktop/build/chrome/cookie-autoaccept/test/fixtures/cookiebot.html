@@ -12,7 +12,7 @@
 <h1>Cookiebot dialog (structure of consent.cookiebot.com uc.js); detection runs main-world eval snippets</h1>
 <p>Article text.</p>
 <script>window.Cookiebot = { hasResponse: false, dialog: { visible: true }, withdraw() {}, hide() {} };</script>
-<div id="CybotCookiebotDialog" class="bar">
+<div id="CybotCookiebotDialog" data-consent-ui class="bar">
   <p>This website uses cookies.</p>
   <button id="CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll" onclick="mark('rejected');Cookiebot.hasResponse=true;Cookiebot.dialog.visible=false;this.parentNode.style.display='none'">Deny</button>
   <button id="CybotCookiebotDialogBodyButtonAccept" onclick="mark('accepted');Cookiebot.hasResponse=true;Cookiebot.dialog.visible=false;this.parentNode.style.display='none'">Allow all</button>
