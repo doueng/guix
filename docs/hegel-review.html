@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Should bbh replace test.check and seeded ERT with Hegel? Spike results and recommendation.">
+<meta name="bbh-doc" content="T176">
+<title>Hegel property testing for bbh: review</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Hegel property testing for bbh: review</h1>
+
+<p><b>Verdict: skip the babashka migration, and maybe use Hegel for new Emacs Lisp properties.</b> Hegel works on this machine. My spike drove it from both bb and batch Emacs. But bb cannot load a C library (it has no FFI), so every bb test would run a helper process I wrote and talk to it over a pipe. That adds a native binary to build and pin, adds 0.2 to 0.5 s to cheap properties, and ties the suite to a 0.x C ABI that shipped 22 releases in the last month. Shrinking was about as good as test.check. One stateful bug was missed in 2 of 3 runs because Hegel's lists are shorter by default. The clear gain is in Emacs, where the one random test has no shrinking at all. I have migrated nothing.</p>
+<p class=muted>Labels: <b>measured</b> = I ran it on this M1 with bb 1.13.229 and Emacs batch. <b>read</b> = taken from Hegel's source or docs. <b>inferred</b> = my reasoning, not tested.</p>
+
+<h2>1. What Hegel is</h2>
+<ul>
+<li><b>Engine plus thin frontends</b> (read). <code>libhegel</code> is a Rust library with a C ABI (<code>hegel.h</code>, 159 functions). It owns generation, shrinking, the example database and stateful rule selection. Each language frontend draws typed values through calls like <code>hegel_generate_integer</code> and <code>hegel_new_collection</code>, then reports the result with <code>hegel_mark_complete</code> (valid, invalid for an assume, overrun, or interesting for a failure). Docs: https://hegel.dev/explanation/how-hegel-works</li>
+<li><b>No wire protocol any more</b> (read). The old <code>hegel-core</code> was a Python server with a protocol. Its README says it is "no longer used" and asks users to migrate to the FFI library. So a bb client cannot just speak a protocol. It needs a bridge.</li>
+<li><b>Frontends</b> (read): Rust, Python, Go, C++, TypeScript, Java (JNA or FFM), OCaml and C#. There is none for Clojure or Emacs Lisp. The Java one needs a JVM with JNA or FFM, and bb has neither (measured: <code>java.lang.foreign.Linker</code> does not resolve in bb).</li>
+<li><b>Shrinking</b> (read): it shrinks the choice sequence, Hypothesis-style. Spans group draws so that, for example, a list element is deleted as a unit. Failures are grouped by an <i>origin</i> string, and each origin is treated as a separate bug.</li>
+<li><b>Example database</b> (read, measured): failures are stored per key in a directory and replayed first on the next run. A reproduce blob (base64) replays one exact case. In my spike, a rerun of a failing property took <b>2 cases instead of 730</b>.</li>
+<li><b>Stateful testing</b> (read, not spiked): an engine-owned state machine with weighted rules, rule rejection, invariants and a step count (see <code>examples/state_machine.c</code>).</li>
+<li><b>License and platforms</b> (read): MIT. Prebuilt <code>libhegel-linux-arm64.so</code> ships with each release. 0.51.5 ran here after adding an rpath for <code>libgcc_s</code> (measured).</li>
+<li><b>Guix</b> (inferred): it can be packaged from source with <code>cargo-build-system</code>. The crate has 8 dependencies plus <code>rustix</code>, and needs Rust 1.86 or newer and edition 2024. A quicker route is a binary package fixed up with patchelf.</li>
+<li><b>Maturity</b> (read): 96 libhegel releases since 0.24.0 (2026-07-03), 22 of them in the last 30 days, and 28 minor bumps. Breaking ABI renames ship without shims, such as <code>hegel_test_case_is_nondeterministic</code> becoming <code>hegel_test_case_should_capture</code>.</li>
+</ul>
+
+<h2>2. bbh's current property tests</h2>
+<table>
+<tr><th>File</th><th>Properties</th><th>Origin</th><th>Shape</th></tr>
+<tr><td>test/bbh/props.clj</td><td>shared runner</td><td>T170</td><td>trial budget, PROPS_SCALE, BBH_PROP_SEED replay</td></tr>
+<tr><td>test/bbh/input_property_test.clj</td><td>5: spoken handle, typed handle, any text, verb call shapes, elisp string</td><td>T170</td><td>pure, 300 to 500 trials</td></tr>
+<tr><td>test/bbh/landing_property_test.clj</td><td>1: random stacks, 4 trials</td><td>T170</td><td>op sequence on real jj, slow</td></tr>
+<tr><td>test/bbh/harness_property_test.clj</td><td>6: wf journal fold, torn journal line, mailbox, mailbox across crashes, checkpoint replay, transcript</td><td>T154</td><td>op sequences on files</td></tr>
+<tr><td>test/bbh/super_property_test.clj</td><td>1: random command sequences, 150 trials</td><td>model-based (T76 per the brief)</td><td>stateful: commands through the store, then replay</td></tr>
+<tr><td>test/bbh/sessions_test.clj, test/bbh/workflow_test.clj</td><td>1 each</td><td>-</td><td>choice sequences</td></tr>
+<tr><td>test/agent-shell-test.el line 1581</td><td>1: random inbox rows, 60 trials</td><td>T170</td><td>seeded <code>random</code>, <b>no shrinking</b></td></tr>
+</table>
+<p>That is 15 bb properties and 1 Emacs one. The Bombadil specs (T174) are UI exploration and are out of scope.</p>
+
+<h2>3. The spike</h2>
+<p>All spike files are in /home/engstrand/.local/state/bbh/workflows/20261114-102612-099-investigation/evidence/spike</p>
+<ul>
+<li><code>hegel-pipe.c</code> (113 lines): a line-protocol bridge over libhegel. It handles start, next, integer, boolean, collection, span and complete.</li>
+<li><code>hegel.clj</code> (80 lines): a bb client with integer, elements, one-of, tuple, fmap, vector-of, such-that, assume and check.</li>
+<li><code>hegel.el</code> (65 lines): an Elisp client over <code>make-process</code>, with a <code>hegel-deftest</code> macro that wraps <code>ert-deftest</code>.</li>
+<li><code>spike.clj</code>: ports two real properties, spoken handle and random command sequences, and adds planted-bug variants.</li>
+</ul>
+
+<h3>Runtime on the passing properties (measured, 3 seeds)</h3>
+<table>
+<tr><th>Property</th><th>test.check</th><th>Hegel</th></tr>
+<tr><td>spoken handle, 300 cases</td><td>5, 6, 7 ms</td><td>203, 240, 264 ms</td></tr>
+<tr><td>random command sequences, 150 cases</td><td>4341, 4752, 4455 ms</td><td>2356, 2731, 2703 ms</td></tr>
+</table>
+<p>The spoken handle cost is the pipe: about 0.7 ms per case, or roughly 0.1 ms per draw (inferred from the totals). Hegel looks faster on command sequences only because it did less work. Its lists averaged <b>7.1</b> commands against test.check's <b>30.3</b> (measured).</p>
+
+<h3>Shrinking on planted bugs (measured)</h3>
+<table>
+<tr><th>Planted bug</th><th>test.check</th><th>Hegel</th></tr>
+<tr><td>parse drops text containing "hundred" and "plan" (budget 2000)</td><td>found 3/3. Shrunk to <code>[100 3 "T" ", " "plan"]</code> and <code>[100 2 "tee" ", " "plan"]</code> twice. 2 to 3 ms.</td><td>found 3/3. Shrunk to <code>[1 0 "tee" ", " "hundred plan"]</code> and <code>[100 1 "T" ", " "plan"]</code> twice. 251 to 513 ms.</td></tr>
+<tr><td>approve after any steer throws (budget 500)</td><td>found 3/3 after 2, 55 and 1 trials. All shrunk to 2 commands. 2.2, 5.2 and 53.3 s.</td><td>found <b>1/3</b>, shrunk to 2 commands, 17.5 s. With the kind drawn uniformly it was still 1/3.</td></tr>
+<tr><td>Elisp: length instead of string-width</td><td>none (the current test has no shrinking)</td><td>shrunk to <code>("日本" 2)</code>. 300 cases in 0.22 s, whole batch run 0.66 s.</td></tr>
+</table>
+<p>Shrink quality is on par. Both libraries reach minimal or near-minimal inputs. The missed stateful bug comes from short default collections, not from a defect in Hegel (inferred). Fixing it needs a <code>min_size</code> or a port to Hegel's state-machine API. Either way the generator has to be redesigned, not just swapped.</p>
+
+<h2>4. Assessment</h2>
+<ol>
+<li><b>babashka client</b>: feasible with a bridge. That means about 120 lines of C for the bridge, about 200 for a production bb client, and a pinned libhegel. bb cannot load libhegel directly. A bb pod in Rust would also work, but it still runs as a separate process (inferred).</li>
+<li><b>Emacs client</b>: feasible. It can use the same bridge over <code>make-process</code> (measured working in batch Emacs). An Emacs dynamic module would be faster (Emacs here was built with modules), but the build is heavier (inferred). It integrates with ERT through a <code>hegel-deftest</code> macro.</li>
+<li><b>What it buys</b>: a failure database replayed across runs (bb has seed replay already), engine-owned stateful testing, and one engine for both bb and Elisp. In Emacs it also brings shrinking, which the tests lack today.</li>
+<li><b>What it costs</b>: a native binary and a bridge to keep building, 0.2 to 0.5 s added to cheap properties under bb, an unstable 0.x ABI, generators retuned for each property, and a client library of our own to maintain, since there is no upstream Clojure or Elisp binding.</li>
+</ol>
+
+<h2>5. If you adopt anyway: migration plan (all estimates inferred)</h2>
+<table>
+<tr><th>Step</th><th>Effort</th></tr>
+<tr><td>Guix package for libhegel: binary with patchelf (about 1 h), or from source with cargo-build-system</td><td>0.5 to 1 day from source</td></tr>
+<tr><td>Bridge to production: errors, strings, floats, notes, blob replay, state-machine ops</td><td>0.5 to 1 day</td></tr>
+<tr><td>bb client: generators, spans, a props/check-compatible report, HEGEL_BLOB replay, database under ~/.cache</td><td>1 day</td></tr>
+<tr><td>input_property_test: 5 properties</td><td>2 h</td></tr>
+<tr><td>harness_property_test: 6 op-sequence properties, with list sizes retuned</td><td>4 to 6 h</td></tr>
+<tr><td>super_property_test: port to the state-machine API</td><td>3 to 4 h</td></tr>
+<tr><td>landing, sessions and workflow properties</td><td>2 to 3 h</td></tr>
+<tr><td>Elisp client, plus porting the inbox rows property</td><td>0.5 day</td></tr>
+<tr><td><b>Total</b></td><td><b>about 4 to 6 days</b>, plus following the ABI as it changes</td></tr>
+</table>
+<p><b>My pick</b>: keep test.check for bb. If you want shrinking in Emacs, the smaller step is a small seed-and-retry shrinker in plain ERT (guess: about 20 lines). Revisit Hegel for Elisp once libhegel reaches 1.0 or ships a CLI or protocol mode. If you still want it now, the cheapest real gain is to port only the Elisp inbox property, with the bridge pinned to one libhegel release.</p>
+
+</main></body></html>
