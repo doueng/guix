@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Whether a patched, PGO-built ungoogled-chromium on guix-builder is worth it versus flatpak Chrome (T186)">
+<meta name="bbh-doc" content="T186">
+<title>Building Chromium through Guix: plausibility</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Building Chromium through Guix: plausibility</h1>
+
+<p class=lead><b>Goal.</b> Decide whether to replace flatpak Google Chrome with a Chromium you build through Guix on guix-builder, carrying your own patches (keys, no address bar with vertical tabs, PGO, M-series tuning). <b>Answer: not worth it now.</b> Two of the four reasons for it are already handled or nearly handled without patches. The others would at best match what Google's build already ships. Meanwhile the builder can't hold the build, and you'd have to rebuild every week to keep up with security fixes. If you still want it, the phased plan at the end costs about 1 EUR of server time per build, but each build takes hours of your attention.</p>
+<p>Labels: <b>[M]</b> measured here today, <b>[I]</b> inferred from sources (cited), <b>[G]</b> guess. Nothing was built and no server was created.</p>
+
+<h2>1. What Guix already has</h2>
+<ul>
+<li><b>[M]</b> The guix channel packages <code>ungoogled-chromium</code> 156.0.8078.47-1 and a wrapper <code>ungoogled-chromium/wayland</code> in gnu/packages/chromium.scm. It sets no <code>supported-systems</code>, so aarch64 is allowed. The rde and asahi channels have no Chromium. You don't use nonguix.</li>
+<li><b>[M]</b> <code>guix weather ungoogled-chromium --system=aarch64-linux</code>: 0 of 1 available on bordeaux, ci and substitutes.asahi-guix.org. For x86_64 it is 100% (124 MiB of nars, 533 MiB installed). So on your laptop even the unpatched package means a full build.</li>
+<li><b>[M]</b> Your flatpak Chrome is 157.0.8103.38 (aarch64, flathub, updated 2026-11-04). Guix trails it by a major version.</li>
+<li><b>[M]</b> Build settings already in the package: <code>is_official_build=true</code> (which turns on ThinLTO, <b>[I]</b> https://source.chromium.org/chromium/chromium/src/+/main:build/config/compiler/compiler.gni ), <code>chrome_pgo_phase=0</code> (no PGO), <code>enable_widevine=false</code>, <code>safe_browsing_mode=0</code>, <code>symbol_level=0</code>, <code>rtc_use_pipewire=true</code>, and on aarch64 <code>use_vaapi=true use_v4l2_codec=true</code>. It sets <code>timeout</code> to 40 h and <code>max-silent-time</code> to 2 h, with the comment that one core of a mid-range x86 machine needs more than 24 h.</li>
+<li><b>[M]</b> The package sets a native search path <code>CHROMIUM_EXTENSION_DIRECTORY</code> = share/chromium/extensions. A Guix package could therefore install vimium-cljs into the profile, with no Web Store involved.</li>
+</ul>
+
+<h2>2. The four wanted changes, checked against what exists</h2>
+<div class=table><table><thead><tr><th>Want</th><th>Without a build</th><th>Patch, if built</th><th>Verdict</th></tr></thead><tbody>
+<tr><td>1. Ctrl+L opens the Vomnibar</td><td><b>[M]</b> T183 has done this with vimium-cljs's <code>vomnibar</code> chrome.commands shortcut, which takes Ctrl+L before Chrome's own binding, even in the address bar and on chrome:// pages. The address bar moves to Alt+D (T183 commit, keybindings decisions.md, 2026-11-14).</td><td>About 1 to 5 lines in chrome/browser/ui/accelerator_table.cc, the <code>kAcceleratorMap</code> row VKEY_L to IDC_FOCUS_LOCATION <b>[I]</b> https://source.chromium.org/chromium/chromium/src/+/main:chrome/browser/ui/accelerator_table.cc . This table changes little, so the patch is low risk.</td><td>Not needed; T183 already does it.</td></tr>
+<tr><td>2. Hide the address bar, keep vertical tabs</td><td>T185 (W210) is still trying fullscreen with the side panel and the vertical-tabs flag.</td><td>Hide <code>location_bar_</code> or the whole toolbar in chrome/browser/ui/views/toolbar/toolbar_view.cc (ToolbarView layout), and make the vertical tab strip stay visible. That strip lives under chrome/browser/ui/views/tabs/ and in recent releases under a vertical/ subdirectory behind a base::Feature <b>[I, path unverified]</b> https://source.chromium.org/chromium/chromium/src/+/main:chrome/browser/ui/views/toolbar/toolbar_view.cc . Roughly 30 to 150 lines <b>[G]</b>. Fragile: views layout and a feature this new get refactored every few releases, so expect to rebase it about once a quarter <b>[G]</b>.</td><td>Only if T185 finds no way. This is the one real reason to build.</td></tr>
+<tr><td>3. PGO and ThinLTO</td><td>Google's Chrome ships with PGO and ThinLTO. Google reported PGO made Chrome up to 10% faster <b>[I]</b> https://blog.chromium.org/2020/08/chrome-just-got-faster-with-profile.html</td><td>ThinLTO is already on. For PGO: build with <code>chrome_pgo_phase=1</code>, run the workloads on the laptop, merge with <code>llvm-profdata merge</code>, then build again with <code>chrome_pgo_phase=2 pgo_data_path=...</code> <b>[I]</b> https://chromium.googlesource.com/chromium/src/+/main/docs/pgo.md . Each round costs two full builds.</td><td>At best this matches Chrome, it doesn't beat it. Without PGO, Guix's build is likely a bit slower than the flatpak <b>[I]</b>.</td></tr>
+<tr><td>4. Tuning for your setup</td><td>Chrome already picks Wayland on its own in a Wayland session <b>[I]</b>, and the flatpak already has PipeWire.</td><td>Details below.</td><td>Gains are small; some changes carry risk.</td></tr>
+</tbody></table></div>
+
+<h3>Setup-specific options</h3>
+<ul>
+<li><b>-mcpu=apple-m1: a trap.</b> Guix's package uses the <code>unbundle</code> toolchain for both host and target <b>[M]</b>. So <code>-mcpu</code> would also apply to build tools that run during the build, such as v8's mksnapshot and torque. The builder's Ampere Altra is an Armv8.2 Neoverse N1 chip, and M1 code that uses Armv8.4/8.5 instructions could stop it with SIGILL <b>[I]</b> https://www.hetzner.com/cloud/ . Use <code>-mtune=apple-m1</code> instead, which only changes scheduling, set through CXXFLAGS/CFLAGS in the env phase. Expect 0 to 3% <b>[G]</b>.</li>
+<li><b>Wayland only</b>: <code>ozone_platform_x11=false ozone_platform="wayland" ozone_auto_platforms=false</code> <b>[I]</b> https://chromium.googlesource.com/chromium/src/+/main/docs/ozone_overview.md . This saves a little build time and binary size. The risk is that X11-only code paths break the build in some release.</li>
+<li><b>PipeWire</b>: already on <b>[M]</b>.</li>
+<li><b>VA-API on Asahi</b>: there is no VA-API driver for the M1's video decoder (AVD) yet <b>[I]</b> https://asahilinux.org/docs/platform/feature-support/overview/ , so video decodes in software in any build. <b>[M]</b> /dev/video0 exists, but that is most likely the camera <b>[G]</b>.</li>
+<li><b>Turning off more features</b>: Guix already turns off remoting, VR, mDNS, reporting, enterprise components and tests <b>[M]</b>. Little remains that would shorten the build much.</li>
+</ul>
+
+<h2>3. What you lose leaving Google Chrome, and how to get it back</h2>
+<ul>
+<li><b>Widevine</b> (Netflix, Spotify web, Disney+): Guix builds with <code>enable_widevine=false</code> <b>[M]</b>. You can rebuild with <code>enable_widevine=true</code> and add Asahi's widevine-installer, which extracts the ARM64 CDM from a ChromeOS image <b>[I]</b> https://github.com/AsahiLinux/widevine-installer . The CDM is proprietary and you'd maintain it by hand.</li>
+<li><b>Google sync and sign-in</b>: Google cut third-party Chromium builds off from sync in 2021 <b>[I]</b> https://blog.chromium.org/2021/01/limiting-private-api-availability-in.html , and ungoogled-chromium removes it as well. You can't get it back. Your bookmark push to second-brain reads Chrome's profile (modules/engstrand/features/second-brain.scm) <b>[M]</b> and would need the new profile path.</li>
+<li><b>Chrome Web Store installs</b>: ungoogled-chromium can't install from the store directly. Use the chromium-web-store helper extension <b>[I]</b> https://github.com/NeverDecaf/chromium-web-store , or ship extensions through <code>CHROMIUM_EXTENSION_DIRECTORY</code> <b>[M]</b>, which suits vimium-cljs well.</li>
+<li><b>Safe Browsing</b>: off (<code>safe_browsing_mode=0</code> <b>[M]</b>).</li>
+<li><b>Automatic security updates</b>: you would own the rebuild schedule. See section 5.</li>
+</ul>
+
+<h2>4. Cost of building</h2>
+<div class=table><table><thead><tr><th>Server</th><th>vCPU / RAM / disk</th><th>Fits?</th><th>One build, wall time</th><th>Price</th></tr></thead><tbody>
+<tr><td>guix-builder CAX21</td><td>4 / 8 GB / 80 GB</td><td><b>No.</b> Only about 31 GB of disk is free <b>[M: docs/remote-builder-plan.html]</b>. The build tree needs roughly 40 to 80 GB at symbol_level=0 <b>[G]</b>, and the ThinLTO link of the chrome binary likely peaks at 10 to 20 GB of RAM <b>[G]</b>.</td><td>20 to 35 h if it fits at all <b>[G]</b>, close to the 40 h timeout</td><td>10.99 EUR/month net <b>[M]</b></td></tr>
+<tr><td>CAX31</td><td>8 / 16 GB / 160 GB</td><td>Probably, with zram during the link <b>[G]</b></td><td>10 to 18 h <b>[G]</b></td><td>20.99 EUR/month net <b>[M: same doc]</b>, billed hourly</td></tr>
+<tr><td><b>CAX41, created on demand</b></td><td>16 / 32 GB / 320 GB</td><td>Yes <b>[I]</b></td><td>5 to 9 h <b>[G]</b></td><td>About 40 EUR/month net, or about 0.06 EUR/h <b>[G]</b> https://www.hetzner.com/cloud/</td></tr>
+<tr><td>CCX (dedicated AMD)</td><td>x86_64</td><td><b>Wrong architecture.</b> Guix would have to cross-compile Chromium, which nobody tests, or emulate it with QEMU, which is far too slow <b>[I]</b>.</td><td>n/a</td><td>n/a</td></tr>
+<tr><td>AWS Graviton (c8g.16xlarge)</td><td>64 / 128 GB</td><td>Yes</td><td>2 to 3 h <b>[G]</b></td><td>About 2 to 3 USD/h <b>[G]</b>, plus a new account and Guix install</td></tr>
+</tbody></table></div>
+<ul>
+<li><b>How the estimate is built [G]:</b> a full Chromium build is about 60 to 100 core-hours on a Neoverse N1-class vCPU. That comes from Guix's own comment (more than 24 h on one x86 core) <b>[M]</b> and from the usual reports of 2 to 4 h on 16-core desktops, scaled by about 2× for slower cloud vCPUs. Divide by the vCPU count and add about 1 h for the link. Phase 1 measures the real figure.</li>
+<li><b>Resizing the CAX21 is worse than a separate server [I]:</b> Hetzner's rescale keeps the 80 GB disk unless you also upgrade the disk, and an upgraded disk can't be scaled back down. A second server deleted after use leaves guix-builder alone. Your <code>make builder-create</code> already provisions Guix through rescue (remote-builder-plan.html) <b>[M]</b>, so a <code>TYPE=cax41</code> variant plus a temporary entry in /etc/guix/machines.scm is most of the tooling.</li>
+<li><b>PGO doubles it:</b> an instrumented build, about 1 h of workloads on the laptop, then the optimized build. That is about 12 to 18 h on a CAX41 <b>[G]</b>, around 1 EUR. Money doesn't matter here. The cost is wall time and attention.</li>
+<li><b>Laptop</b>: 15 GiB RAM with zram and 32 GB of free disk <b>[M: same doc]</b>. Don't build it there, because that risks the freezes earlyoom guards against.</li>
+</ul>
+
+<h2>5. Rebuild cadence and security</h2>
+<ul>
+<li>Chrome ships a major release every 4 weeks and security updates every week <b>[I]</b> https://chromereleases.googleblog.com/ . The browser is your biggest attack surface.</li>
+<li>Guix already trails, 156 against your flatpak's 157 <b>[M]</b>. A variant built on Guix inherits that lag, plus your build time and the time to rebase patches. Building your own <code>%chromium-version</code> means writing your own Debian and ungoogled patch pins, so it becomes a fork of chromium.scm.</li>
+<li>To keep up you'd rebuild weekly: about 52 builds a year at 6 to 9 h each. A PGO profile can be reused across point releases, with warnings about stale functions <b>[I]</b>, so only major releases need the doubled build.</li>
+</ul>
+
+<h2>6. Other options</h2>
+<div class=table><table><thead><tr><th>Option</th><th>Address bar off, vertical tabs</th><th>Ctrl+L Vomnibar</th><th>Cost</th></tr></thead><tbody>
+<tr><td><b>Flatpak Chrome, extensions and kanata (today)</b></td><td>Waiting on T185</td><td>Done (T183) <b>[M]</b></td><td>None, and updates are automatic</td></tr>
+<tr><td>Vivaldi (flatpak, aarch64)</td><td>Yes: an Address Bar toggle and tab bar on the left as settings <b>[I]</b> https://help.vivaldi.com/desktop/tabs/tab-bar-position/</td><td>Remappable keys in settings</td><td>Proprietary UI. Built on Chromium, so vimium-cljs works.</td></tr>
+<tr><td>Brave</td><td>Native vertical tabs <b>[I]</b>; the toolbar can't be hidden <b>[G]</b></td><td>Extension command, as now</td><td>Low</td></tr>
+<tr><td>Firefox or Zen with userChrome.css</td><td>Yes: hide #nav-bar and use native vertical tabs (Firefox 136+) or Zen's sidebar <b>[I]</b> https://support.mozilla.org/kb/use-sidebar-access-tools-and-vertical-tabs</td><td>Needs a Firefox port of vimium-cljs; WebExtension commands can't take Ctrl+L away from Firefox <b>[G]</b></td><td>Changing browser engine, plus Guix packages Firefox as icecat/librewolf</td></tr>
+<tr><td>Patched ungoogled-chromium via Guix</td><td>Yes, by a fragile patch</td><td>Yes (patch or extension)</td><td>Weekly 6 to 9 h builds, patch rebases, no Widevine or sync</td></tr>
+</tbody></table></div>
+
+<h2>7. Recommendation and phased plan</h2>
+<p><b>Keep the flatpak Chrome.</b> Let T185 finish. Build only if T185 shows that Chrome itself can't hide the address bar with vertical tabs, and if the next step, trying Vivaldi's settings, doesn't satisfy you either. Even then, PGO and -mtune are optional extras, not reasons to build.</p>
+<ol>
+<li><b>Phase 1, unpatched build and measurement</b> (one evening): create a CAX41, run <code>guix build ungoogled-chromium</code> on it with <code>--cores=16</code> and record wall time, peak RSS and peak disk. Then <code>guix copy</code> the result to guix-builder, delete the server, and live with it for a week. This answers whether Widevine and sync matter to you.</li>
+<li><b>Phase 2, patches</b>: add a variant in a new module, modules/engstrand/packages/chromium.scm (sketch below). Use a phase that patches the already ungoogled tree rather than <code>origin</code> patches, so that iterating doesn't repack the source, about 1 GB of tarball <b>[G]</b>. Origin patches would work too, but they apply before domain substitution, so they must not touch URLs.</li>
+<li><b>Phase 3, PGO</b>: a <code>pgo-phase</code> parameter on the variant. Build phase 1, run Speedometer 3, JetStream 2 and a list of your usual pages under <code>LLVM_PROFILE_FILE</code> on the laptop, merge, and commit the .profdata (tens of MB <b>[G]</b>) to local/ or the builder, not to git. Then build phase 2.</li>
+</ol>
+<pre><code>(define-public ungoogled-chromium/engstrand
+  (package
+    (inherit ungoogled-chromium)
+    (name "ungoogled-chromium-engstrand")
+    (arguments
+     (substitute-keyword-arguments (package-arguments ungoogled-chromium)
+       ((#:configure-flags flags)
+        #~(append #$flags
+                  '("ozone_platform_x11=false"
+                    "ozone_platform=\"wayland\""
+                    "ozone_auto_platforms=false")))
+       ((#:phases phases)
+        #~(modify-phases #$phases
+            (add-after 'unpack 'apply-engstrand-patches
+              (lambda _
+                (for-each (lambda (p) (invoke "patch" "-p1" "--forward" "-i" p))
+                          '#$(list (local-file "patches/chromium-hide-toolbar.patch")))))))))))</code></pre>
+<p>Stop conditions: if a patch fails to apply two releases running, or if security builds lag Chrome stable by more than a week, go back to the flatpak.</p>
+
+<h2>Evidence</h2>
+<ul>
+<li>/home/engstrand/.cache/guix/checkouts/c4esxpoultvyh34e3tjyvzugo4pdrywanrasc5n5y7njc4hw2wpq/gnu/packages/chromium.scm lines 622 to 777 (flags) and 1182 (timeouts)</li>
+<li>guix weather ungoogled-chromium for --system=aarch64-linux and x86_64-linux, run 2026-11-14</li>
+<li>flatpak info com.google.Chrome</li>
+<li>/home/engstrand/guix/docs/remote-builder-plan.html (builder sizing, prices, disk)</li>
+<li>T183 workspace: desktop/pi/agent/skills/keybindings/references/decisions.md line 110</li>
+</ul>
+
+</main></body></html>
