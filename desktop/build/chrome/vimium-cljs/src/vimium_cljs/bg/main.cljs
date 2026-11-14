@@ -166,8 +166,17 @@
     (swap! sessions dissoc tab-id)
     (doseq [f (distinct (cons 0 (map :frame all)))] (to-frame tab-id f {:type "hints-exit"}))))
 
+(defonce ^:private starts (atom 0))
+
+(defn- exit-all-frames! [tab-id]
+  (-> (frame-ids tab-id)
+      (.then (fn [ids] (doseq [f ids] (to-frame tab-id f {:type "hints-exit"}))))))
+
 (defn hints-start! [tab-id from-frame mode]
-  (swap! sessions dissoc tab-id)
+  ;; A start that Escape (or a newer start) overtakes while frames are still
+  ;; counting their links is dropped instead of shown.
+  (let [n (swap! starts inc)]
+    (swap! sessions assoc tab-id {:pending n})
   (-> (js/Promise.all #js [(frame-ids tab-id) (get-settings)])
       (.then (fn [[ids s]]
                (-> (js/Promise.all (clj->js (map (fn [f] (-> (to-frame tab-id f {:type "hints-collect" :mode mode})
@@ -176,22 +185,32 @@
                             (let [counts (mapv vec pairs)
                                   total (reduce + (map second counts))
                                   assigned (hints/assign (get s "linkHintCharacters") (filter (comp pos? second) counts))]
-                              (if (zero? total)
-                                (to-frame tab-id from-frame {:type "hud" :text "No links to select."})
+                              (cond
+                                (not= n (:pending (get @sessions tab-id)))
+                                (doseq [[f _] counts] (to-frame tab-id f {:type "hints-exit"}))
+                                (zero? total)
+                                (do (swap! sessions dissoc tab-id)
+                                    (doseq [[f _] counts] (to-frame tab-id f {:type "hints-exit"}))
+                                    (to-frame tab-id from-frame {:type "hud" :text "No links to select."}))
+                                :else
                                 (do
                                   (swap! sessions assoc tab-id
                                          {:mode mode :typed ""
                                           :frames (mapv first counts)
                                           :all (vec (for [[f hs] assigned [i h] (map-indexed vector hs)] {:frame f :index i :hint h}))})
                                   (doseq [[f _] counts]
-                                    (to-frame tab-id f {:type "hints-show" :hints (get assigned f [])}))))))))))))
+                                    (to-frame tab-id f {:type "hints-show" :hints (get assigned f [])})))))))))))))
 
 (defn hints-key! [tab-id key]
-  (when-let [{:keys [typed all mode frames]} (get @sessions tab-id)]
+  (when (= key "Escape")
+    ;; Clear every frame even without a session: the worker may have restarted,
+    ;; or a start may still be counting.
+    (swap! sessions dissoc tab-id)
+    (exit-all-frames! tab-id))
+  (when-let [{:keys [typed all mode frames]} (let [s (get @sessions tab-id)] (when (:all s) s))]
     (let [broadcast (fn [t] (doseq [f frames] (to-frame tab-id f {:type "hints-filter" :typed t})))]
       (case key
-        "Escape" (do (swap! sessions dissoc tab-id)
-                     (doseq [f frames] (to-frame tab-id f {:type "hints-exit"})))
+        "Escape" nil
         "Backspace" (let [t (subs typed 0 (max 0 (dec (count typed))))]
                       (swap! sessions assoc-in [tab-id :typed] t)
                       (broadcast t))

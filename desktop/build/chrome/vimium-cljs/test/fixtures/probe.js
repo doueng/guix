@@ -48,7 +48,8 @@
     if (e.data && e.data.probeFrame) probe.frames[e.data.probeFrame] = e.data.facts;
   });
   let lastMode = '';
-  window.__probeFacts = () => {
+  // withLast=false leaves out the last action, which itself holds facts (no nesting).
+  window.__probeFacts = (withLast = true) => {
     const mode = document.documentElement.dataset.vimiumCljsMode || 'normal';
     if (mode !== lastMode) { lastMode = mode; probe.hintsSince = mode === 'hints' ? Date.now() : 0; probe.hintsScrollY = Math.round(scrollY); }
     const links = deepAll(document, 'a[href]').map((a) => ({ id: a.id, visible: visible(a), hint: a.dataset.vimiumCljsHint || null }));
@@ -70,10 +71,10 @@
       fields: deepAll(document, 'input,textarea,[contenteditable]').map((f) => ({ id: f.id, value: f.value ?? f.textContent })),
       active: (() => { let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; return a ? a.id || a.tagName : null; })(),
       frames: probe.frames,
-      last: probe.last,
+      last: withLast ? probe.last : null,
     };
   };
   if (window.top !== window) {
-    setInterval(() => parent.postMessage({ probeFrame: location.host + location.pathname, facts: window.__probeFacts() }, '*'), 150);
+    setInterval(() => parent.postMessage({ probeFrame: location.host + location.pathname, facts: window.__probeFacts(false) }, '*'), 150);
   }
 })();

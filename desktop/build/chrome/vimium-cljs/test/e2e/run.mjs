@@ -83,6 +83,16 @@ test('link hints cover every visible link, across shadow DOM and both iframes', 
   assert.equal(g.mode, 'normal');
 });
 
+test('link hints: Escape right after f cancels them in every frame', T, async () => {
+  await open();
+  await ctl()('keys', { seq: 'f<esc>', gap: '0' });
+  await sleep(900);
+  const f = await facts();
+  assert.equal(f.mode, 'normal');
+  for (const fr of Object.values(f.frames)) assert.equal(fr.mode, 'normal', 'frame ' + fr.url);
+  assert.ok(f.links.every((l) => !l.hint));
+});
+
 test('F opens a hinted link in a new tab; Escape leaves hint mode', T, async () => {
   const before = (await b.cdp('Target.getTargets')).targetInfos.filter((t) => t.type === 'page').length;
   await keys('F', 700);

@@ -66,7 +66,7 @@ export const findHighlightsMatches = always(() => {
 
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ctl = (path: string) => fetch(path).then((r) => r.json());
-const probeOf = (w: any) => w.__probeFacts ? w.__probeFacts() : null;
+const probeOf = (w: any) => w.__probeFacts ? w.__probeFacts(false) : null;
 
 const press = registerCustomAction("press", async (_d, window, seq: string) => {
   const w = window as any;

@@ -27,7 +27,7 @@
     (or (loop [^js el start]
           (cond (nil? el) nil
                 (identical? el root) nil
-                (and (dom/element? el) (dom/can-scroll? el axis dir)) el
+                (and (dom/element? el) (not (dom/editable? el)) (dom/can-scroll? el axis dir)) el
                 :else (recur (or (.-parentElement el) (some-> (.getRootNode el) .-host)))))
         (when (dom/can-scroll? root axis dir) root)
         (largest-scrollable axis dir)

@@ -25,6 +25,7 @@
 (defonce user-acted (atom false))  ; for grabBackFocus
 (defonce hints (atom nil))         ; this frame's part of a hint session
 (defonce previous-position (atom nil))
+(defonce hints-requested (atom false)) ; f pressed, hints not shown yet
 
 (defn setting [k] (get-in @conf [:settings k]))
 
@@ -98,7 +99,12 @@
     (reset! hints {:mode mode :cands cands})
     (count cands)))
 
+(defn request-hints! [mode]
+  (reset! hints-requested true)
+  (send! {:type "hints-start" :mode mode}))
+
 (defn hints-show! [hint-strings]
+  (reset! hints-requested false)
   (if (empty? hint-strings)
     (reset! hints nil)
     (let [{:keys [cands]} @hints
@@ -109,6 +115,7 @@
   (set-mode! :hints))
 
 (defn hints-exit! []
+  (reset! hints-requested false)
   (ui/hide-markers!)
   (when (test-page?)
     (doseq [[^js el] (:cands @hints)] (.removeAttribute el "data-vimium-cljs-hint")))
@@ -143,7 +150,7 @@
 
 (defn- hints-key! [^js e ks esc?]
   (consume! e)
-  (cond esc? (send! {:type "hints-key" :key "Escape"})
+  (cond esc? (do (hints-exit!) (send! {:type "hints-key" :key "Escape"}))
         (= "Backspace" (.-key e)) (send! {:type "hints-key" :key "Backspace"})
         (and ks (= 1 (count ks))) (send! {:type "hints-key" :key (str/lower-case ks)})))
 
@@ -347,11 +354,11 @@
    "findSelectedBackwards" (fn [_] (find-selected! -1))
    "Marks.activateCreateMode" (fn [_] (set-mode! :marks-create) (ui/hud! "Create mark…"))
    "Marks.activateGotoMode" (fn [_] (set-mode! :marks-goto) (ui/hud! "Go to mark…"))
-   "LinkHints.activateMode" (fn [_] (send! {:type "hints-start" :mode "open"}))
-   "LinkHints.activateModeToOpenInNewTab" (fn [_] (send! {:type "hints-start" :mode "newtab"}))
-   "LinkHints.activateModeToOpenInNewForegroundTab" (fn [_] (send! {:type "hints-start" :mode "newtab-fg"}))
-   "LinkHints.activateModeWithQueue" (fn [_] (send! {:type "hints-start" :mode "queue"}))
-   "LinkHints.activateModeToCopyLinkUrl" (fn [_] (send! {:type "hints-start" :mode "copy"}))
+   "LinkHints.activateMode" (fn [_] (request-hints! "open"))
+   "LinkHints.activateModeToOpenInNewTab" (fn [_] (request-hints! "newtab"))
+   "LinkHints.activateModeToOpenInNewForegroundTab" (fn [_] (request-hints! "newtab-fg"))
+   "LinkHints.activateModeWithQueue" (fn [_] (request-hints! "queue"))
+   "LinkHints.activateModeToCopyLinkUrl" (fn [_] (request-hints! "copy"))
    "Vomnibar.activate" (fn [_] (vomnibar! "omni" false))
    "Vomnibar.activateInNewTab" (fn [_] (vomnibar! "omni" true))
    "Vomnibar.activateBookmarks" (fn [_] (vomnibar! "bookmarks" false))
@@ -390,7 +397,9 @@
           :command (do (consume! e) (run-command! (:command r) (:count r)))
           (:pending :reset) (consume! e)
           :pass (when esc?
-                  (cond (ui/frame-kind) (do (consume! e) (ui/close-frame!))
+                  (cond @hints-requested
+                        (do (consume! e) (reset! hints-requested false) (send! {:type "hints-key" :key "Escape"}))
+                        (ui/frame-kind) (do (consume! e) (ui/close-frame!))
                         (seq (:ranges @find/state)) (do (consume! e) (find/clear!))
                         :else nil)))))))
 
