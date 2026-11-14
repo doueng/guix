@@ -37,6 +37,9 @@ hl.env("XCURSOR_SIZE", "20")
 require("startup")
 
 hl.window_rule({ name = "intellij-workspace", match = { class = "jetbrains-idea" }, workspace = "4" })
+-- Chrome believes it is fullscreen but stays tiled: no tab strip or address bar, the side panel
+-- (vimium-cljs tab list) stays, and F11 brings the toolbar back. docs/chrome-no-address-bar.html
+hl.window_rule({ name = "chrome-no-toolbar", match = { class = "google-chrome" }, fullscreen_state = "0 2" })
 
 hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 1"))
 hl.bind("SUPER + U", hl.dsp.focus({ workspace = 2 }))
