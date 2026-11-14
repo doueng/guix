@@ -13,7 +13,7 @@ const flatpak = spawnSync('flatpak', ['info', 'com.google.Chrome'], { stdio: 'ig
 const chromeBin = process.env.CHROME || (flatpak ? null : ['chromium', 'chromium-browser'].find((c) => spawnSync('which', [c]).status === 0));
 export const available = !!(flatpak || chromeBin);
 
-export async function launch({ port, width = 1024, height = 768 } = {}) {
+export async function launch({ port, width = 1024, height = 768, ext = join(ROOT, 'ext') } = {}) {
   const profile = mkdtempSync(join(tmpdir(), 'vimium-cljs-e2e-'));
   const flags = [
     '--headless=new', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-gpu',
@@ -24,7 +24,7 @@ export async function launch({ port, width = 1024, height = 768 } = {}) {
   ];
   const [cmd, args] = chromeBin
     ? [chromeBin, flags]
-    : ['flatpak', ['run', `--filesystem=${ROOT}:ro`, `--filesystem=${profile}`, 'com.google.Chrome', ...flags]];
+    : ['flatpak', ['run', `--filesystem=${ROOT}:ro`, `--filesystem=${ext}`, `--filesystem=${profile}`, 'com.google.Chrome', ...flags]];
   const proc = spawn(cmd, args, { stdio: ['ignore', 'ignore', process.env.CHROME_LOG ? 'inherit' : 'ignore', 'pipe', 'pipe'] });
   let id = 0, buf = '';
   const waiting = new Map();
@@ -48,7 +48,7 @@ export async function launch({ port, width = 1024, height = 768 } = {}) {
       waiting.set(msgId, { resolve: res, reject: rej, method });
       proc.stdio[3].write(JSON.stringify({ id: msgId, method, params, ...(sessionId && { sessionId }) }) + '\0');
     });
-  const { id: extensionId } = await cdp('Extensions.loadUnpacked', { path: join(ROOT, 'ext') });
+  const { id: extensionId } = await cdp('Extensions.loadUnpacked', { path: ext });
   const close = () => {
     proc.stdio[3].destroy();
     proc.stdio[4].destroy();
