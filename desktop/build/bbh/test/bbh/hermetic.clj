@@ -34,6 +34,14 @@
   (into (into {} (remove (comp session-var? key)) (System/getenv))
         (dirs (root))))
 
+(defn wait-for
+  "Poll PRED every 10 ms for about three seconds; true once it holds."
+  [pred]
+  (loop [n 0]
+    (cond (pred) true
+          (> n 300) false
+          :else (do (Thread/sleep 10) (recur (inc n))))))
+
 (defn fixture
   "A :once fixture. with-redefs, not binding, so threads the code under test
   starts see it too; child REPLs inherit it through `(sysenv/getenv)`."

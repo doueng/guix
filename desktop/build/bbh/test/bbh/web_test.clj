@@ -1,5 +1,5 @@
 (ns bbh.web-test
-  (:require [bbh.hermetic :as hermetic]
+  (:require [bbh.hermetic :as hermetic :refer [wait-for]]
             [babashka.fs :as fs]
             [bbh.docs :as docs]
             [bbh.explainer :as explainer]
@@ -14,12 +14,6 @@
             [clojure.test :refer [deftest is testing use-fixtures]]))
 
 (use-fixtures :once hermetic/fixture)
-
-(defn- wait-for [pred]
-  (loop [n 0]
-    (cond (pred) true
-          (> n 300) false
-          :else (do (Thread/sleep 10) (recur (inc n))))))
 
 (def ^:private owner-headers
   {"tailscale-user-login" "owner@example.com"

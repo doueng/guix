@@ -1,5 +1,5 @@
 (ns bbh.super-test
-  (:require [bbh.hermetic :as hermetic]
+  (:require [bbh.hermetic :as hermetic :refer [wait-for]]
             [babashka.fs :as fs]
             [bbh.super :as super]
             [bbh.super.client :as client]
@@ -17,12 +17,6 @@
             [clojure.test :refer [deftest is testing use-fixtures]]))
 
 (use-fixtures :once hermetic/fixture)
-
-(defn- wait-for [pred]
-  (loop [n 0]
-    (cond (pred) true
-          (> n 300) false
-          :else (do (Thread/sleep 10) (recur (inc n))))))
 
 (def ^:private opened
   "Controller dir to the open! specs its stub launch saw, each with the token."

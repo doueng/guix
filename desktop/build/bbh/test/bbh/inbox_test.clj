@@ -1,17 +1,11 @@
 (ns bbh.inbox-test
-  (:require [bbh.hermetic :as hermetic]
+  (:require [bbh.hermetic :as hermetic :refer [wait-for]]
             [babashka.fs :as fs]
             [bbh.inbox :as inbox]
             [bbh.conversation :as conversation]
             [clojure.test :refer [deftest is use-fixtures]]))
 
 (use-fixtures :once hermetic/fixture)
-
-(defn- wait-for [pred]
-  (loop [n 0]
-    (cond (pred) true
-          (> n 300) false
-          :else (do (Thread/sleep 10) (recur (inc n))))))
 
 (defn- with-poller [f]
   (let [root (str (fs/create-temp-dir {:prefix "bbh-inbox"}))

@@ -68,7 +68,6 @@
     (is (str/includes? html "<span class=\"phase passed\" title=\"Name the shape.\nprinciples: model-the-domain\">shape</span>"))
     (is (str/includes? html "<span class=\"phase pending\" title=\"Get a verdict.\">review</span>"))
     (is (str/includes? html "<summary>&lt;skill name=&quot;poteto-mode&quot;&gt; "))
-    (is (str/includes? html "principles: model-the-domain"))
     (is (str/includes? html "<span class=\"badge status-done\">done</span>"))
     (is (str/includes? html "VERDICT: pass, reviewer checked it"))
     (is (str/includes? html "# Shape\nA map."))))

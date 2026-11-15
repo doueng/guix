@@ -324,8 +324,6 @@
     (is (fs/exists? (fs/path current "repl.port")))
     (is (not (fs/exists? (fs/path old "repl.port"))))))
 
-(def ^:private long-answer (apply str (repeat 400 "x")))
-
 (defn- continuation-notice [old-dir n]
   (str "[bbh] This is a continuation session. The previous session ended because its context filled up. "
        "Its transcript has " n " messages, one JSON object per line with role, content and tool_calls, in "

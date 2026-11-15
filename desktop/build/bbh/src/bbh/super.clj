@@ -18,7 +18,6 @@
             [bbh.version :as version]
             [bbh.workflow :as workflow]
             [bencode.core :as bencode]
-            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
