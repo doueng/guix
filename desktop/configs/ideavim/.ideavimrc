@@ -13,7 +13,6 @@ nnoremap <leader><Space>    :action GotoAction<CR>
 vnoremap <leader><Space>    :action GotoAction<CR>
 
 map <Leader>ff :action GotoFile<CR>
-let g:WhichKeyDesc_find_file2 = '<leader>ff Find file'
 
 nmap <C-o> <Action>(Back)
 nmap <C-i> <Action>(Forward)

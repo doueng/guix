@@ -91,10 +91,6 @@
                               :* [:wl-paste "--primary" "--no-newline"]}
                       :cache_enabled 0})
 
-(vim.api.nvim_create_autocmd :TextYankPost
-                             {:callback (fn []
-                                          (vim.highlight.on_yank))})
-
 (fn autosave-current-file []
   (let [buf (vim.api.nvim_get_current_buf)]
     (when (and (vim.api.nvim_buf_is_valid buf) (. vim.bo buf :modified)
@@ -141,9 +137,7 @@
                             (snacks.picker.explorer {:cwd (vim.fn.getcwd)}))))))))
 
 (fn restore-last-session? []
-  (or (= vim.g.restore_last_session true) (= vim.g.restore_last_session 1)
-      (= vim.env.NVIM_RESTORE_LAST_SESSION :1)
-      (= vim.env.NVIM_RESTORE_LAST_SESSION :true)))
+  (= vim.env.NVIM_RESTORE_LAST_SESSION :1))
 
 (vim.api.nvim_create_autocmd :VimEnter
                              {:callback (fn []

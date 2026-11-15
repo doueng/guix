@@ -90,7 +90,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (force-mode-line-update t))
 
 (setq auto-save-default nil
-      make-backup-files nil
       file-precious-flag t)
 
 (auto-save-visited-mode 1)
@@ -144,14 +143,11 @@ This is a lightweight way to apply config changes without restarting Emacs."
 (setq-default
  bidi-display-reordering 'left-to-right
  bidi-paragraph-direction 'left-to-right
- cursor-in-non-selected-windows nil
  delete-by-moving-to-trash t
  window-combination-resize t
  x-stretch-cursor t)
 
-(setq bidi-inhibit-bpa t
-      highlight-nonselected-windows nil
-      undo-limit 80000000
+(setq undo-limit 80000000
       evil-want-fine-undo t
       truncate-string-ellipsis "…"
       password-cache-expiry nil
@@ -175,9 +171,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
  tab-width 2
  indent-tabs-mode nil)
 
-(setq evil-want-C-u-scroll t
-      evil-want-C-d-scroll t
-      evil-respect-visual-line-mode t
+(setq evil-respect-visual-line-mode t
       evil-undo-system 'undo-redo)
 
 (setq read-process-output-max (* 4 1024 1024)
