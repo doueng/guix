@@ -627,15 +627,6 @@
         (is (= {} (:replies @(:state c))) "a brief is not a reply")
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
 
-(deftest a-handle-is-read-typed-or-spoken
-  (is (= ["T12" "also handle the phone layout"] (model/parse-handle "T12 also handle the phone layout")))
-  (is (= ["T12" "use plan B"] (model/parse-handle "t12: use plan B")))
-  (is (= ["T12" "option two"] (model/parse-handle "tee twelve, option two")))
-  (is (= ["T22" "go"] (model/parse-handle "Tee twenty two go")))
-  (is (= ["T7" ""] (model/parse-handle "T seven")))
-  (is (nil? (model/parse-handle "Make the page show cost per session")))
-  (is (nil? (model/parse-handle "tea for two")) "a word that is not a number is not a handle"))
-
 (deftest unresolved-messages-reach-the-router-together-one-file-a-row
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-r"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-rconv"}))

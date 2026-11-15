@@ -54,13 +54,18 @@
                    (= [(str "T" n) (str/trim msg)]
                       (model/parse-handle (str prefix " " (str/join " " form) sep msg)))))))
 
-(deftest spoken-handles-past-ninety-nine
+(deftest handles-people-have-said-or-typed
   (is (= ["T170" "go"] (model/parse-handle "tee one seventy, go")))
   (is (= ["T170" "go"] (model/parse-handle "tee one hundred and seventy: go")))
   (is (= ["T170" "go"] (model/parse-handle "tee 170, go")))
   (is (= ["T12" "3 files"] (model/parse-handle "tee twelve, 3 files")))
   (is (= ["T22" "go"] (model/parse-handle "tee twenty-two go")))
   (is (= ["T1" "two"] (model/parse-handle "tee one two")) "two single numbers are a handle and a word")
+  (is (= ["T12" "use plan B"] (model/parse-handle "t12: use plan B")))
+  (is (= ["T22" "go"] (model/parse-handle "Tee twenty two go")))
+  (is (= ["T7" ""] (model/parse-handle "T seven")))
+  (is (nil? (model/parse-handle "Make the page show cost per session")))
+  (is (nil? (model/parse-handle "tea for two")) "a word that is not a number is not a handle")
   (is (nil? (model/parse-handle "tea time"))))
 
 (deftest property-a-typed-handle-names-its-thread-and-any-text-parses
