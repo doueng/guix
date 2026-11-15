@@ -246,10 +246,10 @@
       (visual/movements ks) (do (consume! e) (visual/move! ks times line) (swap! mode assoc :count 0))
       (= ks "o") (do (consume! e) (visual/swap-ends!))
       (= ks "y") (do (consume! e)
-                      (let [t (visual/selected-text)]
-                        (send! {:type "clipboard-write" :text t})
-                        (visual/exit!) (exit-mode!)
-                        (hud! (str "Yanked " (count t) " characters"))))
+                     (let [t (visual/selected-text)]
+                       (send! {:type "clipboard-write" :text t})
+                       (visual/exit!) (exit-mode!)
+                       (hud! (str "Yanked " (count t) " characters"))))
       (= ks "V") (do (consume! e) (if line (do (visual/exit!) (exit-mode!)) (enter-visual! true)))
       (= ks "v") (do (consume! e) (if line (enter-visual! false) (do (visual/exit!) (exit-mode!))))
       (and (= 1 (count ks)) (not (.-ctrlKey e)) (not (.-metaKey e)) (not (.-altKey e))) (consume! e)

@@ -1,0 +1,11 @@
+;; bb build, bb test, bb e2e, bb bombadil, over the npm scripts in package.json.
+;; ext-reload runs bb build; make lint runs bb test; make chrome-e2e runs bb e2e.
+{:tasks
+ {:requires ([babashka.fs :as fs])
+  deps {:doc "npm ci when node_modules is missing"
+        :task (when-not (fs/exists? "node_modules") (shell "npm ci --no-audit --no-fund"))}
+  build {:doc "Build the unpacked extension into ext/" :depends [deps] :task (shell "npm run build")}
+  test {:doc "Build, check ext/'s manifest paths, unit tests" :depends [deps] :task (shell "npm run check")}
+  e2e {:doc "Headless flatpak Chrome over test/fixtures" :depends [deps] :task (shell "npm run e2e")}
+  bombadil {:doc "Bombadil property run over the fixtures" :depends [deps]
+            :task (apply shell "npm run bombadil --" *command-line-args*)}}}

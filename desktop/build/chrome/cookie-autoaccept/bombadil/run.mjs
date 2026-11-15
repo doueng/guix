@@ -5,7 +5,7 @@
 // One Chrome: $CHROME (a chromium binary) when set, else the com.google.Chrome flatpak. This script owns it over a
 // CDP pipe (to load the extension and drive the popup); Bombadil attaches over a port. The fixtures are served from
 // test/fixtures on localhost and 127.0.0.1 (two sites, so a frame can be cross-origin), with no network.
-// Bombadil is $BOMBADIL, else bombadil on PATH, else the pinned Guix package in ~/guix (T174).
+// Bombadil is $BOMBADIL, else bombadil on PATH, else the pinned Guix package of the guix repo this lives in (T174).
 // --seed picks the starting settings (mode, and whether localhost, where it starts, is disabled); Bombadil's own choices are
 // recorded in its trace, not seeded. --page keeps the exploration on one fixture. A failure prints the seed and the
 // trace directory; --reproduce DIR replays that trace from the same starting settings.
@@ -54,7 +54,7 @@ function options(argv) {
 function bombadilBin() {
   if (process.env.BOMBADIL) return process.env.BOMBADIL;
   if (spawnSync('which', ['bombadil']).status === 0) return 'bombadil';
-  const guix = process.env.GUIX_CHECKOUT || join(process.env.HOME, 'guix');
+  const guix = process.env.GUIX_CHECKOUT || resolve(ROOT, '../../../..');
   const r = spawnSync('guix', ['build', '-L', join(guix, 'modules'), '-e', '(@ (engstrand packages bombadil) bombadil)'], { encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`no bombadil: set BOMBADIL, put it on PATH, or build it from ${guix}: ${r.stderr}`);
   return join(r.stdout.trim().split('\n').pop(), 'bin/bombadil');

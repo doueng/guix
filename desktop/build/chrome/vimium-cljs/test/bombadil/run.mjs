@@ -18,9 +18,9 @@ const out = arg('--output', mkdtempSync(join(tmpdir(), 'vimium-cljs-bombadil-'))
 function bombadilBin() {
   if (process.env.BOMBADIL) return process.env.BOMBADIL;
   if (spawnSync('which', ['bombadil']).status === 0) return 'bombadil';
-  // The pinned Guix package from the guix repo (T174).
+  // The pinned Guix package from the guix repo this lives in (T174).
   const r = spawnSync('guix', ['build', '-L', 'modules', '-e', '(@ (engstrand packages bombadil) bombadil)'],
-    { cwd: process.env.GUIX_REPO || join(process.env.HOME, 'guix'), encoding: 'utf8' });
+    { cwd: process.env.GUIX_REPO || join(ROOT, '../../../..'), encoding: 'utf8' });
   if (r.status !== 0) throw new Error('cannot build bombadil: ' + r.stderr);
   return join(r.stdout.trim().split('\n').pop(), 'bin/bombadil');
 }

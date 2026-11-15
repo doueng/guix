@@ -77,8 +77,28 @@
               nil)
           [(str/trim (str err out))])))))
 
+;; Each Chrome extension in desktop/build/chrome with a bb.edn builds and runs its tests with `bb test`
+;; (about a minute for shadow-cljs). Like the Scheme step, a pass is remembered under a hash of the
+;; folder's tracked files, so lint repeats it only when the extension changed.
+(defn chrome-problems []
+  (let [exts (sort (distinct (keep #(second (re-find #"^desktop/build/chrome/([^/]+)/bb\.edn$" %)) files)))]
+    (doall
+     (for [ext exts
+           :let [dir (str "desktop/build/chrome/" ext "/")
+                 own (sort (filter #(str/starts-with? % dir) files))
+                 key (apply sha256 ext (mapcat (fn [f] [f (sha256 (fs/read-all-bytes (str c/root "/" f)))]) own))
+                 stamp (fs/path (or (System/getenv "XDG_CACHE_HOME") (str (fs/home) "/.cache")) "guix-lint" (str "chrome-" key))
+                 problem (when-not (fs/exists? stamp)
+                           (let [{:keys [exit out err]} (c/sh {:dir (str c/root "/" dir)} "bb" "test")]
+                             (if (zero? exit)
+                               (do (fs/create-dirs (fs/parent stamp)) (spit (str stamp) "") nil)
+                               (str dir " bb test failed:\n" (str/join "\n" (take-last 30 (c/lines (str out err))))))))]
+           :when problem]
+       problem))))
+
 (def steps
   [["scheme" scheme-problems]
+   ["chrome" chrome-problems]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
    ;; Scripts are babashka: `#!/usr/bin/env bb`, with babashka.process/exec for wrappers.
    ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))

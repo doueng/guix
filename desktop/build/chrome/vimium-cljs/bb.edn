@@ -1,0 +1,28 @@
+;; bb build, bb test, bb e2e, bb bombadil. Java comes from Guix (guix shell openjdk), node from PATH.
+;; ext-reload runs bb build; make lint runs bb test; make chrome-e2e runs bb e2e.
+{:tasks
+ {:requires ([babashka.fs :as fs] [clojure.string :as str])
+  :init (defn shadow [args]
+          (shell (str "guix shell openjdk@25:jdk node -- npx shadow-cljs " args)))
+  deps {:doc "npm ci when node_modules is missing"
+        :task (when-not (fs/exists? "node_modules") (shell "npm ci --no-audit --no-fund"))}
+  build {:doc "Release build into ext/js, then load ext/ in headless Chrome and fail with Chrome's error"
+         :depends [deps]
+         :task (do (shadow "release bg content ui panel")
+                   (shell "node scripts/check-load.mjs"))}
+  test {:doc "Unit tests, release builds (warnings are errors), no eval in a bundle, load check, guide check"
+        :depends [deps]
+        :task (do (shadow "compile test")
+                  (shell "node out/test.js")
+                  (shadow "release bg content ui panel")
+                  (when-let [bad (seq (filter (fn [f] (re-find (re-pattern "(^|[^.a-zA-Z_$])eval\\(|new Function\\(") (slurp (str f))))
+                                              (fs/glob "ext/js" "*.js")))]
+                    (throw (ex-info (str "eval in a bundle: " (str/join " " bad)) {})))
+                  (shell "node scripts/check-load.mjs")
+                  (shell "node scripts/check-guide.mjs"))}
+  e2e {:doc "Headless flatpak Chrome over test/fixtures, and the reload test"
+       :depends [build]
+       :task (shell "node --test --test-concurrency=1 test/e2e/run.mjs test/e2e/reload.mjs")}
+  bombadil {:doc "Bombadil property run over the fixtures"
+            :depends [build]
+            :task (apply shell "node test/bombadil/run.mjs" *command-line-args*)}}}

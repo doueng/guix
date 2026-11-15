@@ -27,8 +27,13 @@
    :paths ["desktop/bin/updates" "desktop/build/updates/**"]
    :checks ["make lint" "make updates-test"]}
   {:name "ext-reload"
-   :paths ["desktop/bin/ext-reload" "desktop/build/ext-reload/**" "modules/engstrand/features/chrome-extensions.scm"]
+   :paths ["desktop/bin/ext-reload" "desktop/build/chrome/ext-reload/**" "modules/engstrand/features/chrome-extensions.scm"]
    :checks ["make lint" "make ext-reload-test"]}
+  ;; make lint builds each extension and runs its bb test when its folder changed.
+  {:name "chrome extensions"
+   :paths ["desktop/build/chrome/vimium-cljs/**" "desktop/build/chrome/cookie-autoaccept/**"]
+   :checks ["make lint"]
+   :slow ["make chrome-e2e"]}
   {:name "md-view"
    :paths ["desktop/bin/md-view" "desktop/build/md-view/**"]
    :checks ["make lint" "make md-view-test"]}

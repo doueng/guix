@@ -5,46 +5,28 @@
   #:use-module (gnu services)
   #:use-module (gnu services shepherd)
   #:use-module (guix gexp)
-  #:use-module (ice-9 format)
   #:export (feature-familiar-chrome-extensions))
 
-;; Chrome extensions under development, by the name `ext-reload NAME' takes:
-;; the project directory under $HOME, the unpacked directory in it, and the
-;; build command run there.  See desktop/bin/ext-reload.
-(define %dev-extensions
-  '(("vimium-cljs" "projects/vimium-cljs" "ext" ("./build.sh"))
-    ("cookie-autoaccept" "projects/cookie-autoaccept" "ext" ("npm" "run" "build"))))
+;; Your Chrome extensions live in the guix repo under desktop/build/chrome, one
+;; folder each; `ext-reload NAME' builds one and has Chrome reread it, and
+;; `ext-reload load NAME' loads it the first time.  See desktop/bin/ext-reload.
+(define %chrome-dir "guix/desktop/build/chrome")
 
-(define (extensions-edn extensions)
-  (string-append
-   ";; Written by Guix: modules/engstrand/features/chrome-extensions.scm\n{"
-   (string-join
-    (map (lambda (e)
-           (format #f "~s {:dir ~s :ext ~s :build [~{~s~^ ~}]}"
-                   (car e) (string-append "~/" (cadr e)) (caddr e) (cadddr e)))
-         extensions)
-    "\n ")
-   "}\n"))
-
-(define %registry-service
-  (simple-service 'familiar-ext-reload-registry home-xdg-configuration-files-service-type
-    `(("ext-reload/extensions.edn" ,(plain-file "extensions.edn" (extensions-edn %dev-extensions))))))
-
-;; Chrome reads unpacked extensions inside its Flatpak sandbox.  Grant each
-;; project directory rather than its ext/: a build that deletes and recreates
-;; ext/ would leave the sandbox's bind mount on the deleted directory.  Chrome
-;; sees a new grant after its next start.
+;; Chrome reads unpacked extensions inside its Flatpak sandbox.  Grant the
+;; whole folder rather than each ext/, so a build that recreates ext/ still
+;; shows.  Chrome sees a new grant after its next start; until then the file
+;; chooser hands it the folder through the document portal.
 (define %flatpak-grants-service
   (simple-service 'familiar-ext-reload-flatpak-grants home-activation-service-type
     #~(let ((flatpak "/run/current-system/profile/bin/flatpak"))
         (when (file-exists? flatpak)
-          (for-each (lambda (dir)
-                      (system* flatpak "override" "--user"
-                               (string-append "--filesystem=~/" dir ":ro")
-                               "com.google.Chrome"))
-                    '#$(map cadr %dev-extensions))))))
+          (system* flatpak "override" "--user"
+                   (string-append "--filesystem=~/" #$%chrome-dir ":ro")
+                   "com.google.Chrome")))))
 
 ;; The hub ext-reload talks to; Chrome's helper extension holds a WebSocket to it.
+;; It runs the script from the repo, not its stow link in ~/.local/bin, so it can
+;; start before stow-home has run.
 (define %hub-service
   (simple-service 'familiar-ext-reload home-shepherd-service-type
     (list (shepherd-service
@@ -57,7 +39,7 @@
                       (let ((home (getenv "HOME")))
                         ((make-forkexec-constructor
                           (list (string-append home "/.guix-home/profile/bin/bb")
-                                (string-append home "/.local/bin/ext-reload") "serve")
+                                (string-append home "/guix/desktop/bin/ext-reload") "serve")
                           #:environment-variables
                           (cons* (string-append "PATH=" home "/.guix-home/profile/bin"
                                                 ":/run/current-system/profile/bin")
@@ -70,4 +52,4 @@
 (define (feature-familiar-chrome-extensions)
   (feature-package-set
    'familiar-chrome-extensions
-   #:home-services (list %registry-service %flatpak-grants-service %hub-service)))
+   #:home-services (list %flatpak-grants-service %hub-service)))

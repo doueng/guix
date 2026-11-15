@@ -132,9 +132,9 @@
       "restoreTab" (dotimes [_ n] (js/chrome.sessions.restore))
       "moveTabToNewWindow" (js/chrome.windows.create #js {:tabId id})
       "closeTabsOnLeft" (close-where! tab (fn [^js t] (and (< (.-index t) (.-index tab))
-                                                             (or (not explicit) (>= (.-index t) (- (.-index tab) n))))))
+                                                           (or (not explicit) (>= (.-index t) (- (.-index tab) n))))))
       "closeTabsOnRight" (close-where! tab (fn [^js t] (and (> (.-index t) (.-index tab))
-                                                              (or (not explicit) (<= (.-index t) (+ (.-index tab) n))))))
+                                                            (or (not explicit) (<= (.-index t) (+ (.-index tab) n))))))
       "closeOtherTabs" (close-where! tab (fn [^js t] (not= id (.-id t))))
       "moveTabLeft" (js/chrome.tabs.move id #js {:index (max 0 (- (.-index tab) n))})
       "moveTabRight" (js/chrome.tabs.move id #js {:index (+ (.-index tab) n)})
@@ -169,29 +169,29 @@
   ;; counting their links is dropped instead of shown.
   (let [n (swap! starts inc)]
     (swap! sessions assoc tab-id {:pending n})
-  (-> (frame-ids tab-id)
-      (.then (fn [ids]
-               (-> (js/Promise.all (clj->js (map (fn [f] (-> (to-frame tab-id f {:type "hints-collect" :mode mode})
-                                                                (.then (fn [n] #js [f (or n 0)])))) ids)))
-                   (.then (fn [pairs]
-                            (let [counts (mapv vec pairs)
-                                  total (reduce + (map second counts))
-                                  assigned (hints/assign config/link-hint-characters (filter (comp pos? second) counts))]
-                              (cond
-                                (not= n (:pending (get @sessions tab-id)))
-                                (doseq [[f _] counts] (to-frame tab-id f {:type "hints-exit"}))
-                                (zero? total)
-                                (do (swap! sessions dissoc tab-id)
-                                    (doseq [[f _] counts] (to-frame tab-id f {:type "hints-exit"}))
-                                    (to-frame tab-id from-frame {:type "hud" :text "No links to select."}))
-                                :else
-                                (do
-                                  (swap! sessions assoc tab-id
-                                         {:mode mode :typed ""
-                                          :frames (mapv first counts)
-                                          :all (vec (for [[f hs] assigned [i h] (map-indexed vector hs)] {:frame f :index i :hint h}))})
-                                  (doseq [[f _] counts]
-                                    (to-frame tab-id f {:type "hints-show" :hints (get assigned f [])})))))))))))))
+   (-> (frame-ids tab-id)
+       (.then (fn [ids]
+                (-> (js/Promise.all (clj->js (map (fn [f] (-> (to-frame tab-id f {:type "hints-collect" :mode mode})
+                                                              (.then (fn [n] #js [f (or n 0)])))) ids)))
+                    (.then (fn [pairs]
+                             (let [counts (mapv vec pairs)
+                                   total (reduce + (map second counts))
+                                   assigned (hints/assign config/link-hint-characters (filter (comp pos? second) counts))]
+                               (cond
+                                 (not= n (:pending (get @sessions tab-id)))
+                                 (doseq [[f _] counts] (to-frame tab-id f {:type "hints-exit"}))
+                                 (zero? total)
+                                 (do (swap! sessions dissoc tab-id)
+                                     (doseq [[f _] counts] (to-frame tab-id f {:type "hints-exit"}))
+                                     (to-frame tab-id from-frame {:type "hud" :text "No links to select."}))
+                                 :else
+                                 (do
+                                   (swap! sessions assoc tab-id
+                                          {:mode mode :typed ""
+                                           :frames (mapv first counts)
+                                           :all (vec (for [[f hs] assigned [i h] (map-indexed vector hs)] {:frame f :index i :hint h}))})
+                                   (doseq [[f _] counts]
+                                     (to-frame tab-id f {:type "hints-show" :hints (get assigned f [])})))))))))))))
 
 (defn hints-key! [tab-id key]
   (when (= key "Escape")

@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Cookie autoaccept",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArQGt9Iif+jmsmGkLFUt2FwiWHb8XAHGxYBnpKjKBlNYEm4jpPk1HYowZw3p2uSv9I6p2HDW+cOb6RtiFw7zbRclEsJ9y5WAbsSH6UjKae52RgVXiypn/02ghYqoUGRU5MS6iRUZn1haH99LHjyOI8ezJ/gcHKyJNXHQRNOi0X8LgLn94zpiWpcIqqXuFT6jSm4NDKyTMHSMEUPaSkd8jlQyr9Xv1dAIyoShOf7gijJgmvgodXfYwOk4wYjcj78YYWUdEgczAPvdZK86iOHdxm/4D1KN3MnSK00GY6BJDsT7sphJ+g0Dw8ob7K6fxbm+V/YwqUYHHVVa35TbbENPbaQIDAQAB",
   "description": "Answers cookie consent popups for you (accept by default, or reject), using DuckDuckGo autoconsent rules. No telemetry.",
   "minimum_chrome_version": "111",
   "background": { "service_worker": "js/background.js", "type": "module" },

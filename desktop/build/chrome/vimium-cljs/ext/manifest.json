@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Vimium (cljs)",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr/e5WX6sBmiGi1OiUAxmX61tXiGV9wm4yy2wgXwHlZc7hBUEmdyKVB8qqw9lOpEge/8Ql7ozdGR1ivlWeolzd1PqpgFjYFB4g/mcVrOVAhyv9XhMkGFW98aWHIbha+/yIcRM8cpZVwKg3Do4u8kRMQzKRSOHaKP+SCyYBACj7+X3t4FN7drLiskQ3PScZ+Xl8isINODNRDP9DxoORRTlOK8r19DKKCteVMWo8vYIRPFu905G10Sw3Ake7lmGd/txY31gr1+o2DhZTlWsFE/7u4dUrHzzwCdG0C6D7ikw/DaezETsNKnQtQ/auYiHP6oXhTSERDLplswz/yBQNl4D1wIDAQAB",
   "description": "Vimium-style keyboard navigation, rewritten in ClojureScript.",
   "minimum_chrome_version": "116",
   "side_panel": { "default_path": "panel.html" },
@@ -26,7 +27,8 @@
     "vomnibar": { "description": "Open the Vomnibar" },
     "vomnibar-tabs": { "description": "Search open tabs (desktop leader b b)",
                        "suggested_key": { "default": "Ctrl+Shift+K" } },
-    "tab-panel": { "description": "Open the tab list in the side panel" }
+    "tab-panel": { "description": "Open the tab list in the side panel (Alt+E in Hyprland)",
+                   "suggested_key": { "default": "Ctrl+Shift+E" } }
   },
   "web_accessible_resources": [
     { "resources": ["ui.html", "ui.css", "js/ui.js"], "matches": ["<all_urls>"] }

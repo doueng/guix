@@ -1,4 +1,4 @@
-// Tabs that were open when the extension was reloaded or updated (./build.sh, then the reload
+// Tabs that were open when the extension was reloaded or updated (bb build, then the reload
 // arrow at chrome://extensions) must keep working without a page reload. Chrome does not
 // re-inject content scripts into them, and the old script, cut off from the new worker,
 // used to swallow worker commands such as w and e (previousTab, nextTab) without effect.

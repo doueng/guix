@@ -3,16 +3,18 @@
 Vimium's keyboard navigation rewritten in ClojureScript as a Chrome Manifest V3 extension.
 How to load it in the flatpak Chrome, what it covers and how it is tested: docs/guide.html
 
-`ext/` is what Chrome loads, but its `ext/js/` is build output and not in the repo: run `./build.sh` after every
-checkout or pull, or Load unpacked fails with "Could not load background script".
+It lives in the guix repo at desktop/build/chrome/vimium-cljs (history imported from ~/projects/vimium-cljs).
+`ext/` is what Chrome loads, but its `ext/js/` is build output and not in the repo: `ext-reload load vimium-cljs`
+loads it once and `ext-reload vimium-cljs` rebuilds and reloads it after a change.
 
 ```sh
-./build.sh            # npm install + shadow-cljs release into ext/js + load ext/ in headless Chrome (Java/node from guix)
+bb build              # npm ci + shadow-cljs release into ext/js + load ext/ in headless Chrome (Java from guix)
 npm run check-load    # just the load check: manifest files exist and Chrome accepts ext/
 npm test              # cljs.test on node
 npm run e2e           # headless flatpak Chrome over test/fixtures
 npm run bombadil      # property run over the fixtures (Bombadil from the guix repo)
-./check.sh            # tests + release builds + no-eval check + e2e
+bb test               # tests + release builds + no-eval check + load and guide checks (make lint runs it)
+bb e2e                # the e2e suites (make chrome-e2e runs them)
 ```
 
 Layout: `src/vimium_cljs/{keys,commands,config,hints,exclusions,rank}.cljs` are pure and tested;
@@ -25,8 +27,7 @@ Layout: `src/vimium_cljs/{keys,commands,config,hints,exclusions,rank}.cljs` are 
 ## Changing keys and settings
 
 There is no options page. Key mappings, hint characters, search engines, exclusions and the other settings are
-plain data in `src/vimium_cljs/config.cljs`. Edit it, run `./build.sh`, then click the reload arrow on the
-extension's card at chrome://extensions. `npm test` checks the config is well formed.
+plain data in `src/vimium_cljs/config.cljs`. Edit it, then run `ext-reload vimium-cljs`. `npm test` checks the config is well formed.
 
 ## Ctrl+L
 

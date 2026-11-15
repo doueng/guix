@@ -1,16 +1,19 @@
 #!/usr/bin/env bb
 ;; ext-reload: build an unpacked Chrome extension of yours, activate or reload it in the running
-;; Flatpak Chrome and reload the tabs its content scripts match. No clicks, no DevTools port.
+;; Flatpak Chrome and reload the tabs its content scripts match. No DevTools port, and no clicks after
+;; the one-time load.
 ;;
 ;;   ext-reload NAME [--no-build] [--tabs all|active|none]   build, reload, reload tabs
-;;   ext-reload list                                          registry and what Chrome has loaded
+;;   ext-reload load NAME...                                  load once from this repo, retire old copies
+;;   ext-reload list                                          the extensions and what Chrome has loaded
 ;;   ext-reload serve                                         the hub (the ext-reload Home service)
 ;;   ext-reload setup                                         put the helper extension in place
 ;;
-;; NAME comes from ~/.config/ext-reload/extensions.edn, which Guix writes
-;; (modules/engstrand/features/chrome-extensions.scm). Chrome is driven by a small helper extension,
-;; desktop/build/ext-reload/reloader, that holds a WebSocket to the hub on 127.0.0.1:7357 and uses
+;; NAME is a folder of desktop/build/chrome with a bb.edn and ext/manifest.json; ext-reload runs
+;; bb build there, then has Chrome reread ext/. Chrome is driven by a small helper extension,
+;; desktop/build/chrome/ext-reload/reloader, that holds a WebSocket to the hub on 127.0.0.1:7357 and uses
 ;; chrome.management to disable and enable the target, which rereads an unpacked extension from disk.
+;; A manifest key fixes each extension's id, so ext-reload knows which loaded copy is the repo's.
 (ns ext-reload
   (:require [babashka.fs :as fs]
             [babashka.http-client :as http]
@@ -22,9 +25,11 @@
 
 (def port (parse-long (or (System/getenv "EXT_RELOAD_PORT") "7357")))
 (def home (System/getenv "HOME"))
-(def config-file (or (System/getenv "EXT_RELOAD_CONFIG") (str home "/.config/ext-reload/extensions.edn")))
-(def reloader-src (or (System/getenv "EXT_RELOAD_HELPER_SRC")
-                      (str (fs/normalize (fs/path (fs/parent (fs/canonicalize *file*)) "../build/ext-reload/reloader")))))
+;; The extensions are the folders of desktop/build/chrome in the checkout this script lives in;
+;; EXT_RELOAD_CONFIG names an EDN registry {name {:dir :ext :build}} instead (the test uses one).
+(def config-file (System/getenv "EXT_RELOAD_CONFIG"))
+(def chrome-root (str (fs/normalize (fs/path (fs/parent (fs/canonicalize *file*)) "../build/chrome"))))
+(def reloader-src (or (System/getenv "EXT_RELOAD_HELPER_SRC") (str (fs/path chrome-root "ext-reload/reloader"))))
 ;; Inside the sandbox's own directory, so Chrome reads it without a Flatpak override or restart.
 (def reloader-dir (or (System/getenv "EXT_RELOAD_HELPER_DIR")
                       (str home "/.var/app/com.google.Chrome/data/ext-reload/reloader")))
@@ -34,13 +39,25 @@
 (defn expand [path] (str/replace-first path #"^~(?=/|$)" home))
 
 (defn registry []
-  (if (fs/exists? config-file)
-    (update-vals (edn/read-string (slurp config-file))
-                 #(update % :dir expand))
-    (die "No registry at" config-file "- it comes from the Guix Home feature chrome-extensions.")))
+  (if config-file
+    (update-vals (edn/read-string (slurp config-file)) #(update % :dir expand))
+    (into (sorted-map)
+          (for [d (fs/list-dir chrome-root)
+                :when (and (fs/exists? (fs/path d "bb.edn")) (fs/exists? (fs/path d "ext/manifest.json")))]
+            [(str (fs/file-name d)) {:dir (str d) :ext "ext" :build ["bb" "build"]}]))))
 
-(defn manifest [{:keys [dir ext]}]
-  (json/parse-string (slurp (str (fs/path dir (or ext "ext") "manifest.json"))) true))
+(defn ext-dir [{:keys [dir ext]}] (str (fs/path dir (or ext "ext"))))
+
+(defn manifest [entry]
+  (json/parse-string (slurp (str (fs/path (ext-dir entry) "manifest.json"))) true))
+
+(defn key->id
+  "Chrome's id for an extension whose manifest has KEY: the SHA-256 of the key, first 32 hex digits as a-p."
+  [k]
+  (let [d (.digest (java.security.MessageDigest/getInstance "SHA-256") (.decode (java.util.Base64/getDecoder) ^String k))]
+    (apply str (for [b (take 16 d) n [(bit-and (bit-shift-right b 4) 15) (bit-and b 15)]] (char (+ 97 n))))))
+
+(defn manifest-id [m] (some-> (:key m) key->id))
 
 ;; ---------------------------------------------------------------- helper extension
 
@@ -134,11 +151,12 @@
 (def setup-hint
   (str "Load the helper once: chrome://extensions, Developer mode on, Load unpacked, then pick\n  " reloader-dir))
 
-(defn explain [{:keys [error name]} entry]
+(defn explain [{:keys [error name stale]} nm]
   (case error
     "helper-not-connected" (die (str "Chrome's ext-reload helper is not connected (is Chrome running?).\n" setup-hint))
-    "not-installed" (die (str "Chrome has no unpacked extension named " (pr-str name) ". Load it once: "
-                              "chrome://extensions, Load unpacked, pick\n  " (fs/path (:dir entry) (or (:ext entry) "ext"))))
+    "not-installed" (die (str "Chrome has not loaded " (pr-str name) " from this repo"
+                              (when (seq stale) (str " (it has " (count stale) " copy from elsewhere)"))
+                              ". Load it once with: ext-reload load " nm))
     "did-not-load" (die "Chrome would not load the rebuilt extension; chrome://extensions shows its error.")
     (die "ext-reload:" error)))
 
@@ -148,27 +166,67 @@
     (let [{:keys [exit]} @(process/process build {:dir dir :inherit true})]
       (when-not (zero? exit) (die "ext-reload: build failed with exit" exit)))))
 
+(defn entry-of [nm]
+  (or (get (registry) nm) (die "Unknown extension" nm "- known:" (str/join ", " (keys (registry))))))
+
 (defn reload [nm opts]
-  (let [entry (or (get (registry) nm) (die "Unknown extension" nm "- known:" (str/join ", " (keys (registry)))))
+  (let [entry (entry-of nm)
         _ (when-not (:no-build opts) (build! nm entry))
         m (manifest entry)
         matches (vec (distinct (mapcat :matches (:content_scripts m))))
-        r (hub! {:op "reload" :name (:name m) :matches matches :tabs (:tabs opts "all")})]
+        r (hub! {:op "reload" :extId (manifest-id m) :name (:name m) :matches matches :tabs (:tabs opts "all")})]
     (if (:ok r)
       (do (doseq [x (:extensions r)]
             (println (format "ext-reload: %s %s %s (%s)" (if (:activated r) "activated" "reloaded") (:name x) (:version x) (:id x))))
           (println (format "ext-reload: reloaded %d tab%s" (:tabs r) (if (= 1 (:tabs r)) "" "s"))))
-      (explain r entry))))
+      (explain r nm))))
+
+;; ---------------------------------------------------------------- first load
+
+(defn loaded [] (let [r (hub! {:op "list"})] (if (:ok r) (:extensions r) (explain r nil))))
+
+(defn wait-for [what pred]
+  (loop [n 0]
+    (cond (pred) true
+          (< n 300) (do (Thread/sleep 1000) (recur (inc n)))
+          :else (die (str "ext-reload: gave up after 5 minutes waiting for " what "; run the command again.")))))
+
+(defn load!
+  "Has Chrome load NAME from this repo once. Copies of the same name loaded from elsewhere (an old folder) go
+  first, since their keyboard shortcuts would keep the new copy from getting its suggested keys. Opens
+  chrome://extensions, puts the folder on the clipboard and waits for each step, then reloads NAME's tabs.
+  A Chrome started before Guix granted it desktop/build/chrome gets the folder through the document portal,
+  which the file chooser does by itself; the manifest key gives the extension the same id either way."
+  [nm opts]
+  (let [entry (entry-of nm)
+        _ (when-not (:no-build opts) (build! nm entry))
+        m (manifest entry)
+        id (or (manifest-id m) (die nm "has no key in its manifest, so ext-reload cannot tell its copies apart."))
+        mine? #(= id (:id %))
+        stale #(filter (fn [x] (and (= (:name m) (:name x)) (not (mine? x)))) (loaded))]
+    (if (some mine? (loaded))
+      (println "ext-reload:" (:name m) "is already loaded from this repo")
+      (do (hub! {:op "open" :url "chrome://extensions"})
+          (when (seq (stale))
+            (println "ext-reload: in Chrome, click Remove on the old copies first (their shortcuts would block the new one's):")
+            (doseq [x (stale)] (println (format "  %s %s (%s)" (:name x) (:version x) (:id x))))
+            (wait-for "the old copies to go" #(empty? (stale))))
+          (process/sh {:in (ext-dir entry)} "wl-copy")
+          (println (str "ext-reload: in Chrome, click Load unpacked, then type Ctrl+L, Ctrl+V and Enter to pick\n  "
+                        (ext-dir entry) "\n(it is on the clipboard). Waiting for " (:name m) " " id " ..."))
+          (wait-for (:name m) #(some mine? (loaded)))
+          (println "ext-reload: Chrome loaded" (:name m) "- commands with no suggested key need a shortcut set once at chrome://extensions/shortcuts")))
+    (reload nm (assoc opts :no-build true))))
 
 (defn list-all []
-  (doseq [[nm e] (sort (registry))]
-    (println (format "%-20s %s" nm (fs/path (:dir e) (or (:ext e) "ext")))))
-  (let [r (hub! {:op "list"})]
-    (if (:ok r)
-      (do (println "\nUnpacked in Chrome:")
-          (doseq [x (:extensions r)]
-            (println (format "  %-24s %-8s %s %s" (:name x) (:version x) (:id x) (if (:enabled x) "" "(disabled)")))))
-      (explain r nil))))
+  (let [xs (loaded)]
+    (doseq [[nm e] (registry)
+            :let [m (manifest e) id (manifest-id m)
+                  x (first (filter #(if id (= id (:id %)) (= (:name m) (:name %))) xs))]]
+      (println (format "%-20s %-10s %s" nm (cond (nil? x) "not loaded" (:enabled x) "loaded" :else "disabled") (ext-dir e))))
+    (println "\nUnpacked in Chrome:")
+    (doseq [x xs]
+      (println (format "  %-24s %-8s %s %s" (:name x) (:version x) (:id x) (if (:enabled x) "" "(disabled)"))))))
 
 (defn parse-opts [args]
   (loop [[a & more] args opts {}]
@@ -183,10 +241,11 @@
 (defn -main [& args]
   (let [{:keys [names] :as opts} (parse-opts args)]
     (case (first names)
-      (nil "-h" "--help") (println (str/join "\n" (->> (str/split-lines (slurp *file*)) (drop 1) (take 8) (map #(subs % (min 3 (count %)))))))
+      (nil "-h" "--help") (println (str/join "\n" (->> (str/split-lines (slurp *file*)) (drop 1) (take 10) (map #(subs % (min 3 (count %)))))))
       "serve" (serve)
       "setup" (do (install-helper!) (println setup-hint))
       "list" (list-all)
+      "load" (doseq [nm (rest names)] (load! nm opts))
       (doseq [nm names] (reload nm opts)))))
 
 (when (= *file* (System/getProperty "babashka.file"))

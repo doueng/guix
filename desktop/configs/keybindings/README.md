@@ -56,7 +56,7 @@ Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typi
 
 Herdr and the desktop never treat a bare Space as the leader, so typing a space always types a space.
 Alt+Space sends Ctrl+b Space to the Herdr terminal. From another window it first focuses the Herdr terminal, or starts one when none is open.
-Alt+E in Chrome shows or hides the tab list in the side panel: Hyprland sends Ctrl+Shift+E, vimium-cljs's tab-panel command (`hypr/keys.lua`). Every other window receives Alt+E unchanged, so Emacs M-e and fish's Alt+E still work.
+Alt+E in Chrome shows or hides the tab list in the side panel: Hyprland sends Ctrl+Shift+E, vimium-cljs's tab-panel command (`hypr/keys.lua`), which the extension's manifest suggests, so a fresh load gets it. Every other window receives Alt+E unchanged, so Emacs M-e and fish's Alt+E still work.
 The desktop leader is a Hyprland submap. It captures the following keys before any application sees them. A panel at the bottom of the screen lists the next keys. Escape or any unbound key cancels.
 `keyleader listen` draws the panel. It follows Hyprland's submap events and asks Dusk to show the menu for the active submap. Hyprland starts it at login.
 Release Cmd after Cmd+Space. A key also works with Cmd still held unless kanata rewrites that Cmd chord first, as it does Cmd+W, Cmd+S and Cmd+h/j/k/l.

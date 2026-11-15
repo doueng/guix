@@ -37,11 +37,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dev = async () => (await chrome.management.getAll()).filter((x) => x.installType === 'development' && x.id !== chrome.runtime.id);
 const brief = (x) => ({ id: x.id, name: x.name, version: x.version, enabled: x.enabled });
 
-async function handle({ op, name, matches = [], tabs = 'all' }) {
+// An extension is named by its id when its manifest has a key (the id is then the same wherever it was
+// loaded from), else by its name. Copies with the same name and another id are stale, as from an old folder.
+async function handle({ op, extId, url, name, matches = [], tabs = 'all' }) {
   if (op === 'list') return { ok: true, extensions: (await dev()).map(brief) };
+  if (op === 'open') {
+    const t = await chrome.tabs.create({ url, active: true });
+    await chrome.windows.update(t.windowId, { focused: true });
+    return { ok: true };
+  }
   if (op !== 'reload') throw new Error(`unknown op ${op}`);
-  const same = (await dev()).filter((x) => x.name === name);
-  if (!same.length) return { ok: false, error: 'not-installed', name };
+  const all = await dev();
+  const same = all.filter((x) => (extId ? x.id === extId : x.name === name));
+  if (!same.length) return { ok: false, error: 'not-installed', name, stale: all.filter((x) => x.name === name).map(brief) };
   // Reload the copies that run; when none does, this enables them (a disabled copy is activated).
   const running = same.filter((x) => x.enabled);
   const targets = running.length ? running : same;

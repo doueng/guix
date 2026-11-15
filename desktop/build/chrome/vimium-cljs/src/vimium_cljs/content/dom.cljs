@@ -172,6 +172,5 @@
   ([^js el {:keys [ctrl shift meta]}]
    (doseq [t ["mouseover" "mousedown" "mouseup" "click"]]
      (.dispatchEvent el (js/MouseEvent. t #js {:bubbles true :cancelable true :composed true :view js/window
-                                              :ctrlKey (boolean ctrl) :shiftKey (boolean shift) :metaKey (boolean meta)
-                                              :detail 1 :button 0})))))
-
+                                               :ctrlKey (boolean ctrl) :shiftKey (boolean shift) :metaKey (boolean meta)
+                                               :detail 1 :button 0})))))

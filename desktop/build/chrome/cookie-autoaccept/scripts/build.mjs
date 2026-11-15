@@ -3,7 +3,7 @@
 // so a checkout loads without a build; the build is deterministic, so rebuilding changes ext/ only when src/ changed.
 // Java comes from PATH, else from Guix (guix shell openjdk@25:jdk).
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { checkExtension } from './check-manifest.mjs';
 
@@ -30,7 +30,10 @@ if (process.argv.includes('--test')) {
   process.exit(0);
 }
 
-rmSync(OUT, { recursive: true, force: true });
+// Empty ext/ rather than remove it: Chrome's Flatpak sandbox, or the document portal, holds ext/ itself, and a
+// new directory at the same path would not be the one Chrome loaded.
+mkdirSync(OUT, { recursive: true });
+for (const f of readdirSync(OUT)) rmSync(join(OUT, f), { recursive: true, force: true });
 mkdirSync(join(OUT, 'js'), { recursive: true });
 if (BUILDS.length) {
   shadow(['release', ...BUILDS]);

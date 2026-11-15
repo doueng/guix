@@ -4,12 +4,13 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 
 const HERE = import.meta.dirname;
-const BIN = resolve(HERE, '../../bin/ext-reload');
+const BIN = resolve(HERE, '../../../bin/ext-reload');
 const PORT = 17357 + Math.floor(Math.random() * 1000);
 const tmp = mkdtempSync(join(tmpdir(), 'ext-reload-test-'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -28,8 +29,12 @@ await new Promise((r) => web.once('listening', r));
 const webPort = web.address().port;
 const proj = join(tmp, 'target');
 mkdirSync(join(proj, 'ext'), { recursive: true });
+// A manifest key fixes the id, as for the extensions in desktop/build/chrome; ext-reload derives the same id.
+const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'der' });
+const keyId = [...createHash('sha256').update(key).digest().subarray(0, 16)]
+  .map((b) => String.fromCharCode(97 + (b >> 4), 97 + (b & 15))).join('');
 writeFileSync(join(proj, 'ext/manifest.json'), JSON.stringify({
-  manifest_version: 3, name: 'ext-reload test target', version: '1.0',
+  manifest_version: 3, name: 'ext-reload test target', version: '1.0', key: key.toString('base64'),
   background: { service_worker: 'bg.js' },
   content_scripts: [{ matches: ['http://127.0.0.1/*'], js: ['cs.js'] }],
 }));
@@ -74,6 +79,14 @@ try {
   const { id: helperId } = await cdp('Extensions.loadUnpacked', { path: helperDir });
   assert.equal(helperId, 'hhphiidacaejhbolcnboolfapncammkf', 'the manifest key fixes the helper id');
   const { id: targetId } = await cdp('Extensions.loadUnpacked', { path: join(proj, 'ext') });
+  assert.equal(targetId, keyId, 'the manifest key fixes the target id');
+  // A copy of the same name from another folder, without the key.
+  const old = join(tmp, 'old-ext');
+  cpSync(join(proj, 'ext'), old, { recursive: true });
+  const { key: _k, ...oldManifest } = JSON.parse(readFileSync(join(old, 'manifest.json'), 'utf8'));
+  writeFileSync(join(old, 'manifest.json'), JSON.stringify(oldManifest));
+  const { id: oldId } = await cdp('Extensions.loadUnpacked', { path: old });
+  assert.notEqual(oldId, keyId);
   await cdp('Target.createTarget', { url: `http://127.0.0.1:${webPort}/` });
   const mark = async () => {
     for (let i = 0; i < 50; i++) {
@@ -97,7 +110,8 @@ try {
 
   r = cli('target');
   assert.equal(r.status, 0, r.stderr + r.stdout);
-  assert.match(r.stdout, /reloaded ext-reload test target 1\.0/);
+  assert.match(r.stdout, new RegExp(`reloaded ext-reload test target 1\\.0 \\(${keyId}\\)`), 'reloaded by its key id');
+  assert.doesNotMatch(r.stdout, new RegExp(oldId), 'the old copy of the same name is not the one reloaded');
   assert.match(r.stdout, /reloaded 1 tab$/m);
   assert.equal(await mark(), 'two', 'Chrome reread the rebuilt extension from disk');
   for (let i = 0; i < 30 && loads === before; i++) await sleep(100);
@@ -105,7 +119,7 @@ try {
 
   r = cli('missing');
   assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /no unpacked extension named "never loaded"/);
+  assert.match(r.stderr, /has not loaded "never loaded" from this repo\. Load it once with: ext-reload load missing/);
 
   r = cli('list');
   assert.equal(r.status, 0, r.stderr);

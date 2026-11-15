@@ -31,13 +31,13 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <body><main>
 <h1>Reloading your Chrome extensions with one command</h1>
 
-<p><b>Pick: a small helper extension plus a local hub, behind one command, <code>ext-reload NAME</code>.</b> It builds the extension, reloads it from disk in your running Chrome (or turns it on if it was off), then reloads the open tabs its content scripts match. It does this without clicks and without opening a DevTools port. Guix declares it in <code>modules/engstrand/features/chrome-extensions.scm</code>: the list of extensions, the Flatpak read grants and the hub service.</p>
+<p><b>Pick: a small helper extension plus a local hub, behind one command, <code>ext-reload NAME</code>.</b> It builds the extension, reloads it from disk in your running Chrome (or turns it on if it was off), then reloads the open tabs its content scripts match. It does this without clicks and without opening a DevTools port. Your extensions live in the guix repo, one folder each under <code>desktop/build/chrome/</code> (vimium-cljs, cookie-autoaccept, and ext-reload's own helper), with their history imported from their old repos under <code>~/projects</code>. Guix declares the rest in <code>modules/engstrand/features/chrome-extensions.scm</code>: the Flatpak read grant on that folder and the hub service.</p>
 
 <h2>What Chrome is here</h2>
 <ul>
 <li>Flathub Flatpak <code>com.google.Chrome</code> 157.0.8103.38, branded stable. Guix only sets it as the default browser through MIME settings.</li>
 <li>The profile is Chrome's default one, <code>~/.var/app/com.google.Chrome/config/google-chrome</code>.</li>
-<li>Your Flatpak overrides already give Chrome read-only access to <code>~/projects/vimium-cljs/ext</code> and <code>~/projects/cookie-autoaccept</code>. Your current loads still go through <code>/run/flatpak/doc/…</code> portal paths.</li>
+<li>Guix Home gives Chrome read-only access to <code>/home/engstrand/guix/desktop/build/chrome</code> (from Chrome's next start). Older overrides for <code>~/projects/vimium-cljs/ext</code> and <code>~/projects/cookie-autoaccept</code> are left over from before the move; loads made through the file chooser before a grant go through <code>/run/flatpak/doc/…</code> portal paths, which work too.</li>
 </ul>
 
 <h2>The options, tested on this Chrome</h2>
@@ -63,23 +63,27 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <defs><marker id='a' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0 0L10 5L0 10z' fill='#555'/></marker></defs>
 </svg>
 <ol>
-<li><code>ext-reload vimium-cljs</code> looks up the name in <code>~/.config/ext-reload/extensions.edn</code>, which Guix writes, and runs that project's own build (<code>./build.sh</code> or <code>npm run build</code>).</li>
-<li>It reads the manifest's <code>name</code> and <code>content_scripts.matches</code>, then posts them to the hub on 127.0.0.1:7357. The hub refuses requests that lack an <code>X-Ext-Reload</code> header, which keeps web pages out.</li>
-<li>The helper extension (fixed id <code>hhphiidacaejhbolcnboolfapncammkf</code>) holds a WebSocket to the hub. It finds the unpacked extension by name, disables and re-enables it so Chrome reads it from disk again, and reloads the matching tabs. Pass <code>--tabs active</code> or <code>--tabs none</code> to narrow that. It replies with the version and the tab count, or tells you that Chrome would not load the build.</li>
+<li><code>ext-reload vimium-cljs</code> finds the folder <code>desktop/build/chrome/vimium-cljs</code> next to its own script (any folder there with a <code>bb.edn</code> and <code>ext/manifest.json</code> counts) and runs <code>bb build</code> in it.</li>
+<li>It reads the manifest's <code>key</code>, <code>name</code> and <code>content_scripts.matches</code>, then posts them to the hub on 127.0.0.1:7357. The hub refuses requests that lack an <code>X-Ext-Reload</code> header, which keeps web pages out.</li>
+<li>The helper extension (fixed id <code>hhphiidacaejhbolcnboolfapncammkf</code>) holds a WebSocket to the hub. It finds the unpacked extension by the id its manifest key fixes (or by name when there is no key), so a copy loaded from an old folder is never the one reloaded. It disables and re-enables it so Chrome reads it from disk again, and reloads the matching tabs. Pass <code>--tabs active</code> or <code>--tabs none</code> to narrow that. It replies with the version and the tab count, or tells you that Chrome would not load the build.</li>
 <li>The helper lives in <code>~/.var/app/com.google.Chrome/data/ext-reload/reloader</code>, a folder the sandbox can always read, so it needs no override and no restart. The hub copies it there from the repo when it starts. If the copy changed, the hub tells the running helper to reload itself.</li>
 </ol>
 
 <h2>What is still manual, once</h2>
 <ul>
 <li>Load the helper with Load unpacked once. Chrome offers no way to add an extension from outside except policy (root plus a packed CRX). Chrome remembers it after that.</li>
-<li>Each new extension you develop needs Load unpacked once, using its real path under <code>~/projects</code>. After that, <code>ext-reload</code> handles it, including turning it back on if it was off. When an extension is missing, the command prints the exact path to load.</li>
-<li>Guix gives Chrome read access to each project directory rather than its <code>ext/</code>. cookie-autoaccept's build deletes and recreates <code>ext/</code>, and a Flatpak grant on that folder would keep pointing at the deleted one. A new grant takes effect after Chrome restarts.</li>
+<li>Each extension needs Load unpacked once. <code>ext-reload load NAME</code> walks you through it: it opens <code>chrome://extensions</code>, waits while you Remove copies of the same name loaded from elsewhere (their keyboard shortcuts would keep the new copy from getting its suggested keys, such as vimium-cljs's Ctrl+Shift+E for Alt+E), puts <code>…/desktop/build/chrome/NAME/ext</code> on the clipboard, waits for you to click Load unpacked and paste it (Ctrl+L, Ctrl+V, Enter), then reloads the extension's tabs. After that <code>ext-reload</code> handles it, including turning it back on if it was off.</li>
+<li>Each extension's manifest has a <code>key</code>, so its id is the same whichever path Chrome loaded it from: vimium-cljs is <code>ceeiidnmpnfgpgccdchgcladeoldljem</code>, cookie-autoaccept <code>ahonhdejjmlpgmjfcelimbingnjimlhb</code>. Shortcuts with no suggested key, such as vimium-cljs's Ctrl+L, are set once at <code>chrome://extensions/shortcuts</code>.</li>
+<li>Builds empty <code>ext/</code> rather than replace it, since Chrome, through the Flatpak grant or the document portal, holds that folder.</li>
 </ul>
 
 <h2>Commands</h2>
 <pre>ext-reload vimium-cljs            # build, reload, reload matching tabs
 ext-reload cookie-autoaccept --no-build --tabs active
-ext-reload list                   # registry and the unpacked extensions Chrome has
+ext-reload load vimium-cljs       # the one-time Load unpacked, guided
+ext-reload list                   # each extension, whether Chrome has it, and every unpacked extension
+cd desktop/build/chrome/vimium-cljs && bb test   # build and test one; make lint runs this when it changed
+make chrome-e2e                   # each extension's e2e suite in headless Chrome
 herd status ext-reload            # the hub; log in ~/.local/state/ext-reload.log
 make ext-reload-test              # end to end in a throwaway headless Chrome</pre>
 

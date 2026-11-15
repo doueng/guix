@@ -89,7 +89,7 @@
     (when (and a (not (.-isConnected a))) (reset-activated!)))
   (or @activated
       (reset! activated (or (when-let [b (.-body js/document)] (sc/first-scrollable e b))
-                             (:root e)))))
+                            (:root e)))))
 
 (defn scroller
   "The element a scroll by AMOUNT (pixels, :view-size or :max) times FACTOR along AXIS

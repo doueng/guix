@@ -8,8 +8,11 @@
 
 (def root (str (fs/parent (fs/parent (fs/parent (fs/parent (fs/absolutize *file*)))))))
 
-(defn sh [& args]
-  (apply p/shell {:dir root :out :string :err :string :continue true} args))
+(defn sh
+  "Runs ARGS in the repo root, or with an options map first, in its :dir."
+  [& args]
+  (let [[opts args] (if (map? (first args)) [(first args) (rest args)] [{} args])]
+    (apply p/shell (merge {:dir root :out :string :err :string :continue true} opts) args)))
 
 (defn lines [s] (remove str/blank? (str/split-lines (or s ""))))
 

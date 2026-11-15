@@ -12,10 +12,10 @@ const problems = [];
 
 if (!guide.includes(`version ${manifest.version}`)) problems.push(`guide does not name version ${manifest.version}`);
 if (!guide.includes(manifest.name.replace('(', '(').replace(')', ')'))) problems.push(`guide does not name ${manifest.name}`);
-for (const step of ['chrome://extensions', 'Load unpacked', 'Developer mode', 'flatpak override']) {
+for (const step of ['chrome://extensions', 'Load unpacked', 'Developer mode', 'flatpak override', 'ext-reload load']) {
   if (!guide.includes(step)) problems.push(`guide lacks the step "${step}"`);
 }
-for (const [, p] of guide.matchAll(/\/home\/engstrand\/projects\/vimium-cljs\/([\w./-]*)/g)) {
+for (const [, p] of guide.matchAll(/\/home\/engstrand\/guix\/desktop\/build\/chrome\/vimium-cljs\/([\w./-]*)/g)) {
   if (p && !existsSync(join(root, p))) problems.push(`guide names missing path ${p}`);
 }
 for (const [, s] of guide.matchAll(/npm run ([\w:]+)/g)) {

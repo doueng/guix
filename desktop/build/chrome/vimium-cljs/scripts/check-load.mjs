@@ -17,7 +17,7 @@ const files = [
 ].filter(Boolean);
 const missing = files.filter((f) => !existsSync(join(ext, f)));
 if (missing.length) {
-  console.error(`ext/manifest.json names files that do not exist: ${missing.join(', ')}\nRun ./build.sh first.`);
+  console.error(`ext/manifest.json names files that do not exist: ${missing.join(', ')}\nRun bb build first.`);
   process.exit(1);
 }
 if (!available) {
