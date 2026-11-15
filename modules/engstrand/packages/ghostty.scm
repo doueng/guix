@@ -1,7 +1,3 @@
-;; Ghostty 1.4 needs Zig 0.17, newer than Guix's, so zig-0.17 below is
-;; upstream's static release binary, used only to build, following upstream's
-;; PACKAGING.md.  updates bumps neither; a new release means new versions,
-;; hashes and %ghostty-zig-deps (from its build.zig.zon.json).
 (define-module (engstrand packages ghostty)
   #:use-module (gnu packages base)
   #:use-module (gnu packages compression)
@@ -24,12 +20,8 @@
   #:use-module (ice-9 match)
   #:use-module ((guix licenses) #:prefix license:))
 
-;; The compiler finds the native dynamic linker and glibc through the ELF
-;; header of /usr/bin/env, which a build container lacks, and being static
-;; it can't fall back on its own; it would then target musl.  The same
-;; length /tmp/zig-env, which the ghostty build links to Guix's env, takes
-;; its place in the binary and in the standard library the build runner
-;; compiles.
+;; Static zig finds glibc via /usr/bin/env's ELF header, absent in the build
+;; container, else targets musl; /tmp/zig-env (same length) is patched in.
 (define zig-0.17
   (package
     (name "zig")
@@ -62,7 +54,6 @@ through /tmp/zig-env instead of /usr/bin/env.")
     (home-page "https://ziglang.org")
     (license license:expat)))
 
-;; (NAME ZIG-HASH URL BASE32) for every package in build.zig.zon.json.
 (define %ghostty-zig-deps
   '(
     (aro "aro-0.0.0-JSD1QtuBNwCASyBtNF3pqTl_W3oAJQGEVyFAtrBSE_Pa"
@@ -183,7 +174,6 @@ through /tmp/zig-env instead of /usr/bin/env.")
      (origin
        (method url-fetch)
        (uri url)
-       ;; zig fetch tells the archive type by its extension.
        (file-name (string-append hash (cond ((string-suffix? ".tar.xz" url) ".tar.xz")
                                             ((string-suffix? ".tar.zst" url) ".tar.zst")
                                             (else ".tar.gz"))))
@@ -242,8 +232,6 @@ through /tmp/zig-env instead of /usr/bin/env.")
                        (invoke "tar" "-xzf"
                                (string-append "/tmp/zig-cache/p/" hash ".tar.gz")
                                "-C" #$output)
-                       ;; The archive keeps its single top directory, which
-                       ;; zig strips when it unpacks a package itself.
                        (let* ((dir (string-append #$output "/" hash))
                               (entries (scandir dir (negate (cut member <> '("." ".."))))))
                          (match entries

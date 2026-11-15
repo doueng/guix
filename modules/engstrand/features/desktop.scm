@@ -42,9 +42,8 @@
           "font-google-noto-emoji"
           "adwaita-icon-theme"))))
 
-;; Hyprland's PATH lacks ~/.local/bin, so the entry names the wrapper by its full
-;; path, spelled out because the system reconfigure evaluates this as root.
-;; Written by hand because xdg-desktop-entry would spell MimeType as Mimetype.
+;; Full path: Hyprland's PATH lacks ~/.local/bin and reconfigure evaluates this as root.
+;; Hand-written because xdg-desktop-entry would spell MimeType as Mimetype.
 (define %oilfm-desktop-file
   (plain-file "oilfm.desktop"
               (string-append "[Desktop Entry]
@@ -79,15 +78,8 @@ MimeType=text/markdown;text/x-markdown;
                   `(("applications/oilfm.desktop" ,%oilfm-desktop-file)
                     ("applications/md-view.desktop" ,%md-view-desktop-file))))
 
-;; Entries flatpak exported before flatpak/stable-exports name a /gnu/store flatpak,
-;; which a guix gc breaks.  Until each app is deployed again, activation copies its
-;; entry into ~/.local/share/applications, which shadows XDG_DATA_DIRS, with Exec
-;; naming the system profile's flatpak.  Copies carry a marker, and a copy whose
-;; source is gone or fixed is removed.  Delete this service once
-;; ~/.local/share/applications holds no X-Familiar-Flatpak-Copy entry.
-;; Guix Home runs activation snippets inside a let*, where use-modules takes
-;; effect only after the snippet is expanded, so it can import procedures but
-;; not macros such as cut.
+;; Delete once ~/.local/share/applications holds no X-Familiar-Flatpak-Copy entry.
+;; Activation snippets run inside a let*, so use-modules can import procedures but not macros such as cut.
 (define %home-flatpak-desktop-entries
   (simple-service 'familiar-flatpak-desktop-entries home-activation-service-type
     #~(begin
@@ -107,7 +99,6 @@ MimeType=text/markdown;text/x-markdown;
                                   "/var/lib/flatpak/exports/share/applications")))
                (read-file (lambda (file) (call-with-input-file file get-string-all))))
           (mkdir-p target)
-          ;; Drop stale copies first, so a fixed or removed app falls back to flatpak's entry.
           (for-each (lambda (copy)
                       (when (string-contains (read-file copy) marker)
                         (delete-file copy)))
@@ -142,9 +133,6 @@ MimeType=text/markdown;text/x-markdown;
                  ("image/png" . "imv.desktop")
                  ("image/webp" . "imv.desktop"))))))
 
-;; Flatpak resolves Chrome's xdg-download grant from user-dirs.dirs; without
-;; it the sandbox writes ~/Downloads to a tmpfs that vanishes on exit.
-;; Directories pointed at $HOME are disabled, so activation skips them.
 (define %home-user-dirs-service
   (service home-xdg-user-directories-service-type
     (home-xdg-user-directories-configuration
@@ -155,8 +143,6 @@ MimeType=text/markdown;text/x-markdown;
       (templates "$HOME")
       (videos "$HOME"))))
 
-;; Shepherd starts before Hyprland and has no WAYLAND_DISPLAY, so the script
-;; waits for the session's socket and follows the next one when Hyprland restarts.
 (define %clipboard-history-service
   (simple-service 'familiar-clipboard-history home-shepherd-service-type
     (list (shepherd-service

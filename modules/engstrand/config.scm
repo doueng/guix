@@ -32,8 +32,6 @@
                              #:esp-uuid %esp-uuid
                              #:channels (primitive-load
                                          (string-append %repo-dir "/channels.scm"))))
-         ;; User identity is contributed by feature-user-info, not this
-         ;; machine-level operating-system.
          (features
           (list
            (feature-user-info
@@ -41,8 +39,6 @@
             #:full-name "Engstrand"
             #:email ""
             #:user-groups '("wheel" "netdev" "audio" "video"))
-           ;; Supply the package value rde needs without adopting its patched
-           ;; Shepherd or adding a Home Shepherd service.
            (feature
             (name 'familiar-shepherd)
             (values `((shepherd . ,shepherd-1.0))))
@@ -63,8 +59,6 @@
            (feature-familiar-agent-control)
            (feature-familiar-tailscale)
            (feature-familiar-remote-access)
-           ;; rde rebuilds the OS service list from feature services. Preserve
-           ;; every user service supplied by the Asahi machine configuration.
            (feature-custom-services
             #:feature-name-prefix 'asahi-machine
             #:system-services (operating-system-user-services base)))))

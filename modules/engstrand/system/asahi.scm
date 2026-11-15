@@ -29,8 +29,6 @@
   #:use-module (srfi srfi-1)
   #:export (make-base-os))
 
-;; Only root reads the key; the .pub is world-readable so an agent can copy it
-;; to modules/engstrand/builder/offload.pub.
 (define %offload-key-activation
   (simple-service 'familiar-offload-key activation-service-type
     (with-imported-modules '((guix build utils))
@@ -46,9 +44,6 @@
              (chmod key #o600)
              (chmod (string-append key ".pub") #o644)))))))
 
-;; The remote builder (docs/remote-builder-plan.html), on when its signing key
-;; and ssh host key are in modules/engstrand/builder/, as they are committed:
-;; the daemon then substitutes from it first and offloads builds to it.
 (define %builder-signing-key (builder-key-file "builder-signing.pub"))
 (define %builder-host-key (builder-key-string "host-key.pub"))
 (define %builder? (and %builder-signing-key %builder-host-key #t))
@@ -62,21 +57,12 @@
                (user "offload")
                (host-key #$%builder-host-key)
                (private-key "/etc/guix/offload/id_ed25519")
-               ;; The CAX21 runs one build at a time.
                (parallel-builds 1)
                (overload-threshold 0.8)))
       '()))
 
-;; "0" builds nothing here except local-build derivations (profiles, unions),
-;; which the daemon still runs; everything else offloads to the builder.
-;; `make switch JOBS=1' builds locally once when the builder is down.
 (define %local-max-jobs "0")
 
-;; earlyoom's own log, /var/log/earlyoom.log, is root-only: shepherd creates
-;; it 0640 root, again after each rotation, and its kill lines carry the full
-;; command line, which can hold a token.  So earlyoom's -N hook appends one
-;; line per kill, time, pid, uid and the 15-character comm, to a world-readable
-;; file that bbh super list shows (T165).  A line per kill needs no rotation.
 (define %earlyoom-kills-log "/var/log/earlyoom-kills.log")
 
 (define %earlyoom-kill-hook
@@ -105,7 +91,6 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
   (operating-system
     (inherit asahi-base-os)
     (kernel asahi-linux-keyd)
-    ;; udev loads it by modalias once the boot tree has the ANE node.
     (kernel-loadable-modules (list asahi-linux-keyd-ane))
     (host-name "asahi-guix")
     (timezone "Europe/London")
@@ -149,35 +134,20 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
       (list %udev-backlight-service
             %offload-key-activation
             %earlyoom-kills-log-activation
-            ;; The Neural Engine; Arch leaves this to systemd's 0666 default.
             (udev-rules-service 'ane-accel
                                 (udev-rule "70-ane-accel.rules"
                                            "SUBSYSTEM==\"accel\", GROUP=\"video\", MODE=\"0660\"\n"))
-            ;; Keep the Asahi display-manager Xorg configuration without the
-            ;; Sway example packages, guest Home, or generic %desktop-services.
             %asahi-sddm-service
             (service kernel-module-loader-service-type '("asahi" "appledrm"))
-            ;; Compressed swap in RAM; without swap, memory pressure ends in OOM kills.
             (service zram-device-service-type
                      (zram-device-configuration
                       (size "8G")
                       ;; The Asahi kernel builds only the LZO zram backend.
                       (compression-algorithm 'lzo-rle)
                       (priority 100)))
-            ;; zram swap has no seek cost, so swap earlier and read single pages.
             (simple-service 'familiar-zram-sysctl sysctl-service-type
                             '(("vm.swappiness" . "100")
                               ("vm.page-cluster" . "0")))
-            ;; With zram, reclaim keeps compressing, so the kernel OOM killer
-            ;; fires only once swap is full, minutes into a thrash (T108).
-            ;; earlyoom acts when both available RAM and free swap run low;
-            ;; its RAM percent is of user memory (about 9.9 of 15.6 GB).
-            ;; Chrome is not preferred: its own oom_score_adj already ranks its
-            ;; renderers high, and killing one frees little.
-            ;; Regexes match the 15-character comm: claude runs as
-            ;; ld-linux-aarch6, Emacs as .emacs-31.1-rea, so batch Emacs and
-            ;; the daemon look alike.  Logs to /var/log/earlyoom.log, with a
-            ;; memory line each minute; kills also go to %earlyoom-kills-log.
             (service earlyoom-service-type
                      (earlyoom-configuration
                       (minimum-available-memory 10)
@@ -188,20 +158,12 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
                        "^(Hyprland|start-hyprland|Xwayland|X|\\.sddm.*|\\.?emacs.*|kanata|herdr|shepherd|pipewire.*|wireplumber|elogind|dbus-daemon|guix-daemon)$")
                       (memory-report-interval 60)
                       (send-notification-command %earlyoom-kill-hook)))
-            ;; Data is single-copy, so scrub only detects data corruption; DUP
-            ;; metadata is repaired.  Shepherd drops timer events missed while
-            ;; asleep, so the default first-Sunday midnight would rarely run.
             (service btrfs-scrub-service-type
                      (btrfs-scrub-configuration
                       (schedule "0 12 * * *")))
-            ;; On this hardware, the ALSA UCM and speaker protection are not
-            ;; optional.  PipeWire and D-Bus for the user are in Guix Home.
             (service asahi:alsa-service-type)
             (service speakersafetyd-service-type)
             (service rtkit-service-type)
-            ;; Minimal session/authorization services intentionally replace
-            ;; Guix's broader %desktop-services.  Add others only when needed.
-            ;; SDDM requires elogind; keep D-Bus, polkit, and media/power APIs.
             (service elogind-service-type)
             (service dbus-root-service-type)
             (service polkit-service-type)
@@ -212,7 +174,6 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
             (service x11-socket-directory-service-type))
       (modify-services (operating-system-user-services asahi-base-os)
         (delete openssh-service-type)
-        ;; It prepends its URL to the daemon's list; the list below owns the order.
         (delete asahi-substitutes-service-type)
         (guix-service-type
          config => (guix-configuration
@@ -221,15 +182,11 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
                      (authorized-keys (append %asahi-substitute-keys
                                               (if %builder? (list %builder-signing-key) '())
                                               (guix-configuration-authorized-keys config)))
-                     ;; The builder has what a prebuild built, including the custom
-                     ;; kernel; then the general cache; Asahi and CI are signed fallbacks.
                      (substitute-urls (append (if %builder? (list %builder-publish-url) '())
                                               '("https://bordeaux.guix.gnu.org")
                                               %asahi-substitute-urls
                                               '("https://ci.guix.gnu.org")))
                      (build-machines (append %builder-machines
                                              (guix-configuration-build-machines config)))
-                     ;; No --gc-keep-outputs: the laptop builds nothing (the builder does),
-                     ;; so keeping build inputs of live items only holds ~25 GB of store.
                      (extra-options (list (string-append "--max-jobs=" %local-max-jobs)
                                           "--cores=4")))))))))

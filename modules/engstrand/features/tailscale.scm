@@ -22,10 +22,8 @@
                       (make-forkexec-constructor
                        (list #$(file-append tailscale "/bin/tailscaled")
                              "--state=/var/lib/tailscale.state"
-                             ;; HTTPS certificates live here.  Without it serve
-                             ;; fails every TLS handshake, because tailscaled
-                             ;; derives this only from a state file inside a
-                             ;; directory named tailscale.
+                             ;; Without it serve fails every TLS handshake: tailscaled derives the cert dir only from a
+                             ;; state file inside a directory named tailscale.
                              "--statedir=/var/lib/tailscale")
                        ;; The Asahi kernel has nf_tables without its inet
                        ;; families, so use legacy iptables for the firewall.
@@ -56,7 +54,6 @@ tailscaled keeps in its state and that this restates at boot and deploy."
    (one-shot? #t)
    (documentation documentation)
    (start #~(lambda _
-              ;; tailscaled takes a moment to open its socket.
               (let loop ((tries 30))
                 (cond ((zero? (system* #$(file-append tailscale "/bin/tailscale")
                                #$@arguments))
@@ -64,9 +61,6 @@ tailscaled keeps in its state and that this restates at boot and deploy."
                       ((> tries 1) (sleep 1) (loop (- tries 1)))
                       (else #f)))))))
 
-;; tailscaled's operator setting lets this user run `tailscale file get'
-;; without root.  Home Shepherd cannot require the system's tailscaled, so the
-;; script waits for it, backing off while it is down or starting.
 (define %taildrop-receive-service
   (simple-service 'familiar-taildrop-receive home-shepherd-service-type
     (list (shepherd-service

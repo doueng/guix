@@ -1,6 +1,3 @@
-;;; The checkout has no remote, so the source is its files, minus the gitignored
-;;; data/ and VCS directories.  Without a checkout the package has no source, so
-;;; loading this module never fails.
 (define-module (engstrand packages second-brain)
   #:use-module (engstrand packages babashka)
   #:use-module (gnu packages base)

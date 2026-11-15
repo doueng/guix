@@ -32,8 +32,6 @@
      (list #:linux linux
            #:tests? #f
            #:source-directory "ane"
-           ;; The Makefile reads the version from git, which a store
-           ;; checkout lacks; it becomes /sys/module/ane/version.
            #:make-flags #~(list (string-append "ANE_VERSION=" #$version))))
     (supported-systems '("aarch64-linux"))
     (home-page "https://github.com/joshuaswarren/omarchy-ane")

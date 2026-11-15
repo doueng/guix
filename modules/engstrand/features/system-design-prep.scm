@@ -6,17 +6,12 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-system-design-prep))
 
-;; tailscaled keeps the HTTPS :8444 mapping in its state and fronts the app on
-;; its own, so this service needs nothing from Tailscale.  Run `make serve' in
-;; the checkout once to publish it again after `make unserve'.
 (define %system-design-prep-service
   (simple-service 'familiar-system-design-prep home-shepherd-service-type
     (list (shepherd-service
            (provision '(system-design-prep))
            (documentation "The system design prep flashcard PWA, published to the tailnet.")
            (respawn? #t)
-           ;; A crash loop, such as the port being taken, stops after a minute
-           ;; instead of spinning; `herd enable system-design-prep' rearms it.
            (respawn-limit #~'(5 . 60))
            (respawn-delay 2)
            (start #~(lambda ()

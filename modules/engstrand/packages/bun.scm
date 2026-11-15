@@ -25,7 +25,6 @@
     (arguments
      (list
       #:install-plan #~'(("bun" "libexec/bun"))
-      ;; The wrapper supplies glibc without rewriting Bun's RPATH.
       #:validate-runpath? #f
       #:phases
       #~(modify-phases %standard-phases

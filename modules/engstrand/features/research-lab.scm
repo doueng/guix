@@ -6,9 +6,6 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-research-lab))
 
-;; `lab' reads seeds/, data/ and .env relative to the working directory, so
-;; .env's LAB_SUBJECT picks the subject.  Waiting for each tick keeps two from
-;; sharing a dataroom, and the cap stops a hung one.
 (define %research-lab-service
   (simple-service 'familiar-research-lab home-shepherd-service-type
     (list (shepherd-service

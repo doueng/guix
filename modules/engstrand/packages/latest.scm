@@ -8,10 +8,6 @@
   #:export (%latest-packages
             latest-package))
 
-;; (latest NAME VERSION BASE32 OWNER/REPO MODULE VARIABLE); updates rewrites
-;; VERSION and BASE32.  A line for a library, such as hcloud-go, brings the
-;; newer release another line's package needs: every opted-in package uses
-;; the opted-in releases of its inputs.  Other changes go in %tweaks.
 (define %latest
   '(;; updates apply release/NAME adds lines here.
     (latest "hetznercloud-cli" "1.70.2" "01nwzb25w48jqlzvwihavqppg7x4vklcabzl5a101qzyp3irsdch" "hetznercloud/cli" (gnu packages admin) hetznercloud-cli)
@@ -74,7 +70,6 @@
                          "src/github.com/direnv/direnv/internal/cmd/self_path_test.go"
                          "TestBashHookEscapesSelfPath")))))))))))
 
-;; (NAME OLD-VERSION . NEW-PACKAGE) for each line.
 (define %bumped
   (map (match-lambda
          (('latest name version hash _ module variable)
@@ -84,9 +79,6 @@
                    ((or (assoc-ref %tweaks name) identity) new)))))
        %latest))
 
-;; Replace each opted-in package's old release, wherever it is an input, by
-;; its new one, itself rewritten; the spec names the old version, so a new
-;; release is never replaced by itself.
 (define with-latest-inputs
   (package-input-rewriting/spec
    (map (match-lambda

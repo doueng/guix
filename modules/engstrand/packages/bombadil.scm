@@ -4,7 +4,6 @@
 
 (define bombadil-version "0.7.10")
 
-;; Not in the home profile: `bb test:bombadil' builds it on demand (T174).
 (define-public bombadil
   (let ((version bombadil-version))
     (release-binary

@@ -28,8 +28,6 @@
   #:export (%builder-server-type
             make-builder-os))
 
-;; CAX21: 4 vCPU, 8 GB, 80 GB.  Rescale up with the server off; keep the disk
-;; to come back.
 (define %builder-server-type "cax21")
 (define %prebuild-home "/var/lib/prebuild")
 
@@ -39,9 +37,6 @@
                   (and key (list (car entry) key))))
               users+files))
 
-;; git-shell runs only the commands in ~/git-shell-commands, so the laptop's
-;; `ssh prebuild@builder prebuild REV' can do nothing else.  The script loads
-;; desktop/lib/builder.clj, which -cp supplies from the store.
 (define %prebuild-lib
   (file-union "prebuild-lib"
               `(("builder.clj" ,(package-asset "desktop/lib/builder.clj")))))
@@ -77,13 +72,8 @@
   (list #~(job "0 3 * * *"
                #$(file-append %prebuild-command " nightly")
                #:user "prebuild")
-        ;; Prebuild roots keep the last three revisions alive.
         #~(job "0 5 * * *" "guix gc --free-space=20G")))
 
-;; Tailscale SSH for people: tailscaled answers port 22 on the tailnet address
-;; and the tailnet policy's ssh rules decide who logs in as whom.  sshd stays
-;; on 2222 for guix offload, deploy and prebuild, which need a real sshd.  The
-;; setting persists in tailscaled's state; this restates it at boot and deploy.
 (define %tailscale-ssh-service
   (simple-service 'tailscale-ssh shepherd-root-service-type
     (list (tailscale-one-shot 'tailscale-ssh
@@ -100,8 +90,6 @@ to your address."
       (host-name "guix-builder")
       (timezone "Europe/London")
       (users (cons* (user-account
-                     ;; Your login over Tailscale SSH; no password, so no sudo:
-                     ;; log in as root for that.
                      (name "engstrand")
                      (group "users")
                      (comment "Douglas Engstrand"))
@@ -124,19 +112,14 @@ to your address."
               (service openssh-service-type
                        (openssh-configuration
                         (openssh openssh-sans-x)
-                        ;; The inetd-style service listens on one port: 22 for the
-                        ;; bootstrap deploy over public ssh, then 2222, since
-                        ;; Tailscale SSH answers 22 on the tailnet address.
                         (port-number (if bootstrap? 22 %builder-ssh-port))
                         (permit-root-login 'prohibit-password)
                         (password-authentication? #f)
-                        ;; Offload hangs on a dead connection otherwise.
                         (extra-content "ClientAliveInterval 30\nClientAliveCountMax 4\n")
                         (authorized-keys
                          (append (authorized '(("root" "deploy.pub")
                                                ("prebuild" "deploy.pub")
                                                ("offload" "offload.pub")))
-                                 ;; Runs only the second brain's importer.
                                  (if %brain-authorized-key
                                      `(("second-brain" ,%brain-authorized-key))
                                      '())))))
@@ -156,8 +139,6 @@ to your address."
                              (package-asset "modules/engstrand/builder/nftables.conf")))))
               (service guix-publish-service-type
                        (guix-publish-configuration
-                        ;; nftables admits 8080 only from tailscale0, so this
-                        ;; does not wait for the tailnet address.
                         (host "0.0.0.0")
                         (port 8080)
                         (compression '(("zstd" 9)))
@@ -188,7 +169,6 @@ to your address."
                                      (filter-map builder-key-file
                                                  '("laptop-signing.pub"))
                                      (guix-configuration-authorized-keys config)))
-                            ;; One build at a time: two Rust or kernel builds would not fit 8 GB.
                             (extra-options '("--max-jobs=1" "--cores=4"
                                              "--gc-keep-outputs"
                                              "--timeout=21600"

@@ -8,11 +8,6 @@
   #:use-module (guix packages)
   #:export (release-binary))
 
-;; Upstream's prebuilt aarch64 release of a tool Guix lags on or lacks.  The
-;; source is a tarball, a gzipped binary or a bare binary, which unpack
-;; leaves as FILE.  INSTALL-PLAN maps paths in the unpacked tree to the
-;; output.  Most releases are static; DYNAMIC lists output paths of glibc
-;; binaries to point at Guix's loader and libraries.
 (define* (release-binary #:key name version uri hash install-plan file
                          (dynamic '()) synopsis home-page license)
   (package

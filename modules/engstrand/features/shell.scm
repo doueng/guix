@@ -13,7 +13,6 @@
   (append
    (list fish fzf zoxide fd)
    (map specification->package
-        ;; git and neovim also stay in the system profile for root.
         '("ripgrep"
           "git"
           "neovim"

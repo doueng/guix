@@ -7,15 +7,8 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-chrome-extensions))
 
-;; Your Chrome extensions live in the guix repo under desktop/build/chrome, one
-;; folder each; `ext-reload NAME' builds one and has Chrome reread it, and
-;; `ext-reload load NAME' loads it the first time.  See desktop/bin/ext-reload.
 (define %chrome-dir "guix/desktop/build/chrome")
 
-;; Chrome reads unpacked extensions inside its Flatpak sandbox.  Grant the
-;; whole folder rather than each ext/, so a build that recreates ext/ still
-;; shows.  Chrome sees a new grant after its next start; until then the file
-;; chooser hands it the folder through the document portal.
 (define %flatpak-grants-service
   (simple-service 'familiar-ext-reload-flatpak-grants home-activation-service-type
     #~(let ((flatpak "/run/current-system/profile/bin/flatpak"))
@@ -24,9 +17,6 @@
                    (string-append "--filesystem=~/" #$%chrome-dir ":ro")
                    "com.google.Chrome")))))
 
-;; The hub ext-reload talks to; Chrome's helper extension holds a WebSocket to it.
-;; It runs the script from the repo, not its stow link in ~/.local/bin, so it can
-;; start before stow-home has run.
 (define %hub-service
   (simple-service 'familiar-ext-reload home-shepherd-service-type
     (list (shepherd-service

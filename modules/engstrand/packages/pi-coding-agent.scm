@@ -33,9 +33,8 @@
             (lambda _
               (let* ((output #$output)
                      (real (string-append output "/share/pi/pi"))
-                     ;; Pi's children inherit LD_LIBRARY_PATH, so it must not
-                     ;; shadow their libstdc++. Expose only libgcc_s, which glibc
-                     ;; dlopens when QuickJS worker threads exit.
+                     ;; Children inherit LD_LIBRARY_PATH: expose only libgcc_s (dlopened by glibc at
+                     ;; QuickJS worker exit) so it never shadows their libstdc++.
                      (library-path (string-append output "/lib/pi"))
                      (bin-dir (string-append output "/bin"))
                      (wrapper (string-append bin-dir "/pi")))

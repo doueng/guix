@@ -14,7 +14,6 @@
   #:use-module (guix modules)
   #:use-module (guix packages))
 
-;; Kanata needs uinput. The keyd name predates kanata; renaming rebuilds the kernel.
 (define-public asahi-linux-keyd
   (customize-linux
    #:name "asahi-linux-keyd"
@@ -42,7 +41,6 @@
                 (list (local-file (string-append %bootloader-module-dir
                                                  "/u-boot-xhci-dwc3-os-prepare.patch")))))))))
 
-;; m1n1-u-boot-grub-installer is not exported by (gnu bootloader m1n1).
 (define m1n1-u-boot-grub-installer
   (with-extensions (list coreutils bash-minimal gzip guile-sqlite3)
     (with-imported-modules (source-module-closure
@@ -63,5 +61,4 @@
   (efi-bootloader-chain
    grub-efi-removable-bootloader
    #:installer m1n1-u-boot-grub-installer
-   ;; m1n1's installer reads only lib/dtbs from the kernel's slot.
    #:packages (list asahi-dtbs-ane asahi-m1n1 asahi-u-boot-os-prepare)))

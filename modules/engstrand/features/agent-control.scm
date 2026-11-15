@@ -8,17 +8,12 @@
   #:use-module (rde system services admin)
   #:export (feature-familiar-agent-control))
 
-;;; Everything an agent may do on the desktop without a password.  Root
-;;; equivalents stay out: reconfigure builds whatever the writable repo
-;;; describes.  guix offload test and status may name only the root-owned
-;;; /etc/guix/machines.scm, never a file an agent wrote.  sudoers reads "" as
+;;; Root equivalents stay out: reconfigure builds whatever the writable repo describes, and
+;;; offload may name only the root-owned /etc/guix/machines.scm.  sudoers reads "" as
 ;;; "no arguments" only when it is the whole argument list.
 
 (define %ydotool-socket "/run/ydotoold.socket")
 
-;; ydotoold's uinput device advertises keys and pointer motion, so kanata
-;; grabs it and injected chords pass through the same layers as the built-in
-;; keyboard.
 (define %ydotoold-service
   (simple-service 'familiar-ydotoold shepherd-root-service-type
     (list (shepherd-service
@@ -38,9 +33,7 @@
 (define %herd "/run/current-system/profile/bin/herd")
 (define %guix "/run/current-system/profile/bin/guix")
 
-;; A restart only applies what a human already switched to.  Services that end
-;; the session, stop builds, guard the speakers or carry ssh stay out;
-;; NetworkManager and iwd count, because restarting them restarts ssh-daemon.
+;; NetworkManager and iwd stay out: restarting them restarts ssh-daemon.
 (define %restartable-services
   '("bluetooth" "kanata" "ntpd" "tailscaled" "upower-daemon" "ydotoold"))
 

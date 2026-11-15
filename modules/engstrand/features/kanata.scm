@@ -8,8 +8,6 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-kanata))
 
-;; The build has no cmd feature, so clients can switch layers and reload but
-;; cannot run commands.
 (define %kanata-address "127.0.0.1:7333")
 
 (define %kanata-service
@@ -18,7 +16,6 @@
             (provision '(kanata))
             (requirement '(udev kernel-module-loader))
             (documentation "Personal keyboard layers.")
-            ;; The /etc path lets a reload pick up the switched configuration.
             (start #~(make-forkexec-constructor
                        (list #$(file-append kanata "/bin/kanata")
                              "--cfg" "/etc/kanata/kanata.kbd"

@@ -9,7 +9,6 @@
 
 (define babashka-version "1.13.229")
 
-;; Guix's pinned channel has no Babashka, so package the upstream aarch64 release.
 (define-public babashka
   (package
     (name "babashka")

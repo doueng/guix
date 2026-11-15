@@ -1,4 +1,3 @@
-;; Fails on file-system options that early boot would pass verbatim to mount(2).
 (use-modules (engstrand config)
              (gnu services)
              (gnu services base)

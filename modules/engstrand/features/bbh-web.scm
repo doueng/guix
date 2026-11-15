@@ -6,10 +6,6 @@
   #:use-module (guix gexp)
   #:export (feature-familiar-bbh-web))
 
-;; The bbh checkout is mutable and the services follow it, as the shell does.
-
-;; tailscaled keeps the serve mapping in its state and the site listens on
-;; loopback, so a publish that fails while tailscaled is starting is only logged.
 (define %bbh-super-service
   (simple-service 'familiar-bbh-super home-shepherd-service-type
     (list (shepherd-service

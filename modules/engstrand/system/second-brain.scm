@@ -1,5 +1,3 @@
-;;; Its data lives in %brain-home/data, outside the store.  The laptop pushes
-;;; Chrome's bookmarks with a key that can run only the importer.
 (define-module (engstrand system second-brain)
   #:use-module (engstrand features tailscale)
   #:use-module (engstrand packages assets)
@@ -40,8 +38,6 @@
                #$(package-asset "desktop/build/second-brain/builder.bb")
                #$subcommand))))
 
-;; sshd runs the receiver whatever the laptop asks for, through the user's
-;; shell, with no pty, forwarding or agent.
 (define %brain-authorized-key
   (let ((key (builder-key-string "second-brain.pub")))
     (and key
@@ -57,10 +53,8 @@
          (comment "The second brain")
          (home-directory %brain-home)
          (create-home-directory? #f)
-         ;; A shell, so sshd can run the forced command; the key admits nothing else.
          (shell (file-append bash-minimal "/bin/bash")))))
 
-;; Saves and fetched pages are private: only the service user reads them.
 (define %activation
   #~(begin
       (use-modules (guix build utils))
@@ -72,7 +66,6 @@
                   (map (lambda (dir) (string-append #$%brain-home dir))
                        '("" "/data" "/inbox" "/backups" "/logs"))))))
 
-;; 21:30 London, well before the 03:00 prebuild and 05:00 gc.
 (define %jobs
   (list #~(job "30 21 * * *"
                #$(program-file "second-brain-nightly-logged"
@@ -83,9 +76,6 @@
                        (execl #$(glue "nightly") "second-brain-nightly")))
                #:user "second-brain")))
 
-;; Loopback only; tailscale serve fronts it over HTTPS.  The page reads the
-;; owner from tailscaled, so it requires it.  A crash loop stops after a
-;; minute; `herd enable second-brain' rearms it.
 (define %shepherd-services
   (list
    (shepherd-service

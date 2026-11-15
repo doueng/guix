@@ -39,7 +39,6 @@
                 "hetznercloud-cli"
                 "lua"
                 "pandoc"
-                ;; libsqlite3 for bbh super, loaded through babashka's FFI.
                 "sqlite"
                 "tla2tools"
                 "xxd"

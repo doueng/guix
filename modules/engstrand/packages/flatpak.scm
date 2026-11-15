@@ -1,8 +1,6 @@
-;; Flatpak names its own binary in the Exec line of every exported desktop entry
-;; and in exported wrapper scripts, by default its /gnu/store path, which a
-;; guix gc after a flatpak upgrade removes.  Name the system profile's instead.
-;; FLATPAK_BINARY would override it per process, but sudo drops it for system
-;; installs.
+;; Flatpak writes its own /gnu/store path into exported desktop entries and
+;; wrappers, which gc breaks after an upgrade; use the system profile's path.
+;; FLATPAK_BINARY won't do: sudo drops it for system installs.
 (define-module (engstrand packages flatpak)
   #:use-module (gnu packages package-management)
   #:use-module (guix gexp)

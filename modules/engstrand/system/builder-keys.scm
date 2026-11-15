@@ -1,4 +1,3 @@
-;;; Each key is #f when its file is missing, as in a clone without them.
 (define-module (engstrand system builder-keys)
   #:use-module (engstrand packages assets)
   #:use-module (guix gexp)
@@ -9,11 +8,8 @@
             builder-key-file
             builder-key-string))
 
-;; desktop/lib/builder.clj holds the same host and port for the scripts.
 (define %builder-host "guix-builder.tailbf68ad.ts.net")
 (define %builder-publish-url (string-append "http://" %builder-host ":8080"))
-;; sshd for machines (offload, deploy, prebuild).  Port 22 on the tailnet
-;; address is Tailscale SSH, for people.
 (define %builder-ssh-port 2222)
 
 (define (builder-key-path name)

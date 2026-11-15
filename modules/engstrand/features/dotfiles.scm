@@ -18,7 +18,6 @@
       ;; bundle, which still trusted the compromised eMudhra intermediates.
       ("NODE_OPTIONS" . "--use-openssl-ca")
       ("UV_SYSTEM_CERTS" . "1")
-      ;; Let launchers and xdg-open discover Flatpak's Chrome entry.
       ("XDG_DATA_DIRS" . "$XDG_DATA_DIRS:$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share"))))
 
 (define (feature-familiar-dotfiles)

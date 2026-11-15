@@ -1,4 +1,3 @@
-;; The wrapper mirrors upstream nix/package.nix.
 (define-module (engstrand packages hex)
   #:use-module (gnu packages base)
   #:use-module (gnu packages elf)
@@ -25,7 +24,6 @@
     (source
      (origin
        (method url-fetch)
-       ;; Release files are addressed by their SHA-256.
        (uri "https://anoma.ly/release/hex/files/8aa94907194aa74e4ecac0a780606e65482f4c2f208440cd6699ac67b790411b/hex")
        (file-name (string-append "hex-" version))
        (sha256
@@ -37,7 +35,6 @@
                   wayland wl-clipboard wtype))
     (arguments
      (list
-      ;; Libraries come from the wrapper's LD_LIBRARY_PATH, not a RUNPATH.
       #:validate-runpath? #f
       #:install-plan #~'((#$(string-append "hex-" (package-version this-package)) "bin/hex"))
       #:phases
@@ -58,10 +55,8 @@
                                       "wayland"))))
                   `("ALSA_PLUGIN_DIR" = (,(string-append (assoc-ref inputs "pipewire")
                                                          "/lib/alsa-lib")))
-                  ;; Guix updates Hex; this is the updater's only runtime input,
-                  ;; so a closed local port makes every check fail offline.
+                  ;; Guix updates Hex: a closed local port makes its updater fail offline.
                   `("HEX_RELEASE_BASE_URL" = ("https://127.0.0.1:1"))
-                  ;; Guix mesa builds the Asahi Vulkan driver.
                   `("VK_DRIVER_FILES" = (#$(file-append mesa "/share/vulkan/icd.d/asahi_icd.aarch64.json")))
                   `("PATH" prefix
                     ,(map (lambda (name) (string-append (assoc-ref inputs name) "/bin"))

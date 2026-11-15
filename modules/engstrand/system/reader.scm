@@ -1,7 +1,3 @@
-;;; Its npm and PyPI dependencies are not in Guix, so this is not a package:
-;;; `make reader-push' copies the checkout to %reader-home/app.  The Durable
-;;; Object state lives in %reader-home/state, outside the code, so a push never
-;;; touches it.
 (define-module (engstrand system reader)
   #:use-module (engstrand features tailscale)
   #:use-module (gnu packages admin)
@@ -23,10 +19,7 @@
 (define %suggester-port 8788)
 (define %app (string-append %reader-home "/app"))
 
-;; Cloudflare links workerd against /lib/ld-linux-aarch64.so.1, which Guix
-;; System lacks; run it through Guix's loader, as scripts/workerd does on the
-;; laptop.  The builder is aarch64 like the laptop, so the pushed
-;; node_modules hold the right binary.
+;; workerd is linked against /lib/ld-linux-aarch64.so.1, absent on Guix System.
 (define %workerd
   (program-file "reader-workerd"
                 #~(apply execl #$(file-append glibc "/lib/ld-linux-aarch64.so.1")
@@ -35,10 +28,6 @@
                          #$(string-append %app "/node_modules/@cloudflare/workerd-linux-arm64/bin/workerd")
                          (cdr (command-line)))))
 
-;; The suggester's venv sits outside the code and is synced at every start
-;; from the pushed uv.lock; its base python is this store item, which the
-;; system closure keeps alive through guix gc.  The Jev key comes from
-;; %reader-home/jev-key, which `make reader-push' writes.
 (define %suggester
   (program-file "reader-suggester"
     #~(begin
@@ -54,8 +43,6 @@
                                   "--frozen" "--no-dev"
                                   "--project" #$(string-append %app "/suggester")))
             (exit 1))
-          ;; manylinux wheels (orjson) need libgcc_s; load it in this python
-          ;; only, as suggester/dev/env.sh does.
           (call-with-output-file
               (string-append venv "/lib/python3.12/site-packages/guix-libs.pth")
             (lambda (port)
@@ -100,11 +87,6 @@
                   (map (lambda (dir) (string-append #$%reader-home dir))
                        '("" "/app" "/state" "/.cache"))))))
 
-;; Loopback only: tailscaled fronts it over HTTPS and keeps that mapping in
-;; its state, so neither waits for the other (T74's pattern).  workerd fetches
-;; its Python runtime from Cloudflare at every start, and `networking' is up
-;; before DNS answers at boot, so start waits up to a minute for DNS.  A crash loop,
-;; such as a bad push, stops after a minute; `herd enable reader' rearms it.
 (define (reader-shepherd-service provision documentation command log)
   (shepherd-service
    (provision (list provision))
@@ -128,7 +110,6 @@
                       #:environment-variables #$%environment
                       #:log-file #$log)
                      args)))
-   ;; Kills the process group, so workerd goes with wrangler.
    (stop #~(make-kill-destructor))))
 
 (define %shepherd-services
