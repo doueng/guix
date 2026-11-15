@@ -155,9 +155,6 @@
                       (sort-by (fn [[s i]] [(- s) i]))))]
     (mapv (fn [[_ i e]] (assoc e :id i :text (:label e))) ranked)))
 
-(defn matches [items query]
-  (mapv :text (ranked-items items query)))
-
 (defn- visible-results [items selected]
   (let [start (min (max 0 (- (count items) 8)) (max 0 (- selected 7)))]
     (map-indexed (fn [i item] [(+ start i) item])
@@ -206,9 +203,9 @@
     (or (= key "down") (and (= key "tab") (not shift?)) (and ctrl? (#{"n" "j"} key))) (move! 1)
     (or (= key "up") (and (= key "tab") shift?) (and ctrl? (#{"p" "k"} key))) (move! -1)))
 
-(defn- dismiss-backdrop []
+(defn- dismiss-backdrop [close]
   (ui/box {:position :absolute :top 0 :left 0 :width :full :height :full
-           :on-click #(close-launcher! nil)}))
+           :on-click #(close nil)}))
 
 (defn launcher-panel []
   (when-let [{:keys [query selected prompt]} @launcher]
@@ -221,7 +218,7 @@
                :align :center
                :justify :end
                :padding [0 0 24 0]}
-      (dismiss-backdrop)
+      (dismiss-backdrop close-launcher!)
       (ui/column (merge (card-style 0.85)
                         {:width 760 :padding 12 :gap 8 :occlude true :shadow :lg})
         (ui/input {:value query
@@ -311,8 +308,7 @@
                :exclusive-zone -1
                :scale 1
                :on-key window-hints-key}
-      (ui/box {:position :absolute :top 0 :left 0 :width :full :height :full
-               :on-click #(close-window-hints! nil)})
+      (dismiss-backdrop close-window-hints!)
       (for [{:keys [label x y w h]} targets
             :when (str/starts-with? label typed)]
         (ui/column {:key label :position :absolute :left x :top y :width w :height h

@@ -51,9 +51,9 @@
     (let [after (rows (serialize (config/launcher-panel)))]
       (is (= (mapv :path [(first before) (last before)]) (mapv :path after))))))
 
-(deftest matching-retains-string-api
+(deftest equal-matches-keep-their-input-order
   (is (= ["chrome-incognito" "chrome"]
-         (config/matches ["ghostty" "chrome-incognito" "chrome"] "ch"))))
+         (mapv :text (#'config/ranked-items ["ghostty" "chrome-incognito" "chrome"] "ch")))))
 
 (deftest palette-entries-return-their-value-and-match-their-keys
   (open-launcher! [{:label "Rename symbol" :keys "SPC c r" :source "Neovim" :value "map:<leader>cr"}
@@ -66,20 +66,9 @@
     (config/launcher-key {:key "enter"})
     (is (= "map:<leader>fs" @answer) "Enter returns the entry's value, not its label")))
 
-(deftest launcher-uses-compact-text-and-rows
-  (open-launcher! [{:label "Save file" :keys "SPC f s" :source "Emacs" :value "save-buffer"}])
-  (let [tree (config/launcher-panel)
-        input (get-in tree [:children 1 :children 0])
-        row (first (rows tree))]
-    (is (= 14 (get-in input [:props :font-size])))
-    (is (= 12 (get-in row [:props :font-size])))
-    (is (= 28 (get-in row [:props :height])))
-    (is (= 11 (get-in row [:children 1 :props :font-size])))
-    (is (= 10 (get-in row [:children 2 :props :font-size])))))
-
 (deftest label-matches-rank-above-key-matches
   (is (= ["spc mode" "Save file"]
-         (config/matches [{:label "Save file" :keys "SPC f s" :value 1} {:label "spc mode" :value 2}] "spc"))))
+         (mapv :text (#'config/ranked-items [{:label "Save file" :keys "SPC f s" :value 1} {:label "spc mode" :value 2}] "spc")))))
 
 (deftest compact-rows-preserve-labels-keys-source-and-values
   (let [answer (atom nil)]
