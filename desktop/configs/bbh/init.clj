@@ -52,9 +52,6 @@ You are the Router of bbh super: one long-lived conversation that reads what the
 (def pi-helpers
   "Skills written for Pi name Pi helpers. Drop `await` and map `tools/jev_classify_task {:task t}` to (jev-classify-task t), `fs/read` to read-lines, `tools/read` to slurp, `fs/list` to fs/glob, `tools/edit` to edit!, and `tools/bash`, `jj/...` and `make/...` to sh. Parallelize with future or pmap.")
 
-;; The evaluation budget. The session sets eval-deadline before each evaluation, so helpers can return before
-;; the deadline kills the REPL.
-
 (def eval-deadline (atom nil))
 
 (def ^:private deadline-margin-ms 10000)
@@ -587,8 +584,6 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
 
 (def ^:private conversation-file (requiring-resolve 'bbh.conversation/file))
 
-;; Background jobs. State lives in files under the conversation's jobs directory, so a job and its result
-;; survive the REPL restart that a deadline causes.
 (defn- jobs-dir []
   (if-let [port (System/getenv "BBH_PORT_FILE")]
     (conversation-file (fs/parent port) :jobs)
@@ -614,8 +609,7 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
     (fs/create-dirs d)
     (spit (file ".cmd") cmd)
     (when-not (= run cmd) (spit (file ".run") run))
-    ;; setsid -f forks and returns, so the job is no longer the REPL's descendant and a restart's kill misses it.
-    ;; The command runs from its file because a syntax error in this eval string would lose the exit code.
+    ;; setsid -f detaches the job from the REPL so a restart's kill misses it; the command runs from its file so a syntax error keeps the exit code.
     (p/shell {:dir (or dir (str (fs/cwd))) :in "" :out :discard :err :discard
               :extra-env {"BBH_JOB" (str "echo $$ >" (pr-str (file ".pid"))
                                            "; stat=$(cat /proc/$$/stat); rest=${stat##*) }; set -- $rest; shift 19; echo $1 >" (pr-str (file ".start"))
@@ -647,7 +641,6 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
   (when-not (fs/exists? (job-file id ".cmd")) (throw (ex-info (str "no job " id) {:id id})))
   (let [end #(str/join "\n" (take-last lines (str/split-lines %)))
         exit (job-exit id)]
-    ;; The exit is now read, so bbh super sends no [Job ... exited] message for it.
     (when (some? exit) (spit (job-file id ".seen") ""))
     (cond-> {:id id :cmd (slurp (job-file id ".cmd")) :done? (some? exit) :exit exit :log (job-file id ".log")
              :tail (when (fs/exists? (job-file id ".log")) (end (slurp (job-file id ".log"))))}
@@ -679,7 +672,6 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
         move? (and (deadline-file) before (> before now))
         end (+ now (if move? ms (min ms (bbh.env/budget-ms))))]
     (when move? (move-deadline! (max before (+ end margin))))
-    ;; Until END this wait reports the exit, so bbh super holds its message back.
     (spit (job-file id ".waiting") (str end))
     (try
       (loop []
@@ -989,7 +981,6 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
            (sort-by #(parse-long (first (str/split % #"-")))) reverse
            (mapv #(dissoc (job-status % :lines 0) :tail))))))
 
-;; The flatpak Chrome, since Guix has no aarch64 chromium substitute.
 (def shot-dir "/tmp/bbh-shots")
 
 (defn shot
@@ -1000,24 +991,20 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
    (fs/create-dirs shot-dir)
    (let [out (str shot-dir "/" (or name (str "shot-" w "x" h "-" (System/currentTimeMillis))) ".png")
          _ (fs/delete-if-exists out)
-         ;; One profile per call: Chrome refuses a profile another instance holds,
-         ;; and several sessions take screenshots at once.
+         ;; One profile per call: Chrome refuses a profile another instance holds, and sessions screenshot concurrently.
          profile (str "/tmp/bbh-chrome-" (random-uuid))
          limit (min 60000 (bbh.env/budget-ms))
          argv ["flatpak" "run" (str "--filesystem=" shot-dir) "com.google.Chrome"
                "--headless=new" "--disable-gpu" "--no-first-run" "--hide-scrollbars"
                (str "--user-data-dir=" profile) (str "--virtual-time-budget=" wait)
                (str "--screenshot=" out) (str "--window-size=" w "," h) url]
-         ;; Chrome takes the machine-wide heavy-job slot, waiting at most half the limit, so screenshots wait for a running test suite.
          ;; stderr goes to a file, so the wait ends when Chrome exits, not when a child that kept the pipe does.
          err-file (str profile ".err")
          proc (p/process {:out :discard :err (fs/file err-file)}
                          "bash" "-c" (heavy-command (str/join " " (map shell-quote argv)) :timeout-s (max 1 (quot limit 2000))))
-         ;; Always SIGKILL the tree, even after a clean exit or an interrupt: Chrome can leave its sandbox behind,
-         ;; and SIGTERM strands flatpak's bwrap with Chrome inside it.
+         ;; Always SIGKILL the tree: Chrome can leave its sandbox behind, and SIGTERM strands flatpak's bwrap with Chrome inside.
          r (try (deref proc limit nil)
                 (finally ((requiring-resolve 'bbh.repl/kill-tree!) proc)
-                         ;; A Chrome process that left the tree still names its unique profile.
                          (p/shell {:continue true :out :discard :err :discard} "pkill" "-KILL" "-f" profile)
                          (fs/delete-tree profile)))
          err (str/join "\n" (take-last 5 (str/split-lines (str (when (fs/exists? err-file) (slurp err-file))))))]

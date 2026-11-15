@@ -1,8 +1,6 @@
 (local spec (require :lib.lazy))
 
 (fn hand-off [ctx]
-  ;; The Herdr backend declined: Herdr's edge, a zoomed pane, or no Herdr.
-  ;; keyleader re-checks with Herdr, so a Herdr error never moves desktop focus.
   (vim.system [(vim.fn.expand "~/.local/bin/keyleader") :nav ctx.direction
                "from Neovim edge"]
               {:detach true}))

@@ -110,8 +110,6 @@
       :desc "Format buffer"         "c f" #'+format/buffer
       :desc "Comment line"          "c /" #'comment-line)
 
-;; Match idea-doom-emacs where Doom's defaults differ. Git hunks stay on
-;; SPC g [ and SPC g ] in these buffers.
 (map! :after lsp-mode
       :map lsp-mode-map
       :n "gi"    #'lsp-find-implementation
@@ -161,8 +159,6 @@
       :desc "Reload config"         "h r r" #'eng/reload-config
       :desc "Eval expression"       ";"   #'eval-expression)
 
-;; Insert state keeps C-h and C-l for editing, but C-j and C-k still move
-;; focus. Evil's own insert C-k (digraph) would shadow the override map.
 (map! :i "C-h" #'backward-delete-char
       :i "C-l" #'delete-char
       :i "C-j" #'eng/focus-down

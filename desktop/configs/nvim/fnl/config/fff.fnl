@@ -94,16 +94,12 @@
             :layout {:prompt_position :bottom
                      :preview_position :right
                      :flex {:size 130 :wrap :top}}
-            ;; Match the Snacks picker/explorer background override: use the
-            ;; regular editor background instead of NormalFloat.
             :hl {:normal :Normal}
             :preview {:enabled true
                       :filetypes {:markdown {:wrap_lines true}
                                   :text {:wrap_lines true}}}
             :grep {:modes [:plain :regex :fuzzy]}})
 
-;; <leader><space> is reserved for the Snacks command palette.
-;; Use <leader>ff for project files.
 (vim.keymap.set :n :<leader>ff (find-files true)
                 {:desc "Find Files (Root Dir)"})
 

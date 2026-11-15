@@ -1,5 +1,4 @@
 font-family = JetBrainsMono Nerd Font
-# Keep programming operators literal in terminal applications such as Neovim.
 font-feature = -calt, -liga, -dlig
 font-size = 9.375
 font-thicken = true
@@ -34,7 +33,6 @@ gtk-titlebar = false
 gtk-single-instance = desktop
 
 keybind = shift+insert=paste_from_clipboard
-# The default toggles fullscreen, which Ctrl+Alt+f owns, and hides C-RET from Emacs and TUIs.
 keybind = ctrl+enter=unbind
 keybind = shift+ctrl+alt+r=reload_config
 keybind = super+left=text:\x01

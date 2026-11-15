@@ -1,5 +1,3 @@
-# Newly created projects get these additional tabs; the initial workspace tab
-# remains the shell.
 [[window]]
 name = "emacs"
 startup_script = "emacs-project-start"

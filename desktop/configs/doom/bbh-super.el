@@ -1,14 +1,5 @@
 ;;; bbh-super.el --- the bbh super-agent: Router, Workers and Inbox -*- lexical-binding: t; -*-
 
-;; agent-shell.el loads this file after the bbh session code it builds on.
-
-;;; Super-agent
-
-;; `bbh super' keeps its Workers, its Router and its Inbox in one terminal
-;; Emacs daemon, `emacs --daemon=bbh-super'.  The controller calls
-;; `eng/bbh-super-open' through emacsclient to give a conversation a buffer,
-;; and you attach with `bbh inbox', which opens a frame on *bbh inbox*.
-
 (defun eng/bbh-super--refuse-prompt (prompt-fn &rest args)
   "Signal an error instead of calling PROMPT-FN when no command is running.
 A prompt from a server eval, timer or process filter would wait in some frame
@@ -89,10 +80,7 @@ SPC m r shows the Router and SPC m i the Inbox.  Ordinary bbh sessions never
 get it, since an Inbox opened in another Emacs would take the controller's
 reload port from the bbh-super daemon."
   :keymap eng/bbh-super-mode-map
-  ;; Turned on outside a command, by the controller's emacsclient, evil would
-  ;; not see the map until its next state change.
   (evil-normalize-keymaps))
-;; The composer's major mode restarts when it returns from the history view.
 (put 'eng/bbh-super-mode 'permanent-local t)
 
 (define-key eng/bbh-super-mode-map (kbd "C-c r") #'eng/bbh-inbox-router)
@@ -121,9 +109,7 @@ Side windows survive
    :shell-prompt "bbh> "
    :shell-prompt-regexp "bbh> "
    :client-maker (lambda (buffer)
-                   ;; A finished Worker's session was ended on purpose; starting
-                   ;; its client again would respawn claude, perhaps in a deleted
-                   ;; workspace (T55).  The Router reopens the thread instead.
+                   ;; Restarting a finished Worker's client would respawn claude, perhaps in a deleted workspace (T55).
                    (when (and (buffer-live-p buffer)
                               (buffer-local-value 'eng/bbh-super-finished buffer))
                      (user-error "This Worker is finished; ask the Router to reopen its thread"))
@@ -147,8 +133,6 @@ Side windows survive
   (let ((kill-buffer-query-functions nil)
         (transcript (buffer-local-value 'eng/bbh-transcript shell))
         (composer (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)))
-    ;; The shell first: its clean-up shuts the client down, so killing the
-    ;; composer after it does not ask whether to kill the shell too.
     (dolist (buffer (list shell composer transcript))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
@@ -186,7 +170,6 @@ so it runs no more prompts, and what you type there goes to the Router.
 Returns the shell's name, or nil when no session runs CONVERSATION."
   (when-let* ((shell (eng/bbh-super--shell conversation)))
     (with-current-buffer shell (setq eng/bbh-super-finished t))
-    ;; Finished shells take no mail, so stop checking for it.
     (eng/bbh-mail-unwatch shell)
     (let ((dir (file-name-as-directory (expand-file-name dir))))
       (dolist (buffer (list shell
@@ -205,11 +188,7 @@ again, then the client and its claude are shut down.  The transcript stays
 readable.  Returns the shell's name, or nil when no session runs CONVERSATION."
   (when-let* ((shell (eng/bbh-super--shell conversation)))
     (with-current-buffer shell
-      ;; Finished first: the mailbox watch then wakes it no more.
       (setq eng/bbh-super-finished t)
-      ;; Nor does it check: each of the many finished shells a long-running
-      ;; daemon keeps would otherwise run a timer every second, which
-      ;; allocates and so brings on the daemon's slow garbage collections.
       (eng/bbh-mail-unwatch shell)
       (ignore-errors (agent-shell--shutdown)))
     (buffer-name shell)))
@@ -237,15 +216,6 @@ timers still running."
     (let ((composer (eng/bbh-layout shell)))
       (with-current-buffer composer (eng/bbh-super-mode 1))
       composer)))
-
-;;; Super-agent Inbox
-
-;; The Inbox is an org outline from `bbh inbox org': a heading per thread,
-;; starting with its section and id, then per open ask, starting with its id,
-;; with the options in its body, a folded Details heading and an Answer
-;; heading.  Everything is read-only but the Answer bodies, where you type an
-;; answer in place.  Commands find the thread and ask from the headings above
-;; the cursor, so they act on what you are looking at.
 
 (defvar eng/bbh-inbox-bbh nil
   "The bbh command the Inbox runs, as a list, or nil for bbh on the PATH.")
@@ -298,8 +268,6 @@ Pushes inside that time make one reload, and none runs while you type.")
 A failure calls ON-FAIL with bbh's message, or shows it without ON-FAIL."
   (let ((out (generate-new-buffer " *bbh inbox out*"))
         (err (generate-new-buffer " *bbh inbox err*"))
-        ;; bbh starts in the current buffer's directory.  A finished Worker's
-        ;; buffers outlive its workspace, so that directory may be gone.
         (default-directory (expand-file-name "~/")))
     (make-process
      :name "bbh-inbox-cmd" :noquery t :buffer out :stderr err :connection-type 'pipe
@@ -317,8 +285,6 @@ A failure calls ON-FAIL with bbh's message, or shows it without ON-FAIL."
 
 (defun eng/bbh-inbox--buffer ()
   (get-buffer-create "*bbh inbox*"))
-
-;;;; Reading the outline
 
 (defun eng/bbh-inbox--at-point ()
   "The thread whose heading is at or above the cursor, or the thread list's row here."
@@ -413,8 +379,6 @@ ASK/Details and ASK/Answer."
         (forward-line 1))
       (nreverse all))))
 
-;;;; Drawing it, keeping your place, folds and unsaved answers
-
 (defun eng/bbh-inbox--place (pos)
   "Where POS is: (THREAD LINE KEY OFFSET), its thread, line number, the heading
 above it and how many lines below that heading."
@@ -485,11 +449,9 @@ rendered, and put back the answers in EDITED, typed but unsaved."
         (delete-region (car region) (max (car region) (1- (cdr region))))
         (insert (mapconcat (lambda (line) (concat "    " line)) (split-string text "\n") "\n")))))
   (put-text-property (point-min) (point-max) 'read-only t)
-  ;; Nothing precedes the first character, so only front-stickiness guards it.
   (when (< (point-min) (point-max)) (put-text-property (point-min) (1+ (point-min)) 'front-sticky '(read-only)))
   (dolist (ask (eng/bbh-inbox--asks))
     (when-let* ((region (eng/bbh-inbox--answer-region ask)))
-      ;; The body's last newline stays read-only, so the next heading never joins it.
       (remove-text-properties (car region) (max (car region) (1- (cdr region))) '(read-only nil))
       (when (> (car region) (point-min))
         (put-text-property (1- (car region)) (car region) 'rear-nonsticky '(read-only))))))
@@ -506,7 +468,6 @@ and new ones by default: Details, archived threads and threads with no ask."
                 (goto-char start)
                 (cond ((string-suffix-p "/Details" key) t)
                       ((looking-at eng/bbh-inbox--thread-re)
-                       ;; The split view shows one thread, open.
                        (and (not (eq eng/bbh-inbox-view 'split))
                             (or (equal "ARCHIVED" (match-string 1))
                                 (not (eng/bbh-inbox--asks key))))))))
@@ -578,7 +539,6 @@ shows the Inbox, else when one does."
         ((eq eng/bbh-inbox--reload 'running) (setq eng/bbh-inbox--reload 'again))
         ((null eng/bbh-inbox--reload)
          (setq eng/bbh-inbox--reload 'pending)
-         ;; Idle since before the push counts, or an idle Emacs would wait for a key.
          (run-with-idle-timer (time-add (or (current-idle-time) 0) eng/bbh-inbox-reload-delay)
                               nil #'eng/bbh-inbox--reload))))
 
@@ -615,8 +575,6 @@ shows the Inbox, else when one does."
         (setq eng/bbh-inbox--timer
               (run-at-time 0.15 nil (lambda ()
                                       (eng/bbh-inbox--run (delq nil (list "select" (car here) (cdr here))) nil))))))))
-
-;;;; Answering
 
 (defun eng/bbh-inbox--act (&rest args)
   "Run `bbh inbox ARGS' on the thread under the cursor, then reload."
@@ -847,8 +805,6 @@ rather than stacking another."
      (lambda (dir)
        (eng/bbh-inbox--herdr-jjui
         (append (list (string-trim dir))
-                ;; herdr-jjui runs this after jjui only in place of a popup
-                ;; it replaced.  GUI Emacs is never in one.
                 (unless (display-graphic-p frame) (eng/bbh-inbox--command)))
         frame)))))
 
@@ -858,16 +814,6 @@ Herdr closes its open popup and ends jjui.  From the terminal Inbox, which
 jjui replaces, press q in jjui instead."
   (interactive)
   (eng/bbh-inbox--herdr-jjui (list "--close") (selected-frame)))
-
-;;;; The split view
-
-;; The default view (design 4 of T85): *bbh threads*, one line per thread,
-;; on the left, and *bbh inbox*, holding only the selected thread, on the
-;; right.  `bbh inbox split SEL' feeds both from one controller read: the
-;; list as #+thread lines, SEL's recent events as #+progress lines, then the
-;; outline `org' prints.  The right side is the outline view's buffer and
-;; mode with one thread's subtree in it, so its keys work unchanged.  gv
-;; switches to the old single-buffer view and back.
 
 (defvar eng/bbh-inbox-view 'split
   "Which Inbox `eng/bbh-inbox' shows: `split', the thread list beside the
@@ -1064,7 +1010,6 @@ end sits at the window's bottom, and a list that fits starts at its top."
   (let ((row (eng/bbh-inbox--row id))
         (progress (assoc id eng/bbh-inbox--progress)))
     (concat (let ((subtree (string-trim-right (or (eng/bbh-inbox--subtree eng/bbh-inbox--outline id) (format "* GONE %s" id)) "\n+")))
-              ;; A blank Answer keeps its empty line, the one you type on.
               (concat subtree "\n" (when (string-match-p "^\\*\\*\\* Answer\\'" subtree) "\n")))
             "** Progress\n"
             (cond ((not progress) "   …\n")
@@ -1274,7 +1219,6 @@ focus the window it is in, or nil when no frame is open."
         (eng/bbh-inbox--select thread)
       (setq eng/bbh-inbox--selected thread))
     (eng/bbh-inbox--jump thread ask)
-    ;; The Inbox reloads on its own; land on the ask again once it has.
     (eng/bbh-inbox--run (eng/bbh-inbox--load-args)
                         (lambda (text)
                           (eng/bbh-inbox--show text)
@@ -1330,9 +1274,7 @@ Bare C-h and C-l still move between the panes, as between any windows.")
   (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t)
   (dolist (key eng/bbh-threads-keys)
     (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
-  ;; C-n sends the selected thread's draft here too, as in the Inbox.
   (evil-local-set-key 'normal (kbd "C-n") #'eng/bbh-inbox-send)
-  ;; The other ways into insert state, which would leave the list deaf.
   (dolist (command '(evil-insert-line evil-append evil-append-line evil-open-below evil-open-above
                      evil-substitute evil-change-whole-line))
     (evil-local-set-key 'normal (vector 'remap command) #'eng/bbh-threads-read-only)))
@@ -1397,15 +1339,10 @@ thread list, in its own mode, stays one truncated line per thread."
   (add-hook 'post-command-hook #'eng/bbh-inbox--moved nil t)
   (add-hook 'window-buffer-change-functions #'eng/bbh-inbox--on-show nil t)
   (add-hook 'evil-insert-state-exit-hook #'eng/bbh-inbox--stopped-typing nil t)
-  ;; Buffer-local keys win over evil-org's, such as its A and I.  Insert
-  ;; state types every printable key; only these send or discard.
   (dolist (key eng/bbh-inbox-keys)
     (evil-local-set-key 'normal (kbd (car key)) (cadr key)))
-  ;; C-n sends from anywhere in the Inbox, in normal and insert state, so it
-  ;; sends after a pick as after a typed answer; a completion popup keeps it.
   (dolist (state '(normal insert))
     (evil-local-set-key state (kbd "C-n") (eng/bbh-send-key #'eng/bbh-inbox-send))
-    ;; C-c C-c sends nowhere, as in the composer, rather than org's tags prompt.
     (evil-local-set-key state (kbd "C-c C-c") #'undefined))
   (evil-local-set-key 'insert (kbd "C-c C-k") #'eng/bbh-inbox-clear))
 
@@ -1415,7 +1352,6 @@ thread list, in its own mode, stays one truncated line per thread."
 
 (evil-set-initial-state 'eng/bbh-inbox-mode 'normal)
 
-;; The same commands under SPC m, where which-key lists them.
 (when (fboundp 'map!)
   (map! :map eng/bbh-inbox-mode-map
         :localleader
@@ -1475,15 +1411,12 @@ is replaced."
   "Show the super-agent's Inbox alone in this frame: by default the thread
 list beside the selected thread, or with gv every thread in one buffer."
   (interactive)
-  ;; Make the Inbox before clearing the frame, so a failure leaves the layout.
   (let ((buffer (eng/bbh-inbox-buffer)))
     (if (eq eng/bbh-inbox-view 'split)
         (eng/bbh-inbox--layout)
       (eng/bbh-super--clear-frame)
       (switch-to-buffer buffer))))
 
-;; Loading this file again, as a Doom reload does, brings a live Inbox up to
-;; the new code: its buffer setup and the listener.
 (when-let* ((buffer (get-buffer "*bbh inbox*")))
   (with-current-buffer buffer
     (when (derived-mode-p 'eng/bbh-inbox-mode)

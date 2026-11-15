@@ -10,7 +10,6 @@ RESUME is a saved conversation id the session continues under that id."
    :shell-prompt "bbh> "
    :shell-prompt-regexp "bbh> "
    :client-maker (lambda (buffer)
-                   ;; A client made again after bbh died continues the conversation (T162).
                    (let ((resume (or (and (buffer-live-p buffer)
                                           (when-let* ((id (buffer-local-value 'eng/bbh-conversation buffer)))
                                             (and (file-exists-p (eng/bbh--conversation-file id "messages.jsonl")) id)))
@@ -69,10 +68,7 @@ conversation."
          (eng/bbh-inbox-switch (eng/bbh--shell)))
        (if (eng/bbh-super--to-router-p (eng/bbh--shell))
            (let ((composer (current-buffer))
-                 ;; As agent-shell says for a Worker; the controller would refuse blank text.
                  (_ (when (string-empty-p draft) (user-error "Nothing to send")))
-                 ;; The controller answers later, and what you type meanwhile
-                 ;; follows the sent draft, so only the draft goes then.
                  (sent (copy-marker (point-max))))
              (eng/bbh-super--say-from (eng/bbh--shell) draft
                                       (lambda () (when (buffer-live-p composer)
@@ -204,18 +200,10 @@ keeps the text and shows bbh's message."
     (when input
       (set-window-buffer input (agent-shell-viewport--buffer :shell-buffer shell)))
     (prog1 (eng/bbh-layout shell transcript)
-      ;; You were typing /new, so keep typing.
       (evil-insert-state)
       (let ((kill-buffer-query-functions nil))
         (when (buffer-live-p old-composer) (kill-buffer old-composer))
         (kill-buffer old)))))
-
-;;; Website
-
-;; The session takes its own mail, from the conversation's mailbox, at the
-;; start of each input and before each model call, and deletes a message once
-;; its transcript holds it.  This shell only wakes an idle session with the
-;; prompt `[mail]', so a stuck shell delays mail but cannot lose it.
 
 (defvar-local eng/bbh-mail--watch nil
   "The timer that checks this shell's mailbox, kept only to cancel it.")
@@ -320,7 +308,6 @@ Returns (SWEPT . WATCHING): how many it cancelled, and how many still run."
      (run-at-time 0 nil #'eng/bbh-mail-wake shell))
     ('turn-complete
      (eng/bbh--recovered shell)
-     ;; After agent-shell has sent any prompt it queued meanwhile.
      (run-at-time 0 nil #'eng/bbh-mail-wake shell))
     ('error
      (let ((why (or (map-nested-elt event '(:data :message)) "the request failed")))
@@ -338,16 +325,6 @@ Returns (SWEPT . WATCHING): how many it cancelled, and how many still run."
   (agent-shell-subscribe-to :shell-buffer shell
                             :on-event (lambda (event) (eng/bbh-mail--on-event shell event)))
   (eng/bbh-mail-watch shell))
-
-;;; Recovery
-
-;; When the bbh process dies, agent-shell keeps its client, handshake and
-;; session id, and acp starts a new process at the next request.  That
-;; process never made the session, so bbh answers `Unknown session' (T162).
-;; A bbh shell instead drops all of it and starts a new session on the same
-;; conversation, which bbh reopens from its transcript as the controller's
-;; resume does.  Failures in a row back off, and after
-;; `eng/bbh-retry-limit' of them the shell stops and says so once.
 
 (defvar eng/bbh-retry-delay 1
   "Seconds before the first retry after a failure.  Each next one waits twice as long.")
@@ -478,14 +455,7 @@ while you type, and the mode's return would put you in normal state (T174)."
 
 (advice-add 'agent-shell--handle :around #'eng/bbh--keep-composer)
 
-;;; Turn-end guard
-
-;; agent-shell clears a shell's busy flag near the end of its prompt reply
-;; handler.  When anything before that signals, as a half-reloaded
-;; agent-shell did with void-function at every turn end (T163), the flag
-;; stays set, every mailbox wake waits for a turn end that never comes, and
-;; the shell takes no more mail.  So a prompt's reply handlers run inside a
-;; guard that, on an error, logs it once and finishes the turn anyway.
+;; If agent-shell's reply handler signals before clearing the busy flag, the shell never takes mail again (T163), so the handlers run in a guard that finishes the turn anyway.
 
 (defvar-local eng/bbh--turn-end-error nil
   "The last error a turn's end signalled in this shell, so each is logged once.")
@@ -537,16 +507,6 @@ SHELL busy, as its own turn."
 Messages to the old conversation stay in its mailbox until it is resumed."
   (eng/bbh-mail-watch shell))
 
-;;; Program status
-
-;; Tell the terminal whether bbh is working or waiting for the user.  The
-;; report is OSC 7501, the Program Status Protocol
-;; <https://www.superlogical.com/rex/docs/build/program-status>.  Herdr does
-;; not read OSC 7501 yet, so inside herdr the same state also goes to
-;; `herdr pane report-agent', which shows it and notifies on a finished turn.
-;; Once the conversation is saved, each report carries `emacs-bbh --resume ID',
-;; so a herdr restart reopens the pane on the same conversation.
-
 (defvar eng/bbh-status--seq 0
   "The last sequence number sent to herdr.  Herdr drops reports that do not increase it.")
 
@@ -594,7 +554,6 @@ CONVERSATION is the saved conversation herdr should resume."
   (eng/bbh-status--herdr state msg conversation))
 
 (defun eng/bbh-status--on-event (shell event)
-  ;; A `bbh super' session shares the daemon with others; the Inbox reports for it.
   (unless (buffer-local-value 'eng/bbh-super-conversation shell)
    (let ((conversation (when-let* ((id (eng/bbh--conversation shell)))
                          (and (file-exists-p (eng/bbh--conversation-file id "messages.jsonl")) id))))
@@ -606,8 +565,6 @@ CONVERSATION is the saved conversation herdr should resume."
 
 (defun eng/bbh-status--clear ()
   (eng/bbh-status 'clear))
-
-;;; Org transcript
 
 (defvar-local eng/bbh-transcript nil
   "The org buffer that renders this shell's conversation.")
@@ -701,10 +658,6 @@ strips `display' text properties from whole blocks on partial redisplays."
   (save-excursion
     (setq beg (progn (goto-char beg) (line-beginning-position))
           end (progn (goto-char (min end (point-max))) (min (point-max) (1+ (line-end-position)))))
-    ;; From the line before: a begin line's overlay ends at the start of the
-    ;; next line and an end line's starts at the newline before it, so an
-    ;; edit that keeps the text before it, as a streaming reply's does, can
-    ;; cut either short.
     (when (> beg (point-min))
       (setq beg (progn (goto-char (1- beg)) (line-beginning-position))))
     (dolist (overlay (overlays-in beg end))
@@ -1000,8 +953,6 @@ Messages do not record whether a tool call failed, so every result shows as done
       (prog1 (equal message eng/bbh--shown-error)
         (setq eng/bbh--shown-error message)))))
 
-;;; Usage
-
 (defvar-local eng/bbh-usage-requests nil
   "This turn's model requests as bbh reported them, newest first.
 Each is bbh's request record: input, cached, written, output, n, ratio
@@ -1128,7 +1079,6 @@ and took ELAPSED, such as 12s.  Cache misses and cost appear only when present."
       (let ((data (map-elt event :data)))
         (pcase (map-elt event :event)
           ('input-submitted (eng/bbh-transcript--turn-start)
-                            ;; A retry repeats neither its prompt nor its error (T162).
                             (unless (eng/bbh-transcript--retrying-p eng/bbh-transcript-shell (map-elt data :prompt))
                               (when (buffer-live-p eng/bbh-transcript-shell)
                                 (with-current-buffer eng/bbh-transcript-shell (setq eng/bbh--shown-error nil)))
@@ -1224,8 +1174,6 @@ and its faces about 1 MB.")
                   (and (> p lo) (not (get-text-property (1- p) 'fontified)) p))))
     (cond ((and below (or (not above) (<= (- below start) (- start above))))
            (cons below (min hi (+ below jit-lock-chunk-size))))
-          ;; Start at a shown line, as redisplay does: org colors the newline
-          ;; after a block by whichever delimiter line it fontifies first.
           (above (cons (save-excursion
                          (goto-char (max lo (- above jit-lock-chunk-size)))
                          (beginning-of-line)
@@ -1297,24 +1245,16 @@ Font-lock and org-element look both regexps up in the current buffer."
 (define-derived-mode eng/bbh-transcript-mode org-mode "bbh"
   "A read-only org rendering of a bbh conversation."
   (setq buffer-read-only t)
-  ;; Point rests on the last row, so a margin makes redisplay undo the clamp.
   (setq-local scroll-margin 0)
-  ;; The composer's status line below separates the windows; the buffer
-  ;; size, position and mode name here say nothing useful.
   (setq-local mode-line-format nil)
   (add-hook 'after-change-functions #'eng/bbh-transcript--note-change nil t)
   (eng/bbh-transcript--use-linear-links)
   (font-lock-add-keywords nil eng/bbh-transcript--markup 'append)
-  ;; Clear org's `src-block' mark with the faces, so it only ever says that
-  ;; org fontified the block in the current pass.
   (add-to-list (make-local-variable 'font-lock-extra-managed-props) 'src-block)
-  ;; Doom-one paints org-block with an opaque background. In a terminal that
-  ;; band hides the transparent default, so drop it in this buffer only.
   (unless (display-graphic-p)
     (face-remap-add-relative 'org-block '(:background "unspecified-bg")))
   (visual-line-mode 1))
 
-;; Loading this file again fixes the transcripts already open.
 (dolist (buffer (buffer-list))
   (with-current-buffer buffer
     (when (derived-mode-p 'eng/bbh-transcript-mode)
@@ -1360,11 +1300,6 @@ Font-lock and org-element look both regexps up in the current buffer."
         :localleader
         :desc "Toggle tool results" "t" #'eng/bbh-toggle-tools))
 
-;; Doom's evil-org keys work here: gj and gk move by element, ]h and [h
-;; between prompts, gh up.  S-TAB stays org's cycle; SPC m t or C-c C-t folds
-;; tool results.  n, p and the other evil keys keep their meaning; q buries.
-;; evil-org's C-j and C-k shadow focus, which moves between transcript and
-;; composer.  The transcript is read-only, so normal state is enough.
 (evil-define-key 'normal eng/bbh-transcript-mode-map
   (kbd "q") #'bury-buffer
   (kbd "C-j") #'eng/focus-down
@@ -1385,7 +1320,6 @@ cursor before its last character, where typing would split a word."
     (goto-char (point-max))
     (evil-insert-state)))
 
-;; Doom's evil-org binds its own o, O, A and I in org buffers.
 (dolist (command '(evil-insert evil-append evil-insert-line evil-append-line
                    evil-open-below evil-open-above evil-substitute evil-change-whole-line
                    evil-org-open-below evil-org-open-above evil-org-append-line evil-org-insert-line))
@@ -1446,9 +1380,6 @@ This reads no process, so it is cheap enough for the status line."
     (let ((n (length (map-elt (buffer-local-value 'agent-shell--state shell) :pending-prompts))))
       (when (> n 0) (format "%d queued" n)))))
 
-;; agent-shell lists the running and queued prompts in the echo area after every
-;; enqueue, including each inbox delivery, and the list vanishes on the next
-;; keystroke.  The count above, in the composer header, replaces it.
 (advice-add 'agent-shell--prompt-queue-echo :override #'ignore)
 
 (defun eng/bbh--header ()
@@ -1506,8 +1437,6 @@ The key hints and conversation id are in `eng/bbh-keys'.  % is escaped because t
 
 (defvar-local eng/bbh-composer-padding nil
   "Overlay that shows one blank row above the composer's draft.")
-;; The composer's major mode restarts when it returns from a view, and the
-;; overlay stays, so a second one would double the blank row.
 (put 'eng/bbh-composer-padding 'permanent-local t)
 
 (defun eng/bbh-composer-padding ()
@@ -1546,13 +1475,9 @@ keys, so a send key on C-n would otherwise win while the popup is open."
   "Restore bbh bindings after returning from agent-shell's history view."
   (when eng/bbh-composer
     (eng/bbh-composer-padding)
-    ;; The header line carries the status; Doom's mode-line only repeats the buffer name.
     (setq-local mode-line-format nil)
     (use-local-map (copy-keymap (current-local-map)))
-    ;; agent-shell's own send keys, such as normal-state ZZ, take bbh's path too,
-    ;; so the Router's input always goes through the controller.
     (local-set-key [remap agent-shell-viewport-compose-send] #'eng/bbh-send)
-    ;; C-n sends; agent-shell's own C-c C-c does not.
     (local-set-key (kbd "C-c C-c") #'undefined)
     (dolist (binding `(("C-n" . ,(eng/bbh-send-key #'eng/bbh-send))
                        ("M-RET" . eng/bbh-send)
@@ -1563,8 +1488,6 @@ keys, so a send key on C-n would otherwise win while the popup is open."
                        ("M-j" . eng/bbh-output-page-down)))
       (dolist (state '(normal insert))
         (evil-local-set-key state (kbd (car binding)) (cdr binding))))
-    ;; C-n sends in normal and insert state.  In normal state C-d and C-u page
-    ;; the transcript, since the composer is a few lines tall.
     (dolist (binding '(("g?" . eng/bbh-keys)
                        ("C-d" . eng/bbh-output-page-down)
                        ("C-u" . eng/bbh-output-page-up)))
@@ -1593,22 +1516,12 @@ called interactively, restore this layout for the current session."
       (setq-local eng/bbh-composer t)
       (eng/bbh-setup-composer))
     (eng/bbh-workflow-refresh shell)
-    ;; `set-window-buffer' brings back the start the transcript had when it
-    ;; was last shown, above output that arrived since.  Left to redisplay,
-    ;; that would recentre on point and leave blank rows until the next
-    ;; command's clamp, so a transcript following its end shows its latest
-    ;; output now.
     (when (= (window-point output) (with-current-buffer transcript (point-max)))
       (eng/bbh-transcript--follow output))
     (select-window input)
-    ;; Normal state, so leader keys work at once.  This may run outside a
-    ;; command, from the Inbox's sentinel or the controller's emacsclient,
-    ;; where no hook tells the terminal the new cursor shape.
     (evil-normal-state)
     (when (fboundp 'etcc--set-cursor) (etcc--set-cursor))
     composer))
-
-;;; Workflow phase
 
 (defvar-local eng/bbh-workflow--data nil
   "The last `wf status --json' answer for this shell's run, as an alist, or nil.
@@ -1673,8 +1586,6 @@ Other runs in the repository are never read, so the header matches the session's
 
 (after! agent-shell-viewport
   (add-hook 'agent-shell-viewport-edit-mode-hook #'eng/bbh-setup-composer)
-  ;; Loading this file again, as a Doom reload does, brings live composers up
-  ;; to the new keys.
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
       (when (and eng/bbh-composer (derived-mode-p 'agent-shell-viewport-edit-mode))
@@ -1684,11 +1595,8 @@ Other runs in the repository are never read, so the header matches the session's
 
 (after! agent-shell
   (advice-add 'agent-shell--update-usage-from-notification :after #'eng/bbh--record-usage)
-  ;; Loading system-sleep warns even when this Emacs has no usable backend.
   (unless (or (featurep 'dbusbind) (featurep 'ns) (featurep 'w32))
     (setq agent-shell-inhibit-system-sleep nil))
-  ;; Keep screenshots and transcripts out of project checkouts; bbh already
-  ;; writes its own transcript next to the REPL log.
   (setq agent-shell-dot-subdir-function
         (lambda (subdir)
           (expand-file-name subdir (expand-file-name "agent-shell" (or (getenv "XDG_DATA_HOME") "~/.local/share"))))

@@ -1,4 +1,3 @@
--- keybindings.lua and leader.lua are generated; see keybindings/install.md.
 local keys = require("keys")
 
 hl.monitor({ output = "eDP-1", mode = "2560x1600", position = "auto", scale = 1.6 })
@@ -37,13 +36,7 @@ hl.env("XCURSOR_SIZE", "20")
 require("startup")
 
 hl.window_rule({ name = "intellij-workspace", match = { class = "jetbrains-idea" }, workspace = "4" })
--- Chrome believes it is fullscreen but stays tiled: no tab strip or address bar, the side panel
--- (vimium-cljs tab list) stays, and F11 brings the toolbar back. docs/chrome-no-address-bar.html
 hl.window_rule({ name = "chrome-no-toolbar", match = { class = "google-chrome" }, fullscreen_state = "0 2" })
--- Chrome extension popup windows (chrome.windows.create type popup), such as the
--- vimium-cljs Vomnibar that Ctrl+L opens from the address bar, float centred
--- instead of splitting Chrome. Their initial title is _crx_<extension id>, and
--- Hyprland matches the whole title.
 hl.window_rule({
   name = "chrome-extension-popup",
   match = { initial_title = "_crx_.*" },
@@ -61,15 +54,12 @@ hl.bind("SUPER + G", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 4"))
 hl.bind("SUPER + B", hl.dsp.exec_cmd("~/.local/bin/herdr-terminal"))
 hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("ghostty -e nvim ~/.config/hypr/hyprland.lua"))
 hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
--- Releasing M or Cmd finishes it.  Hyprland reports a release of M only while Cmd is still
--- held, so Cmd's own release (code:133/134) also stops; the flag keeps every
--- other Cmd release from starting a process.
+-- Hyprland reports M's release only while Cmd is held, so Cmd's release (code:133/134) also stops;
+-- the flag keeps other Cmd releases from starting a process.
 local dictating = false
 local agent_dictating = false
 local suppress_plain_dictation = false
--- Each hold is one take.  The press's process records it and the release only
--- asks that process to stop, so a quick tap whose release runs first cannot
--- leave Hex recording.
+-- Release stops only the press's own take, so a tap whose release runs first cannot leave Hex recording.
 local agent_take = nil
 local agent_takes = 0
 hl.bind("SUPER + SHIFT + M", function()
@@ -121,14 +111,12 @@ hl.bind("SUPER + F", hl.dsp.exec_cmd("~/.local/bin/winhint"))
 hl.bind("ALT + SPACE", keys.herdr_menu)
 hl.bind("SUPER + Y", keys.herdr_yank)
 hl.bind("ALT + E", keys.chrome_tab_list)
--- Cmd+Caps+V, which kanata leaves as Super+Ctrl+V.
 hl.bind("SUPER + CTRL + V", hl.dsp.exec_cmd("~/.local/bin/clipboard-history pick"))
 
 require("keybindings")
 require("leader")
 
 hl.bind("PRINT", hl.dsp.exec_cmd("sh -c 'mkdir -p ~/Pictures; grim ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png'"))
--- kanata sends Print for Cmd+Shift+3 and Shift+Print for Cmd+Shift+4.
 hl.bind("SHIFT + PRINT", hl.dsp.exec_cmd("sh -c 'region=$(slurp) && grim -g \"$region\" - | wl-copy --type image/png'"))
 hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"), { locked = true, repeating = true })
 hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"), { locked = true, repeating = true })

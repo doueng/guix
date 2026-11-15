@@ -39,7 +39,6 @@ log = 'separate(" ", change_id.shortest(8), committer.timestamp().local().format
 username = "engstrand"
 
 [aliases]
-# Makes jj jj log work
 jj = []
 nt = ["new", "trunk()"]
 publish-master = ["util", "exec", "--", "bash", "-c", """
@@ -106,8 +105,6 @@ auto-update-stale = true
 'closest_bookmark(to)' = 'heads(::to & bookmarks())'
 'closest_pushable(to)' = 'heads(::to & ~description(exact:"") & (~empty() | merges()))'
 
-# connected() includes revisions between selected endpoints so jj/jjui do not show
-# "(elided revisions)" for the current stack.
 'log' = 'connected(present(@) | ancestors(immutable_heads().., 2) | present(trunk()))'
 
 'rlog' = 'connected(ancestors(trunk()..@, 2) | descendants(@, 3) | @)'

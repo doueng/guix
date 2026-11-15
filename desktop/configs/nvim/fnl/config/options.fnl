@@ -38,11 +38,8 @@
 (set vim.opt.backup false)
 (set vim.opt.writebackup true)
 
-;; Smooth movement/redraws: avoid per-cursor-line highlights.
 (set vim.opt.cursorline false)
 
-;; Disable folding completely. LazyVim defaults to Treesitter foldexpr, which can
-;; add redraw/movement overhead even when folds are not actively used.
 (set vim.opt.foldenable false)
 (set vim.opt.foldcolumn :0)
 (set vim.opt.foldlevel 99)

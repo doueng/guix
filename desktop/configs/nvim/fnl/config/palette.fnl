@@ -1,7 +1,3 @@
-;; Mappings with a description run as if typed, so their own logging and modes
-;; apply.  Ex commands open the command line with the name filled in, so
-;; arguments can follow.
-
 (local uv (or vim.uv vim.loop))
 (local history-path (.. (vim.fn.stdpath :state) :/palette-history.json))
 

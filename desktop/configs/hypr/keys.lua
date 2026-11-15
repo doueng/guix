@@ -4,7 +4,6 @@ local function quote(s)
   return "'" .. (s:gsub("'", "'\\''")) .. "'"
 end
 
--- KIND is one of desktop/lib/keylog.clj's kinds.
 function M.log(keys, effect, kind)
   hl.exec_cmd("~/.local/bin/keylog add " .. (kind or "action") .. " hyprland " .. quote(keys) .. " " .. quote(effect))
 end
@@ -33,9 +32,7 @@ function M.leave(dispatcher, keys, effect)
   end
 end
 
--- Leave SUBMAP, entered with KEYS, without acting: on KEY, or on any key it
--- does not bind when KEY is nil. Hyprland also runs the catch-all after a bound
--- key in the same submap, so it leaves only if that key did not.
+-- Hyprland also runs the catch-all after a bound key in the same submap, so leave only if that key did not.
 function M.cancel(submap, keys, key)
   return function()
     if hl.get_current_submap() == submap then
@@ -45,12 +42,8 @@ function M.cancel(submap, keys, key)
   end
 end
 
--- desktop/bin/herdr-terminal starts Herdr's Ghostty with this class.
 M.herdr_class = "com.mitchellh.ghostty.herdr"
 
--- Send CHORDS, such as { { mods = "CTRL", key = "b" } }, to the Herdr
--- terminal. From another window, focus the Herdr terminal first, or start one
--- and send nothing. Returns whether the chords were sent.
 local function send_to_herdr(chords)
   local active = hl.get_active_window()
   if not (active and active.class == M.herdr_class) then
@@ -76,9 +69,7 @@ function M.herdr_menu()
   end
 end
 
--- Alt+E in Chrome toggles the vimium-cljs tab list in the side panel: send
--- Ctrl+Shift+E, the extension's tab-panel command. Every other window gets
--- Alt+E back, so Emacs M-e and fish's Alt+E edit_command_buffer still work.
+-- Non-Chrome windows get Alt+E back for Emacs M-e and fish's edit_command_buffer.
 function M.chrome_tab_list()
   local active = hl.get_active_window()
   if active and active.class == "google-chrome" then

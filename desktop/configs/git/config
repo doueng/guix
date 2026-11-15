@@ -1,8 +1,6 @@
 [core]
 	excludesfile = ~/.config/git/ignore
 
-# Keep GitHub's credential helper declared here instead of letting gh edit
-# this file, which desktop/stow-home links from the repo.
 [credential "https://github.com"]
 	helper =
 	helper = !gh auth git-credential

@@ -1,10 +1,8 @@
-# Use -gx instead of -Ux to override parent shell's EDITOR
 set -gx EDITOR nvim
 set -gx VISUAL nvim
 set -gx SHELL (command -s fish)
 set -gx PI_SKIP_VERSION_CHECK 1
 
-# Keep Ctrl+S available for terminal/picker bindings instead of XOFF flow control.
 if status is-interactive
     stty -ixon 2>/dev/null
 end
@@ -26,11 +24,11 @@ function fish_vi_cursor --description 'Custom vi cursor with hide support'
 
         switch $mode
             case insert
-                printf '\e[?25l' # hide cursor
+                printf '\e[?25l'
             case default replace replace_one visual
-                printf '\e[?25h\e[4 q' # show + underline cursor
+                printf '\e[?25h\e[4 q'
             case '*'
-                printf '\e[?25h\e[4 q' # show + underline cursor (fallback)
+                printf '\e[?25h\e[4 q'
         end
     end
 
@@ -43,7 +41,7 @@ function fish_vi_cursor --description 'Custom vi cursor with hide support'
             return
         end
 
-        printf '\e[?25h\e[2 q' # show block cursor for external commands
+        printf '\e[?25h\e[2 q'
     end
 end
 

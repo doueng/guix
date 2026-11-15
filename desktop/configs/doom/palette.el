@@ -1,8 +1,5 @@
 ;;; palette.el --- Choose M-x commands in the Dusk palette -*- lexical-binding: t; -*-
 
-;; Dusk only chooses the command; execute-extended-command still runs it, so
-;; prefix arguments, argument prompts and history behave as in M-x.
-
 (require 'server)
 
 (defun eng/palette--socket ()
@@ -47,8 +44,6 @@ Asking where-is-internal for every key of every command took 2.4 s."
   (let ((label (eng/palette--edn-string name)))
     (concat "[" label (if keys (concat " " (eng/palette--edn-string keys)) "") "]")))
 
-;; Key lookups and escaping are cached per buffer because bindings are local.
-;; Applicability and history are evaluated on every opening.
 (cl-defstruct eng/palette--catalog generation maps names fragments)
 (defvar-local eng/palette--cache nil)
 (defvar eng/palette--generation 0)
@@ -133,7 +128,6 @@ Falls back to M-x when Dusk is not running."
 
 (global-set-key [remap execute-extended-command] #'eng/palette-M-x)
 
-;; The global palette finds this Emacs by its process id.
 (setq server-name (format "eng-%d" (emacs-pid)))
 (unless (or noninteractive (daemonp) (server-running-p))
   (server-start))

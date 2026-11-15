@@ -26,8 +26,6 @@
    :radius radius
    :shadow :md})
 
-
-;; Alma-Tadema's Cicero, 1672x941; :cover crops it to fill the 2560x1600 panel.
 (def wallpaper-path "~/.config/dusk/wallpaper.jpg")
 
 (defn wallpaper []
@@ -137,8 +135,6 @@
       (subsequence? item query) 1
       :else nil)))
 
-;; A launcher entry is {:label :keys :source :value}. dmenu sends plain strings,
-;; which choose themselves.
 (defn- entry [item]
   (if (string? item) {:label item :value item} item))
 
@@ -150,7 +146,6 @@
       (when (and keys (str/includes? (str/lower-case keys) (str/lower-case query))) 0.5)))
 
 (defn- ranked-items [items query]
-  ;; An empty query already has the caller's history order. No scoring or sort.
   (let [ranked (if (str/blank? query)
                  (map-indexed (fn [i item] [0 i (entry item)]) items)
                  (->> items
@@ -158,7 +153,6 @@
                                       (let [e (entry item)]
                                         (when-let [s (entry-score e query)] [s i e]))))
                       (sort-by (fn [[s i]] [(- s) i]))))]
-    ;; Identity is the original index, even when labels are duplicated.
     (mapv (fn [[_ i e]] (assoc e :id i :text (:label e))) ranked)))
 
 (defn matches [items query]
@@ -184,8 +178,6 @@
   (fn [{:keys [items prompt]} respond]
     (open-launcher! items prompt respond)))
 
-;; Compact rows [command keys?] choose the command itself. Maps can carry a
-;; different :value, and dmenu still sends plain strings.
 (dusk/on-request :palette
   (fn [{:keys [entries prompt source]} respond]
     (open-launcher! (mapv #(if (vector? %)
@@ -263,8 +255,6 @@
 
 (defonce leader-hint (dusk/state nil))
 
-;; keyleader listen sends {:title "Cmd+Space w" :rows [["h" "Focus left"] ...]}
-;; on each leader submap change, and {} when the submap ends.
 (dusk/on-request :leader-hint
   (fn [{:keys [rows] :as panel} respond]
     (reset! leader-hint (when (seq rows) panel))
@@ -295,8 +285,6 @@
     (reset! window-hints nil)
     (respond choice)))
 
-;; winhint sends {:targets [{:label "a" :x :y :w :h} ...]} in logical pixels of
-;; the focused monitor and gets back the typed label, or nil.
 (dusk/on-request :window-hints
   (fn [{:keys [targets]} respond]
     (close-window-hints! nil)

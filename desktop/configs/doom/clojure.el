@@ -1,9 +1,6 @@
 ;;; clojure.el --- Clojure feature config -*- lexical-binding: t; -*-
 
-;; Register Babashka files before clojure-mode loads. Keeping this inside
-;; `after!' creates a cycle: opening a .bb file cannot load clojure-mode until
-;; the association exists, but the association would not exist until the mode
-;; had already loaded.
+;; Outside `after!': a .bb file cannot load clojure-mode until this association exists.
 (add-to-list 'auto-mode-alist '("\\.bb\\'" . clojure-mode))
 
 (after! clojure-mode

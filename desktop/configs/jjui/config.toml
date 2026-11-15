@@ -1,12 +1,9 @@
 [revisions]
-# jjui defaults to jj's revsets.log if this is unset. Keep this explicit so the
-# graph includes connector revisions instead of showing "(elided revisions)".
 revset = "connected(log)"
 log_batching = true
 log_batch_size = 20
 
 [ui]
-# Disable timer-driven refreshes; focus changes still refresh when needed.
 auto_refresh_interval = 0
 mouse_support = false
 set_window_title = false

@@ -1,6 +1,3 @@
-;; Commands the global palette offers in applications it cannot ask for their own.
-;; Each entry sends keys to the focused window after the palette closes.
-;; :type is text for ydotool type; :chord is a chord such as "ctrl+shift+t".
 {:chrome
  [{:label "Search open tabs" :keys "T" :type "T"}
   {:label "Open URL, bookmark or history" :keys "o" :type "o"}
@@ -35,7 +32,6 @@
   {:label "Bookmark manager" :keys "Ctrl+Shift+O" :chord "ctrl+shift+o"}
   {:label "Developer tools" :keys "Ctrl+Shift+I" :chord "ctrl+shift+i"}
   {:label "Reset zoom" :keys "Ctrl+0" :chord "ctrl+0"}]
- ;; IdeaVim runs :action ID from normal mode. leader.edn's :idea actions are added.
  :idea
  [{:label "Find action" :keys "Ctrl+Shift+A" :action "GotoAction"}
   {:label "Go to file" :keys "Ctrl+Shift+N" :action "GotoFile"}

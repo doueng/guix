@@ -2,8 +2,6 @@
 
 (setq user-full-name "Douglas Engstrand"
       user-mail-address "doueng09@gmail.com"
-      ;; Emacs subprocess helpers require a POSIX shell even though the
-      ;; interactive terminal shell remains Fish.
       shell-file-name (or (executable-find "bash") "/bin/sh"))
 
 (setq confirm-kill-emacs nil
@@ -35,8 +33,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (message "Reloaded %s" (abbreviate-file-name eng/doom-config-dir)))
 
 (setq frame-title-format "MAIN EMACS"
-      ;; Doom's TTY module otherwise recomputes the terminal title after every
-      ;; command. Keep the stable title above without paying that hot-path cost.
       xterm-set-window-title nil)
 
 (dolist (mode '(menu-bar-mode tool-bar-mode scroll-bar-mode))
@@ -50,18 +46,11 @@ This is a lightweight way to apply config changes without restarting Emacs."
 (defun eng/enable-tty-mouse ()
   (unless (display-graphic-p)
     (xterm-mouse-mode 1)
-    ;; Emacs without X preloads no mwheel, so a terminal frame left the
-    ;; wheel and the touchpad unbound: each event only said <wheel-up> is
-    ;; undefined.  The mode is on by default but binds the wheel only once
-    ;; turned on.
     (require 'mwheel)
     (mouse-wheel-mode 1)))
 (dolist (hook '(tty-setup-hook window-setup-hook))
   (add-hook hook #'eng/enable-tty-mouse))
 
-;; `evil-terminal-cursor-changer' normally emits a terminal escape sequence in
-;; both pre- and post-command hooks. Preserve the useful Evil state cursor
-;; shapes, but only write to Ghostty when the shape, blink mode, or color changes.
 (defvar eng/etcc--cursor-state (make-hash-table :test #'eq :weakness 'key))
 
 (defun eng/etcc--set-cursor-when-changed (fn &rest args)
@@ -102,7 +91,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
 
 (setq auto-save-default nil
       make-backup-files nil
-      file-precious-flag t) ; Avoid in-place truncation (safer for concurrent readers)
+      file-precious-flag t)
 
 (auto-save-visited-mode 1)
 
@@ -153,7 +142,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
     (message "Copied: %s" buffer-file-name)))
 
 (setq-default
- bidi-display-reordering 'left-to-right           ; Faster redisplay when not editing RTL text
+ bidi-display-reordering 'left-to-right
  bidi-paragraph-direction 'left-to-right
  cursor-in-non-selected-windows nil
  delete-by-moving-to-trash t
@@ -169,18 +158,13 @@ This is a lightweight way to apply config changes without restarting Emacs."
       scroll-preserve-screen-position 'always
       scroll-margin 2
       display-time-default-load-average nil
-      ;; Keep newly displayed text fully fontified while scrolling. This trades
-      ;; some peak scroll throughput for immediate, stable syntax colors.
       redisplay-skip-fontification-on-input nil
-      ;; Avoid a terminal clear-and-redraw when recentering with C-l.
       recenter-redisplay nil
       reb-re-syntax 'string
       ffap-machine-p-known 'reject
       set-mark-command-repeat-pop t
       help-window-select t)
 
-;; Doom binds `s`/`S` to `evil-snipe` by default. We want `s`/`S` for avy-style
-;; jumping instead, so disable evil-snipe auto-enablement (per Doom docs).
 (remove-hook 'doom-first-input-hook #'evil-snipe-mode)
 
 (load (expand-file-name "clipboard.el" eng/doom-config-dir) nil 'nomessage)
@@ -197,10 +181,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
       evil-undo-system 'undo-redo)
 
 (setq read-process-output-max (* 4 1024 1024)
-      ;; The local Ghostty PTY reports 9600 baud, which makes Emacs favor
-      ;; insert/delete-line terminal operations. Those expose Ghostty's darker
-      ;; default background during rapid scrolling. A realistic local-terminal
-      ;; rate makes Emacs repaint rows instead.
+      ;; Ghostty's PTY reports 9600 baud, so Emacs uses insert/delete-line ops that flash the background while scrolling.
       baud-rate 1000000
       fast-but-imprecise-scrolling nil
       jit-lock-defer-time nil)
@@ -208,9 +189,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
 (after! flycheck
   (setq flycheck-check-syntax-automatically '(mode-enabled idle-change)))
 
-;; Disable line highlighting completely to prevent rendering artifacts. Doom can
-;; enable the globalized mode late during startup, so enforce this after startup
-;; as well as after each major-mode change.
 (defun eng/disable-hl-line-locally ()
   "Disable `hl-line-mode' in the current buffer."
   (when (bound-and-true-p hl-line-mode)
@@ -237,8 +215,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (define-key evil-normal-state-map (kbd "C-o") #'evil-jump-backward)
   (define-key evil-normal-state-map (kbd "C-i") #'evil-jump-forward))
 
-;; Doom's Scheme module adds a Nix-only Guix path. In the Guix profile, use
-;; the active Guile module paths so Geiser can resolve Guix sources.
 (after! geiser-guile
   (dolist (path (split-string (or (getenv "GUILE_LOAD_PATH") "")
                               path-separator t))
@@ -297,10 +273,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
                                   "-node_modules"
                                   "-vendor"])
 
-  ;; lsp-mode computes recursive per-directory diagnostic totals for its
-  ;; headerline and Dired integrations on every publishDiagnostics message.
-  ;; The headerline is disabled and lsp-dired is unused here. Keep Flycheck
-  ;; buffer diagnostics while skipping this otherwise unused aggregation work.
   (defun eng/lsp--skip-unused-diagnostic-aggregates (&rest _args)
     nil)
   (advice-remove #'lsp--on-diagnostics-update-stats
@@ -312,11 +284,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
   (setq lsp-ui-doc-enable nil
         lsp-ui-sideline-enable nil))
 
-;; A Guix profile is a symlink tree into per-package store directories. Doom
-;; visits symlink targets, which moves a library file such as anthropic's
-;; messages.py out of the profile's site-packages. ty then cannot place it in a
-;; package, so go to definition dead-ends at its relative imports. Keep the path
-;; the language server returned for store files.
+;; Visiting a store file's truename moves it out of the profile's site-packages, breaking ty's relative-import resolution.
 (defun eng/keep-guix-store-symlink-path (fn filename &rest args)
   (let ((find-file-visit-truename
          (and find-file-visit-truename
@@ -325,26 +293,18 @@ This is a lightweight way to apply config changes without restarting Emacs."
 (advice-remove #'find-file-noselect #'eng/keep-guix-store-symlink-path)
 (advice-add #'find-file-noselect :around #'eng/keep-guix-store-symlink-path)
 
-;; lsp-mode's ty client has no library folders, so a jump into an installed
-;; package or ty's typeshed stubs started a new ty rooted inside that package,
-;; which cannot resolve the package's relative imports. Declared library
-;; folders join the project's ty instead. Each such jump also saved its root as
-;; a project, and a saved project skips the library check, so drop those.
 (defun eng/lsp-library-path-p (path)
   (or (string-prefix-p "/gnu/store/" path)
       (string-prefix-p (expand-file-name "~/.cache/ty/") path)))
 
 (after! lsp-python-ty
-  ;; Quoted so the struct accessor expands after lsp-mode defines it, not while
-  ;; config.el is read.
+  ;; Quoted so the struct accessor expands after lsp-mode defines it.
   (eval '(setf (lsp--client-library-folders-fn (gethash 'ty-ls lsp-clients))
                (lambda (_workspace) (list "/gnu/store/" (expand-file-name "~/.cache/ty/"))))
         t)
   (dolist (folder (seq-filter #'eng/lsp-library-path-p (lsp-session-folders (lsp-session))))
     (lsp-workspace-folders-remove folder)))
 
-;; Projectile declares these safe, but Doom loads it after the first file's
-;; dir-locals are read, so Emacs would ask before applying them.
 (dolist (var '(projectile-project-compilation-cmd
                projectile-project-test-cmd
                projectile-project-run-cmd))
@@ -385,8 +345,6 @@ This is a lightweight way to apply config changes without restarting Emacs."
            " "))))
 
 (after! treemacs
-  ;; Doom disables follow mode. Reveal the current file in the tree, and keep
-  ;; the workspace reduced to the current buffer's project.
   (treemacs-follow-mode 1)
   (treemacs-project-follow-mode 1))
 
@@ -426,8 +384,6 @@ ultimately to plain `find-file' when the current directory is not a project."
 (load (expand-file-name "clojure.el" eng/doom-config-dir) t 'nomessage)
 (load (expand-file-name "agent-shell.el" eng/doom-config-dir) nil 'nomessage)
 
-;; Guix ships the aarch64 native module as libparinfer_rust.so. Prefer that
-;; over parinfer-rust-mode's unsupported Linux/aarch64 auto-download.
 (let ((parinfer-rust-cli (executable-find "parinfer-rust")))
   (when parinfer-rust-cli
     (setq parinfer-rust-library
@@ -453,7 +409,6 @@ ultimately to plain `find-file' when the current directory is not a project."
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
             (if envrc-global-mode
-                ;; Global toggles revisit buffers even after a local disable.
                 (let ((envrc-mode--set-explicitly nil))
                   (envrc-global-mode-enable-in-buffer))
               (when envrc-mode

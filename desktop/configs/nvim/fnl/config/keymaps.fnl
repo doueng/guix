@@ -4,8 +4,6 @@
 (vim.keymap.set [:n :x] :k "v:count == 0 ? 'gk' : 'k'"
                 {:expr true :silent true})
 
-;; smart-splits moves between windows, then Herdr panes, then hands off to
-;; keyleader for Hyprland. Resizing grows the Herdr pane once Neovim fills it.
 (let [keylog (require :config.keylog)]
   (each [_ [key direction] (ipairs [[:h :left] [:j :down] [:k :up] [:l :right]])]
     (keylog.map (.. :<C- key ">") #((. (require :smart-splits) (.. :move_cursor_ direction)))
@@ -33,7 +31,6 @@
 (vim.keymap.set :n :<A-.> :<cmd>BufferLineCycleNext<cr> {:desc "Next buffer"})
 
 (vim.keymap.set :n :<C-v> "\"+p" {:desc "Paste from clipboard"})
-;; Pasting over a selection keeps what was copied: visual P does not yank.
 (vim.keymap.set :x :<C-v> "\"+P" {:desc "Paste from clipboard"})
 (vim.keymap.set :x :p :P {:desc "Paste without yanking the selection"})
 (vim.keymap.set :i :<C-v> :<C-r>+ {:desc "Paste from clipboard"})

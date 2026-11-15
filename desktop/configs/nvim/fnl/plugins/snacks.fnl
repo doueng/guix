@@ -77,8 +77,6 @@
                        {:mode [:n :i] :desc "Next Notification Window"})})
 
 (fn apply-snacks-highlights []
-  ;; Snacks picker/explorer uses NormalFloat by default, which is light grey
-  ;; with doom-one. Use the regular editor background instead.
   (vim.api.nvim_set_hl 0 :SnacksPicker {:link :Normal})
   (vim.api.nvim_set_hl 0 :SnacksPickerList {:link :Normal})
   (vim.api.nvim_set_hl 0 :SnacksPickerInput {:link :Normal})
@@ -123,8 +121,7 @@
                 [:<leader>sG false]
                 (key :<leader>sw false {:mode [:n :x]})
                 (key :<leader>sW false {:mode [:n :x]})]
-         :opts {;; Prefer redraw smoothness over animated/decorated movement.
-                :indent {:enabled false}
+         :opts {:indent {:enabled false}
                 :scope {:enabled false}
                 :scroll {:enabled false}
                 :words {:enabled false}

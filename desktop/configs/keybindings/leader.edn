@@ -1,23 +1,3 @@
-;; The shared leader grammar. Editors enter it with Space in normal mode,
-;; Herdr with Ctrl+b Space or Alt+Space, and the desktop with Cmd+Space.
-;; Space after the leader opens each context's command palette.
-;; Contexts per entry: :nav (all, falls through editor > Herdr > Hyprland),
-;; :nvim, :doom and :idea (editor commands; IdeaVim stops at its own splits),
-;; :desktop (a Hyprland dispatcher such as ["focus" {:workspace 2}], see
-;; desktop/lib/hypr/dispatch.clj, or an action keyword), :desktop-command
-;; (argv), :chrome (a chord keyleader sends instead of the desktop action while Chrome
-;; is focused; alone, the binding does nothing outside Chrome), :desktop-label (the
-;; label on the desktop when it differs from :label), :herdr (CLI vector, action
-;; keyword, or {:plugin ID :action ID}).
-;; A single key, such as [","], is a frequent action and must not be a group key.
-;; :doom-match records how the meaning compares with upstream Doom at the same
-;; keys: :exact, :analogous (same idea, different object) or :differs. The
-;; reference shows a sequence Doom also binds without it as unverified.
-;; :terminal :keeps names the programs that receive bare Ctrl+h/j/k/l inside
-;; Herdr instead of Herdr moving focus. Each rule pairs a regex for the
-;; lower-cased foreground process name, which Linux truncates to 15 characters
-;; (Guix's Emacs wrapper shows as .emacs-31.1-rea), with the keys it keeps.
-;; Shells keep only Ctrl+l, which clears the screen.
 {:terminal {:keeps [["^(g?(view|l?n?vim?x?)(diff)?|\\.?emacs.*)$" "hjkl"]
                     ["^pi$" "jkl"]
                     ["^fzf$" "jk"]
@@ -38,11 +18,8 @@
    :doom "evil-switch-to-windows-last-buffer" :desktop ["focus" {:last true}]}
   {:keys ["."] :label "Find file, launch app or switch workspace" :doom-match :analogous :idea "<Action>(GotoFile)"
    :doom "eng/project-find-file" :desktop-command ["~/.local/bin/custom-launcher"] :herdr :choose-workspace}
-  ;; Upstream Doom's SPC d is the debugger group, so the editors keep w d.
-  ;; Alt+W alone closes a desktop window (bindings.edn), so the desktop leader has no close.
   {:keys ["d"] :label "Close pane" :doom-match :differs :herdr :close-pane}
   {:keys ["a"] :label "Agents" :doom-match :differs :herdr :choose-agent}
-  ;; Alt+E toggles Chrome's tab list (hypr/keys.lua), so the desktop leader has no e.
   {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
   {:keys ["w" "h"] :label "Focus left" :doom-match :exact :nav "left"}
   {:keys ["w" "j"] :label "Focus down" :doom-match :exact :nav "down"}

@@ -1,4 +1,3 @@
-;; Leader keys must be set before plugins load.
 (set vim.g.mapleader " ")
 (set vim.g.maplocalleader "\\")
 

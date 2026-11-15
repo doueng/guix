@@ -15,22 +15,17 @@ resume_agents_on_restore = true
 delivery = "system"
 
 [keys]
-# previous_tab is unbound: prefix+p is taken over by herdr-annotate (annotate.capture).
 prefix = "ctrl+b"
 help = "prefix+?"
 edit_scrollback = "prefix+shift+e"
 new_tab = "prefix+c"
 next_tab = "prefix+n"
-# kanata turns Cmd+digits into Ctrl+digits.
 switch_tab = ["prefix+1..9", "ctrl+1..9"]
 
 workspace_picker = ["prefix+w", "prefix+e"]
 navigate_workspace_up = "w"
 navigate_workspace_down = "e"
 
-# Ctrl+h/j/k/l move focus, or go to the programs that keep them under
-# leader.edn's :terminal :keeps. Ctrl+b h/j/k/l always move focus, so they leave
-# those programs. Both continue to Hyprland at the pane edge or when zoomed.
 focus_pane_left = []
 focus_pane_down = []
 focus_pane_up = []
@@ -134,8 +129,6 @@ type = "plugin_action"
 command = "hotchpotch.herdr-tiny-fingers.open"
 description = "copy visible text by hint"
 
-# prefix+a is taken by the agent picker and prefix+e opens workspaces, so
-# herdr-annotate's capture lives on prefix+p.
 [[keys.command]]
 key = "prefix+p"
 type = "plugin_action"
@@ -165,7 +158,6 @@ confirm_close = false
 agent_panel_sort = "spaces"
 pane_borders = "off"
 show_agent_labels_on_pane_borders = false
-# Remove the sidebar entirely: start collapsed at zero width.
 sidebar_start_collapsed = true
 sidebar_collapsed_mode = "hidden"
 

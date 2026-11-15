@@ -1,6 +1,3 @@
--- Guix patches Neovim's parser lookup to use TREE_SITTER_GRAMMAR_PATH
--- instead of runtimepath. Prefer Guix parsers, then fall back to parsers
--- installed by nvim-treesitter in runtimepath, loading only on demand.
 do
   local add = vim.treesitter.language.add
   vim.treesitter.language.add = function(lang, opts)
@@ -25,8 +22,6 @@ do
   end
 end
 
--- Guix installs the Fennel Lua module beside its executable rather than in
--- Neovim's default Lua path.
 local fennel_bin = vim.fn.exepath("fennel")
 if fennel_bin ~= "" then
   local fennel_path = vim.fn.fnamemodify(fennel_bin, ":p:h:h")

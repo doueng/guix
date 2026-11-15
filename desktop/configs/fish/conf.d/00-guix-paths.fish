@@ -5,8 +5,6 @@ for path in $paths[-1..1]
     end
 end
 
-# Keep the editable Doom wrapper ahead of the profile's raw Emacs binary.
-# Remove any duplicate inherited entry so this remains true across sessions.
 if test -d "$HOME/.local/bin"
     set -gx PATH "$HOME/.local/bin" (string match -v -- "$HOME/.local/bin" $PATH)
 end

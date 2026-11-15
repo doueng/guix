@@ -3,16 +3,12 @@
 [(plugin :mhinz/vim-signify
          {:event [:BufReadPre :BufNewFile]
           :init (fn []
-                  ;; In colocated jj/git repos, letting Signify try both jj and git is
-                  ;; racy: whichever async command returns first wins. If git wins, it
-                  ;; compares against Git HEAD/the tracked bookmark instead of the
-                  ;; current jj working-copy commit. Force jj mode for accurate signs.
+                  ;; Colocated jj/git: letting Signify try both races and git may win with the wrong base; force jj.
                   (set vim.g.signify_skip {:vcs {:allow [:jj]}})
                   (set vim.g.signify_vcs_cmds
                        {:jj "jj diff --ignore-working-copy --color=never --git --context=0 -r @ -- %f"})
                   (set vim.g.signify_vcs_cmds_diffmode
                        {:jj "jj file show -r @- -- %f"})
-                  ;; Match LazyVim/gitsigns.nvim's gutter glyphs.
                   (set vim.g.signify_sign_add "▎")
                   (set vim.g.signify_sign_change "▎")
                   (set vim.g.signify_sign_delete "")
@@ -21,10 +17,6 @@
                   (set vim.g.signify_sign_show_count false))
           :config (fn []
                     (let [apply-signify-highlights (fn []
-                                                     ;; vim-signify links sign highlights to Diff* by default,
-                                                     ;; which includes a colored background in doom-one. Link to
-                                                     ;; the foreground-only Neovim diff groups so the signcolumn
-                                                     ;; looks like gitsigns.nvim: a slim colored glyph, no block.
                                                      (vim.api.nvim_set_hl 0
                                                                           :SignifySignAdd
                                                                           {:link :Added})
