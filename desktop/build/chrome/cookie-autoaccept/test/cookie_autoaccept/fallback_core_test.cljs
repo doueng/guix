@@ -24,13 +24,10 @@
   (is (not (banner "Sign in to continue. Password required. We use cookies.")))
   (is (not (banner "Read our privacy policy and terms of service before you buy."))))
 
-;; Found by Bombadil: a mailing-list dialog says "you consent to receive our marketing emails"; reject mode
-;; hid it, and accept mode would have pressed its I agree button and submitted the form.
 (deftest ignores-a-dialog-that-asks-you-to-type-such-as-an-email-sign-up
   (is (not (banner "Join our mailing list. By clicking I agree you consent to receive our marketing emails about new products." {:fields 1})))
   (is (banner "We use cookies to improve your experience." {:fields 0})))
 
-;; Found by Bombadil: reject mode hid a consent modal but left its separate dimmed backdrop over the page.
 (deftest an-empty-full-viewport-layer-left-after-hiding-a-banner-is-its-backdrop-content-is-not
   (is (f/backdrop? 1 "" false))
   (is (f/backdrop? 0.95 "  " false))

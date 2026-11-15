@@ -1,5 +1,4 @@
-;; Visual mode on the page selection, after Vimium's mode_visual.js (MIT):
-;; movements are Selection.modify calls; o swaps ends; y yanks; V is line mode.
+;; After Vimium's mode_visual.js (MIT).
 (ns vimium-cljs.content.visual
   (:require [clojure.string :as str]
             [vimium-cljs.content.dom :as dom]))
@@ -46,7 +45,6 @@
                    (try (.setEnd r (.-focusNode s) (.-focusOffset s)) (catch :default _ nil))
                    (not (.-collapsed r)))
         [a b] (if forward? ["backward" "forward"] ["forward" "backward"])]
-    ;; Put the anchor at its line's outer edge, then the focus at its line's outer edge.
     (.setBaseAndExtent s (.-focusNode s) (.-focusOffset s) (.-anchorNode s) (.-anchorOffset s))
     (.modify s "extend" a "lineboundary")
     (.setBaseAndExtent s (.-focusNode s) (.-focusOffset s) (.-anchorNode s) (.-anchorOffset s))

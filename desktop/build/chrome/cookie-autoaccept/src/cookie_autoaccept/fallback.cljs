@@ -126,7 +126,6 @@
         count! (fn [a] (case a "click" (aset tally 0 (inc (aget tally 0))) "hide" (aset tally 1 (inc (aget tally 1))) nil))
         body js/document.body]
     (if in-frame
-      ;; A small frame that is all banner, such as a CMP message iframe.
       (when (and body (not (.hasAttribute body done-attr)) (visible? body))
         (count! (act body mode nil)))
       (let [roots (push-all #js [js/document] (shadow-roots js/document.documentElement))
@@ -159,7 +158,6 @@
                  (let [tally (scan (.-mode answer))]
                    (when (pos? (aget tally 0)) (send! #js {:type "fallbackClicked" :count (aget tally 0)}))
                    (when (pos? (aget tally 1)) (send! #js {:type "fallbackHidden" :count (aget tally 1)}))
-                   ;; The page was looked at after the rule's result, so the popup may now repeat the rule's claim.
                    (when-not in-frame
                      (send! #js {:type "fallbackScanned" :afterResult (js/Boolean (.-afterResult answer))}))))))))
 

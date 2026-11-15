@@ -1,7 +1,3 @@
-;; The tab list in Chrome's side panel (panel.html). With the address bar and tab strip
-;; hidden (Hyprland tells Chrome it is fullscreen while the window stays tiled), this is
-;; where the window's tabs show: click a row to switch, middle-click or × to close.
-;; The panel belongs to one window and redraws on every tab event.
 (ns vimium-cljs.panel.main)
 
 (defn- el [tag cls & kids]

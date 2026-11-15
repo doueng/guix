@@ -9,8 +9,6 @@
         settings (atom settings)
         save (fn [next]
                (reset! settings next)
-               ;; The worker stores the settings and re-registers the early script before the reload, so the page
-               ;; gets them.
                (-> (js/chrome.runtime.sendMessage #js {:type "applySettings" :settings (clj->js next)})
                    (.then (fn []
                             (when (and (some? (some-> tab .-id)) (some? site)) (js/chrome.tabs.reload (.-id tab)))

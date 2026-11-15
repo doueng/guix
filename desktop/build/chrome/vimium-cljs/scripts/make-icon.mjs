@@ -1,10 +1,8 @@
-// Writes ext/icons/icon128.png: a dark rounded square with a green V, drawn pixel by pixel.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 
 const N = 128;
 const px = Buffer.alloc(N * (N * 4 + 1));
-// distance from point to segment
 const seg = (x, y, ax, ay, bx, by) => {
   const dx = bx - ax, dy = by - ay;
   const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));

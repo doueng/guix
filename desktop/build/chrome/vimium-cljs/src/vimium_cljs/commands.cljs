@@ -12,10 +12,6 @@
    [:tabs "Manipulating tabs"]
    [:misc "Miscellaneous"]])
 
-;; :bg      runs in the service worker
-;; :once    takes no count (Vimium's noRepeat)
-;; :top     runs only in the top frame
-;; :options option names the command accepts besides count
 (def table
   [["scrollDown" :page "Scroll down" {}]
    ["scrollUp" :page "Scroll up" {}]
@@ -91,7 +87,6 @@
 (def by-name
   (into {} (map (fn [[n g d o]] [n (assoc o :name n :group g :desc d)])) table))
 
-;; Vimium commands this port leaves out, with the reason shown on the options page.
 (def left-out
   {"LinkHints.activateModeToDownloadLink" "needs the downloads permission"
    "LinkHints.activateModeToOpenIncognito" "incognito is not enabled for unpacked extensions by default"

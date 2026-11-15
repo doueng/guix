@@ -1,4 +1,3 @@
-// Writes static/icons/icon128.png: a cookie, drawn pixel by pixel so no image tool is needed.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 

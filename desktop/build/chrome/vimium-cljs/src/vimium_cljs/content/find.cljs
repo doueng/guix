@@ -1,7 +1,3 @@
-;; Find mode. Like Vimium's mode_find.js the query is smart-case (\\i and \\I
-;; force it) and may be a regexp; unlike it, this searches the text nodes
-;; itself instead of window.find, so it can highlight every match with the
-;; CSS Custom Highlight API and reach open shadow roots.
 (ns vimium-cljs.content.find
   (:require [clojure.string :as str]
             [vimium-cljs.content.dom :as dom]
@@ -56,7 +52,6 @@
                          (recur (inc i) (+ pos (count t))))))
                    (.join sb ""))
             locate (fn [pos]
-                     ;; binary search for the node holding offset POS
                      (loop [lo 0 hi (dec (.-length starts))]
                        (if (>= lo hi)
                          [lo (- pos (aget starts lo))]

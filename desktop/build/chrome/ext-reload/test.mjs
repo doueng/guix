@@ -1,6 +1,3 @@
-// End to end: the ext-reload hub, its helper extension and the ext-reload command against a
-// throwaway headless Flatpak Chrome. A target extension is built (its build rewrites bg.js),
-// reloaded from disk, and the page its content script matches is reloaded. Run: make ext-reload-test
 import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -15,21 +12,18 @@ const PORT = 17357 + Math.floor(Math.random() * 1000);
 const tmp = mkdtempSync(join(tmpdir(), 'ext-reload-test-'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// The helper, pointed at this test's hub port.
 const helperSrc = join(tmp, 'helper-src');
 cpSync(join(HERE, 'reloader'), helperSrc, { recursive: true });
 const bg = join(helperSrc, 'bg.js');
 writeFileSync(bg, readFileSync(bg, 'utf8').replace('127.0.0.1:7357', `127.0.0.1:${PORT}`));
 const helperDir = join(tmp, 'helper');
 
-// A page server that counts loads, and a target extension whose content script matches it.
 let loads = 0;
 const web = createServer((req, res) => { loads++; res.end('<title>t</title>page'); }).listen(0, '127.0.0.1');
 await new Promise((r) => web.once('listening', r));
 const webPort = web.address().port;
 const proj = join(tmp, 'target');
 mkdirSync(join(proj, 'ext'), { recursive: true });
-// A manifest key fixes the id, as for the extensions in desktop/build/chrome; ext-reload derives the same id.
 const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'der' });
 const keyId = [...createHash('sha256').update(key).digest().subarray(0, 16)]
   .map((b) => String.fromCharCode(97 + (b >> 4), 97 + (b & 15))).join('');
@@ -80,7 +74,6 @@ try {
   assert.equal(helperId, 'hhphiidacaejhbolcnboolfapncammkf', 'the manifest key fixes the helper id');
   const { id: targetId } = await cdp('Extensions.loadUnpacked', { path: join(proj, 'ext') });
   assert.equal(targetId, keyId, 'the manifest key fixes the target id');
-  // A copy of the same name from another folder, without the key.
   const old = join(tmp, 'old-ext');
   cpSync(join(proj, 'ext'), old, { recursive: true });
   const { key: _k, ...oldManifest } = JSON.parse(readFileSync(join(old, 'manifest.json'), 'utf8'));

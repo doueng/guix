@@ -1,8 +1,3 @@
-// Screenshots of the Vomnibar at the user's display size (1600x1000 CSS px at 1.6x), over a
-// seeded profile: pages with real-looking URLs are served from DevTools request interception
-// (no network), visited so they land in history with titles, some bookmarked, some left open.
-//   node scripts/vomnibar-lab.mjs OUTDIR [query ...]
-// Writes OUTDIR/<scheme>-<n>.png for each query ("" is the empty Vomnibar), light and dark.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { launch, sleep, evaluate, workerSession } from '../test/lib/chrome.mjs';
@@ -62,7 +57,6 @@ export async function seededBrowser({ width = 1600, height = 1000, scale = 1.6 }
   return { ...b, w, openPage };
 }
 
-/** A session on the Vomnibar frame (or popup), once its input is shown. */
 export async function vomnibarSession(b) {
   for (let i = 0; i < 40; i++) {
     const { targetInfos } = await b.cdp('Target.getTargets');
@@ -102,7 +96,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         const vs = await vomnibarSession(b);
         await b.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] }, vs);
         console.log('focus', await evaluate(b.cdp, vs, 'document.hasFocus() + " " + document.activeElement.id'));
-        // FORCE_FOCUS=1 puts focus back in the input, for builds that lose it on open.
         if (process.env.FORCE_FOCUS) await evaluate(b.cdp, vs, "document.getElementById('query').focus()");
         if (q) await keys(b, vs, q);
         console.log('value', await evaluate(b.cdp, vs, "document.getElementById('query').value + ' active=' + document.activeElement.id"));

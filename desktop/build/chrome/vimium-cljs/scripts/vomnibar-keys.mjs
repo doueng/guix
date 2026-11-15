@@ -1,7 +1,3 @@
-// Keystrokes for common Vomnibar tasks: for each task, tries key sequences shortest first
-// in the seeded profile (scripts/vomnibar-lab.mjs) and reports the first that does the task.
-// Picks memory starts empty for every try, so these are first-time counts.
-//   node scripts/vomnibar-keys.mjs [EXT_DIR]   (ext/ by default; prints JSON)
 import { seededBrowser, keys, vomnibarSession } from './vomnibar-lab.mjs';
 import { sleep, evaluate } from '../test/lib/chrome.mjs';
 
@@ -46,7 +42,6 @@ try {
     for (const c of candidates(task)) {
       if (!task.warm) await evaluate(b.cdp, b.w, 'chrome.storage.local.clear().then(() => true)');
       else if (!warmed) {
-        // One earlier pick: typed in full, opened with Enter.
         warmed = true;
         await evaluate(b.cdp, b.w, 'chrome.storage.local.clear().then(() => true)');
         await b.cdp('Page.bringToFront', {}, home.s);
@@ -60,8 +55,6 @@ try {
       await sleep(300);
       await keys(b, home.s, '<esc>' + c.open);
       await sleep(500);
-      // The old build loses the input's focus right after opening (headless at least);
-      // give it back so its counts measure ranking, not that bug.
       const vs = await vomnibarSession(b);
       if (!(await evaluate(b.cdp, vs, "document.activeElement.id === 'query'"))) {
         focusAssists++;
@@ -73,7 +66,6 @@ try {
       await sleep(900);
       const t = { ...(await state()), count0 };
       const ok = task.ok(t);
-      // Undo: close extra tabs, bring the home tab back to Hacker News.
       const { targetInfos } = await b.cdp('Target.getTargets');
       for (const p of targetInfos.filter((x) => x.type === 'page' && !initial.has(x.targetId))) await b.cdp('Target.closeTarget', { targetId: p.targetId });
       const { targetInfo } = await b.cdp('Target.getTargetInfo', { targetId: home.targetId });

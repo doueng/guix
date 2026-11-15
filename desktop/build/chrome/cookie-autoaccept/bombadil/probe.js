@@ -1,9 +1,3 @@
-// Page probe for the Bombadil run (bombadil/run.mjs injects it first in every fixture page, frames included).
-// It watches what the extension does to the page without touching the extension:
-//   - untrusted click events: el.click() from a content script or a main-world snippet;
-//   - consent decisions through the fixture's mark(), attributed to the user (a trusted event) or to a script;
-//   - what is hidden: data-cookie-autoaccept marks, autoconsent's style elements, consent UI no longer visible.
-// window.__probeFacts() returns one JSON snapshot for the spec's extractor.
 (() => {
   'use strict';
   const isTop = window.top === window;
@@ -21,7 +15,6 @@
     bannerSince: null,
     blockedSince: null,
     keepHiddenSince: null,
-    // Consent values present before this load, so a CMP stand-in can tell a value written during the load.
     startCookies: document.cookie,
     startLocal: (() => { try { return Object.keys(localStorage); } catch { return []; } })(),
   };
@@ -47,7 +40,6 @@
     if (!isTop) parent.postMessage({ __probe: act }, '*');
   }
 
-  // A frame's acts arrive here; the last frame click says who caused the frame's consent message that follows.
   let lastFrameClick = null;
   if (isTop) {
     // Registered before the fixture's own listeners, so they never see the probe's messages.
@@ -60,7 +52,7 @@
     }, true);
   }
 
-  // The click being dispatched now. window.event cannot say: it is undefined in listeners inside a shadow tree.
+  // window.event is undefined in listeners inside a shadow tree, so track the dispatching click here.
   let dispatching = null;
   addEventListener('click', (e) => {
     dispatching = e;
@@ -90,7 +82,6 @@
     if (!e.isTrusted) record({ kind: 'submit', label: labelOf(e.target) });
   }, true);
 
-  // The fixtures report a consent choice through window.mark(what); wrap whatever they assign.
   let markFn = null;
   function wrappedMark(what) {
     const ev = dispatching || window.event;
@@ -127,7 +118,6 @@
   };
   const parentAcross = (el) => el.parentElement || (el.getRootNode() instanceof ShadowRoot ? el.getRootNode().host : null);
 
-  // Something fixed covers the middle of the viewport, or the page cannot scroll.
   function blocker() {
     const vw = innerWidth, vh = innerHeight;
     let el = document.elementFromPoint(vw / 2, vh / 2);
@@ -194,8 +184,7 @@
       popup: state.popup,
     };
   }
-  // Bombadil samples states after the page settles, which misses a banner shown for a few frames and then answered.
-  // So count every animation frame in which a known CMP's banner is visible, for the first 20 s of the page.
+  // Bombadil samples only settled states, missing briefly shown banners, so count every frame one is visible.
   let cmpFrames = 0;
   const tick = () => {
     if (everywhere('[data-consent-ui="cmp"]').some(shown)) cmpFrames++;

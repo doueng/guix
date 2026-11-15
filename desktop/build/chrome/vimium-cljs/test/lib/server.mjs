@@ -1,6 +1,3 @@
-// Serves test/fixtures on 127.0.0.1 (and localhost, the cross-origin frame's host).
-// /__ctl/keys?seq=... sends trusted key events to the page through the DevTools pipe;
-// /__ctl/click?x=&y= sends a trusted click. The Bombadil spec's custom actions call them.
 import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, normalize } from 'node:path';
@@ -10,8 +7,6 @@ import { ROOT, sleep, evaluate, workerSession } from './chrome.mjs';
 const FIXTURES = join(ROOT, 'test/fixtures');
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript' };
 
-// What the Vomnibar frame shows: whether it is open with the input focused, the input's
-// value and the rows (as the page cannot look into the extension's frame).
 const vomnibarState = `(() => {
   const q = document.getElementById('query'), v = document.getElementById('vomnibar');
   const l = document.getElementById('list'), sel = l && l.querySelector('li.selected');
@@ -45,9 +40,7 @@ export function startServer(control) {
   return new Promise((ok) => server.listen(0, '127.0.0.1', () => ok({ server, port: server.address().port })));
 }
 
-/** Control handler that drives whichever page SESSION() returns. */
-// An input event sent to a frame that the event itself removes (Escape closing the
-// Vomnibar) is never acknowledged, so input calls give up after a second.
+// Input events to a frame the event removes (Escape closing the Vomnibar) are never acknowledged, so give up after a second.
 const within = (p, ms) => Promise.race([p, sleep(ms)]);
 
 export function controller(cdp, session, extensionId) {

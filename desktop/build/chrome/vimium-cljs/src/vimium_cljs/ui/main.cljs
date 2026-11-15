@@ -1,6 +1,3 @@
-;; Extension pages: the Vomnibar (in a frame over the page, in a popup window, or as the new
-;; tab page), the help dialog and the offscreen clipboard document. One bundle; the location
-;; picks the page. The Vomnibar follows Vimium's pages/vomnibar_page.js (MIT).
 (ns vimium-cljs.ui.main
   (:require [clojure.string :as str]
             [vimium-cljs.commands :as commands]
@@ -24,15 +21,9 @@
         [kind q] (str/split (subs h (min 1 (count h))) #"\?" 2)]
     [kind (js/URLSearchParams. (or q ""))]))
 
-;; The worker opens the Vomnibar in its own popup window, naming the tab to act on, when
-;; the active tab runs no content script (chrome:// pages, the Web Store) or the page cannot
-;; take focus (the address bar or side panel has it).
 (defn- popup? [] (= "1" (.get (second (params)) "popup")))
 (defn- target-tab [] (some-> (.get (second (params)) "tabId") js/Number))
-;; ui.html with no #kind is the new tab page (manifest chrome_url_overrides). Chrome gives a new
-;; tab page's keyboard focus to the address bar, and keeps it there through navigation; it
-;; picks the address bar or the page only when a tab becomes active. So the new tab page puts
-;; ui.html?newtab in a tab of its own, in its place, which gets the page's focus, and closes.
+;; Chrome keeps a new tab page's focus in the address bar, so the new tab page reopens as ui.html?newtab in its own tab to get page focus.
 (defn- new-tab-page? [] (= "?newtab" (.-search js/location)))
 
 (declare reset-query!)
@@ -41,16 +32,6 @@
   (cond (new-tab-page?) (reset-query!)
         (popup?) (.close js/window)
         :else (.postMessage (.-parent js/window) "vimium-cljs:close" "*")))
-
-;; ---- Vomnibar -------------------------------------------------------------------
-;; Keys: Enter opens the selected row (Shift: new tab, Ctrl: the typed text as is), Tab or
-;; Ctrl-n/j and Shift-Tab or Ctrl-p/k move, 1-9 pick a row in tab search while the query
-;; is empty, Ctrl+V of a URL into the empty input opens it (Ctrl+Shift+V only pastes).
-;; Alt+digits stay with Hyprland's workspaces.
-;;
-;; The page reads its candidates (tabs, history, bookmarks, picks) once when it opens and
-;; ranks them here, once per animation frame, so a burst of keys costs one ranking and no
-;; message to the service worker.
 
 (defonce vstate (atom {:items [] :selected 0 :cands nil :loaded nil :frame nil}))
 
@@ -118,8 +99,6 @@
       (.appendChild list (row mode i item selected)))
     (some-> ^js (.querySelector list "li.selected") (.scrollIntoView #js {:block "nearest"}))))
 
-;; ---- candidates ----------------------------------------------------------------------
-
 (def ^:private day-ms (* 1000 60 60 24))
 
 (defn- bookmark-leaves [^js nodes]
@@ -180,8 +159,6 @@
                  (.then (fn [c] (when (mine?) (swap! vstate assoc :cands c :for nil) (refresh!)) c)))]
     (swap! vstate assoc :loaded full)
     full))
-
-;; ---- results ---------------------------------------------------------------------------
 
 (defn- show!
   "Ranks the candidates for TEXT and draws the rows, unless they already show TEXT."
@@ -300,8 +277,6 @@
                        true)
     (.focus input)
     (when (= mode "edit") (.select input))
-    ;; Keys typed while this frame loaded went to the page, which kept them for us: put
-    ;; them before anything typed here since, and press Enter if one was typed.
     (when (not= js/window (.-parent js/window))
       (.addEventListener js/window "message"
                          (fn [^js e]
@@ -312,7 +287,6 @@
                                  (.dispatchEvent input (js/Event. "input")))
                                (when (.-enter d) (open! new-tab))))))
       (.postMessage (.-parent js/window) "vimium-cljs:ready" "*"))
-    ;; The worker's Ctrl+L on the new tab page: focus the input here, or say no and it opens a popup.
     (when (new-tab-page?)
       (-> (js/chrome.tabs.getCurrent)
           (.then (fn [^js me]
@@ -327,8 +301,6 @@
                           (respond ok)))
                       false))))))
     nil))
-
-;; ---- help ---------------------------------------------------------------------------
 
 (defn- key-label [k] (str/replace k #"^<(.+)>$" "‹$1›"))
 
@@ -354,8 +326,6 @@
         (.appendChild sec tbl)
         (.appendChild body sec))))
   (.focus js/window))
-
-;; ---- offscreen clipboard ---------------------------------------------------------------
 
 (defn offscreen! []
   (js/chrome.runtime.onMessage.addListener

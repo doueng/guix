@@ -1,7 +1,3 @@
-// Times the Vomnibar over a large profile: N_HISTORY history entries and N_TABS open tabs.
-// For each open it reports how long until the input is focused with rows shown, and for
-// each keystroke how long from the input event until the list shows rows for that text.
-//   node scripts/vomnibar-perf.mjs [--history 5000] [--tabs 60] [--query 'gith iss']
 import { launch, sleep, evaluate, workerSession } from '../test/lib/chrome.mjs';
 import { startServer } from '../test/lib/server.mjs';
 import { keys, vomnibarSession } from './vomnibar-lab.mjs';

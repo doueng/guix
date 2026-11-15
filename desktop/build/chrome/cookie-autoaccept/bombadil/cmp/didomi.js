@@ -1,9 +1,5 @@
-// Stand-in for the Didomi SDK (sdk.privacy-center.org loader.js), served under its real host name (run.mjs maps it to the fixture server).
-// It reads the stored consent like the real one: with a choice stored it builds no UI; without one it builds its banner.
-// A choice stored during this page load came from the extension's pre-answer, so it is reported through mark().
 (() => {
   'use strict';
-  // What the page held before this load (the probe's snapshot): a value that appeared since was written this load.
   const p = window.__probe || { startCookies: '', startLocal: [] };
   const cookie = (n) => (document.cookie.split('; ').find((c) => c.startsWith(n + '=')) || '').slice(n.length + 1) || null;
   const fresh = (n) => !p.startCookies.split('; ').some((c) => c.startsWith(n + '=')) && !p.startLocal.includes(n);

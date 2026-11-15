@@ -1,6 +1,3 @@
-// ext-reload's helper extension. It keeps one WebSocket to the local hub (ext-reload serve, a
-// Home shepherd service), which keeps this service worker alive, and acts on the hub's commands:
-// reload an unpacked extension from disk (disable, then enable) and reload the tabs it matches.
 const HUB = 'ws://127.0.0.1:7357/reloader';
 let ws = null;
 
@@ -21,7 +18,6 @@ function connect() {
   sock.onerror = () => {};
 }
 
-// A pattern from content_scripts.matches as a RegExp; enough of the match-pattern grammar for tabs.
 function patternRegex(p) {
   if (p === '<all_urls>') return /^(https?|wss?|file|ftp):\/\//;
   const m = /^(\*|[a-z-]+):\/\/([^/]*)(\/.*)$/.exec(p);
@@ -50,7 +46,6 @@ async function handle({ op, extId, url, name, matches = [], tabs = 'all' }) {
   const all = await dev();
   const same = all.filter((x) => (extId ? x.id === extId : x.name === name));
   if (!same.length) return { ok: false, error: 'not-installed', name, stale: all.filter((x) => x.name === name).map(brief) };
-  // Reload the copies that run; when none does, this enables them (a disabled copy is activated).
   const running = same.filter((x) => x.enabled);
   const targets = running.length ? running : same;
   for (const x of targets) {

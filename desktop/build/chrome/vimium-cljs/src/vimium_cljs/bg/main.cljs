@@ -1,7 +1,5 @@
-;; The MV3 service worker: tab commands, the link-hint coordinator that spans
-;; frames, tab recency, global marks, the clipboard (through an offscreen
-;; document) and Vomnibar queries. After Vimium's background_scripts (MIT).
-;; State that must survive the worker sleeping lives in chrome.storage.session.
+;; After Vimium's background_scripts (MIT). State that must survive the worker
+;; sleeping lives in chrome.storage.session.
 (ns vimium-cljs.bg.main
   (:require [clojure.string :as str]
             [vimium-cljs.hints :as hints]
@@ -29,8 +27,6 @@
   (js/chrome.tabs.update (.-id t) #js {:active true})
   (js/chrome.windows.update (.-windowId t) #js {:focused true}))
 
-;; ---- tab recency ---------------------------------------------------------------
-
 (defn- recency [] (-> (js/chrome.storage.session.get "recency")
                       (.then (fn [^js r] (vec (or (some-> (.-recency r) js->clj) []))))))
 
@@ -38,8 +34,6 @@
   (-> (recency)
       (.then (fn [ids] (js/chrome.storage.session.set
                         #js {:recency (clj->js (vec (take 200 (cons tab-id (remove #{tab-id} ids)))))})))))
-
-;; ---- clipboard -------------------------------------------------------------------
 
 (defn- ensure-offscreen []
   (-> (js/chrome.offscreen.hasDocument)
@@ -59,8 +53,6 @@
       (.then #(js/chrome.runtime.sendMessage #js {:target "offscreen" :type "paste"}))
       (.then (fn [t] (str/trim (or t ""))))))
 
-;; ---- opening URLs ------------------------------------------------------------------
-
 (defn open-url! [^js tab url {:keys [new-tab active]}]
   (cond
     (str/starts-with? (str/lower-case (str/trim url)) "javascript:") nil
@@ -69,8 +61,6 @@
 
 (defn- typed->url [text]
   (p (rank/->url text config/search-engines config/search-url)))
-
-;; ---- commands --------------------------------------------------------------------
 
 (def ^:private zoom-levels [0.25 0.33 0.5 0.67 0.75 0.8 0.9 1 1.1 1.25 1.5 1.75 2 2.5 3 4 5])
 
@@ -149,9 +139,7 @@
                              (open-url! tab (if (str/starts-with? u "view-source:") (subs u 12) (str "view-source:" u)) {:new-tab true :active true}))
       nil)))
 
-;; ---- link hints across frames --------------------------------------------------------
-
-(defonce sessions (atom {}))   ; tab-id -> {:mode :typed :all [{:frame :index :hint}] :key-frame}
+(defonce sessions (atom {}))
 
 (defn- hints-exit! [tab-id]
   (when-let [{:keys [all]} (get @sessions tab-id)]
@@ -220,8 +208,6 @@
             :else (do (swap! sessions assoc-in [tab-id :typed] t)
                       (broadcast t))))))))
 
-;; ---- global marks ------------------------------------------------------------------
-
 (defn- strip-hash [u] (first (str/split (or u "") #"#")))
 
 (defn- scroll-when-loaded! [tab-id scroll]
@@ -247,10 +233,6 @@
                                         (.then (fn [^js nt] (scroll-when-loaded! (.-id nt) scroll)))))
                                   true)))))
                  false)))))
-
-;; ---- Vomnibar ---------------------------------------------------------------------
-;; The Vomnibar page reads and ranks its candidates itself (vimium-cljs.vomnibar); the worker
-;; opens what it picks and remembers the pick, which ranks it higher next time.
 
 (defn- picks []
   (-> (js/chrome.storage.local.get "vomnibarPicks")
@@ -292,13 +274,8 @@
                                     (activate-tab! t)
                                     (open-url! tab url {:new-tab new-tab :active true}))))))))))))
 
-;; Chrome's own Ctrl+L focuses the address bar and is not reserved from extensions: the user
-;; assigns it to the "vomnibar" command in chrome://extensions/shortcuts (Chrome will not
-;; auto-assign a suggested key that a browser shortcut has). The command arrives here even
-;; when focus is in the address bar. The page cannot take focus back from the address bar,
-;; and a tab without our content script (chrome:// pages, the Web Store) has no page UI, so
-;; both get the Vomnibar in a popup window that acts on that tab. Our new tab page has the
-;; Vomnibar already, so there the command only focuses it (or switches it to tab search).
+;; The command arrives even with focus in the address bar, which the page cannot take back, and tabs
+;; without our content script have no page UI: both get the Vomnibar in a popup acting on that tab.
 
 (defn- target-tab
   "The tab a Vomnibar message acts on: the one it names (a popup Vomnibar) or the sender's."
@@ -307,7 +284,6 @@
     (-> (js/chrome.tabs.get id) (.catch (fn [_] sender-tab)))
     (p sender-tab)))
 
-;; The popup is sized to the Vomnibar with ten rows, as Hyprland's chrome-extension-popup rule.
 (defn- vomnibar-popup! [mode ^js tab]
   (js/chrome.windows.create
    #js {:url (js/chrome.runtime.getURL (str "ui.html#vomnibar?mode=" mode "&popup=1"
@@ -337,8 +313,6 @@
                  (-> (show-in-tab mode tab)
                      (.then (fn [shown] (when-not shown (vomnibar-popup! mode tab))))))))))
 
-;; ---- messages ------------------------------------------------------------------------
-
 (defn handle [^js msg ^js sender]
   (let [^js tab (.-tab sender)
         tab-id (some-> tab .-id)
@@ -362,8 +336,6 @@
         "mark-goto-global" (mark-goto! (.-letter msg))
         "vomnibar-open" (do (.then (target-tab msg tab) #(vomnibar-open! % msg)) nil)
         nil))))
-
-;; ---- reloads and updates ------------------------------------------------------------
 
 (defn- inject-open-tabs!
   "Chrome does not inject content scripts into tabs that were open when the extension was
@@ -393,7 +365,6 @@
    (fn [name ^js tab]
      (case name
        "vomnibar" (vomnibar-command! "omni" tab)
-       ;; The desktop leader's b b (Cmd+Space b b) sends this command's key in Chrome.
        "vomnibar-tabs" (vomnibar-command! "tabs" tab)
        "tab-panel" (-> (js/chrome.sidePanel.open #js {:windowId (.-windowId tab)})
                        (.catch (fn [e] (js/console.warn "vimium-cljs: side panel" e))))
@@ -403,8 +374,7 @@
   (js/chrome.tabs.onActivated.addListener (fn [^js info] (note-active! (.-tabId info))))
   (js/chrome.tabs.onRemoved.addListener (fn [id] (swap! sessions dissoc id)))
   (js/chrome.tabs.onUpdated.addListener (fn [id ^js info] (when (= "loading" (.-status info)) (swap! sessions dissoc id))))
-  ;; A page changing its URL in place (history.pushState, a new #fragment) is navigation to
-  ;; the user, and the content script cannot see pushState, so tell the frame (as Vimium does).
+  ;; The content script cannot see history.pushState, so tell the frame its URL changed.
   (let [url-changed (fn [^js d] (to-frame (.-tabId d) (.-frameId d) {:type "url-changed"}))]
     (js/chrome.webNavigation.onHistoryStateUpdated.addListener url-changed)
     (js/chrome.webNavigation.onReferenceFragmentUpdated.addListener url-changed)))

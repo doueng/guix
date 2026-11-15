@@ -38,7 +38,6 @@
                  (attach!)
                  (js/clearTimeout (aget hold-timer 0))
                  (aset hold-timer 0 (js/setTimeout release hold-ms))))
-        ;; Top frame: CMP scripts seen as they are added, before they run.
         preanswer (fn [^js node]
                     (when (and (identical? (.-tagName node) "SCRIPT") (js/Boolean (.-src node)))
                       (when-let [host (try (.-hostname (js/URL. (.-src node) js/location.href)) (catch :default _ nil))]
@@ -58,15 +57,11 @@
                                             (when (and (identical? (.-store w) "local") (nil? (js/localStorage.getItem (.-name w))))
                                               (js/localStorage.setItem (.-name w) (.-value w))
                                               (aset wrote 0 (inc (aget wrote 0))))
-                                            ;; Storage can be blocked (sandboxed or cookie-less documents); the CMP then
-                                            ;; asks and autoconsent answers.
                                             (catch :default _ nil))))
                               (when (pos? (aget wrote 0))
                                 (-> (js/chrome.runtime.sendMessage #js {:type "preanswered" :cmp (.-name cmp)})
                                     (.catch (fn [_]))))))))))
-        ;; After a release, a banner root in an added subtree hides again. The observer callback runs as a microtask
-        ;; of the task that added it, so before any paint and before any animation-frame callback could see it. Only
-        ;; the added subtrees are matched, not the whole document.
+        ;; Observer callbacks run as a microtask of the adding task, so a re-added banner hides before any paint.
         new-banner? (fn [^js n]
                       (or (and (.matches n selector) (not (.has released n)))
                           (.some (js/Array.from (.querySelectorAll n selector)) #(not (.has released %)))))
@@ -80,8 +75,6 @@
                                             (when (identical? 1 (.-nodeType n))
                                               (when top? (preanswer n))
                                               (when-not (aget hiding 0)
-                                                ;; An unparsable selector in the joined list; the stylesheet still
-                                                ;; drops only that rule.
                                                 (try (when (new-banner? n) (hide)) (catch :default _ nil))))))))))]
     (set! (.-id style) "cookie-autoaccept-prehide")
     ;; One rule per selector: a selector this browser cannot parse then drops only its own rule.
@@ -92,7 +85,6 @@
     (hide)
     (js/chrome.runtime.onMessage.addListener
      (fn [^js msg] (when (and msg (identical? (.-type msg) "prehideRelease")) (release))))
-    ;; A subframe's own URL decides whether this script runs, but its top site's toggle is what counts.
     (when-not top?
       (-> (js/chrome.runtime.sendMessage #js {:type "earlyQuery"})
           (.then (fn [^js r]

@@ -1,8 +1,4 @@
-// Starts one headless Chrome with a throwaway profile and loads ext/ over the DevTools pipe.
-// Chrome is the com.google.Chrome flatpak when present, else $CHROME (a chromium binary).
-// Branded Chrome ignores --load-extension, so this uses Extensions.loadUnpacked (needs
-// --enable-unsafe-extension-debugging and --remote-debugging-pipe). With `port` it also
-// opens a DevTools port for Bombadil's test-external.
+// Branded Chrome ignores --load-extension, so use Extensions.loadUnpacked (needs --enable-unsafe-extension-debugging and --remote-debugging-pipe).
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,8 +9,6 @@ const flatpak = spawnSync('flatpak', ['info', 'com.google.Chrome'], { stdio: 'ig
 const chromeBin = process.env.CHROME || (flatpak ? null : ['chromium', 'chromium-browser'].find((c) => spawnSync('which', [c]).status === 0));
 export const available = !!(flatpak || chromeBin);
 
-// `display` (":99") runs a headed Chrome on that X server instead (an Xvfb for checks that need
-// Chrome's own UI: the address bar, popup windows, the new tab page's focus).
 export async function launch({ port, width = 1024, height = 768, ext = join(ROOT, 'ext'), display, flags: extra = [] } = {}) {
   const profile = mkdtempSync(join(tmpdir(), 'vimium-cljs-e2e-'));
   const flags = [
@@ -70,7 +64,6 @@ export async function evaluate(cdp, sessionId, expression) {
   return r.result.value;
 }
 
-/** A session on the extension's service worker. */
 export async function workerSession(cdp, extensionId) {
   for (let i = 0; i < 50; i++) {
     const { targetInfos } = await cdp('Target.getTargets');

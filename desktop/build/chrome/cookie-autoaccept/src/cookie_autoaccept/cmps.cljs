@@ -5,7 +5,6 @@
   (:require-macros [cookie-autoaccept.data :as data]))
 
 (def ^:private year-s (* 365 24 3600))
-;; IAB TCF v2 core string. Vendor list version and CMP ids are fixed guesses; a CMP that wants a newer list re-asks.
 (def ^:private vendor-list-version 100)
 (def ^:private max-vendor 1500)
 
@@ -21,34 +20,34 @@
         flags (fn [n width] (dotimes [i width] (.push bits (if (and accept (< i n)) 1 0))))
         letters (fn [s] (dotimes [i (.-length s)] (put (- (.charCodeAt s i) 65) 6)))
         ds (js/Math.round (/ now 100))]
-    (put 2 6)                                     ; version
-    (put ds 36)                                   ; created
-    (put ds 36)                                   ; last updated
+    (put 2 6)
+    (put ds 36)
+    (put ds 36)
     (put cmp-id 12)
-    (put 1 12)                                    ; CMP version
-    (put 1 6)                                     ; consent screen
+    (put 1 12)
+    (put 1 6)
     (letters "EN")
     (put vendor-list-version 12)
-    (put 5 6)                                     ; TCF policy version (2.2)
-    (put 1 1)                                     ; service specific
-    (put 0 1)                                     ; non-standard texts
-    (flags 2 12)                                  ; special feature opt-ins
-    (flags 11 24)                                 ; purpose consents
-    (put 0 24)                                    ; purpose legitimate interests
-    (put 0 1)                                     ; purpose one treatment
-    (letters "AA")                                ; publisher country, unknown
+    (put 5 6)
+    (put 1 1)
+    (put 0 1)
+    (flags 2 12)
+    (flags 11 24)
+    (put 0 24)
+    (put 0 1)
+    (letters "AA")
     (if accept
       (do (put max-vendor 16)
-          (put 1 1)                               ; range encoding
-          (put 1 12)                              ; one entry
-          (put 1 1)                               ; a range
+          (put 1 1)
+          (put 1 12)
+          (put 1 1)
           (put 1 16)
           (put max-vendor 16))
       (do (put 0 16)
           (put 0 1)))
-    (put 0 16)                                    ; vendor legitimate interests: none
+    (put 0 16)
     (put 0 1)
-    (put 0 12)                                    ; publisher restrictions: none
+    (put 0 12)
     (while (pos? (mod (.-length bits) 8)) (.push bits 0))
     (let [bin (loop [i 0 out ""]
                 (if (< i (.-length bits))

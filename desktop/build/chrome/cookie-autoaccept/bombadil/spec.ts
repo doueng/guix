@@ -1,16 +1,10 @@
-// Properties of cookie-autoaccept while Bombadil explores the fixture site (bombadil/run.mjs runs it).
-// Every state's facts come from the page probe (bombadil/probe.js): what the extension clicked, decided, hid,
-// and what the popup said. User acts (Bombadil's own trusted clicks) never count against the extension.
 import { always } from "@antithesishq/bombadil";
 import { isAction } from "@antithesishq/bombadil/actions";
 import { actions, extract, registerCustomAction, weighted } from "@antithesishq/bombadil/browser";
 import { back, clicks, forward, reload, scroll, waitOnce } from "@antithesishq/bombadil/browser/defaults/actions";
 
-// A consent banner on an enabled site is answered or hidden within this long of being seen.
 const BANNER_MS = 15000;
-// After the banner is gone, an overlay or scroll lock may linger this long.
 const BLOCKED_MS = 3000;
-// The early script releases its prehide after 10 s at most; sampling adds a little.
 const PREHIDE_MS = 12000;
 
 type Act = {
@@ -58,14 +52,12 @@ const facts = extract((s) => {
 });
 const f = () => facts.current as Facts | null;
 
-// What the extension did, as opposed to the user.
 const byScript = (x: Facts) =>
   x.acts.filter((a) => (a.kind === "click" && !a.trusted) || (a.kind === "decision" && a.by === "script") || a.kind === "submit");
 const accepted = (x: Facts) =>
   byScript(x).some((a) => (a.kind === "click" && a.accept) || (a.kind === "decision" && a.what === "accepted"));
 const enabled = (x: Facts | null): x is Facts => !!x && !!x.settings && !x.settings.disabled;
 
-// A pay-or-consent wall can only be paid or accepted; in reject mode the extension leaves it, by design.
 const exempt = (x: Facts) => x.settings!.mode === "reject" && x.bannerKinds.every((k) => k === "pay-wall");
 
 export const bannerGoesAway = always(() => {
@@ -96,20 +88,16 @@ export const pageStaysUsable = always(() => {
   return !x || x.blockedMs <= BLOCKED_MS;
 });
 
-// Prehiding may catch something that only looks like a banner, but never for longer than its timeout.
 export const nonConsentUiStays = always(() => {
   const x = f();
   return !x || x.keepHiddenMs <= PREHIDE_MS;
 });
 
-// A known CMP's banner is hidden before it paints and stays hidden until it is answered: not in any state, nor in
-// any animation frame the probe saw.
 export const cmpBannerNeverShows = always(() => {
   const x = f();
   return !enabled(x) || (!x.cmpBannerVisible && x.cmpFrames === 0);
 });
 
-// A CMP whose script the extension saw coming finds its answer stored and builds no banner.
 export const preansweredCmpBuildsNoUi = always(() => {
   const x = f();
   return !enabled(x) || !x.cmp || !x.cmp.uiBuilt;
@@ -125,7 +113,6 @@ export const blockingBlocks = always(() => {
   return !x || !x.settings || !x.settings.blocked || !x.cmp;
 });
 
-/** Whether the popup's status line is true of the page facts. */
 function reportMatches(status: string, x: Facts): boolean {
   if (!x.settings) return true;
   if (x.settings.disabled) return status === "Off for this site.";
@@ -144,14 +131,9 @@ function reportMatches(status: string, x: Facts): boolean {
 export const popupTellsTheTruth = always(() => {
   const x = f();
   const p = x?.popup;
-  // A popup that did not open (the harness logs why) says nothing.
   return !p || p.op !== "read" || typeof p.status !== "string" || reportMatches(p.status, p.before) || reportMatches(p.status, p.after);
 });
 
-// ---- actions --------------------------------------------------------------
-
-// Opens the real popup through the harness; op is read, toggle-site, toggle-block, accept or reject (all but read
-// reload the tab).
 const popup = registerCustomAction("popup", async (_document, window, op: string) => {
   const w = window as unknown as { __probeFacts?: () => Facts; __probe?: { popup: unknown } };
   const before = w.__probeFacts ? w.__probeFacts() : null;
@@ -160,14 +142,12 @@ const popup = registerCustomAction("popup", async (_document, window, op: string
   if (w.__probe && before && after) w.__probe.popup = { op, status: r.status, before, after };
 });
 
-// Stays on the page a while, as a reader would, so the time bounds above get tested.
 const dwell = registerCustomAction("dwell", async (_document, window, ms: number) => {
   await new Promise((r) => window.setTimeout(r, ms));
 });
 // Bombadil stops a custom action after about 5 s, so a longer stay is several dwells in a row.
 const dwells = actions(() => [dwell(2000), dwell(4500)]);
 
-// Weighted by state, so runs spend most of their time on enabled sites in both modes.
 const disabled = () => !!f()?.settings?.disabled;
 const popupActions = weighted([
   [6, actions(() => [popup("read")])],
@@ -178,11 +158,9 @@ const popupActions = weighted([
   [6, actions(() => [popup("toggle-block")]).when(() => !!f()?.settings?.blocked)],
 ]);
 
-// Nearly every page offers twenty links to other fixtures, so plain clicks would leave each page at once.
 const isLink = (a: unknown) => isAction(a as any, "Click") && !!(a as any).Click.fingerprint?.href;
 const linkClicks = clicks.filter((a) => isLink(a));
 const pageClicks = clicks.filter((a) => !isLink(a));
-// A young page gets time for late banners and the fallback's retries (3, 7 and 12 s).
 const young = () => (f()?.ageMs ?? 0) < 12000;
 
 export const explore = weighted([

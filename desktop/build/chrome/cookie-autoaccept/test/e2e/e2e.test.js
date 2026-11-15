@@ -1,5 +1,3 @@
-// Loads the extension unpacked into headless Chrome and checks it on the fixture pages.
-// Chrome is the com.google.Chrome flatpak when present, else $CHROME (a chromium binary). Skips when neither exists.
 // Branded Chrome ignores --load-extension, so this loads it over the DevTools pipe with Extensions.loadUnpacked.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +9,6 @@ import { join, resolve, normalize } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const FIXTURES = join(ROOT, 'test/fixtures');
-// The unpacked extension that npm run build writes.
 const DIST = join(ROOT, 'ext');
 const flatpak = spawnSync('flatpak', ['info', 'com.google.Chrome'], { stdio: 'ignore' }).status === 0;
 const chrome = process.env.CHROME || (flatpak ? null : ['chromium', 'chromium-browser'].find((c) => spawnSync('which', [c]).status === 0));
@@ -87,7 +84,6 @@ async function setSettings(settings) {
   await evaluate(s, `chrome.storage.local.set({ settings: ${JSON.stringify(settings)} }).then(() => true)`);
 }
 
-/** Opens a fixture, waits until `until` (a page expression) is truthy or the timeout passes, returns page facts. */
 async function visit(page, until, timeout = 15000) {
   const { targetId } = await cdp('Target.createTarget', { url: `http://localhost:${port}/${page}` });
   const { sessionId } = await cdp('Target.attachToTarget', { targetId, flatten: true });
@@ -144,8 +140,7 @@ test('leaves a newsletter box alone', { skip }, async () => {
   assert.ok(!ok, 'newsletter box was hidden');
 });
 
-// A banner added after the prehide was released must be hidden before anything else in the page sees it: hiding it
-// in the next animation frame let earlier callbacks in that frame, or a paint after a ResizeObserver, see it.
+// Hiding it in the next animation frame is too late: earlier callbacks in that frame, or a paint after a ResizeObserver, see it.
 test('a banner added after the prehide release is hidden before the adding task ends', { skip }, async () => {
   const { targetId } = await cdp('Target.createTarget', { url: `http://localhost:${port}/none.html` });
   const { sessionId } = await cdp('Target.attachToTarget', { targetId, flatten: true });
@@ -198,16 +193,12 @@ test('reject mode rejects', { skip }, async () => {
     const { title } = await visit(`${cmp}.html`, `document.title !== 'pending'`);
     assert.equal(title, 'rejected', cmp);
   }
-  // With no rule, reject mode never clicks accept: it hides the banner instead.
   const { ok, title, report } = await visit('generic.html', `!document.getElementById('notice').checkVisibility()`);
   assert.ok(ok, 'banner still visible');
   assert.equal(title, 'pending');
   assert.equal(report?.hidden, 1);
 });
 
-// Chrome closes an extension port, and fails a message, when the page keeping it moves into the back/forward cache.
-// An extension that leaves that error unread gets "Unchecked runtime.lastError: The page keeping the extension port
-// is moved into back/forward cache, so the message channel is closed" on chrome://extensions.
 test('back/forward navigation leaves no unchecked runtime.lastError and the banner stays answered', { skip }, async () => {
   await setSettings({ mode: 'accept', disabledSites: [] });
   const logged = [];
@@ -253,7 +244,6 @@ test('back/forward navigation leaves no unchecked runtime.lastError and the bann
     const other = `http://localhost:${port}/none.html`;
     await go(consent, `document.title === 'accepted'`);
     await evaluate(sessionId, 'window.stayed = true');
-    // Leave the page while the extension's port is open, come back, and go on again: twice.
     for (let i = 0; i < 2; i++) {
       await go(other, `location.pathname === '/none.html'`);
       await history(-1);
@@ -265,7 +255,6 @@ test('back/forward navigation leaves no unchecked runtime.lastError and the bann
       await history(-1);
       assert.ok(await until(`location.pathname === '/onetrust.html'`), 'back again');
     }
-    // A banner page restored from the cache is still answered, and a new one still is.
     assert.equal(await evaluate(sessionId, 'document.title'), 'accepted');
     await go(`http://localhost:${port}/didomi.html`, `document.title !== 'pending'`);
     assert.equal(await evaluate(sessionId, 'document.title'), 'accepted');

@@ -1,5 +1,3 @@
-;; The CMPs the extension can answer before they run: the script hosts that identify each one and its banner roots.
-;; Their consent values are in cmps.cljs. Read at compile time by cookie-autoaccept.data.
 [{:name "onetrust"
   :hosts ["cookielaw.org" "onetrust.com" "optanon.blob.core.windows.net"]
   :prehide ["#onetrust-banner-sdk" "#onetrust-consent-sdk" ".onetrust-pc-dark-filter"]}

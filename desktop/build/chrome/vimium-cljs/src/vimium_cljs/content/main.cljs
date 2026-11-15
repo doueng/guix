@@ -1,8 +1,3 @@
-;; The content script, in every frame at document_start. It owns key handling:
-;; normal-mode keys go through the key state machine (vimium-cljs.keys), keys
-;; in text fields go to the page, and each mode (insert, hints, find, visual,
-;; marks) takes keys while it is active. Commands that need tabs run in the
-;; service worker. Design after Vimium's vimium_frontend.js and modes (MIT).
 (ns vimium-cljs.content.main
   (:require [clojure.string :as str]
             [vimium-cljs.commands :as commands]
@@ -19,12 +14,12 @@
 
 (defonce key-state (atom keys/initial))
 (defonce mode (atom {:name :normal}))
-(defonce top-rule (atom nil))      ; exclusion rule for the tab's URL, from the worker (subframes)
-(defonce suppressed (atom #{}))    ; key codes whose keyup/keypress we swallow
-(defonce user-acted (atom false))  ; for grabBackFocus
-(defonce hints (atom nil))         ; this frame's part of a hint session
+(defonce top-rule (atom nil))
+(defonce suppressed (atom #{}))
+(defonce user-acted (atom false))
+(defonce hints (atom nil))
 (defonce previous-position (atom nil))
-(defonce hints-requested (atom false)) ; f pressed, hints not shown yet
+(defonce hints-requested (atom false))
 
 (defn send!
   "Message to the service worker; resolves to its reply, or nil if the
@@ -37,9 +32,6 @@
 
 (defn hud! [text] (when-not config/hide-hud (ui/hud! text 2000)))
 
-;; ---- key map and exclusions ---------------------------------------------------
-
-;; Built from vimium-cljs.config when the script loads.
 (def conf
   (let [m (keys/effective-mappings (keys/mappings-text config/key-mappings))
         t (keys/trie m)]
@@ -57,8 +49,6 @@
     (cond (empty? rs) {:enabled true :pass-keys ""}
           (some #(not (:enabled %)) rs) {:enabled false :pass-keys ""}
           :else {:enabled true :pass-keys (apply str (map :pass-keys rs))})))
-
-;; ---- event plumbing ---------------------------------------------------------
 
 (defn- consume! [^js e]
   (.preventDefault e)
@@ -83,8 +73,6 @@
 (defn exit-mode! []
   (ui/hide-hud!)
   (set-mode! :normal))
-
-;; ---- link hints (this frame's part) ----------------------------------------------
 
 (defn- hint-candidates [mode]
   (let [all (dom/clickables (ui/host))]
@@ -131,7 +119,6 @@
       (if (and href (not js-href?))
         (send! {:type "open-url" :url href :active (= mode "newtab-fg") :next true})
         (dom/simulate-click! el {:ctrl true}))
-      ;; open
       (cond
         (and (dom/editable? el) (not= "select" (dom/tag el))) (.focus el)
         (and href (not js-href?) (= "_blank" (str/lower-case (or (.getAttribute el "target") ""))))
@@ -149,8 +136,6 @@
   (cond esc? (do (hints-exit!) (send! {:type "hints-key" :key "Escape"}))
         (= "Backspace" (.-key e)) (send! {:type "hints-key" :key "Backspace"})
         (and ks (= 1 (count ks))) (send! {:type "hints-key" :key (str/lower-case ks)})))
-
-;; ---- marks ------------------------------------------------------------------------
 
 (defn- page-key [] (str "marks|" (first (str/split (.-href js/location) #"#"))))
 
@@ -191,8 +176,6 @@
     (-> (send! {:type "mark-goto-global" :letter ks})
         (.then (fn [r] (when-not r (hud! (str "Global mark not set: '" ks "'"))))))))
 
-;; ---- find -------------------------------------------------------------------------
-
 (defn- regex? [] (boolean config/regex-find-mode))
 
 (defn enter-find! []
@@ -224,8 +207,6 @@
       (hud! "Nothing selected")
       (do (find/set-query! t) (perform-find! dir 1)))))
 
-;; ---- visual -----------------------------------------------------------------------
-
 (defn enter-visual! [line?]
   (if (visual/enter! line? (ui/host))
     (do (set-mode! :visual :line line? :count 0 :pending nil)
@@ -255,8 +236,6 @@
       (and (= 1 (count ks)) (not (.-ctrlKey e)) (not (.-metaKey e)) (not (.-altKey e))) (consume! e)
       :else nil)))
 
-;; ---- focusInput -------------------------------------------------------------------
-
 (defn focus-input! [times]
   (let [inputs (dom/text-inputs)]
     (if (empty? inputs)
@@ -278,8 +257,6 @@
       (swap! mode assoc :index i)
       true)
     (do (set-mode! :normal) false)))
-
-;; ---- navigation helpers -------------------------------------------------------------
 
 (defn url-up [href times]
   (let [u (js/URL. href)
@@ -304,8 +281,6 @@
         (if-let [el (some (fn [p] (some (fn [[el]] (when (matches? (str/lower-case p) (text-of el)) el)) cands)) pats)]
           (do (dom/flash! el) (dom/simulate-click! el) true)
           false)))))
-
-;; ---- commands -----------------------------------------------------------------------
 
 (defn- step-size [] config/scroll-step)
 (defn- smooth? [] (boolean config/smooth-scroll))
@@ -369,8 +344,6 @@
    "openCopiedUrlInNewTab" (fn [_] (send! {:type "command" :name "openCopiedUrlInNewTab"}))
    "toggleViewSource" (fn [_] (send! {:type "command" :name "toggleViewSource"}))})
 
-;; A child frame asks the top page for the Vomnibar (its frame goes there) and keeps the keys
-;; typed meanwhile, until the Vomnibar takes focus from it; then the top page gets them.
 (defonce ^:private forwarding (atom nil))
 
 (defn- forward-keys! []
@@ -395,8 +368,6 @@
                                        (send! {:type "top-command" :name command :count n}))
       :else (when-let [f (local-commands command)]
               (f n)))))
-
-;; ---- keydown -------------------------------------------------------------------------
 
 (defn- own-ui? [^js e] (when-let [h (ui/host)] (identical? (.-target e) h)))
 
@@ -459,7 +430,6 @@
         :find nil
         :focus-input (when-not (focus-input-key! e)
                        (when esc? (consume! e) (.blur ^js (dom/deep-active-element))))
-        ;; normal
         (cond
           (nil? ks) nil
           editing? (when esc?
@@ -474,14 +444,10 @@
     (.preventDefault e)
     (.stopImmediatePropagation e)))
 
-;; ---- grabBackFocus -----------------------------------------------------------------
-
 (defn- on-focus [^js e]
   (when (and config/grab-back-focus (not @user-acted) (.-isTrusted e))
     (let [t (dom/event-target e)]
       (when (dom/editable? t) (.blur ^js t)))))
-
-;; ---- messages from the worker -------------------------------------------------------
 
 (defn- on-message [^js msg _sender respond]
   (case (.-type msg)
@@ -494,8 +460,7 @@
     "hud" (do (hud! (.-text msg)) false)
     "top-command" (do (when-let [f (local-commands (.-name msg))] (f (or (.-count msg) 1))) false)
     "vomnibar-keys" (do (ui/more-keys! (.-text msg) (.-enter msg)) false)
-    ;; The worker's Ctrl+L command. A page without focus (the address bar has it) cannot
-    ;; take it back, so it answers false and the worker opens the popup Vomnibar instead.
+    ;; A page without focus (the address bar has it) cannot take it back; answering false makes the worker open the popup.
     "vomnibar" (let [ok (.hasFocus js/document)] (when ok (vomnibar! (or (.-mode msg) "omni") false)) (respond ok) false)
     "focus-frame" (do (.focus js/window) (dom/flash! (.-documentElement js/document)) false)
     "scroll-to" (do (jump-to! {:x (.-x msg) :y (.-y msg)}) false)
@@ -514,11 +479,8 @@
   (when (test-page?)
     (.setAttribute (.-documentElement js/document) "data-vimium-cljs-ready" "1")))
 
-;; ---- reloads and updates -----------------------------------------------------------
-;; When the extension reloads or updates, Chrome leaves the old script running in open tabs,
-;; cut off from the new worker, and the worker injects a new one (bg/main inject-open-tabs!).
-;; The orphan must step aside: it would otherwise swallow keys meant for the worker (w and e
-;; did nothing) and, listening first in the capture phase, stop the new script seeing them.
+;; On extension reload Chrome leaves the old script running, cut off from the worker, which injects a new one.
+;; The orphan must step aside, or it swallows keys in the capture phase before the new script sees them.
 
 (defonce ^:private listening (js/AbortController.))
 

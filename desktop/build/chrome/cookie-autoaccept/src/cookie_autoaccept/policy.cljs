@@ -118,9 +118,7 @@
    :popup false
    :result nil
    :done false
-   ;; Whether the main frame's fallback scanned the page after the rule reported its result.
    :checked false
-   ;; The CMP the early script answered before its script ran, if any.
    :preanswered nil
    :hidden 0
    :clicked 0})
@@ -182,7 +180,6 @@
       (or (nil? report) (nil? site)) "Not a web page."
       disabled "Off for this site."
       (positive? clicked) (str "Accepted cookies (generic button" (when cmp (str ", after " cmp)) ").")
-      ;; A banner the fallback still had to hide after a rule's result means the rule's claim did not hold.
       (and (positive? hidden) (some? result)) (str "Hid " (banners hidden) " (generic, after " cmp ").")
       (and popup (true? result) (not checked)) (str "Found " cmp ", checking...")
       (and popup (true? result)) (str verb " cookies (" cmp ").")

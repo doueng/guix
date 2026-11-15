@@ -1,11 +1,4 @@
-;; Scrolling, ported from Vimium's content_scripts/scroller.js (MIT). The element to
-;; scroll starts from the activated element: the last one the user clicked, tabbed to or
-;; picked with a hint, or, when there is none, the page's scrolling element if the page
-;; scrolls, else the largest visible scrollable element (vimium-cljs.scroller). From there
-;; it walks up, across shadow roots and slots, to the first element that really moves
-;; that way. An in-page URL change (history.pushState, as YouTube does on every
-;; navigation) forgets the activated element, as Vimium's Scroller.reset does (#3119).
-;; Smooth scrolling eases toward a target that repeated keys keep pushing.
+;; Ported from Vimium's content_scripts/scroller.js (MIT).
 (ns vimium-cljs.content.scroll
   (:require [vimium-cljs.content.dom :as dom]
             [vimium-cljs.scroller :as sc]))
@@ -16,7 +9,6 @@
 
 (defn reset-activated! [] (reset! activated nil))
 
-;; Vimium's specialScrollingElementMap: sites whose page scrolls inside one element.
 (def special-scrolling
   {"twitter.com" "div.permalink-container div.permalink[role=main]"
    "reddit.com" "#overlayScrollContainer"
@@ -46,7 +38,6 @@
     (and (not= "hidden" (if (= axis :y) (.-overflowY s) (.-overflowX s)))
          (not (#{"hidden" "collapse"} (.-visibility s)))
          (not= "none" (.-display s))
-         ;; Keys typed in a field are the page's, so a field is never the target.
          (not (dom/editable? el)))))
 
 (defn- containing [^js el]
@@ -110,8 +101,6 @@
                 (< (.-right r) 0) (> (.-left r) (.-innerWidth js/window)))
         (reset! activated el)))))
 
-;; ---- smooth movement --------------------------------------------------------
-
 (defonce ^:private anim (atom nil))
 
 (defn- jump! [^js el x y] (.scrollTo el #js {:left x :top y :behavior "instant"}))
@@ -157,8 +146,6 @@
         target (dimension el axis amount)]
     (if (= axis :y) (jump! el (.-scrollLeft el) target) (jump! el target (.-scrollTop el)))
     (check-visibility! el)))
-
-;; ---- what the user activated --------------------------------------------------
 
 (defonce ^:private last-url (atom nil))
 (defonce ^:private tab-at (atom 0))

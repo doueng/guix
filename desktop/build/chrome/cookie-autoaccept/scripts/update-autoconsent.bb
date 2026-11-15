@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Re-vendor a pinned @duckduckgo/autoconsent release. The only step that uses the network; run it by hand.
-;;   scripts/update-autoconsent.bb 18.6.0
 (require '[babashka.fs :as fs] '[babashka.process :refer [shell]] '[cheshire.core :as json] '[clojure.string :as str])
 
 (def version (or (first *command-line-args*) (do (println "usage: scripts/update-autoconsent.bb VERSION") (System/exit 2))))

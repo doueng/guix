@@ -1,7 +1,4 @@
-;; The content script's own UI lives in one closed shadow root, so the page's
-;; CSS and scripts cannot reach it: the HUD, link-hint markers and the frame
-;; that hosts the Vomnibar or help page. Hint markers keep Vimium's class
-;; names so userDefinedLinkHintCss from a Vimium export still applies.
+;; Hint markers keep Vimium's class names so userDefinedLinkHintCss from a Vimium export still applies.
 (ns vimium-cljs.content.ui
   (:require [clojure.string :as str]))
 
@@ -63,8 +60,6 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
      (when text (set! (.-textContent e) text))
      e)))
 
-;; ---- HUD -----------------------------------------------------------------
-
 (defn hide-hud! []
   (when-let [^js h (:hud @state)] (.remove h))
   (when-let [t (:hud-timer @state)] (js/clearTimeout t))
@@ -108,8 +103,6 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
     (.focus input)
     {:input input :count cnt}))
 
-;; ---- hint markers ----------------------------------------------------------
-
 (defn show-markers!
   "Draws markers for [[hint rect] ...]; returns their elements."
   [pairs]
@@ -141,8 +134,6 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
   (when-let [^js old (:markers @state)] (.remove old))
   (swap! state dissoc :markers))
 
-;; ---- framed pages (Vomnibar, help) ------------------------------------------
-
 (defn close-frame!
   "Removes the framed page and gives focus back to the element that had it."
   []
@@ -164,15 +155,13 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
   (let [^js f (el "iframe" (str "ui " kind))]
     (set! (.-src f) (str (js/chrome.runtime.getURL "ui.html") "#" kind (when (seq query) (str "?" query))))
     (.setAttribute f "allow" "clipboard-write")
-    ;; The page inside focuses its own input; focusing the frame again from here would
-    ;; drop that focus and lose the keys typed meanwhile, so only focus it if it has none.
+    ;; The page inside focuses its own input; refocusing the frame would drop keys typed meanwhile.
     (.addEventListener f "load" (fn [_] (when-not (identical? f (.-activeElement js/document)) (.focus f))))
     (.appendChild (attach!) f)
     (swap! state assoc :frame f :frame-kind kind :typed {:text "" :enter false})
     f))
 
-;; Keys typed after the Vomnibar is asked for but before its frame has loaded reach the page.
-;; The page keeps them here (:typed, until the frame says it is ready) and hands them over.
+;; Keys typed before the Vomnibar frame loads reach the page; keep them (:typed) and hand them over when it is ready.
 
 (defn typing-ahead?
   "Whether keys should be kept for a frame that is still loading."

@@ -1,5 +1,3 @@
-// End-to-end checks: loads ext/ into one headless Chrome and drives the fixture pages with
-// trusted key events. Run `npm run build` first. Skips when no Chrome is found.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { launch, available, sleep, evaluate, workerSession } from '../lib/chrome.mjs';
@@ -17,7 +15,7 @@ async function until(pred, ms = 5000) {
   const t0 = Date.now();
   let f;
   while (Date.now() - t0 < ms) {
-    try { f = await facts(); if (pred(f)) return f; } catch { /* page still loading */ }
+    try { f = await facts(); if (pred(f)) return f; } catch {}
     await sleep(100);
   }
   return f;
@@ -72,7 +70,6 @@ test('link hints cover every visible link, across shadow DOM and both iframes', 
   const all = [...top, ...frames.flatMap((fr) => fr.links.filter((l) => l.hint))].map((l) => l.hint);
   assert.equal(new Set(all).size, all.length, 'hints unique across frames');
   for (const h of all) for (const o of all) if (h !== o) assert.ok(!o.startsWith(h), `${h} is a prefix of ${o}`);
-  // Follow l5 by typing its hint.
   const hint = f.links.find((l) => l.id === 'l5').hint;
   await keys(hint, 400);
   const g = await facts();
@@ -121,7 +118,6 @@ test('keys typed in inputs, textareas, contenteditable and shadow inputs reach t
     assert.ok(f.links.every((l) => !l.hint), 'no hints from ' + id);
     await keys('<esc>', 150);
   }
-  // Escape blurred the field, so j scrolls again.
   const y0 = (await facts()).scrollY;
   await keys('jj', 500);
   assert.ok((await facts()).scrollY > y0, 'j scrolls after Escape');
@@ -149,9 +145,6 @@ test('scrolling: j k d u G gg', T, async () => {
   assert.equal((await facts()).scrollY, 0, 'gg to top');
 });
 
-// test/fixtures/tube.html mimics YouTube's subscriptions feed: web components, a fixed guide
-// that scrolls by itself, and the feed. The keys must scroll the feed, not the guide, until
-// the user clicks into the guide; a guide link that navigates in place hands them back.
 const tube = () => evaluate(b.cdp, page, 'window.__tube()');
 async function openTube(layout) {
   const { targetId } = await b.cdp('Target.createTarget', { url: `http://127.0.0.1:${port}/tube.html?layout=${layout}` });
@@ -177,9 +170,7 @@ for (const [layout, main, max] of [['page', 'page', 'pageMax'], ['app', 'feed', 
     await keys('gg', 400);
     assert.equal((await tube())[main], 0, 'gg to the top');
 
-    // Clicking into the guide makes it the target.
     await clickOn(inGuide('g3'));
-    // That link navigated in place (pushState): the user has moved on, so the target resets.
     t = await tube();
     assert.match(t.url, /feed=3/);
     await keys('jj', 500);
@@ -189,7 +180,6 @@ for (const [layout, main, max] of [['page', 'page', 'pageMax'], ['app', 'feed', 
 
     await clickOn(inGuide('g1'));
     await keys('gg', 400);
-    // A click in the guide that is not a navigation: j then scrolls the guide.
     await clickOn(inGuide('guide-title'));
     const before = await tube();
     await keys('jj', 500);
@@ -200,8 +190,6 @@ for (const [layout, main, max] of [['page', 'page', 'pageMax'], ['app', 'feed', 
     t = await tube();
     assert.ok(t.guide > 100, 'G scrolls the guide to its end');
     assert.equal(t[main], before[main], `G leaves the ${main}`);
-    // At the guide's end, j falls through to what contains it: the page (in the app layout
-    // the feed is the guide's sibling, so nothing moves, as in Vimium).
     if (layout === 'page') {
       await keys('jj', 500);
       assert.ok((await tube()).page > before.page, "past the guide's end, j scrolls the page");
@@ -281,7 +269,6 @@ test("Vomnibar: an open tab's exact title ranks first, Enter switches without a 
   const home = await open('/');
   const ctlv = controller(b.cdp, async () => page, b.extensionId);
   const tabs0 = await ctlv('tabs');
-  // Escape gives focus back to the field that had it.
   await clickOn("document.getElementById('text')");
   await keys('<esc>', 150);
   await evaluate(b.cdp, page, "document.getElementById('text').focus(), true");
@@ -293,7 +280,6 @@ test("Vomnibar: an open tab's exact title ranks first, Enter switches without a 
   await keys('<esc>', 1200);
   assert.equal((await ctlv('vomnibar')).open, false, 'closed');
   assert.equal((await facts()).active, 'text', 'focus back in the field');
-  // o, the exact title, Enter.
   await evaluate(b.cdp, page, 'document.activeElement.blur(), true');
   await keys('o', 500);
   await ctl()('keys', { seq: 'Vomnibar field notes', gap: 0 });
@@ -411,7 +397,7 @@ test('a new tab is the Vomnibar, focused, and opens what you pick in that tab', 
   assert.equal(await evaluate(b.cdp, w, 'chrome.tabs.query({}).then(ts => ts.length)'), before + 1, 'one new tab, the new tab page closed');
   const target = `http://127.0.0.1:${port}/frame.html?from-new-tab`;
   page = s;
-  await ctl()('keys', { seq: '<esc>' }); // Escape clears the text and leaves the page open
+  await ctl()('keys', { seq: '<esc>' });
   assert.ok(await evaluate(b.cdp, s, "!document.getElementById('vomnibar').hidden"), 'Escape keeps the new tab page');
   await evaluate(b.cdp, s, `(() => { const q = document.getElementById('query'); q.value = ${JSON.stringify(target)}; q.dispatchEvent(new Event('input')); return true; })()`);
   await ctl()('keys', { seq: '<enter>' });

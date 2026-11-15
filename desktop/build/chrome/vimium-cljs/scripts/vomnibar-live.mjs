@@ -1,8 +1,3 @@
-// Screenshots the Vomnibar in a headed Chrome on an X server (an Xvfb), where Chrome's own UI
-// is real: the popup window, the new tab page and keyboard focus. Keys go through xdotool, so
-// they land wherever Chrome's focus really is, as when you type.
-//   DISPLAY=:99 node scripts/vomnibar-live.mjs OUT_DIR
-// Needs xdotool and xwd + convert (guix shell xorg-server xdotool xwd imagemagick).
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,7 +16,6 @@ const shot = (name) => {
 const type = async (text) => { x('type', '--delay', '40', text); await sleep(400); };
 const key = async (k) => { x('key', k); await sleep(300); };
 
-// THEME=light (or dark) sets the pages' prefers-color-scheme; Chrome's own UI follows the system.
 const theme = { light: 1, dark: 0 }[process.env.THEME];
 const b = await launch({ display, width: 1200, height: 760, flags: theme == null ? [] : [`--blink-settings=preferredColorScheme=${theme}`] });
 const { server, port } = await startServer(async () => null);
@@ -49,7 +43,6 @@ try {
         scrollbars: [document.documentElement, document.body, l].filter((e) => e && e.scrollHeight > e.clientHeight && getComputedStyle(e).scrollbarWidth !== 'none' && e.offsetWidth > e.clientWidth).map((e) => e.id || e.tagName) }; })()`).catch((e) => String(e));
   };
 
-  // 1. A normal page: Ctrl+L (the worker's command) opens the overlay; type at once.
   const { targetId } = await b.cdp('Target.createTarget', { url: `http://127.0.0.1:${port}/index.html` });
   await sleep(1500);
   x('mousemove', '600', '400'); x('click', '1'); await sleep(300);
@@ -69,7 +62,6 @@ try {
   shot('2b-page-tabs-moved');
   await key('Escape');
 
-  // 2. A new tab (Chrome's t / Ctrl+T path): type at once, then Ctrl+L there.
   await evaluate(b.cdp, w, `chrome.tabs.create({}).then(() => true)`);
   await sleep(1500);
   await type('clo');
@@ -82,12 +74,10 @@ try {
   shot('4-newtab-command');
   await key('Escape');
 
-  // 3. A chrome:// page: the popup fallback.
   await evaluate(b.cdp, w, `chrome.tabs.create({ url: 'chrome://version' }).then(() => true)`);
   await sleep(1200);
   await evaluate(b.cdp, w, `chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => vimiumCljsVomnibarCommand(t, 'omni'))`);
   await sleep(600);
-  // Hyprland's chrome-extension-popup rule gives the popup 900x520; twm leaves Chrome's size.
   await evaluate(b.cdp, w, `chrome.windows.getAll().then((ws) => Promise.all(ws.filter((x) => x.type === 'popup').map((x) => chrome.windows.update(x.id, { width: 900, height: 520, left: 150, top: 120 })))).then(() => true)`);
   await sleep(600);
   await type('wiki');

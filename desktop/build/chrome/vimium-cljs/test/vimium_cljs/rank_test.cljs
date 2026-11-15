@@ -38,8 +38,6 @@
 (defn- rand-str [n] (apply str (repeatedly n #(rand-nth "abcde-"))))
 
 (deftest typo-length-agrees-with-edit-distance
-  ;; The table typo-length fills (one pass, given up early) must give what edit-distance
-  ;; does for each of the lengths n, n-1, n+1, first that fits.
   (let [typo-length @#'r/typo-length]
     (dotimes [_ 3000]
       (let [t (rand-str (+ 4 (rand-int 6)))
@@ -52,8 +50,6 @@
         (is (= want (typo-length t s i budget)) (pr-str t s i))))))
 
 (deftest cached-ranking-matches-uncached
-  ;; Ranking a prepared vector again caches each term's matches; the rows must be the same
-  ;; as ranking the same items with nothing cached, keystroke after keystroke.
   (let [prepared (r/prepare items)
         strip (fn [rows] (map #(select-keys % [:title :score :match]) rows))]
     (doseq [q ["g" "gi" "git" "git v" "git vi" "git vim" "vim" "vimuim" "hn" "news ex" "zz" ""]]
@@ -100,7 +96,6 @@
     (is (nil? (r/engine-of "wiki cats" engines)))))
 
 (deftest latency
-  ;; Ranking runs on every keystroke over up to 3000 history entries.
   (let [words ["github" "clojure" "news" "docs" "guix" "manual" "reference" "api" "tabs" "wiki" "blog" "issue"]
         many (r/prepare (for [i (range 3000)]
                          {:type "history" :title (str (words (mod i 12)) " " (words (mod (* 7 i) 12)) " page " i)

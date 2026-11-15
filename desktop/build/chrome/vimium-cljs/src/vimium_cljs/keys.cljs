@@ -60,8 +60,6 @@
   (or (and (= "Escape" (:key ev)) (not= 229 (:key-code ev)))
       (and vim-escape? (= "<c-[>" ks))))
 
-;; ---- mapping text ---------------------------------------------------------
-
 (def ^:private named-key "(?:[a-z][a-z0-9]+)")
 (def ^:private modified-key (str "(?:(?:[a-zA-Z]-)+(?:.|" named-key "))"))
 (def ^:private special-key-re (re-pattern (str "(?i)^<(" named-key "|" modified-key ")>(.*)")))
@@ -185,8 +183,6 @@
   "command -> [key ...] for the help dialog, in mapping order."
   [{:keys [order entries]}]
   (reduce (fn [m k] (update m (:command (entries k)) (fnil conj []) k)) {} order))
-
-;; ---- the key state machine --------------------------------------------------
 
 (def initial {:states nil :count 0})
 

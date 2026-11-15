@@ -1,6 +1,3 @@
-// Page probe for the e2e and Bombadil runs. It reads only what the page can see: the
-// data-vimium-cljs-* attributes the content script sets on test pages, CSS.highlights,
-// scroll position, and the keys and text that reach the page's own fields.
 (() => {
   const probe = (window.__probe = { pageKeys: [], fieldKeys: [], frames: {}, hintsSince: 0, last: null });
   const deepAll = (root, sel, out = []) => {
@@ -48,7 +45,6 @@
     if (e.data && e.data.probeFrame) probe.frames[e.data.probeFrame] = e.data.facts;
   });
   let lastMode = '';
-  // withLast=false leaves out the last action, which itself holds facts (no nesting).
   window.__probeFacts = (withLast = true) => {
     const mode = document.documentElement.dataset.vimiumCljsMode || 'normal';
     if (mode !== lastMode) { lastMode = mode; probe.hintsSince = mode === 'hints' ? Date.now() : 0; probe.hintsScrollY = Math.round(scrollY); }

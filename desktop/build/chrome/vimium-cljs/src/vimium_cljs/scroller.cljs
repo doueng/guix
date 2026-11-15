@@ -1,15 +1,5 @@
-;; Which element a scroll command moves, ported from Vimium's content_scripts/scroller.js
-;; (MIT): findScrollableElement and firstScrollableElement. Pure over an ENV of DOM
-;; accessors so cljs.test can drive it with a fake tree; content/scroll.cljs supplies the
-;; real one. ENV keys:
-;;   :root        the page's scrolling element (document.scrollingElement)
-;;   :does-scroll (fn [el axis delta]) whether EL moves by DELTA (1 or -1) when asked, tested
-;;                by really scrolling it and putting it back: scrollHeight and overflow lie
-;;   :should      (fn [el axis]) whether EL may be scrolled: not overflow hidden, visible,
-;;                displayed, not a text field
-;;   :containing  (fn [el]) the element EL is laid out in: its slot, parent or shadow host
-;;   :children    (fn [el]) EL's rendered children (its shadow root's, a slot's assigned ones)
-;;   :area        (fn [el]) the area of EL's box inside the viewport, or nil when not visible
+;; Ported from Vimium's content_scripts/scroller.js (MIT). :does-scroll really scrolls
+;; the element and puts it back, since scrollHeight and overflow lie.
 (ns vimium-cljs.scroller)
 
 (defn sign [x] (cond (or (nil? x) (js/isNaN x) (zero? x)) 0 (neg? x) -1 :else 1))

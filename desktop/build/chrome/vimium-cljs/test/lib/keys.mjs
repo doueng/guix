@@ -1,5 +1,3 @@
-// Turns a Vim-style key sequence ("gg", "/needle<enter>", "<c-o>", "<esc>") into
-// CDP Input.dispatchKeyEvent parameters, so the page gets trusted key events.
 const named = {
   esc: ['Escape', 'Escape', 27], enter: ['Enter', 'Enter', 13, '\r'], bs: ['Backspace', 'Backspace', 8],
   tab: ['Tab', 'Tab', 9], space: [' ', 'Space', 32, ' '], left: ['ArrowLeft', 'ArrowLeft', 37],
@@ -22,7 +20,6 @@ function charKey(c) {
   return { key: c, code: '', vk: 0, shift: false };
 }
 
-/** [[downParams, upParams], ...] for SEQ. */
 export function keyEvents(seq) {
   const out = [];
   for (let i = 0; i < seq.length; ) {

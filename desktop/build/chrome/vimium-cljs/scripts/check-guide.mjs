@@ -1,5 +1,3 @@
-// Checks that docs/guide.html still matches the repo: the version, the paths it tells
-// you to use, the npm scripts it names and every command left out of the port.
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 

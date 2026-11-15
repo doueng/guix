@@ -23,7 +23,6 @@
 
 (defn- cmp-hosts [] (mapcat #(array-seq (.-hosts ^js %)) cmps/cmps))
 
-;; The early script's registration and the blocking rules follow the stored settings, one change at a time.
 (def ^:private applying (atom (js/Promise.resolve)))
 (defn- apply-settings []
   (swap! applying
@@ -153,7 +152,6 @@
                                                 (p/reduce-report r msg)
                                                 (with-settings #(p/reduce-report (p/empty-report site %) msg)))))
                 (.then (fn [_]
-                         ;; The page has been checked, or a rule could not click: what is still hidden early may show now.
                          (when (or (= type "fallbackScanned") (and (str/ends-with? type "Result") (not (js/Boolean (:result msg)))))
                            (release tab-id))
                          nil)))
@@ -179,8 +177,6 @@
                true)
            (do (.catch answer (fn [_]))
                false))))))
-  ;; The autoconsent content bundle opens a port in every frame and never uses it. Close it at once: a port left open
-  ;; is closed by Chrome when its page moves into the back/forward cache, and that closed channel shows on
-  ;; chrome://extensions as an unchecked runtime.lastError. Nothing uses the port, so nothing reconnects it.
+  ;; Close autoconsent's unused port at once: Chrome closes it on bfcache entry and logs an unchecked runtime.lastError.
   (js/chrome.runtime.onConnect.addListener (fn [^js port] (.disconnect port)))
   (js/chrome.tabs.onRemoved.addListener (fn [tab-id] (js/chrome.storage.session.remove (report-key tab-id)))))

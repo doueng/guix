@@ -2,8 +2,6 @@
   (:require [cljs.test :refer [deftest is testing]]
             [vimium-cljs.scroller :as sc]))
 
-;; A YouTube-like flat tree: <ytd-app>'s shadow root holds the masthead, a fixed guide
-;; (narrow, scrolls) and the page column; the feed scrolls inside <ytd-page>'s shadow root.
 (def tree
   {:body [:app] :app [:masthead :drawer :page] :masthead [:guide-button]
    :drawer [:guide] :guide [:guide-link :guide-footer] :page [:feed] :feed [:video :ad]})

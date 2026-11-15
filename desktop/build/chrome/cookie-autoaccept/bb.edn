@@ -1,5 +1,3 @@
-;; bb build, bb test, bb e2e, bb bombadil, over the npm scripts in package.json.
-;; ext-reload runs bb build; make lint runs bb test; make chrome-e2e runs bb e2e.
 {:tasks
  {:requires ([babashka.fs :as fs])
   deps {:doc "npm ci when node_modules is missing"

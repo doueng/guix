@@ -46,7 +46,6 @@
   (is (= {"count" 3 "x" "a b"} (k/parse-options "count=3 x=\"a b\"")))
   (is (= {} (k/parse-options "count=zz")) "a non-numeric count is dropped"))
 
-;; The user's mapping text, as in their Vimium export.
 (def user-text "# Insert your preferred key mappings here.\nmap i focusInput\nmap w previousTab\nmap e nextTab\nunmap J\nunmap K\nmap h goBack\nmap l goForward\nmap p Vomnibar.activateTabSelection\nmap <c-o> visitPreviousTab\nunmap N")
 
 (deftest user-mappings

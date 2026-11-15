@@ -1,8 +1,3 @@
-;; Vomnibar matching and ranking. Each query term matches the title or the display URL
-;; as a substring, else as an acronym (hn: Hacker News), else as a subsequence, else as a
-;; word prefix one typo away (vimuim: vimium). Matches score by kind and place, then by
-;; frecency (visits, recency) and the user's earlier picks. The URL-or-search rule for typed
-;; text follows Vimium's lib/url_utils.js (MIT).
 (ns vimium-cljs.rank
   (:require [clojure.string :as str]))
 
@@ -16,8 +11,7 @@
       (str/replace #"^www\." "")
       (str/replace #"/$" "")))
 
-;; Hot path: every keystroke matches each term against up to 3000 titles and URLs, so
-;; this works on char codes and lower-cases each string once.
+;; Hot path (every keystroke, up to 3000 items): works on char codes, lower-cases once.
 
 (defn- alnum-at? [s i]
   (let [c (.charCodeAt s i)]
@@ -166,7 +160,6 @@
   [t smart ^js f]
   (let [s (aget f 0) s* (if smart s (aget f 1))
         n (count t)
-        ;; Every kind but a typo needs all of T's characters; a typo lacks at most two.
         allowed (cond (>= n 8) 2 (>= n 4) 1 :else 0)]
     (when (and (seq s) (<= (missing t s* allowed) allowed))
       (or (substring-match t s s*) (acronym-match t s s*) (subsequence-match t s s*) (typo-match t s s*)))))
@@ -247,9 +240,6 @@
 
 (defn item-key "ITEM's pick-key, from prepare when it ran." [item] (or (::key item) (pick-key (:url item))))
 
-;; Per-term matches for a prepared vector of items (the Vomnibar's candidates, ranked again on
-;; every keystroke): item vector -> Map of term -> JS array of [where match] (false: none) by
-;; item index. Held weakly, so it goes with the candidates.
 (defonce ^:private term-caches (js/WeakMap.))
 
 (defn- term-cache [items]
@@ -264,8 +254,6 @@
   ([query items now] (rank query items now {}))
   ([query items now picks]
    (let [ts (terms query)
-         ;; Terms already matched against these items (earlier keystrokes) go first: a
-         ;; cached term costs a lookup, and a new term is only tried on items the others match.
          ^js cache (term-cache items)
          pts (cond->> (prepared ts) cache (sort-by (fn [[t sm]] (if (.has cache (str sm t)) 0 1))))
          arrays (when cache (mapv (fn [[t sm]] (let [k (str sm t)]
@@ -294,7 +282,6 @@
                  (inc idx)))
              0 items)
      (.sort found (fn [^js a ^js b] (- (aget b 0) (aget a 0))))
-     ;; Highlight ranges only for the rows that can be shown.
      (into [] (map-indexed (fn [n ^js f]
                              (let [i (dissoc (aget f 1) ::tf ::uf)]
                                (if (empty? ts)
@@ -361,8 +348,6 @@
   [query engines]
   (let [[_ kw more] (re-find #"^\s*(\S+)\s+(.*)$" (or query ""))]
     (when-let [e (and kw (get engines kw))] [kw e more])))
-
-;; ---- typed text -> URL ---------------------------------------------------------
 
 (def ^:private schemes #{"http" "https" "ftp" "file" "chrome" "chrome-extension" "about" "view-source" "data"})
 

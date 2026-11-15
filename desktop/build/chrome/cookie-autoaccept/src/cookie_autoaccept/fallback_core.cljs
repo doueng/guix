@@ -27,10 +27,8 @@
          (<= min-text n max-text)
          (or (.test cookieish t) (and (.test consent t) (.test partners t)))
          (not (.test negative t))
-         ;; A long text that is most of the page's text is the page itself (say a fixed app shell), not a notice.
          (not (and (> page-share 0.6) (> n 1000))))))
 
-;; Strong: accepts everything. Weak: a plain yes. Never: anything that costs money, configures, or says no.
 (def ^:private strong #"(?i)^(accept|allow|agree( to)?|enable|alle|tout|todo|tutt[io]|alles|aceptar todo|accepter tout)\b.*\b(all|cookies|alle|tout|todo|tutti|alles)\b|^(alle (akzeptieren|annehmen|zulassen|erlauben)|tout accepter|accepter et fermer|aceptar todo|accetta tutto|alles accepteren|godkänn alla|acceptera alla|accepteer alles)\b")
 (def ^:private weak #"(?i)^(accept|i accept|accepter|aceptar|acepto|accetta|accetto|akzeptieren|ich akzeptiere|annehmen|zustimmen|einverstanden|agree|i agree|allow|ok|okay|got it|i understand|understood|consent and continue|agree and (close|continue|proceed)|zustimmen und weiter|accepter et continuer|continue|yes,? i agree|j'accepte|ich stimme zu|godkänn|acceptera|akkoord)\b")
 (def ^:private never #"(?i)(subscri|suscri|abonn|abbon|abo\b|pay|buy|£|€|\$|setting|einstellung|paramètre|manage|verwalten|gérer|customi[sz]e|anpassen|personnaliser|preference|präferenz|option|more info|mehr info|details|learn more|reject|decline|deny|refuse|ablehnen|refuser|rechazar|rifiuta|weiger|necessary|essential|notwendig|nécessaires|only|nur|without|ohne|sans)")

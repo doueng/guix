@@ -1,9 +1,4 @@
-// Tabs that were open when the extension was reloaded or updated (bb build, then the reload
-// arrow at chrome://extensions) must keep working without a page reload. Chrome does not
-// re-inject content scripts into them, and the old script, cut off from the new worker,
-// used to swallow worker commands such as w and e (previousTab, nextTab) without effect.
-// The reload here is the user's: the arrow on the extension's card (developerPrivate.reload)
-// and, for an update, loading the same unpacked path again.
+// Chrome does not re-inject content scripts into open tabs on reload/update; the orphaned old script must not swallow commands.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -23,7 +18,7 @@ async function until(f, ms = 5000) {
   const t0 = Date.now();
   let v;
   while (Date.now() - t0 < ms) {
-    try { v = await f(); if (v) return v; } catch { /* target still starting */ }
+    try { v = await f(); if (v) return v; } catch {}
     await sleep(100);
   }
   return v;
@@ -55,7 +50,6 @@ async function extensionFrames() {
   return targetInfos.filter((t) => t.url.startsWith(`chrome-extension://${b.extensionId}/ui.html`)).map((t) => t.url);
 }
 
-/** Waits until a worker other than OLD (a target id) runs, then lets it inject. */
 async function newWorker(old) {
   await until(async () => {
     const t = (await b.cdp('Target.getTargets')).targetInfos.find((t) => t.type === 'service_worker' && t.url.includes(b.extensionId));
@@ -65,7 +59,6 @@ async function newWorker(old) {
 }
 const workerId = async () => (await b.cdp('Target.getTargets')).targetInfos.find((t) => t.type === 'service_worker' && t.url.includes(b.extensionId))?.targetId;
 
-/** The reload arrow on the extension's card at chrome://extensions. */
 async function reloadArrow() {
   const old = await workerId();
   const { targetId } = await b.cdp('Target.createTarget', { url: 'chrome://extensions', background: true });
@@ -78,7 +71,7 @@ async function reloadArrow() {
   await newWorker(old);
 }
 
-/** An update: loading the same unpacked path again (chrome.runtime.reload() would unload a CDP-loaded extension for good). */
+/** An update: load the same unpacked path again (chrome.runtime.reload() would unload a CDP-loaded extension for good). */
 async function reloadUpdate() {
   const old = await workerId();
   const { id } = await b.cdp('Extensions.loadUnpacked', { path: join(ROOT, 'ext') });
@@ -111,19 +104,17 @@ test('w and e switch tabs from a tab that was open before an update', T, async (
 });
 
 test('after the reload arrow at chrome://extensions, every kind of binding works in tabs open before it', T, async () => {
-  await open('/?c', { background: true }); // loaded in the background, never shown before the reload
+  await open('/?c', { background: true });
   await reloadArrow();
   await reloadArrow(); // twice: the second orphan is a script the first reload injected
   await tabKeys('after the reload arrow');
 
-  // Page-local keys, through exactly one content script.
   page = sessions['/?a'];
   const y0 = (await facts()).scrollY;
   await keys('j');
   assert.equal((await facts()).scrollY - y0, 60, 'j scrolls one step');
   await keys('gg');
 
-  // Link hints need the worker and every frame, the cross-origin one too.
   await keys('f', 900);
   const f = await until(() => facts().then((f) => f.mode === 'hints' && Object.values(f.frames).length === 2
                                             && Object.values(f.frames).every((x) => x.mode === 'hints') && f));
@@ -133,7 +124,6 @@ test('after the reload arrow at chrome://extensions, every kind of binding works
   await keys(f.links.find((l) => l.id === 'l5').hint, 500);
   assert.ok((await facts()).url.endsWith('#l5'), 'followed the hint: ' + (await facts()).url);
 
-  // Find, visual mode, the Vomnibar and help.
   await keys('/needle<enter>', 400);
   assert.ok((await facts()).findHighlights >= 3, 'find highlights');
   await keys('<esc>', 200);
@@ -147,7 +137,6 @@ test('after the reload arrow at chrome://extensions, every kind of binding works
   assert.ok((await extensionFrames()).some((u) => u.includes('#help')), '? shows help');
   await keys('<esc>', 500);
 
-  // The tab that loaded in the background.
   await front('/?c');
   await keys('w');
   assert.ok(!(await active()).endsWith('/?c'), 'w from the background-loaded tab: active ' + await active());

@@ -1,7 +1,3 @@
-;; What the Vomnibar lists: pure functions over the candidates the Vomnibar page reads once
-;; when it opens (open tabs, history, bookmarks, the user's picks, tab recency). `candidates`
-;; does the per-open work (folding, frecency inputs, dropping the page you are on), so each
-;; keystroke only ranks.
 (ns vimium-cljs.vomnibar
   (:require [clojure.string :as str]
             [vimium-cljs.rank :as rank]))
@@ -31,11 +27,9 @@
                           :time (:lastAccessed t)})
         history (rank/prepare (remove #(and own (str/starts-with? (or (:url %) "") own)) history))
         visited (into {} (map (juxt rank/item-key identity)) history)
-        ;; A tab's frecency is its page's: visits from history, the later of the two times.
         with-visits (fn [t] (if-let [h (visited (rank/item-key t))]
                               (assoc t :visits (:visits h) :typed (:typed h) :time (max (or (:time t) 0) (or (:time h) 0)))
                               t))
-        ;; Never offer the page you are on.
         other? #(not= cur-key (rank/item-key %))
         tab-items (rank/prepare (map tab-item (remove #(= cur-id (:id %)) by-recency)))
         bookmarks (rank/prepare bookmarks)]

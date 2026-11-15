@@ -121,15 +121,12 @@
     (is (= "Accepted cookies (generic button, after Cybotcookiebot)." (p/describe-report r)))
     (is (= "\u2713" (p/badge-for r)))))
 
-;; Found by Bombadil: the popup said 'Accepted cookies (Cybotcookiebot).' while the banner was still up,
-;; because the rule reports success without clicking anything; the fallback only clicks seconds later.
 (deftest a-rules-claim-is-not-reported-until-the-page-was-scanned-after-it
   (let [r (fold (p/empty-report "shop.com" {}) {:type "popupFound" :cmp "Cybotcookiebot"})
         before (p/fallback-answer r)
         r (fold r {:type "optInResult" :cmp "Cybotcookiebot" :result true})
         _ (is (= "Found Cybotcookiebot, checking..." (p/describe-report r)))
         _ (is (= "" (p/badge-for r)))
-        ;; A scan that started before the result checks nothing.
         r (fold r {:type "fallbackScanned" :afterResult (:afterResult before)})
         _ (is (= "Found Cybotcookiebot, checking..." (p/describe-report r)))
         after (p/fallback-answer r)
@@ -146,8 +143,6 @@
                 {:type "fallbackScanned" :afterResult true})]
     (is (= "Hid 1 cookie banner (generic, after Cybotcookiebot)." (p/describe-report r)))))
 
-;; Found by Bombadil: the Sourcepoint frame accepted before the main frame's init, which then wiped the
-;; report, so the popup said 'No cookie popup seen.'
 (deftest a-subframes-result-survives-the-main-frames-later-init-a-new-page-starts-afresh
   (let [ctx {:site "news.com" :settings {}}
         r (p/start-report nil (assoc ctx :type "pageStart" :mainFrame true))

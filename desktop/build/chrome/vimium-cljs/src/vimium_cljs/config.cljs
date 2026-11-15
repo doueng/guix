@@ -1,7 +1,3 @@
-;; Your settings, as plain data. There is no options page: edit this file, then run
-;; ext-reload vimium-cljs, which rebuilds the extension and has Chrome reread it.
-;; The values started as the Vimium export in ~/Downloads/vimium-options.json; anything
-;; it did not set keeps Vimium's default.
 (ns vimium-cljs.config)
 
 (def key-mappings

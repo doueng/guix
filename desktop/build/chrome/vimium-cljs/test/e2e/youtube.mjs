@@ -1,9 +1,3 @@
-// Check on the real site: opens a URL in the headless Chrome with ext/ loaded, optionally
-// clicks the element a JS expression names, presses keys and reports which elements scrolled.
-//   node test/e2e/youtube.mjs [url] [keys] [click-expr]
-// With no arguments it is the YouTube regression check: on a long results page, click
-// Subscriptions in the guide (YouTube navigates in place), go back, press j five times, and
-// exit 1 unless the page scrolled and the guide did not. Needs network; logged out.
 import { launch, sleep, evaluate } from '../lib/chrome.mjs';
 import { controller } from '../lib/server.mjs';
 
@@ -43,7 +37,6 @@ try {
     console.log('click', JSON.stringify(r));
     if (r) { await ctl('click', { x: r[0], y: r[1] }); await sleep(5000); }
     console.log('clicked to', await evaluate(b.cdp, s, 'location.href'));
-    // BACK=1: go back to the start URL in place, as the user would with H.
     if (back) { await evaluate(b.cdp, s, 'history.back()'); await sleep(5000); }
   }
   console.log('before', JSON.stringify(await evaluate(b.cdp, s, snap)));

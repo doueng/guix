@@ -1,10 +1,6 @@
-// Checks that an unpacked extension folder holds every file its manifest.json names, and every local script or
-// stylesheet its HTML pages load, so Chrome cannot refuse it with "Could not load javascript".
-// node scripts/check-manifest.mjs [dir]   (dir defaults to ext/, the folder to load in chrome://extensions)
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-/** The relative paths manifest.json names. */
 export function manifestPaths(m) {
   const out = [];
   const add = (p) => { if (typeof p === 'string' && p) out.push(p); };
@@ -22,7 +18,6 @@ export function manifestPaths(m) {
   return out;
 }
 
-/** Local script and stylesheet paths in an HTML page, relative to the extension root. */
 function htmlPaths(html) {
   return [...html.matchAll(/<(?:script[^>]*\ssrc|link[^>]*\shref)="([^"]+)"/g)]
     .map((m) => m[1])
@@ -30,7 +25,6 @@ function htmlPaths(html) {
     .map((p) => p.replace(/^\//, ''));
 }
 
-/** Returns the missing paths, or throws when dir has no manifest.json. */
 export function missingFiles(dir) {
   const manifest = join(dir, 'manifest.json');
   if (!existsSync(manifest)) return ['manifest.json'];

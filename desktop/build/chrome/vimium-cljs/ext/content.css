@@ -1,4 +1,3 @@
-/* Find-mode highlights (CSS Custom Highlight API); the rest of the UI is in a shadow root. */
 ::highlight(vimium-cljs-find) { background-color: #fff27a; color: #000; }
 ::highlight(vimium-cljs-find-current) { background-color: #ff9632; color: #000; }
 vimium-cljs-ui { all: initial; }

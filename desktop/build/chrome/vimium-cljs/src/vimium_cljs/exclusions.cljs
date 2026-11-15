@@ -1,7 +1,4 @@
-;; Exclusion rules: Vimium's exclusions.js (MIT). A pattern is a regexp in
-;; which * means any text, anchored at both ends. A matching rule with no
-;; pass keys disables the extension on the page; otherwise its pass keys go
-;; to the page. Rules are {:pattern :pass-keys}, as in vimium-cljs.config.
+;; Vimium's exclusions.js (MIT).
 (ns vimium-cljs.exclusions
   (:require [clojure.string :as str]))
 

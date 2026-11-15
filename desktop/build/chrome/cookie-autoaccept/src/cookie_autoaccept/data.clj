@@ -17,8 +17,7 @@
   (js-array (for [{:keys [name hosts prehide]} (cmps)]
               `(cljs.core/js-obj "name" ~name "hosts" ~(js-array hosts) "prehide" ~(js-array prehide)))))
 
-;; content.bundle.js 18.5.0: prehideSelectors of its class-based CMPs and its global didomi list. They are code
-;; there, not data, so they are copied here.
+;; Copied from content.bundle.js 18.5.0, where these prehideSelectors are code, not data.
 (def ^:private built-in
   [".trustarc-banner-container" ".truste_popframe" ".truste_overlay" ".truste_box_overlay" "#truste-consent-track"
    "#CybotCookiebotDialog" "#CybotCookiebotDialogBodyUnderlay" "#dtcookie-container" "#cookiebanner" "#cb-cookieoverlay"
@@ -30,7 +29,6 @@
    "#didomi-popup" ".didomi-popup-container" ".didomi-popup-notice" ".didomi-consent-popup-preferences" "#didomi-notice"
    ".didomi-popup-backdrop" ".didomi-screen-medium"])
 
-;; Ids and classes that name a cookie banner. They can match other things; the early script releases them in seconds.
 (def ^:private generic
   ["[id*=\"cookie-banner\" i]" "[class*=\"cookie-banner\" i]" "[id*=\"cookie-consent\" i]" "[class*=\"cookie-consent\" i]"
    "[id*=\"cookie-notice\" i]" "[class*=\"cookie-notice\" i]" "[id*=\"cookiebanner\" i]" "[class*=\"cookiebanner\" i]"])

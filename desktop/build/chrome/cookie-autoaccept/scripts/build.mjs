@@ -1,7 +1,3 @@
-// Builds the unpacked extension in ext/: the shadow-cljs release builds into ext/js, then the static files from
-// static/ and the vendored autoconsent files the extension loads. Load ext/ in chrome://extensions. ext/ is committed,
-// so a checkout loads without a build; the build is deterministic, so rebuilding changes ext/ only when src/ changed.
-// Java comes from PATH, else from Guix (guix shell openjdk@25:jdk).
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -17,7 +13,6 @@ function run(cmd, args) {
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(' ')} failed (${r.status ?? r.signal})`);
 }
 
-/** Runs shadow-cljs with these arguments, with a JDK from PATH or Guix. */
 export function shadow(args) {
   const java = spawnSync('java', ['-version'], { stdio: 'ignore' }).status === 0;
   if (java) run('npx', ['shadow-cljs', ...args]);
@@ -25,7 +20,6 @@ export function shadow(args) {
 }
 
 if (process.argv.includes('--test')) {
-  // Compiles the cljs.test build to out/test.cjs; npm test runs it.
   shadow(['compile', 'test']);
   process.exit(0);
 }

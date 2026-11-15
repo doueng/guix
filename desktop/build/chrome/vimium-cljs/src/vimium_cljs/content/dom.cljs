@@ -1,6 +1,4 @@
-;; DOM helpers for the content script: editable detection through shadow roots,
-;; visibility, clickable elements, scrollable elements. The clickable rules
-;; follow Vimium's LocalHints (content_scripts/link_hints.js, MIT).
+;; The clickable rules follow Vimium's LocalHints (content_scripts/link_hints.js, MIT).
 (ns vimium-cljs.content.dom
   (:require [clojure.string :as str]))
 
@@ -67,8 +65,6 @@
               y (/ (+ (.-top r) (.-bottom r)) 2)
               root (.getRootNode el)
               ^js hit (if (.-elementFromPoint root) (.elementFromPoint root x y) (.elementFromPoint js/document x y))]
-          ;; A hit outside EL means something covers its centre. Vimium then tries
-          ;; the corners; we accept a hit on any ancestor-or-descendant.
           (when (or (nil? hit) (identical? hit el) (.contains el hit) (.contains hit el)
                     (let [corner (.elementFromPoint root (+ (.-left r) 1) (+ (.-top r) 1))]
                       (or (identical? corner el) (and corner (.contains el corner)))))
@@ -125,7 +121,6 @@
                        (when (and (not (identical? el own-host)) (clickable? el))
                          (when-let [r (visible-rect el)]
                            (.push out #js [el r]))))))
-    ;; Drop a hint whose element contains the next hinted element at the same spot.
     (let [n (.-length out)]
       (vec (keep-indexed
             (fn [i ^js pair]

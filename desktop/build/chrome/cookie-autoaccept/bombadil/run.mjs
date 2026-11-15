@@ -1,14 +1,3 @@
-// Bombadil explores the fixture site in headless Chrome with the extension loaded unpacked, checking spec.ts.
-//
-//   node bombadil/run.mjs [--time 300] [--seed N] [--page FIXTURE.html] [--reproduce DIR] [--headed]
-//
-// One Chrome: $CHROME (a chromium binary) when set, else the com.google.Chrome flatpak. This script owns it over a
-// CDP pipe (to load the extension and drive the popup); Bombadil attaches over a port. The fixtures are served from
-// test/fixtures on localhost and 127.0.0.1 (two sites, so a frame can be cross-origin), with no network.
-// Bombadil is $BOMBADIL, else bombadil on PATH, else the pinned Guix package of the guix repo this lives in (T174).
-// --seed picks the starting settings (mode, and whether localhost, where it starts, is disabled); Bombadil's own choices are
-// recorded in its trace, not seeded. --page keeps the exploration on one fixture. A failure prints the seed and the
-// trace directory; --reproduce DIR replays that trace from the same starting settings.
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -17,21 +6,18 @@ import { join, normalize, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const FIXTURES = join(ROOT, 'test/fixtures');
-// The unpacked extension that npm run build writes.
 const DIST = join(ROOT, 'ext');
 const PROBE = readFileSync(join(import.meta.dirname, 'probe.js'));
 const SPEC = join(import.meta.dirname, 'spec.ts');
 const CMP_SCRIPTS = join(import.meta.dirname, 'cmp');
-// Real CMP script hosts the fixtures load from; Chrome resolves them to the fixture server (--host-resolver-rules).
 const CMP_HOSTS = {
-  // OneTrust's legacy CDN: cdn.cookielaw.org is HSTS-preloaded, so Chrome would ask it over https.
+  // Not cdn.cookielaw.org: it is HSTS-preloaded, so Chrome would ask it over https.
   'optanon.blob.core.windows.net': 'onetrust',
   'consent.cookiebot.com': 'cookiebot',
   'sdk.privacy-center.org': 'didomi',
   'web.cmp.usercentrics.eu': 'usercentrics',
   'cmp.inmobi.com': 'quantcast',
 };
-// Pages that only make sense inside a frame of another page.
 const FRAME_ONLY = new Set(['consent-message.html', 'index.html']);
 
 function options(argv) {
@@ -68,7 +54,6 @@ function nav(port, host) {
   return `<nav id="probe-nav" style="margin:2em 0;line-height:2">${links} <a href="http://${other}:${port}/">other site</a></nav>`;
 }
 
-/** The starting settings for a seed (mulberry32). */
 function startSettings(seed) {
   let s = seed >>> 0;
   const rnd = () => {
@@ -79,8 +64,6 @@ function startSettings(seed) {
   };
   return { mode: rnd() < 0.5 ? 'reject' : 'accept', disabledSites: rnd() < 0.25 ? ['localhost'] : [], blockSites: [] };
 }
-
-// ---- Chrome over a CDP pipe -----------------------------------------------------------------------------------
 
 function launchChrome(profile, headed, sitePort) {
   const rules = Object.keys(CMP_HOSTS).map((h) => `MAP ${h} 127.0.0.1:${sitePort}`).join(',');
@@ -174,11 +157,9 @@ function harness(cdp, extensionId, site) {
     return { ok: false, status: null, error };
   };
 
-  // Opens the real popup for the active tab, reads its status line, and maybe clicks one of its controls.
   let busy = Promise.resolve();
   function popup(op) {
     const run = busy.then(async () => {
-      // The popup belongs to the focused window's active tab: make that Bombadil's fixture tab.
       const opened = await evaluate(await worker(), `(async () => {
         const tabs = await chrome.tabs.query({});
         const t = tabs.find((x) => /^http:\\/\\/(localhost|127\\.0\\.0\\.1):${site()}\\//.test(x.url || ''));
@@ -201,7 +182,6 @@ function harness(cdp, extensionId, site) {
         accept: "document.querySelector('input[name=mode][value=accept]')",
         reject: "document.querySelector('input[name=mode][value=reject]')",
       }[op];
-      // A control that is already in that state fires no change; close the popup ourselves then.
       const changed = click
         ? await evaluate(p.sessionId, `(() => { const el = ${click}; if (!el || el.disabled || (el.type === 'radio' && el.checked)) return false; el.click(); return true; })()`).catch(() => false)
         : false;
@@ -214,7 +194,7 @@ function harness(cdp, extensionId, site) {
   }
   async function setSettings(s) {
     await evaluate(await worker(), `chrome.storage.local.set({ settings: ${JSON.stringify(s)} }).then(() => true)`);
-    // The worker re-registers the early script for the new settings; pages must not load before it has.
+    // Pages must not load before the worker has re-registered the early script for the new settings.
     const want = `js/early-${s.mode}.js`;
     for (let i = 0; i < 50; i++) {
       const js = await evaluate(await worker(), "chrome.scripting.getRegisteredContentScripts({ ids: ['early'] }).then(([e]) => e ? e.js[0] + ' ' + JSON.stringify(e.excludeMatches ?? []) : '')");
@@ -225,8 +205,6 @@ function harness(cdp, extensionId, site) {
   }
   return { settings, setSettings, popup };
 }
-
-// ---- the fixture site ----------------------------------------------------------------------------------------
 
 function startServer(control) {
   const server = createServer(async (req, res) => {
@@ -268,14 +246,11 @@ function startServer(control) {
 const json = (res, v) => res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(v));
 const html = (res, s) => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(s);
 
-// ---- main ---------------------------------------------------------------------------------------------------
-
 async function main() {
   const o = options(process.argv.slice(2));
   const bombadil = bombadilBin();
   const profile = mkdtempSync(join(tmpdir(), 'cookie-autoaccept-bombadil-'));
   const out = mkdtempSync(join(tmpdir(), o.reproduce ? 'cookie-autoaccept-replay-' : 'cookie-autoaccept-trace-'));
-  // The server comes first: Chrome maps the CMP hosts to its port. Its control calls are wired once Chrome is up.
   const control = {};
   const server = await startServer(control);
   const site = server.address().port;
