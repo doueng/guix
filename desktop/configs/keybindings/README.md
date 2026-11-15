@@ -157,10 +157,6 @@ Rows are `TIME PROGRAM KEYS EFFECT KIND 2`, where 2 is the schema version and `d
 
 ## Coaching
 
-Neovim uses Hardtime in hint mode. Repeated movement still works. Hardtime leaves arrow keys available and preserves the existing mouse setting.
-Space u h toggles hints. Space u H opens the report.
-Hardtime writes its own motion-hint log under `~/.local/state/nvim/hardtime.nvim.log`.
-
 Doom uses `key-coach.el`. Five repeated eligible Evil motions trigger advice, with a ten-second notification cooldown.
 The coach ignores insert mode, minibuffers, read-only buffers, buffers without files, explicit counts, and macros.
 Space t h toggles it. Space t H shows per-command hint counts for the current session.

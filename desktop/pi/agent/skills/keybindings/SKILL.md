@@ -59,7 +59,7 @@ Cmd+/ opens `desktop/bin/keyguide`. Entries marked `guide` explain native shortc
 Doom and Neovim use which-key. Herdr uses Ctrl+b ?. Vimium uses ? on supported pages.
 Do not describe the global picker as automatic prefix detection.
 
-Neovim uses Hardtime in hint mode. Doom's `key-coach.el` observes eligible commands, not text.
+Neovim has no motion coaching. Doom's `key-coach.el` observes eligible commands, not text.
 Keep counts, macros, insert mode, minibuffers, and sensitive application input out of new coaching logic.
 Do not add a global keystroke logger. Keep a visible off switch and test that movement still works when a hint fires.
 

@@ -69,7 +69,7 @@ The entries below retain the earlier investigation record. These decisions super
 - Ghostty no longer binds Ctrl+Left and Ctrl+Right. kanata sends them for Alt+arrows, and fish moves by word itself.
 - Keymapper was removed in the kanata migration. The old statement that Alt+W kills a window described keymapper; Alt+W closes a window again through Hyprland's generated bindings.
 - Cmd+/ opens a Dusk discovery menu. It is on-demand discovery, not application prefix interception. The canonical desktop command registry is `desktop/configs/keybindings/bindings.edn`.
-- Neovim Hardtime and Doom's command coach suggest motions without blocking them. Browser guidance is available in the menu. No global input capture was added.
+- Neovim Hardtime and Doom's command coach suggest motions without blocking them. Browser guidance is available in the menu. No global input capture was added. Hardtime was later removed from Neovim.
 - Vimium aliases in `desktop/configs/vimium/keybindings.txt` preserve defaults. They require merging into the extension's existing custom mappings. The supplied blob URL was not treated as a portable export.
 
 - One leader grammar (`leader.edn`) drives Neovim, Doom, IdeaVim, Herdr, and the desktop. A global bare-Space interceptor was rejected because it would capture typed spaces and the editors' own leader. Each context enters the leader with its safe key and then shares the sequences.
