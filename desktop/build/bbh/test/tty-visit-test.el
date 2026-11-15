@@ -1,12 +1,5 @@
 ;;; tty-visit-test.el --- entering a session's layout -*- lexical-binding: t; -*-
 
-;; Run with: bb test:visit
-;; Entering a Router or Worker layout should leave its composer in evil normal
-;; state with the terminal cursor to match, and its transcript already showing
-;; the latest output, whether a key or a process sentinel (the Inbox's RET)
-;; shows it.  Only a terminal frame redisplays and runs evil-terminal-cursor-
-;; changer, so this runs like tty-scroll-test and writes $BBH_TTY_RESULT.
-
 (dolist (pkg '("agent-shell" "acp" "shell-maker" "map" "org" "goto-chg" "evil"
                "evil-terminal-cursor-changer"))
   (add-to-list 'load-path (expand-file-name pkg (getenv "BBH_ELISP_BUILD"))))
@@ -18,7 +11,6 @@
 (load (getenv "BBH_DOOM_AGENT_SHELL") nil t)
 (require 'agent-shell-viewport)
 
-;; Doom's settings and cursors: a bar in insert state, a box in normal state.
 (setq scroll-margin 2
       scroll-conservatively 10
       scroll-preserve-screen-position 'always
@@ -90,7 +82,6 @@
             ((symbol-function 'eng/bbh-workflow-refresh) #'ignore))
     (let ((worker (bbh-visit--session "Worker" 200))
           (router (bbh-visit--session "Router" 200)))
-      ;; The Inbox's RET: bbh names the buffer, and its sentinel shows it.
       (bbh-visit--leave worker)
       (bbh-visit--append (buffer-local-value 'eng/bbh-transcript worker) 100)
       (let* ((done nil)
@@ -100,13 +91,11 @@
                                                 (setq done t)))))
         (while (not done) (accept-process-output process 0.05)))
       (bbh-visit--check-entry worker "a sentinel visit")
-      ;; SPC m r: a command.
       (bbh-visit--leave router)
       (bbh-visit--append (buffer-local-value 'eng/bbh-transcript router) 100)
       (global-set-key (kbd "<f7>") (lambda () (interactive) (eng/bbh-super-visit "Router")))
       (execute-kbd-macro (kbd "<f7>"))
       (bbh-visit--check-entry router "a key visit")
-      ;; A transcript you scrolled back in stays where you were reading.
       (let ((window (get-buffer-window (buffer-local-value 'eng/bbh-transcript router))))
         (with-selected-window window (goto-char (point-min)) (set-window-start window (point-min)))
         (bbh-visit--leave router)
@@ -115,13 +104,7 @@
         (let ((window (get-buffer-window (buffer-local-value 'eng/bbh-transcript router))))
           (unless (= (window-start window) (point-min))
             (error "a transcript read from its top moved to %d" (window-start window)))))
-      ;; T181: output that arrives between commands, from the process filter,
-      ;; keeps every window following the end on its latest output.  A burst
-      ;; longer than `scroll-conservatively' made redisplay recentre on the
-      ;; end and leave the bottom half of the window blank until the next key.
       (bbh-visit--check-output worker)
-      ;; A command that shows the transcript other than through the layout,
-      ;; after output arrived while it was hidden, shows that output.
       (let ((transcript (buffer-local-value 'eng/bbh-transcript router)))
         (eng/bbh-super-visit (buffer-name router))
         (let ((window (get-buffer-window transcript)))
@@ -164,7 +147,6 @@
             (error "after %d lines of output a following window shows %s (start %d of %d)"
                    lines (if blank (format "%d blank rows" blank) "no latest output")
                    (window-start w) (with-current-buffer transcript (point-max)))))))
-    ;; A window scrolled up keeps its place while output arrives.
     (with-selected-window other (goto-char (point-min)) (set-window-start other (point-min)))
     (redisplay t)
     (let ((done nil))

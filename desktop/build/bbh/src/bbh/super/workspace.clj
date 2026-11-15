@@ -47,10 +47,8 @@
   [dir revset]
   (remove str/blank? (str/split-lines (jj-out dir "log" "--no-graph" "-r" revset "-T" "commit_id.short() ++ \" \" ++ description.first_line() ++ \"\\n\""))))
 
-;; Matches the placeholder `wip`, as in [T63] wip(W60).
 (def ^:private wip-description "description(regex:\"^.T[0-9]+. wip[(]\")")
 
-;; A Worker's working-copy change before it has work: empty, undescribed or still described by wip.
 (def ^:private placeholder (str "(empty() & (description(exact:\"\") | " wip-description "))"))
 
 (defn- prefix!
@@ -90,14 +88,10 @@
               (refuse :unclear-tip (str "the line has " (count heads) " heads, so its tip is unclear: " (str/join "; " heads)
                                         ". Ask the person which one your revision goes on, then (super-done! {:onto \"<commit id>\"}).")))
           tip (first (str/split (first heads) #" "))
-          ;; Not the line's own commits the tip lacks, as the person's beside a tip
-          ;; given by ONTO: those stay theirs, neither moved nor prefixed.
           mine (str "(" tip "..@) ~ " trunk " ~ " placeholder)
           _ (when-let [w (seq (revs workspace (str "(" mine ") & " wip-description)))]
               (refuse :wip (str "these commits still have the wip placeholder description: " (str/join "; " w)
                                 ". Describe them (jj describe -r <id> -m ...), then (super-done!) again.")))
-          ;; Work built on the Worker's commits but off its working copy, as after
-          ;; resolving a conflict with jj edit then jj new, would be left behind.
           _ (when-let [s (seq (revs workspace (str "((" mine ")::) ~ ::@ ~ " placeholder)))]
               (refuse :off-stack (str "these commits build on yours but are not under your working copy, so they would not land: " (str/join "; " s)
                                       ". Put your working copy on top of them (jj new <id>, or jj edit <id> for the newest), then (super-done!) again.")))]

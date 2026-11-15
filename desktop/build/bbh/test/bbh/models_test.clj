@@ -14,7 +14,6 @@
       (finally (fs/delete-if-exists file)))))
 
 (deftest a-script-step-streams-its-text-in-the-chunks-it-names
-  ;; Bombadil's Worker view needs output that arrives mid-scroll, as a model's does.
   (let [{:keys [pieces content]} (reply [{:text "one two three four five" :chunks 3}])]
     (is (= 3 (count pieces)))
     (is (= "one two three four five" (str/join pieces) content)))

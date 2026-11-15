@@ -220,7 +220,6 @@
     (is (= expected ts-routes))
     (is (= expected init-routes))
     (is (empty? (set/intersection covered manual)))
-    ;; The route table in the poteto-mode skill is the one a human reads. It must agree too.
     (let [skill (slurp "../../pi/agent/skills/pstack/poteto-mode/SKILL.md")
           rows (for [[_ routes workflow] (re-seq #"(?m)^\| ([\w, ]+?) \| ([\w-]+) \|" skill)
                      r (str/split routes #", ")

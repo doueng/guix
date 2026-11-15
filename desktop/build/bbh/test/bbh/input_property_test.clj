@@ -48,7 +48,6 @@
                               prefix (gen/elements ["tee" "tea" "Tee" "T" "t"])
                               sep (gen/elements [", " ". " ": " " - " ","])
                               msg message]
-                 ;; "T 1 7 0" is read as typed, T1 then "7 0", as it always was.
                  (let [forms (cond->> (spoken-forms n)
                                (#{"T" "t"} prefix) (remove #(and (next %) (every? (fn [w] (re-matches #"\d" w)) %))))
                        form (nth forms (mod form-i (count forms)))]
@@ -106,10 +105,8 @@
                                          :nil (concat positional (when (seq opts) [opts]))))
                        expected [(:command spec) (merge options (zipmap (:args spec) positional) (:fixed spec))]]
                    (if (:map spec)
-                     ;; A map verb takes its arguments as one map.
                      (= [(:command spec) (merge options (:fixed spec))] (call table sym [options]))
                      (and (= expected (call table sym (pass options)))
-                          ;; An option the verb lacks, or a missing argument, is refused.
                           (= :invalid (call table sym (pass (assoc options :no-such-option "x"))))
                           (or (empty? positional) (= :invalid (call table sym (butlast positional))))))))))
 

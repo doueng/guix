@@ -23,24 +23,24 @@
   ([base id] (str (fs/path base id))))
 
 (def ^:private names
-  {:messages "messages.jsonl"     ; the transcript, one JSON message per line
-   :prompts "prompts.jsonl"       ; the prompts in effect, by message count
-   :mailbox "mailbox"             ; messages the session has not taken yet, at the root
-   :agent "agent.json"            ; the live session announces itself, at the root
-   :images "images"               ; pictures sent with mail
+  {:messages "messages.jsonl"
+   :prompts "prompts.jsonl"
+   :mailbox "mailbox"
+   :agent "agent.json"
+   :images "images"
    :repl-port "repl.port"
    :repl-log "repl.log"
-   :wf-run "workflow-run"         ; the wf run the session works in
-   :jobs "jobs"                   ; the REPL's detached jobs
-   :outputs "outputs"             ; tool output too long for the transcript
-   :checkpoint "checkpoint.clj"   ; the REPL definitions a restart replays
+   :wf-run "workflow-run"
+   :jobs "jobs"
+   :outputs "outputs"
+   :checkpoint "checkpoint.clj"
    :deadline "deadline"
    :runs "runs.jsonl"
    :claude-session "claude-session"
    :claude-seen "claude-seen"
    :claude-log "claude.log"
-   :root "inbox-session"          ; the id of the chain's first conversation
-   :continued-in "continued-in"}) ; the id of the conversation this one continued in
+   :root "inbox-session"
+   :continued-in "continued-in"})
 
 (defn file
   "The path of conversation DIR's file K, a key of the table above."

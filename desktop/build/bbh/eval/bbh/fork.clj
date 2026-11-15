@@ -97,7 +97,6 @@ exec \"$@\"")
                                 :args ["--config" (System/getProperty "babashka.config") "-e"
                                        (str "(require 'bbh.fork) (bbh.fork/mcp-stub! " (pr-str dfile) " " (pr-str out) ")")]}}}]
     (spit dfile desc)
-    ;; Before the first message there is nothing to resume: the fork is a new session sent the same prompt.
     (when resume?
       (fs/create-dirs proj)
       (spit (str proj "/" sid ".jsonl")

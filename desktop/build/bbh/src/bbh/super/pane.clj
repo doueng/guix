@@ -61,11 +61,6 @@
 
 (defn- first-line [s] (first (str/split-lines (str s))))
 
-;; The Inbox is an org outline: a heading per thread, then per open ask with
-;; its options in the body, and under each ask a Details heading (folded by
-;; Emacs) and an Answer heading whose body is the one editable text. Emacs
-;; reads the ids back from the headings, so every heading starts with its id.
-
 (defn- indent [prefix s]
   (str/join "\n" (map #(str prefix %) (str/split-lines (str s)))))
 
@@ -88,7 +83,6 @@
                                 (when details [(indent "    " details)])
                                 (when evidence [(str "    " (if (str/starts-with? evidence "/") (str "[[file:" evidence "][" evidence "]]") evidence))])))
                       ["*** Answer"]
-                      ;; An empty line, so a blank Answer has a line to type on.
                       [(if (str/blank? answer) "" (indent "    " answer))]))))
 
 (defn org-view
@@ -121,11 +115,6 @@
   (call! {:command :sections}))
 
 (defn- thread [id] (call! {:command :thread :args {:id id}}))
-
-;; The split view (design 4): a compact list of every thread on the left and
-;; the selected thread on the right. `split` prints the list as #+thread lines
-;; and the selected thread's progress as #+progress lines ahead of the same
-;; outline `org` prints, so one run feeds both panes.
 
 (defn- one-line [s] (str/trim (str/replace (str s) #"\s+" " ")))
 
@@ -258,8 +247,6 @@
   (try
     (case verb
       nil (emacs/attach! "(eng/bbh-inbox)")
-      ;; The Inbox buffer's reload: the header, then the outline, from one read.
-      ;; The buffer keeps your place, folds and unsent answers across reloads.
       "org" (let [s (sections)] (println (header s (version/stale (client/data-dir)))) (println (org-view s)))
       "split" (let [s (sections)]
                 (println (header s (version/stale (client/data-dir))))
@@ -267,14 +254,12 @@
                 (when id
                   (println (str "#+selected: " id))
                   (doseq [l (split-progress id (call! {:command :events :args {:thread id}}) 8)] (println l)))
-                ;; The list's selection moved there: tell voice, as select does.
                 (when (= "select" n) (select! id))
                 (println (org-view s)))
       "select" (select! id n)
       "clear" (call! {:command :discard-draft! :args {:thread id}})
       "pick" (pick! id (parse-long n) :ask (first more))
       "answer" (answer! id n (str/join " " more))
-      ;; ANSWERS is an EDN map {ask text}, so text keeps its newlines.
       "send" (send! id :answers (some-> n edn/read-string))
       "note" (let [line (str/trim (str/join " " (remove nil? (cons n more))))]
                (when (str/blank? line) (throw (ex-info "A note needs text" {:error :invalid})))

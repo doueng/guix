@@ -95,7 +95,6 @@
            150
            (prop/for-all [choices (gen/vector choice 0 60)]
              (let [w (reduce step {:workers {} :sessions {} :busy #{} :since {} :ended {} :now 0} choices)
-                   ;; A pass sees what is stale; once the grace has passed, the next reaps it even in a turn.
                    w (-> w (step [:pass 0]) (update :now + grace) (step [:pass 0]))]
                (every? (fn [[c _]] (sessions/holds-session? (get-in w [:workers (str/replace c "super-" "")])))
                        (:sessions w)))))]

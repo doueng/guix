@@ -65,7 +65,6 @@
       (finally (stop! c)))))
 
 (deftest agent-json-says-when-the-person-last-typed-a-prompt
-  ;; The controller reads it to close asks answered in the chat; a mail wake is no answer.
   (let [c (client ["a" "b"])
         agent #(some-> (first (fs/glob (:dir c) "**/agent.json")) str slurp (json/parse-string true))]
     (try
@@ -133,9 +132,6 @@
       (finally (stop! c)))))
 
 (deftest a-session-whose-directory-is-gone-runs-nothing
-  ;; bbh super deletes a finished Worker's workspace, the session's cwd. The
-  ;; next prompt would start claude there and fail on exec, so bbh refuses it
-  ;; and says why.
   (let [c (client ["ran anyway"])]
     (try
       (send! c 1 "initialize" {:protocolVersion 1})

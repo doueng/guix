@@ -49,7 +49,6 @@
   (let [s (session-with-deadline 3000)
         run #(session/run-code! s (str (random-uuid)) %)]
     (try
-      ;; A 1 s margin instead of 10 s gives sh a 2 s budget, so the test need not wait out a long deadline.
       (repl/eval! (:repl @s) "(alter-var-root #'bbh.env/deadline-margin-ms (constantly 1000))" 5000)
       (run "(def kept 1)")
       (let [start (System/currentTimeMillis)
@@ -89,7 +88,6 @@
       (Thread/sleep 700)
       (session/interrupt! s)
       (deref call 10000 nil)
-      ;; Past the moment the command would have touched the marker.
       (Thread/sleep (max 0 (- (+ started 3000) (System/currentTimeMillis))))
       (is (not (fs/exists? marker)) "the detached command died with the interrupt")
       (is (empty? (fs/glob (:repl-dir @s) "jobs/*")) "an interrupted sh leaves no job files")

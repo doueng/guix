@@ -31,7 +31,6 @@
           (if (= ::eof form)
             acc
             (let [slice (subs code start (min (count code) (offset (.getLineNumber rdr) (.getColumnNumber rdr))))
-                  ;; The slice can start with comments or #_ forms that the reader skipped.
                   source (loop [s (str/triml slice)]
                            (if (str/starts-with? s ";")
                              (recur (str/triml (subs s (or (str/index-of s "\n") (count s)))))

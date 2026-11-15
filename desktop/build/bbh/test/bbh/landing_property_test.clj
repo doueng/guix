@@ -101,9 +101,6 @@
         r (if (= :unclear-tip (:refused r))
             (attempt {:onto (first (lines repo (str "latest(" (last landed) ")") "commit_id"))})
             r)
-        ;; Settling a conflict by editing the conflicted commit leaves the
-        ;; working copy below the rest of the stack, which must be refused
-        ;; rather than left behind; the Worker then moves on top and lands.
         r (loop [r r n 0]
             (cond (> n 8) r
                   (:conflicts r) (do (resolve-conflicts! ws (str (:onto r) ".." thread "-1@ ~ ::default@-"))
@@ -118,7 +115,6 @@
       (nil? (:landed r)) (do (workspace/retire! {:repo repo :workspace ws}) (assoc-in world [:workers i :landed?] true))
       :else
       (let [tip (first (lines repo (:landed r) "commit_id"))
-            ;; The shared file is settled by hand, so only each Worker's own files are compared.
             world (check-landing world (update w :files #(dissoc % "shared.txt")) tip before-line)
             moved (workspace/advance! {:repo repo :tip tip :move move})]
         (workspace/retire! {:repo repo :workspace ws})
@@ -170,7 +166,6 @@
       (let [world (reduce (fn [world op] (let [w (step world op)] (if (:problems w) (reduced w) w)))
                           (start root) ops)
             repo (:repo world)
-            ;; The person's work is never lost: their working copy holds every file as they last wrote it.
             lost (for [[file text] (:person world)
                        :let [f (fs/path repo file)]
                        :when (not= text (when (fs/exists? f) (str/trim (slurp (str f)))))]
@@ -184,24 +179,14 @@
              (gen/choose 0 100) (gen/choose 0 100)))
 
 (deftest landing-regressions-the-property-found
-  ;; Shrunk failures from T170, each a bug in land! or advance! before it.
-  (doseq [[why ops] {;; Settling a conflict with jj edit then jj new left the
-                     ;; working copy below the stack's last commit, which then
-                     ;; never landed: land! now refuses :off-stack.
-                     :stack-left-behind [[:commit 0 0] [:edit 0 0] [:start 0 0] [:commit 46 0] [:land 16 0] [:land 0 0]]
-                     ;; The person committed off the line and the landing went
-                     ;; :onto the Worker's tip: advance! moved their empty
-                     ;; working copy off their own commit.
+  (doseq [[why ops] {:stack-left-behind [[:commit 0 0] [:edit 0 0] [:start 0 0] [:commit 46 0] [:land 16 0] [:land 0 0]]
                      :checkout-left-the-persons-commit [[:commit 0 0] [:person-edit 0 0] [:start 0 0] [:commit 46 0] [:land 0 0] [:person-commit 0 0] [:land 0 0]]
-                     ;; With :onto, the person's commits beside the tip were
-                     ;; taken as the Worker's, rebased and prefixed.
                      :persons-commits-taken [[:person-edit 0 0] [:commit 3 0] [:land 31 0] [:person-commit 0 0] [:start 0 0] [:person-commit 0 0] [:land 7 0]]}]
     (is (nil? (run-world (concat [[:start 0 0] [:start 0 0]] ops))) (str why))))
 
 (deftest property-landing-random-stacks-keeps-the-line-and-loses-nothing
   (props/check "landing" 4
                (prop/for-all [ops (gen/vector op 4 18)]
-                 ;; Every run starts two Workers so short runs land something.
                  (nil? (run-world (concat [[:start 0 0] [:start 0 0]] ops))))
                :explain #(run-world (concat [[:start 0 0] [:start 0 0]] %))
                :max-size 30 :full 30))

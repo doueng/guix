@@ -249,9 +249,6 @@
         (not live) [:div.status "This session ended"]
         busy [:div.status "Working"]))
 
-;; The controller pushes `changed` on /api/super/stream; the page refetches then,
-;; and polls slowly only while the stream is down.
-
 (def fallback-ms 30000)
 (def undo-ms 4000)
 

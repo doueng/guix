@@ -50,8 +50,6 @@
   (when (= :unclosed (:kind balance))
     (let [{:keys [line] :as outer} (first (:stack balance))
           trailing (->> (str/split s #"\n" -1) (drop line) (remove str/blank?) count)]
-      ;; A form in column 1 inside the open region is a top-level form that
-      ;; closing at the end would silently re-parent.
       (when (and (<= trailing max-trailing-nonblank-lines) (not-any? #(>= % line) tops))
         (let [closers (apply str (map (comp closer :char) (rseq (:stack balance))))]
           {:content (str s closers)

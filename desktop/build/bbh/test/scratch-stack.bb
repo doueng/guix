@@ -1,16 +1,5 @@
 #!/usr/bin/env bb
-;; A scratch bbh super stack on this checkout's code, for checks that need a
-;; live controller, Emacs daemon and bbh acp sessions without touching yours.
-;;
-;;   bb test/scratch-stack.bb up      start it, empty
-;;   bb test/scratch-stack.bb env              print the environment to use it
-;;   bb test/scratch-stack.bb down             stop it and leave no process
-;;
-;; Everything lives under $BBH_STACK (default /tmp/bbh-stack): data, state,
-;; a bin/ with bbh and wf wrappers on this checkout, and the logs. The Emacs
-;; daemon is named after the directory and loads this checkout's agent-shell.el.
-;; It never takes a copy of your super.db: its controller would reconcile your
-;; live Workers and reopen their sessions in your workspaces.
+;; Never copy your super.db here: its controller would reconcile your live Workers and reopen their sessions in your workspaces.
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 
 (def checkout (str (fs/canonicalize (fs/path (fs/parent *file*) ".." ".." ".." ".."))))
@@ -55,8 +44,7 @@
   (wrapper! "wf" "bbh.workflow")
   (spawn! "emacs" [(str (fs/expand-home "~/.local/bin/emacs")) (str "--fg-daemon=" server)])
   (wait-for "Emacs" #(zero? (:exit (emacs-eval "t"))))
-  ;; Doom's env file overrides the daemon's environment at startup, so set it
-  ;; again, then refuse to go on unless sessions would run on this stack only.
+  ;; Doom's env file overrides the daemon's environment at startup, so set it again and verify.
   (emacs-eval (str "(progn "
                    (str/join " " (for [[k v] env] (format "(setenv %s %s)" (pr-str k) (pr-str v))))
                    (str/join " " (for [k worker-env] (format "(setenv %s nil)" (pr-str k))))

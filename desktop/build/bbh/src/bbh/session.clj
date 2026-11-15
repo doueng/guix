@@ -104,7 +104,6 @@
   (locking (:code-lock @s)
     (let [messages (claimable s)]
       (when (seq messages)
-        ;; Claim in memory only. record! deletes each file once the transcript holds its tag.
         (swap! s update :taken into (map (juxt :id mail-tag) messages))
         (str/join "\n\n" (map #(str (mail-tag %) " " (str/replace-first (:text %) #"^\[Steering\] " "")) messages))))))
 
@@ -371,7 +370,6 @@
               (try (repl/eval! repl sent (:deadline-ms manifest)
                                (extended-until s (+ start (:deadline-ms manifest) max-extension-ms)))
                    (finally (swap! s assoc :evaluating false))))
-          ;; Before the restart below, so the run survives a close and leaves out the reload.
           _ (trace-run! s "tool" start
                         (cond-> {:tool-call-id id :chars (count (render r Long/MAX_VALUE))
                                  :status (cond (:interrupted @s) "interrupted"
@@ -398,7 +396,6 @@
                     [(str (spill! s id (render r Long/MAX_VALUE) (:max-output-chars manifest)) (when-not sandbox? (name-hint s r)))
                      (if (:error? r) :failed :completed)]))
           text (cond->> text note (str note "\n"))]
-      ;; Mail goes first, where a front end that shortens long output keeps it.
       (let [text (if-let [mail (take-mail! s)] (str mail "\n\n" text) text)]
         (emit! s {:type :tool-result :id id :code code :text text :status status})
         text))))
@@ -435,7 +432,6 @@
     (stop-engine! s)
     (let [new-dir (conversation/continue! dir id)
           checkpoint (checkpoint-path s)]
-      ;; The REPL keeps running, so its definitions belong to the continuation too.
       (when (fs/exists? checkpoint) (fs/copy checkpoint (conversation/file new-dir :checkpoint)))
       (swap! s assoc :dir new-dir :messages [] :last-input nil :turn-from 0))
     (note! s (str "Context reached " (or last-input "the model's limit of") " tokens, so this continues in conversation " id "."))
@@ -522,8 +518,7 @@
             (note! s "The reply hit the model's output limit and was cut off."))
           (cond
             (seq calls)
-            ;; The reminder goes into the tool result as it is recorded, so the
-            ;; prefix of every later request stays the same.
+            ;; Recorded into the tool result so every later request's prefix (prompt cache) stays the same.
             (let [quiet (if (str/blank? (:content message)) (inc quiet) 0)
                   remind? (and (>= quiet quiet-rounds) (< reminders max-reminders))
                   last-id (:id (peek calls))]
@@ -664,7 +659,6 @@
     ;; One swap, so a cancellation that lands just before cannot be cleared by it.
     (swap! s (fn [st] (assoc st :interrupted (boolean (and mailbox? (:cancelled st))) :turn-usage nil :trace nil :taken {})))
     (cond
-      ;; An earlier input may already have taken the mail this wake was for.
       (and wake? (empty? (claimable s)))
       (if (:interrupted @s) :cancelled :end-turn)
 
@@ -691,7 +685,6 @@
                 prompt (cond (and wake? mail) mail
                              mail (str mail "\n\n" prompt)
                              :else prompt)
-                ;; The front end showed only the wake, so it is shown what the wake brought.
                 _ (when (and wake? mail) (emit! s {:type :text :text (str mail "\n\n")}))]
             (record! s {:role "user"
                         :content (if (seq notes) (str "[bbh] " (str/join " " notes) "\n\n" prompt) prompt)})

@@ -215,7 +215,6 @@
             (await-call events)
             (bbh.inbox/send! (:dir @s) "[Steering] preserve the option" nil {:kind :steer})
             (is (= :end-turn (deref turn 10000 :timeout)))
-            ;; Steering leads the result, tagged with its message id.
             (is (re-matches #"\[Steering [^\]]+\] preserve the option\n\n=> 42"
                             (:text (last (filter #(= :tool-result (:type %)) @events)))))
             (is (re-matches #"\[Steering [^\]]+\] preserve the option\n\n=> 42"

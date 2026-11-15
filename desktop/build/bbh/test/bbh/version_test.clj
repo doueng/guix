@@ -18,7 +18,6 @@
   (let [data-home (str (fs/create-temp-dir {:prefix "bbh-serve"}))
         proc (p/process {:out :string :err :string :dir (str (fs/path version/root))
                          :extra-env {"XDG_DATA_HOME" data-home "BBH_SUPER_FOLLOW_MS" "100" "BBH_SUPER_TOKEN" ""
-                                     ;; It manages a Router: keep it away from your Emacs daemon.
                                      "BBH_EMACS_SERVER" "bbh-test-none"}}
                         "bb" "-cp" "src" "-m" "bbh.main" "super" "serve")
         record (fs/path data-home "bbh" "versions" "controller.edn")]

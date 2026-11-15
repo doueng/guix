@@ -42,7 +42,6 @@
                                        :at (if by-health (get-in w [:health :since]) (:state-at w))
                                        :text (or (when by-health (get-in w [:health :problem])) late (:reason w)
                                                  (if (= :needs-human kind) "It needs your help." "Its session ended."))}
-                                ;; A late Worker became news at its deadline, not when it entered the state.
                                 (and late (not by-health) (:state-at w))
                                 (assoc :news-at (+ (:state-at w) (model/deadlines (:state w) 0))))]))))
 
@@ -246,16 +245,13 @@
   due items, for the caller to record as notified."
   [{:keys [effects shown seen live-from] :as notifier} state now policy]
   (let [due (due state now policy)
-        ;; What began before the controller started is history replayed from the log.
         news (into {} (remove #(and live-from (< (or (:news-at (val %)) (:at (val %))) live-from))) due)]
     (when (seq news)
       (let [{dnd :do-not-disturb expire-ms :notify-expire-ms} (merge default-policy policy (overrides))
             threads (set (map :thread (vals news)))
-            ;; A thread's notification is replaced, so it keeps what it showed that still waits.
             p (merge (into {} (comp (filter #(threads (key %))) (mapcat (comp :items val))) @shown) news)]
         (when-not dnd
           (doseq [n (map #(assoc % :expire-ms expire-ms) (plan p state))]
-            ;; A burst stands for its threads; their own notifications go.
             (when (= :burst (:key n))
               (doseq [t (distinct (map :thread (vals p))) :when (@shown t)]
                 ((:close! effects) (@shown t))
@@ -385,8 +381,6 @@
         h (show! n nil (fn [n] (vreset! clicking true) (try (when thread (click! n)) (finally (deliver outcome :clicked)))))]
     (println "sent notification" (deref (:id h) 5000 "(no id: is a notification daemon running?)"))
     (let [start (System/currentTimeMillis)]
-      ;; notify-send --wait ends when the notification closes: clicked, dismissed or expired.
-      ;; Its reader thread sees a click by then, so wait briefly for it.
       (future (.waitFor ^Process (:proc (:proc h)))
               (let [ms (- (System/currentTimeMillis) start)]
                 (Thread/sleep 200)

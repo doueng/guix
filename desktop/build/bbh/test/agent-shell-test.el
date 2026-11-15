@@ -1,7 +1,5 @@
 ;;; agent-shell-test.el --- bbh acp through Doom's agent-shell config -*- lexical-binding: t; -*-
 
-;; Run with: bb test:emacs
-
 (require 'ert)
 (dolist (pkg '("agent-shell" "acp" "shell-maker" "map" "org"))
   (add-to-list 'load-path (expand-file-name pkg (getenv "BBH_ELISP_BUILD"))))
@@ -68,7 +66,6 @@ keys act in normal state."
                                  ("]t" . eng/bbh-inbox-next-waiting)))
     (bbh-test--keys-in 'insert '(("C-n" . eng/bbh-inbox-send) ("C-c C-k" . eng/bbh-inbox-clear)))
     (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send)
-    ;; Nor org's C-c C-c, whose tags prompt on a heading froze the Inbox (T174).
     (dolist (state '(normal insert))
       (bbh-test--keys-in state '(("C-c C-c" . undefined))))
     (evil-change-state 'insert)
@@ -91,15 +88,12 @@ the split view's thread list keeps one truncated line per thread."
     (should word-wrap)
     (should visual-line-mode)
     (should org-indent-mode)
-    ;; A reload runs the setup again, which must not undo it.
     (eng/bbh-inbox--setup)
     (should (and visual-line-mode org-indent-mode (not truncate-lines)))
     (let ((eng/bbh-inbox-view 'outline))
       (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t))
     (goto-char (point-min))
     (search-forward "1. No")
-    ;; A wrapped list item lines up under its text: the level 2 indent, then
-    ;; past "   1. ".
     (should (equal 4 (length (get-text-property (point) 'line-prefix))))
     (should (equal 10 (length (get-text-property (point) 'wrap-prefix))))
     (kill-buffer))
@@ -260,7 +254,6 @@ takes a fraction of the first pass, where the major mode runs (about 1/6
 here; the budget allows 0.7)."
   (let* ((calls 0)
          (count (lambda (&rest _) (cl-incf calls))))
-    ;; Only the uncached path looks up the major mode.
     (with-current-buffer (get-buffer-create "bbh native cache test")
       (eng/bbh-transcript-mode)
       (let ((noninteractive nil)) (font-lock-mode 1))
@@ -341,7 +334,6 @@ deadline and leaves text out of reach alone."
          (count (lambda (&rest _) (cl-incf calls))))
     (with-current-buffer buffer
       (let ((start (window-start window)))
-        ;; A deadline already past does nothing and says that work is left.
         (should (eng/bbh-transcript--precolor-window window (float-time)))
         (should-not (text-property-any (max (point-min) (- start 60000)) start 'fontified t))
         (let ((t0 (float-time)))
@@ -350,7 +342,6 @@ deadline and leaves text out of reach alone."
         (should-not (text-property-any (save-excursion (goto-char (- start 60000)) (line-end-position 2))
                                        (point-max) 'fontified nil))
         (should (text-property-any (point-min) (- start 60000) 'fontified nil))
-        ;; Scrolling back through it now runs no major mode and costs little.
         (advice-add 'org-src-get-lang-mode-if-bound :before count)
         (unwind-protect
             (let ((t0 (float-time)))
@@ -375,7 +366,6 @@ the daemon's redisplay; the transcript's link regexp fails at once and
 still reads links."
   (with-current-buffer (get-buffer-create "bbh links test")
     (eng/bbh-transcript-mode)
-    ;; Org's own regexp takes about 1.6 s here, and 14 s with one more pair.
     (let ((escaped (concat "[[" (apply #'concat (make-list 7 "(s n) \\\\\\\" | \\\\\\\" "))))
           (t0 (float-time)))
       (should-not (string-match org-link-any-re escaped))
@@ -403,10 +393,8 @@ Bombadil found each chunk pulling the reader back to the reply's start."
         (eng/bbh-transcript--reply-chunk "still streaming.\n\n```clojure\n(+ 1 2)")
         (should (= here (window-point reader)))
         (should (= (point-max) (window-point follower)))
-        ;; More code in the open fence changes the text at its #+end_src.
         (eng/bbh-transcript--reply-chunk "\n(+ 3 4)")
         (should (= here (window-point reader)))
-        ;; Each hidden span is a markup line, and each markup line is hidden.
         (dolist (overlay (overlays-in (point-min) (point-max)))
           (when (overlay-get overlay 'eng/bbh-markup)
             (should (string-match-p "#\\+\\(begin\\|end\\)_"
@@ -419,8 +407,6 @@ Bombadil found each chunk pulling the reader back to the reply's start."
         (should (= here (window-point reader)))
         (should (= (point-max) (window-point follower))))
       (delete-window follower))
-    ;; A fence opened in one chunk gets its first line in the next, right
-    ;; under its begin line, which stays hidden.
     (setq eng/bbh-transcript--reply nil)
     (eng/bbh-transcript--prompt "again")
     (eng/bbh-transcript--reply-chunk "```clojure\n")
@@ -580,8 +566,6 @@ scrolled up keeps its start."
           (should (equal (eng/bbh--conversation shell) "20210101-000000-000")))
       (kill-buffer shell))))
 
-;;; Website mailbox
-
 (defun bbh-test--mail (conversation id text &optional kind)
   "Leave TEXT in CONVERSATION's mailbox as bbh does, under message ID."
   (let ((dir (eng/bbh-mail-dir conversation)))
@@ -620,8 +604,6 @@ and the transcript keeps q and focus moves in normal state."
       (bbh-test--keys-in 'normal '(("q" . bury-buffer) ("C-j" . eng/focus-down) ("C-k" . eng/focus-up))))))
 
 (ert-deftest bbh-insert-keys-in-the-transcript-type-in-the-composer ()
-  ;; i in the read-only transcript put it in insert state, where j and G
-  ;; only said the buffer is read-only (Bombadil, T174).
   (bbh-test--with-shell (shell composer transcript)
     (with-current-buffer composer (insert "draft"))
     (dolist (key '("i" "a" "A" "o"))
@@ -631,7 +613,6 @@ and the transcript keeps q and focus moves in normal state."
       (call-interactively (key-binding (kbd key)))
       (should (eq (window-buffer (selected-window)) composer))
       (should (evil-insert-state-p))
-      ;; After the draft, not inside its last word.
       (should (= (point) (point-max)))
       (with-current-buffer transcript (should (evil-normal-state-p)))
       (evil-normal-state))))
@@ -649,7 +630,6 @@ and the transcript keeps q and focus moves in normal state."
       (should (equal "half typed" (with-current-buffer composer (string-trim (buffer-string))))))))
 
 (ert-deftest bbh-mail-waits-while-the-shell-is-stuck-busy ()
-  ;; T36: shell-maker-busy stayed t after a turn, and every wake was lost.
   (bbh-test--with-shell (shell composer transcript)
     (let (file)
       (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t)))
@@ -695,8 +675,6 @@ and the transcript keeps q and focus moves in normal state."
                                   30)))))))
 
 (ert-deftest bbh-an-error-at-the-end-of-a-turn-leaves-the-shell-taking-mail ()
-  ;; T163: a half-reloaded agent-shell signalled void-function at every turn
-  ;; end, before it cleared the busy flag, so mail never woke the shell again.
   (bbh-test--with-shell (shell composer transcript)
     (bbh-test--submit shell (concat "/model script/"
                                     (make-temp-file "bbh-turn-end" nil ".edn" "[\"first reply\" \"mail reply\"]")))
@@ -711,7 +689,6 @@ and the transcript keeps q and focus moves in normal state."
         (bbh-test--submit shell "say something")
         (should (bbh-test--wait (lambda () (string-match-p "first reply" (bbh-test--text shell))) 30))
         (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 10))
-        ;; Still failing at each turn end, the shell takes its mail.
         (let ((file (bbh-test--mail (eng/bbh--conversation shell) "4-m4" "after the broken turn")))
           (should (bbh-test--wait (lambda () (not (file-exists-p file))) 30))
           (should (bbh-test--wait (lambda () (string-match-p "after the broken turn" (bbh-test--text transcript))) 30))
@@ -719,8 +696,6 @@ and the transcript keeps q and focus moves in normal state."
           (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30)))
         (should (= 1 (length logged)))
         (should (string-match-p "agent-shell--more-config-options" (car logged)))))))
-
-;;; Leftover mailbox timers
 
 (defun bbh-test--timer-live-p (timer)
   (and (timerp timer) (memq timer timer-list) t))
@@ -751,7 +726,6 @@ and the transcript keeps q and focus moves in normal state."
         timers base)
     (unwind-protect
         (cl-letf (((symbol-function 'eng/bbh-mail-wake) #'ignore))
-          ;; Shells earlier tests left keep their watches.
           (setq base (cdr (eng/bbh-mail-sweep)))
           (eng/bbh-mail-watch live)
           (with-current-buffer finished (setq eng/bbh-super-finished t))
@@ -763,7 +737,6 @@ and the transcript keeps q and focus moves in normal state."
             (should (eq live (eng/bbh-mail--timer-shell old-live)))
             (should (eq live (eng/bbh-mail--timer-shell watch)))
             (should-not (eng/bbh-mail--timer-shell other))
-            ;; The finished shell's and the live shell's duplicate go; its watch stays.
             (should (equal (cons 2 (1+ base)) (eng/bbh-mail-sweep)))
             (should (bbh-test--timer-live-p watch))
             (should-not (bbh-test--timer-live-p old-live))
@@ -783,12 +756,9 @@ and the transcript keeps q and focus moves in normal state."
           (with-current-buffer shell (setq eng/bbh-super-conversation "super-W12"))
           (should (equal '(1 0) (take 2 (eng/bbh-super-sweep '("super-W12" "super-W404")))))
           (should (equal '("super-W12") ended))
-          ;; Ended once: a finished shell is not ended again.
           (should (equal '(0 0) (take 2 (eng/bbh-super-sweep '("super-W12")))))
           (should (= 1 (length ended))))
       (kill-buffer shell))))
-
-;;; Super-agent
 
 (defun bbh-test--environ (pid)
   (with-temp-buffer
@@ -806,7 +776,6 @@ and the transcript keeps q and focus moves in normal state."
           (should (bbh-test--wait (lambda () (with-current-buffer shell (map-nested-elt agent-shell--state '(:session :id)))) 30))
           (should (equal "super-W7" (eng/bbh--conversation shell)))
           (should (equal "T7 test transcript" (buffer-name (buffer-local-value 'eng/bbh-transcript shell))))
-          ;; The renamed shell still takes a prompt and runs it.
           (bbh-test--submit shell "add forty and two")
           (should (bbh-test--wait (lambda () (and (bbh-test--idle-p shell) (string-match-p "=> 42" (bbh-test--text shell)))) 60))
           (let ((acp (seq-find (lambda (p) (and (member "acp" (process-command p)) (member "super-W7" (process-command p)))) (process-list))))
@@ -816,7 +785,6 @@ and the transcript keeps q and focus moves in normal state."
             (should (member "WF_RUN=run-7" (bbh-test--environ (process-id acp))))
             (should (member "PATH" (mapcar (lambda (v) (car (split-string v "="))) (bbh-test--environ (process-id acp)))))
             (should (file-equal-p dir (file-truename (format "/proc/%d/cwd" (process-id acp))))))
-          ;; Shown, it has a composer; replacing it must not ask about the shell.
           (eng/bbh-super-visit name)
           (should (agent-shell-viewport--buffer :shell-buffer shell :existing-only t))
           (let ((again (cl-letf (((symbol-function 'y-or-n-p) (lambda (p) (error "Asked: %s" p))))
@@ -828,10 +796,6 @@ and the transcript keeps q and focus moves in normal state."
       (when-let* ((s (eng/bbh-super--shell "super-W7"))) (eng/bbh-super--kill s)))))
 
 (ert-deftest bbh-super-finished-session-runs-nothing-after-its-workspace-is-deleted ()
-  ;; super-done! deletes the Worker's workspace, the shell's directory, in the
-  ;; middle of its last turn, after the controller released the session. The
-  ;; shell must still go idle, and then run nothing in the deleted directory:
-  ;; mail does not wake it, and what the person types goes to the Router.
   (let* ((ws (make-temp-file "bbh-super-ws" t))
          (repo (make-temp-file "bbh-super-repo" t))
          (shell (get-buffer (eng/bbh-super-open "super-W9" ws "T9 test" nil))))
@@ -844,17 +808,14 @@ and the transcript keeps q and focus moves in normal state."
           (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
           (bbh-test--submit shell "finish")
           (should (bbh-test--wait (lambda () (string-match-p "Thread/sleep" (bbh-test--text shell))) 30))
-          ;; What the controller does while the turn runs: release, then retire.
           (should (equal "T9 test" (eng/bbh-super-release "super-W9" repo)))
           (should-not (eng/bbh-super-release "super-W404" repo))
           (delete-directory ws t)
           (should (bbh-test--wait (lambda () (string-match-p "landed" (bbh-test--text shell))) 30))
           (should (bbh-test--wait (lambda () (bbh-test--idle-p shell)) 30))
-          ;; Mail to the finished Worker wakes nothing, so it stays unread.
           (let ((file (bbh-test--mail "super-W9" "9-m9" "job exited")))
             (sleep-for 2)
             (should (file-exists-p file)))
-          ;; What the person types goes to the Router, naming the thread.
           (let* ((said nil)
                  (this-command 'shell-maker-submit))
             (cl-letf (((symbol-function 'eng/bbh-super-say)
@@ -907,8 +868,6 @@ used to be erased when it answered, with whatever you typed meanwhile
       (kill-buffer router))))
 
 (ert-deftest bbh-super-end-frees-a-finished-workers-session-and-keeps-its-buffer ()
-  ;; The controller ends a finished Worker's session to free its memory. Its
-  ;; process goes, its buffers stay readable, and no client is made again.
   (let* ((ws (make-temp-file "bbh-super-ws" t))
          (shell (get-buffer (eng/bbh-super-open "super-W10" ws "T10 test" nil))))
     (unwind-protect
@@ -935,9 +894,6 @@ used to be erased when it answered, with whatever you typed meanwhile
   (with-current-buffer buf (how-many regexp (point-min) (point-max))))
 
 (ert-deftest bbh-a-restarted-process-gets-a-new-session-and-takes-its-mail ()
-  ;; T162: the controller died and took W172's bbh with it.  agent-shell then
-  ;; started a new bbh but sent it the old session id, bbh answered `Unknown
-  ;; session', and the mailbox wake printed that every second.
   (let* ((ws (make-temp-file "bbh-super-ws" t))
          (shell (get-buffer (eng/bbh-super-open "super-W11" ws "T11 test" nil)))
          (transcript (buffer-local-value 'eng/bbh-transcript shell)))
@@ -963,10 +919,6 @@ used to be erased when it answered, with whatever you typed meanwhile
       (delete-directory ws t))))
 
 (ert-deftest bbh-a-restarted-process-keeps-the-composer-and-its-draft ()
-  ;; When a shell needs a new client, agent-shell turns its viewport into the
-  ;; read-only view of the last turn and erases it.  A bbh composer is that
-  ;; viewport, so a restart after bbh died (T162) took the composer and the
-  ;; half-typed draft away (Bombadil, T174).
   (let* ((ws (make-temp-file "bbh-super-ws" t))
          (shell (get-buffer (eng/bbh-super-open "super-W13" ws "T13 test" nil))))
     (unwind-protect
@@ -981,9 +933,7 @@ used to be erased when it answered, with whatever you typed meanwhile
             (with-current-buffer composer
               (should (derived-mode-p 'agent-shell-viewport-edit-mode))
               (should (equal "half-typed draft" (string-trim (buffer-string))))
-              ;; The restart lands while you type, so you keep typing.
               (should (evil-insert-state-p))
-              ;; One blank row above the draft, not two.
               (should (= 1 (seq-count (lambda (o) (equal "\n" (overlay-get o 'before-string)))
                                       (overlays-in (point-min) (point-max))))))))
       (when-let* ((s (eng/bbh-super--shell "super-W13"))) (eng/bbh-super--kill s))
@@ -1004,9 +954,6 @@ used to be erased when it answered, with whatever you typed meanwhile
         (should (member id (process-command (bbh-test--acp "acp"))))))))
 
 (ert-deftest bbh-a-failing-mail-wake-backs-off-stops-and-says-so-once ()
-  ;; Every prompt fails with `Unknown session'.  The shell starts new sessions
-  ;; a bounded number of times, shows the wake and its error once, then stops
-  ;; and asks for attention instead of retrying every second.
   (let* ((ws (make-temp-file "bbh-super-ws" t))
          (shell (get-buffer (eng/bbh-super-open "super-W13" ws "T13 test" nil)))
          (transcript (buffer-local-value 'eng/bbh-transcript shell))
@@ -1024,7 +971,6 @@ used to be erased when it answered, with whatever you typed meanwhile
                              (let ((on-failure (plist-get args :on-failure))
                                    (buffer (plist-get args :buffer)))
                                (setq prompts (1+ prompts))
-                               ;; As acp answers: later, in the request's buffer.
                                (run-at-time 0 nil (lambda ()
                                                     (with-current-buffer buffer
                                                       (funcall on-failure (acp-make-error :code -32602 :message "Unknown session") nil)))))
@@ -1033,7 +979,6 @@ used to be erased when it answered, with whatever you typed meanwhile
                        (lambda (format &rest args) (push (apply #'format-message format args) messages))))
               (setq file (bbh-test--mail "super-W13" "13-m13" "sent to a broken session"))
               (should (bbh-test--wait (lambda () (buffer-local-value 'eng/bbh--attention shell)) 30))
-              ;; Long enough for several more mailbox checks.
               (bbh-test--wait (lambda () nil) 3)
               (should (= 3 prompts))
               (should (file-exists-p file))
@@ -1044,7 +989,6 @@ used to be erased when it answered, with whatever you typed meanwhile
               (eng/bbh-super-visit (buffer-name shell))
               (with-current-buffer (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)
                 (should (string-match-p "Stopped: Unknown session" (eng/bbh--header)))))
-            ;; Once bbh answers again, reconnecting takes the mail.
             (with-current-buffer shell (eng/bbh-reconnect))
             (should (bbh-test--wait (lambda () (not (file-exists-p file))) 30))
             (should (bbh-test--wait (lambda () (string-match-p "sent to a broken session" (bbh-test--text transcript))) 30))
@@ -1093,7 +1037,6 @@ used to be erased when it answered, with whatever you typed meanwhile
       (should (bbh-test--wait (lambda () (with-temp-buffer (insert-file-contents log) (string-match-p "^inbox register [0-9]+$" (buffer-string)))) 0))
       (goto-char (point-min))
       (should (equal "T1" (eng/bbh-inbox--at-point)))
-      ;; On the thread's heading a digit picks on its newest ask; on the ask, on that ask.
       (let ((last-command-event ?2)) (call-interactively (bbh-test--key "2")))
       (should (bbh-test--wait (lambda () (funcall logged "inbox pick T1 2")) 10))
       (forward-line 1)
@@ -1102,21 +1045,17 @@ used to be erased when it answered, with whatever you typed meanwhile
       (should (bbh-test--wait (lambda () (funcall logged "inbox pick T1 2 a1")) 10))
       (call-interactively (bbh-test--key "."))
       (should (bbh-test--wait (lambda () (funcall logged "inbox pick T1 1 a1")) 10))
-      ;; RET on an option picks it.
       (forward-line 2)
       (call-interactively (bbh-test--key "RET"))
       (should (bbh-test--wait (lambda () (funcall logged "inbox pick T1 2 a1")) 10))
-      ;; Details start folded; the question and options show.
       (should (invisible-p (save-excursion (goto-char (point-min)) (search-forward "Because") (point))))
       (should-not (invisible-p (save-excursion (goto-char (point-min)) (search-forward "2. Yes") (point))))
-      ;; Only the Answer body takes text.
       (goto-char (point-min))
       (should-error (insert "x") :type 'text-read-only)
       (forward-line 1)
       (call-interactively (bbh-test--key "i"))
       (should (eng/bbh-inbox--in-answer-p))
       (insert "call it Zed")
-      ;; Letters type there, as keys do anywhere in an Answer.
       (should (memq (bbh-test--key "s") '(self-insert-command org-self-insert-command)))
       (should (equal "call it Zed" (eng/bbh-inbox--answer-text "a1")))
       (should-not (eq 'eng/bbh-inbox-send (bbh-test--key "C-c C-c")))
@@ -1133,14 +1072,11 @@ used to be erased when it answered, with whatever you typed meanwhile
     (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)
     (goto-char (car (eng/bbh-inbox--answer-region "a1")))
     (insert "not saved yet")
-    ;; Show the Details, fold T2's summary open, and reload with something changed.
     (save-excursion (goto-char (point-min)) (search-forward "*** Details") (org-fold-show-subtree))
     (eng/bbh-inbox--render (concat "head\n" bbh-test--outline "\n* NEW T3 third") t)
     (should (equal "not saved yet" (eng/bbh-inbox--answer-text "a1")))
     (should-not (invisible-p (save-excursion (goto-char (point-min)) (search-forward "Because") (point))))
     (should (eng/bbh-inbox--in-answer-p))
-    ;; Saving sends it to the draft.  A reload still carrying the older draft
-    ;; keeps your text; once the draft has it, the draft's text is what shows.
     (eng/bbh-inbox--save "T1")
     (should (bbh-test--wait (lambda () (member "answer" (bbh-test--inbox-log log))) 10))
     (eng/bbh-inbox--render (concat "head\n" bbh-test--outline "\n* NEW T4 fourth") t)
@@ -1184,7 +1120,6 @@ Inbox's single-key commands, such as g, j, x, digits or ., runs there."
       (should (equal (string-trim bbh-test--printable) (eng/bbh-inbox--answer-text "a1")))
       (should (equal (length bbh-test--printable) (length ran)))
       (should-not (seq-remove (lambda (command) (memq command '(self-insert-command org-self-insert-command org-force-self-insert))) ran))
-      ;; No verb but the outline itself reached bbh.
       (should-not (seq-remove (lambda (verb) (equal verb "org")) (bbh-test--inbox-log log))))))
 
 (ert-deftest bbh-inbox-ctrl-n-sends-the-answer ()
@@ -1265,8 +1200,6 @@ saves the note and sends the thread; RET only saves it."
 
 
 (ert-deftest bbh-inbox-opens-from-a-buffer-whose-workspace-is-gone ()
-  ;; A finished Worker's workspace is removed while its buffers stay, so SPC m i
-  ;; runs with a default-directory that no longer exists.
   (let* ((log (make-temp-file "bbh-inbox-log"))
          (script (make-temp-file "bbh-fake" nil nil
                                  (concat "#!/bin/sh\necho \"$@\" >> " log "\n"
@@ -1288,7 +1221,6 @@ saves the note and sends the thread; RET only saves it."
     (kill-buffer worker)))
 
 (ert-deftest bbh-inbox-reload-replaces-a-stale-listener-and-rehooks-the-buffer ()
-  ;; A Doom reload loads this file again; the live Inbox must follow the new code.
   (let* ((log (make-temp-file "bbh-inbox-log"))
          (script (make-temp-file "bbh-fake" nil nil
                                  (concat "#!/bin/sh\necho \"$@\" >> " log "\n"
@@ -1298,7 +1230,6 @@ saves the note and sends the thread; RET only saves it."
                                   (how-many "^inbox register [0-9]+$" (point-min) (point-max))))))
     (set-file-modes script #o700)
     (when (process-live-p eng/bbh-inbox--listener) (delete-process eng/bbh-inbox--listener))
-    ;; The listener as older code made it: a closure filter.
     (setq eng/bbh-inbox--listener
           (make-network-process :name "bbh-inbox-listen" :server t :host "127.0.0.1" :service t
                                 :family 'ipv4 :noquery t :filter (lambda (c _) (delete-process c))))
@@ -1311,7 +1242,6 @@ saves the note and sends the thread; RET only saves it."
       (should-not (process-live-p old))
       (should (eq #'eng/bbh-inbox--on-push (process-filter eng/bbh-inbox--listener)))
       (should (bbh-test--wait (lambda () (= 1 (funcall registered))) 10))
-      ;; A current listener is kept, and not registered again.
       (let ((current eng/bbh-inbox--listener))
         (eng/bbh-inbox--listen)
         (should (eq current eng/bbh-inbox--listener))
@@ -1326,8 +1256,6 @@ saves the note and sends the thread; RET only saves it."
   (sort (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list nil 'nomini)) #'string<))
 
 (ert-deftest bbh-super-views-switch-with-their-own-windows ()
-  ;; The Inbox and a session's transcript and composer are each
-  ;; view's whole frame; nothing of the view you left stays behind.
   (let* ((script (make-temp-file "bbh-fake" nil nil
                                  (concat "#!/bin/sh\ncase \"$2\" in\n"
                                          "org) printf 'bbh inbox · 0 need you\\n* NEW T1 first\\n';;\n"
@@ -1345,19 +1273,16 @@ saves the note and sends the thread; RET only saves it."
           (with-current-buffer "*bbh inbox*"
             (should (bbh-test--wait (lambda () (string-match-p "T1 first" (buffer-string))) 10)))
           (should (equal '("*bbh inbox*") (bbh-test--windows)))
-          ;; SPC m r in the Inbox: the Router alone, its composer selected.
           (with-current-buffer "*bbh inbox*" (call-interactively (key-binding (kbd "C-c r"))))
           (let ((composer (agent-shell-viewport--buffer :shell-buffer shell :existing-only t)))
             (should (equal (sort (list "Router transcript" (buffer-name composer)) #'string<) (bbh-test--windows)))
             (should (eq composer (window-buffer (selected-window))))
-            ;; SPC m i in the composer and in the transcript: the Inbox alone again.
             (dolist (from (list composer (buffer-local-value 'eng/bbh-transcript shell)))
               (eng/bbh-super-visit "Router")
               (with-current-buffer from (call-interactively (key-binding (kbd "C-c i"))))
               (should (bbh-test--wait (lambda () (equal '("*bbh inbox*") (bbh-test--windows))) 10))
               (should (equal "*bbh inbox*" (buffer-name (window-buffer (selected-window))))))))
       (eng/bbh-super--kill shell))
-    ;; An ordinary session in another Emacs has neither key.
     (with-temp-buffer
       (eng/bbh-transcript-mode)
       (should-not (memq (key-binding (kbd "C-c i")) '(eng/bbh-inbox eng/bbh-inbox-router))))))
@@ -1379,9 +1304,6 @@ saves the note and sends the thread; RET only saves it."
     (should (equal '("queued  mine") shown))))
 
 (ert-deftest bbh-prompt-queue-never-echoes-the-queue ()
-  ;; agent-shell listed the active and queued prompts in the echo area on every
-  ;; enqueue, such as an inbox delivery, and it vanished on the next keystroke.
-  ;; The composer header's count is where to look instead.
   (let (shown)
     (with-temp-buffer
       (setq major-mode 'agent-shell-mode)
@@ -1392,8 +1314,6 @@ saves the note and sends the thread; RET only saves it."
       (should (equal "2 queued" (eng/bbh--queued (current-buffer)))))
     (should-not shown)))
 
-;;; The super-agent Inbox reloads itself
-
 (defun bbh-test--inbox-view (ids)
   "`bbh inbox org' output listing thread IDS."
   (mapconcat #'identity (cons "bbh inbox · 0 need you" (mapcar (lambda (id) (format "* NEW %s %s row" id id)) ids)) "\n"))
@@ -1402,8 +1322,6 @@ saves the note and sends the thread; RET only saves it."
   (mapcar (lambda (n) (format "T%d" n)) (number-sequence from to)))
 
 (ert-deftest bbh-inbox-jjui-three-times-leaves-no-buffers-or-processes ()
-  ;; T93: J asks herdr-jjui for jjui in the frame's Herdr, even from the
-  ;; callback after `bbh inbox dir', and three J's leave no buffer or process.
   (let* ((log (make-temp-file "herdr-jjui-log"))
          (eng/bbh-inbox-herdr-jjui
           (make-temp-file "herdr-jjui" nil nil
@@ -1465,7 +1383,6 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
     (eng/bbh-inbox--render (bbh-test--inbox-view (bbh-test--inbox-ids 1 30)) t)
     (goto-char (eng/bbh-inbox--find '("T20" . 1)))
     (set-window-start (selected-window) (eng/bbh-inbox--find '("T16" . 1)))
-    ;; Three new threads above, and one gone above the cursor.
     (eng/bbh-inbox--render (bbh-test--inbox-view (append '("T31" "T32" "T33") (delete "T5" (bbh-test--inbox-ids 1 30)))) t)
     (should (equal "T20" (eng/bbh-inbox--at-point)))
     (should (equal "* NEW T31 T31 row" (save-excursion (goto-char (point-min)) (buffer-substring-no-properties (point) (line-end-position)))))
@@ -1477,8 +1394,6 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
              rows "\n"))
 
 (ert-deftest bbh-inbox-archiving-leaves-the-cursor-on-the-next-thread ()
-  ;; Archiving moves the thread to the Archived section at the bottom; the
-  ;; cursor stays in place, on the thread below, and the window does not scroll.
   (bbh-test--with-fake-inbox (view log)
     (let ((before (mapcar (lambda (id) (list id "waiting")) (bbh-test--inbox-ids 1 30))))
       (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (append before '(("T40" "archived"))))) t)
@@ -1489,13 +1404,11 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
                              t)
       (should (equal "T21" (eng/bbh-inbox--at-point)))
       (should (= 4 (count-lines (window-start) (point))))
-      ;; The last live thread archived: the cursor goes to the one above.
       (goto-char (eng/bbh-inbox--find '("T30" . 1)))
       (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (append (bbh-test--inbox-rows-without before "T20" "T30")
                                                                             '(("T30" "archived") ("T20" "archived") ("T40" "archived")))))
                              t)
       (should (equal "T29" (eng/bbh-inbox--at-point)))
-      ;; A thread already archived, and one moving between live sections, keep the cursor.
       (goto-char (eng/bbh-inbox--find '("T40" . 1)))
       (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (append (bbh-test--inbox-rows-without before "T20" "T30")
                                                                             '(("T40" "archived") ("T20" "archived") ("T30" "archived")))))
@@ -1505,7 +1418,6 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
       (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (cons '("T10" "stopped") (bbh-test--inbox-rows-without before "T10" "T20" "T30"))))
                              t)
       (should (equal "T10" (eng/bbh-inbox--at-point)))
-      ;; T10, now first, gone from the view leaves the cursor on the one below it.
       (eng/bbh-inbox--render (concat "head\n" (bbh-test--inbox-rows (bbh-test--inbox-rows-without before "T10" "T20" "T30"))) t)
       (should (equal "T1" (eng/bbh-inbox--at-point))))))
 
@@ -1526,7 +1438,6 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
       (should (bbh-test--wait (lambda () (eq 'pending eng/bbh-inbox--reload)) 10))
       (should (equal "* NEW T1 T1 row\n* NEW T2 T2 row\n" (buffer-substring-no-properties (point-min) (point-max))))
       (should (equal '("org") (seq-filter (lambda (verb) (equal verb "org")) (bbh-test--inbox-log log))))
-      ;; A failed reload says so in the header, not the echo area.
       (mapc #'cancel-timer (bbh-test--inbox-reloads))
       (setq eng/bbh-inbox--reload nil)
       (delete-file view)
@@ -1536,7 +1447,6 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
       (should (bbh-test--wait (lambda () (null eng/bbh-inbox--reload)) 10))
       (should (string-match-p "reload failed" header-line-format))
       (should (= messages (with-current-buffer (messages-buffer) (buffer-size)))))
-    ;; Hidden, a push only marks the Inbox stale; showing it reloads.
     (switch-to-buffer "*scratch*")
     (eng/bbh-inbox--changed)
     (should (and eng/bbh-inbox--stale (null eng/bbh-inbox--reload)))
@@ -1544,8 +1454,6 @@ and each verb is appended to file LOG.  SPEC is (VIEW LOG)."
     ;; Redisplay runs this hook; batch Emacs has none.
     (run-hook-with-args 'window-buffer-change-functions (selected-window))
     (should (eq 'pending eng/bbh-inbox--reload))))
-
-;;; The split view: the thread list beside the selected thread
 
 (defun bbh-test--split (rows &optional selected progress)
   "`bbh inbox split' output: ROWS, each (ID SECTION STATUS ASKS UNSEEN TITLE),
@@ -1577,23 +1485,19 @@ SELECTED's PROGRESS lines, then `bbh-test--outline' and a subtree per other row.
     (should (equal '(("11-08 10:00" "milestone" "half way")) (plist-get data :progress)))
     (should (string-prefix-p "* STOPPED T1 first" (plist-get data :outline)))
     (should (equal "W1" (plist-get (car (plist-get data :rows)) :worker)))
-    ;; Unseen mark, status, id, title, open asks and age, in the controller's order.
     (should (string-match-p "^•● T1   first +1\\? 5m$" (nth 0 lines)))
     (should (string-match-p "^ ◐ T2   second +5m$" (nth 1 lines)))
     (should (string-match-p "^ ● T3 " (nth 2 lines)))
     (should (string-match-p "^ ✖ T4 " (nth 3 lines)))
     (should (string-match-p "^ ✓ T5 " (nth 4 lines)))
     (should (= 40 (string-width (nth 0 lines))))
-    ;; Rows hold values only; the tooltip names them, empty ones left out.
     (should-not (seq-some (lambda (line) (string-match-p "[a-z]+=" line)) lines))
     (let ((tip (get-text-property 0 'help-echo (eng/bbh-inbox--row-line (car (plist-get data :rows)) 40))))
       (should (string-match-p "^title: first$" tip))
       (should (string-match-p "^asks: 1$" tip))
       (should-not (string-match-p "^asks: 0$" (get-text-property 0 'help-echo (eng/bbh-inbox--row-line (nth 1 (plist-get data :rows)) 40)))))
-    ;; Archived threads fold into one row.
     (should (equal "  ▸ 1 archived" (nth 5 lines)))
     (should-not (seq-some (lambda (line) (string-match-p "T9" line)) lines))
-    ;; A selection that leaves the list goes to the row that took its place.
     (let ((rows (plist-get data :rows)))
       (should (equal "T3" (eng/bbh-inbox--choose "T2" rows (seq-remove (lambda (r) (equal "T2" (plist-get r :id))) rows))))
       (should (equal "T1" (eng/bbh-inbox--choose nil nil rows))))))
@@ -1605,10 +1509,6 @@ SELECTED's PROGRESS lines, then `bbh-test--outline' and a subtree per other row.
     (string-trim (apply #'concat (cl-loop repeat (random 25) collect (aref pool (random (length pool))))))))
 
 (ert-deftest bbh-inbox-property-random-rows-parse-back-fill-their-width-and-keep-order ()
-  ;; A property over random rows, with a fixed seed so a failure replays: the
-  ;; controller's `key=value' fields parse back, each list line is exactly
-  ;; the list's width whatever the title holds, and the list keeps the
-  ;; controller's order.
   (let ((seed "T170") (eng/bbh-inbox--show-archived nil))
     (random seed)
     (dotimes (trial 60)
@@ -1631,9 +1531,6 @@ SELECTED's PROGRESS lines, then `bbh-test--outline' and a subtree per other row.
                                 (list seed trial (cadr (split-string line))))))))))
 
 (ert-deftest bbh-inbox-split-lists-newest-threads-first-within-a-section ()
-  ;; The controller sends threads newest first in each section (T99), numerically:
-  ;; T100 above T99 above T12, waiting sections still first. The list keeps that order,
-  ;; and a newer thread arriving on top leaves the selection on its thread.
   (let* ((eng/bbh-inbox--show-archived nil)
          (rows '(("T98" "stopped" "waiting" 1 nil "asks")
                  ("T100" "new" "working" 0 nil "newest")
@@ -1688,7 +1585,6 @@ SPEC is (VIEW ORG LOG)."
     (with-temp-file org (insert "bbh inbox · 2 need you\n" bbh-test--outline))
     (eng/bbh-inbox)
     (should (bbh-test--wait (lambda () (string-match-p "half way" (bbh-test--right))) 10))
-    ;; The list on the left, selected; the thread on the right.
     (should (equal '("*bbh inbox*" "*bbh threads*") (bbh-test--windows)))
     (should (equal "*bbh threads*" (buffer-name (window-buffer (selected-window)))))
     (should (> (window-left-column (get-buffer-window "*bbh inbox*")) 0))
@@ -1700,17 +1596,14 @@ SPEC is (VIEW ORG LOG)."
       (should-not (string-match-p "T2 second" right)))
     (with-current-buffer "*bbh inbox*"
       (should (string-prefix-p "T1 " header-line-format))
-      ;; The cursor starts on the ask, where T82's keys answer it.
       (should (equal "a1" (eng/bbh-inbox--ask)))
       (let ((last-command-event ?2)) (call-interactively (bbh-test--key "2")))
       (should (bbh-test--wait (lambda () (bbh-test--logged-p log "pick T1 2 a1")) 10))
       (should (eq 'eng/bbh-inbox-pick-recommended (bbh-test--key ".")))
       (should (eq 'eng/bbh-inbox-answer (bbh-test--key "i")))
       (should-not (eq 'eng/bbh-inbox-send (bbh-test--key "C-c C-c")))
-      ;; The right pane is the Inbox buffer, so C-n sends from any line of it.
       (should (eq 'eng/bbh-inbox-send (bbh-test--key "C-n")))
       (should (eq 'eng/bbh-inbox-other-pane (bbh-test--key "o")))
-      ;; i types the answer in place, above the progress.
       (eng/bbh-inbox-answer)
       (should (eng/bbh-inbox--in-answer-p))
       (insert "call it Zed")
@@ -1718,7 +1611,6 @@ SPEC is (VIEW ORG LOG)."
       (should (string-match-p "^    call it Zed\n\\*\\* Progress$" (bbh-test--right))))
     (with-current-buffer "*bbh threads*"
       (should (equal "T1" (eng/bbh-inbox--at-point)))
-      ;; C-n in the list sends the selected thread with the answer typed on the right.
       (should (eq 'eng/bbh-inbox-send (bbh-test--key "C-n")))
       (cl-letf (((symbol-function 'eng/bbh-inbox--send-thread)
                  (lambda (thread _) (push (cons thread (eng/bbh-inbox--answer-text "a1")) bbh-test--sent))))
@@ -1730,22 +1622,17 @@ SPEC is (VIEW ORG LOG)."
                      ("o" . eng/bbh-inbox-other-pane) ("RET" . eng/bbh-threads-ret) ("gv" . eng/bbh-inbox-toggle-view)
                      ("J" . eng/bbh-inbox-jjui) ("gr" . eng/bbh-inbox-refresh)))
         (should (eq (cdr key) (bbh-test--key (car key)))))
-      ;; j moves the selection and the right side follows at once, then fetches it.
       (eng/bbh-threads-next)
       (eng/bbh-threads--moved)
       (should (equal "T2" eng/bbh-inbox--selected))
       (should (string-match-p "T2 second" (bbh-test--right)))
       (should-not (string-match-p "a1 Keep" (bbh-test--right)))
       (should (bbh-test--wait (lambda () (bbh-test--logged-p log "split T2 select")) 10))
-      ;; ]t goes to the next thread waiting on you, and wraps.
       (eng/bbh-inbox-next-waiting)
       (should (equal "T3" eng/bbh-inbox--selected))
       (should (equal "T3" (eng/bbh-inbox--at-point)))
       (eng/bbh-inbox-next-waiting)
       (should (equal "T1" eng/bbh-inbox--selected))
-      ;; i on the list answers the selected thread's ask beside it, not
-      ;; insert state on the read-only list (Bombadil, T174); the other
-      ;; insert keys only say so.
       (should (eq 'eng/bbh-threads-answer (bbh-test--key "i")))
       (should (eq 'eng/bbh-threads-read-only (command-remapping 'evil-open-above)))
       (save-selected-window
@@ -1756,7 +1643,6 @@ SPEC is (VIEW ORG LOG)."
         (should (evil-insert-state-p))
         (evil-normal-state))
       (with-current-buffer "*bbh threads*" (should (evil-normal-state-p)))
-      ;; o goes to the thread and back.
       (eng/bbh-inbox-other-pane)
       (should (equal "*bbh inbox*" (buffer-name (window-buffer (selected-window))))))
     (with-current-buffer "*bbh inbox*" (eng/bbh-inbox-other-pane))
@@ -1775,7 +1661,6 @@ SPEC is (VIEW ORG LOG)."
       (should (bbh-test--wait (lambda () (bbh-test--logged-p log "read T2")) 10))
       (call-interactively (bbh-test--key "M"))
       (should (bbh-test--wait (lambda () (bbh-test--logged-p log "read all")) 10))
-      ;; Each reloads, and the cursor stays on its thread.
       (should (bbh-test--wait (lambda () (bbh-test--logged-p log "split T2")) 10))
       (should (equal "T2" (eng/bbh-inbox--at-point)))
       (should-not (bbh-test--logged-p log "buffer T2"))
@@ -1792,8 +1677,6 @@ SPEC is (VIEW ORG LOG)."
       (eng/bbh-inbox-toggle-view))))
 
 (ert-deftest bbh-inbox-split-reload-keeps-a-long-lists-screen-line ()
-  ;; A list taller than its window keeps the selected row on its screen line
-  ;; when a thread arrives above, so the list does not jump under you.
   (let ((rows (cl-loop for n from 1 to 60 collect (list (format "T%d" n) "new" "working" 0 nil (format "thread %d" n)))))
     (bbh-test--with-split-inbox (view org log)
       (with-temp-file view (insert (bbh-test--split rows)))
@@ -1814,16 +1697,12 @@ SPEC is (VIEW ORG LOG)."
           (should (= row (count-lines (window-start) (point)))))))))
 
 (ert-deftest bbh-inbox-split-reload-fills-the-window-before-hiding-rows-above ()
-  ;; The selection at the top of a list one line taller than its window; three
-  ;; threads below it begin to wait on you and sort above it.  Keeping its
-  ;; screen line would hide them with the window empty below the list (T174).
   (bbh-test--with-split-inbox (view org log)
     (with-temp-file view (insert (bbh-test--split '(("T1" "new" "working" 0 nil "one")))))
     (with-temp-file org (insert "bbh inbox · 0 need you\n"))
     (eng/bbh-inbox)
     (should (bbh-test--wait (lambda () (with-current-buffer "*bbh threads*" (string-match-p "T1 " (buffer-string)))) 10))
     (let* ((height (window-body-height (get-buffer-window "*bbh threads*")))
-           ;; Rows, a blank line and the legend: one line more than the window.
            (rows (cl-loop for n from 1 to (1- height)
                           collect (list (format "T%d" n) "new" "working" 0 nil (format "thread %d" n))))
            (waiting (lambda (n) (list (format "T%d" n) "stopped" "on-you" 1 nil (format "thread %d" n)))))
@@ -1853,8 +1732,6 @@ SPEC is (VIEW ORG LOG)."
     (eng/bbh-inbox--select "T3")
     (with-current-buffer "*bbh threads*"
       (progn
-        ;; A push with a new thread above: the selection stays, and a list
-        ;; that fits shows the new row rather than hiding it above (T174).
         (with-temp-file view (insert (bbh-test--split (cons '("T0" "stopped" "on-you" 1 t "zeroth") bbh-test--split-rows))))
         (eng/bbh-inbox--changed)
         (mapc #'cancel-timer (bbh-test--inbox-reloads))
@@ -1865,12 +1742,10 @@ SPEC is (VIEW ORG LOG)."
         (should (= (point-min) (window-start)))
         (should (string-match-p "third" (bbh-test--right)))
         (should (bbh-test--logged-p log "split T3")))
-      ;; RET on the archived row shows the archived threads.
       (goto-char (text-property-any (point-min) (point-max) 'bbh-archived t))
       (eng/bbh-threads-ret)
       (should (string-match-p "T9" (buffer-string)))
       (goto-char (eng/bbh-inbox--row-start "T3"))
-      ;; gv: every thread in one buffer, the cursor on the selected one.
       (eng/bbh-inbox-toggle-view))
     (should (eq 'outline eng/bbh-inbox-view))
     (should (bbh-test--wait (lambda () (string-match-p "T2 second" (bbh-test--right))) 10))

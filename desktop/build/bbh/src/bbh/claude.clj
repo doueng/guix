@@ -79,7 +79,7 @@
                     "--verbose" "--include-partial-messages"
                     "--tools" "" "--strict-mcp-config" "--mcp-config" (json/generate-string mcp)
                     "--allowedTools" tool-name "--setting-sources" ""
-                    ;; Otherwise a resume keeps the recorded prompt and drops a changed one.
+                    ;; Otherwise a resume keeps the recorded system prompt and drops a changed one.
                     "--system-prompt-snapshot" "off" "--system-prompt" system "--model" (:model engine)
                     (concat (when effort ["--effort" effort])
                             (when resume ["--resume" resume])))
@@ -182,8 +182,6 @@
                                             :request {:subtype "interrupt"}}))
     (send-line! in {:type "user" :message {:role "user" :content text}})
     (try
-      ;; A request starts when its prompt or tool results go out, not at its
-      ;; first stream event, so the run includes the time to first token.
       (loop [texts 0 request-start (System/currentTimeMillis) calls 0]
         (let [{:keys [type event message] :as ev} (.take ^LinkedBlockingQueue queue)]
           (case type
@@ -198,7 +196,6 @@
                         (recur (inc texts) request-start calls))
                     (and (= "content_block_start" etype) (= "tool_use" (:type content_block)))
                     (recur texts request-start (inc calls))
-                    ;; One per model request, with that request's final token counts.
                     (and (= "message_delta" etype) (:usage event))
                     (let [usage (request-usage (:usage event))]
                       (session/add-usage! s usage)
@@ -210,11 +207,8 @@
                     :else (recur texts request-start calls)))
             "assistant" (do (record-assistant! s (:content message)) (recur texts request-start calls))
             "user" (do (record-tool-results! s (:content message))
-                       ;; Claude Code owns the loop and has no hook between requests, so
-                       ;; it is replaced once it holds no unanswered call.
                        (if (and (session/rollover-due? s) (calls-answered? (:messages @s)))
                          (do (session/continue-mid-turn! s) (session/turn! s))
-                         ;; An interrupt also arrives as a user event, with no tool result.
                          (recur texts
                                 (if (some #(= "tool_result" (:type %)) (:content message))
                                   (System/currentTimeMillis)

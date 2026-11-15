@@ -79,8 +79,6 @@
                     (try (apply session/prompt! s text opts)
                          (catch Exception e (println (str "\n" (ex-message e)))))
                     (println)))
-        ;; The mailbox is how the website and bbh super reach this session. A
-        ;; running turn takes new mail itself, and an idle session is woken.
         poller (promise)
         _ (deliver poller (inbox/start! {:root (conversation/root dir) :project (str (fs/cwd))
                                          :deliver (session/mailbox-handler

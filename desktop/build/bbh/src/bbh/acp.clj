@@ -52,13 +52,10 @@
                 :content (text-block (clojure-block (:code ev)))}
     :tool-result {:sessionUpdate "tool_call_update" :toolCallId (:id ev) :status (name (:status ev))
                   :content (text-block (str (clojure-block (:code ev)) "\n\n```\n" (:text ev) "\n```"))}
-    ;; _meta.bbh.request is one model request's tokens and whether its prefix
-    ;; came from the prompt cache, which the Doom config shows.
     :usage (cond-> {:sessionUpdate "usage_update" :cost {:amount (:spent ev) :currency "USD"}}
              (:used ev) (assoc :used (:used ev))
              (:size ev) (assoc :size (:size ev))
              (:request ev) (assoc :_meta {:bbh {:request (:request ev)}}))
-    ;; The /model command changes the model inside a prompt, so clients learn of it here.
     :model {:sessionUpdate "config_option_update" :configOptions (config-options (:model ev))}))
 
 (defn- turn-usage
@@ -97,7 +94,6 @@
         s (session/new-session {:dir (or resume (conversation/dir sid))
                                 :notes (when (and resume (conversation/saved? resume))
                                          ["This conversation resumed in a new REPL, so earlier live definitions are gone."])
-                                ;; The Router's session evaluates in the sandbox, as in the terminal front end.
                                 :sandbox? (= "router" (sysenv/getenv "BBH_ROLE"))
                                 :init (or (sysenv/getenv "BBH_INIT") (str (fs/expand-home "~/.config/bbh/init.clj")))
                                 :cwd (or cwd (str (fs/cwd)))
@@ -106,7 +102,6 @@
                                 :emit #(when-not (and (= :text (:type %)) (empty? (:text %)))
                                          (update! sid (event->update %)))})
         problem (session/start-repl! s)]
-    ;; The session takes its mail itself, Emacs only wakes it, and a cancellation is acted on here.
     (session/watch-controls! s)
     (announce! s false)
     (swap! sessions assoc sid s)
@@ -141,8 +136,7 @@
       "session/new"
       (let [[sid problem] (new-session params)
             current (:model @(get @sessions sid))]
-        ;; The current model is listed even when it is not one of bbh's suggestions,
-        ;; because clients such as Harbor only select models from this list.
+        ;; Listed even when not a suggestion: clients such as Harbor only select models from this list.
         (send! {:id id :result {:sessionId sid
                                 :models {:currentModelId current
                                          :availableModels (for [m (distinct (cons current models/available))] {:modelId m :name m})}
@@ -162,13 +156,10 @@
 
       "session/prompt"
       (let [text (prompt-text (:prompt params))]
-        ;; bbh super deletes a finished Worker's workspace, which is this
-        ;; session's cwd: claude and the REPL could only fail on exec there.
         (when-not (fs/directory? (:cwd @s))
           (throw (ex-info (str "This session's directory " (:cwd @s) " is gone, so bbh runs nothing in it. "
                                "If it was a bbh super Worker's workspace, that Worker is finished: ask the Router (SPC m r) to reopen its thread.")
                           {:rpc-code -32000})))
-        ;; Any prompt but the mail wake is the person typing, which answers open asks.
         (swap! s #(cond-> (assoc % :busy true)
                     (not= session/mail-wake (str/trim text)) (assoc :prompted-at (System/currentTimeMillis))))
         (announce! s true)

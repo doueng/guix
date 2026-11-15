@@ -154,7 +154,6 @@
     (testing "a restart shows nothing; what no longer waits and is still on screen is closed"
       (let [log2 (atom [])
             n2 (notify/new-notifier (effects log2) file)]
-        ;; T1's expired at 15000; T2's, shown at 30000, is still on screen at 32000.
         (notify/resume! n2 (answer s "a2") 32000)
         (is (= [[:close 2]] @log2))
         (is (= ["T1"] (keys @(:shown n2))) "T1 still waits, so it is kept")
@@ -173,7 +172,6 @@
         effects {:show! (fn [n _] (swap! log conj (:key n)) {}) :close! (fn [_])}
         boot 1000000
         n (notify/new-notifier effects nil (- boot notify/replay-grace-ms))
-        ;; Many asks on many threads, opened long before the controller started, never recorded.
         old (reduce (fn [s i] (-> s (assoc-in [:threads (str "T" i)] {:id (str "T" i) :title "old"})
                                   (ask [(str "a" i) (* i 1000)] (str "T" i) "Old question?" "Yes")))
                     base (range 1 40))

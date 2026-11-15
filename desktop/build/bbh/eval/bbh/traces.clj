@@ -88,8 +88,6 @@
        sort
        (mapv load-trace)))
 
-;; Level 1 assertions. Each check returns the places a trace breaks it, or nothing.
-
 (defn- step-check [pred]
   (fn [{:keys [steps]}] (for [s steps :when (pred s)] (str "step " (:n s)))))
 

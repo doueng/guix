@@ -1,7 +1,5 @@
 ;;; try.el --- run real bbh prompts through agent-shell headlessly -*- lexical-binding: t; -*-
 
-;; bb try MODEL PROMPT... prints the agent-shell buffer after each prompt.
-
 (dolist (pkg '("agent-shell" "acp" "shell-maker" "map"))
   (add-to-list 'load-path (expand-file-name pkg (getenv "BBH_ELISP_BUILD"))))
 (defmacro after! (feature &rest body)

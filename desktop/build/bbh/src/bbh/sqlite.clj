@@ -28,7 +28,6 @@
     :linux (filterv some? [(System/getenv "BBH_SQLITE_LIB")
                            (when (.exists (java.io.File. profile)) profile)
                            "libsqlite3.so.0"])
-    ;; winsqlite3.dll ships with Windows itself
     :windows ["sqlite3.dll" "winsqlite3.dll"]}))
 
 (defcfn ^:private c-initialize "sqlite3_initialize" [] :int)
@@ -70,18 +69,14 @@
 (defcfn ^:private c-result-null "sqlite3_result_null" [:pointer] :void)
 (defcfn ^:private c-result-error "sqlite3_result_error" [:pointer :string :int] :void)
 
-;; SQLITE_TRANSIENT: sqlite must copy text and blob buffers during the bind
-;; call, because the buffers babashka.ffi passes are freed when it returns.
-;; It is the pseudo pointer (void*)-1, not a real address, so it is written
-;; as a raw one
+;; SQLITE_TRANSIENT, the pseudo pointer (void*)-1: sqlite must copy buffers, which babashka.ffi frees on return.
 (def ^:private sqlite-transient (ffi/segment -1))
 
 (defcfn version
   "Returns the SQLite library version."
   "sqlite3_libversion" [] :string)
 
-;; builds compiled with SQLITE_OMIT_AUTOINIT (common for standalone
-;; Windows dlls) crash in sqlite3_open unless the library is initialized
+;; SQLITE_OMIT_AUTOINIT builds (common Windows dlls) crash in sqlite3_open without this.
 (defonce ^:private initialized (delay (c-initialize)))
 
 (def ^:private SQLITE-OPEN-READONLY 0x1)
@@ -113,10 +108,7 @@
            (c-close db)
            (throw (ex-info (str "sqlite3: " msg) {:path path}))))
        (c-busy-timeout db 5000)
-       ;; one shared arena per registered function: sqlite calls a callback
-       ;; on whichever thread runs the statement, so it cannot be confined,
-       ;; and a registration that fails closes its own arena instead of
-       ;; leaving the stubs behind. close! closes whatever is left.
+       ;; Shared, not confined, arena: sqlite calls callbacks on whichever thread runs the statement.
        {:db db :arenas (atom [])}))))
 
 (defn close!
@@ -125,8 +117,6 @@
   [{:keys [db arenas]}]
   (c-close db)
   (when arenas
-    ;; releases every callback that create-function! and create-aggregate!
-    ;; allocated
     (doseq [a @arenas] (.close ^java.lang.AutoCloseable a))
     (reset! arenas []))
   nil)
@@ -148,11 +138,9 @@
   NULL pointer for an empty blob."
   ^bytes [n p]
   (if (pos? n)
-    ;; a pointer from C has size 0; give it the blob's size first
     (ffi/read-array (ffi/reinterpret p n) :byte n)
     (byte-array 0)))
 
-;; sqlite types values per cell, not per column
 (defn- column-value [stmt i]
   (case (c-column-type stmt i)
     1 (c-column-int64 stmt i)
@@ -169,8 +157,6 @@
                (boolean? v) (c-bind-int64 stmt i (if v 1 0))
                (integer? v) (c-bind-int64 stmt i v)
                (float? v) (c-bind-double stmt i v)
-               ;; nbytes -1: read the UTF-8 C string up to its NUL. Text
-               ;; with embedded NUL characters is not supported.
                (string? v) (c-bind-text stmt i v -1 sqlite-transient)
                (bytes? v) (with-open [arena (ffi/confined-arena)]
                             (let [n (alength ^bytes v)
@@ -212,7 +198,6 @@
               {:rows-changed (c-changes db)
                :last-insert-rowid (c-last-insert-rowid db)})))
         (finally
-          ;; finalizing a NULL statement (failed prepare) is a no-op
           (c-finalize (ffi/read pstmt :pointer)))))))
 
 (def ^:private SQLITE-UTF8 1)
@@ -241,7 +226,6 @@
     :else (c-result-error ctx (str "cannot return " (type v) " from a function") -1)))
 
 (defn- decode-args [argc argv]
-  ;; argv comes from C with size 0; it holds argc pointers
   (let [argv (ffi/reinterpret argv (* 8 argc))]
     (mapv (fn [i] (decode-value (ffi/read argv :pointer (* 8 i))))
           (range argc))))
@@ -255,7 +239,6 @@
                               (or xfinal ffi/null)
                               ffi/null)]
     (when-not (zero? rc)
-      ;; sqlite did not take the callbacks, so nothing can call them
       (.close ^java.lang.AutoCloseable arena)
       (throw (ex-info (str "sqlite3: " (c-errmsg db)) {:function name})))
     (swap! arenas conj arena)
@@ -318,9 +301,6 @@
          finish (or finish identity)
          states (atom {})
          next-id (atom 0)
-         ;; sqlite3_aggregate_context gives an 8-byte per-group slot; it
-         ;; holds an id into states, since the accumulator is a Clojure
-         ;; value that cannot live in C memory
          slot-id (fn [ctx]
                    (let [slot (ffi/reinterpret (c-aggregate-context ctx 8) 8)
                          id (ffi/read slot :int64)]
@@ -344,8 +324,6 @@
                  arena
                  (fn [ctx]
                    (try
-                     ;; nbytes 0: only look up the slot. NULL when step
-                     ;; never ran (zero rows)
                      (let [slot (c-aggregate-context ctx 0)
                            id (if (ffi/null? slot) 0 (ffi/read (ffi/reinterpret slot 8) :int64))
                            acc (if (zero? id) init (get @states id init))]

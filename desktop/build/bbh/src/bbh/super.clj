@@ -133,8 +133,6 @@
   (try (launch-steps! c w token)
        (catch Exception e
          (if (and (= :emacs (:error (ex-data e))) (not ((get-in c [:launch :emacs-up?]))))
-           ;; Emacs is down: the Worker stays :starting, and reconcile! opens
-           ;; its buffer once Emacs is back.
            (binding [*out* *err*] (println "bbh super:" (:id w) "waits for Emacs:" (ex-message e)))
            (do (run! c :controller {:id (str "launch-failed-" (:id w)) :command :finish-worker!
                                     :args {:worker (:id w) :state-after :failed :reason (str "Launch failed: " (ex-message e))}})
@@ -314,7 +312,6 @@
   (let [{:keys [repo thread]} (get-in @state [:workers worker])
         r ((:advance! launch) {:repo repo :tip tip :move (:move-working-copy (policy c))})]
     (when-let [text (workspace/kept-milestone {:worker worker :repo repo :tip tip} r)]
-      ;; A fixed id, so a retry after a crash says it once.
       (run! c :owner {:id (str "kept-" worker) :command :milestone! :args {:thread thread :text text}}))
     r))
 
@@ -442,10 +439,8 @@
               (reconcile! c)
               (settle! c)
               {:ok (:result r)})
-            ;; An archived thread's Worker no longer holds a slot.
             :archive!
             (let [r (run! c principal cmd)]
-              ;; Workers that ended before effects were recorded owe nothing, so theirs go here.
               (doseq [w (vals (:workers @(:state c))) :when (and (= (:thread args) (:thread w)) (not (:owes w)))]
                 (try (retire-worker! c (:id w))
                      (catch Exception e (binding [*out* *err*] (println "bbh super: retiring" (:id w) "failed:" (ex-message e))))))
@@ -529,7 +524,6 @@
           :let [exit (try (parse-long (str/trim (slurp (str f))))
                           (catch java.io.IOException _ nil))
                 waiting-until (some-> (process/read-text (str base ".waiting")) parse-long)]
-          ;; A job-wait that is still running reports this exit itself.
           :when (and (some? exit) (not (and waiting-until (< (System/currentTimeMillis) waiting-until))))]
     (run! c :controller {:id (str "job-exited-" (pr-str [(:id w) job])) :command :job-exited!
                          :args {:worker (:id w) :job job :exit exit :log (str base ".log")
@@ -577,7 +571,6 @@ still running (T163)."
   (let [agents (session-agents c sessions)
         {:keys [kill since stale]} (sessions/plan @state sessions agents @stale-since
                                                   (System/currentTimeMillis) (or reap-grace-ms sessions/default-grace-ms))
-        ;; A sweep of ALL? sessions forgets those no longer stale, as a resumed Worker's.
         _ (swap! stale-since #(merge (if all? (select-keys % (map :conversation stale)) %) since))
         tried (into {} (map (juxt :conversation #(boolean (reap! c %)))) kill)]
     (swap! stale-since #(apply dissoc % (keep (fn [[conversation gone]] (when gone conversation)) tried)))
@@ -616,7 +609,6 @@ still running (T163)."
                     (let [w (get-in @state [:workers worker])
                           a (some->> (:conversation w) (conversation-root c) inbox/agent)
                           s (some-> a (select-keys [:pid :start]) (assoc :conversation (:conversation w)))]
-                      ;; One attempt: a session it cannot kill, or an error, is the health pass's to retry.
                       (when (and s (not @stopped) (not (sessions/holds-session? w))
                                  (= {} (try (reap-sessions! c [s])
                                             (catch Exception e (binding [*out* *err*] (println "bbh super: reaping" worker "failed:" (ex-message e)))))))
@@ -656,7 +648,6 @@ still running (T163)."
   (locking (:recovery-lock c)
     (let [now (System/currentTimeMillis)
           grace (or (:restart-grace-ms c) 30000)
-          ;; Asked once a pass, and only when a Worker needs its buffer opened.
           emacs-up? (delay ((get-in c [:launch :emacs-up?])))]
       (doseq [w (vals (:workers @state))
               :when (or (model/active-states (:state w)) (= :queued (:state w)))
@@ -688,13 +679,10 @@ still running (T163)."
                 stopped? (every? true? (mapv process/stop-job! running))]
             (when (and (empty? blocked) stopped?)
               (doseq [j running] (spit (str (:base j) ".exit") "137\n"))
-              ;; dispatch! sends the cancellation and marks its row done once the session took it.
               (when (or (not agent) (not (model/cancel-owed? @state w)))
                 (run! c :controller {:id (str "cancelled-" (:id w)) :command :cancel-delivered! :args {:worker (:id w)}})
                 (promote! c))))
 
-          ;; A launch that met Emacs down: open its buffer once Emacs is back.
-          ;; Its token was issued at promotion, so open! needs a new one.
           (and (not agent) (= :starting (:state w)) (:workspace w) (:conversation w)
                (> (- now (or (:started-at w) (:boot-at c))) grace)
                @emacs-up?)
@@ -711,7 +699,6 @@ still running (T163)."
                 (run! c :controller {:id (str "launch-failed-" (:id w)) :command :finish-worker!
                                      :args {:worker (:id w) :state-after :failed :reason (str "Launch failed: " (ex-message e))}})
                 (promote! c))))))
-      ;; Jobs outlive a Worker that ended elsewhere: a failed launch, a controller that was down.
       (doseq [w (vals (:workers @state)) :when (#{:done :failed} (:state w))]
         (stop-jobs! c (:id w)))
       (try (ensure-router! c)
@@ -744,22 +731,17 @@ still running (T163)."
         for-router? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
         batch (filter for-router? rows)
         send! (fn [{:keys [id conversation]} text kind]
-                ;; The file is named after the row, so a pass that died before
-                ;; recording the send writes the same message again, not a second.
+                ;; Named after the row, so a pass that died before recording the send rewrites the same message.
                 (let [m (inbox/send! (conversation-root c conversation) text nil
                                      (cond-> {:message-id (model/message-id id)} kind (assoc :kind kind)))]
                   (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}})))]
-    ;; The Router's turn takes its pending rows together, oldest first. Summaries
-    ;; of messages already routed to a Worker ride along but never wake it alone.
     (when (some #(not= :summary (:delivery %)) batch)
       (doseq [{:keys [id text delivery] :as o} batch]
         (send! o (str (when-not (= :summary delivery) (str id " ")) text) nil)))
    (doseq [{:keys [id conversation text message] :as o} rows
            :when (not (and (= :pending (:state o)) (= router conversation)))]
      (if (model/dead-letter? @state o)
-       ;; Its Worker has finished, so the row is dropped and its file deleted unread.
        (do (run! c :controller {:id (str "dropped-" id) :command :outbox-dropped! :args {:outbox id}})
-           ;; A pending row may have a file too, written by a pass that died before recording it.
            (inbox/ack! {:root (conversation-root c conversation)} (or message (model/message-id id))))
        (case (:state o)
          :pending (send! o text (#{:steer :cancel} (:delivery o)))
@@ -811,7 +793,6 @@ still running (T163)."
            :launch (merge workspace/impl
                           {:wf-start! wf-start! :wf-close! wf-close! :open! open! :release! release!
                            :open-router! client/open-router!
-                           ;; Whether open! can work: the daemon's, unless a caller brought its own open!.
                            :emacs-up? (if (:open! launch) (constantly true) emacs/alive?)}
                           launch)
            :policy policy
@@ -819,15 +800,10 @@ still running (T163)."
            :boot-at (System/currentTimeMillis) :now now :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
            :db db :state (atom (store/replay db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
            :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :web (atom nil)
-           ;; NOTIFY, effects such as notify/desktop, turns desktop notifications on.
-           ;; What waited before it started is history, which it records but does not show.
            :notifier (some-> notify (notify/new-notifier (fs/path dir "notifications.edn") (- (now) notify/replay-grace-ms)))}]
     (ensure-owner-token! c)
     (some-> (:notifier c) (notify/resume! @(:state c) (now)))
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))
-    ;; Each client gets its own thread and a read timeout, so a client that
-    ;; never sends its line, or a slow launch, holds up nobody else. Commits
-    ;; stay serialized by run!.
     (doto (Thread. #(while (not @(:stopped c))
                       (try (let [sock (.accept server)]
                              (.setSoTimeout sock 10000)
@@ -843,10 +819,7 @@ still running (T163)."
                       (try
                         (when (or (some (fn [w] (= :cancelling (:state w))) (vals (:workers @(:state c))))
                                   (> (- (System/currentTimeMillis) @(:last-health c)) health-ms))
-                          ;; A pass can find a Worker gone, which frees its slot.
                           (reconcile! c) (settle! c) (promote-all! c) (reset! (:last-health c) (System/currentTimeMillis)))
-                        ;; At start and every health interval: reap sessions that outlived their
-                        ;; Worker, and log memory, swap and live sessions.
                         (when (> (- (System/currentTimeMillis) @(:last-machine c)) health-ms)
                           (reset! (:last-machine c) (System/currentTimeMillis))
                           (try (observe-machine! c)
@@ -864,10 +837,8 @@ still running (T163)."
   (some-> notifier notify/stop!)
   (some-> web deref :stop (apply [:timeout 5000]))
   (.close ^ServerSocket server)
-  ;; Let the requests already accepted finish, a launch among them.
   (let [deadline (+ (System/currentTimeMillis) 30000)]
     (while (and (pos? @in-flight) (< (System/currentTimeMillis) deadline)) (Thread/sleep 50)))
-  ;; Wait for the current observation/delivery transaction before closing SQLite.
   (when-let [t @dispatcher] (.join ^Thread t))
   (fs/delete-if-exists (fs/path dir "port"))
   (locking db (store/close! db))

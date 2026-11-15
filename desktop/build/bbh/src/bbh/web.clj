@@ -311,7 +311,6 @@
                                                           :note (str/trim (str note))}
                                                    (seq answers) (assoc :answers answers))}
                                       202))))
-          ;; A draft is the same whatever retries it, so it needs no id.
           (= "draft" verb)
           (let [{:keys [ask option answer note]} body]
             (cond (> (count (str note)) max-text) (json-response 413 {:error "Note too long"})
@@ -330,7 +329,7 @@
                              :args {:thread id :ask (:ask body) :revision (:revision body) :evidence-sha (:evidence-sha body)}}
                         202)
             (json-response 400 {:error "An approval names its id, ask, revision and evidence-sha"}))
-          ;; The id makes a retry the same command, so it is required here as for a reply.
+          ;; The id makes a retry the same command, so it is required.
           (not (string? (:id body))) (json-response 400 {:error (str "A " verb " needs an id")})
           :else (super-call dir {:command (keyword (str verb "!")) :id (:id body) :args {:thread id}} 202))))
 

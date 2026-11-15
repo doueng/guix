@@ -92,10 +92,6 @@
   trace. The connection just closes and the server goes on, so the report
   becomes one line."
   [lines]
-  ;; Reports from two connections interleave line by line, and the ERROR
-  ;; line that starts one may end a line of another's stack, so each line is
-  ;; judged alone: the message line becomes the one line, and the rest of a
-  ;; report goes while one is being dropped.
   (let [anchor? #(str/includes? % "nREPL message must be a map")]
     (letfn [(step [lines dropping?]
               (lazy-seq

@@ -1,9 +1,5 @@
 #!/usr/bin/env bb
-;; emacsclient for a bbh super Worker's REPL, which finds this one first on its
-;; PATH.  It refuses the live bbh-super daemon: that daemon runs every Router and
-;; Worker session and the Inbox, and Workers that benchmarked or debugged in it
-;; froze it twice and half-reloaded agent-shell (T163).  Every other server goes
-;; to the real emacsclient.
+;; Refuses the live bbh-super daemon: Workers debugging in it froze it (T163).
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 
 (def live

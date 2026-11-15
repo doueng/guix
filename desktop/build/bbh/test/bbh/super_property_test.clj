@@ -90,14 +90,12 @@
                                              :args {:thread (thread-of state (if (and (seq archived) (odd? b)) (pick archived a) worker)) :reason (pick ["stop" "" "stop"] b)}}])
       :cancel-delivered! [:controller {:id id :command :cancel-delivered!
                                        :args {:worker (pick-id (keep #(when (= :cancelling (:state %)) (:id %)) (vals (:workers state))) b worker)}}]
-      ;; A session that ended stays ended until it is resumed, as in Super.tla.
       :health! (let [w (get-in state [:workers worker])
                      alive? (and (odd? b) (not (and w (model/session-ended? w))))]
                  [:controller {:id id :command :health!
                                :args {:worker worker :at i
                                       :health {:classification (if alive? :running :session-ended)
                                                :process (if alive? {:pid 7 :start "s"} {})
-                                               ;; In a turn, and one the person typed, as agent.json says.
                                                :busy (boolean (and alive? (zero? (mod b 3))))
                                                :prompted-at (when (and alive? (zero? (mod c 2))) (System/currentTimeMillis))
                                                :jobs (if (zero? (mod c 3)) [{:id "j1" :state :rebooted}] [])}}}])
@@ -152,8 +150,6 @@
       :outbox! (let [done-for (set (keep #(when (finished (:state %)) (:conversation %)) (vals (:workers state))))
                      dead (filter #(and (done-for (:conversation %)) (not= :done (:state %))) (vals (:outbox state)))
                      row (when (and (seq dead) (odd? a)) (pick dead c))]
-                 ;; A row nobody will read is dropped, and a dropped one is then
-                 ;; acked or sent late, which must not revive it.
                  [:controller {:id id :command (cond (nil? row) (pick [:outbox-sent! :outbox-acked! :outbox-dropped!] b)
                                                      (= :dropped (:state row)) (pick [:outbox-sent! :outbox-acked!] b)
                                                      :else :outbox-dropped!)
@@ -176,16 +172,11 @@
        [:two-workers-on-a-thread t])
      (for [a open :when (not (model/active-states (get-in state [:workers (:worker a) :state])))]
        [:open-ask-without-a-live-worker (:id a)])
-     ;; A Worker seen mid-turn is never shown as waiting.
      (for [t (vals (:threads state))
            :let [w (->> workers (filter #(= (:id t) (:thread %))) (sort-by (comp model/id-order :id)) last)]
            :when (and (get-in w [:health :busy]) (= :waiting (model/execution state (:id t))))]
        [:mid-turn-shown-waiting (:id t)])
-     ;; Waiting is read from the asks, so no Worker stores it, and a read shows
-     ;; it exactly while a working Worker outside a turn has a stopped ask open.
      (for [w workers :when (= :waiting (:state w))] [:waiting-is-stored (:id w)])
-     ;; Only a Worker that ended owes effects, each at most once, and what it
-     ;; still owes is among them, without those done or failed too often.
      (for [w workers :when (and (:owes w) (not (finished (:state w))))] [:live-worker-owes (:id w)])
      (for [w workers :when (not= (:owes w) (seq (filter (set (:owes w)) model/effect-order)))] [:owes-out-of-order (:id w) (:owes w)])
      (for [w workers kind (model/obligations state w)
@@ -203,11 +194,8 @@
        [:read-shows-another-state (:id w)])
      (for [w workers :when (and (= :queued (:state w)) (get-in state [:threads (:thread w) :resolved-at]))]
        [:queued-on-an-archived-thread (:id w)])
-     ;; A reply stops waiting when its Worker ends.
      (for [r (vals (:replies state)) :when (and (= :sent (:state r)) (finished (get-in state [:workers (:worker r) :state])))]
        [:reply-waits-on-a-finished-worker (:id r)])
-     ;; A cancellation is one outbox row: a Worker with a session being
-     ;; cancelled has exactly one, and nobody else has any.
      (let [cancels (frequencies (keep #(when (= :cancel (:delivery %)) (:conversation %)) (vals (:outbox state))))]
        (concat
         (for [w workers :when (and (= :cancelling (:state w)) (:conversation w) (not= 1 (get cancels (:conversation w))))]
@@ -220,8 +208,6 @@
      (for [kind [:threads :workers :asks :outbox] id (keys (kind state))
            :when (> (model/id-order id) (get-in state [:counters kind] 0))]
        [:id-past-its-counter id])
-     ;; The Inbox: every thread once, newest first within a section, and
-     ;; the first matching rule decides the section.
      (let [sections (model/sections state)
            rows (for [{:keys [section threads]} sections t threads] [section t])]
        (concat
@@ -236,7 +222,6 @@
                         (and (not any-open?) (:resolved-at t) (not= :archived section))
                         (not= (:came-back t) (boolean (and (:resolved-at t) (> (:milestone-seq t) (:resolved-at t))))))]
           [:wrong-section (:id t) section])))
-     ;; Reads hop between linked records: an ask names the reply that took it.
      (for [r (vals (:replies state))
            a (concat (keys (:picks r)) (keys (:approved r)) (:dismiss r))
            :when (or (not= (:id r) (:reply (model/linked state :asks a)))
@@ -286,7 +271,6 @@
         bad (fn [why & more] [(into [why command] more)])]
     (concat
      (when (and refused (not= before after)) (bad :refusal-changed-state))
-     ;; A reply or a new ask changes what is open, so a send against the old list is stale.
      (when (and (not refused) (#{:reply! :approve! :ask!} command)
                 (let [t' (get-in after [:threads (:thread (or (get-in after [:replies result]) (get-in after [:asks result])))])]
                   (not (> (:asks-version t' 0) (get-in before [:threads (:id t') :asks-version] 0)))))
@@ -300,7 +284,6 @@
                :else (when (= :forbidden (:error refused)) (bad :own-command-forbidden)))))
      (case (when-not (and (vector? principal) (= :forbidden (:error refused))) command)
        :health!
-       ;; A prompt the person typed answers every ask the Worker opened before it.
        (when-let [p (and (not refused) (get-in args [:health :prompted-at]))]
          (let [w (get-in after [:workers (:worker args)])]
            (when (and (= :working (get-in before [:workers (:worker args) :state]))
@@ -317,7 +300,6 @@
                      (concat
                       (when (not= (:state w) (if full? :queued :starting)) (bad :cap-decision (:state w)))
                       (when (and full? (not= (str cap " Workers already running") (:reason result))) (bad :queued-reason (:reason result)))
-                      ;; A Worker it replaced has joined the history.
                       (when (not= (:generation w) (inc (count (get-in after [:threads (:thread args) :history])))) (bad :generation))
                       (when (not= (:origin w) (if (= :owner principal) :owner (get-in before [:outbox (:for args) :origin])))
                         (bad :origin (:origin w))))))
@@ -368,7 +350,6 @@
        :draft!
        (when (not= (get-in before [:threads (:thread args) :updated-at]) (get-in after [:threads (:thread args) :updated-at]))
          (bad :draft-moved-the-thread))
-       ;; Steering a Worker whose session ended resumes it first, so it is delivered too.
        :steer!
        (let [w (get-in before [:workers (get-in before [:threads (:thread args) :worker])])
              deliverable? (and (= :working (:state w)) (:conversation w) (not (model/session-ended? w)))]
@@ -377,8 +358,6 @@
                            (bad :steer-refused refused)))
                (not (some #(= (str "[Steering] " (:text args)) (:text %)) (new-rows before after)))
                (bad :steer-not-delivered)))
-       ;; There is no lease: the owner and the Router cancel any Worker that runs
-       ;; or waits to, on an archived thread too.
        :cancel!
        (let [w (get-in before [:workers (get-in before [:threads (:thread args) :worker])])]
          (when (and refused (#{:queued :starting :working} (:state w)) (not (str/blank? (:reason args))))

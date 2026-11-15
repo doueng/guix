@@ -13,7 +13,6 @@
 
 (defn- session-var? [k]
   (and (re-find #"^(BBH_|WF_|PI_CODING_AGENT_)" k)
-       ;; Locates a host library, not a session.
        (not= k "BBH_SQLITE_LIB")))
 
 (def ^:private own-root (delay (str (fs/create-temp-dir {:prefix "bbh-test-home"}))))

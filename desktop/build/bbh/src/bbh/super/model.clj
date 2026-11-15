@@ -297,7 +297,6 @@
 (defmethod decide* :start-worker! [state {{:keys [thread workflow brief repo check bench repro for replaces] :as args} :args :keys [token-hash policy requires principal]}]
   (let [id (next-id state :workers "W")
         t (thread-of state thread)
-        ;; :replaces is optional: it only confirms which Worker the caller expects to replace.
         _ (when (and replaces (not= replaces (:worker t)))
             (refuse :invalid :field :replaces :message (str replaces " is not " thread "'s Worker")))
         origin (request-origin state principal for)
@@ -375,7 +374,6 @@
     (when-not (#{:queued :starting :working} (:state w)) (refuse :not-running :worker worker))
     (when (str/blank? reason) (refuse :invalid :field :reason))
     {:events [{:kind :cancel-requested :thread (:thread w)
-               ;; A Worker with a session is told through the outbox, like any other signal.
                :data (merge {:id worker :reason reason} (authority state principal for)
                             (when (:conversation w)
                               {:outbox (next-id state :outbox "o") :conversation (:conversation w)
@@ -416,7 +414,6 @@
               (and agent (not repl?)) [:needs-human (format "Its session (pid %s) is alive but its REPL does not answer." (:pid agent))]
               stale [:needs-human (format "Delivery %s has waited %d min in its mailbox while the Worker runs; it is not taking messages."
                                           (:id stale) (quot (:waited stale) 60000))]
-              ;; A session in a turn is working, whatever asks are open.
               agent [(if (and (waiting? state w) (not (:busy agent))) :waiting :running)]
               (#{:working :cancelling} (:state w))
               [:session-ended (format "Its session ended. Resume it with u in the Inbox or bbh inbox resume %s." (:thread w))]
@@ -464,8 +461,6 @@
      :result worker}))
 
 (defmethod decide* :machine-observed! [_ {:keys [args]}]
-  ;; A log line for the health pass: memory, swap and live sessions against
-  ;; active Workers, so a leak shows in the event log. It changes no record.
   {:events [{:kind :machine-observed :data args}] :result nil})
 
 (defn- rebooted-jobs
@@ -507,7 +502,6 @@
         t (thread-of state thread)
         w (or (get-in state [:workers (:worker t)]) (refuse :no-worker :thread thread :message (str thread " has no running Worker; start one")))
         _ (when (str/blank? text) (refuse :invalid :field :text))
-        ;; A Worker whose session ended is resumed first, so the text reaches its new session.
         resumed (when (session-ended? w) (:events (decide* state (assoc cmd :command :resume! :args {:thread thread}))))
         state (reduce fold* state resumed)
         w (deliverable-worker! (get-in state [:workers (:id w)]))]
@@ -524,7 +518,6 @@
       (refuse :invalid :field :job))
     (if (get-in w [:jobs job])
       {:events [] :result job}
-      ;; An exit the Worker already read through job-status needs no message.
       {:events [{:kind :job-exited :thread (:thread w)
                  :data (cond-> {:worker worker :job job :exit exit :log log}
                          (not seen) (assoc :outbox (next-id state :outbox "o") :conversation (:conversation w)
@@ -636,7 +629,6 @@
                                      (let [d (update d :answers dissoc ask)] (if (empty? (:answers d)) (dissoc d :answers) d))
                                      (assoc-in d [:answers ask] text))))
                   note (assoc :note (str/trim (str note))))]
-      ;; The thread rides in :data, so a draft does not stamp :updated-at.
       {:events [(if (and (empty? (:picks draft)) (empty? (:answers draft)) (str/blank? (:note draft)))
                   {:kind :draft-discarded :data {:thread thread}}
                   {:kind :draft-saved :data {:thread thread :draft draft}})]
@@ -650,16 +642,12 @@
   {:events (filterv some? [(dismissal state thread id)]) :result thread})
 
 (defmethod decide* :read! [state {{:keys [threads read]} :args}]
-  ;; Unread puts the cursor before every milestone. The thread rides in :data,
-  ;; so reading neither stamps :updated-at nor moves the row.
   (let [ts (mapv #(thread-of state %) threads)]
     {:events (vec (for [t ts :when (= (boolean read) (unread? t))]
                     {:kind :thread-read :data {:thread (:id t) :seq (if read (or (:milestone-seq t) 0) 0)}}))
      :result (mapv :id ts)}))
 
 (defmethod decide* :archive! [state {{:keys [thread]} :args :keys [id]}]
-  ;; A queued Worker has no process yet, so it is new work, which an archived
-  ;; thread takes none of. A running Worker carries on.
   (let [queued (some #(when (and (= thread (:thread %)) (= :queued (:state %))) %) (vals (:workers state)))]
     {:events (filterv some? [(dismissal state thread id)
                              (when queued (finished queued {:state :cancelled :reason "thread archived"}))
@@ -696,7 +684,6 @@
   [s]
   (let [ts (spoken-tokens s)
         at (fn [i] (let [t (get ts i)] (when (and t (or (zero? i) (not (:stop? (get ts (dec i)))))) t)))
-        ;; A number below a hundred in words from token I: [n next-index].
         below-100 (fn [i]
                     (when-let [{:keys [v digits?]} (at i)]
                       (cond (or (nil? v) digits?) nil
@@ -739,8 +726,7 @@
 (defmethod decide* :say! [state {{:keys [text origin]} :args :keys [id]}]
   (when (str/blank? text) (refuse :invalid :field :text))
   (when-not (#{:phone :emacs :herdr :voice} origin) (refuse :invalid :field :origin))
-  (let [;; A typed or spoken handle names the thread and is stripped from the message.
-        [thread message] (parse-handle text)
+  (let [[thread message] (parse-handle text)
         t (when thread (or (get-in state [:threads thread]) (refuse :no-such-thread :thread thread)))
         w (some-> (get-in state [:workers (:worker t)]) deliverable-worker!)]
     (if w
@@ -775,7 +761,6 @@
 (defmethod decide* :answered! [state {{:keys [thread reply]} :args}]
   (let [r (or (get-in state [:replies reply]) (refuse :no-such-reply :reply reply))]
     (when (not= thread (:thread r)) (refuse :forbidden :reply reply))
-    ;; A reply closed by its Worker's end stays closed: a later Worker never took it.
     {:events (if (= :closed (:state r)) [] [{:kind :reply-answered :thread thread :data {:id reply}}]) :result reply}))
 
 (defmethod decide* :issue-token! [_ {{:keys [principal]} :args :keys [token-hash]}]
@@ -840,7 +825,6 @@
   "{[kind version] f}: F turns an event of KIND in VERSION into the next
   version. Change an event's format by raising its entry in `versions` and
   adding the step here, so a log written before the change still folds."
-  ;; A version 1 snapshot stored :waiting on a Worker; the asks say it now.
   {[:snapshot 1] (fn [event]
                    (update-in event [:data :state :workers] update-vals
                               #(cond-> % (= :waiting (:state %)) (assoc :state :working))))})
@@ -853,8 +837,6 @@
       (recur (assoc (f event) :v (inc v)))
       event)))
 
-;; The whole state at one point of the log. A replay starts at the newest one,
-;; so events before it need not fold to it any more.
 (defmethod fold* :snapshot [_ {{:keys [state]} :data}] state)
 
 (defn fold
@@ -891,7 +873,6 @@
   (let [w (get-in state [:workers id])]
     (-> state (bump :outbox)
         (update-in [:workers id] merge (dissoc running :id :outbox :text) {:state :working :queued-reason nil})
-        ;; The last Worker's note is not this one's.
         (assoc-in [:threads thread :summary] nil)
         (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
                                     :state :pending :message nil})
@@ -919,9 +900,7 @@
     (-> state
         (update-in [:workers id] #(cond-> (assoc % :state outcome :reason reason) landed (assoc :landed landed) (not-empty owes) (assoc :owes owes)))
         (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
-        ;; Nobody is left to read an answer, whatever the outcome.
         (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= id (:worker a)) (= :open (:state a))) (assoc :state :superseded))]) %)))
-        ;; Nor to act on a reply it has not answered. Closed is not answered.
         (update :replies update-vals #(cond-> % (and (= id (:worker %)) (= :sent (:state %))) (assoc :state :closed)))
         (cond-> (contains? #{id nil} (:worker t))
           (-> (assoc-in [:threads thread :worker] nil)
@@ -944,7 +923,6 @@
   (cond-> state worker (assoc-in [:workers worker :health] health)))
 
 (defmethod fold* :worker-resumed [state {{:keys [id outbox conversation text]} :data :keys [thread]}]
-  ;; Health observes the new session; until then the Worker holds its slot again.
   (-> state (bump :outbox)
       (update-in [:workers id] dissoc :health)
       (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
@@ -1012,7 +990,6 @@
   [state thread]
   (let [t (get-in state [:threads thread])
         w (->> (vals (:workers state)) (filter #(= thread (:thread %))) (sort-by (comp id-order :id)) last)
-        ;; A session seen in a turn is working, though a stopped ask is open.
         e (get execution-of (shown-state state w) :none)]
     (if (and (:resolved-at t) (not (#{:queued :starting :working} (:state w)))) :none e)))
 
@@ -1139,7 +1116,6 @@
   (-> state (assoc-in [:threads thread :summary] text) (assoc-in [:threads thread :milestone-seq] seq)))
 
 (defmethod fold* :outbox-sent [state {{:keys [id message]} :data}]
-  ;; Only a pending row becomes sent; a late repeat never moves one back.
   (cond-> state
     (= :pending (get-in state [:outbox id :state])) (update-in [:outbox id] assoc :state :sent :message message)))
 
@@ -1148,7 +1124,6 @@
     (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :dropped)))
 
 (defmethod fold* :outbox-acked [state {{:keys [id]} :data}]
-  ;; Only the row moves. A reply stays :sent until the Worker answers it.
   (cond-> state
     (#{:pending :sent} (get-in state [:outbox id :state])) (assoc-in [:outbox id :state] :done)))
 

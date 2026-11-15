@@ -1,9 +1,6 @@
 ;;; tty-scroll-test.el --- the transcript stops scrolling at its end -*- lexical-binding: t; -*-
 
-;; Run with: bb test:transcript-scroll
-;; Batch Emacs never redisplays, so this runs in a terminal frame and writes
-;; its verdict to $BBH_TTY_RESULT. Keys go through `execute-kbd-macro' so the
-;; command loop runs `post-command-hook' as it does for a real key press.
+;; Batch Emacs never redisplays, so this runs in a terminal frame; `execute-kbd-macro' makes `post-command-hook' run as for a real key.
 
 (dolist (pkg '("agent-shell" "acp" "shell-maker" "map" "org" "goto-chg" "evil"))
   (add-to-list 'load-path (expand-file-name pkg (getenv "BBH_ELISP_BUILD"))))
@@ -13,7 +10,7 @@
 (require 'evil)
 (load (getenv "BBH_DOOM_AGENT_SHELL") nil t)
 
-;; The settings Doom runs with. A nonzero margin makes redisplay undo the clamp.
+;; A nonzero margin makes redisplay undo the clamp.
 (setq scroll-margin 2
       scroll-conservatively 10
       scroll-preserve-screen-position 'always)
@@ -155,8 +152,6 @@ when the text or a fold changed, not on every event."
           (when (> layouts 2)
             (error "the clamp laid the end out %d times in 260 wheel events" layouts)))
       (advice-remove 'eng/bbh-transcript--latest-start count))
-    ;; Showing or folding output near the end moves the latest start, and
-    ;; the wheel and the clamp follow it, though no text changed.
     (dolist (fold '(off t))
       (with-current-buffer (window-buffer window)
         (save-excursion

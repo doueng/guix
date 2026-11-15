@@ -57,7 +57,6 @@
               pick-words (if send? pick-words words)
               t (when thread (call! {:command :thread :args {:id thread}}))
               open (sort-by :seq (filter #(= :open (:state %)) (:asks t)))
-              ;; The ask your Inbox cursor is on, while it is still open, else the newest.
               ask (or (when (= thread (:thread selected)) (some #(when (= (:ask selected) (:id %)) %) open)) (last open))
               n (when (and thread (seq pick-words)) (pick-number ask pick-words))]
           (when (and handle (nil? t)) (throw (ex-info "No such thread" {:thread handle})))
@@ -138,7 +137,6 @@
     (let [target (when (some #{"--selected"} args) :selected)
           args (remove #{"--selected"} args)]
       (prn (case (first args)
-             ;; With a take id, the press records and the release only asks it to stop.
              "start" (if-let [take (second args)]
                        (take! take :target target)
                        (let [{:keys [exit err]} (hex! "dictation" "start")]

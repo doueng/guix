@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Run from desktop/build/bbh: bb docs/super-agent.bb
 (require '[babashka.fs :as fs]
          '[bbh.web.markdown :as md]
          '[clojure.string :as str]

@@ -9,15 +9,12 @@
   (loop [n 50] (or (f) (when (pos? n) (Thread/sleep 100) (recur (dec n))))))
 
 (deftest stop-job-kills-what-the-job-moved-to-another-group
-  ;; T179: a test script's Chrome ran in a process group of its own inside the
-  ;; job's session, so killing only the job's group left it running.
   (let [dir (fs/create-temp-dir {:prefix "bbh-stop-job"})
         child (str (fs/path dir "child"))
         leader (p/process {:out :discard :err :discard}
                           "setsid" "bash" "-c" (str "set -m; sleep 300 & echo $! > " child "; wait"))]
     (try
       (let [cpid (wait-for #(some-> (process/read-text child) not-empty parse-long))
-            ;; setsid execs in place, so the process started is the job's leader.
             lpid (.pid (:proc leader))
             job (process/identity-of lpid)
             cjob (process/identity-of cpid)]

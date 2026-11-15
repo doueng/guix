@@ -113,8 +113,6 @@
   [st]
   (or (:definition st) (load-workflow (:workflow st))))
 
-;; The journal is the source of truth. State is folded from it.
-
 (defn fold-event [st {:keys [type] :as e}]
   (case type
     :start   (merge st (select-keys e [:id :workflow :definition :cwd :task :repro :check :bench :phase])

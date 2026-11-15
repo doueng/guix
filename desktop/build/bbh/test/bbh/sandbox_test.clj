@@ -17,7 +17,7 @@
         real (str (fs/create-temp-dir {:dir (str (fs/create-dirs (str home "/.cache"))) :prefix "bbh-sandbox-test"}))
         remote (str real "/remote.git")
         clone (str real "/clone")
-        scratch (str (fs/create-temp-dir {:dir "/var/tmp" :prefix "bbh-sandbox-scratch"})) ; the test tmpdir lies under home
+        scratch (str (fs/create-temp-dir {:dir "/var/tmp" :prefix "bbh-sandbox-scratch"}))
         up (str scratch "/up")
         steps (str home "/.local/share/bbh-replay/steps.edn")
         uid (str/trim (:out (p/shell {:out :string} "id" "-u")))

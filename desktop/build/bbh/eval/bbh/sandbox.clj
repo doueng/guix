@@ -159,8 +159,6 @@ exec unshare --user --map-user=\"$uid\" --map-group=\"$gid\" -- \"$@\"")
         up (str scratch "/up")
         bin (write-shims! up)
         out (str (replay-dir home) "/run")
-        ;; This session's own bbh variables, such as its super token, stay outside.
-        ;; HOME and the XDG dirs name the overlaid home, also when the caller's point elsewhere.
         env (-> (into {} (remove (fn [[k _]] (re-find #"^(BBH_|WF_|XDG_(STATE|DATA|CONFIG|CACHE)_HOME$)" k))) (System/getenv))
                 (assoc "HOME" home)
                 (assoc "PATH" (str (str/replace bin up home) ":" (System/getenv "PATH"))))
@@ -173,7 +171,6 @@ exec unshare --user --map-user=\"$uid\" --map-group=\"$gid\" -- \"$@\"")
         r (or r (assoc @proc :timed-out true))
         seen (str/replace out home up)
         result (let [f (str seen "/result.edn")] (when (fs/exists? f) (edn/read-string (slurp f))))]
-    ;; ~/.claude is the real one, for credentials, so the replay's Claude Code session is removed from it.
     (when-let [id (:claude-session result)]
       (doseq [f (fs/glob (str home "/.claude/projects") (str "*/" id ".jsonl"))] (fs/delete f)))
     {:out seen

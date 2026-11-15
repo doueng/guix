@@ -141,8 +141,7 @@
         marker (str (random-uuid))
         times (last-times)
         queue (java.util.concurrent.LinkedBlockingQueue. (sort-by #(- (get times % 0)) vars))
-        ;; Each worker and the child REPLs its tests start take a few hundred MB, and 8 at once beside running
-        ;; Workers helped freeze the laptop (T108), so the default stays at 4.
+        ;; More than 4 workers beside running Workers froze the laptop (T108).
         jobs (or (some-> (System/getenv "BBH_TEST_JOBS") parse-long)
                  (min 4 (.availableProcessors (Runtime/getRuntime))))
         results (atom [])
@@ -151,18 +150,15 @@
         before (entries)
         sqlite (str (fs/path (System/getProperty "user.home") ".guix-home/profile/lib/libsqlite3.so.0"))
         worker-env (merge {marker-var marker
-                           ;; No test reaches the Emacs daemon of the person running the suite.
                            "BBH_EMACS_SERVER" (str "bbh-test-" marker)
                            hermetic/root-var root
                            "TMPDIR" tmp}
                           (when props? {"BBH_PROPS" "full"})
                           (hermetic/dirs root)
-                          ;; sqlite looks under user.home, which now names root.
                           (when (and (not (System/getenv "BBH_SQLITE_LIB")) (fs/exists? sqlite))
                             {"BBH_SQLITE_LIB" sqlite}))
         run-worker (fn []
                      (let [proc (p/process {:in :pipe :out :pipe :err :inherit :extra-env worker-env}
-                                           ;; Temp dirs and fs/expand-home land under root too.
                                            "bb" (str "-Djava.io.tmpdir=" tmp) (str "-Duser.home=" root) "-e" "(require 'bbh.test-runner) (bbh.test-runner/worker)")
                            in (io/writer (:in proc))
                            send! #(if-let [v (.poll queue)]

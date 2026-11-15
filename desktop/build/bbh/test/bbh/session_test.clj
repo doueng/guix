@@ -161,9 +161,6 @@
       (is (str/includes? file "(def w 6)"))
       (is (str/includes? file "(in-ns 'user)\n\n(def v :user)") "the file switches back for user's v"))))
 
-;; Properties borrowed from Pi Durable's code mode tests: a result is journaled before it is delivered,
-;; a replay does not redo finished work, and a damaged journal is noticed rather than silently emptied.
-
 (deftest the-checkpoint-is-written-before-the-result-reaches-the-model
   (let [h (harness "" [{:code "(defn helper [x] (inc x))"} "ok"])
         checkpoint (str (fs/path (:dir h) "checkpoint.clj"))
@@ -647,8 +644,6 @@
       (finally (stop-watch) (stop! h)))))
 
 (deftest a-session-restarted-before-its-ack-reads-the-mail-once
-  ;; The session died after its transcript held the mail and before it deleted
-  ;; the file, or the controller wrote the same row's file a second time.
   (let [h (harness "" ["done"])
         mail! #(bbh.inbox/send! (:dir h) "[Reply] Keep the alias?: No" nil {:message-id "0000000007-o7"})]
     (try

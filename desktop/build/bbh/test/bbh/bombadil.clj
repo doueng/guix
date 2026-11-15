@@ -30,8 +30,6 @@
 (def ^:private checkout (str (fs/canonicalize (fs/path here ".." ".." ".." ".."))))
 (def ^:private inside-var "BBH_BOMBADIL_ROOT")
 
-;; ---- options --------------------------------------------------------------
-
 (defn- parse [args]
   (loop [[a v & more :as args] args
          o {:time 120 :seed (rand-int 1000000) :keep false :rows 40 :columns 140 :view "inbox" :step-ms 1000}]
@@ -50,8 +48,6 @@
 
 (def ^:private emacs-mem-mb 1536)
 
-;; ---- the binary -----------------------------------------------------------
-
 (defn- bombadil-bin
   "Bombadil from PATH, else the pinned Guix package built from modules/."
   []
@@ -60,8 +56,6 @@
                                             "guix" "build" "-L" "modules" "-e" "(@ (engstrand packages bombadil) bombadil)")]
         (when-not (zero? exit) (throw (ex-info (str "building bombadil failed: " err) {})))
         (str (fs/path (last (str/split-lines (str/trim out))) "bin" "bombadil")))))
-
-;; ---- the fixture: a controller and fake Workers ---------------------------
 
 (def ^:private words
   ["alder" "birch" "cedar" "dogwood" "elm" "fir" "ginkgo" "hazel" "ivy" "juniper" "larch" "maple"])
@@ -104,7 +98,6 @@
                                                     :options [{:id "y" :label "Yes"} {:id "n" :label "No"}]
                                                     :recommended "y"}))))
         take-mail! (fn []
-                     ;; A Worker's session takes its mailbox; a reply in it has arrived.
                      (doseq [f (fs/glob conversations "super-W*/mailbox/*.json")] (fs/delete-if-exists f)))
         tick! (fn []
                 (take-mail!)
@@ -122,8 +115,6 @@
       (reset! running false)
       (.join churn 5000)
       (stop c))))
-
-;; ---- the worker view: scripts, a large transcript, real sessions ----------
 
 (def ^:private plain-words
   ;; No q or z, so a typed zq-word never occurs in generated or anonymized text.
@@ -150,7 +141,6 @@
                  (words (+ 10 (.nextInt rng 60)))))
         parts (vec (repeatedly (+ 1 (.nextInt rng 7)) part))]
     (str (str/join "\n\n" parts)
-         ;; A reply cut off inside a fence.
          (when (zero? (.nextInt rng 15)) (str "\n\n```clojure\n(" (words 4))))))
 
 (def ^:private gen-codes
@@ -303,13 +293,11 @@
                         (< r 16) (let [[_ w] (pick ws)] (say "note" w (worker w :note! {:text (str "looking at " (pick plain-words))})))
                         (< r 19) (let [[t w] (pick ws)
                                        s (first (filter #(= (str "super-" w) (:conversation %)) (mine)))]
-                                   ;; A crashed session: Emacs starts a new one on the conversation (T162).
                                    (say "kill" t w (pr-str s) (when s (kill! s :grace-ms 0))))
                         :else (let [[t w] (pick ws)]
                                 (when (> (count ws) 2)
                                   (say "finish" t w (worker w :finish-worker! {:state-after :done :reason "fixture"})))))))
         churn (doto (Thread. #(do
-                                ;; The run's Emacs makes the server the launch needs.
                                 (loop [n 0] (when (and @running (< n 600) (not (alive?))) (Thread/sleep 200) (recur (inc n))))
                                 (say "emacs" (alive?))
                                 (dotimes [_ 2] (try (new-thread!) (catch Exception e (say "error" (ex-message e)))))
@@ -321,10 +309,7 @@
       (reset! running false)
       (.join churn 10000)
       (stop c)
-      ;; Sessions outlive the Emacs that started them only if something broke; end them.
       (doseq [s (mine)] (kill! s :grace-ms 1000)))))
-
-;; ---- the watchdog and the timings -----------------------------------------
 
 (defn- emacs-pid [root]
   (some (fn [d] (let [pid (parse-long (str (fs/file-name d)))]
@@ -383,8 +368,6 @@
      :faults (if (fs/exists? (fs/path root "faults.log")) (count (fs/read-all-lines (fs/path root "faults.log"))) 0)
      :hang (when (fs/exists? (fs/path root "watchdog.log")) (slurp (str (fs/path root "watchdog.log"))))}))
 
-;; ---- the run --------------------------------------------------------------
-
 (defn- trace-keys [trace]
   (some->> (fs/glob trace "**trace.jsonl") first str
            (#(with-open [r (clojure.java.io/reader %)]
@@ -413,8 +396,7 @@
                          "--quiescence-timeout-ms" "100"
                          "--output-path" trace "--output-path-overwrite"]
                         (when reproduce ["--reproduce" reproduce])
-                        ;; A soft cap: Emacs gets an allocation error past it, while the bbh it
-                        ;; runs lifts it again, since babashka's isolate cannot start under it.
+                        ;; Soft cap for Emacs; bbh lifts it again since babashka's isolate cannot start under it.
                         ["--" "prlimit" (str "--as=" (* emacs-mem-mb 1024 1024) ":unlimited") "timeout" (str (+ time 60))
                          emacs "-Q" "-nw" "-l" (str (fs/path here "bombadil" (str view ".el")))])
             started (System/currentTimeMillis)
@@ -432,10 +414,8 @@
             keys (trace-keys trace)
             summary (when worker? (timing-summary root))
             exit (if (and (zero? exit) (seq (:checks summary))) 3 exit)]
-        ;; Bombadil draws the screen in color after each state; keep the words.
         (println (str/join "\n" (take-last 120 (remove #(str/includes? % "\u001b[") (str/split-lines (str/trim text))))))
         (println (format "bombadil: exit %d after %d s, %s states, seed %d" exit secs (or (count keys) "?") seed))
-        ;; Which keys the generators reached, so a property whose key never came is visible.
         (println "keys:" (->> (frequencies (clojure.core/keep key-name keys))
                               (sort-by (comp - val)) (map (fn [[k n]] (str k " " n))) (str/join ", ")))
         (when summary
@@ -461,7 +441,6 @@
   [args]
   (let [o (parse args)
         worker? (= "worker" (:view o))
-        ;; The worker view runs a Router and Workers besides Emacs.
         need (+ emacs-mem-mb 1024 (if worker? 1536 0))
         available (mem-available-mb)
         _ (when (and available (< available need))
@@ -485,14 +464,12 @@
                                           (str home "/.config/emacs/.local/straight/build-31.1"))
                     "BBH_DOOM_AGENT_SHELL" (str (fs/path checkout "desktop" "configs" "doom" "agent-shell.el"))
                     "BBH_BOMBADIL_BIN" (bombadil-bin)
-                    ;; The profile's emacs: desktop/bin/emacs is babashka, which prlimit's cap stops.
+                    ;; Not desktop/bin/emacs: that is babashka, which prlimit's cap stops.
                     "BBH_BOMBADIL_EMACS" (let [e (fs/path home ".guix-home/profile/bin/emacs")] (if (fs/executable? e) (str e) "emacs"))
                     "PATH" (str (when worker? (str (fs/path root "bin") ":")) (fs/path home ".guix-home/profile/bin") ":" (System/getenv "PATH"))}
                    (when worker?
-                     {;; Every session, the Router's too, answers from a script, never a paid model.
-                      "BBH_MODEL" (str "script/" (fs/path root "scripts" "default.edn"))
+                     {"BBH_MODEL" (str "script/" (fs/path root "scripts" "default.edn"))
                       "BBH_BOMBADIL_SEED_CONVERSATIONS" "seed-big,seed-mid"
-                      ;; Read for the anonymized seed transcript only; nothing is written there.
                       "BBH_BOMBADIL_REAL_CONVERSATIONS" (str (fs/path home ".local" "share" "bbh" "conversations"))})
                    (when (fs/exists? sqlite) {"BBH_SQLITE_LIB" sqlite})
                    (when (System/getenv "BBH_HEAVY_SLOT") {"BBH_HEAVY_SLOT" (System/getenv "BBH_HEAVY_SLOT")}))]
@@ -520,7 +497,6 @@
 (defn- inside! [args]
   (let [root (System/getenv inside-var)
         o (parse args)]
-    ;; The run's own guards: every bbh path must sit under the temp root.
     (doseq [k ["HOME" "XDG_DATA_HOME" "XDG_STATE_HOME" "XDG_CONFIG_HOME"]]
       (when-not (str/starts-with? (str (System/getenv k)) root)
         (throw (ex-info (str k " is not under the temp root " root) {}))))

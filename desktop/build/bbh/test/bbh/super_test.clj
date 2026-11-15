@@ -88,7 +88,6 @@
   (let [db (store/open nil)
         state (store/replay db)]
     (is (thrown? Exception
-                 ;; The second event cannot be written, after the first was.
                  (with-redefs [model/decide (fn [& _] {:events [{:kind :thread-created :thread "T1" :data {:id "T1" :title "x"}} {:kind nil}]
                                                        :result "T1"})]
                    (store/commit! db state :owner {:id "c1" :command :thread! :args {:title "x"}}))))
@@ -137,13 +136,11 @@
         c (super/start! opts)]
     (swap! controllers assoc dir c)
     (try
-      ;; The first controller has notifications off, so the ask is never recorded as notified.
       (let [{:keys [token]} (thread-with-ask dir)]
         (Thread/sleep 20)
         (super/stop! c)
         (let [c2 (with-redefs [notify/replay-grace-ms 0]
                    (super/start! (assoc opts :policy {:notify-delay-seconds 0}
-                                        ;; The stub Worker's session is gone, which is news of its own; count the asks.
                                         :notify {:show! (fn [n _] (swap! log into (filter #(= :ask (first %)) (:keys n))) {}) :close! (fn [_])})))]
           (swap! controllers assoc dir c2)
           (try
@@ -164,7 +161,6 @@
         log (atom [])
         opts (-> opts (assoc :now #(deref clock) :policy {:notify-delay-seconds 5}
                              :notify {:show! (fn [n _] (swap! log conj (:summary n)) {}) :close! (fn [_])})
-                 ;; Emacs is down, so no session opens and W1 stays :starting.
                  (update :launch assoc :emacs-up? (constantly false)
                          :open! (fn [_] (throw (ex-info "no socket" {:error :emacs})))))
         c (super/start! opts)
@@ -190,7 +186,6 @@
           (is (= ["T1 needs you: slow start"] @log))
           (is (= :starting (get-in @(:state c2) [:workers "W1" :state])) "nothing is killed")
           (testing "a cancel that the Worker does not obey is told the same way"
-            ;; A session that lives and never takes the cancellation.
             (with-redefs [model/cancel-owed? (constantly true) bbh.inbox/agent (constantly {:pid 1 :start 1})]
               (call dir {:command :cancel! :args {:thread "T1" :reason "stop"}})
               (swap! clock + (* 10 60000) 1000)
@@ -212,8 +207,6 @@
       (call dir {:command :thread! :args {:title "plan"}})
       (run-worker dir "T1")
       (super/stop! c)
-      ;; The steer commits, dispatch! writes its file, and the controller dies
-      ;; before :outbox-sent! commits.
       (let [db (store/open (str (fs/path dir "super.db")))
             st (try (:state (store/commit! db (store/replay db) :owner {:id "s1" :command :steer! :args {:thread "T1" :text "use plan B"}}))
                     (finally (store/close! db)))
@@ -261,7 +254,6 @@
                 (Thread/sleep 50)
                 (is (= :cancelling (get-in @(:state c2) [:workers "W1" :state])) "and still does after a restart")
                 (is (= [message] (map :id (bbh.inbox/pending root))) "the restart sends no second cancel")
-                ;; The session interrupts and deletes the file.
                 (bbh.inbox/ack! {:root root} message)
                 (is (wait-for #(= :cancelled (get-in @(:state c2) [:workers "W1" :state]))))
                 (is (= :done (get-in @(:state c2) [:outbox (:id row) :state])))
@@ -438,7 +430,6 @@
             (call dir {:command :thread! :args {:title "two"}})
             (let [section (fn [id] (some (fn [{:keys [section threads]}] (when (some #(= id (:id %)) threads) section))
                                          (:sections (:ok (call dir {:command :sections})))))
-                  ;; The dispatcher's first machine observation can land at any moment.
                   events #(count (remove (comp #{:machine-observed} :kind) (store/events (:db c))))
                   at (get-in @(:state c) [:threads "T1" :updated-at])]
               (is (= [:new :new] (map section ["T1" "T2"])) "a new thread is unread")
@@ -589,7 +580,6 @@
         (is (= [:working :working] (map :state [w1 w2])))
         (is (= [(str (fs/path dir "workspaces" "T1-1")) (str (fs/path dir "workspaces" "T2-1"))] (map :workspace [w1 w2])))
         (is (fs/exists? (fs/path (:workspace w1) "README")) "the workspace holds the repository's files")
-        ;; A missing workspace must not make the write land in the checkout.
         (is (fs/starts-with? (str (:workspace w1)) dir))
         (when (fs/starts-with? (str (:workspace w1)) dir)
           (spit (str (fs/path (:workspace w1) "only-here")) "x"))
@@ -655,7 +645,6 @@
 (deftest unresolved-messages-reach-the-router-together-one-file-a-row
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-r"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-rconv"}))
-        ;; a slow dispatcher, so two messages are pending at once
         c (super/start! {:dir dir :conversations conversations :scan-ms 1500})]
     (try
       (let [token (:token (:ok (call dir {:command :register-router! :args {:conversation "router"}})))
@@ -694,8 +683,6 @@
     (try
       (thread-with-ask dir)
       (spit (str base ".cmd") "build command")
-      ;; A real detached process outlives the first controller. A file gate
-      ;; avoids racing the restart against a short sleep.
       (babashka.process/shell
         {:out :discard :err :discard}
         "setsid" "-f" "bash" "-c"
@@ -756,11 +743,9 @@
       (let [jobs (fs/create-dirs (fs/path conversations "super-W1" "jobs"))
             base #(str (fs/path jobs %))
             job-rows #(filter (fn [o] (clojure.string/starts-with? (:text o) "[Job")) (vals (:outbox @(:state c))))]
-        ;; job-status read the exit, so it left a .seen marker.
         (spit (str (base "seen") ".cmd") "test")
         (spit (str (base "seen") ".seen") "")
         (spit (str (base "seen") ".exit") "0")
-        ;; A job-wait still running holds the exit back; it reports it itself.
         (spit (str (base "waited") ".cmd") "test")
         (spit (str (base "waited") ".waiting") (str (+ (System/currentTimeMillis) 60000)))
         (spit (str (base "waited") ".exit") "3")
@@ -846,8 +831,6 @@
           (finally (when (bbh.super.process/matches? during) (bbh.super.process/stop-job! during))))))))
 
 (deftest a-done-worker-leaves-no-job-or-what-it-started-running
-  ;; T184: W206's test script started Chrome in a process group of its own
-  ;; inside its job's session, and Chrome outlived the job's stop.
   (with-workers
     (fn [c dir repo _]
       (call dir {:command :thread! :args {:title "t"}})
@@ -895,7 +878,6 @@
             runs [(run-of "W1") (run-of "W2")]]
         (is (= [:active :active] (map #(:status (bbh.workflow/status %)) runs)))
         (super/stop! c)
-        ;; The finish commits and the controller dies before any effect ran.
         (let [db (store/open (str (fs/path dir "super.db")))]
           (try (reduce (fn [st cmd] (:state (store/commit! db st :controller cmd)))
                        (store/replay db)
@@ -961,7 +943,6 @@
       (let [c (assoc c :restart-grace-ms -1)
             health #(get-in @(:state c) [:workers % :health :classification])]
         (with-redefs [bbh.workflow/status (fn [_] {:status :active :phase :implement})]
-          ;; Both sessions are dead: no agent.json was ever written.
           (dotimes [_ 2] (super/reconcile! c))
           (is (= 2 (count @launches)) "nothing is relaunched")
           (is (= [:session-ended :working] [(health "W1") (get-in @(:state c) [:workers "W1" :state])]))
@@ -984,8 +965,6 @@
         (locking (:db c) (is (= (store/replay (:db c)) @(:state c))))))))
 
 (deftest cancelling-an-ended-session-keeps-its-slot-free
-  ;; Found by Super.tla CapRespected: an ended Worker frees its slot, another
-  ;; takes it, and cancelling the first must not count it again.
   (let [w {:id "W1" :thread "T1" :state :cancelling :health {:classification :session-ended}}
         state {:threads {"T1" {:id "T1" :worker "W1"}} :workers {"W1" w}}]
     (is (model/session-ended? w))
@@ -994,8 +973,6 @@
                           (model/decide* state {:command :resume! :args {:thread "T1"}})))))
 
 (deftest an-ended-session-stays-ended-when-health-names-another-problem
-  ;; Found by Super.tla CapRespected: an ended Worker frees its slot, another
-  ;; takes it, and a later pass that sees a lost job must not count it again.
   (let [w {:id "W1" :thread "T1" :state :working :wf-run "r1"}
         state {:threads {"T1" {:id "T1" :worker "W1"}} :workers {"W1" w}}
         observe (fn [obs] (assoc w :health (model/health state w (merge {:agent nil :jobs [] :wf {:status :active} :repl? false :waits {}} obs) 0 60000)))
@@ -1041,7 +1018,6 @@
         session (atom nil)
         c (super/start! {:dir dir :conversations conversations :scan-ms 10 :restart-grace-ms -1 :manage-router true
                          :launch {:emacs-up? #(deref up)
-                                  ;; The Router session announces itself in its conversation, as bbh acp does.
                                   :open-router! (fn [{:keys [conversation token]}]
                                                   (swap! opened conj [conversation token])
                                                   (reset! session (bbh.inbox/start! {:root (str (fs/path conversations conversation)) :deliver (fn [_])})))}})]
@@ -1197,8 +1173,6 @@
               (is (= :voice (:origin (:data (last (filter #(= :router-queued (:kind %)) (store/events (:db c)))))))))))))))
 
 (deftest the-agent-voice-binding-goes-to-the-router-whatever-the-inbox-selected
-  ;; Cmd+Shift+M runs `bbh say start TAKE` and `bbh say stop TAKE`, which end in
-  ;; stop!. A thread the Inbox cursor selected must not become a "T1:" prefix.
   (with-controller
     (fn [c dir _]
       (binding [pane/*state-file* (str (fs/path dir "inbox.edn"))]
@@ -1501,8 +1475,6 @@
     (is (= :working (model/execution state "T1")))))
 
 (deftest a-worker-answered-in-its-chat-is-working-and-its-asks-close
-  ;; T72: the person typed the answer into W69's buffer, so no reply closed its
-  ;; stopped asks and the Inbox showed it waiting while it worked.
   (let [health (fn [id h] [:controller {:id id :command :health!
                                          :args {:worker "W1" :at 0 :health (merge {:classification :running :process {:pid 7 :start "s"}} h)}}])
         asking [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
@@ -1581,8 +1553,6 @@
     (is (= :waiting (:state (model/linked state :workers "W1"))) "a read of the Worker shows it")))
 
 (deftest a-worker-waits-exactly-while-its-stopped-ask-is-open
-  ;; T79: `resume` copied the asks into the Worker's state at four folds, and 23
-  ;; of 68 stopped asks ended without one, so the Worker worked on as :waiting.
   (let [base [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
               (start-cmd "s1" "T1") (running "W1")
               [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "ok?" :stopped true}}]]
@@ -1710,7 +1680,6 @@
         dir (str (fs/create-temp-dir {:prefix "bbh-say"}))]
     (with-redefs [voice/hex! (fn [& args] (Thread/sleep 50) (swap! calls conj (vec args))
                               (if (= "start" (second args)) {:exit 0 :out ""} {:exit 4 :out ""}))]
-      ;; The release's stop process wins the race and runs before the press's start.
       (voice/request-stop! "take-1" :dir dir)
       (is (= {:silence true} (deref (future (voice/take! "take-1" :dir dir :poll-ms 5)) 3000 :hung)))
       (is (= [["dictation" "start"] ["dictation" "stop" "--print"]] @calls))
@@ -1770,7 +1739,6 @@
 
 (deftest a-launch-waits-for-a-down-daemon-and-fails-on-one-that-refuses
   (let [down (:bin (fake-emacsclient 1 "emacsclient: can't find socket"))
-        ;; Answers the liveness check, refuses to open the buffer.
         refusing (str (fs/create-temp-file {:prefix "fake-emacsclient"}))
         dir (str (fs/create-temp-dir {:prefix "bbh-super-em"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-emconv"}))
@@ -1802,7 +1770,6 @@
             (call dir {:command :thread! :args {:title "b"}})
             (start-worker dir "T1" :repo repo)
             (is (= "wC:p1\n" (with-out-str (pane/-main "buffer" "T1"))))
-            ;; The error path exits the process, so it runs as the real command, pointed at this controller.
             (let [data (fs/create-temp-dir {:prefix "bbh-super-data"})
                   _ (fs/create-sym-link (fs/path (fs/create-dirs (fs/path data "bbh")) "super") dir)
                   r (babashka.process/shell {:out :string :err :string :continue true
@@ -1923,7 +1890,6 @@
         (is (= "1\n" (slurp (str (fs/path repo "one")))) "and the checkout has the new work")
         (let [w2 (:ok (start-worker dir "T2" :repo repo))]
           (commit-file (:workspace w2) "two" "2\n" "two")
-          ;; Edited but not yet seen by jj: advance! must snapshot before it judges.
           (spit (str (fs/path repo "mine")) "in progress\n")
           (is (= {:ok "W2"} (call dir {:command :finish-worker! :args {:worker "W2" :state-after :done}})))
           (is (= (landed c "W1") (parent-of-default repo)) "a working copy with changes stays")
@@ -1959,7 +1925,6 @@
       (jj-in repo "commit" "-m" "mine")
       (is (= :current (workspace/advance! {:repo repo :tip tip})) "a working copy above the tip stays above it")
       (is (= "mine" (jj-in repo "log" "--no-graph" "--ignore-working-copy" "-r" "default@-" "-T" "description.first_line()")))
-      ;; jj edit of a landed commit, then a landing on top of it: nothing to move.
       (jj-in repo "edit" tip)
       (jj-in ws "new" tip)
       (commit-file ws "y" "y\n" "y")
@@ -1977,7 +1942,6 @@
         (assert (every? :workspace [w1 w2]) "both Workers started")
         (commit-file (:workspace w1) "one" "1\n" "one")
         (commit-file (:workspace w2) "two" "2\n" "two")
-        ;; Work in progress keeps the user's change where it is, so theirs forks from start.
         (spit (str (fs/path repo "yours")) "y\n")
         (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})
         (jj-in repo "commit" "-m" "yours")
@@ -2058,8 +2022,6 @@
         (is (not (fs/exists? stray)))))))
 
 (deftest a-workers-session-leaves-its-workspace-before-the-workspace-goes
-  ;; Its Emacs shell outlives the Worker. Left in a deleted directory it stays
-  ;; busy forever, and every message to it waits in its queue.
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-r"}))
         conversations (str (fs/create-temp-dir {:prefix "bbh-super-rconv"}))
         repo (jj-repo)
@@ -2222,8 +2184,6 @@
 (defn- refuse-or-nil [refused code] (or (refused code) ""))
 
 (deftest the-routers-call-shapes-reach-a-live-worker
-  ;; Each shape the Router has used, new and old, against a scratch super: a
-  ;; Router REPL loaded before a controller change keeps sending the old one.
   (with-controller
     (fn [c dir _]
       (thread-with-ask dir)

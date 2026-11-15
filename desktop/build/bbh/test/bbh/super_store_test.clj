@@ -36,7 +36,6 @@
       (finally (store/close! db)))))
 
 (deftest a-snapshot-from-before-waiting-was-derived-reads-the-same
-  ;; The live database's snapshot was written while a Worker stored :waiting.
   (let [db (store/open nil)
         w {:id "W1" :thread "T1" :state :waiting :conversation "super-W1"}
         old (assoc model/empty-state
