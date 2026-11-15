@@ -290,10 +290,8 @@
 
 (declare run-desktop!)
 
-(defn guide-path [] (keyguide/config-path))
-
 (defn guide-entries []
-  (for [g (keyguide/validate! (keyguide/groups (edn/read-string (slurp (guide-path)))))
+  (for [g (keyguide/validate! (keyguide/groups (edn/read-string (slurp (keyguide/config-path)))))
         e (:entries g)]
     (assoc e :palette {:label (:label e) :keys (keyguide/shortcut e) :source "Guide"
                        :value (str "guide:" (:id g) "/" (:id e))})))

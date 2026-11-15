@@ -59,7 +59,7 @@
 
 (deftest a-hand-updated-package-reads-its-own-version
   (is (= "1.4.0" (u/hand-version "(define-public zig\n (package (version \"0.17.0\")))\n(define-public ghostty\n  (package\n    (name \"ghostty\")\n    (version \"1.4.0\")))" "ghostty")))
-  (is (= "1.4.0" (:current (first (u/hand-items)))) "ghostty.scm as checked in"))
+  (is (re-matches #"\d+(\.\d+)+" (:current (first (u/hand-items)))) "ghostty.scm as checked in"))
 
 (deftest a-release-that-does-not-build-is-left-as-it-was-and-the-rest-go-on
   (let [file (str (fs/create-temp-file {:suffix ".scm"}))

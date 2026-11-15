@@ -78,10 +78,6 @@
     (with-redefs [keyleader/tabs (constantly tabs)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo (re-pattern message) (keyleader/step-tab! "w1" 1))))))
 
-(deftest guide-path-is-independent-of-the-leader-path
-  (with-redefs [keyleader/config-path (constantly "/tmp/custom/my-leader.edn")]
-    (is (= (keyguide/config-path) (keyleader/guide-path)))))
-
 (deftest inventory-includes-the-leader-grammar
   (let [rows (->> (:out (p/shell {:out :string} "bb" "desktop/pi/agent/skills/keybindings/scripts/inventory.bb" "."))
                   str/split-lines
