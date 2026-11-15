@@ -88,3 +88,13 @@ export function output(result: Awaited<ReturnType<Awaited<ReturnType<typeof harn
 		.map((item) => item.text)
 		.join("\n");
 }
+
+export async function data(runtime: Awaited<ReturnType<typeof harness>>, source: string) {
+	const r = await runtime.call(`(text (json/generate ${source}))`);
+	assert.equal(r.isError, false, output(r));
+	const line = output(r)
+		.split("\n")
+		.find((line) => line.startsWith("{"));
+	assert.ok(line, output(r));
+	return JSON.parse(line);
+}

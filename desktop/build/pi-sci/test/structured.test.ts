@@ -5,17 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readJson, readJsonl } from "../src/structured-files.ts";
-import { harness, output } from "./harness.ts";
-
-async function data(runtime: Awaited<ReturnType<typeof harness>>, source: string) {
-	const result = await runtime.call(`(text (json/generate ${source}))`);
-	assert.equal(result.isError, false, output(result));
-	const line = output(result)
-		.split("\n")
-		.find((line) => line.startsWith("{"));
-	assert.ok(line, output(result));
-	return JSON.parse(line);
-}
+import { data, harness, output } from "./harness.ts";
 
 test("complete JSON reads parse beyond the display limit without losing values", async () => {
 	const runtime = await harness();

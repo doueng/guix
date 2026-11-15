@@ -7,18 +7,9 @@ import { guixDomain } from "../src/builds.ts";
 import { runCommand } from "../src/command-process.ts";
 import { DOMAINS } from "../src/commands.ts";
 import { collection } from "../src/operations.ts";
-import { harness, output } from "./harness.ts";
+import { data, harness, output } from "./harness.ts";
 import { PNG } from "./provider.ts";
 
-async function data(runtime: Awaited<ReturnType<typeof harness>>, source: string) {
-	const r = await runtime.call(`(text (json/generate ${source}))`);
-	assert.equal(r.isError, false, output(r));
-	const line = output(r)
-		.split("\n")
-		.find((line) => line.startsWith("{"));
-	assert.ok(line, output(r));
-	return JSON.parse(line);
-}
 const root = resolve(fileURLToPath(new URL("../../../..", import.meta.url)));
 test("Jujutsu reads return typed JSON and mutations expose their operation to hooks", async () => {
 	const calls: Record<string, unknown>[] = [];

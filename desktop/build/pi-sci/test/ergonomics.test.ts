@@ -8,17 +8,7 @@ import { runCommand } from "../src/command-process.ts";
 import { searchDomain } from "../src/files.ts";
 import { signatures } from "../src/operations.ts";
 import { condenseFailure, throttleUpdates } from "../src/output.ts";
-import { harness, output } from "./harness.ts";
-
-async function data(runtime: Awaited<ReturnType<typeof harness>>, source: string) {
-	const r = await runtime.call(`(text (json/generate ${source}))`);
-	assert.equal(r.isError, false, output(r));
-	return JSON.parse(
-		output(r)
-			.split("\n")
-			.find((line) => line.startsWith("{")) ?? "null",
-	);
-}
+import { data, harness, output } from "./harness.ts";
 
 test("the agent prompt steers file work to SCI functions instead of bash and read", async () => {
 	let prompt = "";

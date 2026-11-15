@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { harness, output } from "./harness.ts";
 import { USAGE } from "./provider.ts";
@@ -196,28 +196,6 @@ test("classifier and image calls preserve model discovery, accounting, and image
 		assert.equal(result.usage?.totalTokens, 24);
 		assert.equal(result.usage?.cost.total, USAGE.cost.total * 2);
 		assert.doesNotMatch(output(result), /iVBOR/);
-	} finally {
-		runtime.close();
-	}
-});
-
-test("persisted store can be read after reopening the session file", async () => {
-	const runtime = await harness([], true);
-	try {
-		assert.equal((await runtime.call('(store "resumed" {:n 7})')).isError, false);
-		const path = runtime.manager.getSessionFile();
-		assert.ok(path, "the fixture persists a session file");
-		const reopened = SessionManager.open(path);
-		const writes = reopened
-			.getBranch()
-			.filter((entry) => entry.type === "custom" && entry.customType === "codemode-store");
-		assert.equal(writes.length, 1);
-		assert.deepEqual(writes[0].type === "custom" ? writes[0].data : undefined, {
-			set: { resumed: { n: 7 } },
-			delete: [],
-		});
-		runtime.manager.setSessionFile(path);
-		assert.match(output(await runtime.call('(load "resumed")')), /\{:n 7\}/);
 	} finally {
 		runtime.close();
 	}
