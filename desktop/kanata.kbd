@@ -1,9 +1,6 @@
-;; Kanata grabs every keyboard, including ydotoold's virtual one, so injected
-;; chords pass through these layers too. Holding Left Ctrl, Space and Escape
-;; together stops kanata and returns the raw keyboard.
+;; Holding Left Ctrl, Space and Escape together stops kanata and frees the keyboard.
 (defcfg
   process-unmapped-keys yes
-  ;; App layers map only Cmd. Their other keys fall through to base.
   delegate-to-first-layer yes
   linux-continue-if-no-devs-found yes)
 
@@ -13,9 +10,7 @@
 (defvar
   meta (lmet rmet)
   alt (lalt ralt)
-  ;; Holding Caps or Shift alone this long gives the modifier, not the tap.
-  ;; Kanata does not see mouse clicks, so Ctrl+click and Shift+click work
-  ;; only after this long. Taps are much shorter.
+  ;; Kanata does not see mouse clicks, so Ctrl+click and Shift+click work only after this long.
   hold-ms 200)
 
 (defsrc)
@@ -39,14 +34,8 @@
   rmet @rcmd
   sleep micmute)
 
-;; Cmd chords become the Linux chords for the same command. Unmapped keys stay
-;; Super chords for Hyprland, and Shift passes through.
-;; App differences test the base layer when the key is pressed, not when Cmd
-;; is. Cmd held from a terminal through Cmd+U into Chrome must give Ctrl+T.
-;; IntelliJ's default keymap redoes on Ctrl+Shift+Z. Its Ctrl+Y deletes a line.
-;; In terminals Ctrl+Z suspends Neovim or a running job, and fish's vi insert
-;; mode has no undo on it, so Cmd+Z and Cmd+Shift+Z do nothing there. Cmd+W and
-;; Cmd+T do nothing rather than delete a path component or transpose characters.
+;; Switches test the base layer when the key is pressed, so Cmd held from a
+;; terminal into Chrome still gives Ctrl+T. In terminals Ctrl+Z suspends the job.
 (deflayermap (cmd)
   c (unmod $meta lctl ins)
   ;; Cmd+Caps+V stays Super+Ctrl+V for Hyprland: clipboard history.
@@ -85,9 +74,6 @@
   bspc (unmod $alt lctl bspc)
   left (unmod $alt lctl left)
   right (unmod $alt lctl right))
-
-;; App layers. hyprkan switches to them from ~/.config/kanata/apps.edn. They
-;; only name the base layer that the cmd layer's switches test.
 
 (deflayermap (intellij))
 

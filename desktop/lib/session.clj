@@ -1,6 +1,3 @@
-;; The graphical session's environment for programs that Shepherd starts at
-;; login, before or apart from Hyprland: they inherit the D-Bus address but
-;; not WAYLAND_DISPLAY or HYPRLAND_INSTANCE_SIGNATURE.
 (ns session
   (:require [babashka.fs :as fs]))
 

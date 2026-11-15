@@ -17,14 +17,10 @@
              "jj" "jjui" "dusk" "nvim"]]
   (stow-package! (str repo "/configs") (str home "/.config/" app) app))
 
-;; The IntelliJ Flatpak points XDG_CONFIG_HOME into its sandbox, so IdeaVim
-;; only reads ~/.ideavimrc.
 (stow-package! (str repo "/configs") home "ideavim")
 (stow-package! repo (str home "/.local/bin") "bin")
 (stow-package! (str repo "/pi") (str home "/.pi/agent") "agent")
 
-;; Stow never removes a link whose file left the repo, so delete the dangling
-;; links that point into it, and the directories that leaves empty.
 (defn dangling-repo-link? [path]
   (and (fs/sym-link? path)
        (not (fs/exists? path))

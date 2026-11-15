@@ -1,17 +1,4 @@
 #!/usr/bin/env bb
-;; Run an Emacs check away from the live bbh-super daemon, with a memory cap
-;; and a time limit (T163).
-;;
-;;   emacs-throwaway [--mem-mb N] [--timeout S] --batch -- EMACS-ARGS...
-;;       emacs --batch EMACS-ARGS, as from `emacs -Q --batch`.
-;;   emacs-throwaway [--mem-mb N] [--timeout S] --daemon NAME [-- EMACS-ARGS...]
-;;       a foreground daemon NAME with your Doom config, for emacsclient -s NAME.
-;;       Run it as a job; it exits after the timeout or when you kill it.
-;;
-;; It refuses to start while MemAvailable is under the cap, so a check cannot
-;; push the machine into swap and earlyoom.  The cap is the address space
-;; (prlimit --as), so Emacs gets an allocation error instead of the machine
-;; running out.
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 
 (defn parse [args]
@@ -31,8 +18,7 @@
 (defn command
   "The argv that runs OPTS."
   [{:keys [mode name mem-mb timeout emacs-args]}]
-  ;; The profile's emacs, not desktop/bin/emacs: that wrapper is babashka,
-  ;; which cannot start under an address-space cap.
+  ;; Not desktop/bin/emacs: that wrapper is babashka, which cannot start under an address-space cap.
   (let [emacs (or (some-> (fs/path (fs/home) ".guix-home/profile/bin/emacs") (#(when (fs/executable? %) (str %))))
                   "emacs")
         cap ["prlimit" (str "--as=" (* mem-mb 1024 1024)) "timeout" (str timeout)]]

@@ -2,7 +2,6 @@
 
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs])
-;; Scripts are stowed as symlinks; load the client from the repository.
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
 
 (require '[babashka.process :as p]
@@ -10,7 +9,6 @@
          '[herdr.client :as herdr]
          '[hypr.dispatch :as hypr])
 
-;; desktop/bin/herdr-terminal starts Herdr's Ghostty with this class.
 (def herdr-class "com.mitchellh.ghostty.herdr")
 
 (defn hyprctl [& args]

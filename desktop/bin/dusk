@@ -1,14 +1,10 @@
 #!/usr/bin/env bb
-;; dusk's binary is a cargo build output, so a cleanup of target/ leaves the
-;; session bare after the next login; say so on screen instead of failing
-;; silently.
 (require '[babashka.fs :as fs] '[babashka.process :as p])
 (let [here (fs/parent (fs/real-path *file*))
       bin (str here "/../build/dusk/target/release/dusk")]
   (when-not (fs/executable? bin)
     (let [msg (str "dusk is not built (" (fs/normalize bin) " is missing): run make dusk")]
       (binding [*out* *err*] (println msg))
-      ;; Hyprland draws this itself, since dusk may be the notification daemon.
       (try (p/shell {:continue true :out :string :err :string} "hyprctl" "notify" "3" "30000" "0" msg)
            (catch Exception _))
       (System/exit 1)))

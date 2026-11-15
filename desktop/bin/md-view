@@ -1,8 +1,5 @@
 #!/usr/bin/env bb
-;; md-view [--no-open] FILE.md|file://URI ...
-;;
-;; Flatpak Chrome only sees ~/Downloads among home dirs (not ~/.cache, not host
-;; /tmp), so pages go to ~/Downloads/.md-view/<sha1 of path>.html.
+;; Flatpak Chrome only sees ~/Downloads among home dirs (not ~/.cache or host /tmp).
 
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
@@ -15,7 +12,6 @@
 (def home (System/getProperty "user.home"))
 (def out-dir (fs/path (or (System/getenv "MD_VIEW_DIR") (fs/path home "Downloads" ".md-view"))))
 (def max-pages 200)
-;; Hyprland's PATH may lack the Home profile.
 (def pandoc (str (or (fs/which "pandoc") (fs/path home ".guix-home/profile/bin/pandoc"))))
 
 (def css "
@@ -110,7 +106,6 @@ code span.op,code span.ot,code span.pp{color:inherit}
                     (every? #(pos? (compare (fs/last-modified-time page) (fs/last-modified-time %)))
                             [src template-file]))]
     (if fresh?
-      ;; Follow the recorded links so edited neighbours still get refreshed.
       (let [links (str page ".links")]
         (when (fs/exists? links)
           (map fs/path (remove str/blank? (str/split-lines (slurp links))))))

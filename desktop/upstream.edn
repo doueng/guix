@@ -1,8 +1,3 @@
-;; Upstream code vendored under desktop/, keyed by its local directory: the
-;; GitHub repository, the copied subdirectory, and the upstream commit the copy
-;; is synced to.  updates apply three-way merges newer upstream changes into
-;; local edits.  :manual entries are ports or reshaped copies that are updated
-;; by hand; the UPSTREAM.md or README beside each copy describes its deviations.
 {"build/herdr/sesh"
  {:repo "fullerzz/herdr-plugin-sesh" :commit "464b0b57d3b0bb023f78d4800651171412438aef" :manual true}
  "build/herdr/tiny-fingers"

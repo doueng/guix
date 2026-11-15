@@ -1,14 +1,4 @@
 #!/usr/bin/env bb
-;;   taildrop receive           Move files sent to this laptop into ~/Downloads/Taildrop
-;;                              and notify; loops forever (the taildrop-receive Home service).
-;;   taildrop send FILE...      Send FILEs to a device, the phone first.
-;;   taildrop send              Pick what to send: the clipboard, a recent screenshot or download.
-;;   taildrop send --clipboard  Send the clipboard: copied files or a path (oilfm gy),
-;;                              an image, or else the text as a .txt file.
-;;   taildrop targets           List the devices that accept files.
-;;
-;; tailscaled's operator setting (OperatorUser) lets this user run
-;; `tailscale file get' and `file cp' without root.
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs]
          '[babashka.process :as p]
@@ -41,7 +31,6 @@
 (def image-re #"(?i)\.(png|jpe?g|gif|webp|heic|heif|avif)$")
 
 (defn open! [path]
-  ;; The service has the D-Bus address but no Wayland display.
   (if-let [env (session/wayland-env)]
     (p/process ["xdg-open" path] {:extra-env env :out :discard :err :discard})
     (log "no Wayland session to open" path)))
@@ -68,8 +57,6 @@
 (defn receive! []
   (fs/create-dirs inbox)
   (log "receiving into" inbox)
-  ;; get --wait returns once it has moved what arrived; the next pass waits
-  ;; again. While tailscaled is down or starting, back off up to a minute.
   (loop [failures 0]
     (let [before (listing)
           r (sh "tailscale" "file" "get" "--wait" "--conflict=rename" inbox)

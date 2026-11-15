@@ -1,6 +1,5 @@
 #!/usr/bin/env bb
-;; Claude Code, from the binary pi-claude-bridge already bundles. Its
-;; autoupdater would replace that binary under pi, and Home provides ripgrep.
+;; Its autoupdater would replace pi-claude-bridge's bundled binary; Home provides ripgrep.
 (require '[babashka.fs :as fs] '[babashka.process :as p])
 (apply p/exec {:extra-env {"DISABLE_AUTOUPDATER" "1" "USE_BUILTIN_RIPGREP" "0"}}
        (str (fs/parent *file*) "/claude-bridge-cli") *command-line-args*)

@@ -1,11 +1,4 @@
 #!/usr/bin/env bb
-;;   clipboard-history watch   Record each new clipboard entry (Home service).
-;;   clipboard-history store   wl-paste --watch runs this per copy, content on stdin.
-;;   clipboard-history pick    Choose an entry (Cmd+Caps+V): copy it and paste it.
-;;   clipboard-history wipe    Forget the whole history.
-;;
-;; wl-paste sets CLIPBOARD_STATE=sensitive for x-kde-passwordManagerHint, and
-;; cliphist drops those copies.
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs]
          '[babashka.process :as p]
@@ -16,8 +9,6 @@
 
 (def max-items 200)
 (def max-bytes (* 5 1024 1024))
-;; Password managers and password prompts, by window class, and by title for
-;; those that run in a browser tab or app window.
 (def secret-class-re
   #"(?i)1password|bitwarden|keepass|enpass|proton.?pass|passwordsafe|org\.gnome\.world\.secrets|seahorse|pinentry|gcr-prompter|polkit")
 (def secret-title-re #"(?i)1password|bitwarden|keepassxc|proton pass|password manager")
@@ -35,7 +26,6 @@
   (loop []
     (let [env (session/await-wayland-env)]
       (log "watching" (get env "WAYLAND_DISPLAY"))
-      ;; Exits with the compositor; then wait for the next one.
       @(p/process ["wl-paste" "--watch" self "store"] {:extra-env env :out :inherit :err :inherit})
       (Thread/sleep 2000)
       (recur))))
@@ -57,7 +47,6 @@
   (let [state (System/getenv "CLIPBOARD_STATE")]
     (cond
       (= "sensitive" state) nil
-      ;; cliphist forgets the newest entry when a client clears the clipboard.
       (= "clear" state) (p/sh (cliphist "store") {:in ""})
       (secret-window?) nil
       :else (if-let [bytes (read-capped System/in max-bytes)]

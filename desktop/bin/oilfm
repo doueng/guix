@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Its binary is a cargo build output, like dusk's; say so on screen when it is
-;; missing instead of failing silently.
 (require '[babashka.fs :as fs] '[babashka.process :as p])
 (let [bin (str (fs/home) "/projects/oilfm/target/release/oilfm")]
   (when-not (fs/executable? bin)

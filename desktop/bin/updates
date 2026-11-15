@@ -1,9 +1,4 @@
 #!/usr/bin/env bb
-;; Usage: updates [status|list|refresh|apply] [--refresh|--cached] [SOURCE[/NAME] ...]
-;;
-;; Every source reads installed versions from the files or profiles that hold
-;; them, so this keeps no inventory of its own; it only caches latest versions,
-;; per source, and looks again when that cache is a day old or a pin changed.
 (ns updates
   (:require [babashka.classpath :as classpath]
             [babashka.fs :as fs]
@@ -36,9 +31,6 @@
       (str base "/log/" to)
       (str base "/compare/" from "..." to))))
 
-;; A refresh caches a commit source's repository as :compare, not a URL, since
-;; the installed commit can change before the next refresh; the changelog is
-;; built from the item's current commit each time it is shown.
 (defn changelog [{:keys [compare current latest held] :as item}]
   (cond-> (if (and compare current latest) (compare-url compare current latest) (:changelog item))
     held (str " (held: " held ")")))
@@ -51,8 +43,6 @@
                 (slurp channels-file))]
     {:name name :url url :branch branch :current commit}))
 
-;; Channels whose branch head breaks with the others, held at a commit that works.
-;; Drop an entry once upstream fixes the incompatibility.
 (def channel-holds {})
 
 (defn channel-refresh [items]
@@ -69,8 +59,6 @@
 (defn channel-apply! [items]
   (spit channels-file (bumped-channels items)))
 
-;; Comparing the newest version per name before and after the bump hides older
-;; variants that stay installed.
 (def guix-versions-script
   "(use-modules (gnu packages) (guix packages) (ice-9 match) (ice-9 rdelim))
 (call-with-input-file (cadr (command-line))
@@ -164,7 +152,6 @@
   (channel-apply! (filter outdated? (with-latest (read-cache) (map #(assoc % :source "channel")
                                                                     (channel-items))))))
 
-;; Tailscale publishes its binaries elsewhere but tags the same versions here.
 (def github-repos {"tailscale" {:repo "tailscale/tailscale" :prefix "v"}})
 
 (defn github-item [file]
@@ -330,7 +317,6 @@ copy; return the files left with conflict markers."
 (defn skills-apply! [items]
   (apply run! "bun" "x" "skills" "update" "-p" "-y" (map :name items)))
 
-;; Flatpak apps come from Flathub; the system remote is unreadable without root.
 (defn flatpak-items []
   (for [line (str/split-lines (sh "flatpak" "list" "--app" "--columns=application,version"))
         :let [[id version] (str/split line #"\t")]]
@@ -346,7 +332,6 @@ copy; return the files left with conflict markers."
 (defn flatpak-apply! [items]
   (apply run! "flatpak" "update" "-y" (map :name items)))
 
-;; Doom Emacs is a git checkout; doom upgrade also updates its pinned packages.
 (def doom-dir (str home "/.config/emacs"))
 
 (defn doom-items []
@@ -357,8 +342,7 @@ copy; return the files left with conflict markers."
         :let [latest (head-commit (sh "git" "-C" doom-dir "remote" "get-url" "origin") "HEAD")]]
     (assoc item :latest latest :compare "https://github.com/doomemacs/doomemacs")))
 
-;; doom upgrade needs HEAD on a branch, which jj, colocated in the checkout,
-;; leaves detached; move the default branch up to HEAD when it is behind.
+;; doom upgrade needs HEAD on a branch, which colocated jj leaves detached.
 (defn doom-attach! []
   (let [git #(apply p/shell {:dir doom-dir :continue true :out :string :err :string} "git" %&)]
     (when-not (zero? (:exit (git "symbolic-ref" "-q" "HEAD")))
@@ -369,17 +353,13 @@ copy; return the files left with conflict markers."
         (println (str "  attaching Doom's detached HEAD to " branch))
         (sh {:dir doom-dir} "git" "checkout" "-q" "-B" branch)))))
 
-;; --force answers doom upgrade's prompts, which have no terminal here, but
-;; would also discard edits to tracked files, so refuse those first.
+;; --force answers doom upgrade's prompts but discards edits to tracked files, so refuse those first.
 (defn doom-apply! [_]
   (when-let [dirty (not-empty (sh {:dir doom-dir} "git" "status" "--porcelain" "-uno"))]
     (throw (ex-info (str "Doom has local edits; commit or drop them first:\n" dirty) {})))
   (doom-attach!)
   (run! (str doom-dir "/bin/doom") "--force" "upgrade"))
 
-;; lazy.nvim pins plugins in the stowed lazy-lock.json and rewrites it on update.
-;; Current is the commit the plugin's checkout has, which is what runs; :locked
-;; is the lock's, which differs when the lock was reverted or not yet written.
 (def lazy-lock (in-repo "desktop/configs/nvim/lazy-lock.json"))
 (def lazy-dir (str home "/.local/share/nvim/lazy"))
 
@@ -402,7 +382,6 @@ installed one, or nil."
 
 (defn lazy-refresh [items]
   (let [out (str (fs/create-temp-file))
-        ;; lazy.nvim's own check honours pinned commits, tags and versions.
         check (str "lua require('lazy').check({ wait = true, show = false }) "
                    "local lines = {} "
                    "for _, p in pairs(require('lazy.core.config').plugins) do "
@@ -450,7 +429,6 @@ installed one, or nil."
                                (if (and (number? x) (number? y)) (compare x y) (compare (str x) (str y))))))
         0)))
 
-;; Release tags such as v1.2.3, release-1.2 or pkg-1_2; nil for other tags.
 (defn tag-version [tag]
   (some-> (re-matches #"(?i)(?:v|version-|release-|[a-z0-9_]+-)?(\d+(?:[._]\d+)*)" (str tag))
           second (str/replace "_" ".")))
@@ -473,9 +451,6 @@ CURRENT unless upstream sorts newer, and nil when no tag reads as a version."
 
 (declare latest-items latest-add! each-latest! failure)
 
-;; How far each Guix package you install trails its GitHub release.
-;; The version is the one the bumped channels bring when a
-;; refresh cached it.  apply opts a Guix package in to source latest.
 (def repo-script
   "(use-modules (gnu packages) (guix packages) (guix diagnostics) (guix git-download) (ice-9 match)
              (ice-9 rdelim) (ice-9 regex) (srfi srfi-1) (srfi srfi-26))
@@ -597,8 +572,6 @@ that fails and go on, then throw naming the failures."
 
 (defn latest-apply! [items] (each-latest! latest-bump! items))
 
-;; Packages whose update is more than a version and a hash, such as Ghostty's
-;; Zig dependencies; updates reports their releases and apply says what to edit.
 (def hand-packages
   {"ghostty" {:repo "ghostty-org/ghostty" :file "modules/engstrand/packages/ghostty.scm"}})
 
@@ -634,8 +607,6 @@ that fails and go on, then throw naming the failures."
     (try (latest-bump! {:name name :form form :current current :latest latest})
          (catch Exception e (spit latest-file text) (throw e)))))
 
-;; apply runs make prebuild itself, which builds the edited tree on the remote
-;; builder, so the laptop then only downloads.
 (def rebuild-steps ["make prebuild" "make pull" "make home-apply" "make switch" "make doom-check"])
 
 (def sources
@@ -684,9 +655,6 @@ that fails and go on, then throw naming the failures."
         :let [item (merge item (dissoc (get-in cache [:latest [source name]]) :current))]]
     (cond-> item (changelog item) (assoc :changelog (changelog item)))))
 
-;; The cache is refreshed per source when it is older than this, when an item's
-;; current version is not the one its latest was looked up for (a pin or an
-;; install changed since), or when an item is new.
 (def max-age-hours (or (some-> (System/getenv "UPDATES_MAX_AGE_HOURS") parse-double) 24.0))
 
 (defn cached-at
@@ -802,8 +770,6 @@ old the rest of the cache is, in one line."
                   (when (seq shown) " Apply with: updates apply [SOURCE[/NAME] ...]")))
     (some :error items)))
 
-;; Which copy of this script runs: the last change to it in its checkout, and
-;; whether the file differs from that, so a stale checkout shows at a glance.
 (defn revision []
   (let [jj #(apply p/shell {:dir repo :out :string :err :string :continue true} "jj" "--ignore-working-copy" %&)
         {:keys [exit out]} (jj "log" "--no-graph" "-r" "latest(::@ & files(root:\"desktop/bin/updates\"))"
@@ -836,16 +802,12 @@ old the rest of the cache is, in one line."
                (warn "prebuild failed: " (failure e) "; the new versions don't build, so don't pull or switch yet")
                :failed)))))
 
-;; Only a problem with a reachable builder fails status; the laptop is often
-;; offline.
 (defn prebuild-status! []
   (let [{:keys [exit out err]} (p/shell {:continue true :out :string :err :string}
                                         (in-repo "desktop/bin/builder-prebuild") "alert")]
     (println (or (last-line out) (str "builder prebuild: status unknown: " (last-line err))))
     (= 1 exit)))
 
-;; Like refresh, a failed source prints one line and the rest still apply;
-;; apply returns the failed sources so the caller can exit 1.
 (defn apply! [selectors mode]
   (let [named? (fn [{:keys [source name]}] (some #{(str source "/" name)} selectors))
         items (->> (latest! (inventory selectors) mode)
@@ -869,7 +831,6 @@ old the rest of the cache is, in one line."
         (when (seq steps)
           (println "Review the repository diff with jj diff, then run:")
           (doseq [step rebuild-steps :when (and (steps step) (not= step "make prebuild"))]
-            ;; The laptop's daemon may run --max-jobs=0; JOBS=1 lets it build.
             (println (str "  " step (when (and (= prebuild :skipped) (#{"make pull" "make home-apply" "make switch"} step))
                                       " JOBS=1")))))
         (seq (cond-> (map :source failed) (= prebuild :failed) (conj "prebuild")))))))
@@ -896,6 +857,5 @@ old the rest of the cache is, in one line."
       "list" (print-table (latest! (inventory selectors) mode))
       "apply" (when (apply! selectors mode) (System/exit 1)))))
 
-;; Not when a test loads this file for its functions.
 (when (= *file* (System/getProperty "babashka.file"))
   (-main *command-line-args*))

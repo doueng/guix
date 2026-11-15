@@ -7,10 +7,6 @@
 
 (def version 2)
 
-;; action: a binding ran. leader: a leader started waiting for keys.
-;; cancel: a leader or menu closed without acting. forward: the key went on to
-;; the program that EFFECT names, "Forwarded to fish", which handles it itself.
-;; PROGRAM is always the program that logged the row.
 (def kinds #{"action" "leader" "cancel" "forward"})
 
 (def ^:dynamic *silent*
@@ -22,8 +18,6 @@
       (str (or (System/getenv "XDG_STATE_HOME") (str (fs/home) "/.local/state"))
            "/keybindings/keys.tsv")))
 
-;; Linux truncates process names to 15 characters, and Guix's Emacs wrapper
-;; shows as .emacs-31.1-rea.
 (def program-names [[#"^\.?emacs" "emacs"] [#"^nvim$" "neovim"]])
 
 (defn program-id
@@ -41,7 +35,6 @@
   (let [clean #(str/replace (str %) #"[\t\n]" " ")]
     (str (str/join "\t" (map clean [time (program-id program) keys effect kind version])) "\n")))
 
-;; An explicit pattern, since LocalDateTime's toString drops :00 seconds.
 (defn now []
   (.format (java.time.LocalDateTime/now)
            (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss")))

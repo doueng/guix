@@ -8,10 +8,8 @@
 
 (def host (or (System/getenv "BUILDER") "guix-builder.tailbf68ad.ts.net"))
 
-;; sshd listens on 2222; 22 on the tailnet address is Tailscale SSH, for people.
 (def ssh-port (or (System/getenv "BUILDER_SSH_PORT") "2222"))
 
-;; Unattended: guile-ssh and these scripts cannot use a passphrase-protected key.
 (def deploy-key (or (System/getenv "BUILDER_SSH_KEY") (str home "/.config/guix-builder/deploy_ed25519")))
 
 (def publish (or (System/getenv "BUILDER_PUBLISH") (str "http://" host ":8080")))

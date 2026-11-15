@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Rows are TIME PROGRAM KEYS EFFECT KIND 2, as desktop/lib/keylog.clj describes.
-;; Writers call `keylog add`; editors and keyleader append the same format.
 (require '[babashka.classpath :as classpath] '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
 (require '[keylog])
@@ -33,7 +31,6 @@
 
     "path" (println file)
 
-    ;; Stowed as a symlink; the report lives in the repository.
     "report" (apply p/exec "bb" (str (fs/parent (fs/real-path *file*)) "/../build/keybindings/usage.clj")
                       "--log" file args)
 

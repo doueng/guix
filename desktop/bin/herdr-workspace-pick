@@ -2,7 +2,6 @@
 
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs])
-;; Scripts are stowed as symlinks; load the client from the repository.
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
 
 (ns herdr-workspace-pick
@@ -16,8 +15,6 @@
       (str (or (System/getenv "XDG_STATE_HOME")
                (str home "/.local/state"))
            "/herdr-workspace-pick")))
-;; Keep the workspace we left so the next picker invocation behaves like a
-;; last-workspace toggle instead of selecting the workspace we are already in.
 (def state-file (str state-dir "/last-workspace"))
 
 (defn workspaces []
@@ -61,8 +58,6 @@
                            (not= current-id workspace_id))
                   workspace_id))
               items)
-        ;; There is no history to consult on the first run. Avoid selecting
-        ;; the focused workspace when another open workspace is available.
         (first-other-workspace-id items current-id)
         current-id)))
 
@@ -141,6 +136,5 @@
       (when (and selected-id
                  (not= selected-id current-id))
         (herdr/run! [herdr/bin "workspace" "focus" selected-id])
-        ;; Store the workspace we just left, not the one we just selected.
         (when current-id
           (remember! current-id))))))

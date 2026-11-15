@@ -1,18 +1,13 @@
-# Daily targets use the pulled Guix and refuse to run until it matches channels.scm.
-
 CONFIG ?= desktop/system.scm
 HOME_CONFIG ?= desktop/home.scm
 CHANNELS ?= channels.scm
 MODULES ?= modules
 
-# Normal boot still uses the updated ESP; fast kexec reboot is opt-in.
 RECONFIGURE_FLAGS ?= --no-kexec
 
-# make gc keeps generations newer than GC_AGE; the current one always stays.
 GC_AGE ?= 2w
 
 GUIX := $(HOME)/.config/guix/current/bin/guix
-# With the remote builder the daemon runs --max-jobs=0; JOBS=1 builds here once.
 JOBS ?=
 JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))
 COMMON := -L "$(MODULES)"
@@ -138,8 +133,6 @@ gc:
 home-build: channels-current
 	"$(GUIX)" home build $(JOBS_FLAG) $(COMMON) "$(HOME_CONFIG)"
 
-# The remote builder; see docs/remote-builder-plan.html.  The Hetzner token is
-# read only here, and later deploys go over the tailnet without it.
 BUILDER_TOKEN ?= $(HOME)/.config/guix-builder/hcloud-token
 
 builder-create:
@@ -245,7 +238,6 @@ dusk-test:
 dusk-verify:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/dusk/verify.bb
 
-# oilfm, the file manager, lives in its own repo; build it in place like dusk.
 OILFM ?= $(HOME)/projects/oilfm
 
 oilfm:
@@ -254,10 +246,8 @@ oilfm:
 oilfm-test:
 	cd "$(OILFM)" && scripts/vendor-gpui && scripts/cargo test --workspace --features oilfm/ui-tests
 
-# Doom's CLI reads a piped stdin to EOF before running, so an agent's open pipe
-# hangs it; give it /dev/null.
-# doom doctor exits 0 even when an enabled module lacks its tools, so compare its
-# warnings, prefixed with their module, against an accepted baseline.
+# Doom's CLI reads piped stdin to EOF (hangs under an open pipe), so give it /dev/null.
+# doom doctor exits 0 despite missing tools, so diff its warnings against a baseline.
 DOOM ?= $(HOME)/.config/emacs/bin/doom
 DOOM_BASELINE := desktop/build/doom/doctor-baseline.txt
 DOOM_WARNINGS = out=$$(cd "$(HOME)" && "$(DOOM)" doctor 2>&1 </dev/null) || { printf '%s\n' "$$out" >&2; exit 1; }; \
@@ -269,7 +259,6 @@ doom-check:
 	test -z "$$new" || { printf 'New doom doctor warnings (accept with make doom-baseline):\n%s\n' "$$new" >&2; exit 1; }; \
 	echo 'doom doctor: no new warnings'
 
-# The simulator parses desktop/kanata.kbd with the kanata version Guix installs.
 KANATA_VERSION := 1.11.0
 KANATA_SRC := $(HOME)/.cache/kanata-sim/$(KANATA_VERSION)
 KANATA_SIM := $(KANATA_SRC)/target/release/kanata_simulated_input
@@ -279,7 +268,6 @@ $(KANATA_SIM):
 	git clone --quiet --depth 1 --branch v$(KANATA_VERSION) https://github.com/jtroo/kanata "$(KANATA_SRC)"
 	cd "$(KANATA_SRC)" && "$(GUIX)" shell rust rust:cargo gcc-toolchain -- cargo build --release --quiet -p kanata-sim
 
-# Talks to the live compositor and running Emacs daemons, then restores the clipboard text.
 clipboard-check:
 	bb desktop/build/clipboard/check.bb
 
@@ -294,8 +282,7 @@ kanata-check: $(KANATA_SIM)
 	  { echo 'Guix kanata differs from KANATA_VERSION; update it in the Makefile' >&2; exit 1; }
 	bb desktop/build/keybindings/kanata-test.bb "$(KANATA_SIM)"
 
-# Tests that need the keybinding log set KEYLOG_FILE themselves; the rest must
-# not write to the real one.
+# Tests must not write the real keybinding log; those that need one set KEYLOG_FILE.
 keybindings-check: export KEYLOG_FILE = /dev/null
 keybindings-check: kanata-check
 	bb desktop/build/keybindings/generate.bb --check

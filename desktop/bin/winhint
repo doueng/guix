@@ -40,8 +40,6 @@
       {:path [[:hypr address]] :class class
        :x (- x (:x monitor)) :y (- y (:y monitor)) :w w :h h})))
 
-;; Its tab bar takes the row above the pane area.
-
 (defn herdr-panes [window]
   (let [{:keys [area panes]} (get-in (keyleader/herdr-json "pane" "layout") [:result :layout])
         cols (+ (:x area) (:width area))
@@ -54,8 +52,6 @@
 (defn pane-program [pane]
   (palette/program-of (get-in (keyleader/herdr-json "pane" "process-info" "--pane" pane)
                               [:result :process_info :foreground_processes])))
-
-;; Each returns window rects in cells of the editor's own grid.
 
 (defn nvim-socket [pid]
   (let [pids (set (palette/process-tree pid))]

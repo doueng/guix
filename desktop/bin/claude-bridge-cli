@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Run pi-claude-bridge's bundled Claude Code on Guix (no /lib ELF loader).
 (require '[babashka.fs :as fs] '[babashka.process :as p])
 (let [agent-dir (or (System/getenv "PI_CODING_AGENT_DIR") (str (fs/home) "/.pi/agent"))
       claude (str agent-dir "/npm/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/claude")

@@ -1,14 +1,4 @@
 #!/usr/bin/env bb
-;; Usage, on the laptop:
-;;   builder-prebuild build     push @ to the builder, build system, Home and
-;;                              desktop/build/*/manifest.scm there, wait
-;;   builder-prebuild check     publish reachable, last prebuild, nothing to build locally
-;;   builder-prebuild alert [--notify]  one line when the last prebuild failed,
-;;                              hangs or the nightly stopped; --notify also sends
-;;                              it as a desktop notification, once per problem
-;; On the builder (the prebuild account's git-shell command and mcron job):
-;;   prebuild run REV | nightly | status
-;; See docs/remote-builder-plan.html.
 (ns builder-prebuild
   (:require [babashka.classpath :as classpath]
             [babashka.fs :as fs]
@@ -16,8 +6,6 @@
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
-;; desktop/lib from the repo; on the builder, the prebuild command passes it
-;; with -cp (modules/engstrand/system/builder.scm).
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
 (require '[builder])
 
@@ -35,10 +23,6 @@
 (def repo (delay (-> *file* fs/real-path fs/parent fs/parent fs/parent str)))
 (def guix (str home "/.config/guix/current/bin/guix"))
 
-;; Channels in channels.scm with a file:// url, such as a local checkout:
-;; [name path commit].  The builder can't reach the laptop's paths,
-;; so push-and-build pushes each pinned commit into its guix.git as
-;; refs/heads/channel-NAME and the builder points the url there.
 (defn local-channels [text]
   (for [[_ name path commit]
         (re-seq #"\(name '(\S+)\)\s*\(url \"file://([^\"]+)\"\)\s*(?:\(branch \"[^\"]*\"\)\s*)?\(commit \"([0-9a-f]+)\"\)"
@@ -46,8 +30,6 @@
     [name path commit]))
 
 (defn push-and-build []
-  ;; jj snapshots @ into a commit in its git store; push that commit by id so an
-  ;; undescribed working copy, such as an `updates apply' edit, can be built.
   (let [rev (out {:dir @repo} "jj log --no-graph -r @ -T commit_id")
         git-dir (out {:dir @repo} "jj git root")
         push (fn [git-dir refspec]
@@ -68,9 +50,6 @@
   (and (fs/exists? drv) (str/includes? (slurp drv) "(\"preferLocalBuild\",\"1\")")))
 
 (defn dry-run-builds [kind config]
-  ;; --dry-run lists what the daemon would build; with the builder first, that
-  ;; should be nothing.  time-machine evaluates the pins in channels.scm, so
-  ;; this also holds before make pull, as updates apply runs it.
   (let [urls (str "--substitute-urls=" publish " https://bordeaux.guix.gnu.org")
         {:keys [exit err]} (p/shell {:dir @repo :err :string :continue true}
                                     guix "time-machine" urls "-C" "channels.scm" "--"
@@ -79,14 +58,10 @@
     (when-not (zero? exit)
       (die (str kind " build --dry-run failed (exit " exit "): "
                 (last (remove str/blank? lines)))))
-    ;; "The following derivations would be built:" lists them indented by
-    ;; two spaces; profile hooks and grafts come under their own headers.
     (->> (range (count lines))
          (filter #(re-find #"^The following derivations? would be built" (lines %)))
          (mapcat #(take-while (fn [l] (re-find #"^\s+/gnu/store/" l)) (drop (inc %) lines)))
          (map str/trim)
-         ;; Local-build derivations, such as boot, activate, shepherd.conf and the
-         ;; Home with its provenance, run here even at --max-jobs=0 and take seconds.
          (remove local-build?))))
 
 (defn check []
@@ -104,9 +79,6 @@
             (run! println (take 20 missing))
             (System/exit 1))))))
 
-;; The builder's status.edn, as `prebuild status' prints it: {:rev :state
-;; :ok? :started :finished :checked :error :log}.  :state is :running while a
-;; prebuild runs; :checked is when the nightly last looked.
 (defn parse-status [text]
   (let [s (try (edn/read-string (str text)) (catch Exception _ nil))]
     (when (and (map? s) (seq s)) s)))
@@ -147,8 +119,6 @@
                                   (ssh-prebuild "prebuild" "status"))]
     (if (zero? exit) {:status (parse-status out)} {:unreachable true})))
 
-;; Exit 0 when fine, 1 on an alert, 2 when the builder doesn't answer.  An
-;; unreachable builder only prints: the laptop is often offline.
 (defn alert-command [args]
   (let [notify? (some #{"--notify"} args)
         seen (str home "/.cache/builder-prebuild/notified")
@@ -211,7 +181,6 @@
           root #(str state "/roots/" % "-" rev)
           started (str (java.time.Instant/now))
           checked (:checked (read-status))]
-      ;; A prebuild killed mid-run leaves this, which `alert' reports once it is old.
       (spit status-file (pr-str {:rev rev :state :running :started started :checked checked :log log}))
       (when-not (fs/exists? work)
         (p/shell "git" "clone" "--quiet" (str state "/guix.git") work))
@@ -227,7 +196,6 @@
         (apply sh! log (concat tm ["build" "-L" "modules" "-f" "desktop/home.scm" "-r" (root "home")]))
         (doseq [m (manifests work)]
           (apply sh! log (concat tm ["shell" "-m" (str m) "-r" (root (manifest-root m)) "--" "true"])))
-        ;; Ask publish for every item now, so its cache bakes before the laptop asks.
         (let [items (apply out (str bin "/guix") "gc" "-R" (root "system") (root "home")
                            (map (comp root manifest-root) (manifests work)))]
           (spit (str state "/items") items)
@@ -255,7 +223,6 @@
           (and ok? (= rev last-rev)) (println "already built" rev)
           :else (run-prebuild rev))))
 
-;; Not when test.bb loads this file for its functions.
 (when (= *file* (System/getProperty "babashka.file"))
   (let [[cmd & args] *command-line-args*]
     (case cmd

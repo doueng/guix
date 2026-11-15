@@ -1,15 +1,4 @@
 #!/usr/bin/env bb
-;; Usage, on the laptop:
-;;   second-brain-push chrome           push Chrome's bookmarks to the builder's
-;;                                      second brain when they changed since the
-;;                                      last push (the hourly Home timer runs this)
-;;   second-brain-push html FILE [SRC]  import a Bookmarks.html (Safari: SRC safari)
-;;   second-brain-push x-likes FILE     import like.js, or the X archive zip (only
-;;                                      its like.js leaves the laptop)
-;;   second-brain-push x-export FILE    import the JSON from tools/x-export.js
-;;   second-brain-push status           the builder's services, item count and page
-;; The push key (~/.config/guix-builder/second-brain_ed25519) can only run the
-;; importer; status uses the deploy key.
 (ns second-brain-push
   (:require [babashka.classpath :as classpath]
             [babashka.fs :as fs]
@@ -57,7 +46,6 @@
       (let [exit (push! "chrome" bytes)]
         (cond
           (zero? exit) (do (fs/create-dirs state-dir) (spit stamp sum))
-          ;; Asleep, offline or the builder down: the next run tries again.
           (= 255 exit) (println "second-brain-push: builder unreachable; will retry")
           :else (die "second-brain-push: the import failed on the builder"))))))
 

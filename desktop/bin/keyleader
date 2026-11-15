@@ -12,9 +12,6 @@
          '[keylog])
 
 (def desktop-leader "Cmd+Space")
-;; The modifier of the desktop leader chord, as Hyprland names it and as its
-;; modmask. Each key in the leader also works with it still held, unless kanata
-;; rewrites that Cmd chord first, as it does Cmd+W and Cmd+h/j/k/l.
 (def desktop-leader-mod {:hypr "SUPER" :modmask 64})
 
 (def contexts
@@ -230,9 +227,6 @@
           (keylog/log! "forward" "herdr" keys (str "Forwarded to " (keylog/program-id program))))
       (nav! direction keys))))
 
-;; Desktop context. Hyprland submaps capture the keys and `listen` shows the
-;; which-key panel; these run the steps that need a script.
-
 (defn submap-panel
   "The which-key panel for Hyprland submap NAME, or nil when no leader submap is active."
   [grammar name]
@@ -322,15 +316,12 @@
 
 (defn run-desktop! [grammar keys]
   (if (= keys ["SPC"])
-    ;; The palette offers the focused program's commands as well as these.
     @(p/process [(str (fs/home) "/.local/bin/palette")] {:out :inherit :err :inherit})
     (let [b (some #(when (= keys (:keys %)) %) (in-context grammar :desktop))
           pressed (str desktop-leader " " (str/join " " keys))]
       (if (:nav b)
         (move-desktop-focus! (:nav b) pressed)
         (do (cond
-              ;; In Chrome, send the vimium-cljs command's key instead, such as its tab search for b b.
-              ;; A binding with only :chrome does nothing elsewhere.
               (and (:chrome b) (chrome-focused?)) (run! (into ["ydotool" "key"] (chord-events (:chrome b))))
               (:desktop-command b) (spawn! (:desktop-command b))
               (= :choose-window (:desktop b)) (choose-window!)
@@ -444,7 +435,6 @@
         (= :close-pane action) (run! ["herdr" "pane" "close" pane])
         (= :edit-scrollback action) (herdr-api! "pane.edit_scrollback" {:pane_id pane})
         (= :choose-workspace action) (choose-workspace!)
-        ;; The agent picker is an fzf script, so it runs in the leader's popup terminal.
         (= :choose-agent action) @(spawn! ["~/.local/bin/herdr-agent-pick"])
         (map? action) (herdr-api! "plugin.action.invoke" {:plugin_id (:plugin action) :action_id (:action action)
                                                             :context {:focused_pane_id pane}})
@@ -535,7 +525,7 @@
   (case command
     "nav" (nav! (first args) (second args))
     "term-nav" (term-nav! (load-grammar) (first args))
-    ;; Its own name keeps earlyoom's bb preference off this long-lived listener, as in hyprkan.
+    ;; Its own name keeps earlyoom's bb preference off this long-lived listener.
     "listen" (do (spit "/proc/self/comm" "keyleader") (listen!))
     "run" (run-desktop! (load-grammar) (vec args))
     "herdr" (herdr-leader! (load-grammar))

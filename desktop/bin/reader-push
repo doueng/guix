@@ -1,11 +1,4 @@
 #!/usr/bin/env bb
-;; Usage, on the laptop:
-;;   reader-push code    copy the reader checkout's code and its Jev key to the
-;;                       builder's /var/lib/reader and restart the services
-;;   reader-push state   move the Durable Object state (sources, headlines,
-;;                       suggestions) to the builder; refuses while the laptop's
-;;                       reader runs, and keeps a backup on both sides
-;;   reader-push status  the builder's reader services and its headline count
 (ns reader-push
   (:require [babashka.classpath :as classpath]
             [babashka.fs :as fs]
@@ -42,8 +35,6 @@
     (remote script (:out tar))
     (when-not (zero? (:exit @tar)) (die "reader-push: tar failed in" dir))))
 
-;; Checkout-local and laptop-only paths: VCS, caches, the venv and guix
-;; profile (they name laptop store items), and the state, which `state' moves.
 (def code-excludes
   ["./.jj" "./.git" "./.cpcache" "./target" "./.wrangler" "./node_modules/.cache"
    "./suggester/.venv" "./suggester/.guix-profile" "./.pytest_cache"
@@ -52,7 +43,6 @@
 (defn code []
   (when-not (fs/exists? (str src "/public/js/main.js"))
     (die "reader-push: no public/js/main.js; run `npm run build' in" src))
-  ;; Unpack beside the live copy and swap, so files deleted in the checkout go too.
   (tar-to-builder src code-excludes
                   (str "set -e; cd " lib "; rm -rf app.new app.old; mkdir app.new; "
                        "tar -x --no-same-owner -C app.new; chown -R reader:reader app.new; "
@@ -61,7 +51,6 @@
     (remote (str "set -e; umask 077; cat > " lib "/jev-key; chown reader:reader " lib "/jev-key")
             (slurp jev-key))
     (println "reader-push: no" jev-key "; the Find button will fail without TYPESAFE_API_KEY"))
-  ;; enable rearms a service that gave up respawning, as before the first push.
   (remote "herd enable reader && herd enable reader-suggester && herd restart reader && herd restart reader-suggester")
   (println "Pushed" src "to" (str host ":" lib "/app")))
 

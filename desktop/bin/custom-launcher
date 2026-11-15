@@ -18,8 +18,6 @@
   (or (find-executable name) name))
 
 (defn apps []
-  ;; Reuse the checked-in launcher so its Flatpak application ID and Wayland
-  ;; flags stay consistent with the documented browser installation.
   (let [chrome [(executable "chrome-unified")]]
     [["ghostty" [(executable "ghostty")]]
      ["chrome-incognito" (conj chrome "--incognito")]

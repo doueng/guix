@@ -2,7 +2,6 @@
 
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs])
-;; Scripts are stowed as symlinks; load the client from the repository.
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
 
 (ns herdr-agent-pick
@@ -13,7 +12,6 @@
             [herdr.client :as herdr]))
 
 (def agent-state-order
-  ;; Keep attention-worthy agents at the top, matching Herdr's priority view.
   {"blocked" 0
    "done" 1
    "working" 2
@@ -59,7 +57,6 @@
              prompt nil]
         (if-not line
           (or name prompt)
-          ;; Session files grow large; only parse the lines that can matter.
           (cond
             (str/includes? line "\"session_info\"")
             (recur lines (or (:name (json/parse-string line true)) name) prompt)
@@ -134,8 +131,6 @@
                             "--no-sort"
                             "--prompt" "Agent> "
                             "--with-nth" "2"
-                            ;; Pi draws on the alternate screen, so scrollback reads scroll an idle
-                            ;; pane (about a second) and fail on a working one.
                             "--preview" (str herdr/bin " agent read {1} --source visible")
                             "--preview-window" "down,60%,follow,border-top"]
                            {:in input})]

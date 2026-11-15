@@ -1,10 +1,4 @@
 #!/usr/bin/env bb
-;;   palette          open the palette for the focused window
-;;   palette fish     choose a fish command and print it, for fish's own binding
-;; Editors that can open the palette themselves are asked to: Emacs over its
-;; server, Neovim over its socket. Everything else gets one list, the focused
-;; program's commands first, then Herdr's and the desktop's, and the palette
-;; runs the choice.
 (ns palette
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
@@ -28,8 +22,7 @@
    "google-chrome" :chrome
    "jetbrains-idea" :idea})
 
-;; Foreground programs in a Herdr pane, in priority order. Linux truncates the
-;; process name to 15 characters, and Guix's Emacs wrapper shows as .emacs-31.1-rea.
+;; Linux truncates process names to 15 chars; Guix's Emacs wrapper shows as .emacs-31.1-rea.
 (def programs
   [[:emacs #"^\.?emacs"]
    [:nvim #"^n?vim$"]
@@ -57,8 +50,6 @@
     (cond-> {:kind kind :window (:address window)}
       (= :herdr kind) (merge (herdr-focus)))))
 
-;; Editors open their own palette, which keeps their buffer, mode and history.
-
 (defn open-emacs! [pid]
   (sh-out "emacsclient" "-s" (str "eng-" pid) "--eval" "(eng/palette-M-x)"))
 
@@ -69,8 +60,7 @@
                             (try (second (re-matches #"socket:\[(\d+)\]" (str (fs/read-link fd))))
                                  (catch Exception _ nil)))
                           (fs/list-dir (str "/proc/" pid "/fd"))))]
-    ;; This kernel's proc/net/unix rejects Babashka's JVM-style reads with
-    ;; EINVAL. cat reads it successfully on the same machine.
+    ;; This kernel's /proc/net/unix rejects Babashka's JVM-style reads with EINVAL; cat works.
     (into [] (keep (fn [line]
                      (let [fields (str/split (str/trim line) #"\s+" 8)]
                        (when (and (= 8 (count fields)) (inodes (nth fields 6)))
@@ -92,8 +82,6 @@
               (= "1" (some-> (sh-out "nvim" "--server" socket "--remote-expr"
                                      "luaeval(\"require('config.palette').open() and 1 or 0\")") str/trim))))
           (mapcat process-sockets pids))))
-
-;; Entries the palette runs itself. Each :value names its runner before a colon.
 
 (defn config [k]
   (get (edn/read-string (slurp (str (fs/parent (keyleader/config-path)) "/palette.edn"))) k))
@@ -186,8 +174,6 @@
         (notify! (str (name id) " did not answer, so the palette shows Herdr and the desktop")))
       (let [k (history-key ctx)
             es (entries grammar ctx)]
-        ;; The palette logs the choice; the binding it runs would log keys that
-        ;; were never pressed.
         (if-let [value (dusk/pick! (str/capitalize (name (or (:id (:program ctx)) (:kind ctx))))
                                    (dusk/by-history k es))]
           (do (dusk/remember! k value)

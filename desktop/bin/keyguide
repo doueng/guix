@@ -6,13 +6,10 @@
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
-;; Scripts are stowed as symlinks; load shared code from the repository.
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
 (require '[hypr.dispatch :as hypr]
          '[keylog])
 
-;; Alt+digit focuses workspace N and Alt+Shift+digit moves the window there,
-;; taken from applications by request. The older Ctrl+Alt digits stay as aliases.
 (defn groups [config]
   (mapv (fn [group]
           (if (:workspace-digits group)

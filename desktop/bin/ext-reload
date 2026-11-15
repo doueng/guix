@@ -9,11 +9,6 @@
 ;;   ext-reload serve                                         the hub (the ext-reload Home service)
 ;;   ext-reload setup                                         put the helper extension in place
 ;;
-;; NAME is a folder of desktop/build/chrome with a bb.edn and ext/manifest.json; ext-reload runs
-;; bb build there, then has Chrome reread ext/. Chrome is driven by a small helper extension,
-;; desktop/build/chrome/ext-reload/reloader, that holds a WebSocket to the hub on 127.0.0.1:7357 and uses
-;; chrome.management to disable and enable the target, which rereads an unpacked extension from disk.
-;; A manifest key fixes each extension's id, so ext-reload knows which loaded copy is the repo's.
 (ns ext-reload
   (:require [babashka.fs :as fs]
             [babashka.http-client :as http]
@@ -25,12 +20,9 @@
 
 (def port (parse-long (or (System/getenv "EXT_RELOAD_PORT") "7357")))
 (def home (System/getenv "HOME"))
-;; The extensions are the folders of desktop/build/chrome in the checkout this script lives in;
-;; EXT_RELOAD_CONFIG names an EDN registry {name {:dir :ext :build}} instead (the test uses one).
 (def config-file (System/getenv "EXT_RELOAD_CONFIG"))
 (def chrome-root (str (fs/normalize (fs/path (fs/parent (fs/canonicalize *file*)) "../build/chrome"))))
 (def reloader-src (or (System/getenv "EXT_RELOAD_HELPER_SRC") (str (fs/path chrome-root "ext-reload/reloader"))))
-;; Inside the sandbox's own directory, so Chrome reads it without a Flatpak override or restart.
 (def reloader-dir (or (System/getenv "EXT_RELOAD_HELPER_DIR")
                       (str home "/.var/app/com.google.Chrome/data/ext-reload/reloader")))
 (def reloader-id "hhphiidacaejhbolcnboolfapncammkf")
@@ -59,8 +51,6 @@
 
 (defn manifest-id [m] (some-> (:key m) key->id))
 
-;; ---------------------------------------------------------------- helper extension
-
 (defn helper-version [dir]
   (when (fs/exists? (fs/path dir "manifest.json"))
     (:version (json/parse-string (slurp (str (fs/path dir "manifest.json"))) true))))
@@ -77,8 +67,6 @@
       (fs/create-dirs (fs/parent reloader-dir))
       (fs/copy-tree reloader-src reloader-dir)
       true)))
-
-;; ---------------------------------------------------------------- hub
 
 (def clients (atom #{}))
 (def pending (atom {}))
@@ -137,8 +125,6 @@
   (future (loop [] (Thread/sleep 20000) (doseq [ch @clients] (send-json! ch {:op "ping"})) (recur)))
   @(promise))
 
-;; ---------------------------------------------------------------- client
-
 (defn hub! [m]
   (try
     (-> (http/post (str "http://127.0.0.1:" port "/command")
@@ -180,8 +166,6 @@
             (println (format "ext-reload: %s %s %s (%s)" (if (:activated r) "activated" "reloaded") (:name x) (:version x) (:id x))))
           (println (format "ext-reload: reloaded %d tab%s" (:tabs r) (if (= 1 (:tabs r)) "" "s"))))
       (explain r nm))))
-
-;; ---------------------------------------------------------------- first load
 
 (defn loaded [] (let [r (hub! {:op "list"})] (if (:ok r) (:extensions r) (explain r nil))))
 
