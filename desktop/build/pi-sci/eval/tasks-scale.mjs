@@ -4,9 +4,6 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { answer, lines, services } from "./tasks.mjs";
 
-// The same three tasks at three sizes, to see whether the SCI/vanilla cost
-// ratio changes as the data grows.
-
 const put = (ws, text) => writeFile(join(ws, "answer.txt"), `${text}\n`);
 
 function checks(count) {

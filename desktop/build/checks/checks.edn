@@ -1,8 +1,3 @@
-;; Which check covers which path. `make affected` matches changed files against
-;; :paths (Java globs relative to the repo root) and prints :checks, which are
-;; cheap enough to run on every change, and :slow, which take minutes or the
-;; network. `make lint` fails when a glob here matches no tracked file or a
-;; check names a missing make target. Add a rule when you add a component.
 {:rules
  [{:name "lint"
    :paths ["Makefile" "AGENTS.md" "channels.scm" "desktop/build/checks/**"
@@ -29,7 +24,6 @@
   {:name "ext-reload"
    :paths ["desktop/bin/ext-reload" "desktop/build/chrome/ext-reload/**" "modules/engstrand/features/chrome-extensions.scm"]
    :checks ["make lint" "make ext-reload-test"]}
-  ;; make lint builds each extension and runs its bb test when its folder changed.
   {:name "chrome extensions"
    :paths ["desktop/build/chrome/vimium-cljs/**" "desktop/build/chrome/cookie-autoaccept/**"]
    :checks ["make lint"]
@@ -62,7 +56,6 @@
   {:name "clipboard"
    :paths ["desktop/configs/doom/clipboard.el" "desktop/configs/nvim/fnl/config/options.fnl"
            "desktop/build/clipboard/**"]
-   ;; Slow only because it borrows the live clipboard and Emacs daemons.
    :slow ["make clipboard-check"]}
   {:name "clipboard history"
    :paths ["desktop/bin/clipboard-history" "desktop/lib/session.clj" "desktop/build/clipboard/history-test.bb"]

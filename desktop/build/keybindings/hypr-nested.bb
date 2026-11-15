@@ -84,8 +84,6 @@
   (client! "kt.right" "sleep" "300")
   (check (= "kt.right" (active)) "the second window has focus")
 
-  ;; wtype's keymap does not map its logo modifier to Super, so check the
-  ;; Cmd+Space bind and run the desktop leader's handler directly.
   (check (some #(and (= "" (:submap %)) (= 64 (:modmask %)) (= "SPACE" (:key %)))
                (json/parse-string (hypr "-j" "binds") true))
          "Cmd+Space (SUPER + SPACE) is bound at the top level")
@@ -123,8 +121,6 @@
   (let [f (str work "/plain")]
     (check (not (and (fs/exists? f) (pos? (fs/size f))))
            (str "the other Ghostty window receives nothing, got " (pr-str (when (fs/exists? f) (slurp f))))))
-  ;; Keys Hyprland sends while wtype still holds Alt arrive garbled, though they
-  ;; arrive intact through kanata, so this checks the bind and the focus only.
   (no-herdr-window!)
   (client! "com.mitchellh.ghostty.herdr" "sleep" "30")
   (hypr "dispatch" "hl.dsp.focus({ window = \"class:^com\\\\.mitchellh\\\\.ghostty$\" })")
@@ -143,8 +139,6 @@
   (check (some #(and (= "" (:submap %)) (= 64 (:modmask %)) (= "Y" (:key %)))
                (json/parse-string (hypr "-j" "binds") true))
          "Cmd+Y (SUPER + Y) is bound at the top level")
-  ;; Each row is its own keylog process, so rows within one wtype call may land
-  ;; in either order.
   (wait-for #(= 13 (count (logged))))
   (check (= (frequencies [(row "leader" "Cmd+Space" "Desktop leader menu")
                           (row "cancel" "Cmd+Space" "Cancelled with Escape")

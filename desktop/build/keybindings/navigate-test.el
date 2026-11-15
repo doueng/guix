@@ -20,7 +20,6 @@
       (should (eq left (selected-window))))))
 
 (ert-deftest navigate-reaches-no-other-window-windows ()
-  ;; Doom marks the Treemacs window no-other-window.
   (delete-other-windows)
   (let ((left (selected-window))
         (calls nil))

@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// Prove each grader rejects the untouched fixture and accepts a reference
-// solution, so a pass in a live run means the task was done.
 import { execFileSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

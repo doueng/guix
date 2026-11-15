@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Tests the built dist/; make pi-sci-test builds it first when a source changed.
 (require '[babashka.fs :as fs] '[babashka.process :as p])
 (let [here (str (fs/parent (fs/absolutize *file*)))
       run #(apply p/shell {:dir here} %&)]

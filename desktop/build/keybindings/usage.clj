@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Usage: bb desktop/build/keybindings/usage.clj [--log PATH] [--leader PATH]
-;;          [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--top N]
 (ns keybindings-usage
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
@@ -10,9 +8,6 @@
 (load-file (str repo "/desktop/bin/keyleader"))
 (require '[keylog])
 
-;; Keystroke-Level Model operators (Card, Moran and Newell): K for one key
-;; press by an average non-secretarial typist, M for mentally preparing one
-;; command. A binding costs one M and one K per key, modifiers included.
 (def k-seconds 0.28)
 (def m-seconds 1.35)
 
@@ -24,11 +19,6 @@
 
 (defn klm-seconds [n] (+ m-seconds (* k-seconds n)))
 
-;; Each leader and its leader.edn context. Herdr's and the desktop's leaders
-;; are logged by whichever layer finally acts, such as Hyprland when Ctrl+b
-;; Space w h leaves the terminal. Editors share Space, so their program decides.
-;; The desktop leader was Alt+Space until 2026-10-28 and is Cmd+Space since.
-;; Alt+Space now only forwards to Herdr, a row with no keys after it.
 (def herdr-leader "Ctrl+b Space")
 (def leaders [[herdr-leader (constantly :herdr)]
               ["Cmd+Space" (constantly :desktop)]

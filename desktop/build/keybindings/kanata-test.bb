@@ -1,4 +1,3 @@
-;; Usage: bb desktop/build/keybindings/kanata-test.bb <kanata_simulated_input>
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.edn :as edn]
@@ -52,7 +51,6 @@
     "↓LGui ↑LGui ↓LShift ↓Home ↑LShift ↑Home ↓LGui ↑LGui ↓BSpace ↑BSpace ↓LGui ↑LGui"]
    ["Cmd+Shift+H selects left" "d:lmet d:lsft d:h u:h u:lsft u:lmet"
     "↓LGui ↓LShift ↑LGui ↓Left ↑Left ↓LGui ↑LShift ↑LGui"]
-   ;; keyberon names Linux KEY_SYSRQ SysReq. XKB reads it as Print.
    ["Cmd+Shift+3 sends Print" "d:lmet d:lsft d:3 u:3 u:lsft u:lmet"
     "↓LGui ↓LShift ↑LGui ↑LShift ↓SysReq ↑SysReq ↓LGui ↓LShift ↑LShift ↑LGui"]
    ["Cmd+Shift+4 sends Shift+Print" "d:lmet d:lsft d:4 u:4 u:lsft u:lmet"
@@ -62,7 +60,6 @@
    ["Caps tapped is Escape" "d:caps u:caps" "↓Escape ↑Escape"]
    ["Caps tapped for 150 ms is still Escape" "d:caps t:150 u:caps" "↓Escape ↑Escape"]
    ["Caps held alone becomes Ctrl" "d:caps t:600 u:caps" "↓LCtrl ↑LCtrl"]
-   ;; A mouse click is not a key, so only the hold time separates Ctrl+click from Escape.
    ["Caps held 300 ms for a click is Ctrl, not Escape" "d:caps t:300 u:caps" "↓LCtrl ↑LCtrl"]
    ["Shift held 300 ms for a click types no parenthesis" "d:lsft t:300 u:lsft" "↓LShift ↑LShift"]
    ["Caps+Alt+H is Ctrl+Alt+H" "d:caps d:lalt d:h u:h u:lalt u:caps"
@@ -78,7 +75,6 @@
    ["Left Shift tapped types (" "d:lsft u:lsft" "↓LShift ↓Kb9 ↑LShift ↑Kb9"]
    ["Right Shift tapped types )" "d:rsft u:rsft" "↓LShift ↓Kb0 ↑LShift ↑Kb0"]
    ["Shift+A types A" "d:lsft d:a u:a u:lsft" "↓LShift ↓A ↑A ↑LShift"]
-   ;; keyberon names code 248 MediaMute. Linux reads it as KEY_MICMUTE.
    ["Sleep mutes the microphone" "d:sleep u:sleep" "↓MediaMute ↑MediaMute"]
    ["IntelliJ Cmd+Shift+Z redoes with Ctrl+Shift+Z" "ls:intellij d:lmet d:lsft d:z u:z u:lsft u:lmet"
     "↓LGui ↓LShift ↑LGui ↓LCtrl ↓Z ↑LCtrl ↑Z ↓LGui ↑LShift ↑LGui"]
@@ -95,7 +91,6 @@
    ["Terminal Cmd+T sends nothing" "ls:terminal d:lmet d:t u:t u:lmet" "↓LGui ↑LGui"]
    ["Terminal Cmd+N still sends Ctrl+N for Pi and bbh" "ls:terminal d:lmet d:n u:n u:lmet"
     "↓LGui ↑LGui ↓LCtrl ↓N ↑LCtrl ↑N ↓LGui ↑LGui"]
-   ;; hyprkan changes the base layer on focus while Cmd may still be held.
    ["Cmd held from a terminal through Cmd+U into Chrome sends Ctrl+T" "ls:terminal d:lmet d:u u:u ls:base d:t u:t u:lmet"
     "↓LGui ↓U ↑U ↑LGui ↓LCtrl ↓T ↑LCtrl ↑T ↓LGui ↑LGui"]
    ["Cmd held from Chrome into a terminal sends nothing for Cmd+T" "d:lmet d:u u:u ls:terminal d:t u:t u:lmet"

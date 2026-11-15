@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Pure phase measurements. No IPC or changes to the live Dusk shell.
 (require '[clojure.edn :as edn]
          '[cheshire.core :as json]
          '[dusk.core :as core]

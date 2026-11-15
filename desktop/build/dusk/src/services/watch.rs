@@ -1,7 +1,3 @@
-//! inotify watcher for the config directory. Both the config directory and
-//! the directories the config files resolve to are watched, so Stow symlinks
-//! into a repository still trigger reloads when the real file is saved.
-
 use std::collections::BTreeSet;
 use std::ffi::{CString, OsStr};
 use std::os::unix::ffi::OsStrExt;
@@ -76,7 +72,6 @@ pub fn start(config: PathBuf, events: smol::channel::Sender<CoreEvent>) {
                     while n > 0 && offset + std::mem::size_of::<libc::inotify_event>() <= n as usize
                     {
                         // SAFETY: the loop condition keeps a whole event header inside the
-                        // bytes read; the u8 buffer gives no alignment, hence read_unaligned.
                         let event = unsafe {
                             std::ptr::read_unaligned(
                                 buf.as_ptr().add(offset) as *const libc::inotify_event

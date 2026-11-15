@@ -346,9 +346,8 @@ impl Core {
         }
     }
 
-    /// GPUI's Wayland `resize` runs as a spawned task that panics if the
-    /// window was destroyed before it ran. Stop the view from issuing new
-    /// resizes, then remove the window once pending ones have drained.
+    /// GPUI's Wayland `resize` task panics if the window is already destroyed,
+    /// so stop new resizes and remove the window once pending ones drain.
     fn close_surface(&mut self, id: &str, cx: &mut App) {
         let Some(surface) = self.surfaces.remove(id) else {
             return;

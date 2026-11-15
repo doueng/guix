@@ -104,12 +104,8 @@ function summary(entry: Capability) {
 
 const README = fileURLToPath(new URL("../README.md", import.meta.url));
 
-// Claude Code cuts MCP tool descriptions at 2048 characters. What a model needs
-// to call functions without guessing keys must fit before that point.
+// Claude Code cuts MCP tool descriptions at 2048 characters.
 export const DESCRIPTION_HEAD = 2048;
-// Signature priority: the main domains, the core plain tools, the remaining
-// domains in DOMAIN_ORDER, the other tools, and finally version and describe
-// functions, which take no options and are rarely called.
 const HEAD_DOMAINS = ["fs", "search", "sys", "jj"];
 const CORE_TOOLS = ["edit", "write", "bash", "read", "vent"];
 const DOMAIN_ORDER = [...HEAD_DOMAINS, "make", "repo", "guix"];
@@ -172,8 +168,6 @@ export function sciDescription(
 		...ranked.filter((line) => !RARE.test(line)),
 		...ranked.filter((line) => RARE.test(line)),
 	];
-	// Fill the part that survives truncation in priority order, then move the
-	// remainder after it.
 	const header = lines.length ? `${SCI_BASICS}\n${SIGNATURE_HEADER}` : SCI_BASICS;
 	let room = DESCRIPTION_HEAD - header.length - MORE_SIGNATURES.length - 2;
 	const head: string[] = [];

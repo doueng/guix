@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// --before ISO keeps only SCI trials that started before that time, for runs
-// that straddle a rebuild.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { listCost, priceFor, readEvents, summarize } from "./metrics.mjs";

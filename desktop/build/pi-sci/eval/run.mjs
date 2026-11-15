@@ -15,8 +15,6 @@ const SCI = join(desktop, "pi/agent/extensions/sci-codemode/index.ts");
 const GUIDANCE = join(desktop, "pi/agent/AGENTS.md");
 const packages = join(homedir(), ".pi/agent/npm/node_modules");
 
-// A provider that Pi loads from a package needs its extension and config file,
-// which --no-extensions and the fresh agent directory would otherwise drop.
 const PROVIDERS = {
 	"claude-bridge": {
 		extensions: [join(packages, "pi-claude-bridge/src/index.ts")],
@@ -44,10 +42,6 @@ const sciSettings = (mode) => ({
 	codemode: { mode },
 });
 
-// One variable per neighbouring profile: vanilla → sci-bare adds SCI-only
-// codemode, sci-bare → sci adds the production AGENTS.md guidance, and
-// sci-bare → hybrid also declares the plain tools. sci → sci-nopy drops the
-// rule that forbids generating Python or shell programs for data work.
 export const PROFILES = {
 	vanilla: { args: ["--tools", "read,bash,edit,write"] },
 	"sci-bare": { extensions: [SCI], settings: sciSettings("only") },
@@ -81,8 +75,6 @@ const retries = Number(opts.retries ?? 3);
 const runId = opts.run ?? new Date().toISOString().replace(/[:.]/g, "-");
 const out = resolve(opts.out ?? join(homedir(), ".cache/pi-sci-eval/runs"), runId);
 
-// Profiles rotate per (attempt, task) so no profile always runs first, and the
-// trials of one pair start next to each other and share machine noise.
 const schedule = [];
 for (let attempt = 1; attempt <= attempts; attempt++)
 	tasks.forEach((task, index) => {
@@ -179,10 +171,6 @@ function runTurn(trial, dir, ws, agent, prompt, turn) {
 
 const RATE_LIMITED = /rate.?limit|\b429\b|overloaded|\b529\b/i;
 
-// A task with several prompts continues one session, so a later prompt can
-// reuse whatever the agent built in an earlier one. A prompt that ends on a
-// rate limit after Pi's own retries is sent again into the same session after
-// a pause; invocations records how many times each prompt ran.
 async function runPi(trial, dir, ws, agent) {
 	const started = Date.now();
 	const prompts = trial.task.prompts ?? [trial.task.prompt];

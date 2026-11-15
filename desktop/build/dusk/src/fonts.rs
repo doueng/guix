@@ -1,9 +1,6 @@
-//! GPUI's Linux text system (cosmic-text/fontdb) reads `/etc/fonts/fonts.conf`
-//! directly, but Guix's fontconfig reads its own store config, so the two can
-//! disagree (an `/etc/fonts`, when one exists, need not list DejaVu). Before
-//! GPUI starts we ask the real fontconfig (`fc-list`) where fonts live and hand
-//! fontdb a small generated config listing those directories. Generic families such as `sans-serif`
-//! are resolved with `fc-match` because GPUI matches family names literally.
+//! GPUI's fontdb reads `/etc/fonts/fonts.conf`, not Guix's fontconfig, so we
+//! hand it a config built from `fc-list`. GPUI matches family names literally,
+//! so generic families are resolved with `fc-match`.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -18,8 +15,6 @@ pub fn injected_env() -> Vec<&'static str> {
     INJECTED.lock().unwrap().clone()
 }
 
-/// Guix has no global Vulkan ICD directory, so point the loader at the
-/// drivers of the profile dusk was built against.
 pub fn configure_vulkan() {
     if std::env::var_os("VK_DRIVER_FILES").is_some()
         || std::env::var_os("VK_ICD_FILENAMES").is_some()
@@ -44,7 +39,6 @@ fn runtime_dir() -> PathBuf {
 }
 
 pub fn configure_fontconfig() {
-    // Resolve the initial fallback before GPUI starts (not during rendering).
     load_family("sans-serif");
     if std::env::var_os("FONTCONFIG_FILE").is_some() {
         return;
@@ -97,7 +91,6 @@ fn generic_family(name: &str) -> bool {
     )
 }
 
-/// Render-time lookup only. Discovery is done by `prepare` on a worker.
 pub fn resolve_family(name: &str) -> String {
     if !generic_family(name) {
         return name.to_string();
@@ -114,8 +107,7 @@ fn load_family(name: &str) {
     if !generic_family(name) || family_cache().lock().unwrap().contains_key(name) {
         return;
     }
-    // Never hold the cache lock across I/O: render-time readers must not wait
-    // for fc-match, or for a recursive icon search on another worker.
+    // Never hold the cache lock across I/O: render-time readers must not wait.
     let resolved = Command::new("fc-match")
         .args(["-f", "%{family[0]}", name])
         .output()
@@ -197,8 +189,6 @@ fn load_icon(name: &str) {
     icon_cache().lock().unwrap().insert(name.to_string(), found);
 }
 
-/// Collect referenced names without touching the filesystem or running commands.
-/// Cached names are skipped when this work runs on GPUI's background executor.
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct Assets {
     families: BTreeSet<String>,
@@ -281,8 +271,6 @@ mod tests {
 
     #[test]
     fn render_lookup_does_not_populate_discovery_cache() {
-        // If resolve_icon still searched the filesystem, even a failed lookup
-        // would populate its negative cache. The render path must do neither.
         let name = "dusk-test-nonexistent-render-only-icon";
         assert_eq!(resolve_icon(name), None);
         assert!(!icon_cache().lock().unwrap().contains_key(name));

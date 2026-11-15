@@ -39,13 +39,11 @@
          (bp/ok-line {:rev rev :state :running :started "2026-11-10T09:00:00Z"} now))))
 
 (deftest prune-roots-keeps-the-newest
-  ;; The links point at files with one old mtime, as store items have.
   (let [dir (fs/create-temp-dir)
         target (fs/create-file (fs/path dir "item"))
         revs (for [i (range 5)] (apply str (repeat 40 (char (+ (int \a) i)))))]
     (fs/set-last-modified-time target (java.nio.file.attribute.FileTime/fromMillis 1000))
     (fs/create-dirs (fs/path dir "roots"))
-    ;; Newest first, so the directory's order is not the links' age order.
     (doseq [[i rev] (reverse (map-indexed vector revs)) kind ["system" "home"]]
       (let [link (fs/create-sym-link (fs/path dir "roots" (str kind "-" rev)) target)]
         (java.nio.file.Files/setAttribute link "basic:lastModifiedTime"

@@ -1,7 +1,4 @@
 #!/usr/bin/env bb
-;; The Herdr server starts outside a login shell, so its PATH lacks
-;; ~/.local/bin, where pierre-diff-ansi lives.
-;; Usage: bb preview-check.bb [REPO]   (needs the stowed jj config)
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 (load-file (str (fs/parent *file*) "/jjui.bb"))
 

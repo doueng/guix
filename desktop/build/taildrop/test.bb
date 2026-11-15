@@ -1,4 +1,3 @@
-;; Unit checks for desktop/bin/taildrop that need no tailnet, phone or clipboard.
 (require '[babashka.fs :as fs] '[clojure.string :as str])
 (def root (str (fs/parent (fs/parent (fs/parent (fs/parent (fs/real-path *file*)))))))
 (load-file (str root "/desktop/bin/taildrop"))

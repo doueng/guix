@@ -1,5 +1,3 @@
-;; Usage: bb scripts/inventory.bb <repo-root>
-;; Lists every keybinding in the desktop configs as layer, chord, action, source.
 (ns inventory (:require [babashka.fs :as fs] [clojure.string :as str]))
 (def root (or (first *command-line-args*) "."))
 (defn path [& parts] (str/join "/" (cons root parts)))

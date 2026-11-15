@@ -1,6 +1,4 @@
-//! Single-line editing through GPUI's platform input handler, not raw keys.
 //! The Element/InputHandler integration follows GPUI's Apache-2.0 input example:
-//! https://github.com/zed-industries/zed/blob/7f7520b98ed1a0ce03dab1d5ddcb87163f1bcdb8/crates/gpui/examples/input.rs
 //! See licenses/GPUI-Apache-2.0.txt.
 
 use std::ops::Range;
@@ -356,7 +354,6 @@ impl TextInput {
             return 0;
         };
         let index = line.closest_index_for_x(position.x - bounds.left() + self.scroll_x);
-        // Mouse hit-testing must not leave the caret inside a grapheme.
         self.buffer
             .text
             .grapheme_indices(true)
@@ -414,8 +411,7 @@ impl EntityInputHandler for TextInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Enter/Tab are surface shortcuts, not text. The Wayland backend can
-        // forward their control characters after raw key dispatch.
+        // The Wayland backend can forward Enter/Tab control chars after raw key dispatch.
         if !text.is_empty() && text.chars().all(char::is_control) {
             return;
         }
@@ -443,7 +439,7 @@ impl EntityInputHandler for TextInput {
                 .range_from_utf16(base + selected.start..base + selected.end);
             self.buffer.reversed = false;
         }
-        cx.notify(); // Preedit stays local until the platform commits it.
+        cx.notify();
     }
     fn bounds_for_range(
         &mut self,
@@ -884,7 +880,7 @@ mod tests {
                 input.selected_text_range(false, window, cx).unwrap().range,
                 2..3
             );
-            input.set_props(input.props.clone(), 1., cx); // Unrelated controlled update.
+            input.set_props(input.props.clone(), 1., cx);
             input.replace_and_mark_text_in_range(None, "日本語", None, window, cx);
         });
         assert!(events.try_recv().is_err());

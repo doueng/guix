@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Isolated runtime/config regressions: no IPC, windows, or session changes.
 (ns dusk-tests
   (:require [clojure.test :refer [deftest is testing run-tests use-fixtures]]
             [config :as config]

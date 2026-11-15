@@ -1,7 +1,4 @@
 #!/usr/bin/env bb
-;; The binary's RUNPATH points at .guix-profile/lib, so dlopen'ed libraries
-;; (libwayland-client, libvulkan) and the Vulkan drivers come from the same
-;; profile at runtime without LD_LIBRARY_PATH leaking into launched programs.
 (require '[babashka.fs :as fs] '[babashka.process :as p])
 (let [here (str (fs/parent (fs/absolutize *file*)))
       profile (str here "/.guix-profile")]

@@ -56,9 +56,6 @@ test("complete JSON reads parse beyond the display limit without losing values",
 	}
 });
 
-// Codemode cancels calls still pending when a script ends. A signal that
-// aborts while the file opens must reject the read, not leave the stream to
-// emit an unhandled error that kills Pi.
 test("a structured read cancelled while its file opens rejects without an uncaught error", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-sci-abort-"));
 	const path = join(dir, "data.jsonl");

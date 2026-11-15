@@ -1,10 +1,3 @@
-//! Default sink/source volume as `:volume` and `:microphone` signals.
-//!
-//! `pw-dump --monitor` is used purely as a change trigger: whenever PipeWire
-//! reports a node, device or metadata change we wait for the burst to settle
-//! and re-read the defaults with `wpctl`, which already resolves default
-//! devices and cubic volumes.
-
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -32,7 +25,6 @@ fn read_volume(target: &str) -> Value {
         return Value::Nil;
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    // "Volume: 0.40" or "Volume: 0.40 [MUTED]"
     let muted = text.contains("[MUTED]");
     let Some(level) = text
         .split_whitespace()
@@ -98,9 +90,6 @@ pub fn start(events: smol::channel::Sender<CoreEvent>) {
                 let stdout = BufReader::new(child.stdout.take().unwrap());
                 let (tx, rx) = mpsc::channel::<()>();
                 std::thread::spawn(move || {
-                    // Clients (e.g. browsers) update their properties many
-                    // times a second; only nodes, devices and the default
-                    // device metadata can change a volume.
                     for line in stdout.lines() {
                         let Ok(line) = line else { break };
                         if RELEVANT.iter().any(|t| line.contains(t)) && tx.send(()).is_err() {

@@ -1,7 +1,3 @@
-//! Display backlight as the `:brightness` signal. The kernel emits a
-//! `change` uevent for every backlight write (brightnessctl, logind, ...),
-//! so we listen on the kobject-uevent netlink socket instead of polling.
-
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 

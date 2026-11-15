@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Usage: bb desktop/build/clipboard/check.bb [--daemon NAME]...
-;; The user's clipboard text is restored at the end.
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 
 (def root (str (fs/parent (fs/parent (fs/parent (fs/parent (fs/absolutize *file*)))))))
@@ -76,15 +74,12 @@
                "(kill-new \"no evil\"))"))
       (check! (str "emacsclient -s " d " visual paste keeps the clipboard") t wl-paste))))
 
-;; Neovim reads this checkout's config, not the stowed one.
 (def nvim-config-home
   (let [d (str (fs/create-temp-dir))]
     (fs/create-sym-link (str d "/nvim") (str root "/desktop/configs/nvim"))
     (fs/delete-on-exit d)
     d))
 
-;; Neovim with the user config in a pseudo-terminal, so LazyVim's deferred
-;; clipboard option is in effect. `yy` must reach wl-paste and `p` must read it.
 (defn nvim-tty [env lua]
   (let [script (str (fs/create-temp-file {:suffix ".lua"}))
         out (str (fs/create-temp-file {:suffix ".out"}))]

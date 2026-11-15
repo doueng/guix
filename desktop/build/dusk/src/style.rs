@@ -1,9 +1,3 @@
-//! Map EDN style props onto GPUI's `Styled` builder.
-//!
-//! Lengths are logical pixels multiplied by the surface scale; `"50%"` and
-//! `:full` are relative lengths and `:auto` leaves sizing to layout. A float
-//! `:line-height` is a factor of the font size; an integer is pixels.
-
 use gpui::{
     AbsoluteLength, BoxShadow, DefiniteLength, FontWeight, Hsla, Length, Styled, point, px,
     relative, rgba,
@@ -69,7 +63,6 @@ pub fn pixels(v: &Value, scale: f32) -> Option<f32> {
     v.as_f64().map(|f| f as f32 * scale)
 }
 
-/// CSS-like edge shorthand: n | [v h] | [t r b l].
 pub fn edges(v: &Value) -> Option<[Value; 4]> {
     match v {
         Value::Int(_) | Value::Float(_) | Value::Keyword(_) | Value::Str(_) => {
@@ -140,8 +133,6 @@ fn shadow(v: &Value, scale: f32) -> Option<Vec<BoxShadow>> {
     }
 }
 
-/// Layer-shell margins position the window, not its root element. Other
-/// window-only props are ignored by `apply`; margin is the overlapping key.
 pub fn apply_layer<T: Styled>(el: T, props: &Value, scale: f32) -> T {
     let content = Value::Map(
         props

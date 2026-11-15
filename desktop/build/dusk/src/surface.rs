@@ -21,7 +21,6 @@ pub enum Dim {
     Auto,
 }
 
-/// Everything that requires re-creating the layer surface when it changes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowKey {
     pub layer: Layer,
@@ -120,9 +119,8 @@ impl SurfaceSpec {
         }
     }
 
-    /// Size to request from the compositor. Stretched axes request 0, which
-    /// layer-shell defines as "fill the anchored span"; GPUI's Wayland
-    /// backend has no primary display to measure it ourselves.
+    /// Stretched axes request 0 (layer-shell: fill the anchored span); GPUI's
+    /// Wayland backend has no primary display to measure it ourselves.
     pub fn window_size(&self, current: Option<gpui::Size<Pixels>>) -> gpui::Size<Pixels> {
         let pick = |dim: Dim, current: Option<Pixels>, guess: f32| match dim {
             Dim::Fixed(v) => px(v),
@@ -168,7 +166,6 @@ fn handler(node: &Value, name: &str) -> Option<String> {
 
 fn interactive_div(el: Div, node: &Value, scale: f32) -> gpui::Stateful<Div> {
     let p = props(node);
-    // Hover-only elements also need persistent state for invalidation.
     let mut el = el.id(SharedString::from(node_path(node)));
     if let Some(hover) = p
         .get("hover")
@@ -274,8 +271,6 @@ impl SurfaceView {
             && !has_input_focus
             && (self.focus.is_focused(window) || had_input_focus)
         {
-            // Auto-focus the first input on mount; preserve the user's focus
-            // through updates, and recover it if that input was removed.
             window.focus(first_focus.as_ref().unwrap_or(&self.focus), cx);
         }
         self.inputs = live;
@@ -296,8 +291,6 @@ impl SurfaceView {
             cx.stop_propagation();
             return;
         }
-        // Only surface-level shortcuts remain raw events. TextInput handles
-        // edits via platform input and scoped GPUI actions.
         if let Some(h) = handler(&self.tree, "on-key") {
             self.link.event(&h, vec![key_event_value(event)]);
         }
@@ -406,7 +399,6 @@ impl SurfaceView {
                     .and_then(|s| style::pixels(s, scale))
                     .unwrap_or(16. * scale);
                 let Some(path) = fonts::resolve_icon(name) else {
-                    // Reserve layout space while background discovery runs.
                     return div().size(px(icon_size)).flex_none().into_any_element();
                 };
                 let mut el = svg()
@@ -450,8 +442,6 @@ impl SurfaceView {
             }
             "input" => {
                 let el = style::apply(
-                    // TextInput inherits these styles, including hover and
-                    // explicit line-height/font-size refinements.
                     div()
                         .flex()
                         .flex_row()
@@ -659,8 +649,6 @@ mod tests {
             first.read_with(cx, |input, _| input.test_text().to_string()),
             "one?"
         );
-        // Clicking either input routes future text there, not to the first
-        // field unconditionally. The click is past the text, so caret = end.
         cx.simulate_click(gpui::point(px(280.), px(60.)), Default::default());
         cx.simulate_input("+");
         assert_eq!(

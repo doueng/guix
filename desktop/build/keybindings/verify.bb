@@ -1,7 +1,4 @@
 #!/usr/bin/env bb
-;; Presses real keys through kanata on the live desktop. It changes workspaces,
-;; enters the desktop leader, opens the guide and sends Alt+Space to Herdr
-;; briefly, then restores the original workspace.
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs]
          '[babashka.process :as p]

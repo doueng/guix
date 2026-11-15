@@ -1,15 +1,4 @@
 #!/usr/bin/env bb
-;; Parinfer-stable Lisp: a file passes when parinfer-rust leaves it unchanged in
-;; paren mode, which parinfer-rust-mode runs before the first edit in Emacs and
-;; asks about, and in indent mode, which Emacs uses while typing.  Options
-;; follow parinfer-rust-mode: scheme-mode gets the scheme options, every other
-;; Lisp the defaults.
-;;
-;;   bb parinfer.bb [--fix] [--root DIR] [FILE...]
-;;
-;; With no FILE it checks the files jj (or git) tracks under DIR, by default
-;; this repo.  --fix rewrites failing files with paren mode's output and drops
-;; lines that held only closing parens.
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
 
 (def plain ["--no-lisp-vline-symbols" "--no-lisp-block-comments" "--no-guile-block-comments"

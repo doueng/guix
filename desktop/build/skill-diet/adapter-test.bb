@@ -1,4 +1,3 @@
-;;   bb desktop/build/skill-diet/adapter-test.bb
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[cheshire.core :as json]
@@ -14,7 +13,6 @@
         work (doto (fs/path dir "work") fs/create-dirs)
         out (fs/path dir "out")
         script (str (fs/path dir "script.edn"))]
-    ;; A repository root with an AGENTS.md, which the adapter must hide.
     (fs/create-dirs (fs/path work ".git"))
     (spit (str (fs/path work "AGENTS.md")) "LEAKED-INSTRUCTIONS")
     (spit script (pr-str [{:code (str "(do " (when skill-dir (str "(slurp \"" skill-dir "/SKILL.md\") "))

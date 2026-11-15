@@ -10,7 +10,6 @@ use crate::edn::Value;
 
 const PATH: &str = "/org/freedesktop/Notifications";
 const IFACE: &str = "org.freedesktop.Notifications";
-/// Used when a client asks for the server default (`expire_timeout = -1`).
 const DEFAULT_TIMEOUT_MS: i32 = 6000;
 
 #[derive(Clone, Copy)]
@@ -291,8 +290,6 @@ async fn run(shared: Arc<Shared>, commands: smol::channel::Receiver<Command>) ->
         )?
         .build()
         .await?;
-    // Queue behind an existing server instead of failing, so dusk takes over
-    // as soon as the previous daemon exits.
     let reply = conn
         .request_name_with_flags(
             "org.freedesktop.Notifications",

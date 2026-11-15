@@ -230,7 +230,6 @@ async function readClaudeCredentials(): Promise<ClaudeCredentials["claudeAiOauth
 	}
 }
 
-// claude-bridge runs Claude Code, which keeps its own subscription token fresh; pi's anthropic login is the fallback.
 async function authorizeAnthropic(ctx: UsageCtx): Promise<string | undefined> {
 	const oauth = await readClaudeCredentials();
 	if (oauth?.accessToken && (oauth.expiresAt ?? 0) > Date.now()) return `Bearer ${oauth.accessToken}`;

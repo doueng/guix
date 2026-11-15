@@ -4,9 +4,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { lines, nodeTests, orders, random } from "./tasks.mjs";
 
-// Long sessions: each prompt continues the same Pi session, so tool results
-// and any helpers from earlier prompts stay in context or in the session.
-
 const read = (ws, path) => readFile(join(ws, path), "utf8").catch(() => "");
 
 function csvRow(line) {
@@ -121,9 +118,6 @@ function parseLogs(texts) {
 	);
 }
 
-// Two-decimal percentages in exact integer arithmetic. An exact half, such as
-// 1.755, accepts both neighbours, since half-up and half-even disagree and
-// floats land on either side.
 function percent(part, whole) {
 	const scaled = part * 10_000;
 	const low = Math.floor(scaled / whole);

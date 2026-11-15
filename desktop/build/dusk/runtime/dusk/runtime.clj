@@ -45,8 +45,6 @@
 
 (defn- child-path [path i child]
   (let [k (when (map? child) (get-in child [:props :key]))]
-    ;; Preserve key types and escape path delimiters, so a keyed child cannot
-    ;; collide with an indexed child or with another child's descendants.
     (str path "/" (if (some? k)
                     (str "k" (-> (pr-str k) (str/replace "%" "%25") (str/replace "/" "%2F")))
                     i))))

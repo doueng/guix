@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; bb affected.bb [--run] [--slow] [REV]
 (load-file (str (babashka.fs/parent *file*) "/common.clj"))
 (require '[checks.common :as c] '[clojure.string :as str] '[babashka.process :as p])
 

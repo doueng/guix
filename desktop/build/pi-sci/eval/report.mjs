@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// REPORT_FORMAT=json prints the same tables as JSON.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { listCost, priceFor, promptSegments, readEvents, summarize } from "./metrics.mjs";
@@ -18,7 +17,6 @@ const all = readFileSync(join(dir, "results.jsonl"), "utf8")
 		);
 		const metrics = summarize(events);
 		const segments = promptSegments(events);
-		// A prompt resent after a rate limit spans several segments.
 		const grouped = (row.invocations ?? segments.map(() => 1)).map((n, i, counts) => {
 			const start = counts.slice(0, i).reduce((a, b) => a + b, 0);
 			return segments.slice(start, start + n).flat();
@@ -34,8 +32,6 @@ const all = readFileSync(join(dir, "results.jsonl"), "utf8")
 		});
 		return { ...row, ...metrics, listCost: listCost(metrics.usage, price), prompts };
 	});
-// A trial in which any prompt ended on a provider error says nothing about the
-// harness, so it leaves every table and is only counted.
 const broken = (row) => row.prompts.some((prompt) => prompt.failed);
 const invalid = all.filter(broken);
 const rows = all.filter((row) => !broken(row));
@@ -99,7 +95,6 @@ const perTask = Object.fromEntries(
 	]),
 );
 
-// Paired by (task, attempt): the same fixture ran under both profiles.
 const key = (row) => `${row.task}#${row.attempt}`;
 const base = new Map(rows.filter((row) => row.profile === baseline).map((row) => [key(row), row]));
 const paired = profiles
@@ -123,7 +118,6 @@ const paired = profiles
 		};
 	});
 
-// Cumulative median list cost after each prompt of a multi-prompt task.
 const perPrompt = Object.fromEntries(
 	tasks
 		.filter((task) => rows.some((row) => row.task === task && row.prompts.length > 1))

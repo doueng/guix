@@ -13,8 +13,6 @@ function expandUserPath(p: string): string {
 }
 
 function getGlobalAgentDir(): string {
-	// Mirror pi-coding-agent's getAgentDir() behavior (best-effort).
-	// For the canonical implementation see pi-mono/packages/coding-agent/src/config.ts
 	const env = process.env.PI_CODING_AGENT_DIR;
 	if (env) return expandUserPath(env);
 	return path.join(os.homedir(), ".pi", "agent");

@@ -53,10 +53,6 @@ async function spill(text: string) {
 	return path;
 }
 
-// Pi's executor joins adjacent text items, marks each text() block with
-// `==> text k/N <==`, and appends console output and the failure to the same
-// item. Splitting at those boundaries recovers the blocks; joining the parts
-// with a newline restores the item exactly.
 const BOUNDARY =
 	/\n(?===> text \d+\/\d+ <==\n|<console_output>\n|Script error:\n|Note: models\.generateImages)/;
 const MARKER = /^==> text \d+\/\d+ <==\n/;
@@ -130,10 +126,6 @@ export async function budgetOutput<T extends AgentToolResult<unknown>>(
 	};
 }
 
-// Pi's codemode executor reports progress after every nested call, and each
-// report carries the whole call list, so a script with n calls sends O(n²)
-// bytes to the UI. Deliver the first report, then at most one per interval,
-// always the latest. stop() drops a pending report once the call returns.
 export function throttleUpdates<T>(update: ((value: T) => void) | undefined, intervalMs = 250) {
 	if (!update) return { update, stop() {} };
 	let last = 0;

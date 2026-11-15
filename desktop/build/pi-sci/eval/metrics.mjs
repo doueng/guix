@@ -4,8 +4,7 @@ import { join } from "node:path";
 
 const UPDATE_PREFIX = Buffer.from('{"type":"tool_execution_update"');
 
-// Streams the file, because progress updates can make it larger than a Node
-// string. Updates are skipped: no metric uses them, and they hold most bytes.
+// Streamed: progress updates can make the file larger than a Node string.
 export function readEvents(path) {
 	const events = [];
 	const fd = openSync(path, "r");
@@ -50,9 +49,6 @@ export function readEvents(path) {
 	return events;
 }
 
-// Each pi invocation writes one session header, so a session with several
-// prompts splits there into one segment per prompt. agent_start would also
-// split at Pi's automatic retries.
 export function promptSegments(events) {
 	const segments = [];
 	let current = [];
@@ -69,8 +65,6 @@ export function promptSegments(events) {
 
 const PROVIDER_PRICES = { "claude-bridge": "anthropic" };
 
-// List price in dollars, from Pi's model store. Subscription providers report
-// $0, so this is the comparable cost across runs.
 export function priceFor(model) {
 	const [provider, ...rest] = model.split("/");
 	const id = rest.join("/");
@@ -93,9 +87,6 @@ export function listCost(usage, price) {
 const text = (result) =>
 	(result?.content ?? []).reduce((n, block) => n + (block.text?.length ?? 0), 0);
 
-// Outer calls are the model's round trips; inner calls are tools a codemode
-// script ran. promptTokens is the first request's context, which is the fixed
-// cost of the harness (system prompt and tool declarations).
 export function summarize(events) {
 	const m = {
 		turns: 0,

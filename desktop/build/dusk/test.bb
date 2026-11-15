@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; Unit and headless GPUI tests; never contact or alter the running shell.
 (require '[babashka.fs :as fs] '[babashka.process :as p])
 (let [here (str (fs/parent (fs/absolutize *file*)))
       profile (str here "/.guix-profile")

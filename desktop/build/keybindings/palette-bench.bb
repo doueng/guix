@@ -1,6 +1,4 @@
 #!/usr/bin/env bb
-;; Usage: bb desktop/build/keybindings/palette-bench.bb BASELINE-REV OUTPUT-DIR
-;; Opens and cancels ten palettes. Never types into the focused application.
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[cheshire.core :as json]
@@ -63,7 +61,6 @@
         (evaluate server (str "(palette-bench-export " (pr-str out) " " (pr-str side) " " run ")"))
         (command "bb" "--classpath" runtime-classpath "desktop/build/dusk/palette-bench.bb"
                  (str out "/" side "-config.clj") (str prefix ".edn") (str prefix "-runtime.json"))
-        ;; Load the matching config without restarting Dusk, alternating sides.
         (command "dusk" "msg" "eval" (str "(load-file " (pr-str (str out "/" side "-config.clj")) ")"))
         (evaluate server "(palette-bench-warm)")
         (let [request (assoc (edn/read-string (slurp (str prefix ".edn"))) :name :palette-bench)

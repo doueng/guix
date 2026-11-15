@@ -5,8 +5,6 @@ min_herdr_version = "0.9.0"
 description = "jjui in a popup that gives way to what it replaced when jjui quits"
 platforms = ["linux"]
 
-# The Herdr CLI cannot ask for a popup placement, so the launcher calls the
-# socket API.
 [[panes]]
 id = "jjui"
 title = "jjui · q closes"

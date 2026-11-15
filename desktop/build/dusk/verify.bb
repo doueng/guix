@@ -1,5 +1,4 @@
 #!/usr/bin/env bb
-;; usage: verify.bb [check ...]    (default: all checks, in table order)
 
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
@@ -183,7 +182,6 @@
   (let [proc (p/process [dusk "dmenu" "-p" "verify"]
                         {:in "ghostty\nchrome-incognito\nchrome\noilfm\n" :out :string :err :string})
         [opened] (wait-for 2000 #(contains? (surfaces) "launcher"))]
-    ;; Give the compositor a moment to hand the exclusive surface focus.
     (Thread/sleep 250)
     (doseq [k keys]
       (if (str/starts-with? k "key:")

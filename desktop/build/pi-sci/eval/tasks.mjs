@@ -2,9 +2,6 @@ import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-// Each task owns its fixture and an executable grader. Prompts state the goal
-// only, never which tool to use.
-
 export async function answer(ws) {
 	try {
 		return (await readFile(join(ws, "answer.txt"), "utf8")).trim();

@@ -16,7 +16,6 @@
   (is (= "https://x/notes" (u/changelog {:changelog "https://x/notes" :current "1" :latest "2"}))))
 
 (deftest a-row-links-the-installed-commit-even-after-the-cache-was-written
-  ;; Refreshed when the plugin was at A and B was upstream; since then it moved to C.
   (let [cache {:refreshed {"lazy" "2026-11-10T11:00:00Z"}
                :latest {["lazy" "p"] {:latest b :compare "https://github.com/o/p.git" :current a}}}
         [item] (u/with-latest cache [{:source "lazy" :name "p" :current c}])

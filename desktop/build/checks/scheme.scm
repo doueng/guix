@@ -1,6 +1,4 @@
-;; guix repl -L modules -- scheme.scm PATH...
-;; Loading alone misses unbound variables inside procedure bodies; compiling
-;; catches them.
+;; Loading alone misses unbound variables inside procedure bodies; compiling catches them.
 (use-modules (system base compile) (ice-9 ftw) (srfi srfi-1) (guix build utils))
 
 ;; (gnu) rebinds core `delete' for the modify-services clause; that is intended.
@@ -20,8 +18,6 @@
 (define out-dir
   (string-append (or (getenv "TMPDIR") "/tmp") "/guix-lint-" (number->string (getpid))))
 
-;; channels.scm and manifests are scripts that Guix evaluates with these
-;; modules in scope rather than modules of their own.
 (define (script-env)
   (let ((m (make-fresh-user-module)))
     (for-each (lambda (name) (module-use! m (resolve-interface name)))
@@ -51,7 +47,6 @@
 
 (define files (sort (append-map scheme-files (cdr (command-line))) string<?))
 (define failed (remove check files))
-;; The objects only exist to make the compiler run.
 (when (file-exists? out-dir) (delete-file-recursively out-dir))
 (format #t "scheme: compiled ~a file(s), ~a with problems~%" (length files) (length failed))
 (exit (if (null? failed) 0 1))

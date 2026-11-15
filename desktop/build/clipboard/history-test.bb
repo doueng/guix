@@ -1,4 +1,3 @@
-;; It never reads or changes the live clipboard.
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.string :as str])
@@ -12,7 +11,6 @@
 (fs/delete db)
 (def env {"PATH" (str cliphist-dir ":" (System/getenv "PATH"))
           "CLIPHIST_DB_PATH" db
-          ;; No compositor: the focused-window check finds none and allows.
           "HYPRLAND_INSTANCE_SIGNATURE" "none"})
 
 (defn store! [in & [state]]

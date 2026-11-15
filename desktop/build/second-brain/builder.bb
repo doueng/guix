@@ -1,12 +1,4 @@
 #!/usr/bin/env bb
-;;   builder.bb serve     the page on 127.0.0.1:8790, open only to the tailnet
-;;                        login that owns the builder (BRAIN_OWNER)
-;;   builder.bb receive   sshd's forced command for the laptop's push key: reads
-;;                        one export on stdin and imports it; SSH_ORIGINAL_COMMAND
-;;                        names the kind (chrome, html SOURCE, x-likes, x-export)
-;;   builder.bb nightly   fetch new pages, rewrite the markdown tree, back up the db
-;; The wrapper puts the second-brain command, tailscale, sqlite3, flock, nice,
-;; ionice and timeout on PATH and sets BRAIN_HOME.
 (ns second-brain-builder
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
@@ -17,7 +9,6 @@
 (def db (str home "/data/brain.db"))
 (def lock (str home "/jobs.lock"))
 (def port "8790")
-;; A Chrome Bookmarks file is a few MB; an X like.js some tens.
 (def max-bytes (* 64 1024 1024))
 
 (defn die [& msg] (binding [*out* *err*] (apply println msg)) (System/exit 1))
@@ -33,8 +24,6 @@
        (catch Exception _ nil)))
 
 (defn serve []
-  ;; tailscaled may still be starting; the last answer is kept for that case.
-  ;; The login itself stays out of the log.
   (let [file (str home "/owner")
         owner (or (some (fn [_] (or (tailnet-owner) (do (Thread/sleep 1000) nil))) (range 30))
                   (when (fs/exists? file) (not-empty (str/trim (slurp file)))))]
@@ -78,7 +67,6 @@
     (fs/create-dirs (fs/parent file))
     (fs/write-bytes (str file ".new") bytes)
     (fs/move (str file ".new") file {:replace-existing true :atomic-move true})
-    ;; The import prints counts only, never the saves themselves.
     (let [r @(apply p/process {:out :inherit :err :inherit :extra-env {"BRAIN_DB" db}}
                         (concat ["flock" "-w" "600" lock "nice" "-n" "10" "second-brain"] args))]
       (System/exit (:exit r)))))
@@ -88,8 +76,6 @@
   (:exit @(apply p/process {:out :inherit :err :inherit :extra-env {"BRAIN_DB" db}} args)))
 
 (defn nightly []
-  ;; Low priority and bounded: the builder builds too.  enrich fetches at most
-  ;; 1500 pages a night, four hosts at a time with a pause between requests.
   (let [heavy ["flock" "-w" "600" lock "nice" "-n" "19" "ionice" "-c" "3"
                "timeout" "3h" "second-brain"]
         enrich (apply step (concat heavy ["enrich" "--limit" "1500"]))

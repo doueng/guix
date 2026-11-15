@@ -42,12 +42,9 @@
         (recur)))
     seen))
 
-;; The interpreter running these tests, so the script runs without bb on PATH, as in a Guix build.
 (def bb (.. (java.lang.ProcessHandle/current) info command get))
 
 (deftest opens-jjui-in-the-directory-with-or-without-a-popup-open
-  ;; THEN brings back only a popup jjui replaced, such as the Inbox's. From an
-  ;; Inbox in an ordinary pane it would stack a second Inbox in the popup.
   (doseq [open? [false true]]
     (let [tmp (fs/create-temp-dir)
           sock (str tmp "/herdr.sock")
@@ -61,7 +58,6 @@
              (last @seen)) (str "popup open: " open?)))))
 
 (deftest the-popup-puts-local-bin-first-on-path-for-the-preview
-  ;; Herdr's server PATH lacks ~/.local/bin, where pierre-diff-ansi lives.
   (is (= "/h/.local/bin:/gnu/bin:/usr/bin"
          (get (jjui/pane-env {"HOME" "/h" "PATH" "/gnu/bin:/usr/bin"}) "PATH")))
   (is (= "/h/.local/bin:/gnu/bin"

@@ -7,7 +7,6 @@ const TOOL = "jev_classify_task";
 const MODE_ENTRY = "poteto-mode";
 const TIMEOUT_MS = 20_000;
 
-// poteto-mode's SKILL.md Route map lists these keys; the bbh workflow test fails when they differ.
 const ROUTES = {
   investigation: "Read-only understanding, explanation, or diagnosis; no implementation is requested.",
   bug_fix: "Existing behavior is defective; reproduce, diagnose, fix, and verify it.",
@@ -95,7 +94,6 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
       if (answer?.type !== "choice") throw new Error("TypeSafe returned no task classification");
       if (!Object.hasOwn(ROUTES, answer.choice)) throw new Error("TypeSafe selected an unknown route");
       const route = answer.choice as Route;
-      // Pi validates the response shape and numbers; routing still requires every route's probability.
       const probabilities = Object.fromEntries(Object.keys(ROUTES).map((name) => {
         const probability = answer.probabilities[name];
         if (probability === undefined) throw new Error(`TypeSafe returned no probability for ${name}`);
@@ -136,13 +134,11 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
         active = (entry.data as { active?: unknown } | undefined)?.active === true;
       }
     }
-    // New conversations start in poteto-mode. A recorded choice, including /poteto-mode-off, wins.
     autoStart = !recorded && !started;
     rereadAfterCompaction = false;
     sync(ctx);
   });
 
-  // The selector falls back to the first user message, which is the expanded skill block.
   function nameSession(task: string) {
     const name = task.replace(/\s+/g, " ").trim().slice(0, 80);
     if (name && !pi.getSessionName()) pi.setSessionName(name);
@@ -155,7 +151,6 @@ export default function jevPstackExtension(pi: ExtensionAPI) {
       setActive(true, ctx);
       if (firstPrompt) nameSession(event.text.replace(/^\/skill:poteto-mode/, ""));
     } else if (autoStart && !event.text.startsWith("/")) {
-      // Pi expands /skill: after input handlers, so this loads the skill exactly as typing it would.
       setActive(true, ctx);
       nameSession(event.text);
       return { action: "transform", text: `/skill:poteto-mode ${event.text}` };

@@ -40,7 +40,6 @@
   (let [chords (for [line (str/split-lines (str (slurp "desktop/configs/hypr/hyprland.lua")
                                                 (slurp "desktop/configs/hypr/keybindings.lua")))
                      :let [[_ chord] (re-find #"^(?:hl|keys)\.bind\(\"([^\"]+)\"" line)]
-                     ;; A release bind ends a held chord rather than being one.
                      :when (and chord (not (str/includes? line "release = true")))]
                  (set (map str/upper-case (str/split chord #" \+ "))))]
     (is (= (count chords) (count (distinct chords))))

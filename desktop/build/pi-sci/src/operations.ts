@@ -21,7 +21,6 @@ export function operation<T extends TObject>(
 	positional?: string,
 	mutation = false,
 	select?: string,
-	// Alternative key spellings, renamed to the canonical key before checking.
 	aliases: Record<string, string> = {},
 ) {
 	return {
@@ -85,9 +84,6 @@ function relativePath(value: Json, base: string): Json {
 	return path.startsWith("..") || isAbsolute(path) ? value : path;
 }
 
-// Paths under the call's directory print relative to it, which keeps results
-// short. Passing one back with the same :cwd names the same file. Only path
-// fields change, never file contents in :value or :text.
 export function relativePaths(data: { [key: string]: Json }, base: string) {
 	const out = { ...data };
 	for (const key of ["path", "root", "pattern"])

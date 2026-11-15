@@ -50,7 +50,6 @@ export type DelimiterOutcome =
 	| { kind: "repaired"; content: string; note: string }
 	| { kind: "unbalanced"; summary: string };
 
-// Emacs Lisp character syntax such as ?(, ?\), and ?\C-\M-] where the last character is data.
 const ELISP_CHARACTER = /\?(?:\\\^|\\[ACHMSs]-)*\\?./sy;
 
 const CLOSER = { "(": ")", "[": "]", "{": "}" } as const;
@@ -140,8 +139,6 @@ function closeTrailingTruncation(content: string, { balance, nestedTopLevelLines
 		.slice(outer.line)
 		.filter((line) => line.trim()).length;
 	if (trailing > MAX_TRAILING_NONBLANK_LINES) return undefined;
-	// A form starting in column 1 inside the open region is a top-level form
-	// that closing at EOF would silently re-parent.
 	if (nestedTopLevelLines.some((line) => line >= outer.line)) return undefined;
 	const closers = balance.stack
 		.toReversed()

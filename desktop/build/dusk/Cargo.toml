@@ -6,11 +6,9 @@ rust-version = "1.93"
 publish = false
 description = "Programmable Wayland shell: GPUI surfaces described by a live Babashka runtime"
 
-# GPUI is pinned to the last Zed revision whose toolchain matches Guix's Rust
-# (1.93). Cargo.lock started from Zed's lockfile at that revision so every
-# transitive crate is a version Zed itself built with.
+# GPUI pinned to the last Zed revision built with Guix's Rust (1.93); Cargo.lock
+# started from Zed's lockfile at that revision.
 [features]
-# Headless GPUI integration tests; not included in the daemon build.
 ui-tests = ["gpui/test-support"]
 
 [dependencies]

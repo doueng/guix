@@ -6,10 +6,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { answer, lines } from "./tasks.mjs";
 
-// Questions and edits modeled on prompts from real Pi sessions in this
-// repository, run against a fixed snapshot of it. Guix itself computes the
-// answer keys, so a grader never trusts its own parse of the Scheme.
-
 const REPO = fileURLToPath(new URL("../../../../", import.meta.url));
 const COMMIT = "b7fd83a5a210e6ba89fe80f2069f72818296d5d4";
 const PATHS = [
@@ -103,7 +99,6 @@ const RESOLVES = `(resolve-interface '(engstrand features tailscale)) (display "
 const UNUSED = "  #:use-module (engstrand packages jjui)\n";
 const TAILSCALE = "modules/engstrand/features/tailscale.scm";
 
-// Expected answers come from an untouched snapshot, computed once per run.
 let truth;
 async function expected() {
 	if (truth) return truth;

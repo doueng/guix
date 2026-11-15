@@ -130,9 +130,6 @@
    [#"^js/JSON" (constantly "Use json/parse and json/generate.")]
    [#"^js/" (constantly "There is no JavaScript interop. clojure.core, clojure.string, clojure.set, Math, and the Pi namespaces are available.")]])
 
-;; Clojure functions models reach for that SCI's ClojureScript core lacks or
-;; that have no interop route here. Math mirrors the static methods of
-;; java.lang.Math that scripts use.
 (def numbers
   {'parse-long parse-long
    'parse-double parse-double
@@ -172,8 +169,6 @@
   (when (and (symbol? node) (re-find dotted-symbol (str node)))
     (throw (ex-info (str "Unable to resolve symbol: " node) (select-keys (meta node) [:line :column])))))
 
-;; A page cut short by a byte budget looks complete unless the script checks
-;; :truncated. A read that returned everything it asked for is not partial.
 (defn partial-read [args result]
   (when (and (map? args) (map? result) (:truncated result))
     (case (:operation args)

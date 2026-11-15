@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// Keeps the old results.jsonl as results.jsonl.bak.  Use after fixing a
-// grader; trials are not rerun.
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { TASKS } from "./registry.mjs";

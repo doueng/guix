@@ -151,15 +151,12 @@ pub fn client_msg(args: &[String]) -> i32 {
     }
 }
 
-/// `dusk dmenu [-p PROMPT]`: choose one stdin line through the shell UI.
-/// Prints the choice and exits 0, or exits 1 when cancelled.
 pub fn client_dmenu(args: &[String]) -> i32 {
     let mut prompt = String::new();
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "-p" | "--prompt" => prompt = it.next().cloned().unwrap_or_default(),
-            // dmenu compatibility flags that do not change behaviour here.
             "-i" | "-b" | "-f" => {}
             "-l" | "-fn" | "-nb" | "-nf" | "-sb" | "-sf" | "-m" | "-w" => {
                 it.next();
