@@ -296,6 +296,21 @@
   [^js tab]
   (str/starts-with? (or (.-url tab) "") (js/chrome.runtime.getURL "ui.html?newtab")))
 
+(defonce ^:private swapped (atom #{}))
+
+(defn- swap-incognito-new-tab!
+  "Chrome never applies chrome_url_overrides in incognito, so an incognito window's new tab page is Chrome's own
+  and has no keys. Replace TAB, when it is one, with ours, in a new tab as the override does so the page gets focus."
+  [^js tab]
+  (when (and (.-incognito tab) (= "chrome://newtab/" (or (not-empty (.-pendingUrl tab)) (.-url tab)))
+             (not (@swapped (.-id tab))))
+    (swap! swapped conj (.-id tab))
+    (-> (js/chrome.tabs.create (clj->js (cond-> {:url (js/chrome.runtime.getURL "ui.html?newtab") :active (.-active tab)
+                                                 :index (.-index tab) :windowId (.-windowId tab)}
+                                          (.-openerTabId tab) (assoc :openerTabId (.-openerTabId tab)))))
+        (.then #(js/chrome.tabs.remove (.-id tab)))
+        (.catch (fn [e] (js/console.warn "vimium-cljs: incognito new tab" e))))))
+
 (defn- show-in-tab
   "Asks TAB to show the Vomnibar in MODE; resolves to whether it could (it has focus).
   Our new tab page is already an empty tab, so there a pick opens in place even for NEW-TAB."
@@ -393,8 +408,15 @@
   ;; DevTools key events never reach Chrome's shortcuts, so the e2e suite runs the command here.
   (unchecked-set js/globalThis "vimiumCljsVomnibarCommand" (fn [tab mode new-tab] (vomnibar-command! (or mode "omni") tab new-tab)))
   (js/chrome.tabs.onActivated.addListener (fn [^js info] (note-active! (.-tabId info))))
-  (js/chrome.tabs.onRemoved.addListener (fn [id] (swap! sessions dissoc id)))
-  (js/chrome.tabs.onUpdated.addListener (fn [id ^js info] (when (= "loading" (.-status info)) (swap! sessions dissoc id))))
+  (js/chrome.tabs.onRemoved.addListener (fn [id] (swap! sessions dissoc id) (swap! swapped disj id)))
+  (js/chrome.tabs.onUpdated.addListener (fn [id ^js info ^js tab]
+                                          (when (= "loading" (.-status info)) (swap! sessions dissoc id))
+                                          (when (.-url info) (swap-incognito-new-tab! tab))))
+  ;; Split incognito mode: this worker serves only incognito windows there, and a new window's first tab can
+  ;; exist before the worker starts.
+  (js/chrome.tabs.onCreated.addListener swap-incognito-new-tab!)
+  (when (.-inIncognitoContext js/chrome.extension)
+    (-> (js/chrome.tabs.query #js {}) (.then #(run! swap-incognito-new-tab! %))))
   ;; The content script cannot see history.pushState, so tell the frame its URL changed.
   (let [url-changed (fn [^js d] (to-frame (.-tabId d) (.-frameId d) {:type "url-changed"}))]
     (js/chrome.webNavigation.onHistoryStateUpdated.addListener url-changed)

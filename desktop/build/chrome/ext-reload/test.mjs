@@ -47,15 +47,18 @@ writeFileSync(join(proj, 'ext/cs.js'), '');
 // The rebuild adds a command with a suggested key, as T197's vomnibar-new-tab did.
 writeFileSync(join(proj, 'build.json'), JSON.stringify({
   'ext/bg.js': `self.MARK = 'two';\n${hook}`,
-  'ext/manifest.json': manifest('1.1', { commands: { go: { description: 'go', suggested_key: { default: 'Ctrl+Shift+Y' } } } }),
+  'ext/manifest.json': manifest('1.1', { incognito: 'split', commands: { go: { description: 'go', suggested_key: { default: 'Ctrl+Shift+Y' } } } }),
 }));
 const config = join(tmp, 'extensions.edn');
 writeFileSync(config, `{"target" {:dir "${proj}" :ext "ext" :build ["bb" "-e" "(doseq [[f s] (cheshire.core/parse-string (slurp \\"build.json\\"))] (spit f s))"]}
  "missing" {:dir "${proj}" :ext "ext2"}}`);
 mkdirSync(join(proj, 'ext2'));
 writeFileSync(join(proj, 'ext2/manifest.json'), JSON.stringify({ manifest_version: 3, name: 'never loaded', version: '1' }));
+// Chrome's Preferences as ext-reload reads them: the target is loaded and Allow in Incognito is off.
+const prefs = join(tmp, 'Preferences');
+writeFileSync(prefs, JSON.stringify({ extensions: { settings: { [keyId]: { location: 4 } } } }));
 const env = { ...process.env, EXT_RELOAD_PORT: String(PORT), EXT_RELOAD_CONFIG: config,
-              EXT_RELOAD_HELPER_SRC: helperSrc, EXT_RELOAD_HELPER_DIR: helperDir };
+              EXT_RELOAD_HELPER_SRC: helperSrc, EXT_RELOAD_HELPER_DIR: helperDir, EXT_RELOAD_CHROME_PREFS: prefs };
 const cli = (...args) => spawnSync('bb', [BIN, ...args], { env, encoding: 'utf8' });
 
 const hub = spawn('bb', [BIN, 'serve'], { env, stdio: ['ignore', 'inherit', 'inherit'] });
@@ -131,6 +134,8 @@ try {
   assert.match(r.stdout, new RegExp(`reloaded ext-reload test target 1\\.\\d \\(${keyId}\\)`), 'reloaded by its key id');
   assert.doesNotMatch(r.stdout, new RegExp(oldId), 'the old copy of the same name is not the one reloaded');
   assert.match(r.stdout, /reloaded 1 tab$/m);
+  assert.match(r.stdout, new RegExp(`off in incognito windows\\. Once: open chrome://extensions/\\?id=${keyId} and turn on Allow in Incognito`),
+               'a manifest that asks for incognito gets the one click Chrome needs');
   assert.equal(await mark(), 'two', 'Chrome reread the rebuilt extension from disk');
   const manifestNow = 'chrome.commands.getAll().then((cs) => [chrome.runtime.getManifest().version, ...cs.map((c) => `${c.name}=${c.shortcut}`)].join(" "))';
   let now;

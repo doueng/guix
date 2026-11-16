@@ -155,6 +155,19 @@
 (defn entry-of [nm]
   (or (get (registry) nm) (die "Unknown extension" nm "- known:" (str/join ", " (keys (registry))))))
 
+(def chrome-prefs (or (System/getenv "EXT_RELOAD_CHROME_PREFS")
+                      (str home "/.var/app/com.google.Chrome/config/google-chrome/Default/Preferences")))
+
+(defn incognito-hint
+  "When manifest M asks for incognito (its \"incognito\" key) and Chrome's profile shows Allow in Incognito off for ID,
+  the one click that turns it on. No API, flag or policy sets it for an unpacked extension; Chrome keeps it per id."
+  [m id]
+  (when (and (:incognito m) id (fs/exists? chrome-prefs))
+    (let [s (try (get-in (json/parse-string (slurp chrome-prefs)) ["extensions" "settings" id]) (catch Exception _ nil))]
+      (when (and s (not (get s "incognito")))
+        (format "ext-reload: %s is off in incognito windows. Once: open chrome://extensions/?id=%s and turn on Allow in Incognito"
+                (:name m) id)))))
+
 (defn reload [nm opts]
   (let [entry (entry-of nm)
         _ (when-not (:no-build opts) (build! nm entry))
@@ -164,7 +177,8 @@
     (if (:ok r)
       (do (doseq [x (:extensions r)]
             (println (format "ext-reload: %s %s %s (%s)" (if (:activated r) "activated" "reloaded") (:name x) (:version x) (:id x))))
-          (println (format "ext-reload: reloaded %d tab%s" (:tabs r) (if (= 1 (:tabs r)) "" "s"))))
+          (println (format "ext-reload: reloaded %d tab%s" (:tabs r) (if (= 1 (:tabs r)) "" "s")))
+          (some-> (incognito-hint m (manifest-id m)) println))
       (explain r nm))))
 
 (defn loaded [] (let [r (hub! {:op "list"})] (if (:ok r) (:extensions r) (explain r nil))))

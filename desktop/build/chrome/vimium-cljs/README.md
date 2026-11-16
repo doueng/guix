@@ -41,6 +41,17 @@ The extension replaces Chrome's new tab page with the Vomnibar (`ui.html?newtab`
 typing goes straight to a search. Chrome focuses the address bar on a new tab page, so the replacement opens
 `ui.html?newtab` in its place and closes itself. `new-tab-url` in config.cljs still overrides what `t` opens.
 
+## Incognito
+
+The manifest asks for `"incognito": "split"`: incognito windows get their own worker and load the extension's pages
+in incognito. Chrome never applies `chrome_url_overrides` there, so that worker swaps Chrome's incognito new tab page
+for `ui.html?newtab`, and Ctrl+Shift+N then typing goes to the Vomnibar. Spanning mode can't do that: Chrome opens a
+spanning extension's page in a normal window instead. Chrome only lets an unpacked extension into incognito after a
+click on Allow in Incognito at chrome://extensions/?id=ceeiidnmpnfgpgccdchgcladeoldljem. No API, flag or policy sets
+it, but Chrome keeps it for the extension's fixed id, so it is a one-time click; `ext-reload` prints it when it is off.
+`npm run e2e:incognito` checks it headless, and `DISPLAY=:99 node scripts/incognito-live.mjs DIR` screenshots
+Ctrl+Shift+N and typing on an Xvfb.
+
 ## Cmd+Space b b
 
 The `vomnibar-tabs` command opens the Vomnibar on your open tabs, like Doom's SPC b b. Its suggested key

@@ -7,6 +7,7 @@
   "minimum_chrome_version": "116",
   "side_panel": { "default_path": "panel.html" },
   "chrome_url_overrides": { "newtab": "ui.html" },
+  "incognito": "split",
   "icons": { "128": "icons/icon128.png" },
   "background": { "service_worker": "js/bg.js" },
   "permissions": ["tabs", "bookmarks", "history", "storage", "sessions", "webNavigation",
