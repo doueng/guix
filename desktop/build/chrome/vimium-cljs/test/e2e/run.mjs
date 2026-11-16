@@ -295,9 +295,11 @@ test("Vomnibar: an open tab's exact title ranks first, Enter switches without a 
   for (const t of [notes, home]) await b.cdp('Target.closeTarget', { targetId: t });
 });
 
-test('the Vomnibar command (Ctrl+L) opens the Vomnibar in the page', T, async () => {
+test('the Vomnibar command (Ctrl+Shift+H, sent by Ctrl+L) opens the Vomnibar in the page', T, async () => {
   await open();
   const w = await workerSession(b.cdp, b.extensionId);
+  const cmd = await evaluate(b.cdp, w, "chrome.commands.getAll().then(cs => cs.find(c => c.name === 'vomnibar')?.shortcut || '')");
+  assert.equal(cmd, 'Ctrl+Shift+H', 'suggested key assigned');
   await evaluate(b.cdp, w, 'chrome.tabs.query({active: true, lastFocusedWindow: true}).then(t => vimiumCljsVomnibarCommand(t[0])).then(() => true)');
   await sleep(600);
   const frames = await extensionFrames();

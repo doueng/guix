@@ -24,7 +24,7 @@
 
 Caps+Alt provides Ctrl+Alt without reaching for the bottom-left Ctrl key.
 Plain Alt letters belong to applications, not Hyprland. There are three exceptions. Alt+Space is the Herdr leader, so Emacs M-SPC is not available. Alt+W closes a window everywhere, so Emacs M-w is shadowed. Alt+1..0 focus workspaces 1 to 10 and Alt+Shift+1..0 move the window there, by request, since Cmd+1..9 already switch tabs. Applications lose Alt and Alt+Shift digits: Chrome's Alt+1..9 tab keys, Ghostty's goto_tab, Doom's M-1..M-0 workspace keys (SPC TAB 1..9 remain), Emacs digit-argument (C-u N remains), Emacs M-! M-$ M-% M-& M-( M-) (Doom's :%s and SPC : remain), and IntelliJ's Alt+1..9 tool windows (Goto Action remains).
-Cmd+hjkl remains the existing arrow layer. Cmd+L is not Chrome's address-bar shortcut. In Chrome, Ctrl+L opens the vimium-cljs Vomnibar, even from the address bar, and Alt+D focuses the address bar. Chrome will not give an extension a key its own shortcut uses, so Ctrl+L is set once by hand at chrome://extensions/shortcuts (Vimium (cljs), Open the Vomnibar).
+Cmd+hjkl remains the existing arrow layer. Cmd+L is not Chrome's address-bar shortcut. In Chrome, Ctrl+L opens the vimium-cljs Vomnibar, even from the address bar, and Alt+D focuses the address bar. Chrome will not give an extension a key its own shortcut uses, so in Chrome Hyprland turns Ctrl+L into Ctrl+Shift+H, the `vomnibar` command's suggested key; other apps get Ctrl+L unchanged.
 Cmd chords can differ per application. See [Application layers](#application-layers).
 
 ## Application layers

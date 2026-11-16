@@ -91,6 +91,8 @@ end
 M.chrome_tab_list = in_chrome("ALT", "e", "e", "Alt+E", "Chrome tab list (side panel)")
 -- kanata turns Cmd+T into Ctrl+T. Elsewhere Ctrl+T stays, such as fish's transpose on Caps+T.
 M.chrome_vomnibar_new_tab = in_chrome("CTRL", "t", "y", "Cmd+T", "Vomnibar, pick opens in a new tab")
+-- Chrome keeps Ctrl+L for its address bar and never gives it to an extension. Elsewhere Ctrl+L stays clear-screen etc.
+M.chrome_vomnibar = in_chrome("CTRL", "l", "h", "Ctrl+L", "Vomnibar, pick opens in this tab")
 
 function M.herdr_yank()
   if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "f" } }) then

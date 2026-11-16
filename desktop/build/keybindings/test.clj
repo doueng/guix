@@ -1,7 +1,9 @@
 (ns keyguide-test
   (:require [clojure.test :refer [deftest is run-tests]]
             [clojure.edn :as edn]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [babashka.process :as p]
+            [cheshire.core :as json]))
 (load-file "desktop/bin/keyguide")
 (require '[hypr.dispatch :as hypr])
 
@@ -46,6 +48,35 @@
     (is (not-any? #(and (contains? % "ALT") (<= 2 (count %) 3) (not (contains? % "CTRL"))
                        (not (some (set (cons "SPACE" (map str "WE0123456789"))) %))) chords)
         "Alt plus a key belongs to applications, except Alt+Space, Alt+W (close window), Alt+E (Chrome tab list, passed through elsewhere) and Alt+digits (workspaces)")))
+
+(defn- bound-to
+  "The keys.lua function hyprland.lua binds CHORD to, such as \"chrome_vomnibar\" for \"CTRL + L\"."
+  [chord]
+  (some #(second (re-find (re-pattern (str "^hl\\.bind\\(\"" (java.util.regex.Pattern/quote chord) "\", keys\\.(\\w+)\\)")) %))
+        (str/split-lines (slurp "desktop/configs/hypr/hyprland.lua"))))
+
+(defn- presses
+  "The chords Hyprland sends when CHORD is pressed with a window of CLASS active: runs the real keys.lua under
+  lua with a stub hl that records send_key_state presses."
+  [chord class]
+  (let [f (bound-to chord)
+        lua (str "local sent = {}\n"
+                 "hl = { dsp = { send_key_state = function(a) return a end }, exec_cmd = function() end,\n"
+                 "  dispatch = function(a) if a.state == 'down' then sent[#sent + 1] = a.mods .. '+' .. a.key end end,\n"
+                 "  get_active_window = function() return { class = '" class "' } end }\n"
+                 "dofile('desktop/configs/hypr/keys.lua')." f "()\n"
+                 "io.write(table.concat(sent, ' '))")
+        r (p/shell {:out :string :err :string :continue true} "lua" "-e" lua)]
+    (is (zero? (:exit r)) (:err r))
+    (:out r)))
+
+(deftest chrome-ctrl-l-opens-the-vomnibar-and-other-apps-keep-ctrl-l
+  (is (= "CTRL SHIFT+h" (presses "CTRL + L" "google-chrome"))
+      "in Chrome, Ctrl+L taps vimium-cljs's vomnibar command key")
+  (is (= "CTRL+l" (presses "CTRL + L" "com.mitchellh.ghostty")) "elsewhere Ctrl+L passes through unchanged")
+  (is (= "Ctrl+Shift+H" (get-in (json/parse-string (slurp "desktop/build/chrome/vimium-cljs/ext/manifest.json"))
+                                ["commands" "vomnibar" "suggested_key" "default"]))
+      "the key Hyprland taps is the one vimium-cljs's manifest suggests for its vomnibar command"))
 
 (defn chord-keys
   "The set of upper-cased keys in a Hyprland chord such as \"SUPER + COMMA\" or a

@@ -31,9 +31,11 @@ plain data in `src/vimium_cljs/config.cljs`. Edit it, then run `ext-reload vimiu
 
 ## Ctrl+L
 
-The manifest's `vomnibar` command opens the Vomnibar. Chrome won't auto-assign Ctrl+L to an extension because its
-own address-bar shortcut uses it, so set it once at chrome://extensions/shortcuts. After that it works from
-the page, the address bar and chrome:// pages, the last two through a popup Vomnibar that fills its window.
+The manifest's `vomnibar` command opens the Vomnibar; the pick opens in the current tab. Chrome won't give an
+extension Ctrl+L because its own address-bar shortcut uses it, so the command's suggested key is Ctrl+Shift+H, and
+on the guix desktop Hyprland sends Ctrl+Shift+H when Chrome gets Ctrl+L (other apps keep Ctrl+L). Nothing to set by
+hand. It works from the page, the address bar and chrome:// pages, the last two through a popup Vomnibar that fills
+its window. Elsewhere, assign Ctrl+L to it once at chrome://extensions/shortcuts.
 
 ## New tab
 
@@ -71,7 +73,7 @@ command focuses it and the pick fills that empty tab.
 
 The `tab-panel` command opens the window's tabs in Chrome's side panel (`ext/panel.html`): click switches,
 middle-click or × closes. It works next to Chrome's own tab strip, or alone in a Chrome that hides it.
-On the guix desktop Alt+E toggles it; elsewhere assign it a key at chrome://extensions/shortcuts, like Ctrl+L.
+On the guix desktop Alt+E toggles it; elsewhere assign it a key at chrome://extensions/shortcuts.
 
 ## Google Docs
 

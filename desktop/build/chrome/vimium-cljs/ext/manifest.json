@@ -25,7 +25,8 @@
     }
   ],
   "commands": {
-    "vomnibar": { "description": "Open the Vomnibar" },
+    "vomnibar": { "description": "Open the Vomnibar; a pick opens in this tab (Ctrl+L in Hyprland)",
+                  "suggested_key": { "default": "Ctrl+Shift+H" } },
     "vomnibar-tabs": { "description": "Search open tabs (desktop leader b b)",
                        "suggested_key": { "default": "Ctrl+Shift+K" } },
     "vomnibar-new-tab": { "description": "Open the Vomnibar; a pick opens in a new tab (Cmd+T in Hyprland)",
