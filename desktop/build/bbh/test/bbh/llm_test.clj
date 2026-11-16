@@ -4,17 +4,27 @@
             [babashka.http-client :as http]
             [bbh.auth :as auth]
             [bbh.llm :as llm]
+            [cheshire.core :as json]
             [clojure.test :refer [deftest is use-fixtures]]))
 
 (use-fixtures :once hermetic/fixture)
 
-(deftest accumulate-joins-text-and-split-tool-arguments
+(defn- streamed-reply
+  "The reply OpenRouter's sample function builds from streamed CHUNKS."
+  [chunks]
+  (let [sse (str (apply str (map #(str "data: " (json/generate-string %) "\n\n") chunks)) "data: [DONE]\n")]
+    (with-redefs [http/post (fn [& _] {:status 200 :headers {} :body (java.io.ByteArrayInputStream. (.getBytes ^String sse "UTF-8"))})
+                  auth/api-key (fn [& _] "test-key")
+                  llm/model-info (constantly nil)]
+      ((llm/openrouter "test") {} {:on-text identity :on-open identity}))))
+
+(deftest streamed-text-and-split-tool-arguments-are-joined
   (is (= {:message {:role "assistant"
                     :content "Hello"
                     :tool_calls [{:id "c1" :type "function"
                                   :function {:name "clojure" :arguments "{\"code\":\"1\"}"}}]}
           :usage {:input 3 :cached 0 :written 0 :output 0 :thinking 0 :cost nil}}
-         (llm/accumulate [{:choices [{:delta {:content "Hel"}}]}
+         (streamed-reply [{:choices [{:delta {:content "Hel"}}]}
                           {:choices [{:delta {:content "lo"
                                               :tool_calls [{:index 0 :id "c1"
                                                             :function {:name "clojure" :arguments "{\"co"}}]}}]}
@@ -22,10 +32,10 @@
                           {:usage {:prompt_tokens 3}}]))))
 
 (deftest a-reply-stopped-at-the-output-limit-is-truncated
-  (is (:truncated (llm/accumulate [{:choices [{:delta {:content "Hel"}}]}
+  (is (:truncated (streamed-reply [{:choices [{:delta {:content "Hel"}}]}
                                    {:choices [{:delta {} :finish_reason "length"}]}])))
-  (is (:truncated (llm/accumulate [{:choices [{:delta {} :finish_reason "tool_calls" :native_finish_reason "length"}]}])))
-  (is (nil? (:truncated (llm/accumulate [{:choices [{:delta {:content "Hi"} :finish_reason "stop"}]}])))))
+  (is (:truncated (streamed-reply [{:choices [{:delta {} :finish_reason "tool_calls" :native_finish_reason "length"}]}])))
+  (is (nil? (:truncated (streamed-reply [{:choices [{:delta {:content "Hi"} :finish_reason "stop"}]}])))))
 
 (deftest broken-streams-are-errors-unless-the-user-cancelled
   (let [path (str (fs/create-temp-file {:prefix "bbh-stream-test"}))
@@ -85,14 +95,14 @@
 
 (deftest usage-reports-cache-reads-writes-and-reasoning
   (is (= {:input 10339 :cached 10318 :written 0 :output 60 :thinking 12 :cost 0.002}
-         (:usage (llm/accumulate [{:usage {:prompt_tokens 10339 :completion_tokens 60 :cost 0.002
+         (:usage (streamed-reply [{:usage {:prompt_tokens 10339 :completion_tokens 60 :cost 0.002
                                            :prompt_tokens_details {:cached_tokens 10318 :cache_write_tokens 0}
                                            :completion_tokens_details {:reasoning_tokens 12}}}])))))
 
 (deftest streamed-reasoning-details-are-joined-by-index-for-the-next-request
   (is (= [{:type "reasoning.text" :text "Let me think" :signature "sig" :format "anthropic-claude-v1" :index 0}
           {:type "reasoning.encrypted" :data "abc" :index 1}]
-         (get-in (llm/accumulate
+         (get-in (streamed-reply
                   [{:choices [{:delta {:reasoning_details [{:type "reasoning.text" :text "Let me " :signature nil
                                                             :format "anthropic-claude-v1" :index 0}]}}]}
                    {:choices [{:delta {:reasoning_details [{:type "reasoning.text" :text "think" :index 0}]}}]}

@@ -338,7 +338,6 @@
   a function so that a slow Tailscale start does not stick. SUPER-DIR is the
   controller's directory for the inbox. DOC-ROOTS, a function, gives the roots
   `bbh.docs` lists and serves explainers from."
-  ([conversations owner] (handler conversations owner (super/super-dir)))
   ([conversations owner super-dir] (handler conversations owner super-dir docs/roots))
   ([conversations owner super-dir doc-roots]
    (super/on-change! super-dir ::stream #(broadcast! super-dir "event: changed\ndata: 1\n\n"))

@@ -3,6 +3,7 @@
             [bbh.auth :as auth]
             [bbh.codex :as codex]
             [bbh.llm :as llm]
+            [cheshire.core :as json]
             [clojure.test :refer [deftest is use-fixtures]]))
 
 (use-fixtures :once hermetic/fixture)
@@ -39,37 +40,6 @@
   (is (= {:model "m" :instructions "" :input [] :stream true :store false}
          (codex/request "m" {:messages []}))))
 
-(deftest streamed-events-become-a-reply
-  (is (= {:message {:role "assistant" :content "Hello"
-                    :tool_calls [{:id "c1" :type "function"
-                                  :function {:name "clojure" :arguments "{}"}}]}
-          :usage {:input 10 :cached 4 :written 0 :output 5 :thinking 2 :cost nil}}
-         (codex/accumulate
-          [{:type "response.output_item.added" :item {:type "message"}}
-           {:type "response.output_text.delta" :delta "Hel"}
-           {:type "response.output_text.delta" :delta "lo"}
-           {:type "response.output_item.done"
-            :item {:type "function_call" :call_id "c1" :name "clojure" :arguments "{}"}}
-           {:type "response.completed"
-            :response {:incomplete_details nil
-                       :usage {:input_tokens 10 :output_tokens 5
-                               :input_tokens_details {:cached_tokens 4 :cache_write_tokens 0}
-                               :output_tokens_details {:reasoning_tokens 2}}}}]))))
-
-(deftest a-reply-cut-off-at-the-output-limit-is-truncated
-  (is (:truncated (codex/accumulate
-                   [{:type "response.output_text.delta" :delta "partial"}
-                    {:type "response.completed"
-                     :response {:incomplete_details {:reason "max_output_tokens"}}}])))
-  (is (nil? (:truncated (codex/accumulate
-                         [{:type "response.completed" :response {:incomplete_details nil}}]))))
-  (let [r (codex/accumulate [{:type "response.output_text.delta" :delta "partial"}
-                             {:type "response.incomplete"
-                              :response {:status "incomplete" :incomplete_details {:reason "max_output_tokens"}
-                                         :usage {:input_tokens 10 :output_tokens 5}}}])]
-    (is (:truncated r) "the Responses API ends a cut-off reply with response.incomplete")
-    (is (= 10 (get-in r [:usage :input])))))
-
 (defn- stream [body]
   {:status 200 :headers {}
    :body (java.io.ByteArrayInputStream. (.getBytes ^String body "UTF-8"))})
@@ -83,6 +53,43 @@
                                        :expires (+ (System/currentTimeMillis) 60000)})]
     ((codex/sample "gpt-6.1-sol") {:messages [{:role "user" :content "hi"}]}
      {:on-text identity :on-open identity})))
+
+(defn- sampled
+  "The reply the subscription sample builds from streamed EVENTS."
+  [events]
+  (with-redefs [llm/stream! (fn [& _] (stream (apply str (map #(str "data: " (json/generate-string %) "\n\n") events))))]
+    (subscription)))
+
+(deftest streamed-events-become-a-reply
+  (is (= {:message {:role "assistant" :content "Hello"
+                    :tool_calls [{:id "c1" :type "function"
+                                  :function {:name "clojure" :arguments "{}"}}]}
+          :usage {:input 10 :cached 4 :written 0 :output 5 :thinking 2 :cost nil}}
+         (sampled
+          [{:type "response.output_item.added" :item {:type "message"}}
+           {:type "response.output_text.delta" :delta "Hel"}
+           {:type "response.output_text.delta" :delta "lo"}
+           {:type "response.output_item.done"
+            :item {:type "function_call" :call_id "c1" :name "clojure" :arguments "{}"}}
+           {:type "response.completed"
+            :response {:incomplete_details nil
+                       :usage {:input_tokens 10 :output_tokens 5
+                               :input_tokens_details {:cached_tokens 4 :cache_write_tokens 0}
+                               :output_tokens_details {:reasoning_tokens 2}}}}]))))
+
+(deftest a-reply-cut-off-at-the-output-limit-is-truncated
+  (is (:truncated (sampled
+                   [{:type "response.output_text.delta" :delta "partial"}
+                    {:type "response.completed"
+                     :response {:incomplete_details {:reason "max_output_tokens"}}}])))
+  (is (nil? (:truncated (sampled
+                         [{:type "response.completed" :response {:incomplete_details nil}}]))))
+  (let [r (sampled [{:type "response.output_text.delta" :delta "partial"}
+                    {:type "response.incomplete"
+                     :response {:status "incomplete" :incomplete_details {:reason "max_output_tokens"}
+                                :usage {:input_tokens 10 :output_tokens 5}}}])]
+    (is (:truncated r) "the Responses API ends a cut-off reply with response.incomplete")
+    (is (= 10 (get-in r [:usage :input])))))
 
 (deftest a-subscription-turn-streams-its-text
   (let [text (atom [])]

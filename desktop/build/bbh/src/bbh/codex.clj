@@ -81,11 +81,6 @@
            :usage (usage-record usage)}
     (= "max_output_tokens" incomplete) (assoc :truncated true)))
 
-(defn accumulate
-  "Fold streamed events into the sample contract's reply."
-  [events]
-  (finish (reduce step {:content "" :calls []} events)))
-
 (defn sample
   "A sample function for MODEL on the ChatGPT subscription. Takes the same
   request and callbacks as bbh.llm/openrouter."

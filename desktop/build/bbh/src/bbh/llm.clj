@@ -64,12 +64,6 @@
              :usage (usage-record (:usage msg))}
       (some output-limit-reasons [(:finish_reason msg) (:native_finish_reason msg)]) (assoc :truncated true))))
 
-(defn accumulate
-  "Fold streamed chunks into {:message :usage :truncated}, where :truncated means
-  the reply stopped at the output limit."
-  [chunks]
-  (finish (reduce step {:content ""} chunks)))
-
 (defn chunks [body]
   (->> (line-seq (io/reader body))
        (keep #(when (str/starts-with? % "data: ") (subs % 6)))

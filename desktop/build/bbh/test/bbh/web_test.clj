@@ -22,7 +22,7 @@
 (defn- site []
   (let [root (str (fs/create-temp-dir {:prefix "bbh-web"}))]
     {:root root
-     :app (web/handler root (constantly "owner@example.com"))
+     :app (web/handler root (constantly "owner@example.com") (bbh.super.client/super-dir))
      :dir #(str (fs/path root %))}))
 
 (defn- live! [{:keys [dir]} id project]
