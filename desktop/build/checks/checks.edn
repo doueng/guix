@@ -53,6 +53,10 @@
            "desktop/bin/{keyleader,keyguide,keylog,palette,winhint,hyprkan}"]
    :checks ["make keybindings-check"]
    :slow ["make hypr-nested-check"]}
+  {:name "test display"
+   :paths ["desktop/bin/test-display" "modules/engstrand/features/agent-control.scm"]
+   :checks ["make lint"]
+   :slow ["make test-display-check"]}
   {:name "clipboard"
    :paths ["desktop/configs/doom/clipboard.el" "desktop/configs/nvim/fnl/config/options.fnl"
            "desktop/build/clipboard/**"]

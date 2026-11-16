@@ -1,6 +1,7 @@
 (define-module (engstrand features agent-control)
   #:use-module (engstrand features packages)
   #:use-module (gnu home services)
+  #:use-module (gnu packages wm)
   #:use-module (gnu packages xdisorg)
   #:use-module (gnu services)
   #:use-module (gnu services shepherd)
@@ -54,7 +55,8 @@
 (define (feature-familiar-agent-control)
   (feature-package-set
    'familiar-agent-control
-   #:home-packages (list ydotool)
+   ;; sway runs desktop/bin/test-display's headless compositor.
+   #:home-packages (list ydotool sway)
    #:home-services
    (list (simple-service 'familiar-ydotool-socket
                          home-environment-variables-service-type

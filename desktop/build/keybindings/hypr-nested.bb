@@ -13,10 +13,19 @@
   (let [{:keys [out err]} @(p/process (vec args) {:out :string :err :string :extra-env env})]
     (str/trim (str out err))))
 
-(defn outer [& args] (apply sh {} args))
-
 (defn instances []
-  (set (map :instance (json/parse-string (outer "hyprctl" "-j" "instances") true))))
+  (set (map :instance (json/parse-string (sh {} "hyprctl" "-j" "instances") true))))
+
+;; The user's live Hyprland. The inherited signature goes stale when Hyprland restarts.
+(def user-env
+  (let [live (filter #(fs/exists? (str "/proc/" (:pid %)))
+                     (json/parse-string (sh {} "hyprctl" "-j" "instances") true))]
+    (if-let [i (first (sort-by :time live))]
+      {"HYPRLAND_INSTANCE_SIGNATURE" (:instance i) "WAYLAND_DISPLAY" (:wl_socket i)}
+      {})))
+
+(defn outer [& args] (apply sh user-env args))
+(defn user-focus [] (:address (json/parse-string (outer "hyprctl" "-j" "activewindow") true)))
 
 (def failures (atom []))
 (defn check [ok? what]
@@ -35,9 +44,15 @@
            ;; wtype invents keycodes; match its keys by name like a real keymap.
            "\nhl.device({ name = \"hl-virtual-keyboard-wtype\", resolve_binds_by_sym = true })\n"))
 
+(def user-focus-before (user-focus))
+;; Aquamarine nests only in Hyprland, which cannot run headless, so its window opens in
+;; the user's Hyprland: this rule sends it to a special workspace without focus, before
+;; it maps. Other live tests use desktop/bin/test-display instead.
+(outer "hyprctl" "eval" (str "hl.window_rule({ name = \"test-display-nested-hyprland\", match = { class = \"^aquamarine$\" }, "
+                               "workspace = \"special:test-display silent\", no_initial_focus = true })"))
 (def before (instances))
 (def nested (p/process ["Hyprland" "-c" (str cfg "/hyprland.lua")]
-                       {:out :discard :err :discard :extra-env {"KEYLOG_FILE" keylog}}))
+                       {:out :discard :err :discard :extra-env (assoc user-env "KEYLOG_FILE" keylog)}))
 (assert (wait-for #(seq (remove before (instances)))) "nested Hyprland did not start")
 (def sig (first (remove before (instances))))
 (def socket (:wl_socket (first (filter #(= sig (:instance %))
@@ -47,10 +62,6 @@
 (def env {"HYPRLAND_INSTANCE_SIGNATURE" sig "WAYLAND_DISPLAY" socket})
 
 (defn hypr [& args] (apply sh env "hyprctl" args))
-(defn hide-window! []
-  (let [lua (outer "hyprctl" "dispatch" "hl.dsp.window.move({ workspace = \"special:keytest\", follow = false, window = \"class:aquamarine\" })")]
-    (when-not (= "ok" lua)
-      (outer "hyprctl" "dispatch" "movetoworkspacesilent" "special:keytest,class:aquamarine"))))
 (defn submap [] (str/replace (hypr "submap") "\"" ""))
 (defn active [] (:class (json/parse-string (hypr "-j" "activewindow") true)))
 (defn type! [& args]
@@ -78,8 +89,8 @@
     (wait-for #(some (fn [c] (= class (:class c))) (json/parse-string (hypr "-j" "clients") true)))))
 
 (try
-  (hide-window!)
   (check (str/blank? (hypr "configerrors")) "config loads without errors")
+  (check (= user-focus-before (user-focus)) "the nested session did not take the user's focus")
   (client! "kt.left" "sleep" "300")
   (client! "kt.right" "sleep" "300")
   (check (= "kt.right" (active)) "the second window has focus")
@@ -160,6 +171,7 @@
             (frequencies (logged)))
          (str "the keybinding log has one row per leader, action, cancel and forward, got " (pr-str (logged))))
   (check (= "ok" (hypr "dispatch" "hl.dsp.focus({ workspace = 3 })")) "hyprctl accepts Lua dispatchers")
+  (check (= user-focus-before (user-focus)) "the user's focus never moved during the run")
   (let [out (sh env (str repo "/desktop/bin/keyleader") "--verify-hypr")]
     (check (str/starts-with? out "Hyprland has loaded all") (str "keyleader --verify-hypr: " out)))
   (let [out (sh (assoc env "HERDR_PANE_ID" "" "HERDR_ACTIVE_PANE_ID" "" "KEYLOG_FILE" keylog)

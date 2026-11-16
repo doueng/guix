@@ -1,0 +1,225 @@
+#!/usr/bin/env bb
+;; Run live tests in a headless sway that has its own Wayland socket, seat, focus and
+;; output, so their windows, keys and screenshots never touch the user's Hyprland.
+;; See /home/engstrand/guix/docs/test-display.html for why.
+(ns test-display
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [cheshire.core :as json]
+            [clojure.string :as str]))
+
+(def usage "usage: test-display [--name N] [--size WxH] -- CMD ARG...   run CMD in a throwaway test display
+       test-display [--name N] [--size WxH] start               start (or reuse) display N, print its env
+       test-display [--name N] env                              print export lines for display N
+       test-display [--name N] exec -- CMD ARG...               run CMD in display N, starting it if needed
+       test-display [--name N] stop                             stop display N
+       test-display check [--keep DIR]                          prove a headed Chrome stays off the user's screen
+
+Inside, WAYLAND_DISPLAY and SWAYSOCK name the test display, TEST_DISPLAY is its name,
+DISPLAY and HYPRLAND_INSTANCE_SIGNATURE are unset, sway, swaymsg, grim and wtype are
+on PATH, and ydotool refuses, since it types into whatever the user has focused.
+Type with wtype, click with swaymsg 'seat - cursor ...', screenshot with grim.")
+
+(defn die [& msg] (binding [*out* *err*] (println (apply str msg))) (System/exit 2))
+
+(defn parse [args]
+  (loop [[a & more :as args] args o {:name "default" :size "1280x800"}]
+    (case a
+      nil o
+      "--" (assoc o :cmd (vec more) :mode (or (:mode o) :run))
+      "--name" (recur (rest more) (assoc o :name (first more)))
+      "--size" (recur (rest more) (assoc o :size (first more)))
+      "--keep" (recur (rest more) (assoc o :keep (first more)))
+      ("start" "env" "exec" "stop" "check") (recur more (assoc o :mode (keyword a)))
+      ("-h" "--help") (assoc o :mode :help)
+      (die "test-display: unknown argument " a "\n" usage))))
+
+(defn runtime-dir [] (or (System/getenv "XDG_RUNTIME_DIR") (str "/run/user/" (str/trim (:out (p/sh "id" "-u"))))))
+
+(defn tool-bin
+  "The directory holding sway, swaymsg, grim and wtype: PATH's when sway is installed,
+  else a cached guix shell profile."
+  []
+  (if-let [sway (fs/which "sway")]
+    (str (fs/parent sway))
+    (let [r (p/sh ["guix" "shell" "sway" "grim" "wtype" "--" "sh" "-c" "dirname \"$(command -v sway)\""])]
+      (when-not (zero? (:exit r)) (die "test-display: no sway on PATH and guix shell sway failed:\n" (:err r)))
+      (str/trim (:out r)))))
+
+(defn state-dir [name] (str (runtime-dir) "/test-display/" name))
+
+(defn alive? [pid] (and pid (fs/exists? (str "/proc/" pid))))
+
+(defn read-state [name]
+  (let [f (str (state-dir name) "/state.json")]
+    (when (fs/exists? f)
+      (let [s (json/parse-string (slurp f) true)]
+        (when (and (alive? (:pid s)) (fs/exists? (str (runtime-dir) "/" (:wayland s)))) s)))))
+
+(defn env-of
+  "The environment a test runs in: the test display's, nothing of the user's session."
+  [{:keys [wayland swaysock bin name dir]}]
+  {"WAYLAND_DISPLAY" wayland "SWAYSOCK" swaysock "TEST_DISPLAY" name "XDG_SESSION_TYPE" "wayland"
+   "PATH" (str dir "/shim:" bin ":" (System/getenv "PATH"))})
+
+(def dropped ["DISPLAY" "HYPRLAND_INSTANCE_SIGNATURE" "HYPRLAND_CMD"])
+
+(defn child-env [s] (merge (apply dissoc (into {} (System/getenv)) dropped) (env-of s)))
+
+(def ydotool-shim "#!/usr/bin/env bb
+(binding [*out* *err*]
+  (println \"ydotool: refused inside test-display: it types into the user's focused window. Use wtype, which types into the test display.\"))
+(System/exit 2)
+")
+
+(defn start!
+  "Start display NAME and return its state once sway has its socket."
+  [{:keys [name size]}]
+  (let [dir (state-dir name)
+        ready (str dir "/ready")
+        bin (tool-bin)]
+    (fs/delete-tree dir)
+    (fs/create-dirs (str dir "/shim"))
+    (spit (str dir "/shim/ydotool") ydotool-shim)
+    (fs/set-posix-file-permissions (str dir "/shim/ydotool") "rwxr-xr-x")
+    (spit (str dir "/config")
+          (str "xwayland disable\n"
+               "output HEADLESS-1 resolution " size " position 0 0 bg #3c3c3c solid_color\n"
+               "default_border none\ndefault_floating_border none\nfocus_follows_mouse no\n"
+               "exec printf '%s %s' \"$WAYLAND_DISPLAY\" \"$SWAYSOCK\" > " ready "\n"))
+    (let [env (merge (apply dissoc (into {} (System/getenv)) "WAYLAND_DISPLAY" "SWAYSOCK" dropped)
+                     {"WLR_BACKENDS" "headless" "WLR_LIBINPUT_NO_DEVICES" "1"})
+          proc (p/process ["setsid" (str bin "/sway") "-c" (str dir "/config")]
+                          {:env env :in :inherit :out (fs/file dir "sway.log") :err (fs/file dir "sway.log")})]
+      (loop [n 0]
+        (cond
+          (and (fs/exists? ready) (seq (str/trim (slurp ready))))
+          (let [[wayland swaysock] (str/split (str/trim (slurp ready)) #" ")
+                s {:name name :dir dir :bin bin :wayland wayland :swaysock swaysock :pid (.pid (:proc proc))}]
+            (spit (str dir "/state.json") (json/generate-string s))
+            s)
+          (or (= n 150) (not (p/alive? proc)))
+          (die "test-display: sway did not start; see " dir "/sway.log\n"
+               (str/join "\n" (take-last 10 (str/split-lines (slurp (str dir "/sway.log"))))))
+          :else (do (Thread/sleep 100) (recur (inc n))))))))
+
+(defn tagged-pids
+  "Pids whose environment carries TEST_DISPLAY=NAME. Sandboxed Chrome outlives a lost
+  compositor and escapes the process tree through bwrap, but keeps its environment."
+  [name]
+  (let [tag (str "TEST_DISPLAY=" name)]
+    (for [d (fs/list-dir "/proc")
+          :let [pid (str (fs/file-name d))]
+          :when (re-matches #"\d+" pid)
+          :let [env (try (slurp (str d "/environ")) (catch Exception _ ""))]
+          :when (some #{tag} (str/split env #"\x00"))]
+      pid)))
+
+(defn kill-tagged! [name]
+  (when-let [pids (seq (tagged-pids name))]
+    (apply p/sh "kill" pids)
+    (Thread/sleep 1000)
+    (when-let [left (seq (tagged-pids name))] (apply p/sh "kill" "-9" left))))
+
+(defn stop! [{:keys [pid dir name]}]
+  (when name (kill-tagged! name))
+  (when (alive? pid)
+    (p/sh "kill" (str pid))
+    (loop [n 0] (when (and (alive? pid) (< n 30)) (Thread/sleep 100) (recur (inc n))))
+    (when (alive? pid) (p/sh "kill" "-9" (str pid))))
+  (when dir (fs/delete-tree dir)))
+
+(defn resolve-cmd
+  "CMD with its program looked up on the test display's PATH, so the ydotool shim wins."
+  [env [prog & args :as cmd]]
+  (if-let [hit (and prog (not (str/includes? prog "/"))
+                    (some #(let [f (fs/file % prog)] (when (fs/executable? f) (str f)))
+                          (str/split (get env "PATH") #":")))]
+    (into [hit] args)
+    cmd))
+
+(defn run-in [s cmd]
+  (let [env (child-env s)]
+    (:exit @(p/process (resolve-cmd env cmd) {:env env :inherit true}))))
+
+(defn print-env [s]
+  (println (str "unset " (str/join " " dropped)))
+  (doseq [[k v] (env-of s)] (println (str "export " k "=" (pr-str v)))))
+
+;;; check: the proof that a headed test leaves the user's session alone.
+
+(defn user-hypr
+  "Env reaching the user's live Hyprland, or nil. The inherited signature can be stale
+  after a restart, so take the live instance hyprctl lists."
+  []
+  (when (fs/which "hyprctl")
+    (let [r (p/sh ["hyprctl" "-j" "instances"])
+          live (when (zero? (:exit r))
+                 (filter #(alive? (:pid %)) (json/parse-string (:out r) true)))]
+      (when-let [i (first (sort-by :time live))]
+        {"HYPRLAND_INSTANCE_SIGNATURE" (:instance i) "WAYLAND_DISPLAY" (:wl_socket i)}))))
+
+(defn hypr-json [env & args]
+  (json/parse-string (:out (p/sh (into ["hyprctl" "-j"] args) {:extra-env env})) true))
+
+(defn user-view [env]
+  {:active (select-keys (hypr-json env "activewindow") [:address :class])
+   :clients (set (map :address (hypr-json env "clients")))
+   :monitor (:name (first (filter :focused (hypr-json env "monitors"))))})
+
+(defn sway-windows [s]
+  (let [tree (json/parse-string (:out (p/sh [(str (:bin s) "/swaymsg") "-t" "get_tree"] {:env (child-env s)})) true)]
+    (filter :app_id (tree-seq map? #(concat (:nodes %) (:floating_nodes %)) tree))))
+
+(defn chrome-argv [profile url]
+  (let [flags ["--ozone-platform=wayland" (str "--user-data-dir=" profile) "--no-first-run"
+               "--no-default-browser-check" "--disable-sync" url]]
+    (if-let [c (some fs/which (remove nil? [(System/getenv "CHROME") "chromium"]))]
+      (into [(str c)] flags)
+      (into ["flatpak" "run" "--socket=wayland" "--nosocket=x11" (str "--filesystem=" profile) "com.google.Chrome"] flags))))
+
+(defn check! [{:keys [keep]}]
+  (let [out (str (if keep (fs/create-dirs keep) (fs/create-temp-dir {:prefix "test-display-check"})))
+        uenv (or (user-hypr) (die "test-display check: no live Hyprland to compare against"))
+        s (start! {:name (str "check-" (System/currentTimeMillis)) :size "1280x800"})
+        profile (str (fs/create-temp-dir {:prefix "test-display-chrome"}))
+        failures (atom [])
+        ok (fn [pass? what] (println (if pass? "PASS" "FAIL") what) (when-not pass? (swap! failures conj what)))
+        before (user-view uenv)
+        page "data:text/html,<title>test-display</title><input autofocus oninput='document.title=this.value'><h1>TEST DISPLAY</h1>"
+        chrome (p/process (chrome-argv profile page) {:env (child-env s) :out :discard :err :discard})]
+    (try
+      (let [win (loop [n 0] (or (first (sway-windows s)) (when (< n 150) (Thread/sleep 200) (recur (inc n)))))]
+        (ok win "a headed Chrome window opened in the test display")
+        (Thread/sleep 1500)
+        (p/sh [(str (:bin s) "/wtype") "-s" "300" "typed into the test display"] {:env (child-env s)})
+        (Thread/sleep 800)
+        (let [title (:name (first (sway-windows s)))]
+          (ok (str/includes? (str title) "typed into the test display") (str "wtype reached the test Chrome (title: " title ")")))
+        (p/sh [(str (:bin s) "/grim") (str out "/test-display.png")] {:env (child-env s)})
+        (ok (fs/exists? (str out "/test-display.png")) (str "grim captured the test display: " out "/test-display.png"))
+        (ok (= 2 (run-in s ["ydotool" "key" "28:1" "28:0"])) "ydotool refuses inside the test display")
+        (let [after (user-view uenv)]
+          (p/sh ["grim" "-o" (:monitor after) (str out "/user-output.png")] {:extra-env uenv})
+          (println "user output" (:monitor after) "captured:" (str out "/user-output.png"))
+          (ok (= (:active before) (:active after)) (str "the user's focused window is unchanged: " (pr-str (:active after))))
+          (ok (= (:clients before) (:clients after)) (str "no window appeared in the user's Hyprland (" (count (:clients after)) " clients before and after)"))))
+      (finally
+        (p/destroy-tree chrome)
+        (stop! s)
+        (future (Thread/sleep 1500) (fs/delete-tree profile))))
+    (Thread/sleep 1600)
+    (if (seq @failures) (do (println "FAILED:" (count @failures)) 1) (do (println "test-display check passed") 0))))
+
+(let [{:keys [mode name cmd] :as o} (parse *command-line-args*)]
+  (System/exit
+   (case mode
+     :help (do (println usage) 0)
+     :run (let [s (start! (update o :name #(str % "-" (System/currentTimeMillis))))]
+            (try (run-in s cmd) (finally (stop! s))))
+     :start (do (print-env (or (read-state name) (start! o))) 0)
+     :env (if-let [s (read-state name)] (do (print-env s) 0) (die "test-display: display " name " is not running; use test-display start"))
+     :exec (run-in (or (read-state name) (start! o)) cmd)
+     :stop (do (stop! (or (read-state name) {:dir (state-dir name) :name name})) 0)
+     :check (check! o)
+     (die usage))))

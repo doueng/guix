@@ -22,7 +22,7 @@ Layout: `src/vimium_cljs/{keys,commands,config,hints,exclusions,rank}.cljs` are 
 `node scripts/vomnibar-lab.mjs DIR [query ...]` screenshots the Vomnibar (light and dark) over a seeded profile;
 `node scripts/vomnibar-keys.mjs` counts keystrokes for common Vomnibar tasks;
 `node scripts/vomnibar-perf.mjs` times opening and each keystroke over 5000 history entries and 60 tabs;
-`DISPLAY=:99 node scripts/vomnibar-live.mjs DIR` screenshots a headed Chrome on an Xvfb (page, new tab, popup) while xdotool types.
+`node scripts/vomnibar-live.mjs DIR` screenshots a headed Chrome (page, new tab, popup) while wtype types, all inside a throwaway `test-display`, so nothing reaches your screen.
 
 ## Changing keys and settings
 

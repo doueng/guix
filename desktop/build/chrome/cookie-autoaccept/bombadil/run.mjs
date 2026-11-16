@@ -69,13 +69,13 @@ function launchChrome(profile, headed, sitePort) {
   const rules = Object.keys(CMP_HOSTS).map((h) => `MAP ${h} 127.0.0.1:${sitePort}`).join(',');
   const flags = [
     `--host-resolver-rules=${rules}`,
-    ...(headed ? [] : ['--headless=new']), `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
+    ...(headed ? ['--ozone-platform=wayland'] : ['--headless=new']), `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
     '--disable-gpu', '--disable-sync', '--disable-background-networking', '--disable-component-update',
     '--remote-debugging-pipe', '--remote-debugging-port=0', '--enable-unsafe-extension-debugging', 'about:blank',
   ];
   const [cmd, args] = process.env.CHROME
     ? [process.env.CHROME, flags]
-    : ['flatpak', ['run', `--filesystem=${ROOT}:ro`, `--filesystem=${profile}`, 'com.google.Chrome', ...flags]];
+    : ['flatpak', ['run', `--filesystem=${ROOT}:ro`, `--filesystem=${profile}`, ...(headed ? ['--socket=wayland', '--nosocket=x11'] : []), 'com.google.Chrome', ...flags]];
   const browser = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
   let id = 0, buf = '';
   const waiting = new Map();
@@ -248,6 +248,11 @@ const html = (res, s) => res.writeHead(200, { 'content-type': 'text/html; charse
 
 async function main() {
   const o = options(process.argv.slice(2));
+  if (o.headed && !process.env.TEST_DISPLAY) {
+    // A headed Chrome runs only inside desktop/bin/test-display, never on the user's screen.
+    const r = spawnSync('test-display', ['--', process.execPath, import.meta.filename, ...process.argv.slice(2)], { stdio: 'inherit' });
+    process.exit(r.status ?? 1);
+  }
   const bombadil = bombadilBin();
   const profile = mkdtempSync(join(tmpdir(), 'cookie-autoaccept-bombadil-'));
   const out = mkdtempSync(join(tmpdir(), o.reproduce ? 'cookie-autoaccept-replay-' : 'cookie-autoaccept-trace-'));

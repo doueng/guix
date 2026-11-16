@@ -15,7 +15,7 @@ COMMON := -L "$(MODULES)"
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test ext-reload-test chrome-e2e \
-        doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check clipboard-check \
+        doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check test-display-check clipboard-check \
         clipboard-history-test taildrop-test parinfer-check parinfer-fix
 
 help:
@@ -68,6 +68,7 @@ help:
 	@echo 'kanata-check  run kanata.kbd chord tests in the kanata simulator'
 	@echo 'keybindings-check kanata-check plus generated-binding, Hyprland, Emacs and Neovim tests'
 	@echo 'hypr-nested-check test Hyprland keybindings in a nested session'
+	@echo 'test-display-check open a headed Chrome in the headless test display and prove the user'\''s screen and focus stay untouched'
 	@echo 'clipboard-check yank and paste between Emacs, Neovim and the Wayland clipboard (uses the live clipboard)'
 	@echo 'clipboard-history-test check what clipboard-history stores and skips, in a throwaway cliphist db'
 	@echo 'taildrop-test unit checks for the Taildrop send and receive script'
@@ -300,6 +301,9 @@ keybindings-check: kanata-check
 
 hypr-nested-check:
 	bb desktop/build/keybindings/hypr-nested.bb
+
+test-display-check:
+	desktop/bin/test-display check
 
 doom-baseline:
 	@$(DOOM_WARNINGS) > "$(DOOM_BASELINE)"
