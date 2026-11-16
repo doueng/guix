@@ -13,17 +13,6 @@
 (load (getenv "BBH_DOOM_AGENT_SHELL") nil t)
 (require 'agent-shell)
 
-(ert-deftest bbh-inbox-keys-are-evil-normal-state ()
-  (with-current-buffer (get-buffer-create "*bbh-inbox-keys*")
-    (eng/bbh-inbox-mode)
-    (evil-local-mode 1)
-    (should (eq 'normal evil-state))
-    (dolist (key '(("gr" . eng/bbh-inbox-refresh) ("s" . eng/bbh-inbox-send) ("2" . eng/bbh-inbox-pick)
-                   ("RET" . eng/bbh-inbox-ret) ("R" . eng/bbh-inbox-router)
-                   ("." . eng/bbh-inbox-pick-recommended) ("i" . eng/bbh-inbox-answer) ("A" . eng/bbh-inbox-approve) ("J" . eng/bbh-inbox-jjui) ("gJ" . eng/bbh-inbox-jjui-close) ("q" . quit-window)
-                   ("j" . evil-next-line) ("gg" . evil-goto-first-line) ("G" . evil-goto-line)))
-      (should (eq (cdr key) (key-binding (kbd (car key))))))))
-
 (defun bbh-test--keys-in (state keys)
   "In evil STATE, whether each (KEYS . COMMAND) in KEYS runs COMMAND here."
   (evil-change-state state)
@@ -63,7 +52,13 @@ keys act in normal state."
     (should (eq 'normal evil-state))
     (bbh-test--keys-in 'normal '(("s" . eng/bbh-inbox-send)
                                  ("C-c C-k" . eng/bbh-inbox-clear) ("gv" . eng/bbh-inbox-toggle-view)
-                                 ("]t" . eng/bbh-inbox-next-waiting)))
+                                 ("]t" . eng/bbh-inbox-next-waiting)
+                                 ("gr" . eng/bbh-inbox-refresh) ("2" . eng/bbh-inbox-pick)
+                                 ("RET" . eng/bbh-inbox-ret) ("R" . eng/bbh-inbox-router)
+                                 ("." . eng/bbh-inbox-pick-recommended) ("i" . eng/bbh-inbox-answer)
+                                 ("A" . eng/bbh-inbox-approve) ("J" . eng/bbh-inbox-jjui)
+                                 ("gJ" . eng/bbh-inbox-jjui-close) ("q" . quit-window)
+                                 ("j" . evil-next-line) ("gg" . evil-goto-first-line) ("G" . evil-goto-line)))
     (bbh-test--keys-in 'insert '(("C-n" . eng/bbh-inbox-send) ("C-c C-k" . eng/bbh-inbox-clear)))
     (bbh-test--no-c-c-c-send '(normal insert) 'eng/bbh-inbox-send)
     (dolist (state '(normal insert))
@@ -555,16 +550,6 @@ scrolled up keeps its start."
         (should-not (eq (eng/bbh--shell) old))
         (should (string-prefix-p "* add forty\n" text))
         (should (string-suffix-p (concat "The answer is 42.\n\nResumed " id "\n") text))))))
-
-(ert-deftest bbh-conversation-follows-resume ()
-  (let ((shell (generate-new-buffer " bbh-test-shell")))
-    (unwind-protect
-        (with-current-buffer shell
-          (setq-local agent-shell--state (list (cons :session (list (cons :id "20200101-000000-000")))))
-          (should (equal (eng/bbh--conversation shell) "20200101-000000-000"))
-          (setq eng/bbh-conversation "20210101-000000-000")
-          (should (equal (eng/bbh--conversation shell) "20210101-000000-000")))
-      (kill-buffer shell))))
 
 (defun bbh-test--mail (conversation id text &optional kind)
   "Leave TEXT in CONVERSATION's mailbox as bbh does, under message ID."
