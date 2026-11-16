@@ -36,7 +36,6 @@ hl.env("XCURSOR_SIZE", "20")
 require("startup")
 
 hl.window_rule({ name = "intellij-workspace", match = { class = "jetbrains-idea" }, workspace = "4" })
-hl.window_rule({ name = "chrome-no-toolbar", match = { class = "google-chrome" }, fullscreen_state = "0 2" })
 hl.window_rule({
   name = "chrome-extension-popup",
   match = { initial_title = "_crx_.*" },

@@ -70,8 +70,8 @@ command focuses it and the pick fills that empty tab.
 ## Tab list side panel
 
 The `tab-panel` command opens the window's tabs in Chrome's side panel (`ext/panel.html`): click switches,
-middle-click or × closes. It is meant for a Chrome with no tab strip or address bar (Hyprland's
-`fullscreen_state = "0 2"` rule in the guix repo). Assign it a key at chrome://extensions/shortcuts, like Ctrl+L.
+middle-click or × closes. It works next to Chrome's own tab strip, or alone in a Chrome that hides it.
+On the guix desktop Alt+E toggles it; elsewhere assign it a key at chrome://extensions/shortcuts, like Ctrl+L.
 
 ## Google Docs
 
