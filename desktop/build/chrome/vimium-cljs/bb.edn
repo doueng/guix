@@ -20,7 +20,7 @@
                   (shell "node scripts/check-guide.mjs"))}
   e2e {:doc "Headless flatpak Chrome over test/fixtures, and the reload test"
        :depends [build]
-       :task (shell "node --test --test-concurrency=1 test/e2e/run.mjs test/e2e/docs.mjs test/e2e/select.mjs test/e2e/reload.mjs test/e2e/incognito.mjs")}
+       :task (shell "node --test --test-concurrency=1 test/e2e/run.mjs test/e2e/docs.mjs test/e2e/sheets.mjs test/e2e/select.mjs test/e2e/reload.mjs test/e2e/incognito.mjs")}
   bombadil {:doc "Bombadil property run over the fixtures"
             :depends [build]
             :task (apply shell "node test/bombadil/run.mjs" *command-line-args*)}}}

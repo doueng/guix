@@ -417,13 +417,27 @@
     nil)
   (exit-mode!))
 
+(def ^:private app-catchers
+  "The key catchers of Google Docs and Sheets. A page that has one is a canvas editor, whose
+  own fields give Escape back to it."
+  ".docs-texteventtarget-iframe, #waffle-rich-text-editor")
+
+(defn catcher?
+  "Whether editable EL is one a canvas editor reads keys from while nobody sees it: in a frame
+  you cannot see (Docs) or placed off the page (Sheets)."
+  [^js el]
+  (or (hidden-frame?) (and (dom/element? el) (dom/off-page? el))))
+
 (defn focus-kind
-  "Where keys typed now go, for dispatch/decide: :page, :field, or :catcher (an editable in
-  a frame you cannot see, like Google Docs' text event target)."
+  "Where keys typed now go, for dispatch/decide: :page, :field, :catcher (see catcher?) or
+  :app-field (a visible editable on a page with an app catcher, such as a Sheets cell)."
   [^js e]
-  (cond (not (or (dom/editable? (dom/event-target e)) (dom/editable? (dom/deep-active-element)))) :page
-        (hidden-frame?) :catcher
-        :else :field))
+  (let [t (dom/event-target e) a (dom/deep-active-element)
+        el (cond (dom/editable? t) t (dom/editable? a) a)]
+    (cond (nil? el) :page
+          (catcher? el) :catcher
+          (and top? (.querySelector js/document app-catchers)) :app-field
+          :else :field)))
 
 (defn- type-ahead-key!
   "Keeps a key typed for a Vomnibar that is still loading (here or, from a child frame, in the
@@ -487,28 +501,30 @@
     (.stopImmediatePropagation e)))
 
 (defn- on-focus
-  "Undoes a page's autofocus until the user acts, except in a frame you cannot see: that is a
-  canvas editor's key catcher (Google Docs), and its focus is what lets you type. Docs focuses
+  "Undoes a page's autofocus until the user acts, except on a catcher (see catcher?): a canvas
+  editor's key catcher (Google Docs, Sheets), whose focus is what lets you type. Docs focuses
   it again after every menu, toolbar button or Escape, so that does not end normal mode either;
   i or a click does."
   [^js e]
-  (when (and config/grab-back-focus (not @user-acted) (.-isTrusted e) (not (hidden-frame?)))
+  (when (and config/grab-back-focus (not @user-acted) (.-isTrusted e))
     (let [t (dom/event-target e)]
-      (when (dom/editable? t) (.blur ^js t)))))
+      (when (and (dom/editable? t) (not (catcher? t))) (.blur ^js t)))))
 
 (def ^:private pointer-message "vimium-cljs:pointer")
 
 (defn- on-mousedown
   "A trusted click is the user acting, and means typing again over a key catcher. A click in
   the top page of Google Docs lands outside the frame that holds the keyboard, so the top
-  frame tells that frame."
+  frame tells that frame, and the Docs catcher frame even when a menu has the focus."
   [^js e]
   (when (.-isTrusted e)
     (reset! user-acted true)
     (set-suspended! false)
-    (let [^js a (.-activeElement js/document)]
-      (when (and a (= "iframe" (dom/tag a)))
-        (some-> (.-contentWindow a) (.postMessage pointer-message "*"))))))
+    (let [^js a (.-activeElement js/document)
+          frames (cond-> (set (array-seq (.querySelectorAll js/document ".docs-texteventtarget-iframe")))
+                   (and a (= "iframe" (dom/tag a))) (conj a))]
+      (doseq [^js f frames]
+        (some-> (.-contentWindow f) (.postMessage pointer-message "*"))))))
 
 (defn- on-message [^js msg _sender respond]
   (case (.-type msg)

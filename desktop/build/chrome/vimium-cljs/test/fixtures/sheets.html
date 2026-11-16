@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="vimium-cljs-test" content="1">
+<title>Sheets-like fixture</title>
+<!-- Reproduces what vimium-cljs meets in Google Sheets (seen on a live Sheet, Nov 2026): Sheets draws its grid
+     itself and reads keys from a contenteditable cell editor (#waffle-rich-text-editor) in the top page, focused
+     on load and after a click, which it keeps at top -9998px, 0px wide, until a cell is edited; then it moves the
+     editor over the cell. A letter starts editing, Enter commits, Escape cancels, arrows move the selection. The
+     grid scrolls from a .native-scrollbar-y div beside it. The formula bar is a second, visible contenteditable,
+     where Escape cancels and gives the keyboard back to the cell editor. Menus open on mousedown, as in Docs. -->
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; font: 13px sans-serif; }
+#docs-menubar { display: flex; gap: 6px; padding: 4px; height: 22px; }
+.menu-button, .goog-toolbar-button { padding: 2px 8px; cursor: default; user-select: none; }
+#docs-toolbar { display: flex; gap: 6px; padding: 4px; height: 22px; border-bottom: 1px solid #ccc; }
+.goog-menu { position: absolute; top: 30px; background: #fff; border: 1px solid #888; padding: 4px; display: none; z-index: 5; }
+.goog-menu.open { display: block; }
+.goog-menuitem { padding: 3px 12px; }
+#t-formula-bar-input-container { height: 24px; border-bottom: 1px solid #ccc; padding: 2px 8px; }
+#t-formula-bar-input-container .cell-input { min-height: 18px; outline: 1px solid #ddd; }
+#waffle-grid-container { position: absolute; top: 90px; bottom: 30px; left: 0; right: 16px; overflow: hidden; }
+#grid { position: absolute; left: 0; width: 100%; }
+.row { height: 21px; display: flex; border-bottom: 1px solid #e3e3e3; }
+.cell { width: 100px; border-right: 1px solid #e3e3e3; padding: 2px 4px; box-sizing: border-box; white-space: nowrap; overflow: hidden; }
+.cell.active { outline: 2px solid #1a73e8; outline-offset: -2px; }
+.native-scrollbar-y { position: absolute; top: 90px; bottom: 30px; right: 0; width: 16px; overflow-y: auto; }
+.native-scrollbar-y > div { height: 21000px; width: 1px; }
+#editor-parent { position: absolute; }
+#waffle-rich-text-editor { position: absolute; top: -9998px; left: 4px; width: 0; height: 30px; outline: none; white-space: nowrap; }
+#editor-parent[style] #waffle-rich-text-editor { position: static; width: auto; height: 100%; background: #fff; outline: 2px solid #1a73e8; }
+#sheet-tabs { position: absolute; bottom: 0; height: 30px; left: 0; right: 0; display: flex; gap: 4px; border-top: 1px solid #ccc; }
+.docs-sheet-tab { padding: 6px 12px; cursor: default; user-select: none; }
+.docs-sheet-tab.active { background: #e8f0fe; }
+</style>
+<script src="/probe.js"></script>
+</head>
+<body>
+<div id="docs-menubar" role="menubar" tabindex="-1">
+  <div class="menu-button goog-control" role="menuitem" id="docs-file-menu" data-menu="menu-file">File</div>
+  <div class="menu-button goog-control" role="menuitem" id="m-format" data-menu="menu-format">Format</div>
+</div>
+<div class="goog-menu" role="menu" id="menu-file" style="left: 4px">
+  <div class="goog-menuitem" role="menuitem" id="i-copy">Make a copy</div>
+</div>
+<div class="goog-menu" role="menu" id="menu-format" style="left: 60px">
+  <div class="goog-menuitem" role="menuitem" id="i-bold">Bold</div>
+</div>
+<div id="docs-toolbar" role="toolbar">
+  <div class="goog-toolbar-button" role="button" id="b-bold" aria-label="Bold (Ctrl+B)">B</div>
+</div>
+<div id="t-formula-bar-input-container"><div class="cell-input" id="formula" contenteditable="true" role="combobox" tabindex="0"></div></div>
+<div id="waffle-grid-container"><div id="grid"></div></div>
+<div class="native-scrollbar native-scrollbar-y" id="scrollbar"><div></div></div>
+<div id="editor-parent"><div id="waffle-rich-text-editor" class="cell-input" contenteditable="true" role="combobox" aria-label="Cell editor"></div></div>
+<div id="sheet-tabs">
+  <div class="docs-sheet-tab active" id="tab-1" role="button">Sheet1</div>
+  <div class="docs-sheet-tab" id="tab-2" role="button">Sheet2</div>
+</div>
+<script>
+(() => {
+  const ROWS = 1000, COLS = 6, RH = 21, CW = 100;
+  const sheet = (window.__sheet = { cells: {}, active: [0, 0], editing: null, actions: [], escapes: 0, tab: 'tab-1' });
+  const name = ([r, c]) => String.fromCharCode(65 + c) + (r + 1);
+  const grid = document.getElementById('grid'), container = document.getElementById('waffle-grid-container');
+  const bar = document.getElementById('scrollbar'), editor = document.getElementById('waffle-rich-text-editor');
+  const parent = document.getElementById('editor-parent'), formula = document.getElementById('formula');
+  const draw = () => {
+    const first = Math.floor(bar.scrollTop / RH), n = Math.ceil(container.clientHeight / RH) + 1;
+    grid.style.top = -(bar.scrollTop % RH) + 'px';
+    grid.innerHTML = '';
+    for (let r = first; r < Math.min(ROWS, first + n); r++) {
+      const row = document.createElement('div'); row.className = 'row';
+      for (let c = 0; c < COLS; c++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell' + (r === sheet.active[0] && c === sheet.active[1] ? ' active' : '');
+        cell.textContent = sheet.cells[name([r, c])] || '';
+        row.appendChild(cell);
+      }
+      grid.appendChild(row);
+    }
+    if (document.activeElement !== formula) formula.textContent = sheet.cells[name(sheet.active)] || '';
+  };
+  bar.addEventListener('scroll', draw);
+  const startEdit = (text) => {
+    const [r, c] = sheet.active, cr = container.getBoundingClientRect();
+    sheet.editing = name(sheet.active);
+    parent.setAttribute('style', `top: ${cr.top + r * RH - bar.scrollTop}px; left: ${c * CW}px; width: ${CW}px; height: ${RH}px`);
+    editor.textContent = text;
+    const sel = getSelection(); sel.selectAllChildren(editor); sel.collapseToEnd();
+  };
+  const stopEdit = (commit) => {
+    if (sheet.editing && commit) sheet.cells[sheet.editing] = editor.textContent;
+    sheet.editing = null;
+    parent.removeAttribute('style');
+    editor.textContent = '';
+    draw();
+  };
+  const move = (dr, dc) => { sheet.active = [Math.max(0, sheet.active[0] + dr), Math.max(0, Math.min(COLS - 1, sheet.active[1] + dc))]; draw(); };
+  const arrows = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+  editor.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented) return;
+    if (e.key === 'Escape') { sheet.escapes++; if (sheet.editing) stopEdit(false); return; }
+    if (e.ctrlKey && e.key === 'b') { e.preventDefault(); sheet.actions.push('ctrl-b'); return; }
+    if (sheet.editing) {
+      if (e.key === 'Enter') { e.preventDefault(); stopEdit(true); move(1, 0); }
+      return;
+    }
+    if (arrows[e.key]) { e.preventDefault(); move(...arrows[e.key]); return; }
+    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); startEdit(e.key); }
+  });
+  formula.addEventListener('focus', () => { formula.textContent = sheet.cells[name(sheet.active)] || ''; });
+  formula.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); sheet.escapes++; editor.focus(); draw(); }
+    if (e.key === 'Enter') { e.preventDefault(); sheet.cells[name(sheet.active)] = formula.textContent; editor.focus(); draw(); }
+  });
+  const closeMenus = () => document.querySelectorAll('.goog-menu.open').forEach((m) => m.classList.remove('open'));
+  const act = (id) => { sheet.actions.push(id); closeMenus(); setTimeout(() => editor.focus(), 0); };
+  for (const b of document.querySelectorAll('.menu-button')) {
+    b.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      document.getElementById('docs-menubar').focus();
+      const m = document.getElementById(b.dataset.menu), was = m.classList.contains('open');
+      closeMenus();
+      if (!was) m.classList.add('open');
+    });
+  }
+  for (const i of document.querySelectorAll('.goog-menuitem')) i.addEventListener('mouseup', () => act(i.id));
+  for (const b of document.querySelectorAll('.goog-toolbar-button')) b.addEventListener('click', () => act(b.id));
+  for (const t of document.querySelectorAll('.docs-sheet-tab')) t.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.docs-sheet-tab').forEach((x) => x.classList.toggle('active', x === t));
+    sheet.tab = t.id; sheet.actions.push(t.id);
+    setTimeout(() => editor.focus(), 0);
+  });
+  container.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    closeMenus();
+    if (sheet.editing) stopEdit(true);
+    const r = container.getBoundingClientRect();
+    sheet.active = [Math.floor((e.clientY - r.top + bar.scrollTop) / RH), Math.min(COLS - 1, Math.floor((e.clientX - r.left) / CW))];
+    draw();
+    editor.focus();
+  });
+  draw();
+  editor.focus();
+  window.__sheetFacts = () => ({
+    cells: { ...sheet.cells }, active: name(sheet.active), editing: sheet.editing, editorText: editor.textContent,
+    actions: sheet.actions.slice(), escapes: sheet.escapes, tab: sheet.tab, top: Math.round(bar.scrollTop),
+    editorFocused: document.activeElement === editor, formulaFocused: document.activeElement === formula,
+    formula: formula.textContent, editorShown: editor.getBoundingClientRect().top > 0,
+    suspended: document.documentElement.dataset.vimiumCljsSuspended === '1',
+    menuOpen: [...document.querySelectorAll('.goog-menu.open')].map((m) => m.id),
+    hints: [...document.querySelectorAll('[data-vimium-cljs-hint]')].map((el) => [el.id, el.dataset.vimiumCljsHint]),
+  });
+})();
+</script>
+</body></html>

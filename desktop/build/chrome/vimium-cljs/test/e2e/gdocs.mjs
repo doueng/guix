@@ -1,10 +1,15 @@
-// The Google Docs checks on a real Doc, in headless Chrome: node test/e2e/gdocs.mjs [doc-url]
-// A public Doc opens view-only without an account, which still has Docs' key catcher (a contenteditable in a 1px
-// iframe) and its scrolling editor div, so it shows the focus, scrolling and hint behaviour, though not typed text.
+// The Google Docs checks on a real Doc, in headless Chrome: node test/e2e/gdocs.mjs <doc-url>, or GDOC_URL.
+// It types into the Doc, so use a scratch Doc of your own that anyone with the link can edit: a stranger's public
+// Doc that allows suggestions keeps the typed keys as anonymous suggestions. Docs' key catcher is a contenteditable
+// in a 1px iframe, and its editor div scrolls; this shows the focus, scrolling and hint behaviour.
 import { launch, sleep, evaluate } from '../lib/chrome.mjs';
 import { controller } from '../lib/server.mjs';
 
-const url = process.argv[2] || 'https://docs.google.com/document/d/103S6IjN9D80ntbPIcK3mP_ZWdeFom2Mq8qpkpIsXRVI/edit';
+const url = process.argv[2] || process.env.GDOC_URL;
+if (!url) {
+  console.error('usage: node test/e2e/gdocs.mjs <url of a scratch Doc you own, editable by anyone with the link>');
+  process.exit(2);
+}
 const b = await launch({ width: 1280, height: 900 });
 const results = [];
 const check = (name, ok, detail) => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${detail ? ' ' + JSON.stringify(detail) : ''}`); };

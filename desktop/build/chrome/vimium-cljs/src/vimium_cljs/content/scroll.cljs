@@ -16,10 +16,11 @@
    "www.reddit.com" "#overlayScrollContainer"
    "web.telegram.org" ".MessageList"
    ;; Google Docs scrolls this div; in an edit-mode doc its wrappers have no box, so the search below never reaches it.
-   "docs.google.com" ".kix-appview-editor"})
+   ;; Sheets draws its grid and scrolls it from .native-scrollbar-y, which is no ancestor of a clicked cell.
+   "docs.google.com" [".kix-appview-editor" ".native-scrollbar-y"]})
 
 (defn scrolling-element []
-  (or (some->> (get special-scrolling (.-host js/location)) (.querySelector js/document))
+  (or (some #(.querySelector js/document %) (let [s (get special-scrolling (.-host js/location))] (if (string? s) [s] s)))
       (.-scrollingElement js/document)
       (.-body js/document)))
 

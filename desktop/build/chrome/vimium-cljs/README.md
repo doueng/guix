@@ -75,12 +75,17 @@ The `tab-panel` command opens the window's tabs in Chrome's side panel (`ext/pan
 middle-click or × closes. It works next to Chrome's own tab strip, or alone in a Chrome that hides it.
 On the guix desktop Alt+E toggles it; elsewhere assign it a key at chrome://extensions/shortcuts.
 
-## Google Docs
+## Google Docs and Sheets
 
-Docs reads keys from a contenteditable in a 1px iframe that always has focus. `src/vimium_cljs/dispatch.cljs` keeps
-vimium's own mode over such a "key catcher": typing until Escape, normal mode (j scrolls the document, f hints menus)
-until i or a click. `test/fixtures/docs.html` reproduces the structure; `npm run e2e:docs` and
-`npm run bombadil:docs` check it; `npm run gdocs` checks a real public Doc headless.
+Docs reads keys from a contenteditable in a 1px iframe that always has focus; Sheets from a contenteditable cell editor
+it keeps at top -9998px until a cell is edited. `src/vimium_cljs/dispatch.cljs` keeps vimium's own mode over such a
+"key catcher": typing until Escape, normal mode (j scrolls the document or grid, f hints menus, the toolbar and sheet
+tabs) until i or a click. In a visible field of these apps (a cell being edited, the formula bar) Escape is the app's:
+it ends the edit and the next Escape gives normal mode. `test/fixtures/docs.html` and `sheets.html` reproduce the
+structure; `npm run e2e:docs` and `npm run bombadil:docs` check them. `npm run gdocs <url>` checks a Doc headless, and
+`GDOC_URL=... GSHEET_URL=... node scripts/gdocs-live.mjs` runs a real Chrome window on the test display with real keys
+and screenshots. Both type into the document, so give them a scratch Doc and Sheet of your own that anyone with the
+link can edit, never someone else's.
 
 Logic ported from [Vimium](https://github.com/philc/vimium), MIT, Copyright (c) 2010 Phil Crosby, Ilya Sukhar
 (ext/LICENSE.vimium.txt). The mode kept over Docs' editor follows [SheetKeys](https://github.com/philc/sheetkeys)

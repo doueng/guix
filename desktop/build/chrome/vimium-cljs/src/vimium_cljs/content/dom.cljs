@@ -38,6 +38,14 @@
   (let [path (.composedPath e)]
     (if (pos? (.-length path)) (aget path 0) (.-target e))))
 
+(defn off-page?
+  "Whether EL lies above or left of the page, where no scrolling reaches it. Google Sheets keeps
+  its cell editor there (top -9998px) and reads keys from it until a cell is edited."
+  [^js el]
+  (let [^js r (.getBoundingClientRect el)]
+    (or (<= (+ (.-bottom r) (.-scrollY js/window)) 0)
+        (<= (+ (.-right r) (.-scrollX js/window)) 0))))
+
 (defn in-viewport-rect
   "The first client rect of EL that is at least 3px each way and overlaps the
   viewport, clipped to it, or nil."

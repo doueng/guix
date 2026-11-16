@@ -30,7 +30,7 @@
     [2 (gen/fmap (fn [[c m]] {:key (str c) m true}) (gen/tuple gen/char-alpha (gen/elements [:ctrl :alt :meta])))]
     [2 (gen/elements [{:key "Escape"} {:key "[" :ctrl true}])]]))
 
-(def gen-focus (gen/elements [:page :field :catcher]))
+(def gen-focus (gen/elements [:page :field :catcher :app-field]))
 
 (def modes [:normal :insert :hints :visual :marks-create :marks-goto :find :focus-input :pass-next])
 
@@ -52,7 +52,7 @@
 
 (defspec typing-in-an-editor-is-never-taken 300
   (prop/for-all [st gen-state
-                 focus (gen/elements [:field :catcher])
+                 focus (gen/elements [:field :catcher :app-field])
                  evs (gen/vector (gen/such-that #(not (:esc? (key-of %))) gen-event) 1 20)]
     (let [st (assoc st :mode :normal :suspended false)]
       (every? (fn [[_ effect]] (and (#{[:type] [:pass]} effect) (not (d/consume? effect))))
@@ -68,6 +68,8 @@
         (and (= :normal (:mode state)) (k/reset-state? (:keys state))
              (case focus
                :field (or (= [:blur] effect) (not= :normal (:mode st)))
+               ;; the app ends the edit and focuses its catcher, where typing goes on
+               :app-field (or (= [:pass] effect) (not= :normal (:mode st)))
                :catcher (:suspended state)
                true))))))
 
@@ -76,6 +78,15 @@
     (let [steps (concat (map #(vector :catcher %) prefix) [[:catcher {:key "Escape"}]])
           [st effect] (last (run d/initial steps))]
       (and (= [:suspend] effect) (:suspended st) (d/consume? effect)))))
+
+(defspec an-app-field-gives-every-key-to-the-app 300
+  ;; A Sheets cell or formula bar: typing and Escape alike are Sheets', which ends the edit
+  ;; on Escape and focuses its catcher again, so a second Escape gives normal mode.
+  (prop/for-all [evs (gen/vector gen-event 1 20)]
+    (let [steps (run d/initial (map vector (repeat :app-field) evs))
+          [st effect] (first (run (first (last steps)) [[:catcher {:key "Escape"}]]))]
+      (and (every? (fn [[_ effect]] (and (#{[:type] [:pass]} effect) (not (d/consume? effect)))) steps)
+           (= [:suspend] effect) (:suspended st)))))
 
 (defspec a-suspended-editor-never-gets-text 500
   (prop/for-all [st gen-state
@@ -123,6 +134,9 @@
   (testing "a visible field: Escape blurs it, keys type"
     (is (= [:blur] (:effect (d/decide ctx d/initial :field (key-of {:key "Escape"})))))
     (is (= [:type] (:effect (d/decide ctx d/initial :field (key-of {:key "j"}))))))
+  (testing "a Sheets cell being edited: Escape is Sheets'"
+    (is (= [:pass] (:effect (d/decide ctx d/initial :app-field (key-of {:key "Escape"})))))
+    (is (= [:type] (:effect (d/decide ctx d/initial :app-field (key-of {:key "j"}))))))
   (testing "a suspended Docs editor scrolls on j and swallows q"
     (let [st (assoc d/initial :suspended true)]
       (is (= "scrollDown" (get-in (d/decide ctx st :catcher (key-of {:key "j"})) [:effect 1 :command])))

@@ -5,10 +5,11 @@
   "scripts": {
     "build": "shadow-cljs release bg content ui panel",
     "test": "shadow-cljs compile test && node out/test.js",
-    "e2e": "node --test --test-concurrency=1 test/e2e/run.mjs test/e2e/docs.mjs test/e2e/select.mjs test/e2e/reload.mjs test/e2e/incognito.mjs",
+    "e2e": "node --test --test-concurrency=1 test/e2e/run.mjs test/e2e/docs.mjs test/e2e/sheets.mjs test/e2e/select.mjs test/e2e/reload.mjs test/e2e/incognito.mjs",
     "e2e:incognito": "node --test test/e2e/incognito.mjs",
-    "e2e:docs": "node --test --test-concurrency=1 test/e2e/docs.mjs",
+    "e2e:docs": "node --test --test-concurrency=1 test/e2e/docs.mjs test/e2e/sheets.mjs",
     "gdocs": "node test/e2e/gdocs.mjs",
+    "gdocs:live": "node scripts/gdocs-live.mjs",
     "e2e:content": "node --test --test-concurrency=1 --test-name-pattern='keys typed|scrolling|find mode|visual mode' test/e2e/run.mjs",
     "e2e:worker": "node --test --test-concurrency=1 --test-name-pattern='link hints|F opens|tabs:' test/e2e/run.mjs",
     "e2e:ui": "node --test --test-concurrency=1 --test-name-pattern='mappings|Vomnibar' test/e2e/run.mjs",

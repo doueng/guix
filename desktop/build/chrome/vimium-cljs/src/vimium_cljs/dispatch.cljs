@@ -2,8 +2,9 @@
 ;; Pure, so test.check drives it (test/vimium_cljs/dispatch_test.cljs).
 ;;
 ;; Google Docs draws the document itself and reads keys from a contenteditable in an iframe
-;; nobody sees (docs-texteventtarget-iframe, 1px tall). Focus there is always "typing" by
-;; the DOM's account, so, as SheetKeys does for Sheets' always-focused cell editor
+;; nobody sees (docs-texteventtarget-iframe, 1px tall); Sheets from a contenteditable it
+;; places at top -9998px (#waffle-rich-text-editor) until a cell is edited. Focus there is
+;; always "typing" by the DOM's account, so, as SheetKeys does for Sheets' always-focused cell editor
 ;; (https://github.com/philc/sheetkeys, MIT, Copyright (c) Phil Crosby), the mode over such
 ;; an editor is the extension's own state: Escape suspends typing without blurring, and
 ;; i or a click resumes it. Docs refocusing its editor (after a menu, say) does not.
@@ -38,14 +39,17 @@
 
 (defn decide
   "Routes a keydown. CTX is {:trie :pass-keys :enabled}. ST is {:mode :keys :suspended}.
-  FOCUS is :page (nothing editable has focus), :field (a visible editable) or :catcher (an
-  editable in a frame you cannot see, which a canvas editor such as Google Docs reads keys
-  from). K is {:ks (keys/key-string) :esc? :text? (edits-text?)}. Returns {:state :effect},
+  FOCUS is :page (nothing editable has focus), :field (a visible editable), :catcher (an
+  editable you cannot see, which a canvas editor reads keys from: Google Docs' 1px frame,
+  Sheets' cell editor placed above the page) or :app-field (a visible editable of such an
+  editor: a Sheets cell being edited, the formula bar, a Docs comment box). K is
+  {:ks (keys/key-string) :esc? :text? (edits-text?)}. Returns {:state :effect},
   where :effect is a vector headed by
     :type    the key is text for the page; the extension does nothing
     :pass    the page gets the key
     :swallow nobody gets it
     :blur    Escape in a field: blur it
+    :pass    also Escape in an app field: the app ends the edit and focuses its catcher again
     :suspend Escape over a catcher: stop typing, keep its focus
     :resume  type again in the catcher
     :pending :reset   keys/step swallowed a key of a longer mapping, or reset
@@ -71,6 +75,8 @@
 
       (and (= focus :field) esc?) {:state (normal st) :effect [:blur]}
       (= focus :field) {:state st :effect [:type]}
+      (and (= focus :app-field) esc?) {:state (normal st) :effect [:pass]}
+      (= focus :app-field) {:state st :effect [:type]}
       (and (= focus :catcher) (not enabled)) {:state st :effect [:pass]}
       (and (= focus :catcher) (not suspended) esc?) {:state (assoc (normal st) :suspended true) :effect [:suspend]}
       (and (= focus :catcher) (not suspended)) {:state st :effect [:type]}
