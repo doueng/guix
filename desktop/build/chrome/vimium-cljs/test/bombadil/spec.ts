@@ -4,11 +4,14 @@ import { actions, extract, registerCustomAction, weighted } from "@antithesishq/
 import { back, clicks, scroll, waitOnce } from "@antithesishq/bombadil/browser/defaults/actions";
 
 type Link = { id: string; visible: boolean; hint: string | null };
+// docs.html, the Google Docs fixture: text in its 1px key-catcher frame and the mode the content script keeps there.
+type Docs = { text: string; editorTop: number; typingFocus: boolean; frameMode: string; suspended: boolean; hints: [string, string][] };
 type Facts = {
   url: string; ready: boolean; mode: string; hintsMs: number; hintsScrollY: number; scrollY: number; maxScrollY: number;
   links: Link[]; findHighlights: number; findCurrent: number; needles: number;
   pageKeys: number; fieldKeys: string; fields: { id: string; value: string }[]; active: string | null;
   frames: Record<string, Facts>;
+  docs: null | Docs;
   last: null | { kind: string; seq: string; before: Facts; after: Facts; field?: string };
 };
 
@@ -94,7 +97,7 @@ export const vomnibarNoDuplicateTabs = always(() => {
 export const findHighlightsMatches = always(() => {
   const l = f()?.last;
   if (!l || l.kind !== "find") return true;
-  return l.after.findHighlights === l.after.needles && l.after.findCurrent === 1;
+  return l.after.findHighlights === l.after.needles && l.after.findCurrent === (l.after.needles ? 1 : 0);
 });
 
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -211,8 +214,47 @@ const keyActions = weighted([
     ["jkf", "gg/x", "Fd u", "hello j"].map((t) => typeInto(id, t))))],
 ]);
 
+// Google Docs: random key runs over the docs.html fixture. A run with no Escape, typed while the editor takes text,
+// must all land in the document; a run while typing is suspended, without i or f (whose hints can click back into
+// the document), must type nothing; a run ending in Escape must end in normal mode with no hints.
+const docsKeys = registerCustomAction("docsKeys", async (_d, window, seq: string) => {
+  const w = window as any;
+  if (!w.__docsFacts) return;
+  const before = w.__docsFacts();
+  await ctl(`/__ctl/keys?seq=${encodeURIComponent(seq)}`);
+  await settle(500);
+  if (w.__probe) w.__probe.last = { kind: "docs", seq, before: { docs: before }, after: { docs: w.__docsFacts() } };
+});
+
+const docsTokens = ["<esc>", "i", "j", "k", "q", "a", "s", " ", "gg", "G", "f", "<c-b>", "z", "3"];
+const docsActions = actions(() => Array.from({ length: 12 }, () =>
+  docsKeys(Array.from({ length: 1 + Math.floor(Math.random() * 5) }, () => docsTokens[Math.floor(Math.random() * docsTokens.length)]).join(""))));
+
+const dl = () => { const l = f()?.last as any; return l && l.kind === "docs" ? l as { seq: string; before: { docs: Docs }; after: { docs: Docs } } : null; };
+
+export const docsTypingReachesTheDocument = always(() => {
+  const l = dl();
+  if (!l) return true;
+  const b = l.before.docs, a = l.after.docs;
+  if (b.suspended || b.frameMode !== "normal" || !b.typingFocus || l.seq.includes("<")) return true;
+  return a.text === b.text + l.seq && a.editorTop === b.editorTop && a.hints.length === 0;
+});
+
+export const docsNormalModeNeverTypes = always(() => {
+  const l = dl();
+  if (!l || !l.before.docs.suspended || l.before.docs.frameMode !== "normal" || /[if]/.test(l.seq)) return true;
+  return l.after.docs.text === l.before.docs.text;
+});
+
+export const docsEscapeEndsInNormalMode = always(() => {
+  const l = dl();
+  if (!l || !l.seq.endsWith("<esc>") || !l.before.docs.typingFocus) return true;
+  return l.after.docs.frameMode === "normal" && l.after.docs.hints.length === 0;
+});
+
 export const explore = weighted([
   [12, keyActions],
+  [6, docsActions],
   [4, vomnibarActions],
   [4, clicks],
   [3, scroll],

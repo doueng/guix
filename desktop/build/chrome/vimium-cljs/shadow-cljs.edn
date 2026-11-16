@@ -1,6 +1,6 @@
 ;; MV3 forbids eval and shadow-cljs dev builds use it, so the extension only runs release builds.
 {:source-paths ["src" "test"]
- :dependencies []
+ :dependencies [[org.clojure/test.check "1.1.1"]]
  :builds
  {:bg      {:target :browser
             :output-dir "ext/js"

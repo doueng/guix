@@ -14,7 +14,9 @@
    "reddit.com" "#overlayScrollContainer"
    "new.reddit.com" "#overlayScrollContainer"
    "www.reddit.com" "#overlayScrollContainer"
-   "web.telegram.org" ".MessageList"})
+   "web.telegram.org" ".MessageList"
+   ;; Google Docs scrolls this div; in an edit-mode doc its wrappers have no box, so the search below never reaches it.
+   "docs.google.com" ".kix-appview-editor"})
 
 (defn scrolling-element []
   (or (some->> (get special-scrolling (.-host js/location)) (.querySelector js/document))

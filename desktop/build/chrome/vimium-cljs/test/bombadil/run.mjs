@@ -7,6 +7,7 @@ import { startServer, controller } from '../lib/server.mjs';
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : dflt; };
 const time = arg('--time', '3m');
+const page = arg('--page', ''); // a fixture to start on, as docs.html
 const out = arg('--output', mkdtempSync(join(tmpdir(), 'vimium-cljs-bombadil-')));
 
 function bombadilBin() {
@@ -42,11 +43,11 @@ for (let i = 0; i < 50; i++) {
   try { await fetch(`http://127.0.0.1:${devtoolsPort}/json/version`); break; } catch { await sleep(200); }
 }
 const origin = `http://127.0.0.1:${port}/`;
-console.log(`bombadil: ${time} on ${origin}, output ${out}`);
+console.log(`bombadil: ${time} on ${origin}${page}, output ${out}`);
 const child = spawn(bin, ['browser', 'test-external', '--remote-debugger', `http://127.0.0.1:${devtoolsPort}`, '--create-target',
   '--allow-url', `http://127.0.0.1:${port}/*`, '--allow-url', `http://localhost:${port}/*`,
   '--time-limit', time, '--exit-on-violation', '--output-path', out, '--output-path-overwrite',
-  origin, join(ROOT, 'test/bombadil/spec.ts')], { stdio: 'inherit' });
+  origin + page, join(ROOT, 'test/bombadil/spec.ts')], { stdio: 'inherit' });
 const code = await new Promise((ok) => child.on('exit', (c) => ok(c ?? 1)));
 b.close();
 server.closeAllConnections();

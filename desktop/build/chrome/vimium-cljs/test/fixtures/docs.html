@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="vimium-cljs-test" content="1">
+<title>Docs-like fixture</title>
+<!-- Reproduces what vimium-cljs meets in Google Docs (seen on a live Doc, Nov 2026): the page draws the text
+     itself, takes keys from a contenteditable in a 1px about:blank iframe at top -10000px
+     (docs-texteventtarget-iframe) that it focuses on load and on a click, scrolls a div (kix-appview-editor),
+     and has a menubar whose items open goog menus on mousedown. -->
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; font: 14px sans-serif; }
+#docs-menubar { display: flex; gap: 6px; padding: 4px; height: 24px; }
+.menu-button, .goog-toolbar-button { padding: 2px 8px; cursor: default; user-select: none; }
+#docs-toolbar { display: flex; gap: 6px; padding: 4px; height: 24px; border-bottom: 1px solid #ccc; }
+.goog-menu { position: absolute; top: 32px; background: #fff; border: 1px solid #888; padding: 4px; display: none; z-index: 5; }
+.goog-menu.open { display: block; }
+.goog-menuitem { padding: 3px 12px; }
+.kix-appview-editor { position: absolute; top: 70px; bottom: 0; left: 0; right: 0; overflow-y: auto; }
+.kix-page { width: 600px; height: 6000px; margin: 12px auto; background: linear-gradient(#fff, #dde); box-shadow: 0 0 3px #999; }
+.kix-page canvas { width: 600px; height: 200px; }
+.docs-texteventtarget-iframe { position: absolute; top: -10000px; width: 625px; height: 1px; border: 0; contain: strict; }
+</style>
+<script src="/probe.js"></script>
+</head>
+<body>
+<div id="docs-menubar" role="menubar" tabindex="-1">
+  <div class="menu-button goog-control" role="menuitem" id="m-file" data-menu="menu-file">File</div>
+  <div class="menu-button goog-control" role="menuitem" id="m-format" data-menu="menu-format">Format</div>
+</div>
+<div class="goog-menu" role="menu" id="menu-file" style="left: 4px">
+  <div class="goog-menuitem" role="menuitem" id="i-copy">Make a copy</div>
+  <div class="goog-menuitem" role="menuitem" id="i-print">Print</div>
+</div>
+<div class="goog-menu" role="menu" id="menu-format" style="left: 60px">
+  <div class="goog-menuitem" role="menuitem" id="i-bold">Bold</div>
+</div>
+<div id="docs-toolbar" role="toolbar">
+  <div class="goog-toolbar-button" role="button" id="b-bold" aria-label="Bold (Ctrl+B)">B</div>
+  <div class="goog-toolbar-button" role="button" id="b-italic" aria-label="Italic (Ctrl+I)">I</div>
+</div>
+<div class="kix-appview-editor" id="editor"><div class="kix-page"><canvas></canvas></div></div>
+<script>
+(() => {
+  const docs = (window.__docs = { actions: [], escapes: 0 });
+  const iframe = document.createElement('iframe');
+  iframe.className = 'docs-texteventtarget-iframe';
+  iframe.src = 'about:blank';
+  document.body.appendChild(iframe);
+  const fd = iframe.contentDocument;
+  fd.body.innerHTML = '<div tabindex="0" role="textbox" aria-multiline="true" aria-label="Document content" contenteditable="true" style="outline: none"></div>';
+  const target = fd.body.firstChild;
+  const focusEditor = () => target.focus();
+  const act = (name) => { docs.actions.push(name); closeMenus(); setTimeout(focusEditor, 0); };
+  const closeMenus = () => document.querySelectorAll('.goog-menu.open').forEach((m) => m.classList.remove('open'));
+  // Docs' own shortcuts and Escape, as its key handler on the text event target sees them.
+  fd.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented) return;
+    if (e.key === 'Escape') docs.escapes++;
+    if (e.ctrlKey && e.key === 'b') { e.preventDefault(); docs.actions.push('ctrl-b'); }
+  });
+  for (const b of document.querySelectorAll('.menu-button')) {
+    b.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      document.getElementById('docs-menubar').focus(); // Docs moves focus to its menubar
+      const m = document.getElementById(b.dataset.menu), was = m.classList.contains('open');
+      closeMenus();
+      if (!was) m.classList.add('open');
+    });
+  }
+  for (const i of document.querySelectorAll('.goog-menuitem')) i.addEventListener('mouseup', () => act(i.id));
+  for (const b of document.querySelectorAll('.goog-toolbar-button')) b.addEventListener('click', () => act(b.id));
+  document.getElementById('editor').addEventListener('mousedown', (e) => { e.preventDefault(); closeMenus(); focusEditor(); });
+  focusEditor();
+  window.__docsFacts = () => {
+    const ed = document.getElementById('editor'), html = fd.documentElement;
+    return {
+      text: target.textContent,
+      actions: docs.actions.slice(),
+      escapes: docs.escapes,
+      editorTop: Math.round(ed.scrollTop),
+      editorMax: ed.scrollHeight - ed.clientHeight,
+      typingFocus: document.activeElement === iframe && fd.activeElement === target,
+      frameMode: html.dataset.vimiumCljsMode || 'normal',
+      suspended: html.dataset.vimiumCljsSuspended === '1',
+      menuOpen: [...document.querySelectorAll('.goog-menu.open')].map((m) => m.id),
+      hints: [...document.querySelectorAll('[data-vimium-cljs-hint]')].map((el) => [el.id, el.dataset.vimiumCljsHint]),
+    };
+  };
+})();
+</script>
+</body></html>

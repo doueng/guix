@@ -6,6 +6,7 @@
             [vimium-cljs.content.scroll :as scroll]
             [vimium-cljs.content.ui :as ui]
             [vimium-cljs.content.visual :as visual]
+            [vimium-cljs.dispatch :as dispatch]
             [vimium-cljs.exclusions :as exclusions]
             [vimium-cljs.keys :as keys]
             [vimium-cljs.config :as config]))
@@ -20,6 +21,20 @@
 (defonce hints (atom nil))
 (defonce previous-position (atom nil))
 (defonce hints-requested (atom false))
+;; Escape was pressed over a key catcher (see dispatch) and typing has not resumed.
+(defonce typing-suspended (atom false))
+
+(defn hidden-frame?
+  "A child frame you cannot see: under 4px either way, or placed outside its parent's view.
+  Google Docs reads keys from such a frame (docs-texteventtarget-iframe, 1px tall)."
+  []
+  (and (not top?)
+       (or (<= (.-innerWidth js/window) 3) (<= (.-innerHeight js/window) 3)
+           (when-let [^js fe (try (.-frameElement js/window) (catch :default _ nil))]
+             (let [^js r (.getBoundingClientRect fe)
+                   ^js pw (.-defaultView (.-ownerDocument fe))]
+               (or (<= (.-bottom r) 0) (<= (.-right r) 0)
+                   (>= (.-top r) (.-innerHeight pw)) (>= (.-left r) (.-innerWidth pw))))))))
 
 (defn send!
   "Message to the service worker; resolves to its reply, or nil if the
@@ -30,7 +45,9 @@
         (.catch (fn [_] nil)))
     (catch :default _ (js/Promise.resolve nil))))
 
-(defn hud! [text] (when-not config/hide-hud (ui/hud! text 2000)))
+(defn hud! [text]
+  (when-not config/hide-hud
+    (if (hidden-frame?) (send! {:type "top-hud" :text text}) (ui/hud! text 2000))))
 
 (def conf
   (let [m (keys/effective-mappings (keys/mappings-text config/key-mappings))
@@ -61,9 +78,21 @@
 
 (defn test-page?
   "Fixture pages opt in with <meta name=vimium-cljs-test>; the content script
-  then mirrors its mode and hints into DOM attributes for the test probe."
+  then mirrors its mode and hints into DOM attributes for the test probe. A blank
+  frame the page wrote itself (docs.html's key catcher) goes with its parent."
   []
-  (some? (.querySelector js/document "meta[name=vimium-cljs-test]")))
+  (let [sel "meta[name=vimium-cljs-test]"]
+    (some? (or (.querySelector js/document sel)
+               (when-not top?
+                 (try (some-> js/window .-parent .-document (.querySelector sel)) (catch :default _ nil)))))))
+
+(defn set-suspended!
+  "Whether typing over a key catcher is suspended (see dispatch)."
+  [on?]
+  (when (not= @typing-suspended on?)
+    (reset! typing-suspended on?)
+    (when (test-page?)
+      (.setAttribute (.-documentElement js/document) "data-vimium-cljs-suspended" (if on? "1" "0")))))
 
 (defn set-mode! [m & {:as more}]
   (reset! mode (merge {:name m} more))
@@ -131,10 +160,9 @@
     (hints-exit!)
     (when el (activate-element! el mode))))
 
-(defn- hints-key! [^js e ks esc?]
+(defn- hints-key! [^js e ks]
   (consume! e)
-  (cond esc? (do (hints-exit!) (send! {:type "hints-key" :key "Escape"}))
-        (= "Backspace" (.-key e)) (send! {:type "hints-key" :key "Backspace"})
+  (cond (= "Backspace" (.-key e)) (send! {:type "hints-key" :key "Backspace"})
         (and ks (= 1 (count ks))) (send! {:type "hints-key" :key (str/lower-case ks)})))
 
 (defn- page-key [] (str "marks|" (first (str/split (.-href js/location) #"#"))))
@@ -148,11 +176,10 @@
     (.scrollTo js/window x y)
     (reset! previous-position here)))
 
-(defn- marks-key! [^js e ks esc? create?]
+(defn- marks-key! [^js e ks create?]
   (consume! e)
   (exit-mode!)
   (cond
-    esc? nil
     (and create? ks (re-matches #"[a-z]" ks))
     (let [k (page-key)]
       (-> (js/chrome.storage.local.get k)
@@ -213,12 +240,11 @@
         (ui/hud! (if line? "Visual mode (line)" "Visual mode")))
     (hud! "No usable text on this page")))
 
-(defn- visual-key! [^js e ks esc?]
+(defn- visual-key! [^js e ks]
   (let [{:keys [line pending] cnt :count} @mode
         times (max 1 cnt)]
     (cond
       (nil? ks) nil
-      esc? (do (consume! e) (visual/exit!) (exit-mode!))
       (and (re-matches #"[0-9]" ks) (or (pos? cnt) (not= ks "0")))
       (do (consume! e) (swap! mode assoc :count (+ (* 10 cnt) (js/parseInt ks 10))))
       (= pending "g") (do (consume! e) (swap! mode assoc :pending nil :count 0)
@@ -362,29 +388,42 @@
   (let [info (commands/by-name command)
         n (or (get options "count") 1)
         n (if (:once info) 1 (* n (or count 1)))]
-    (cond
-      (:bg info) (send! {:type "command" :name command :count n :explicit (some? count) :options options})
-      (and (:top info) (not top?)) (do (when (str/starts-with? command "Vomnibar.") (start-forwarding!))
-                                       (send! {:type "top-command" :name command :count n}))
-      :else (when-let [f (local-commands command)]
+    (case (dispatch/command-frame command info top? (hidden-frame?))
+      :bg (send! {:type "command" :name command :count n :explicit (some? count) :options options})
+      :top (do (when (str/starts-with? command "Vomnibar.") (start-forwarding!))
+               (send! {:type "top-command" :name command :count n}))
+      :here (when-let [f (local-commands command)]
               (f n)))))
 
 (defn- own-ui? [^js e] (when-let [h (ui/host)] (identical? (.-target e) h)))
 
-(defn- normal-key! [^js e ks esc?]
-  (let [{:keys [enabled pass-keys]} (rule)]
-    (when enabled
-      (let [{:keys [state result] :as r} (keys/step (:trie conf) @key-state ks esc? pass-keys)]
-        (reset! key-state state)
-        (case result
-          :command (do (consume! e) (run-command! (:command r) (:count r)))
-          (:pending :reset) (consume! e)
-          :pass (when esc?
-                  (cond @hints-requested
-                        (do (consume! e) (reset! hints-requested false) (send! {:type "hints-key" :key "Escape"}))
-                        (ui/frame-kind) (do (consume! e) (ui/close-frame!))
-                        (seq (:ranges @find/state)) (do (consume! e) (find/clear!))
-                        :else nil)))))))
+(defn- escape-key!
+  "Escape in normal mode with no keys to reset: closes what is open, else the page gets it."
+  [^js e]
+  (cond @hints-requested
+        (do (consume! e) (reset! hints-requested false) (send! {:type "hints-key" :key "Escape"}))
+        (ui/frame-kind) (do (consume! e) (ui/close-frame!))
+        (seq (:ranges @find/state)) (do (consume! e) (find/clear!))
+        :else nil))
+
+(defn- exit-key!
+  "Escape left MODE: undo what it left behind, back to normal mode."
+  [mode]
+  (case mode
+    :hints (do (hints-exit!) (send! {:type "hints-key" :key "Escape"}))
+    :visual (visual/exit!)
+    :find (find/clear!)
+    :focus-input (some-> ^js (dom/deep-active-element) .blur)
+    nil)
+  (exit-mode!))
+
+(defn focus-kind
+  "Where keys typed now go, for dispatch/decide: :page, :field, or :catcher (an editable in
+  a frame you cannot see, like Google Docs' text event target)."
+  [^js e]
+  (cond (not (or (dom/editable? (dom/event-target e)) (dom/editable? (dom/deep-active-element)))) :page
+        (hidden-frame?) :catcher
+        :else :field))
 
 (defn- type-ahead-key!
   "Keeps a key typed for a Vomnibar that is still loading (here or, from a child frame, in the
@@ -415,28 +454,31 @@
     (let [ev (ev->map e)
           {:keys [mapkeys vim-escape? ignore-layout]} conf
           ks (keys/key-string ev mapkeys ignore-layout)
-          esc? (keys/escape? ev ks vim-escape?)
-          target (dom/event-target e)
-          editing? (or (dom/editable? target) (dom/editable? (dom/deep-active-element)))]
-      (case (:name @mode)
-        :hints (hints-key! e ks esc?)
-        :visual (visual-key! e ks esc?)
-        :marks-create (when ks (marks-key! e ks esc? true))
-        :marks-goto (when ks (marks-key! e ks esc? false))
-        :insert (when esc? (consume! e) (exit-mode!))
-        :pass-next (when ks
-                     (let [left (dec (:left @mode))]
-                       (if (pos? left) (swap! mode assoc :left left) (exit-mode!))))
-        :find nil
-        :focus-input (when-not (focus-input-key! e)
-                       (when esc? (consume! e) (.blur ^js (dom/deep-active-element))))
-        (cond
-          (nil? ks) nil
-          editing? (when esc?
-                     (consume! e)
-                     (let [^js a (dom/deep-active-element)] (when a (.blur a)))
-                     (.focus js/window))
-          :else (normal-key! e ks esc?))))))
+          esc? (keys/escape? ev ks vim-escape?)]
+      (let [m (:name @mode)
+            {:keys [enabled pass-keys]} (rule)
+            {:keys [state effect]} (dispatch/decide {:trie (:trie conf) :pass-keys pass-keys :enabled enabled}
+                                                    {:mode m :keys @key-state :suspended @typing-suspended :left (:left @mode)}
+                                                    (focus-kind e)
+                                                    {:ks ks :esc? esc? :text? (dispatch/edits-text? ev)})]
+        (reset! key-state (:keys state))
+        (set-suspended! (:suspended state))
+        (when (dispatch/consume? effect) (consume! e))
+        (case (first effect)
+          :handler (case m
+                     :hints (hints-key! e ks)
+                     :visual (visual-key! e ks)
+                     :marks-create (when ks (marks-key! e ks true))
+                     :marks-goto (when ks (marks-key! e ks false))
+                     :focus-input (focus-input-key! e))
+          :exit (exit-key! (second effect))
+          :pass-next (if (pos? (second effect)) (swap! mode assoc :left (second effect)) (exit-mode!))
+          :blur (do (some-> ^js (dom/deep-active-element) .blur) (.focus js/window))
+          :suspend (hud! "Normal mode: i or a click to type")
+          :resume (hud! "Typing")
+          :command (let [[_ entry cnt] effect] (run-command! entry cnt))
+          :escape (escape-key! e)
+          nil)))))
 
 (defn- on-keyup [^js e]
   (when (contains? @suppressed (.-code e))
@@ -444,10 +486,29 @@
     (.preventDefault e)
     (.stopImmediatePropagation e)))
 
-(defn- on-focus [^js e]
-  (when (and config/grab-back-focus (not @user-acted) (.-isTrusted e))
+(defn- on-focus
+  "Undoes a page's autofocus until the user acts, except in a frame you cannot see: that is a
+  canvas editor's key catcher (Google Docs), and its focus is what lets you type. Docs focuses
+  it again after every menu, toolbar button or Escape, so that does not end normal mode either;
+  i or a click does."
+  [^js e]
+  (when (and config/grab-back-focus (not @user-acted) (.-isTrusted e) (not (hidden-frame?)))
     (let [t (dom/event-target e)]
       (when (dom/editable? t) (.blur ^js t)))))
+
+(def ^:private pointer-message "vimium-cljs:pointer")
+
+(defn- on-mousedown
+  "A trusted click is the user acting, and means typing again over a key catcher. A click in
+  the top page of Google Docs lands outside the frame that holds the keyboard, so the top
+  frame tells that frame."
+  [^js e]
+  (when (.-isTrusted e)
+    (reset! user-acted true)
+    (set-suspended! false)
+    (let [^js a (.-activeElement js/document)]
+      (when (and a (= "iframe" (dom/tag a)))
+        (some-> (.-contentWindow a) (.postMessage pointer-message "*"))))))
 
 (defn- on-message [^js msg _sender respond]
   (case (.-type msg)
@@ -469,6 +530,8 @@
     false))
 
 (defn- on-window-message [^js e]
+  (when (and (= pointer-message (.-data e)) (not top?) (identical? (.-source e) (.-parent js/window)))
+    (set-suspended! false))
   (when (identical? (.-source e) (ui/frame-window))
     (case (.-data e)
       "vimium-cljs:close" (ui/close-frame!)
@@ -510,7 +573,7 @@
     (listen! js/window "keyup" on-keyup true)
     (listen! js/window "keypress" on-keyup true)
     (listen! js/window "focus" on-focus true)
-    (listen! js/window "mousedown" (fn [^js e] (when (.-isTrusted e) (reset! user-acted true))) true)
+    (listen! js/window "mousedown" on-mousedown true)
     (scroll/install!)
     (listen! js/window "message" on-window-message false)
     (.addEventListener js/document "DOMContentLoaded" mark-ready!)

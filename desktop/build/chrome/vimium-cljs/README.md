@@ -62,5 +62,13 @@ The `tab-panel` command opens the window's tabs in Chrome's side panel (`ext/pan
 middle-click or × closes. It is meant for a Chrome with no tab strip or address bar (Hyprland's
 `fullscreen_state = "0 2"` rule in the guix repo). Assign it a key at chrome://extensions/shortcuts, like Ctrl+L.
 
+## Google Docs
+
+Docs reads keys from a contenteditable in a 1px iframe that always has focus. `src/vimium_cljs/dispatch.cljs` keeps
+vimium's own mode over such a "key catcher": typing until Escape, normal mode (j scrolls the document, f hints menus)
+until i or a click. `test/fixtures/docs.html` reproduces the structure; `npm run e2e:docs` and
+`npm run bombadil:docs` check it; `npm run gdocs` checks a real public Doc headless.
+
 Logic ported from [Vimium](https://github.com/philc/vimium), MIT, Copyright (c) 2010 Phil Crosby, Ilya Sukhar
-(ext/LICENSE.vimium.txt).
+(ext/LICENSE.vimium.txt). The mode kept over Docs' editor follows [SheetKeys](https://github.com/philc/sheetkeys)
+(MIT, Copyright (c) Phil Crosby).

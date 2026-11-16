@@ -67,6 +67,7 @@
       fields: deepAll(document, 'input,textarea,[contenteditable]').map((f) => ({ id: f.id, value: f.value ?? f.textContent })),
       active: (() => { let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; return a ? a.id || a.tagName : null; })(),
       frames: probe.frames,
+      docs: window.__docsFacts ? window.__docsFacts() : null,
       last: withLast ? probe.last : null,
     };
   };
