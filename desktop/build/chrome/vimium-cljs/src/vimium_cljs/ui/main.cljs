@@ -33,7 +33,7 @@
         (popup?) (.close js/window)
         :else (.postMessage (.-parent js/window) "vimium-cljs:close" "*")))
 
-(defonce vstate (atom {:items [] :selected 0 :cands nil :loaded nil :frame nil}))
+(defonce vstate (atom (assoc vomnibar/initial :mode nil :loaded nil :frame nil)))
 
 (def ^:private badge {"tab" "Tab" "bookmark" "Bookmark" "history" "History" "search" "Search" "url" "Go"})
 
@@ -67,7 +67,7 @@
 
 (defn- numbered? [mode] (and (= mode "tabs") (str/blank? (.-value ($ "#query")))))
 
-(declare open!)
+(declare open! dispatch!)
 
 (def ^:private search-host
   (-> (re-find #"^https?://([^/]+)" config/search-url) second (or "the web") (str/replace #"^www\." "")))
@@ -88,7 +88,7 @@
     (when (numbered? mode) (.append li (el "span" "num" (when (< i 9) (str (inc i))))))
     (.append li (icon item) text (el "span" "badge" (badge type type)))
     (.addEventListener li "mousedown" (fn [^js e] (.preventDefault e)))
-    (.addEventListener li "click" (fn [^js e] (swap! vstate assoc :selected i) (open! (.-shiftKey e))))
+    (.addEventListener li "click" (fn [^js e] (dispatch! [:select i]) (open! (.-shiftKey e))))
     li))
 
 (defn- render! []
@@ -143,33 +143,18 @@
                    :bookmarks (bookmark-leaves tree)
                    :own (js/chrome.runtime.getURL "")}))))))
 
-(declare refresh!)
-
-(defn- reload!
-  "Reads the candidates again. The latest pages come first, so rows show before the full
-  history (3000 pages take Chrome ~90 ms) is in; :loaded resolves once it is."
-  [mode]
-  (let [gen (:gen (swap! vstate update :gen inc))
-        mine? #(= gen (:gen @vstate))
-        ;; One after the other: Chrome answers history queries in turn, so the small one
-        ;; would wait behind the big one.
-        full (-> (load-candidates mode 40)
-                 (.then (fn [c] (when (mine?) (swap! vstate assoc :cands c :for nil) (refresh!))))
-                 (.then #(load-candidates mode 3000))
-                 (.then (fn [c] (when (mine?) (swap! vstate assoc :cands c :for nil) (refresh!)) c)))]
-    (swap! vstate assoc :loaded full)
-    full))
-
-(defn- show!
-  "Ranks the candidates for TEXT and draws the rows, unless they already show TEXT."
-  [text]
-  (let [{:keys [cands mode for]} @vstate]
-    (when (and cands (not= text for))
-      (swap! vstate assoc :for text :selected 0
-             :items (vomnibar/rows cands mode text (js/Date.now) {:engines config/search-engines :search-url config/search-url}))
+(defn- dispatch!
+  "Steps the view through EVENTS (see vomnibar/step) and draws the rows if they changed."
+  [& events]
+  (let [old @vstate
+        rows (fn [cands text] (vomnibar/rows cands (:mode old) text (js/Date.now)
+                                             {:engines config/search-engines :search-url config/search-url}))
+        new (swap! vstate #(reduce (fn [v e] (vomnibar/step v e rows)) % events))]
+    (when (not= (mapv old [:items :selected :for]) (mapv new [:items :selected :for]))
       (render!)
       ;; Which text the rows are for, for the tests that time them.
-      (set! (.. ($ "#list") -dataset -for) text))))
+      (set! (.. ($ "#list") -dataset -for) (:for new)))
+    new))
 
 (defn- refresh!
   "Shows the rows for what is typed at the next frame: keys typed before it cost one ranking."
@@ -177,29 +162,53 @@
   (when-not (:frame @vstate)
     (swap! vstate assoc :frame
            (js/requestAnimationFrame
-            (fn [_] (swap! vstate assoc :frame nil) (show! (.-value ($ "#query"))))))))
+            (fn [_] (swap! vstate assoc :frame nil) (dispatch! [:show]))))))
+
+(defn- reload!
+  "Reads the candidates again. The latest pages come first, so rows show before the full
+  history (3000 pages take Chrome ~90 ms) is in; :loaded resolves once it is."
+  [mode]
+  (let [gen (:gen (dispatch! [:reload]))
+        got (fn [c] (dispatch! [:cands gen c]) (refresh!) c)
+        ;; One after the other: Chrome answers history queries in turn, so the small one
+        ;; would wait behind the big one.
+        full (-> (load-candidates mode 40)
+                 (.then got)
+                 (.then #(load-candidates mode 3000))
+                 (.then got))]
+    (swap! vstate assoc :loaded full)
+    full))
+
+(defn- leave!
+  "After a pick: the Vomnibar goes away, or on the new tab page stays frozen while the tab
+  navigates (clearing it here drew the unfiltered rows until the page changed)."
+  []
+  (when-not (new-tab-page?) (close!)))
 
 (defn- open!
-  "Opens the selected row for what is typed (ranking it first if a frame has not shown it
-  yet, so a fast Enter never opens a result for older text). AS-TYPED opens the typed text."
+  "Opens the highlighted row for what is typed (ranking it first if a frame has not shown it
+  yet, so a fast Enter never opens a result for older text) and freezes the rows. AS-TYPED
+  opens the typed text."
   ([new-tab] (open! new-tab false))
   ([new-tab as-typed]
    (-> (:loaded @vstate)
        (.then (fn [_]
-                (let [text (.-value ($ "#query"))
-                      _ (show! text)
-                      {:keys [items selected]} @vstate
-                      item (when-not as-typed (get items selected))]
-                  (when (or item (not (str/blank? text)))
-                    (-> (js/chrome.runtime.sendMessage
-                         (clj->js {:type "vomnibar-open" :newTab (boolean new-tab) :query text
-                                   :item (some-> item (select-keys [:type :url :tabId :windowId]))
-                                   :text (when-not item text) :tabId (target-tab)}))
-                        (.finally close!)))))))))
+                (when-not (:ended @vstate)
+                  (let [text (.-value ($ "#query"))
+                        v (dispatch! [:input text] [:pick])
+                        item (when-not as-typed (vomnibar/picked v))]
+                    (if (or item (not (str/blank? text)))
+                      (-> (js/chrome.runtime.sendMessage
+                           (clj->js {:type "vomnibar-open" :newTab (boolean new-tab) :query text
+                                     :item (some-> item (select-keys [:type :url :tabId :windowId]))
+                                     :text (when-not item text) :tabId (target-tab)}))
+                          (.finally leave!))
+                      (dispatch! [:reset])))))))))
 
 (defn- reset-query! []
   (let [^js input ($ "#query")]
     (set! (.-value input) "")
+    (dispatch! [:reset])
     (.dispatchEvent input (js/Event. "input"))))
 
 (defn- show-chip! [mode q]
@@ -211,7 +220,8 @@
   "Shows the Vomnibar in MODE and reads its candidates."
   [mode]
   (let [^js input ($ "#query")]
-    (swap! vstate assoc :mode mode :for nil)
+    (swap! vstate assoc :mode mode)
+    (dispatch! [:input (.-value input)])
     (reload! mode)
     (set! (.-placeholder input) (case mode "tabs" "Switch to tab" "bookmarks" "Search bookmarks" "Search or type a URL"))
     (show-chip! mode (.-value input))))
@@ -221,31 +231,29 @@
         new-tab (= "1" (.get ps "newTab"))
         ^js input ($ "#query")
         plain-paste (atom false)
-        move (fn [d] (let [n (count (:items @vstate))]
-                       (when (pos? n)
-                         (swap! vstate update :selected #(mod (+ % d) n))
-                         (render!))))]
+        move (fn [d] (dispatch! [:move d]))]
     (when (= mode "edit") (set! (.-value input) (or (.get ps "url") "")))
     (set-mode! mode)
     (cond (popup?) (.add (.-classList js/document.body) "popup")
           (new-tab-page?) (do (.add (.-classList js/document.body) "newtab")
                               (set! (.-title js/document) "New Tab")))
     (set! (.-hidden ($ "#vomnibar")) false)
-    (.addEventListener input "input" (fn [_] (show-chip! (:mode @vstate) (.-value input)) (refresh!)))
+    (.addEventListener input "input" (fn [_] (show-chip! (:mode @vstate) (.-value input)) (dispatch! [:input (.-value input)]) (refresh!)))
     (.addEventListener input "paste"
                        (fn [^js e]
                          (let [t (str/trim (.getData (.-clipboardData e) "text"))]
                            (when (and (not @plain-paste) (str/blank? (.-value input)) (rank/url-like? t))
                              (.preventDefault e)
                              (set! (.-value input) t)
+                             (dispatch! [:input t] [:pick])
                              (-> (js/chrome.runtime.sendMessage (clj->js {:type "vomnibar-open" :newTab new-tab :query t :text t :tabId (target-tab)}))
-                                 (.finally close!))))
+                                 (.finally leave!))))
                          (reset! plain-paste false)))
     (.addEventListener js/document "keydown"
                        (fn [^js e]
                          (let [k (.-key e) c (.-ctrlKey e) s (.-shiftKey e)]
                            (cond
-                             (or (= k "Escape") (and c (= k "["))) (do (.preventDefault e) (close!))
+                             (or (= k "Escape") (and c (= k "["))) (do (.preventDefault e) (when-not (new-tab-page?) (dispatch! [:escape])) (close!))
                              (= k "Enter") (do (.preventDefault e) (open! (or new-tab s) c))
                              (or (= k "ArrowDown") (and (= k "Tab") (not s)) (and c (#{"n" "j"} k)))
                              (do (.preventDefault e) (move 1))
@@ -253,13 +261,12 @@
                              (do (.preventDefault e) (move -1))
                              (and (re-matches #"[1-9]" k) (not c) (not (.-altKey e)) (numbered? (:mode @vstate))
                                   (< (dec (js/Number k)) (count (:items @vstate))))
-                             (do (.preventDefault e) (swap! vstate assoc :selected (dec (js/Number k))) (open! (or new-tab s)))
+                             (do (.preventDefault e) (dispatch! [:select (dec (js/Number k))]) (open! (or new-tab s)))
                              (and c s (= (str/lower-case k) "v")) (reset! plain-paste true)
                              (and (= k "Delete") s (= (:mode @vstate) "tabs"))
-                             (let [{:keys [items selected]} @vstate]
-                               (when-let [t (get items selected)]
-                                 (.preventDefault e)
-                                 (-> (js/chrome.tabs.remove (:tabId t)) (.then #(reload! (:mode @vstate))))))))))
+                             (when-let [t (vomnibar/picked @vstate)]
+                               (.preventDefault e)
+                               (-> (js/chrome.tabs.remove (:tabId t)) (.then #(reload! (:mode @vstate)))))))))
     (when-not (new-tab-page?)
       (.addEventListener js/window "blur" (fn [_] (js/setTimeout #(when-not (.hasFocus js/document) (close!)) 50))))
     ;; The page focuses the frame when it loads, which can drop the input's focus without
@@ -288,6 +295,10 @@
                                (when (.-enter d) (open! new-tab))))))
       (.postMessage (.-parent js/window) "vimium-cljs:ready" "*"))
     (when (new-tab-page?)
+      ;; Back on a new tab page that was left frozen by a pick: start over.
+      (.addEventListener js/window "pageshow" (fn [_] (when (:ended @vstate) (reset-query!))))
+      (.addEventListener js/document "visibilitychange"
+                         (fn [_] (when (and (= "visible" (.-visibilityState js/document)) (:ended @vstate)) (reset-query!))))
       (-> (js/chrome.tabs.getCurrent)
           (.then (fn [^js me]
                    (js/chrome.runtime.onMessage.addListener
@@ -295,6 +306,7 @@
                       (when (and (= "vomnibar-show" (.-type msg)) me (= (.-tabId msg) (.-id me)))
                         (let [ok (.hasFocus js/document)]
                           (when ok
+                            (when (:ended @vstate) (reset-query!))
                             (when (not= (.-mode msg) (:mode @vstate))
                               (set-mode! (.-mode msg)))
                             (.focus input) (.select input))

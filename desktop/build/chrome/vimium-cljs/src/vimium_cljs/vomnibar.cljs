@@ -55,3 +55,52 @@
         (rank/omni-list query (typed-item query engines search-url)
                         (rank/rank query (:pool cands) now picks)
                         max-rows)))))
+
+;; The view: what is typed (:query), the rows (:items) and the text they were ranked for
+;; (:for), the highlighted row (:selected), the candidates of the latest read (:cands, from
+;; read :gen; :stale once they replace the ones the rows came from), and :ended, :picked or
+;; :closed, after which nothing the user sees changes until a :reset.
+
+(def initial {:query "" :for nil :items [] :selected 0 :cands nil :stale false :gen 0 :ended nil})
+
+(defn picked
+  "The highlighted row."
+  [{:keys [items selected]}]
+  (get items selected))
+
+(defn- show [{:keys [cands query for stale items selected] :as v} rows-fn]
+  (cond
+    (or (nil? cands) (and (= query for) (not stale))) v
+    (not= query for) (assoc v :for query :stale false :selected 0 :items (rows-fn cands query))
+    ;; Same text, more candidates: keep the highlight on the row it was on.
+    :else (let [url (:url (get items selected))
+                rows (rows-fn cands query)
+                i (or (first (keep-indexed (fn [i r] (when (= url (:url r)) i)) rows)) 0)]
+            (assoc v :stale false :items rows :selected (if (pos? selected) i 0)))))
+
+(defn step
+  "The view V after EVENT, a vector [kind & args]:
+  [:input text]  the typed text changed
+  [:reload]      a new read of the candidates starts
+  [:cands gen c] candidates C from read GEN arrive (dropped unless GEN is the latest)
+  [:show]        a frame: rank for the typed text, unless the rows show it already
+  [:move d]      move the highlight D rows, wrapping
+  [:select i]    highlight row I (a click or a number key)
+  [:pick]        Enter: rank first if no frame showed the typed text yet, then freeze
+  [:escape]      closed without a pick
+  [:reset]       shown again: unfreeze with an empty query
+  ROWS-FN ranks: (rows-fn cands text)."
+  [v [kind a b] rows-fn]
+  (if (and (:ended v) (not (#{:reset :reload :cands} kind)))
+    v
+    (case kind
+      :input (assoc v :query a)
+      :reload (update v :gen inc)
+      :cands (if (= a (:gen v)) (assoc v :cands b :stale true) v)
+      :show (if (:ended v) v (show v rows-fn))
+      :move (let [n (count (:items v))]
+              (if (pos? n) (update v :selected #(mod (+ % a) n)) v))
+      :select (if (< -1 a (count (:items v))) (assoc v :selected a) v)
+      :pick (-> (if (= (:query v) (:for v)) v (show v rows-fn)) (assoc :ended :picked))
+      :escape (assoc v :ended :closed)
+      :reset (-> v (assoc :ended nil :query "") (show rows-fn)))))

@@ -50,9 +50,10 @@ export const scrollingMoves = always(() => {
 });
 
 type Vom = { open: boolean; focused: boolean; value: string; for: string | null; scrollbars: string[]; selectedVisible: boolean;
-  items: { url: string; type: string; title: string }[] };
+  items: { url: string; type: string; title: string; selected: boolean }[] };
 type VomLast = { kind: "vomnibar"; key: string; text: string; target: string | null; end: string; openMs: number; opened: Facts;
   typed: Vom; resultsMs: number; moved: Vom | null; mid: Facts; closed: Vom; pageFocused: boolean; before: Facts; after: Facts;
+  drawnAfterEnd: { what: string; query: string; for: string | null; urls: string[] }[];
   tabsBefore: { urls: string[]; active: string }; tabsAfter: { urls: string[]; active: string } };
 const vl = () => { const l = f()?.last as any; return l && l.kind === "vomnibar" ? l as VomLast : null; };
 
@@ -82,6 +83,24 @@ export const vomnibarKeysStayOut = always(() => {
 export const vomnibarEscapeCloses = always(() => {
   const l = vl();
   return !l || l.end !== "esc" || (!l.closed.open && l.pageFocused && l.after.active === l.before.active);
+});
+
+// The rows on screen are the ranking for the typed text, also after Tab moved the highlight.
+export const vomnibarRowsForTypedText = always(() => {
+  const l = vl();
+  return !l || [l.typed, l.moved].every((v) => !v || (v.for === v.value && v.items.filter((i) => i.selected).length <= 1));
+});
+
+// Enter or Escape ends it: nothing is drawn after, and the typed text stays (the new tab page once cleared it and showed every row).
+export const vomnibarStillAfterEnd = always(() => {
+  const l = vl();
+  return !l || l.drawnAfterEnd.every((d) => d.what !== "rows" && d.query === l.typed.value);
+});
+
+export const vomnibarNewTabStillAfterPick = always(() => {
+  const l = f()?.last as any;
+  if (!l || l.kind !== "newtab") return true;
+  return !!l.typed && l.typed.for === l.text && l.drawn.every((d: any) => d.what !== "rows" && d.query === l.text);
 });
 
 export const vomnibarExactMatchFirst = always(() => {
@@ -173,14 +192,27 @@ const vomnibar = registerCustomAction("vomnibar", async (_d, window, key: string
     moved = await ctl("/__ctl/vomnibar");
   }
   const mid = probeOf(w);
+  await ctl("/__ctl/vomnibar-watch");
   await ctl(`/__ctl/keys?seq=${end === "enter" ? "<enter>" : "<esc>"}`);
   await settle(300);
+  const drawnAfterEnd = await ctl("/__ctl/vomnibar-draws");
   const closed = await ctl("/__ctl/vomnibar");
   const tabsAfter = await ctl("/__ctl/tabs");
   const pageFocused = w.document.hasFocus();
   if (end === "enter") { await ctl("/__ctl/front"); await settle(200); }
   if (w.__probe) w.__probe.last = { kind: "vomnibar", key, text, target, end, openMs, opened, typed, resultsMs, moved, mid,
-    closed, pageFocused, before, after: probeOf(w), tabsBefore, tabsAfter, seq: text };
+    closed, pageFocused, before, after: probeOf(w), tabsBefore, tabsAfter, drawnAfterEnd, seq: text };
+});
+
+// A pick on the new tab page: it stays put while the tab navigates or switches.
+const newTabPick = registerCustomAction("newTabPick", async (_d, window, what: string) => {
+  const w = window as any;
+  const text = what === "url" ? `${w.location.host}/frame.html?ntp` : what;
+  await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>")}`);
+  const r = await ctl(`/__ctl/newtab-pick?text=${encodeURIComponent(text)}`);
+  await ctl("/__ctl/front");
+  await settle(200);
+  if (w.__probe && r) w.__probe.last = { kind: "newtab", seq: text, text, typed: r.typed, drawn: r.drawn };
 });
 
 const typeAhead = registerCustomAction("typeAhead", async (_d, window, key: string, text: string) => {
@@ -202,6 +234,7 @@ const vomnibarActions = weighted([
   [3, actions(() => ["title", "url", "zq xv", "fixtrue", "j k gg"].flatMap((what) => ["esc", "enter"].map((end) => vomnibar("o", what, end))))],
   [2, actions(() => ["", "frame", "title"].flatMap((what) => ["esc", "enter"].map((end) => vomnibar("p", what, end))))],
   [2, actions(() => ["notes", "jjkk", "field n"].flatMap((t) => ["o", "p"].map((k) => typeAhead(k, t))))],
+  [1, actions(() => ["url", "Vomnibar field notes", "frame"].map((t) => newTabPick(t)))],
 ]);
 
 const keyActions = weighted([
