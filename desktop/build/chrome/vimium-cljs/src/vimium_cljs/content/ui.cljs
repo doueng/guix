@@ -20,6 +20,23 @@
 iframe.ui { position: fixed; z-index: 2147483647; border: 0; background: transparent; color-scheme: normal; }
 iframe.vomnibar { left: 50%; top: 54px; width: min(964px, calc(80vw + 64px)); height: 600px; transform: translateX(-50%); }
 iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh; transform: translateX(-50%); }
+.mode { position: fixed; left: 8px; bottom: 8px; z-index: 2147483646; pointer-events: none; user-select: none;
+  font: 600 11px/18px system-ui, -apple-system, 'Segoe UI', sans-serif; letter-spacing: .04em; padding: 0 7px;
+  border-radius: 6px; background: #f1f3f4; color: var(--c, #6b6f76); border: 1px solid rgba(0,0,0,.08);
+  box-shadow: 0 1px 4px rgba(0,0,0,.10); opacity: .92; transition: opacity .15s; }
+.mode::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; margin-right: 5px; vertical-align: 1px; }
+.mode.normal { opacity: .8; }
+.mode.insert { --c: #188038; } .mode.hints { --c: #b06000; } .mode.visual, .mode.visual-line { --c: #8430ce; }
+.mode.vomnibar { --c: #1a66d6; } .mode.pass, .mode.mark { --c: #c5221f; }
+.mode.off, .mode.find { display: none; }
+.mode.near { opacity: 0; }
+.mode.right { left: auto; right: 8px; }
+@media (prefers-color-scheme: dark) {
+  .mode { background: #303134; border-color: rgba(255,255,255,.13); color: var(--c, #9aa0a6); }
+  .mode.insert { --c: #81c995; } .mode.hints { --c: #fdd663; } .mode.visual, .mode.visual-line { --c: #c58af9; }
+  .mode.vomnibar { --c: #8ab4f8; } .mode.pass, .mode.mark { --c: #f28b82; }
+}
 ")
 
 (defonce ^:private state (atom {}))
@@ -73,6 +90,10 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
    (when-not (some-> ^js (:hud @state) .-classList (.contains "find"))
      (hide-hud!)
      (let [^js h (el "div" "hud" text)]
+       ;; beside the mode badge when that sits in the bottom right corner
+       (when-let [^js b (:mode @state)]
+         (when (.contains (.-classList b) "right")
+           (set! (.. h -style -right) (str (+ 16 (.-width (.getBoundingClientRect b))) "px"))))
        (.appendChild (attach!) h)
        (swap! state assoc :hud h
               :hud-timer (when ms (js/setTimeout hide-hud! ms)))))))
@@ -135,15 +156,18 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
   (swap! state dissoc :markers))
 
 (defn close-frame!
-  "Removes the framed page and gives focus back to the element that had it."
-  []
-  (when-let [^js f (:frame @state)]
-    (let [^js back (:focus-back @state)]
-      (.remove f)
-      (swap! state dissoc :frame :frame-kind :focus-back :typed)
-      (.focus js/window)
-      (when (and back (.-isConnected back) (not= back (.-body js/document)))
-        (.focus back #js {:preventScroll true})))))
+  "Removes the framed page and gives focus back to the element that had it, unless REFOCUS is
+  false (the focus already went somewhere else)."
+  ([] (close-frame! true))
+  ([refocus]
+   (when-let [^js f (:frame @state)]
+     (let [^js back (:focus-back @state)]
+       (.remove f)
+       (swap! state dissoc :frame :frame-kind :focus-back :typed)
+       (when refocus
+         (.focus js/window)
+         (when (and back (.-isConnected back) (not= back (.-body js/document)))
+           (.focus back #js {:preventScroll true})))))))
 
 (defn frame-kind [] (:frame-kind @state))
 
@@ -160,6 +184,83 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
     (.appendChild (attach!) f)
     (swap! state assoc :frame f :frame-kind kind :typed {:text "" :enter false})
     f))
+
+(def ^:private mode-labels
+  {"normal" "NORMAL" "insert" "INSERT" "hints" "HINTS" "visual" "VISUAL" "visual-line" "VISUAL LINE"
+   "vomnibar" "VOMNIBAR" "find" "FIND" "pass" "PASS KEY" "mark" "MARK" "off" ""})
+
+(def ^:private clickable
+  "What the badge should not sit on."
+  "a, button, input, select, textarea, [role=button], [role=link], [role=tab], [role=menuitem], [onclick], [contenteditable=true]")
+
+(defn- covers-clickable?
+  "Whether badge B, where it is now, lies over something clickable (sampled at its corners and
+  middle; the badge itself takes no pointer, so the page answers)."
+  [^js b]
+  (let [^js r (.getBoundingClientRect b)]
+    (and (pos? (.-width r))
+         (boolean (some (fn [[x y]] (some-> (.elementFromPoint js/document x y) (.closest clickable)))
+                        [[(+ (.-left r) 2) (+ (.-top r) 2)] [(- (.-right r) 2) (+ (.-top r) 2)]
+                         [(+ (.-left r) 2) (- (.-bottom r) 2)] [(- (.-right r) 2) (- (.-bottom r) 2)]
+                         [(/ (+ (.-left r) (.-right r)) 2) (/ (+ (.-top r) (.-bottom r)) 2)]])))))
+
+(defn- place-badge!
+  "Keeps badge B in its bottom corner (the left one at first) while nothing clickable is under
+  it there, else moves it to the other corner if that one is clear (from the Sheets add-sheet
+  button, say)."
+  [^js b]
+  (when (covers-clickable? b)
+    (let [cl (.-classList b) right? (.contains cl "right")]
+      (.toggle cl "right" (not right?))
+      (if (covers-clickable? b)
+        (.toggle cl "right" right?)
+        (swap! state assoc :right (not right?))))))
+
+(defn indicator!
+  "Shows the mode badge in a bottom corner (see dispatch/indicator for MODE, or \"vomnibar\").
+  It takes no clicks, keeps off what is clickable where it can and fades while the pointer is
+  near, so it never hides what is under it. An open find bar stands in for it."
+  [mode]
+  (let [^js b (or (:mode @state)
+                  (let [^js b (el "div" "mode")]
+                    (.setAttribute b "aria-hidden" "true")
+                    (swap! state assoc :mode b)
+                    b))]
+    (when-not (.-isConnected b) (.appendChild (attach!) b))
+    (when (not= mode (:shown @state))
+      (swap! state assoc :shown mode)
+      (set! (.-className b) (str "mode " mode (when (:near @state) " near") (when (:right @state) " right")))
+      (set! (.-textContent b) (get mode-labels mode mode)))
+    ;; the page can grow a button under it after it was placed (Sheets draws its bar late), so
+    ;; look again on later draws too, at most once a second
+    (let [now (js/Date.now)]
+      (when (> now (+ 1000 (or (:placed @state) 0)))
+        (swap! state assoc :placed now :mode-size nil)
+        (place-badge! b)))))
+
+(defn pointer-at!
+  "Fades the badge while the pointer at X, Y (viewport pixels) is within 48px of it. It sits
+  8px from a bottom corner; its size and corner are measured once per mode, not on every move."
+  [x y]
+  (when-let [^js b (:mode @state)]
+    (let [[w h right] (or (:mode-size @state)
+                          (let [^js r (.getBoundingClientRect b)
+                                s [(.-width r) (.-height r) (.contains (.-classList b) "right")]]
+                            (swap! state assoc :mode-size s)
+                            s))
+          bottom (- (.-innerHeight js/window) 8)
+          vw (.-innerWidth js/window)
+          near (and (pos? w)
+                    (if right (> x (- vw 8 w 48)) (< x (+ 8 w 48)))
+                    (> y (- bottom h 48)))]
+      (when (not= near (boolean (:near @state)))
+        (swap! state assoc :near near)
+        (.toggle (.-classList b) "near" near)))))
+
+(defn watch-frame!
+  "Calls F with the kind of the frame over the page (or nil) whenever it changes."
+  [f]
+  (add-watch state ::frame (fn [_ _ o n] (when (not= (:frame-kind o) (:frame-kind n)) (f (:frame-kind n))))))
 
 ;; Keys typed before the Vomnibar frame loads reach the page; keep them (:typed) and hand them over when it is ready.
 

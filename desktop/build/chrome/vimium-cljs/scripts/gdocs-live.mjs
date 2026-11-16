@@ -34,7 +34,9 @@ const STATE = `(() => {
   const shown = (m) => getComputedStyle(m).display !== 'none' && getComputedStyle(m).visibility !== 'hidden' && m.getBoundingClientRect().height > 0;
   const hint = (sel) => (document.querySelector(sel) || {}).dataset?.vimiumCljsHint || null;
   const ed = document.getElementById('waffle-rich-text-editor');
-  return { url: location.href, focus: document.hasFocus(), active: desc(a), inner: desc(inner), editable: !!((inner || a) && (inner || a).isContentEditable),
+  const keyDoc = inner ? inner.ownerDocument : document;
+  return { badge: document.documentElement.dataset.vimiumCljsIndicator || null, mode: keyDoc.documentElement.dataset.vimiumCljsMode || 'normal',
+    url: location.href, focus: document.hasFocus(), active: desc(a), inner: desc(inner), editable: !!((inner || a) && (inner || a).isContentEditable),
     cellEditing: !!(ed && ed.getBoundingClientRect().top > 0),
     scrollTop: scroller ? Math.round(scroller.scrollTop) : null, suspended: html.dataset.vimiumCljsSuspended === '1',
     hints: document.querySelectorAll('[data-vimium-cljs-hint]').length,
@@ -59,13 +61,22 @@ try {
     const sheet = name.startsWith('sheets');
     const r = (report[name] = []);
     const shot = (n) => { const f = join(out, `${name}-${n}.png`); run('grim', f); return f; };
-    const check = (n, what, ok, st) => { r.push({ what, ok: !!ok, shot: shot(n), st }); console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}: ${what} ${JSON.stringify(st)}`); };
+    // BADGE: the mode badge this step should show at the bottom left
+    const check = (n, what, ok, st, badge) => {
+      const good = !!ok && (!badge || st.badge === badge);
+      const say = badge ? `${what}; the badge says ${badge.toUpperCase()}` : what;
+      r.push({ what: say, ok: good, shot: shot(n), st });
+      console.log(`${good ? 'PASS' : 'FAIL'}: ${name}: ${say} ${JSON.stringify(st)}`);
+    };
     const { targetId } = await b.cdp('Target.createTarget', { url: p.url });
     const s = (await b.cdp('Target.attachToTarget', { targetId, flatten: true })).sessionId;
     await b.cdp('Page.bringToFront', {}, s);
     await sleep(p.wait);
     // Mirror hints into attributes, as on the fixtures.
     await evaluate(b.cdp, s, `(() => { if (!document.querySelector('meta[name=vimium-cljs-test]')) { const m = document.createElement('meta'); m.name = 'vimium-cljs-test'; document.head.appendChild(m); } })()`);
+    // and have the frame with the keyboard report its mode again, now that the badge mirrors into an attribute
+    await evaluate(b.cdp, s, `[window, ...[...document.querySelectorAll('iframe')].map((f) => f.contentWindow)].forEach((w) => { try { w.dispatchEvent(new FocusEvent('focus')); } catch {} })`);
+    await sleep(300);
     const st = () => evaluate(b.cdp, s, STATE);
     const click = async ([x, y]) => {
       for (const type of ['mousePressed', 'mouseReleased']) await b.cdp('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }, s);
@@ -80,13 +91,13 @@ try {
       await sleep(1500);
       a = await st();
     }
-    check('1-loaded', 'on load the app keeps its keyboard', a.editable && a.focus, a);
+    check('1-loaded', 'on load the app keeps its keyboard', a.editable && a.focus, a, 'insert');
     await click(p.click);
     const { url: url0, scrollTop: top0 } = await st();
     await type(sheet ? 'jkfhl' : 'vimium typing test jjjkhl ');
     if (sheet) await key('Return');
     a = await st();
-    check('2-typed', 'after a click, letters are typing: nothing scrolls, no hints, no history move', Math.abs(a.scrollTop - top0) < 40 && a.url === url0 && !a.suspended && a.hints === 0 && a.editable, a);
+    check('2-typed', 'after a click, letters are typing: nothing scrolls, no hints, no history move', Math.abs(a.scrollTop - top0) < 40 && a.url === url0 && !a.suspended && a.hints === 0 && a.editable, a, 'insert');
     if (sheet) {
       await key('Up');
       a = await st();
@@ -94,14 +105,14 @@ try {
     }
     await key('Escape');
     a = await st();
-    check('3-escape', 'Escape: normal mode, the app keeps its editor focused', a.suspended && a.editable && a.focus, a);
+    check('3-escape', 'Escape: normal mode, the app keeps its editor focused', a.suspended && a.editable && a.focus, a, 'normal');
     await type('jjj');
     a = await st();
-    check('4-scrolled', 'j scrolls', a.scrollTop > 0 && a.suspended, a);
+    check('4-scrolled', 'j scrolls', a.scrollTop > 0 && a.suspended, a, 'normal');
     await type('gg');
     await type('f');
     a = await st();
-    check('5-hints', 'f shows hints on the menus and toolbar', a.hints > 0 && a.fileHint, a);
+    check('5-hints', 'f shows hints on the menus and toolbar', a.hints > 0 && a.fileHint, a, 'hints');
     if (sheet) check('5b-tab-hint', 'the sheet tab has a hint', !!a.tabHint, a);
     if (a.fileHint) {
       await type(a.fileHint);
@@ -112,29 +123,46 @@ try {
     } else await key('Escape');
     await click(p.click);
     a = await st();
-    check('7-click', 'a click types again', !a.suspended && a.editable, a);
+    check('7-click', 'a click types again', !a.suspended && a.editable, a, 'insert');
     if (sheet) {
       await type('x');
       a = await st();
-      check('8-cell-edit', 'a letter starts editing the cell', a.cellEditing && !a.suspended, a);
+      check('8-cell-edit', 'a letter starts editing the cell', a.cellEditing && !a.suspended, a, 'insert');
       await key('Escape');
       a = await st();
-      check('9-cell-escape', 'Escape in a cell is the Sheet\'s: it ends the edit and typing goes on', !a.cellEditing && !a.suspended && a.editable, a);
+      check('9-cell-escape', 'Escape in a cell is the Sheet\'s: it ends the edit and typing goes on', !a.cellEditing && !a.suspended && a.editable, a, 'insert');
       await key('Down');
       await key('Up');
       a = await st();
       check('9b-cell-kept', 'the edit was cancelled: arrows move between cells and the cell keeps its value', a.formula === 'jkfhl' && !a.suspended, a);
       await key('Escape');
       a = await st();
-      check('10-second-escape', 'a second Escape gives normal mode', a.suspended && a.editable, a);
+      check('10-second-escape', 'a second Escape gives normal mode', a.suspended && a.editable, a, 'normal');
       await click(await center('#t-formula-bar-input-container .cell-input'));
       await type('=1+1');
       a = await st();
-      check('11-formula', 'the formula bar takes typing', !a.suspended && a.hints === 0 && a.formula.includes('1+1'), a);
+      check('11-formula', 'the formula bar takes typing', !a.suspended && a.hints === 0 && a.formula.includes('1+1'), a, 'insert');
       await key('Escape');
       a = await st();
-      check('12-formula-escape', 'Escape in the formula bar is the Sheet\'s: the grid keeps the keyboard', a.active === 'div#waffle-rich-text-editor' && !a.suspended, a);
+      check('12-formula-escape', 'Escape in the formula bar is the Sheet\'s: the grid keeps the keyboard', a.active === 'div#waffle-rich-text-editor' && !a.suspended, a, 'insert');
     }
+    // The badge in the other modes: visual (where the frame with the keyboard has text) and the Vomnibar.
+    await key('Escape');
+    a = await st();
+    check('13-normal', 'Escape: normal mode again', a.suspended, a, 'normal');
+    await type('v');
+    a = await st();
+    check('14-visual', 'v: the badge names the mode v left (visual, or normal where the keys have no text to select)', true, a, a.mode === 'visual' ? 'visual' : 'normal');
+    await key('Escape');
+    await type('o');
+    a = await st();
+    check('15-vomnibar', 'o opens the Vomnibar', true, a, 'vomnibar');
+    await key('Escape');
+    a = await st();
+    check('16-vomnibar-closed', 'Escape closes it: normal mode, the app keeps its editor', a.suspended && a.editable, a, 'normal');
+    await click(p.click);
+    a = await st();
+    check('17-typing-again', 'a click types again', !a.suspended && a.editable, a, 'insert');
     await b.cdp('Target.closeTarget', { targetId });
   }
 } finally {

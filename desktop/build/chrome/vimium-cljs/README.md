@@ -75,6 +75,14 @@ The `tab-panel` command opens the window's tabs in Chrome's side panel (`ext/pan
 middle-click or × closes. It works next to Chrome's own tab strip, or alone in a Chrome that hides it.
 On the guix desktop Alt+E toggles it; elsewhere assign it a key at chrome://extensions/shortcuts.
 
+## Mode badge
+
+A small badge in a bottom corner names the mode keys are in: NORMAL, INSERT (keys type text), HINTS, VISUAL,
+VOMNIBAR, PASS KEY or MARK (the find bar stands in for FIND). It takes no clicks, keeps off whatever is clickable
+where it can (bottom left, else bottom right) and fades while the pointer is near. `dispatch/indicator` derives it
+from the mode, the focus and whether typing is suspended; the frame with the keyboard reports it, through the
+worker when that is a frame nobody sees (Docs), and the top frame draws it. A click on the page closes the Vomnibar.
+
 ## Google Docs and Sheets
 
 Docs reads keys from a contenteditable in a 1px iframe that always has focus; Sheets from a contenteditable cell editor
@@ -82,7 +90,7 @@ it keeps at top -9998px until a cell is edited. `src/vimium_cljs/dispatch.cljs` 
 "key catcher": typing until Escape, normal mode (j scrolls the document or grid, f hints menus, the toolbar and sheet
 tabs) until i or a click. In a visible field of these apps (a cell being edited, the formula bar) Escape is the app's:
 it ends the edit and the next Escape gives normal mode. `test/fixtures/docs.html` and `sheets.html` reproduce the
-structure; `npm run e2e:docs` and `npm run bombadil:docs` check them. `npm run gdocs <url>` checks a Doc headless, and
+structure; `npm run e2e:docs`, `npm run bombadil:docs` and `npm run bombadil:sheets` check them, and the badge with them. `npm run gdocs <url>` checks a Doc headless, and
 `GDOC_URL=... GSHEET_URL=... node scripts/gdocs-live.mjs` runs a real Chrome window on the test display with real keys
 and screenshots. Both type into the document, so give them a scratch Doc and Sheet of your own that anyone with the
 link can edit, never someone else's.

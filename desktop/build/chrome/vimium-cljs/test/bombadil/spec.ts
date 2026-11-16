@@ -6,12 +6,18 @@ import { back, clicks, scroll, waitOnce } from "@antithesishq/bombadil/browser/d
 type Link = { id: string; visible: boolean; hint: string | null };
 // docs.html, the Google Docs fixture: text in its 1px key-catcher frame and the mode the content script keeps there.
 type Docs = { text: string; editorTop: number; typingFocus: boolean; frameMode: string; suspended: boolean; hints: [string, string][] };
+type Sheet = { cells: Record<string, string>; active: string; editing: string | null; editorText: string; top: number;
+  editorFocused: boolean; formulaFocused: boolean; suspended: boolean; hints: [string, string][] };
 type Facts = {
   url: string; ready: boolean; mode: string; hintsMs: number; hintsScrollY: number; scrollY: number; maxScrollY: number;
   links: Link[]; findHighlights: number; findCurrent: number; needles: number;
   pageKeys: number; fieldKeys: string; fields: { id: string; value: string }[]; active: string | null;
   frames: Record<string, Facts>;
   docs: null | Docs;
+  sheet: null | Sheet;
+  // the badge (data-vimium-cljs-indicator) and the one the DOM says it should be (probe.js), with how long
+  // the probe has seen that expectation hold
+  indicator: string | null; expected: string | null; expectedMs: number;
   last: null | { kind: string; seq: string; before: Facts; after: Facts; field?: string };
 };
 
@@ -30,6 +36,23 @@ export const hintsCoverVisibleLinks = always(() => {
   if (all.some((fr) => fr.links.some((l) => l.visible && !l.hint))) return false;
   const hints = all.flatMap((fr) => fr.links.filter((l) => l.hint).map((l) => l.hint as string));
   return new Set(hints).size === hints.length && hints.every((h) => hints.every((o) => o === h || !o.startsWith(h)));
+});
+
+// The badge names the mode of the frame with the keyboard. It follows through the service worker from a frame
+// nobody sees (Docs), so a change gets a second before it counts.
+const badgeOf = (m: string | null) => m === "visual-line" ? "visual" : m;
+const badgeAgrees = (x: { indicator: string | null; expected: string | null } | null | undefined) =>
+  !x || x.expected === null || x.expected === undefined || badgeOf(x.indicator) === x.expected;
+
+export const badgeMatchesTheMode = always(() => {
+  const x = f();
+  return !x || x.expectedMs < 1000 || badgeAgrees(x);
+});
+
+// After each key or click action has settled, the badge shows its mode at once.
+export const badgeSettlesWithTheMode = always(() => {
+  const l = f()?.last as any;
+  return !l || !l.after || l.kind === "vomnibar" || l.kind === "newtab" || badgeAgrees(l.after);
 });
 
 export const keysNeverFireInFields = always(() => {
@@ -73,6 +96,11 @@ export const vomnibarTypeAhead = always(() => {
 
 export const vomnibarOpensFast = always(() => { const l = vl(); return !l || (l.typed.open && l.openMs <= 750); });
 
+export const vomnibarBadge = always(() => {
+  const l = vl() as any;
+  return !l || (l.opened.indicator === "vomnibar" && (l.closed.open || l.after.indicator !== "vomnibar"));
+});
+
 export const vomnibarKeepsKeystrokes = always(() => { const l = vl(); return !l || l.typed.value === l.text; });
 
 export const vomnibarKeysStayOut = always(() => {
@@ -115,13 +143,26 @@ export const vomnibarNoDuplicateTabs = always(() => {
 
 export const findHighlightsMatches = always(() => {
   const l = f()?.last;
-  if (!l || l.kind !== "find") return true;
+  // the badge says whether / reaches vimium-cljs or types in an editor
+  if (!l || l.kind !== "find" || l.before.indicator === "insert") return true;
   return l.after.findHighlights === l.after.needles && l.after.findCurrent === (l.after.needles ? 1 : 0);
 });
 
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ctl = (path: string) => fetch(path).then((r) => r.json());
 const probeOf = (w: any) => w.__probeFacts ? w.__probeFacts(false) : null;
+
+// Escape until the badge says normal mode: one leaves hints, typing or a field; a Sheets cell takes two,
+// since its first Escape is the sheet's.
+async function toNormal(w: any) {
+  for (let i = 0; i < 3; i++) {
+    await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>")}`);
+    const t0 = Date.now();
+    let x = probeOf(w);
+    while (x && x.indicator !== "normal" && Date.now() - t0 < 300) { await settle(20); x = probeOf(w); }
+    if (!x || !x.indicator || x.indicator === "normal") return;
+  }
+}
 
 const press = registerCustomAction("press", async (_d, window, seq: string) => {
   const w = window as any;
@@ -135,8 +176,9 @@ const find = registerCustomAction("find", async (document, window) => {
   const w = window as any;
   const a = document.activeElement as HTMLElement | null;
   if (a && a.tagName === "IFRAME") a.blur();
+  await toNormal(w);
   const before = probeOf(w);
-  await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>/needle<enter>")}`);
+  await ctl(`/__ctl/keys?seq=${encodeURIComponent("/needle<enter>")}`);
   await settle(400);
   if (w.__probe) w.__probe.last = { kind: "find", seq: "needle", before, after: probeOf(w) };
   await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>")}`);
@@ -168,8 +210,7 @@ const vomnibar = registerCustomAction("vomnibar", async (_d, window, key: string
   const target = what === "title" || what === "url" ? `${w.location.origin}${path}` : null;
   const text = what === "title" ? pages[path] : what === "url" ? `${w.location.host}${path}` : what;
   if (end === "enter" && !target) end = "esc";
-  await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>")}`);
-  await settle(100);
+  await toNormal(w);
   const tabsBefore = await ctl("/__ctl/tabs");
   const before = probeOf(w);
   const t0 = Date.now();
@@ -217,8 +258,7 @@ const newTabPick = registerCustomAction("newTabPick", async (_d, window, what: s
 
 const typeAhead = registerCustomAction("typeAhead", async (_d, window, key: string, text: string) => {
   const w = window as any;
-  await ctl(`/__ctl/keys?seq=${encodeURIComponent("<esc>")}`);
-  await settle(100);
+  await toNormal(w);
   const before = probeOf(w);
   await ctl(`/__ctl/keys?gap=0&seq=${encodeURIComponent(key + text)}`);
   const t0 = Date.now();
@@ -253,17 +293,20 @@ const keyActions = weighted([
 const docsKeys = registerCustomAction("docsKeys", async (_d, window, seq: string) => {
   const w = window as any;
   if (!w.__docsFacts) return;
-  const before = w.__docsFacts();
+  const before = probeOf(w);
   await ctl(`/__ctl/keys?seq=${encodeURIComponent(seq)}`);
   await settle(500);
-  if (w.__probe) w.__probe.last = { kind: "docs", seq, before: { docs: before }, after: { docs: w.__docsFacts() } };
+  if (w.__probe) w.__probe.last = { kind: "docs", seq, before, after: probeOf(w) };
 });
 
-const docsTokens = ["<esc>", "i", "j", "k", "q", "a", "s", " ", "gg", "G", "f", "<c-b>", "z", "3"];
-const docsActions = actions(() => Array.from({ length: 12 }, () =>
-  docsKeys(Array.from({ length: 1 + Math.floor(Math.random() * 5) }, () => docsTokens[Math.floor(Math.random() * docsTokens.length)]).join(""))));
+const pick = (tokens: string[], max: number) =>
+  Array.from({ length: 1 + Math.floor(Math.random() * max) }, () => tokens[Math.floor(Math.random() * tokens.length)]).join("");
+const ending = () => ["", "", "<esc>", "<esc><esc>"][Math.floor(Math.random() * 4)];
+const docsTokens = ["<esc>", "i", "j", "k", "q", "a", "s", " ", "gg", "G", "f", "<c-b>", "z", "3", "o", "v"];
+const docsActions = actions(() => f()?.docs ? Array.from({ length: 12 }, () => docsKeys(pick(docsTokens, 5) + ending())) : []);
 
-const dl = () => { const l = f()?.last as any; return l && l.kind === "docs" ? l as { seq: string; before: { docs: Docs }; after: { docs: Docs } } : null; };
+type Snap = { docs: Docs; indicator: string | null; expected: string | null };
+const dl = () => { const l = f()?.last as any; return l && l.kind === "docs" && l.before?.docs ? l as { seq: string; before: Snap; after: Snap } : null; };
 
 export const docsTypingReachesTheDocument = always(() => {
   const l = dl();
@@ -285,9 +328,72 @@ export const docsEscapeEndsInNormalMode = always(() => {
   return l.after.docs.frameMode === "normal" && l.after.docs.hints.length === 0;
 });
 
+// The badge against what keys do in the Docs editor: INSERT means plain keys land in the document,
+// NORMAL means they type nothing (bar i and f, whose hints can click back into it).
+export const docsBadgeInsertTypes = always(() => {
+  const l = dl();
+  if (!l || l.before.indicator !== "insert" || !l.before.docs.typingFocus || l.seq.includes("<")) return true;
+  const text = (s: string) => s.replace(/\u00a0/g, " ");
+  return text(l.after.docs.text) === text(l.before.docs.text + l.seq) && l.after.docs.hints.length === 0;
+});
+
+export const docsBadgeNormalNeverTypes = always(() => {
+  const l = dl();
+  if (!l || l.before.indicator !== "normal" || !l.before.docs.typingFocus || /[if]/.test(l.seq)) return true;
+  return l.after.docs.text === l.before.docs.text;
+});
+
+export const docsEscapeEndsWithNormalBadge = always(() => {
+  const l = dl();
+  if (!l || !l.seq.endsWith("<esc>") || !l.after.docs.typingFocus) return true;
+  return l.after.indicator === "normal";
+});
+
+// Google Sheets: the same over sheets.html, whose cell editor sits off the page until a cell is edited.
+const sheetKeys = registerCustomAction("sheetKeys", async (_d, window, seq: string) => {
+  const w = window as any;
+  if (!w.__sheetFacts) return;
+  const before = probeOf(w);
+  await ctl(`/__ctl/keys?seq=${encodeURIComponent(seq)}`);
+  await settle(500);
+  if (w.__probe) w.__probe.last = { kind: "sheet", seq, before, after: probeOf(w) };
+});
+
+const sheetTokens = ["<esc>", "i", "j", "k", "q", "a", "s", " ", "gg", "f", "<enter>", "3", "v", "<c-b>"];
+const sheetActions = actions(() => f()?.sheet ? Array.from({ length: 12 }, () => sheetKeys(pick(sheetTokens, 5) + ending())) : []);
+
+type SheetSnap = { sheet: Sheet; indicator: string | null; expected: string | null };
+const sl = () => { const l = f()?.last as any; return l && l.kind === "sheet" && l.before?.sheet ? l as { seq: string; before: SheetSnap; after: SheetSnap } : null; };
+
+export const sheetBadgeInsertTypes = always(() => {
+  const l = sl();
+  if (!l || l.before.indicator !== "insert" || !l.before.sheet.editorFocused || l.seq.includes("<")) return true;
+  const b = l.before.sheet, a = l.after.sheet;
+  // a contenteditable keeps a trailing space as a no-break space
+  const text = (s: string) => s.replace(/\u00a0/g, " ");
+  // the run lands where the caret is, all of it
+  const was = text(b.editing ? b.editorText : ""), now = text(a.editorText);
+  return now.length === was.length + l.seq.length && now.includes(text(l.seq)) && a.top === b.top && a.hints.length === 0;
+});
+
+export const sheetBadgeNormalNeverTypes = always(() => {
+  const l = sl();
+  if (!l || l.before.indicator !== "normal" || !l.before.sheet.editorFocused || l.before.sheet.editing || /[if]/.test(l.seq)) return true;
+  const b = l.before.sheet, a = l.after.sheet;
+  return !a.editing && JSON.stringify(a.cells) === JSON.stringify(b.cells);
+});
+
+// Escape is the sheet's while a cell or the formula bar is edited; a second one always reaches normal mode.
+export const sheetEscapeTwiceEndsWithNormalBadge = always(() => {
+  const l = sl();
+  if (!l || !l.seq.endsWith("<esc><esc>") || !l.after.sheet.editorFocused) return true;
+  return l.after.indicator === "normal";
+});
+
 export const explore = weighted([
   [12, keyActions],
   [6, docsActions],
+  [6, sheetActions],
   [4, vomnibarActions],
   [4, clicks],
   [3, scroll],

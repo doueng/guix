@@ -84,7 +84,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 13px sans-serif; }
     const [r, c] = sheet.active, cr = container.getBoundingClientRect();
     sheet.editing = name(sheet.active);
     parent.setAttribute('style', `top: ${cr.top + r * RH - bar.scrollTop}px; left: ${c * CW}px; width: ${CW}px; height: ${RH}px`);
-    editor.textContent = text;
+    editor.textContent = text.replace(/ /g, '\u00a0'); // a lone space would collapse and the caret land before it
     const sel = getSelection(); sel.selectAllChildren(editor); sel.collapseToEnd();
   };
   const stopEdit = (commit) => {

@@ -121,7 +121,8 @@
              :bg (boolean (:bg info))
              :top (not (:bg info))
              ;; only commands about the keyboard itself stay in the frame that has it
-             :here (boolean (or (#{"passNextKey" "enterInsertMode"} name) (re-find #"^LinkHints\." name))))))))
+              :here (boolean (or (#{"passNextKey" "enterInsertMode" "enterVisualMode" "enterVisualLineMode"} name)
+                                 (re-find #"^LinkHints\." name))))))))
 
 (deftest docs-scrolls-the-top-frame
   (is (= :top (d/command-frame "scrollDown" (commands/by-name "scrollDown") false true)))
@@ -153,3 +154,36 @@
     (is (d/edits-text? {:key "Enter"}))
     (is (not (d/edits-text? {:key "a" :ctrl true})))
     (is (not (d/edits-text? {:key "ArrowLeft"})))))
+
+;; The mode badge (d/indicator) against what keys really do.
+
+(defn badge [st focus] (d/indicator {:mode (:mode st) :suspended (:suspended st) :focus focus}))
+
+(defspec badge-says-normal-exactly-when-j-runs-a-command 400
+  (prop/for-all [st gen-state focus gen-focus]
+    (let [st (assoc st :keys k/initial)
+          {:keys [effect]} (d/decide ctx st focus (key-of {:key "j"}))]
+      (= (= "normal" (badge st focus)) (= :command (first effect))))))
+
+(defspec badge-says-insert-while-typing-in-an-editor 300
+  (prop/for-all [focus (gen/elements [:field :catcher :app-field])
+                 evs (gen/vector (gen/such-that #(not (:esc? (key-of %))) gen-event) 1 20)]
+    (every? (fn [[s _]] (= "insert" (badge s focus)))
+            (run (assoc d/initial :mode :normal :suspended false) (map vector (repeat focus) evs)))))
+
+(defspec escape-always-reaches-a-defined-mode 400
+  (prop/for-all [st gen-state focus gen-focus esc (gen/elements [{:key "Escape"} {:key "[" :ctrl true}])]
+    (let [[[s effect]] (run st [[focus esc]])
+          m (badge s focus)]
+      ;; passNextKey hands the page the next key, Escape too
+      (or (= :pass-next (:mode st))
+          (and (= :normal (:mode s))
+               (if (#{:page :catcher} focus) (= "normal" m) (#{"normal" "insert"} m))
+               (some? effect))))))
+
+(deftest badge-names-each-mode
+  (is (= ["hints" "visual" "visual-line" "find" "pass" "mark" "insert" "off" "hints"]
+         [(d/indicator {:mode :hints}) (d/indicator {:mode :visual}) (d/indicator {:mode :visual :line true})
+          (d/indicator {:mode :find}) (d/indicator {:mode :pass-next}) (d/indicator {:mode :marks-goto})
+          (d/indicator {:mode :insert :focus :page}) (d/indicator {:mode :normal :enabled false})
+          (d/indicator {:mode :normal :hints? true})])))

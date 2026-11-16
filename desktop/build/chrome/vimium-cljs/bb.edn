@@ -18,9 +18,11 @@
                     (throw (ex-info (str "eval in a bundle: " (str/join " " bad)) {})))
                   (shell "node scripts/check-load.mjs")
                   (shell "node scripts/check-guide.mjs"))}
-  e2e {:doc "Headless flatpak Chrome over test/fixtures, and the reload test"
+  e2e {:doc "Headless flatpak Chrome over test/fixtures, the reload test, then Bombadil over the Docs and Sheets fixtures for BOMBADIL_TIME each (default 90s)"
        :depends [build]
-       :task (shell "node --test --test-concurrency=1 test/e2e/run.mjs test/e2e/docs.mjs test/e2e/sheets.mjs test/e2e/select.mjs test/e2e/reload.mjs test/e2e/incognito.mjs")}
+       :task (do (shell "node --test --test-concurrency=1 test/e2e/run.mjs test/e2e/docs.mjs test/e2e/sheets.mjs test/e2e/indicator.mjs test/e2e/select.mjs test/e2e/reload.mjs test/e2e/incognito.mjs")
+                 (doseq [page ["docs.html" "sheets.html"]]
+                   (shell "node test/bombadil/run.mjs --page" page "--time" (or (System/getenv "BOMBADIL_TIME") "90s"))))}
   bombadil {:doc "Bombadil property run over the fixtures"
             :depends [build]
             :task (apply shell "node test/bombadil/run.mjs" *command-line-args*)}}}

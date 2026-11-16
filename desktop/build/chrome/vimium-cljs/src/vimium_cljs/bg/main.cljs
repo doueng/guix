@@ -340,6 +340,7 @@
         "command" (do (run-command! (.-name msg) tab frame (or (.-count msg) 1) (.-explicit msg) (js->clj (.-options msg))) nil)
         "top-command" (do (to-frame tab-id 0 {:type "top-command" :name (.-name msg) :count (.-count msg)}) nil)
         "top-hud" (do (to-frame tab-id 0 {:type "hud" :text (.-text msg)}) nil)
+        "indicator" (do (to-frame tab-id 0 {:type "indicator" :mode (.-mode msg)}) nil)
         "vomnibar-keys" (do (to-frame tab-id 0 {:type "vomnibar-keys" :text (.-text msg) :enter (.-enter msg)}) nil)
         "tab-url" (.-url tab)
         "hints-start" (do (hints-start! tab-id frame (.-mode msg)) nil)

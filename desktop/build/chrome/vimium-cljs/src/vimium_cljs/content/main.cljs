@@ -86,18 +86,22 @@
                (when-not top?
                  (try (some-> js/window .-parent .-document (.querySelector sel)) (catch :default _ nil)))))))
 
+(declare refresh-indicator!)
+
 (defn set-suspended!
   "Whether typing over a key catcher is suspended (see dispatch)."
   [on?]
   (when (not= @typing-suspended on?)
     (reset! typing-suspended on?)
     (when (test-page?)
-      (.setAttribute (.-documentElement js/document) "data-vimium-cljs-suspended" (if on? "1" "0")))))
+      (.setAttribute (.-documentElement js/document) "data-vimium-cljs-suspended" (if on? "1" "0")))
+    (refresh-indicator!)))
 
 (defn set-mode! [m & {:as more}]
   (reset! mode (merge {:name m} more))
   (reset! key-state keys/initial)
-  (when (test-page?) (.setAttribute (.-documentElement js/document) "data-vimium-cljs-mode" (name m))))
+  (when (test-page?) (.setAttribute (.-documentElement js/document) "data-vimium-cljs-mode" (name m)))
+  (refresh-indicator!))
 
 (defn exit-mode! []
   (ui/hide-hud!)
@@ -114,10 +118,12 @@
 
 (defn request-hints! [mode]
   (reset! hints-requested true)
+  (refresh-indicator!)
   (send! {:type "hints-start" :mode mode}))
 
 (defn hints-show! [hint-strings]
   (reset! hints-requested false)
+  (refresh-indicator!)
   (if (empty? hint-strings)
     (reset! hints nil)
     (let [{:keys [cands]} @hints
@@ -129,6 +135,7 @@
 
 (defn hints-exit! []
   (reset! hints-requested false)
+  (refresh-indicator!)
   (ui/hide-markers!)
   (when (test-page?)
     (doseq [[^js el] (:cands @hints)] (.removeAttribute el "data-vimium-cljs-hint")))
@@ -430,14 +437,56 @@
 
 (defn focus-kind
   "Where keys typed now go, for dispatch/decide: :page, :field, :catcher (see catcher?) or
-  :app-field (a visible editable on a page with an app catcher, such as a Sheets cell)."
+  :app-field (a visible editable on a page with an app catcher, such as a Sheets cell). E is
+  the keydown, or nil for where the focus is."
   [^js e]
-  (let [t (dom/event-target e) a (dom/deep-active-element)
+  (let [t (some-> e dom/event-target) a (dom/deep-active-element)
         el (cond (dom/editable? t) t (dom/editable? a) a)]
     (cond (nil? el) :page
           (catcher? el) :catcher
           (and top? (.querySelector js/document app-catchers)) :app-field
           :else :field)))
+
+;; The mode badge. The frame that holds the keyboard knows the mode (in Google Docs that is a
+;; frame nobody sees), so it reports to the top frame, which draws the one badge and shows the
+;; Vomnibar over whatever was reported while its frame is open.
+
+(defonce ^:private reported (atom nil))
+(defonce ^:private indicator-state (atom {:reported "normal" :frame nil}))
+
+(defn- keyboard-here?
+  "Whether this frame's own document, not a frame inside it, has the keyboard."
+  []
+  (and (.hasFocus js/document)
+       (not (#{"iframe" "frame"} (some-> (.-activeElement js/document) dom/tag)))))
+
+(defn- draw-indicator!
+  "Top frame: the badge shows the Vomnibar while it is open (keys typed while it loads are kept
+  or forwarded to it; a click on the page closes it), else what was reported."
+  []
+  (let [{:keys [reported frame]} @indicator-state
+        m (if (= "vomnibar" frame) "vomnibar" reported)]
+    (ui/indicator! m)
+    (when (test-page?) (.setAttribute (.-documentElement js/document) "data-vimium-cljs-indicator" m))))
+
+(defn show-indicator!
+  "Top frame: MODE is what the frame with the keyboard reported."
+  [mode]
+  (swap! indicator-state assoc :reported mode)
+  (draw-indicator!))
+
+(defn refresh-indicator!
+  "Reports this frame's mode (dispatch/indicator) to the badge when this frame has the
+  keyboard: the top frame draws it, a child frame sends it when it changed, or always with FORCE."
+  ([] (refresh-indicator! false))
+  ([force]
+   (when (keyboard-here?)
+     (let [{m :name line :line} @mode
+           v (dispatch/indicator {:mode m :line line :suspended @typing-suspended :focus (focus-kind nil)
+                                  :hints? @hints-requested :enabled (:enabled (rule))})]
+       ;; the top frame draws the badge child frames report to, so it always redraws it
+       (cond top? (show-indicator! v)
+             (or force (not= v @reported)) (do (reset! reported v) (send! {:type "indicator" :mode v})))))))
 
 (defn- type-ahead-key!
   "Keeps a key typed for a Vomnibar that is still loading (here or, from a child frame, in the
@@ -492,13 +541,32 @@
           :resume (hud! "Typing")
           :command (let [[_ entry cnt] effect] (run-command! entry cnt))
           :escape (escape-key! e)
-          nil)))))
+          nil)
+        (refresh-indicator!)))))
 
 (defn- on-keyup [^js e]
   (when (contains? @suppressed (.-code e))
     (when (= "keyup" (.-type e)) (swap! suppressed disj (.-code e)))
     (.preventDefault e)
     (.stopImmediatePropagation e)))
+
+(defonce ^:private catcher-focus (atom nil))
+
+(defn- note-catcher-focus!
+  "A frame nobody sees (the Docs key catcher) remembers the editor it focuses."
+  [^js e]
+  (let [t (dom/event-target e)]
+    (when (and (dom/editable? t) (hidden-frame?)) (reset! catcher-focus t))))
+
+(defn- on-window-focus
+  "When the focus comes back to a frame nobody sees, as the Vomnibar closes, it goes back to the
+  editor the frame had, or keys would reach nothing there. Then the badge hears from this frame."
+  [^js e]
+  (when (identical? (.-target e) js/window)
+    (let [^js el @catcher-focus]
+      (when (and el (hidden-frame?) (.-isConnected el) (not (dom/editable? (dom/deep-active-element))))
+        (.focus el #js {:preventScroll true})))
+    (refresh-indicator! true)))
 
 (defn- on-focus
   "Undoes a page's autofocus until the user acts, except on a catcher (see catcher?): a canvas
@@ -513,13 +581,16 @@
 (def ^:private pointer-message "vimium-cljs:pointer")
 
 (defn- on-mousedown
-  "A trusted click is the user acting, and means typing again over a key catcher. A click in
+  "A trusted click is the user acting, closes the Vomnibar, and means typing again over a key catcher. A click in
   the top page of Google Docs lands outside the frame that holds the keyboard, so the top
   frame tells that frame, and the Docs catcher frame even when a menu has the focus."
   [^js e]
   (when (.-isTrusted e)
     (reset! user-acted true)
+    ;; a click on the page closes the Vomnibar or help, as in Vimium (a click in them stays in their frame)
+    (when (and top? (ui/frame-kind)) (ui/close-frame! false))
     (set-suspended! false)
+    (js/setTimeout refresh-indicator! 0)
     (let [^js a (.-activeElement js/document)
           frames (cond-> (set (array-seq (.querySelectorAll js/document ".docs-texteventtarget-iframe")))
                    (and a (= "iframe" (dom/tag a))) (conj a))]
@@ -535,6 +606,8 @@
     "hints-activate" (do (hints-activate! (.-index msg) (.-mode msg)) false)
     "hints-exit" (do (hints-exit!) false)
     "hud" (do (hud! (.-text msg)) false)
+    ;; a report from a frame comes through the worker, so it can come after the focus moved here
+    "indicator" (do (when top? (if (keyboard-here?) (refresh-indicator!) (show-indicator! (.-mode msg)))) false)
     "top-command" (do (when-let [f (local-commands (.-name msg))] (f (or (.-count msg) 1))) false)
     "vomnibar-keys" (do (ui/more-keys! (.-text msg) (.-enter msg)) false)
     ;; A page without focus (the address bar has it) cannot take it back; answering false makes the worker open the popup.
@@ -547,7 +620,8 @@
 
 (defn- on-window-message [^js e]
   (when (and (= pointer-message (.-data e)) (not top?) (identical? (.-source e) (.-parent js/window)))
-    (set-suspended! false))
+    (set-suspended! false)
+    (refresh-indicator!))
   (when (identical? (.-source e) (ui/frame-window))
     (case (.-data e)
       "vimium-cljs:close" (ui/close-frame!)
@@ -590,11 +664,22 @@
     (listen! js/window "keypress" on-keyup true)
     (listen! js/window "focus" on-focus true)
     (listen! js/window "mousedown" on-mousedown true)
+    ;; focus moving between fields, or into this frame, changes what keys do
+    (listen! js/window "focusin" (fn [e] (note-catcher-focus! e) (refresh-indicator!)) true)
+    (listen! js/window "focusout" (fn [_] (js/setTimeout refresh-indicator! 0)) true)
+    (listen! js/window "focus" on-window-focus false)
+    (when top?
+      (ui/watch-frame! (fn [kind] (swap! indicator-state assoc :frame kind) (draw-indicator!) (when-not kind (js/setTimeout #(refresh-indicator! true) 0))))
+      (listen! js/window "mousemove" (fn [^js e] (ui/pointer-at! (.-clientX e) (.-clientY e))) true))
     (scroll/install!)
     (listen! js/window "message" on-window-message false)
     (.addEventListener js/document "DOMContentLoaded" mark-ready!)
     (js/chrome.runtime.onMessage.addListener on-message)
     (ui/set-user-css! config/link-hint-css)
     (when-not (= "loading" (.-readyState js/document)) (mark-ready!))
+    (let [start #(do (when top? (draw-indicator!)) (refresh-indicator! true))]
+      (if (= "loading" (.-readyState js/document))
+        (.addEventListener js/document "DOMContentLoaded" start)
+        (start)))
     (when-not top?
       (-> (send! {:type "tab-url"}) (.then (fn [u] (reset! top-rule u)))))))

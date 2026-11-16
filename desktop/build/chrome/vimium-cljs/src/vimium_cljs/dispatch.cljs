@@ -97,11 +97,33 @@
                       {:state st :effect [:swallow]}
                       :else {:state st :effect [:pass]}))))))
 
+(defn indicator
+  "The mode the badge shows for a frame: \"normal\", \"insert\" (keys type text), \"hints\",
+  \"visual\", \"visual-line\", \"find\", \"pass\", \"mark\" or \"off\" (an excluded page). MODE,
+  SUSPENDED and FOCUS are as for decide; LINE is visual line mode; HINTS? a hints request still
+  being answered; ENABLED the page's exclusion rule. Over a catcher, normal mode is the
+  suspended one; unsuspended, the catcher takes text, so that is insert."
+  [{:keys [mode line suspended focus hints? enabled] :or {enabled true}}]
+  (cond (not enabled) "off"
+        hints? "hints"
+        :else (case mode
+                :hints "hints"
+                :visual (if line "visual-line" "visual")
+                :find "find"
+                :pass-next "pass"
+                (:marks-create :marks-goto) "mark"
+                (:insert :focus-input) "insert"
+                (case focus
+                  (:field :app-field) "insert"
+                  :catcher (if suspended "normal" "insert")
+                  "normal"))))
+
 (defn consume? [effect] (contains? consumes (first effect)))
 
 (def ^:private key-frame-commands
-  "Commands that act on the frame holding the keyboard, even when nobody can see it."
-  #{"passNextKey" "enterInsertMode" "LinkHints.activateMode" "LinkHints.activateModeToOpenInNewTab"
+  "Commands that act on the frame holding the keyboard, even when nobody can see it. Visual mode
+  reads its keys there, so in the top frame Escape would never reach it (in Docs it finds no text)."
+  #{"passNextKey" "enterInsertMode" "enterVisualMode" "enterVisualLineMode" "LinkHints.activateMode" "LinkHints.activateModeToOpenInNewTab"
     "LinkHints.activateModeToOpenInNewForegroundTab" "LinkHints.activateModeWithQueue"
     "LinkHints.activateModeToCopyLinkUrl"})
 
