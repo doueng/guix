@@ -41,6 +41,8 @@
        (str "Makefile: .PHONY target " t " has no line in make help"))
      (for [t (sort (remove phony (filter help targets)))]
        (str "Makefile: " t " is in make help but not .PHONY"))
+     (for [t (sort (remove targets (into phony help)))]
+       (str "Makefile: " t " is in .PHONY or make help but has no rule"))
      (for [cmd (distinct cmds)
            :let [t (c/make-target-of cmd)]
            :when (and t (not (targets t)))]

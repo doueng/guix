@@ -1,7 +1,7 @@
 {:rules
  [{:name "lint"
    :paths ["Makefile" "AGENTS.md" "channels.scm" "desktop/build/checks/**"
-           "**/*.scm" "**/*.fish" "**/*.json" "**/*.edn" "**/*.bb" "desktop/bin/*"
+           "**/*.scm" "**/*.fish" "*.json" "**/*.json" "**/*.edn" "**/*.bb" "desktop/bin/*"
            "**/*.clj" "**/*.cljs" "**/*.cljc" "**/*.el" "**/*.fnl" "**/*.kbd"]
    :checks ["make lint"]}
   {:name "guix system"
