@@ -57,6 +57,7 @@ Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typi
 Herdr and the desktop never treat a bare Space as the leader, so typing a space always types a space.
 Alt+Space sends Ctrl+b Space to the Herdr terminal. From another window it first focuses the Herdr terminal, or starts one when none is open.
 Alt+E in Chrome shows or hides the tab list in the side panel: Hyprland sends Ctrl+Shift+E, vimium-cljs's tab-panel command (`hypr/keys.lua`), which the extension's manifest suggests, so a fresh load gets it. Every other window receives Alt+E unchanged, so Emacs M-e and fish's Alt+E still work.
+Cmd+T in Chrome opens the vimium-cljs Vomnibar in new-tab mode, so the pick opens in a new tab and Escape opens none: kanata turns Cmd+T into Ctrl+T, and Hyprland sends Ctrl+Shift+Y, the extension's vomnibar-new-tab command, when Chrome is focused (`hypr/keys.lua`). Chrome lets no extension take Ctrl+T, hence the detour. Caps+T in Chrome does the same, and every other window gets Ctrl+T unchanged.
 The desktop leader is a Hyprland submap. It captures the following keys before any application sees them. A panel at the bottom of the screen lists the next keys. Escape or any unbound key cancels.
 `keyleader listen` draws the panel. It follows Hyprland's submap events and asks Dusk to show the menu for the active submap. Hyprland starts it at login.
 Release Cmd after Cmd+Space. A key also works with Cmd still held unless kanata rewrites that Cmd chord first, as it does Cmd+W, Cmd+S and Cmd+h/j/k/l.
@@ -184,6 +185,7 @@ No global keyboard listener or browser content script has been added.
 | Ctrl+Alt+w, Cmd+Space d and Cmd+Space w d close a window | Alt+w only | Requested. One chord closes an app everywhere. Emacs M-w copy is shadowed again |
 | Ctrl+b a opens the agent picker | Also Alt+Space a | Requested |
 | Cmd+Space e toggles Chrome's tab list | Alt+E, in Chrome only | Requested (T185). Other windows get Alt+E, keeping Emacs M-e and fish's edit_command_buffer |
+| Cmd+T in Chrome opens an empty new tab, whose page is the Vomnibar | The Vomnibar over the current page in new-tab mode | Requested (T197). Escape leaves no empty tab, and an open tab can be switched to. Physical Ctrl+T is the same chord, so it changes too |
 | Ctrl+b Space s l copies visible text by hint | Cmd+Y, from any window. s l and Ctrl+b f still work | Yank in two keys. One-key s would clash with the Search group |
 | Ctrl+b Space . was unbound | It chooses a Herdr workspace, like TAB . | `.` opens the main picker in every context |
 | Ctrl+j/k in the bbh transcript move by org heading, Ctrl+k in insert state types a digraph | They move focus | Ctrl+h/j/k/l is focus everywhere. gj, gk, ]h and [h move by heading, as in Doom's evil-org |

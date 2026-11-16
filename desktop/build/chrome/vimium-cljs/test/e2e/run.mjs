@@ -317,6 +317,57 @@ test('the vomnibar-tabs command (Ctrl+Shift+K, sent by Cmd+Space b b) opens the 
   await keys('<esc>', 300);
 });
 
+test('the vomnibar-new-tab command (Ctrl+Shift+Y, sent by Cmd+T) opens the pick in a new tab', T, async () => {
+  const home = await open();
+  const ctlv = controller(b.cdp, async () => page, b.extensionId);
+  const w = await workerSession(b.cdp, b.extensionId);
+  const cmd = await evaluate(b.cdp, w, "chrome.commands.getAll().then(cs => cs.find(c => c.name === 'vomnibar-new-tab')?.shortcut || '')");
+  assert.equal(cmd, 'Ctrl+Shift+Y', 'suggested key assigned');
+  const before = (await ctlv('tabs')).urls.length;
+  await evaluate(b.cdp, w, "chrome.tabs.query({active: true, lastFocusedWindow: true}).then(t => vimiumCljsVomnibarCommand(t[0], 'omni', true)).then(() => true)");
+  await sleep(600);
+  assert.ok((await extensionFrames()).some((u) => u.includes('#vomnibar?mode=omni&newTab=1')), 'in-page Vomnibar in new-tab mode');
+  const target = `http://127.0.0.1:${port}/notes.html?cmdt=1`;
+  await ctl()('keys', { seq: target, gap: 0 });
+  await sleep(400);
+  await keys('<enter>', 1000);
+  const now = await ctlv('tabs');
+  assert.equal(now.urls.length, before + 1, 'one new tab');
+  assert.equal(now.active, target, 'the new tab shows the pick');
+  assert.equal((await b.cdp('Target.getTargetInfo', { targetId: home })).targetInfo.url, `http://127.0.0.1:${port}/`, 'the page stayed');
+  const opened = (await b.cdp('Target.getTargets')).targetInfos.find((t) => t.url === target);
+  for (const t of [opened?.targetId, home]) if (t) await b.cdp('Target.closeTarget', { targetId: t });
+});
+
+test('the vomnibar-new-tab command on a chrome:// page opens a popup whose pick opens in a new tab', T, async () => {
+  const { targetId } = await b.cdp('Target.createTarget', { url: 'chrome://version' });
+  await sleep(500);
+  const w = await workerSession(b.cdp, b.extensionId);
+  await evaluate(b.cdp, w, `chrome.tabs.query({}).then(ts => vimiumCljsVomnibarCommand(ts.find(t => t.url.startsWith('chrome://version')), 'omni', true)).then(() => true)`);
+  let popup;
+  for (let i = 0; i < 30 && !popup; i++) {
+    popup = (await b.cdp('Target.getTargets')).targetInfos.find((t) => t.type === 'page' && t.url.includes('popup=1') && t.url.includes('newTab=1'));
+    if (!popup) await sleep(100);
+  }
+  assert.ok(popup, 'popup Vomnibar in new-tab mode');
+  const ps = (await b.cdp('Target.attachToTarget', { targetId: popup.targetId, flatten: true })).sessionId;
+  for (let i = 0; i < 30; i++) {
+    if (await evaluate(b.cdp, ps, "!!document.getElementById('query') && !document.getElementById('vomnibar').hidden").catch(() => false)) break;
+    await sleep(100);
+  }
+  const target = `http://127.0.0.1:${port}/frame.html?cmdt=1`;
+  await evaluate(b.cdp, ps, `(() => { const q = document.getElementById('query'); q.value = ${JSON.stringify(target)};
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true; })()`);
+  let opened;
+  for (let i = 0; i < 30 && !opened; i++) {
+    await sleep(100);
+    opened = (await b.cdp('Target.getTargets')).targetInfos.find((t) => t.type === 'page' && t.url === target);
+  }
+  assert.ok(opened, 'the pick opened in a new tab');
+  assert.ok((await b.cdp('Target.getTargetInfo', { targetId })).targetInfo.url.startsWith('chrome://version'), 'the chrome:// tab stayed');
+  for (const t of [opened.targetId, targetId]) await b.cdp('Target.closeTarget', { targetId: t });
+});
+
 test('the Vomnibar command opens a popup on chrome:// pages and the choice opens in that tab', T, async () => {
   const { targetId } = await b.cdp('Target.createTarget', { url: 'chrome://version' });
   const s = (await b.cdp('Target.attachToTarget', { targetId, flatten: true })).sessionId;

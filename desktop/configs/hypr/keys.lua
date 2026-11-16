@@ -69,18 +69,28 @@ function M.herdr_menu()
   end
 end
 
--- Non-Chrome windows get Alt+E back for Emacs M-e and fish's edit_command_buffer.
-function M.chrome_tab_list()
-  local active = hl.get_active_window()
-  if active and active.class == "google-chrome" then
-    hl.dispatch(hl.dsp.send_key_state({ mods = "CTRL SHIFT", key = "e", state = "down" }))
-    hl.dispatch(hl.dsp.send_key_state({ mods = "CTRL SHIFT", key = "e", state = "up" }))
-    M.log("Alt+E", "Chrome tab list (side panel)")
-  else
-    hl.dispatch(hl.dsp.send_key_state({ mods = "ALT", key = "e", state = "down" }))
-    hl.dispatch(hl.dsp.send_key_state({ mods = "ALT", key = "e", state = "up" }))
+local function tap(mods, key)
+  hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "down" }))
+  hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "up" }))
+end
+
+-- In Chrome, send a vimium-cljs command's chord; every other window gets the chord unchanged.
+local function in_chrome(own_mods, key, chrome_key, keys, effect)
+  return function()
+    local active = hl.get_active_window()
+    if active and active.class == "google-chrome" then
+      tap("CTRL SHIFT", chrome_key)
+      M.log(keys, effect)
+    else
+      tap(own_mods, key)
+    end
   end
 end
+
+-- Non-Chrome windows get Alt+E back for Emacs M-e and fish's edit_command_buffer.
+M.chrome_tab_list = in_chrome("ALT", "e", "e", "Alt+E", "Chrome tab list (side panel)")
+-- kanata turns Cmd+T into Ctrl+T. Elsewhere Ctrl+T stays, such as fish's transpose on Caps+T.
+M.chrome_vomnibar_new_tab = in_chrome("CTRL", "t", "y", "Cmd+T", "Vomnibar, pick opens in a new tab")
 
 function M.herdr_yank()
   if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "f" } }) then

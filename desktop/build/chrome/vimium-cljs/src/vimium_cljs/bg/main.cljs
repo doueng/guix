@@ -284,10 +284,11 @@
     (-> (js/chrome.tabs.get id) (.catch (fn [_] sender-tab)))
     (p sender-tab)))
 
-(defn- vomnibar-popup! [mode ^js tab]
+(defn- vomnibar-popup! [mode ^js tab new-tab]
   (js/chrome.windows.create
    #js {:url (js/chrome.runtime.getURL (str "ui.html#vomnibar?mode=" mode "&popup=1"
-                                            (when tab (str "&tabId=" (.-id tab)))))
+                                            (when tab (str "&tabId=" (.-id tab)))
+                                            (when new-tab "&newTab=1")))
         :type "popup" :width 900 :height 520 :focused true}))
 
 (defn- new-tab-page?
@@ -296,22 +297,24 @@
   (str/starts-with? (or (.-url tab) "") (js/chrome.runtime.getURL "ui.html?newtab")))
 
 (defn- show-in-tab
-  "Asks TAB to show the Vomnibar in MODE; resolves to whether it could (it has focus)."
-  [mode ^js tab]
+  "Asks TAB to show the Vomnibar in MODE; resolves to whether it could (it has focus).
+  Our new tab page is already an empty tab, so there a pick opens in place even for NEW-TAB."
+  [mode ^js tab new-tab]
   (-> (if (new-tab-page? tab)
         (js/chrome.runtime.sendMessage #js {:type "vomnibar-show" :mode mode :tabId (.-id tab)})
-        (js/chrome.tabs.sendMessage (.-id tab) #js {:type "vomnibar" :mode mode} #js {:frameId 0}))
+        (js/chrome.tabs.sendMessage (.-id tab) #js {:type "vomnibar" :mode mode :newTab (boolean new-tab)} #js {:frameId 0}))
       (.catch (fn [_] false))))
 
 (defn- vomnibar-command!
-  "Open the Vomnibar in MODE (\"omni\", \"tabs\") over TAB's page, or in a popup when the page can't take it."
-  [mode ^js tab]
+  "Open the Vomnibar in MODE (\"omni\", \"tabs\") over TAB's page, or in a popup when the page can't take it.
+  With NEW-TAB a pick opens in a new tab, as Shift+Enter does."
+  [mode ^js tab & [new-tab]]
   (-> (if tab (p tab) (-> (js/chrome.tabs.query #js {:active true :lastFocusedWindow true}) (.then first)))
       (.then (fn [^js tab]
                (if-not tab
-                 (vomnibar-popup! mode nil)
-                 (-> (show-in-tab mode tab)
-                     (.then (fn [shown] (when-not shown (vomnibar-popup! mode tab))))))))))
+                 (vomnibar-popup! mode nil new-tab)
+                 (-> (show-in-tab mode tab new-tab)
+                     (.then (fn [shown] (when-not shown (vomnibar-popup! mode tab new-tab))))))))))
 
 (defn handle [^js msg ^js sender]
   (let [^js tab (.-tab sender)
@@ -366,11 +369,12 @@
      (case name
        "vomnibar" (vomnibar-command! "omni" tab)
        "vomnibar-tabs" (vomnibar-command! "tabs" tab)
+       "vomnibar-new-tab" (vomnibar-command! "omni" tab true)
        "tab-panel" (-> (js/chrome.sidePanel.open #js {:windowId (.-windowId tab)})
                        (.catch (fn [e] (js/console.warn "vimium-cljs: side panel" e))))
        nil)))
   ;; DevTools key events never reach Chrome's shortcuts, so the e2e suite runs the command here.
-  (unchecked-set js/globalThis "vimiumCljsVomnibarCommand" (fn [tab mode] (vomnibar-command! (or mode "omni") tab)))
+  (unchecked-set js/globalThis "vimiumCljsVomnibarCommand" (fn [tab mode new-tab] (vomnibar-command! (or mode "omni") tab new-tab)))
   (js/chrome.tabs.onActivated.addListener (fn [^js info] (note-active! (.-tabId info))))
   (js/chrome.tabs.onRemoved.addListener (fn [id] (swap! sessions dissoc id)))
   (js/chrome.tabs.onUpdated.addListener (fn [id ^js info] (when (= "loading" (.-status info)) (swap! sessions dissoc id))))

@@ -27,6 +27,8 @@
     "vomnibar": { "description": "Open the Vomnibar" },
     "vomnibar-tabs": { "description": "Search open tabs (desktop leader b b)",
                        "suggested_key": { "default": "Ctrl+Shift+K" } },
+    "vomnibar-new-tab": { "description": "Open the Vomnibar; a pick opens in a new tab (Cmd+T in Hyprland)",
+                          "suggested_key": { "default": "Ctrl+Shift+Y" } },
     "tab-panel": { "description": "Open the tab list in the side panel (Alt+E in Hyprland)",
                    "suggested_key": { "default": "Ctrl+Shift+E" } }
   },

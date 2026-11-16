@@ -461,7 +461,7 @@
     "top-command" (do (when-let [f (local-commands (.-name msg))] (f (or (.-count msg) 1))) false)
     "vomnibar-keys" (do (ui/more-keys! (.-text msg) (.-enter msg)) false)
     ;; A page without focus (the address bar has it) cannot take it back; answering false makes the worker open the popup.
-    "vomnibar" (let [ok (.hasFocus js/document)] (when ok (vomnibar! (or (.-mode msg) "omni") false)) (respond ok) false)
+    "vomnibar" (let [ok (.hasFocus js/document)] (when ok (vomnibar! (or (.-mode msg) "omni") (.-newTab msg))) (respond ok) false)
     "focus-frame" (do (.focus js/window) (dom/flash! (.-documentElement js/document)) false)
     "scroll-to" (do (jump-to! {:x (.-x msg) :y (.-y msg)}) false)
     "ping" (do (respond true) false)

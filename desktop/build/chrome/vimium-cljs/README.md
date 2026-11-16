@@ -48,6 +48,14 @@ Ctrl+Shift+K is free in Chrome, so a fresh load assigns it; an already-loaded co
 chrome://extensions/shortcuts. The desktop leader in the guix repo (Hyprland grabs Cmd+Space before Chrome sees it)
 sends Ctrl+Shift+K for b b when Chrome is focused. Works on chrome:// pages and from the address bar too, via the popup.
 
+## Cmd+T
+
+The `vomnibar-new-tab` command opens the Vomnibar in new-tab mode: the pick opens in a new tab, as Shift+Enter
+does, and Escape opens nothing. Chrome gives no extension Ctrl+T, so on the guix desktop Hyprland sends this
+command's key Ctrl+Shift+Y (suggested, so a fresh load assigns it) when Chrome gets Ctrl+T, which kanata makes
+of Cmd+T. Works on chrome:// pages via the popup. On the new tab page the Vomnibar is already there, so the
+command focuses it and the pick fills that empty tab.
+
 ## Tab list side panel
 
 The `tab-panel` command opens the window's tabs in Chrome's side panel (`ext/panel.html`): click switches,
