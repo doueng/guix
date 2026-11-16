@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<meta name="description" content="Whether to replace Herdr with Rex and a self-built Linux client: current setup, Rex protocol, rexy, gaps, effort, plan. Verdict: wait.">
+<meta name="description" content="Whether to replace Herdr with Rex if we write our own Rust client instead of using rexy: protocol contract, spikes, crates, architecture, bbh and Guix fit, size, milestones, risks. Verdict: still wait, with a smaller gate.">
 <meta name="bbh-doc" content="T194">
-<title>Rex instead of Herdr?</title>
+<title>Rex instead of Herdr, with our own Rust client?</title>
 <style>
 :root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
 *{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
@@ -28,26 +28,45 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
 @media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
 .m,.i,.g{font-size:.75em;padding:1px 5px;border-radius:4px;white-space:nowrap}.m{background:#14532d;color:#bbf7d0}.i{background:#1e3a8a;color:#bfdbfe}.g{background:#78350f;color:#fde68a}.verdict{border-left:4px solid #f59e0b;padding:8px 12px;background:rgba(245,158,11,.08);margin:12px 0}td.ok{color:#22c55e}td.gap{color:#f87171}table{display:block;overflow-x:auto}
+.chg{font-size:.75em;padding:1px 5px;border-radius:4px;white-space:nowrap;background:#7c2d12;color:#fed7aa}.same{font-size:.75em;padding:1px 5px;border-radius:4px;white-space:nowrap;background:#e5e7eb;color:#374151}
 </style></head>
 <body><main>
-<h1>Rex instead of Herdr?</h1>
+<h1>Rex instead of Herdr, with our own Rust client?</h1>
+<p class=sub>T194, revised by W230 on 2026-11-16. The first version (W229, commit vtlzprnt) assumed we would package rexy. This one assumes we write our own client in Rust and use rexy only as a reference.</p>
 
-<p class=lead><b>Goal:</b> decide whether to replace Herdr with Rex, given that on Linux we would have to supply the client ourselves.</p>
+<p class=lead><b>Goal:</b> decide whether to replace Herdr with Rex if we write our own Linux client in Rust, rather than packaging rexy.</p>
 
-<div class=verdict><b>Recommendation: wait.</b> Don't migrate now. Look again when Rex has a stable release and a published license, and when a Linux client has floating panes, a license and a few months of history. Spend at most an afternoon on a side-by-side trial. Herdr stays as it is in the meantime.</div>
+<div class=verdict><b>Recommendation: still wait, but the gate is now smaller.</b> <span class=chg>changed</span> Writing our own client removes every blocker that came from rexy: it has no license, needs Rust 1.100 and has no floating panes. Two spikes showed the hard part works on this machine. The blockers that remain are all in the Rex server: no stable release, no license, no session restore, and an API that changed revision in a few days. Owning the client does not fix any of these, and it adds about 4 to 6 weeks of work plus upkeep each time Rex changes. So keep Herdr for now. When Rex ships a stable, licensed release, build our own client (working name <b>rexmux</b>) instead of packaging rexy, starting from the milestones in section 12.</div>
 
-<p>Each claim has a tag: <span class=m>measured</span> means I ran it or read it in code, <span class=i>inferred</span> means I reasoned from what I read, and <span class=g>guess</span> means an estimate.</p>
+<p>Each claim has a tag: <span class=m>measured</span> means I ran it or read it in code, <span class=i>inferred</span> means I reasoned from what I read, and <span class=g>guess</span> means an estimate. <span class=chg>changed</span> marks a finding that differs from the first version, and <span class=same>unchanged</span> marks one that still holds.</p>
 
-<h2>1. Short answer</h2>
+<nav><details><summary>Contents</summary><ol>
+<li><a href='#short'>Short answer</a></li><li><a href='#changed'>What changed</a></li><li><a href='#herdr'>How Herdr is used today</a></li><li><a href='#rex'>What Rex is</a></li><li><a href='#contract'>The contract our client implements</a></li><li><a href='#spikes'>Spikes</a></li><li><a href='#arch'>Architecture</a></li><li><a href='#crates'>Crate choices</a></li><li><a href='#fit'>Fit with bbh, Emacs, phone, voice</a></li><li><a href='#guix'>Guix packaging</a></li><li><a href='#map'>Herdr feature mapping</a></li><li><a href='#size'>Size and milestones</a></li><li><a href='#risks'>Risks</a></li><li><a href='#call'>Go, wait or no-go</a></li><li><a href='#evidence'>Evidence</a></li></ol></details></nav>
+
+<h2 id=short>1. Short answer</h2>
 <ul>
-<li>The Rex <b>server</b> works on this machine. The arm64 preview.19 binary is a Go program linked against glibc. Once patchelf points it at Guix's loader, <code>rex server start</code>, sessions, <code>send</code>, <code>capture</code>, <code>events</code> and OSC 7501 status reads all worked on the 16K-page Asahi kernel. <span class=m>measured</span></li>
-<li>Rex itself is <b>closed source and pre-release</b>. There is no stable release yet: the stable channel returns <i>No Rex stable release is available</i>. Linux is server-only and marked <i>in testing</i>, and no license is published. The download is public, though the install docs are behind Discord. <span class=m>measured</span></li>
-<li><b>rexy</b> is a native GUI window (egui and libghostty), not a TUI that runs inside Ghostty. It was started on 2026-11-13 and has 57 commits by one author over three days. It has <b>no license</b>, so all rights are reserved by default. It needs Rust 1.100, while Guix has 1.93, plus Zig 0.17. It has no floating panes. <span class=m>measured</span></li>
-<li>Herdr is Apache-2.0, is at release 0.9.5, and is already packaged and well integrated here. <span class=m>measured</span> Herdr features that Rex plus rexy lack today: popups, which five of your bindings use, session and agent resume after a restart, and the plugins. <span class=i>inferred</span></li>
-<li>A client of our own in bb or Emacs Lisp is <b>not realistic</b>. A client has to be a terminal emulator that reads Ghostty's snapshot format over a WebSocket, and the CLI shortcut <code>rex block stream</code> answers <i>not implemented</i>. <span class=m>measured</span> The practical route is to package rexy or rex-rune in Guix and port our scripts to the <code>rex</code> CLI and Lua.</li>
+<li><b>Feasible, and the risky core is proven.</b> In a 65-line throwaway Rust program, our own code connected to a real Rex preview.19 server over its Unix socket, negotiated API revision 14, got a data ticket from <code>session.bootstrap</code>, opened the pane's data stream, and restored the pane's screen from Rex's Ghostty snapshot with libghostty-vt. The restored screen read <i>RED spike-marker</i> and the next three lines exactly. <span class=m>measured</span> <span class=chg>changed</span> The first version called this the reason a client was hard to build; it is now shown to be about a day of work.</li>
+<li><b>It builds here.</b> libghostty-vt from libghostty-rs builds on this aarch64 Asahi machine with Guix's <code>rust-1.96</code>, which has substitutes, and the repo's own <code>zig-0.17</code>. A clean build took 2 min 19 s. rexy needs Rust 1.100, which Guix does not have. <span class=m>measured</span> <span class=chg>changed</span></li>
+<li><b>Much lighter than rexy.</b> A terminal-UI client (tokio, tokio-tungstenite, serde_json, crossterm, ratatui, libghostty-vt) locks 129 crates, 18 of them Windows or WASM only. rexy locks 422. <span class=m>measured</span> <span class=chg>changed</span></li>
+<li><b>Design: a terminal UI inside Ghostty, like Herdr, not a GUI window like rexy.</b> That keeps the Ghostty window class trick, kanata's terminal layer and Hyprland focus as they are, and it skips fonts and GPU rendering, which are most of rexy's code. <span class=i>inferred</span></li>
+<li><b>Size:</b> about 5,000 to 6,500 lines of Rust and 4 to 6 focused weeks, including Guix packaging and porting our scripts. <span class=g>guess</span></li>
+<li><b>Still blocked by the server</b>: no stable release, no license, no session restore, and it moves quickly (API revision 13 to 14 in days, preview builds about daily). <span class=m>measured</span> <span class=same>unchanged</span></li>
 </ul>
 
-<h2>2. How Herdr is used today</h2>
+<h2 id=changed>2. What changed since the first version</h2>
+<div class=table><table>
+<tr><th>First version (package rexy)</th><th>Now (own Rust client)</th></tr>
+<tr><td>rexy has no license, so we can't redistribute it, and even a private build is a gray area.</td><td>We own the client code. Its key dependencies are licensed: libghostty-rs is MIT or Apache-2.0, Ghostty is MIT, and the crates are permissive. <span class=m>measured</span> <span class=chg>changed</span> The Rex server itself still has no license. <span class=same>unchanged</span></td></tr>
+<tr><td>Needs a Rust 1.100 binary toolchain, built like <code>zig-0.17</code>.</td><td>libghostty-rs needs Rust 1.96, and Guix's <code>rust-1.96</code> has substitutes on aarch64. No toolchain package needed. <span class=m>measured</span> <span class=chg>changed</span></td></tr>
+<tr><td>422 vendored crates.</td><td>129 locked crates for the planned stack. <span class=m>measured</span> <span class=chg>changed</span></td></tr>
+<tr><td>A client in bb or Emacs Lisp is not realistic. Option C, a client of our own, was rated high risk and weeks of work.</td><td>Still true for bb or Elisp. <span class=same>unchanged</span> In Rust it is realistic, because libghostty-vt reads the snapshot and the protocol is small and documented. <span class=m>measured</span> <span class=chg>changed</span></td></tr>
+<tr><td>Popups are a gap because rexy has no floating panes.</td><td>The server has floating layers. We would draw them ourselves, so popups become our work rather than someone else's roadmap. <span class=i>inferred</span> <span class=chg>changed</span></td></tr>
+<tr><td>A single author changes rexy daily.</td><td>No longer our dependency. We follow only the Rex API and libghostty-rs. <span class=chg>changed</span></td></tr>
+<tr><td>Rex has no restore; a server restart ends programs.</td><td>Still true. We could work around it with bbh, which already knows each conversation id (section 9). <span class=same>unchanged</span></td></tr>
+<tr><td>Recommendation: wait for a stable licensed Rex and a licensed Linux client with floating panes.</td><td>Wait only for the server. Don't wait for a client: we would write it. <span class=chg>changed</span></td></tr>
+</table></div>
+
+<h2 id=herdr>3. How Herdr is used today <span class=same>unchanged</span></h2>
 <table>
 <tr><th>Area</th><th>What it does</th><th>Where</th></tr>
 <tr><td>Guix packages</td><td><code>herdr</code> 0.9.5 is the upstream aarch64 release binary, installed with copy-build-system. Three bb plugins (sesh, tiny-fingers, jjui) run their tests.bb at build time. <span class=m>measured</span></td><td>/home/engstrand/guix/modules/engstrand/packages/herdr.scm</td></tr>
@@ -63,7 +82,8 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 </table>
 <p>That comes to about 2,100 lines across 15 files that name Herdr directly, plus about 40 mentions in three Emacs files and notify.clj. <span class=m>measured</span> Aside: config.toml binds four <code>annotate.*</code> plugin actions, but <code>herdr plugin list</code> shows only three plugins, none of them annotate, so those keys do nothing today. <span class=m>measured</span></p>
 
-<h2>3. What Rex is</h2>
+<h2 id=rex>4. What Rex is <span class=same>unchanged, re-checked today</span></h2>
+<p>Re-checked on 2026-11-16: the stable channel still answers <i>No Rex stable release is available</i>, preview.19 from 2026-11-13 is still the newest, and rexy still has no license. <span class=m>measured</span></p>
 <ul>
 <li>Rex is the <i>multiplexer for all work</i> from Superlogical. One server owns sessions, windows and blocks (panes), and clients attach to it. The macOS app is the main client and has a local server. iOS, Linux and Windows clients exist but are not in public testing. <span class=m>measured</span>, from the installation page</li>
 <li>The server and CLI are one 44 MB Go binary for x86-64 and ARM64, on glibc 2.26 or later or musl. Releases are public at https://blob.superlogical.com/api/releases/rex/preview with sha256 sums. Three channels exist, and stable is empty. Snapshots ship about daily, and preview.19 is from 2026-11-13. <span class=m>measured</span></li>
@@ -72,80 +92,191 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <li>Automation is strong: a self-describing API (74 methods in API revision 14), <code>rex api call</code>, <code>rex events --json</code>, server-side Lua (init.lua, <code>rex.bind</code>, key sequences, key modes, custom actions, event hooks), and an agent skill. <span class=m>measured</span></li>
 </ul>
 
-<h2>4. What a client has to implement</h2>
-<svg viewBox='0 0 640 170' width='100%' role='img' aria-label='client protocol'>
-<rect x='10' y='20' width='170' height='130' rx='8' fill='#1f2937' stroke='#9ca3af'/><text x='95' y='45' fill='#fff' text-anchor='middle' font-size='14'>Client</text>
-<text x='95' y='75' fill='#d1d5db' text-anchor='middle' font-size='11'>VT emulator per pane</text><text x='95' y='95' fill='#d1d5db' text-anchor='middle' font-size='11'>(Ghostty snapshot)</text><text x='95' y='115' fill='#d1d5db' text-anchor='middle' font-size='11'>layout, keys, render</text>
-<rect x='460' y='20' width='170' height='130' rx='8' fill='#1f2937' stroke='#9ca3af'/><text x='545' y='45' fill='#fff' text-anchor='middle' font-size='14'>rex server</text><text x='545' y='75' fill='#d1d5db' text-anchor='middle' font-size='11'>sessions, blocks, PTYs</text><text x='545' y='95' fill='#d1d5db' text-anchor='middle' font-size='11'>Lua keymap, events</text>
-<line x1='180' y1='60' x2='460' y2='60' stroke='#60a5fa' stroke-width='2'/><text x='320' y='52' fill='#60a5fa' text-anchor='middle' font-size='11'>WS /api/control rex.control.v1, JSON: hello, request, events</text>
-<line x1='460' y1='115' x2='180' y2='115' stroke='#f59e0b' stroke-width='2'/><text x='320' y='108' fill='#f59e0b' text-anchor='middle' font-size='11'>WS /api/data rex.data.terminal.v1, binary, one per pane</text>
-<text x='320' y='140' fill='#9ca3af' text-anchor='middle' font-size='10'>HTTP over a Unix socket, SSH or Tailscale</text>
-</svg>
-<ul>
-<li><b>Control:</b> a WebSocket at <code>/api/control</code> with subprotocol <code>rex.control.v1</code>. The client sends a JSON hello within 5 s, negotiates the API revision and gets a reconnect token, then makes requests and receives events tagged with sequence numbers and revisions. <span class=m>measured</span>, from the server's /llms.txt</li>
-<li><b>Data:</b> per pane, <code>data.connect</code> issues a ticket. The client opens a WebSocket at <code>/api/data</code>, sends a 17-byte binary HELLO, and gets a WELCOME or REJECT. After that comes <b>a snapshot in Ghostty's snapshot format</b>, then the raw program output with APC <code>rex1;nonce;json</code> messages (resize, theme, child_exited) mixed in. Resuming means counting the exact number of bytes received. Input goes back on the control connection through <code>client.key</code> or the terminal's <code>write</code>. <span class=m>measured</span></li>
-<li>So a client must embed a terminal emulator that can restore Ghostty snapshots: libghostty-vt in practice. rexy's Cargo.toml says no libghostty-rs release can restore a snapshot yet, so it pins a commit. <span class=m>measured</span> Emacs vterm uses libvterm, which cannot read this format. <span class=i>inferred</span></li>
-<li>The CLI does not offer a dumb terminal attach. It has no attach command, and <code>rex block stream</code> answers <i>Error: command "rex block stream" is not implemented</i>. <span class=m>measured</span></li>
-</ul>
 
-<h2>5. rexy and the alternatives</h2>
-<table>
-<tr><th></th><th>rexy</th><th>rex-rune</th><th>Herdr (today)</th></tr>
-<tr><td>Kind</td><td>GUI window, egui and libghostty-vt</td><td>GUI, Rust on Rune</td><td>TUI inside Ghostty</td></tr>
-<tr><td>Age and activity</td><td>From 2026-11-13, 57 commits, 1 author, 4 stars</td><td>From 2026-11-01, 59 stars, 13 forks</td><td>From 2026-03, 51k stars, 0.9.5 on 2026-10-14</td></tr>
-<tr><td>License</td><td><b>none</b> (no LICENSE file, no Cargo license field)</td><td>MIT</td><td>Apache-2.0</td></tr>
-<tr><td>Size</td><td>12.7k lines of Rust, 422 crates in Cargo.lock</td><td>not studied</td><td>packaged binary</td></tr>
-<tr><td>Toolchain</td><td>Rust 1.100 (Guix: 1.93), Zig 0.17 (the repo already builds <code>zig-0.17</code> for Ghostty)</td><td>not studied</td><td>none</td></tr>
-<tr><td>API</td><td>Pins revision 13 (hello min = max = 13). The server's revision 14 also accepts 13 <span class=i>inferred</span></td><td></td><td></td></tr>
-</table>
-<p>rexy already has: several servers in one sidebar (Unix socket, SSH, WebSocket), agent status dots and an activity view, desktop notifications that focus the pane, splits, zoom, moving panes between tabs, Kitty graphics, search, Ghostty themes, Rex's keymap from init.lua, and a command palette. It is missing floating panes, editing hosts, moving a pane to another session, and animated pictures. All of this is from its README. <span class=m>measured</span></p>
-<p>On Linux in general (Hyprland, Wayland, egui), rexy should work. I did not run its GUI on Asahi. <span class=g>guess</span></p>
+<h2 id=contract>5. The contract our client implements</h2>
+<p>From the server's /llms.txt (API revision 14), checked against what rexy calls. rexy is the reference for which parts a working client really needs, not code to copy. <span class=m>measured</span></p>
+<div class=table><table>
+<tr><th>Part</th><th>What to implement</th><th>MVP?</th></tr>
+<tr><td>Transport</td><td>HTTP upgrade to WebSocket over the Unix socket <code>$XDG_RUNTIME_DIR/rex/server.sock</code>. SSH and Tailscale carriers can come later.</td><td>yes, Unix socket only</td></tr>
+<tr><td>Control handshake</td><td><code>GET /api/control</code>, subprotocol <code>rex.control.v1</code>. Send a <code>hello</code> under 512 bytes within 5 s with <code>api_revision</code> and <code>api_min_revision</code>. Check the <code>welcome</code>, keep the newest <code>reconnect_token</code>, honor <code>max_message_bytes</code>, and ignore unknown fields and message types.</td><td>yes</td></tr>
+<tr><td>Requests and events</td><td><code>request</code> with a unique id, matching <code>response</code> with <code>payload</code> or <code>error</code>. Events carry <code>seq</code>; skip unknown types. Some methods run in order per connection, so keep a single writer.</td><td>yes</td></tr>
+<tr><td>Session setup</td><td><code>session.bootstrap</code> with <code>event_scope</code> (required, the spike's first try failed without it), <code>attach_session_ids</code> and <code>data_tickets</code>; then <code>session.view</code> for windows, layouts and blocks.</td><td>yes</td></tr>
+<tr><td>Data stream per pane</td><td><code>data.connect</code> or bootstrap tickets (16 bytes, base64url, one use, 60 s). <code>GET /api/data</code>, 17-byte HELLO, 32-byte WELCOME with resume token and channel nonce, or 2-byte REJECT with 7 reasons. Count every stream byte for a 25-byte RESUME within 60 s. Messages are 1 to 64 KiB and their boundaries mean nothing.</td><td>yes, RESUME in M4</td></tr>
+<tr><td>Terminal stream</td><td>Ghostty snapshot first, then program output with <code>ESC _ rex1;&lt;nonce&gt;;&lt;json&gt; ESC \</code> messages. Drop those whose nonce doesn't match, which a program printed. Handle <code>resize</code>, <code>theme</code> and <code>child_exited</code>.</td><td>yes</td></tr>
+<tr><td>Input</td><td><code>client.key</code> with W3C physical key names, mods, consumed mods, text, unshifted code point, composing and press, release or repeat. This lets Rex's Lua bindings act first and the server encode for the pane's own modes. Paste and raw bytes through <code>com.superlogical.terminal.write</code>.</td><td>yes</td></tr>
+<tr><td>Size and ownership</td><td><code>session.own_block</code> so the pane takes this client's size, then <code>com.superlogical.terminal.resize</code> when the layout changes.</td><td>yes</td></tr>
+<tr><td>Layout actions</td><td>About 40 methods that rexy uses: <code>session.new_split</code>, <code>focus_block</code>, <code>focus_direction</code>, <code>zoom_block</code>, <code>new_window</code>, <code>focus_window</code>, <code>close_window</code>, <code>block.close</code>, <code>resize_pane</code>, <code>swap_blocks</code>, <code>move_block</code> and others. Each is a thin request.</td><td>the dozen we bind</td></tr>
+<tr><td>Keymap and client actions</td><td><code>client.keymap</code> and <code>keymap_changed</code>; answer <code>client_perform_requested</code> and <code>client_call_requested</code> with <code>client.reply</code>, which is how init.lua asks a client to scroll, switch tabs or open the palette.</td><td>yes, a small action set</td></tr>
+<tr><td>Status and notifications</td><td><code>program_status_changed</code> and <code>program_status_removed</code> (OSC 7501), <code>title_changed</code>, bells.</td><td>yes</td></tr>
+<tr><td>Floating layers</td><td><code>session.new_layer</code>, <code>session.float_block</code>, <code>session.close_layer</code>, drawn over the tiled panes.</td><td>yes, for popups</td></tr>
+<tr><td>Later</td><td>Kitty graphics, search, selection and copy, the command palette, several servers, SSH and Tailscale, theme sync.</td><td>no</td></tr>
+</table></div>
+<p>No PTY code is needed on our side. The server owns every PTY; the client only renders and sends input. <span class=m>measured</span></p>
 
-<h2>6. Herdr feature to Rex mapping</h2>
-<table>
-<tr><th>Herdr feature you use</th><th>Rex with rexy</th><th>Status</th></tr>
-<tr><td>Workspaces, tabs, pane splits and zoom</td><td>Sessions, windows (tabs) and blocks. Split, zoom and move work in rexy</td><td class=ok>equivalent</td></tr>
-<tr><td>Ctrl+b prefix with custom shell commands</td><td>Lua <code>rex.bind</code>, key sequences and key modes in init.lua. Commands run server-side through Lua. rexy reads the server's keymap</td><td class=ok>equivalent, rewritten as Lua</td></tr>
-<tr><td>Popups: leader menu, agent picker, bbh inbox, workspace picker, jjui</td><td>The server has floating layers (<code>session.new_layer</code>), but rexy lists <i>floating panes</i> as not done yet. Fallbacks: a zoomed temporary block, or a floating Hyprland window</td><td class=gap>gap</td></tr>
-<tr><td>Pane edges for nav (<code>herdr pane edges</code>)</td><td><code>session.focus_direction</code> with <code>wrap=false</code>, or geometry from <code>session.view</code></td><td class=ok>likely <span class=i>inferred</span></td></tr>
-<tr><td>Agent state reports (<code>report-agent</code>) and the agent panel</td><td>OSC 7501, Rex's own Program Status Protocol, which bbh Emacs already emits. I measured a <code>blocked/question</code> record read back with <code>program_status</code>. rexy shows the status dots</td><td class=ok>better: no CLI call needed</td></tr>
-<tr><td>Agent and session resume after a restart</td><td>No restore. A server restart ends programs</td><td class=gap>gap</td></tr>
-<tr><td>System toasts</td><td>rexy sends desktop notifications over D-Bus and can focus the pane</td><td class=ok>equivalent</td></tr>
-<tr><td>Plugins: sesh, tiny-fingers, jjui</td><td>Lua scripts and actions for sesh-like pickers. tiny-fingers needs an overlay on the screen, which no client has. jjui needs popups</td><td class=gap>partial</td></tr>
-<tr><td>Edit scrollback, socket API from bb</td><td><code>rex capture</code>, the terminal's <code>format</code> method (text, html or vt), and <code>rex api call</code> from bb</td><td class=ok>equivalent</td></tr>
-<tr><td>Hyprland focus by window class</td><td>rexy's app id is <code>dev.rexy.client</code>. Tabs are focused through <code>rex window focus</code></td><td class=ok>port</td></tr>
-<tr><td>bbh super, phone and voice</td><td>None of these depend on Herdr. Emacs frames would run in a rexy pane</td><td class=ok>no change</td></tr>
-<tr><td>Remote and phone access</td><td>Built-in Tailscale and SSH, plus an iOS client that is not yet public</td><td class=ok>new capability</td></tr>
-</table>
-
-<h2>7. Client work estimate</h2>
-<p>Below, a day means a focused working day, mine or yours. <span class=g>guess</span></p>
-<table>
-<tr><th>Option</th><th>Work</th><th>Risk</th></tr>
-<tr><td><b>A. Package rexy in Guix</b> (recommended if we go)</td><td>A rust-1.100 binary toolchain built the way <code>zig-0.17</code> is, 422 vendored crates, the pinned libghostty-rs commit and patchelf. Then a Rex package (patchelf on the release binary, like herdr) and a Home shepherd service for <code>rex server run</code>. About 2 to 4 days.</td><td>No license means we can't redistribute it, and even a private build is a gray area until the author adds one. Its single author changes it daily, so it may break against new API revisions.</td></tr>
-<tr><td>B. Port our integration</td><td>keyleader (about 100 Herdr references), the pickers, workspace-or-herdr-tab, winhint, palette, Hyprland keys, the agent-shell.el status code (drop the Herdr CLI call and keep OSC 7501), bbh-super.el <code>J</code>, notify.clj, the keybinding tests and the Herdr skill. About 2,100 lines touched in bb and Lua, about 3 to 5 days.</td><td>Popup-based flows have no home until floating panes land.</td></tr>
-<tr><td>C. Own client in bb or Emacs Lisp</td><td>Needs a VT emulator with Ghostty snapshot restore, plus layout and rendering. Not feasible in bb. In Emacs it would mean a libghostty-vt dynamic module, weeks of work.</td><td>High. Not recommended.</td></tr>
-<tr><td>D. Contribute to rex-rune (MIT) instead</td><td>Unknown. I did not evaluate its code.</td><td>Medium.</td></tr>
-</table>
-
-<h2>8. Migration sketch with fallback</h2>
+<h2 id=spikes>6. Spikes</h2>
+<p>Two throwaway spikes in /tmp/rexmux-spike, outside the repo. <span class=m>measured</span></p>
 <ol>
-<li><b>Gate.</b> Wait for all of these: a Rex stable release with a license, a licensed Linux client (rexy or rex-rune) with floating panes, and a Guix rust that meets its rust-version, or a client that relaxes it.</li>
-<li><b>Side by side.</b> Package Rex and the client under new names and add <code>feature-rex</code> without touching <code>feature-familiar-herdr</code>. Run the Rex server as a Home shepherd service.</li>
-<li><b>Thin adapter.</b> Add <code>desktop/lib/mux.clj</code> behind keyleader and the pickers, with a Herdr backend and a Rex backend, so bindings choose the backend by window class.</li>
-<li><b>Move one workflow</b>, such as the bbh-super Emacs frames, which only needs OSC 7501. Move the popups last.</li>
-<li><b>Fallback.</b> Herdr stays installed and Super+B still opens it. Switching back means a one-line change of the default backend, with no data to migrate, because bbh state lives in bbh and not in the multiplexer.</li>
+<li><b>Build on Asahi.</b> <code>guix shell</code> with <code>rust-1.96</code>, its cargo, the repo's <code>zig-0.17</code>, gcc-toolchain and git, then <code>cargo build --release</code> of libghostty-rs at the commit rexy pins (483ea3d, the tip today, which builds Ghostty at vt-1.0.1, 108cacb). The first try failed in simdutf with <i>'bits/alltypes.h' file not found</i>, because Zig picked musl. Pointing <code>/tmp/zig-env</code> at a Guix <code>env</code>, the same trick ghostty.scm uses, fixed it. Build time 2 min 19 s; an encode and decode round trip of a snapshot passed.</li>
+<li><b>Real server.</b> Started a Rex preview.19 server, made a session running <code>printf</code> with a red word and <code>ls</code>, then ran the spike client. Output, shortened:
+<pre><code>welcome api_revision=14
+bootstrap payload keys: [attach_all, attached_sessions, client_id, data_tickets, selected_session, server_status]
+data welcome tag=0x81 len=32 nonce=8171740667726652697 stream bytes=1457
+snapshot consumed 1299 bytes; after it 158 bytes: ESC _rex1;8171740667726652697;{"type":"resize","cols":80,"rows":24,...} ESC \
+--- screen ---
+RED spike-marker
+automate_agent-skill.md
+automate_cli.md
+automate_lua-events.md</code></pre>
+This confirms the byte layouts, the bootstrap tickets, that the snapshot ends cleanly where the APC messages start, and that the server's snapshot matches the libghostty-vt version we would pin. I stopped the server afterwards.</li>
 </ol>
+<p>Not tested: input through <code>client.key</code>, rendering into a host terminal, and a resume. These are ordinary work, not unknowns. <span class=i>inferred</span></p>
 
-<h2>9. Why wait rather than no-go</h2>
-<p>Rex's design suits this setup. OSC 7501 is the protocol bbh already speaks. The self-describing API and the Lua keymap are cleaner than Herdr's CLI plus socket. Built-in Tailscale and SSH access could later serve the phone path. <span class=i>inferred</span> What blocks a move today is maturity and licensing, not fit: a closed beta server with no stable release and no restore, and a three-day-old client with no license and no popups. Signals to re-check: https://blob.superlogical.com/api/releases/rex/stable returns a release, and https://github.com/haydn-jones/rexy gains a LICENSE and floating panes.</p>
-
-<h2>10. Evidence</h2>
+<h2 id=arch>7. Architecture</h2>
+<svg viewBox='0 0 360 452' role='img' aria-label='rexmux architecture' style='max-width:520px;margin:0 auto'>
+<defs><marker id='a' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0,0 L10,5 L0,10 z' fill='#1c2230'/></marker></defs>
+<rect x='20' y='8' width='320' height='40' rx='7' fill='#f7efdc' stroke='#8a6a1f'/>
+<text x='180' y='25' text-anchor='middle' font-size='13' font-weight='700' fill='#1c2230'>Ghostty window</text><text x='180' y='41' text-anchor='middle' font-size='11' fill='#1c2230'>keys in, cells out</text>
+<rect x='8' y='62' width='344' height='272' rx='10' fill='#e6f0f5' stroke='#2f6f8f'/>
+<text x='180' y='80' text-anchor='middle' font-size='12.5' font-weight='700' fill='#2f6f8f'>rexmux</text>
+<rect x='20' y='92' width='150' height='58' rx='7' fill='#fff' stroke='#2f6f8f'/><text x='95' y='116' text-anchor='middle' font-size='12.5' font-weight='700'>input</text><text x='95' y='134' text-anchor='middle' font-size='11'>crossterm, kitty keys</text>
+<rect x='190' y='92' width='150' height='58' rx='7' fill='#fff' stroke='#2f6f8f'/><text x='265' y='116' text-anchor='middle' font-size='12.5' font-weight='700'>compositor</text><text x='265' y='134' text-anchor='middle' font-size='11'>layout, tabs, popups</text>
+<rect x='20' y='176' width='150' height='58' rx='7' fill='#fff' stroke='#2f6f8f'/><text x='95' y='200' text-anchor='middle' font-size='12.5' font-weight='700'>control task</text><text x='95' y='218' text-anchor='middle' font-size='11'>requests, events</text>
+<rect x='190' y='176' width='150' height='58' rx='7' fill='#fff' stroke='#2f6f8f'/><text x='265' y='200' text-anchor='middle' font-size='12.5' font-weight='700'>terminal thread</text><text x='265' y='218' text-anchor='middle' font-size='11'>libghostty-vt per pane</text>
+<rect x='190' y='260' width='150' height='58' rx='7' fill='#fff' stroke='#2f6f8f'/><text x='265' y='284' text-anchor='middle' font-size='12.5' font-weight='700'>data task per pane</text><text x='265' y='302' text-anchor='middle' font-size='11'>snapshot, then bytes</text>
+<rect x='20' y='350' width='320' height='52' rx='8' fill='#f0e9f6' stroke='#7a4fa0'/>
+<text x='180' y='371' text-anchor='middle' font-size='12.5' font-weight='700' fill='#7a4fa0'>rex server (Home service)</text><text x='180' y='389' text-anchor='middle' font-size='11'>sessions, PTYs, Lua keymap, OSC 7501</text>
+<line x1='95' y1='48' x2='95' y2='90' stroke='#1c2230' stroke-width='1.5' marker-end='url(#a)'/>
+<line x1='265' y1='92' x2='265' y2='50' stroke='#1c2230' stroke-width='1.5' marker-end='url(#a)'/>
+<line x1='95' y1='150' x2='95' y2='174' stroke='#1c2230' stroke-width='1.5' marker-end='url(#a)'/>
+<line x1='170' y1='182' x2='188' y2='128' stroke='#1c2230' stroke-width='1.5' stroke-dasharray='4 3' marker-end='url(#a)'/>
+<line x1='265' y1='176' x2='265' y2='152' stroke='#1c2230' stroke-width='1.5' marker-end='url(#a)'/>
+<line x1='265' y1='260' x2='265' y2='236' stroke='#1c2230' stroke-width='1.5' marker-end='url(#a)'/>
+<line x1='85' y1='234' x2='85' y2='348' stroke='#2e7d4f' stroke-width='2' marker-end='url(#a)'/>
+<line x1='105' y1='348' x2='105' y2='236' stroke='#2e7d4f' stroke-width='2' marker-end='url(#a)'/>
+<text x='110' y='296' font-size='11' font-weight='700' fill='#2e7d4f'>JSON</text>
+<line x1='265' y1='350' x2='265' y2='320' stroke='#8a6a1f' stroke-width='2' marker-end='url(#a)'/>
+<text x='274' y='346' font-size='11' font-weight='700' fill='#8a6a1f'>bytes</text>
+<text x='180' y='424' text-anchor='middle' font-size='11' fill='#1c2230'>bb scripts and Emacs: rex CLI and OSC 7501</text>
+<text x='180' y='442' text-anchor='middle' font-size='11' fill='#1c2230'>every link: a WebSocket on the Unix socket</text>
+</svg>
+<p class=sub>The dashed arrow carries view events: layout changes go from the control task to the compositor.</p>
 <ul>
-<li>The Rex docs as markdown, the server's /llms.txt (329 kB), the install script and the release JSON are in /tmp/rex-study. <span class=m>measured</span></li>
-<li>The probe ran a throwaway server with HOME=/tmp/rex-study/home: version, server start, new, send, capture, program_status, format vt and events. The binary needed <code>patchelf --set-interpreter</code> to Guix glibc, because its <code>/lib/ld-linux-aarch64.so.1</code> is missing on Guix and running it through ld.so breaks the server's re-exec. I stopped the server afterwards. <span class=m>measured</span></li>
-<li>The rexy checkout is in /home/engstrand/.cache/checkouts/github.com/haydn-jones/rexy at 7b102f1. <span class=m>measured</span></li>
-<li>Repository metadata came from the GitHub API on 2026-11-16. <span class=m>measured</span></li>
+<li><b>A terminal UI, not a GUI.</b> rexmux runs in a Ghostty window, as Herdr does, so the outer Ghostty does fonts, GPU, ligatures, clipboard and IME. rexy's egui interface alone is 6,526 of its 12,710 lines, before its notification, theme and Wayland code; none of that has a counterpart. <span class=m>measured</span> The cost is that pane graphics such as Kitty images have to be passed through, which we can leave out at first. <span class=i>inferred</span></li>
+<li><b>Tasks.</b> A tokio runtime runs one control task, which owns the socket, gives each request an id and a reply channel, and turns events into messages for the UI, plus one data task per visible pane, which counts bytes, splits off the <code>rex1</code> messages and forwards the rest. <span class=i>inferred</span></li>
+<li><b>Terminals on one thread.</b> libghostty-vt terminals are FFI handles; rexy keeps them on a dedicated thread too. The thread restores the snapshot, feeds bytes and produces a render state for the compositor. <span class=m>measured</span> in rexy's terminal.rs</li>
+<li><b>Compositor.</b> Turns <code>session.view</code> into rectangles, copies each pane's cells and styles from the libghostty-vt render state into a ratatui buffer, draws borders, the tab bar, status dots and floating layers, and lets ratatui write only changed cells. Repaints are batched to the display rate. <span class=i>inferred</span></li>
+<li><b>Input.</b> crossterm enables the kitty keyboard protocol flags (disambiguate, event types, alternate keys, all keys as escapes, associated text), which Ghostty supports. Each key becomes a <code>client.key</code>. Physical key names come from the base layout key. Mouse clicks focus panes, the wheel scrolls, and pastes become <code>terminal.write</code>. <span class=i>inferred</span></li>
+<li><b>State.</b> The server is the source of truth. The client keeps a cache rebuilt from <code>session.view</code> and its events, so a reconnect or restart of rexmux loses nothing. <span class=i>inferred</span></li>
 </ul>
 
+<h2 id=crates>8. Crate choices</h2>
+<div class=table><table>
+<tr><th>Need</th><th>Choice</th><th>Why, and the alternative</th></tr>
+<tr><td>Async runtime</td><td><b>tokio</b> (rt, net, time, sync, macros, signal), on a current-thread runtime</td><td>tokio-tungstenite and the Unix socket work with it; rexy uses it; Guix packages 19 versions. smol with async-tungstenite would be smaller but has less company.</td></tr>
+<tr><td>WebSocket</td><td><b>tokio-tungstenite</b> with default features off (handshake only), via <code>client_async</code> over a <code>UnixStream</code></td><td>Measured in the spike. No TLS for the Unix socket; add rustls only when remote servers are needed.</td></tr>
+<tr><td>Terminal emulator</td><td><b>libghostty-vt</b> (libghostty-rs), pinned commit, <code>pkg-config</code> feature in Guix</td><td>The only one that reads Ghostty snapshots. alacritty_terminal, vt100, wezterm-term and termwiz cannot. <span class=m>measured</span> for libghostty-vt, <span class=i>inferred</span> for the others</td></tr>
+<tr><td>Host terminal I/O</td><td><b>crossterm</b> (with event-stream)</td><td>Kitty keyboard flags, mouse, bracketed paste, focus and resize events. termion has no kitty keyboard support. <span class=i>inferred</span></td></tr>
+<tr><td>Drawing</td><td><b>ratatui</b> (crossterm backend only)</td><td>Buffer diffing, layout and widgets for the tab bar and pickers. We could write raw escapes instead, but diffing is the part worth reusing.</td></tr>
+<tr><td>PTY</td><td><b>none</b></td><td>The server owns the PTYs. portable-pty is not needed.</td></tr>
+<tr><td>Serialization</td><td><b>serde</b> and <b>serde_json</b></td><td>Typed structs for the messages we use, and <code>serde_json::Value</code> for the rest, so new server fields never break us.</td></tr>
+<tr><td>Small helpers</td><td>base64 for tickets, anyhow, and lexopt or a hand-written parser instead of clap</td><td>Keeps the lockfile short.</td></tr>
+<tr><td>Notifications</td><td>none in the client</td><td>bbh's notify.clj already raises notices. A Rex event hook or bb can call it, which avoids zbus.</td></tr>
+</table></div>
+
+<h2 id=fit>9. Fit with bbh, Emacs, the phone and voice</h2>
+<div class=table><table>
+<tr><th>Path</th><th>With our own client</th></tr>
+<tr><td>bbh super</td><td>Unchanged: messages go through the controller and the bbh-super Emacs daemon, not the multiplexer. Its terminal frames (<code>emacsclient -s bbh-super -t</code>) run in a Rex pane. notify.clj's fallback focus target becomes the rexmux window and <code>rex block focus</code>. <span class=m>measured</span> for today, <span class=i>inferred</span> for the change</td></tr>
+<tr><td>Restore after restart</td><td>Rex can't restore, but bbh knows each Worker's conversation id. A small bb script, run when the Rex service starts, could recreate the bbh panes with <code>emacs-bbh --resume</code>. That partly closes Herdr's resume gap, and it is ours to keep. <span class=i>inferred</span></td></tr>
+<tr><td>Emacs</td><td>agent-shell.el already emits OSC 7501, which Rex reads natively; drop the <code>herdr pane report-agent</code> call. bbh-super.el <code>J</code> opens jjui in a floating layer we draw. key-navigate.el keeps handing off to keyleader at the frame edge. <span class=i>inferred</span></td></tr>
+<tr><td>Phone</td><td>Unchanged: the phone goes through bbh web to <code>super say!</code>. A terminal UI also works over SSH from the phone, as Herdr does. Rex's Tailscale carrier could later replace SSH if we add TLS. <span class=i>inferred</span></td></tr>
+<tr><td>Voice</td><td>Unchanged: voice.clj goes straight to <code>super say!</code>. <span class=m>measured</span> in the first version</td></tr>
+<tr><td>Hyprland and kanata</td><td>Same pattern as Herdr: a Ghostty window with its own class, for example <code>com.mitchellh.ghostty.rex</code>, focused by Super+Return/E/D/G, then <code>rex window focus</code> for tabs 1 to 4. kanata needs only the new class. <span class=i>inferred</span></td></tr>
+<tr><td>keyleader and pickers</td><td>Port to the <code>rex</code> CLI: <code>session.focus_direction</code> with <code>wrap=false</code> or geometry from <code>session.view</code> for pane edges. The first version's estimate of about 2,100 lines touched and 3 to 5 days still holds. <span class=same>unchanged</span></td></tr>
+</table></div>
+
+<h2 id=guix>10. Guix packaging on aarch64 Asahi</h2>
+<ol>
+<li><b>libghostty-vt.</b> A package built with <code>zig-0.17</code> from Ghostty at the commit libghostty-rs pins, with <code>-Demit-lib-vt=true</code>, which installs the library and pkg-config files. It reuses ghostty.scm's <code>zig-environment</code> and dependency fetching, but needs its own list of Zig dependencies for that commit. The build fetches nothing when <code>--system</code> points at prefetched dependencies. About 1 day. <span class=i>inferred</span> from build.rs and ghostty.scm</li>
+<li><b>rex.</b> The release binary with patchelf, like herdr.scm, plus a Home shepherd service for <code>rex server run</code>. Half a day. <span class=m>measured</span> that patchelf is needed</li>
+<li><b>rexmux.</b> <code>cargo-build-system</code> with <code>#:rust rust-1.96</code>, the libghostty-vt-sys <code>pkg-config</code> feature so build.rs doesn't fetch Ghostty, and crate sources generated with <code>guix import crate --lockfile</code> into a channel-local crates module. Guix's rust-crates.scm already defines 10,633 crate sources, so most of the roughly 110 Linux crates may already be there; the git dependency on libghostty-rs needs an origin of its own. 1 to 2 days, including the first Rust check rules in checks.edn. <span class=i>inferred</span></li>
+</ol>
+<p>The dependency burden is now small: 129 crates locked, about 110 of them for Linux, about a quarter of rexy's 422, and no toolchain package of our own. A from-scratch build of rexmux should take a few minutes, most of it the Zig build. <span class=m>measured</span> for the counts and the spike's build time, <span class=g>guess</span> for the package build time</p>
+
+<h2 id=map>11. Herdr feature mapping, updated</h2>
+<div class=table><table>
+<tr><th>Herdr feature you use</th><th>Rex with our client</th><th>Status</th></tr>
+<tr><td>Workspaces, tabs, splits, zoom</td><td>Sessions, windows and blocks, through the layout methods</td><td class=ok>M2</td></tr>
+<tr><td>Ctrl+b prefix with shell commands</td><td>Lua <code>rex.bind</code>, key sequences and modes in init.lua, applied server-side because we send <code>client.key</code></td><td class=ok>M3, rewritten as Lua</td></tr>
+<tr><td>Popups: leader menu, agent picker, bbh inbox, workspace picker, jjui</td><td>Server floating layers drawn by our compositor <span class=chg>changed</span></td><td class=ok>M3, our work</td></tr>
+<tr><td>Pane edges for navigation</td><td><code>session.focus_direction</code> with <code>wrap=false</code> or geometry from <code>session.view</code></td><td class=ok>likely <span class=i>inferred</span></td></tr>
+<tr><td>Agent state reports and panel</td><td>OSC 7501, already emitted; status dots in our tab bar</td><td class=ok>better, no CLI call</td></tr>
+<tr><td>Agent and session resume after restart</td><td>No server restore; a bb script could recreate bbh panes from bbh state <span class=chg>changed</span></td><td class=gap>partial, our work</td></tr>
+<tr><td>System toasts</td><td>A Lua event hook or bb calls notify.clj</td><td class=ok>port</td></tr>
+<tr><td>Plugins: sesh, tiny-fingers, jjui</td><td>sesh as a Lua action and picker; jjui in a floating layer; tiny-fingers needs an overlay, which we could draw because we own the renderer <span class=chg>changed</span></td><td class=gap>after MVP</td></tr>
+<tr><td>Edit scrollback, socket API from bb</td><td><code>rex capture</code>, the terminal's <code>format</code> method, <code>rex api call</code></td><td class=ok>equivalent</td></tr>
+<tr><td>bbh super, phone and voice</td><td>Not tied to the multiplexer</td><td class=ok>no change</td></tr>
+</table></div>
+
+<h2 id=size>12. Size and milestones of a minimal viable client</h2>
+<p>A day means a focused working day, mine or yours. Line counts are for Rust, without tests. Both are <span class=g>guess</span>es, sized against rexy's measured backend.rs (2,107 lines), wire.rs (846) and terminal.rs with its helpers (1,476), which cover roughly M1, M2 and M4.</p>
+<div class=table><table>
+<tr><th>Milestone</th><th>Done when</th><th>Lines</th><th>Days</th></tr>
+<tr><td><b>M0. Spike</b> (done today)</td><td>Connect, bootstrap, data stream, snapshot restore on Asahi</td><td>65</td><td>done</td></tr>
+<tr><td><b>M1. One pane</b></td><td>rexmux attaches to a session and shows its focused pane live; typing, resize and <code>child_exited</code> work; you can run fish and Neovim in it</td><td>1,500</td><td>3 to 4</td></tr>
+<tr><td><b>M2. Layout</b></td><td>Splits, tabs, zoom, focus by key and mouse, scrollback, one data stream per visible pane, follows <code>session_view_changed</code></td><td>1,500</td><td>4 to 5</td></tr>
+<tr><td><b>M3. Our keys and popups</b></td><td>init.lua with the Ctrl+b prefix, client actions answered, floating layers for the leader menu, pickers, bbh inbox and jjui, status dots, bells</td><td>1,300</td><td>3 to 5</td></tr>
+<tr><td><b>M4. Robust</b></td><td>Reconnect with the token and RESUME, survive a server restart, bracketed paste, OSC 52 clipboard, revision checks, an integration test against a throwaway server</td><td>1,000</td><td>3 to 4</td></tr>
+<tr><td><b>M5. Guix and port</b></td><td>The three packages and Home service from section 10; keyleader, pickers, Hyprland, kanata, Emacs and notify.clj ported; Herdr kept as fallback</td><td>bb and Lua: about 2,100 lines touched</td><td>5 to 8</td></tr>
+<tr><td><b>Total</b></td><td>Daily use without Herdr</td><td>5,000 to 6,500</td><td>18 to 26, about 4 to 6 weeks</td></tr>
+</table></div>
+<p>Herdr can be retired after M5. Kitty graphics, search and selection, a palette, remote servers and the tiny-fingers overlay come after. <span class=i>inferred</span></p>
+
+<h2 id=risks>13. Risks</h2>
+<div class=table><table>
+<tr><th>Risk</th><th>How likely and how bad</th><th>Mitigation</th></tr>
+<tr><td><b>Rex API churn.</b> Revision 14 came days after 13, and preview builds ship about daily.</td><td>High and ongoing: each change is our upkeep now, not rexy's author's.</td><td>Declare a min and max revision in the hello; pin the rex and rexmux versions together in Guix; upgrade on purpose. <span class=i>inferred</span></td></tr>
+<tr><td><b>Snapshot format drift.</b> The server's Ghostty and our libghostty-vt pin must agree.</td><td>Medium. Measured compatible today with preview.19 and vt-1.0.1. A mismatch fails at attach, loudly.</td><td>Bump both together; an attach test in checks. <span class=i>inferred</span></td></tr>
+<tr><td><b>Rex server license and maturity.</b> No license, no stable release, closed source.</td><td>High; owning the client does not change it. A closed server could change terms or stop.</td><td>This is the gate in section 14. Herdr stays as the fallback. <span class=m>measured</span> status</td></tr>
+<tr><td><b>No restore.</b> Rex ends programs when the server restarts.</td><td>Medium for bbh Workers, which Herdr resumes today.</td><td>A bb respawn script from bbh state; or Rex's login-server mode for upgrades. <span class=i>inferred</span></td></tr>
+<tr><td><b>Key fidelity.</b> <code>client.key</code> wants physical keys and releases; a terminal UI learns them only through the kitty keyboard protocol.</td><td>Low to medium. Ghostty supports the protocol; mapping base layout keys to W3C names is a table.</td><td>Fall back to <code>terminal.write</code> with libghostty-vt's key encoder for odd keys. <span class=i>inferred</span></td></tr>
+<tr><td><b>Rust upkeep in a bb repo.</b> The first Rust code here.</td><td>Medium: new lint and check rules, rust-1.96 in the build, a few minutes per rebuild.</td><td>Keep it one crate, small dependency set, and a checks.edn rule. <span class=g>guess</span></td></tr>
+<tr><td><b>Scope creep</b> toward a full terminal app.</td><td>Medium.</td><td>Stop at M5; anything else must replace a Herdr feature we use. <span class=g>guess</span></td></tr>
+</table></div>
+
+<h2 id=call>14. Go, wait or no-go</h2>
+<p><b>Wait.</b> <span class=chg>changed reasons, same call</span> Owning the client changes the call's reasons, but not the call itself.</p>
+<ul>
+<li><b>Removed by owning the code:</b> rexy's missing license, its Rust 1.100 toolchain, its missing floating panes, its single-author churn, and its 422-crate build. <span class=m>measured</span></li>
+<li><b>Not removed:</b> the Rex server's missing license and stable release, no restore, and protocol churn. Churn now costs more, because it lands on us. <span class=m>measured</span> status, <span class=i>inferred</span> cost</li>
+<li><b>Cost against benefit:</b> about 4 to 6 weeks plus upkeep, to get native OSC 7501, a Lua keymap and a cleaner API in place of a Herdr setup that works today. That is worth it on a stable, licensed server, but not on a closed beta. <span class=i>inferred</span></li>
+<li><b>Not no-go:</b> the fit is good, and the spikes removed the main technical doubt. <span class=m>measured</span></li>
+</ul>
+<h3>Gate to start, smaller than before</h3>
+<ol>
+<li>https://blob.superlogical.com/api/releases/rex/stable returns a release.</li>
+<li>Rex publishes a license that allows private use and packaging.</li>
+<li>The API revision holds still for a few weeks, or Rex states a compatibility policy.</li>
+</ol>
+<p>Dropped from the first version's gate: a licensed Linux client with floating panes, and a Guix rust that meets rexy's rust-version. <span class=chg>changed</span></p>
+<h3>Migration once the gate opens</h3>
+<ol>
+<li>Package libghostty-vt, rex and rexmux under new names, and add a <code>feature-rex</code> beside <code>feature-familiar-herdr</code>.</li>
+<li>Build M1 to M4 in the repo, using the side-by-side window class.</li>
+<li>Put a <code>desktop/lib/mux.clj</code> adapter behind keyleader and the pickers, with Herdr and Rex backends chosen by window class. <span class=same>unchanged</span></li>
+<li>Move the bbh-super Emacs frames first, then the popups, then make Rex the default.</li>
+<li>Fallback: Herdr stays installed and Super+B still opens it. Switching back is a one-line change of the default backend; no data moves, because bbh state lives in bbh. <span class=same>unchanged</span></li>
+</ol>
+<p>If you want to start before the gate opens, the cheapest step that keeps value is M1 as a private experiment, which would show daily-use latency and key handling. I would not start M2 or later before the gate. <span class=g>guess</span></p>
+
+<h2 id=evidence>15. Evidence</h2>
+<ul>
+<li>Spike code and lockfile: /tmp/rexmux-spike/Cargo.toml, /tmp/rexmux-spike/src/main.rs, /tmp/rexmux-spike/Cargo.lock, and the build script /tmp/rexmux-spike-build.sh. Throwaway; they live outside the repo. <span class=m>measured</span></li>
+<li>Spike logs: /home/engstrand/.local/share/bbh/conversations/super-W230/jobs/1794833629194-736.log (musl header failure) and /home/engstrand/.local/share/bbh/conversations/super-W230/jobs/1794833858872-953.log (the real-server run). <span class=m>measured</span></li>
+<li>Rex docs and /llms.txt: /tmp/rex-study/llms.txt, sections Data Connections and Opening the Connection; the binary is /tmp/rex-study/bin/rex, preview.19, API revision 14. <span class=m>measured</span></li>
+<li>rexy at 7b102f1 in /home/engstrand/.cache/checkouts/github.com/haydn-jones/rexy, method use counted with grep over src. libghostty-rs at 483ea3d in /home/engstrand/.cache/checkouts/github.com/Uzaaft/libghostty-rs, build.rs and snapshot.rs. <span class=m>measured</span></li>
+<li>Guix: <code>guix build --dry-run</code> for <code>rust-1.96</code> downloads 50.2 MB of substitutes; the default <code>rust</code> is 1.93.0; rust-crates.scm defines 10,633 crates. <span class=m>measured</span></li>
+<li>Zig on Guix: /home/engstrand/guix/modules/engstrand/packages/ghostty.scm line 25 (zig-0.17 and its /tmp/zig-env patch) and line 182 (zig-environment). <span class=m>measured</span></li>
+<li>First version of this page: commit vtlzprnt, by W229. <span class=m>measured</span></li>
+</ul>
 </main></body></html>
