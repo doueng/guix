@@ -79,7 +79,7 @@
 
 (defspec a-suspended-editor-never-gets-text 500
   (prop/for-all [st gen-state
-                 evs (gen/vector (gen/such-that #(:text? (key-of %)) gen-event) 1 20)]
+                 evs (gen/vector (gen/such-that #(:text? (key-of %)) gen-event 100) 1 20)]
     (let [st (assoc st :mode :normal :suspended true)]
       (every? (fn [[_ effect]] (d/consume? effect))
               ;; i (focusInput) resumes typing, after which text belongs to the editor

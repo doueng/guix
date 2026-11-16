@@ -91,9 +91,24 @@
            :when problem]
        problem))))
 
+(defn ext-reload-problems
+  "Each extension ext-reload serves must reload itself when its manifest.json changed: ext-reload's disable and
+  enable keep the manifest Chrome first loaded, so without it a new command never gets its key (T197's Cmd+T)."
+  []
+  (for [ext (sort (distinct (keep #(second (re-find #"^desktop/build/chrome/([^/]+)/bb\.edn$" %)) files)))
+        :let [dir (str "desktop/build/chrome/" ext "/")]
+        :when (some #{(str dir "ext/manifest.json")} files)
+        :when (not-any? #(let [s (slurp (str c/root "/" %))]
+                           (and (str/includes? s "(reread-manifest!)") (str/includes? s "\"manifest.json\"")
+                                (str/includes? s "js/chrome.runtime.reload")))
+                        (filter #(and (str/starts-with? % (str dir "src/")) (re-find #"\.clj[sc]?$" %)) files))]
+   (str dir ": its background never calls reread-manifest! (see vimium-cljs bg/main.cljs),"
+        " so after ext-reload Chrome keeps running its old manifest.json")))
+
 (def steps
   [["scheme" scheme-problems]
    ["chrome" chrome-problems]
+   ["ext-reload" ext-reload-problems]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
    ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))
                             (filter (fn [f] (or (str/ends-with? f ".bb") (re-find #"^#!.*\bbb\b" (first-line f)))) files))]

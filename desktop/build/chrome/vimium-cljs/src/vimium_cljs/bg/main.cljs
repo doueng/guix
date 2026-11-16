@@ -356,8 +356,24 @@
                    (-> (js/chrome.scripting.executeScript #js {:target target :files #js ["js/content.js"]})
                        (.catch (fn [_] nil)))))))))
 
+(defn- reread-manifest!
+  "ext-reload restarts an unpacked extension by disabling and enabling it, which rereads its scripts but keeps the
+  manifest Chrome first loaded, so a new command never gets its key. Reload once for each manifest.json that differs."
+  []
+  (-> (js/fetch (js/chrome.runtime.getURL "manifest.json"))
+      (.then #(.text %))
+      (.then (fn [text]
+               (when (not= (js->clj (js/JSON.parse text)) (js->clj (js/chrome.runtime.getManifest)))
+                 (-> (js/chrome.storage.local.get "reloadedForManifest")
+                     (.then (fn [^js got]
+                              (when (not= text (.-reloadedForManifest got))
+                                (-> (js/chrome.storage.local.set #js {:reloadedForManifest text})
+                                    (.then #(js/chrome.runtime.reload))))))))))
+      (.catch (fn [_] nil))))
+
 (defn init []
   (js/chrome.runtime.onInstalled.addListener (fn [_] (inject-open-tabs!)))
+  (reread-manifest!)
   (js/chrome.runtime.onMessage.addListener
    (fn [msg sender respond]
      (let [r (try (handle msg sender) (catch :default e (js/console.error e) nil))]
