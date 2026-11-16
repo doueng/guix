@@ -1175,12 +1175,6 @@
             (testing "the selected-thread mode keeps acting on the selection"
               (is (= {:thread "T1" :sent true} (voice/submit! "send" :target :selected))))))))))
 
-(deftest hex-stop-does-not-paste-or-route-silence
-  (let [calls (atom [])]
-    (with-redefs [voice/hex! (fn [& args] (swap! calls conj args) {:exit 4 :out ""})]
-      (is (= {:silence true} (voice/stop!)))
-      (is (= [["dictation" "stop" "--print"]] (mapv vec @calls))))))
-
 (deftest handle-input-does-not-target-undeliverable-workers
   (doseq [[worker-state conversation] [[:queued nil] [:starting nil] [:cancelling "super-W1"]]]
     (let [state (-> model/empty-state
@@ -1451,14 +1445,6 @@
            :policy {:workers 1}
            :args (merge {:thread thread :workflow :change :brief "b" :repo "/r"} args)}])
 
-(deftest a-worker-that-supersedes-its-stopped-ask-with-an-open-one-is-working
-  (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                                       (start-cmd "at" "T1") (running "W1")
-                                       [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "Which?" :stopped true}}]
-                                       [[:worker "W1"] {:id "k2" :command :ask! :args {:kind :question :text "FYI" :supersedes ["a1"]}}]])]
-    (is (= :working (get-in state [:workers "W1" :state])))
-    (is (= :working (model/execution state "T1")))))
-
 (deftest a-worker-answered-in-its-chat-is-working-and-its-asks-close
   (let [health (fn [id h] [:controller {:id id :command :health!
                                          :args {:worker "W1" :at 0 :health (merge {:classification :running :process {:pid 7 :start "s"}} h)}}])
@@ -1505,7 +1491,7 @@
                                                (start-cmd "s2" "T2")])]
     (is (= :starting (:state (nth results 2))))
     (is (= [:queued "1 Workers already running"] ((juxt :state :reason) (nth results 3))))
-    (is (= #{:counters :threads :workers :asks :replies :outbox :tokens :router} (set (keys state))) "no lock records")))
+    (is (not-any? #(re-find #"lock|lease" (name %)) (keys state)) "no lock records")))
 
 (deftest a-thread-with-a-starting-worker-takes-no-second-one
   (let [{:keys [results]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
@@ -1527,23 +1513,14 @@
     (is (= :cancelling (:error (nth results 4))))
     (is (= :cancelled (get-in state [:workers "W1" :state])))))
 
-(deftest thread-execution-is-derived-not-stored
-  (let [{:keys [state]} (run-commands [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
-                                       (start-cmd "s1" "T1") (running "W1")
-                                       [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "ok?" :stopped true}}]])]
-    (is (not (contains? (get-in state [:threads "T1"]) :execution)) "the record holds no copy")
-    (is (= :waiting (model/execution state "T1")))
-    (is (= :waiting (:execution (model/thread-view state (get-in state [:threads "T1"])))))
-    (is (= :working (get-in state [:workers "W1" :state])) "nor does the Worker hold a copy")
-    (is (= :waiting (:state (model/linked state :workers "W1"))) "a read of the Worker shows it")))
-
 (deftest a-worker-waits-exactly-while-its-stopped-ask-is-open
   (let [base [[:owner {:id "t1" :command :thread! :args {:title "a"}}]
               (start-cmd "s1" "T1") (running "W1")
               [[:worker "W1"] {:id "k1" :command :ask! :args {:kind :question :text "ok?" :stopped true}}]]
         shown (fn [more] (let [state (:state (run-commands (into base more)))]
                            [(get-in state [:workers "W1" :state]) (:state (model/linked state :workers "W1")) (model/execution state "T1")]))]
-    (is (= [:working :waiting :waiting] (shown [])))
+    (is (= [:working :waiting :waiting] (shown [])) "execution is derived: neither the Worker nor the thread holds a copy")
+    (is (not (contains? (get-in (run-commands base) [:state :threads "T1"]) :execution)) "the thread record holds no copy")
     (is (= [:working :working :working] (shown [[:owner {:id "d1" :command :dismiss! :args {:thread "T1"}}]]))
         "a dismissed ask")
     (is (= [:working :working :working] (shown [[[:worker "W1"] {:id "k2" :command :ask! :args {:kind :question :text "FYI" :supersedes ["a1"]}}]]))

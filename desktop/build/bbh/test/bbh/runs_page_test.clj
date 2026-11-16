@@ -46,6 +46,8 @@
                  {:type :enter :phase :review :visit 1 :at "2026-10-27T10:00:03Z"}
                  {:type :verdict :phase :review :visit 1 :reviewer "bbh-review/review-1-5" :verdict :pass
                   :note "VERDICT: pass" :at "2026-10-27T10:00:04Z"}
+                 {:type :attest :phase :review :visit 1 :claim "reviewed" :outcome :pass
+                  :gates [{:index 0 :kind :verdict :pass? true}] :at "2026-10-27T10:00:04Z"}
                  {:type :done :at "2026-10-27T10:00:05Z"}])
     (fs/create-dirs (fs/path run "evidence"))
     (spit (str (fs/path run "evidence" "shape.md")) "# Shape\nA map.")
@@ -66,7 +68,7 @@
     (is (str/includes? html "FULL TAIL"))
     (is (str/includes? html "<code>page.clj</code>"))
     (is (str/includes? html "<span class=\"phase passed\" title=\"Name the shape.\nprinciples: model-the-domain\">shape</span>"))
-    (is (str/includes? html "<span class=\"phase pending\" title=\"Get a verdict.\">review</span>"))
+    (is (str/includes? html "<span class=\"phase passed\" title=\"Get a verdict.\">review</span>"))
     (is (str/includes? html "<summary>&lt;skill name=&quot;poteto-mode&quot;&gt; "))
     (is (str/includes? html "<span class=\"badge status-done\">done</span>"))
     (is (str/includes? html "VERDICT: pass, reviewer checked it"))

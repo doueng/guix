@@ -55,7 +55,7 @@
     (spit (str (fs/path root "agent.json")) "{\"pid\": 2147483646, \"project\": \"/p\", \"busy\": false}")
     (is (nil? (inbox/agent root)))))
 
-(deftest a-rolled-over-conversation-keeps-its-mailbox
+(deftest rollovers-chain-back-to-the-first-conversation
   (let [base (str (fs/create-temp-dir {:prefix "bbh-inbox"}))
         root (str (fs/create-dirs (fs/path base "first")))
         rolled (conversation/continue! root "second")

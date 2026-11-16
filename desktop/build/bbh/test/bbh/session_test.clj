@@ -583,7 +583,7 @@
       (is (= [] (bbh.inbox/pending (:dir h))))
       (finally (stop! h)))))
 
-(deftest typed-cancellation-interrupts-a-busy-evaluation-not-a-steering-request
+(deftest typed-cancellation-interrupts-a-busy-evaluation
   (let [h (harness "" [{:code "(Thread/sleep 60000)"} "done"])
         s (:s h)
         turn (future (session/prompt! s "start"))]
