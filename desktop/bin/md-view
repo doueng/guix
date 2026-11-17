@@ -1,7 +1,7 @@
 #!/usr/bin/env bb
 (ns md-view
-  "Render Markdown or Org with pandoc and show it in Chrome with live reload, in a
-  terminal pane, or in the phone's bbh Docs list."
+  "Render Markdown or Org with pandoc, or take an HTML file as it is, and show it in
+  Chrome with live reload, in a terminal pane, or in the phone's bbh Docs list."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
             [clojure.string :as str]
@@ -57,7 +57,10 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
   (condp re-find (str path)
     #"(?i)\.org$" "org"
     #"(?i)\.(md|markdown|mdown|mkd)$" "gfm+footnotes"
+    #"(?i)\.x?html?$" "html"
     nil))
+
+(defn html? [path] (= "html" (input-format path)))
 
 (defn doc? [path] (boolean (and path (input-format path) (fs/regular-file? path))))
 
@@ -110,16 +113,37 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
                          (doc? path) (str "href=\"" (escape (str (link-doc (fs/canonicalize path)) frag)) "\"")
                          :else (str "href=\"" (escape (str (file-uri path) frag)) "\""))))))))
 
+(defn insert-before
+  "Put MARKUP before the first TAG in HTML, matched without case, else at FALLBACK
+  (:start or :end)."
+  [html tag markup fallback]
+  (let [m (re-matcher (re-pattern (str "(?i)" tag)) html)]
+    (cond
+      (.find m) (str (subs html 0 (.start m)) markup (subs html (.start m)))
+      (= fallback :start) (str markup html)
+      :else (str html markup))))
+
+(defn html-page
+  "An HTML file as it is, with relative images inlined and relative links rewritten
+  like a rendered page's, HEAD added to <head> and the reload poller before </body>."
+  [src {:keys [link-doc head live?]}]
+  (cond-> (rewrite (slurp (str src)) (fs/parent src) link-doc)
+    head (insert-before "</head>" head :start)
+    live? (insert-before "</body>" (str "<script>" live-js "</script>") :end)))
+
 (defn page
   "SRC as one self-contained HTML page. LINK-DOC maps a linked document's path to
-  its href; HEAD is extra markup for <head>; LIVE? adds the reload poller."
-  [src {:keys [link-doc head live?] :or {link-doc file-uri}}]
-  (str "<!doctype html>\n<html><head><meta charset=utf-8>"
-       "<meta name=viewport content='width=device-width,initial-scale=1'>"
-       "<title>" (escape (fs/file-name src)) "</title>" head "<style>" css "</style></head>\n"
-       "<body><main><div class=src>" (escape src) "</div>\n"
-       (rewrite (pandoc! src "--to=html5" "--standalone" (str "--template=" @body-template)) (fs/parent src) link-doc)
-       "\n</main>" (when live? (str "<script>" live-js "</script>")) "</body></html>\n"))
+  its href; HEAD is extra markup for <head>; LIVE? adds the reload poller. HTML
+  stays as it is, without pandoc or this viewer's style."
+  [src {:keys [link-doc head live?] :or {link-doc file-uri} :as opts}]
+  (if (html? src)
+    (html-page src (assoc opts :link-doc link-doc))
+    (str "<!doctype html>\n<html><head><meta charset=utf-8>"
+         "<meta name=viewport content='width=device-width,initial-scale=1'>"
+         "<title>" (escape (fs/file-name src)) "</title>" head "<style>" css "</style></head>\n"
+         "<body><main><div class=src>" (escape src) "</div>\n"
+         (rewrite (pandoc! src "--to=html5" "--standalone" (str "--template=" @body-template)) (fs/parent src) link-doc)
+         "\n</main>" (when live? (str "<script>" live-js "</script>")) "</body></html>\n")))
 
 (defn stamp [path] (str (fs/file-time->millis (fs/last-modified-time path))))
 
@@ -129,7 +153,7 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
       (when (str/starts-with? s "/") (fs/canonicalize s)))))
 
 (defn handler
-  "Serve only Markdown and Org files, and only to a page this server's own origin
+  "Serve only Markdown, Org and HTML files, and only to a page this server's own origin
   named, so a web page cannot read files through a rebound DNS name."
   [{:keys [uri query-string headers]}]
   (let [path (query-path query-string)
@@ -138,7 +162,7 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
       (not (#{(str "127.0.0.1:" port) (str "localhost:" port)} (get headers "host"))) (text 403 "forbidden host")
       (= uri "/health") (text 200 "md-view")
       (not (#{"/view" "/stamp"} uri)) (text 404 "not found")
-      (not (doc? path)) (text 404 "not a Markdown or Org file")
+      (not (doc? path)) (text 404 "not a Markdown, Org or HTML file")
       (= uri "/stamp") (assoc-in (text 200 (stamp path)) [:headers "cache-control"] "no-store")
       :else (try {:status 200 :headers {"content-type" "text/html; charset=utf-8"}
                   :body (page path {:link-doc view-url :live? true})}
@@ -174,9 +198,73 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
   (let [out (fs/path (or (System/getenv "MD_VIEW_PHONE_DIR") "/tmp")
                      (str "md-view-" (str/replace (fs/strip-ext (fs/file-name src)) #"[^\w.-]" "_")
                           "-" (subs (sha1 src) 0 8) ".html"))]
-    (spit (str out) (page src {:head (str "<meta name=\"bbh-doc\" content=\"md-view\">"
-                                          "<meta name=\"description\" content=\"" (escape src) "\">")}))
+    (spit (str out) (page src {:head (let [has? #(and (html? src) (re-find (re-pattern (str "(?i)<meta[^>]+name=\"?" % "\"?[\\s>/]")) (slurp (str src))))]
+                                      (str (when-not (has? "bbh-doc") "<meta name=\"bbh-doc\" content=\"md-view\">")
+                                           (when-not (has? "description") (str "<meta name=\"description\" content=\"" (escape src) "\">"))))}))
     (str out)))
+
+(def entities {"amp" "&" "lt" "<" "gt" ">" "quot" "\"" "apos" "'" "nbsp" " " "mdash" "—" "ndash" "–"
+               "hellip" "…" "rarr" "→" "larr" "←" "middot" "·" "copy" "©" "times" "×"})
+
+(defn unescape [s]
+  (str/replace s #"&(#x[0-9a-fA-F]+|#\d+|\w+);"
+               (fn [[whole e]]
+                 (cond
+                   (str/starts-with? e "#x") (String. (Character/toChars (Integer/parseInt (subs e 2) 16)))
+                   (str/starts-with? e "#") (String. (Character/toChars (parse-long (subs e 1))))
+                   :else (entities e whole)))))
+
+(defn wrap [line cols]
+  (let [[_ indent text] (re-find #"^(\s*(?:- )?)(.*)$" line)]
+    (->> (str/split text #" ")
+         (reduce (fn [lines w]
+                   (let [l (peek lines)]
+                     (if (and (not= l indent) (> (+ (count l) 1 (count w)) cols))
+                       (conj lines (str (apply str (repeat (count indent) " ")) w))
+                       (conj (pop lines) (if (= l indent) (str l w) (str l " " w))))))
+                 [indent])
+         (str/join "\n"))))
+
+(defn html->text
+  "HTML as readable text, without pandoc: headings, list items, paragraphs and
+  preformatted blocks keep their shape, with bold headings when ANSI? and lines
+  wrapped at COLS."
+  [html cols ansi?]
+  (let [bold (fn [s] (if ansi? (str "\u001b[1m" s "\u001b[0m") s))
+        pres (atom [])
+        stash (fn [[_ body]] (swap! pres conj (unescape (str/replace body #"(?s)<[^>]*>" "")))
+                (str "\u0001" (dec (count @pres)) "\u0001"))
+        text (-> html
+                 (str/replace #"(?is)<!--.*?-->" "")
+                 (str/replace #"(?is)<(head|script|style|svg|template|noscript)\b.*?</\1\s*>" "")
+                 (str/replace #"(?is)<pre\b[^>]*>(.*?)</pre\s*>" stash)
+                 (str/replace #"\s+" " ")
+                 (str/replace #" ?\u0001(\d+)\u0001 ?" "\n\u0000$1\u0000\n")
+                 (str/replace #"(?is)<h([1-6])\b[^>]*>(.*?)</h\1\s*>"
+                              (fn [[_ n t]] (str "\n\n" (bold (str (apply str (repeat (parse-long n) "#")) " "
+                                                                   (str/trim (str/replace t #"<[^>]*>" "")))) "\n\n")))
+                 (str/replace #"(?i)<li\b[^>]*>" "\n- ")
+                 (str/replace #"(?i)<br\s*/?>" "\n")
+                 (str/replace #"(?i)</?(p|div|section|article|main|header|footer|nav|aside|ul|ol|table|tr|blockquote|figure|figcaption|details|summary|dl|dt|dd|hr|h[1-6])\b[^>]*>" "\n")
+                 (str/replace #"(?i)</t[dh]\s*>" "  ")
+                 (str/replace #"<[^>]*>" "")
+                 unescape)]
+    (->> (str/split-lines text)
+         (map #(str/replace % #"^ +| +$" ""))
+         (map (fn [l] (if-let [[_ i] (re-find #"^\u0000(\d+)\u0000$" l)]
+                        (str/trimr (str/replace (@pres (parse-long i)) #"^\n" ""))
+                        (if (str/includes? l "\u001b") l (wrap l cols)))))
+         (str/join "\n")
+         (#(str/replace % #"\n{3,}" "\n\n"))
+         str/trim
+         (#(str % "\n")))))
+
+(defn as-text
+  "SRC as text COLS wide: pandoc for Markdown and Org, html->text for HTML."
+  [src cols ansi?]
+  (if (html? src)
+    (html->text (slurp (str src)) cols ansi?)
+    (pandoc! src (if ansi? "--to=ansi" "--to=plain") (str "--columns=" cols))))
 
 (defn columns []
   (let [{:keys [out]} (p/shell {:in (fs/file "/dev/tty") :out :string :err :string :continue true} "stty" "size")]
@@ -187,10 +275,10 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
   save, so R in less shows the new text; piped, print plain text."
   [src]
   (if-not (System/console)
-    (print (pandoc! src "--to=plain" "--columns=100"))
+    (print (as-text src 100 false))
     (let [cols (min 100 (- (columns) 2))
           out (fs/create-temp-file {:prefix "md-view-" :suffix ".txt"})
-          render! #(spit (str out) (pandoc! src "--to=ansi" (str "--columns=" cols)))
+          render! #(spit (str out) (as-text src cols true))
           watcher (future (loop [seen (stamp src)]
                             (Thread/sleep 300)
                             (let [now (stamp src)]
@@ -208,7 +296,7 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
       (= "serve" (first args)) (serve!)
       (or (empty? files) (seq (remove #{"--term" "-t" "--phone" "--no-open"} flags)) (not-every? doc? files))
       (do (binding [*out* *err*]
-            (println "usage: md-view [-t|--term|--phone|--no-open] FILE.md|FILE.org|file://URI ...")
+            (println "usage: md-view [-t|--term|--phone|--no-open] FILE.md|FILE.org|FILE.html|file://URI ...")
             (println "       md-view serve [PORT]"))
           (System/exit 2))
       (#{"-t" "--term"} mode) (run! term! files)

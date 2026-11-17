@@ -375,7 +375,7 @@ ultimately to plain `find-file' when the current directory is not a project."
     (call-interactively #'find-file))))
 
 (defun eng/md-view (&optional phone)
-  "Save, then show this Markdown or Org file in Chrome with md-view's live reload.
+  "Save, then show this Markdown, Org or HTML file in Chrome with md-view's live reload.
 With PHONE, the prefix argument, send a snapshot to the phone's bbh Docs list."
   (interactive "P")
   (unless buffer-file-name (user-error "md-view needs a file"))
@@ -390,6 +390,10 @@ With PHONE, the prefix argument, send a snapshot to the phone's bbh Docs list."
 (map! :after markdown-mode :map (markdown-mode-map gfm-mode-map)
       :localleader :desc "View in md-view" "v" #'eng/md-view)
 (map! :after org :map org-mode-map
+      :localleader :desc "View in md-view" "v" #'eng/md-view)
+(map! :after sgml-mode :map html-mode-map
+      :localleader :desc "View in md-view" "v" #'eng/md-view)
+(map! :after mhtml-mode :map mhtml-mode-map
       :localleader :desc "View in md-view" "v" #'eng/md-view)
 
 (load (expand-file-name "keybindings.el" eng/doom-config-dir) t 'nomessage)
