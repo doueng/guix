@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Design for a Rex client: thin Rust GPUI frontend built from Dusk, a babashka sidecar owning an M-x command registry generated from Rex's API, the IPC protocol and effect vocabulary, claim check, stage 0 and 1 spikes, and an audit of what it would remove from the current setup.">
+<meta name="bbh-doc" content="T194">
+<title>A Rex client driven by Clojure</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+.m,.i,.g{font-size:.75em;padding:1px 5px;border-radius:4px;white-space:nowrap}.m{background:#14532d;color:#bbf7d0}.i{background:#1e3a8a;color:#bfdbfe}.g{background:#78350f;color:#fde68a}.verdict{border-left:4px solid #f59e0b;padding:8px 12px;background:rgba(245,158,11,.08);margin:12px 0}td.ok{color:#22c55e}td.gap{color:#f87171}table{display:block;overflow-x:auto}
+.chg{font-size:.75em;padding:1px 5px;border-radius:4px;white-space:nowrap;background:#7c2d12;color:#fed7aa}.same{font-size:.75em;padding:1px 5px;border-radius:4px;white-space:nowrap;background:#e5e7eb;color:#374151}
+</style></head>
+<body><main>
+
+<h1>A Rex client driven by Clojure: design and setup audit</h1>
+<p class=sub>T194, by W242 on 2026-11-17. Follows <a href='rex-vs-herdr.html'>rex-vs-herdr.html</a> (W229, W230), which decided whether to replace Herdr with Rex. This page designs the client and audits what it could replace.</p>
+
+<p class=lead><b>Goal:</b> turn the pasted design (a thin Rust GUI, Rex for sessions, libghostty for terminals, a babashka sidecar that owns commands and an Emacs-style M-x) into a concrete architecture; check its claims; settle UI-in-Clojure or not, and egui or GPUI; prototype stage 1; and say what in /home/engstrand/guix it would remove or merge.</p>
+
+<div class=verdict><b>Short answer.</b>
+<ol>
+<li>The pasted claims hold, with three corrections: the OSC 7501 states are <i>idle, working, done, blocked, error</i> (not finished or failed); keymaps are <i>layers the client sends</i> to <code>client.keymap</code>, not just a list to read; and agents only appear in Rex if they emit OSC 7501 themselves. <span class=m>measured</span></li>
+<li><b>You already own half of this design.</b> Dusk, your desktop shell, is a GPUI program whose UI is described by a live babashka runtime over EDN lines, with a launcher, palette and which-key panel. <code>leader.edn</code> is already a cross-app command registry. Build the Rex client from Dusk's crates and protocol, not from scratch, and feed its registry from <code>leader.edn</code>. <span class=m>measured</span></li>
+<li><b>GPUI, not egui</b>, because Dusk has already paid GPUI's Guix costs (fonts, Vulkan, a pinned Zed revision) and its EDN-to-GPUI renderer and runtime would be shared. egui would mean a second toolkit and a second protocol. <span class=i>inferred</span></li>
+<li><b>Open question:</b> Clojure defines the <i>panels</i> (sidebar, lists, dialogs) as Dusk EDN trees, and all behaviour. Rust owns the terminal panes, pane layout, the key path and the minibuffer widget. That is the split Dusk already uses, plus a hard rule that nothing per-frame or per-key goes through bb. <span class=i>inferred</span></li>
+<li><b>Stage 1 works.</b> A 149-line bb sidecar generated 95 M-x commands from a real Rex server's <code>rex api list --json</code>, filled session and block from context, rejected a bad enum by schema, prompted for missing arguments, and found a pane whose program reported <i>blocked</i>. <span class=m>measured</span></li>
+<li><b>Stage 0 works too.</b> Dusk's pinned GPUI and libghostty-vt build together in one binary under Guix rust 1.96 and zig-0.17 on this machine, after bumping one locked crate (bitflags). <span class=m>measured</span></li>
+<li><b>Audit:</b> remove Herdr and its pickers (about 680 lines plus Herdr branches elsewhere), merge keyleader's Herdr side, the pickers and the agent picker into the client's M-x; keep Hyprland, kanata, Emacs, bbh's Emacs surfaces, Dusk, the phone and the voice paths. Hyprland stays: the client replaces Herdr's tiling, not the compositor. <span class=i>inferred</span></li>
+<li>The go or wait call in the first page is unchanged: the Rex server still has no stable release or license. Stage 1 and a GPUI terminal spike are cheap, reusable and can run now. <span class=i>inferred</span></li>
+</ol></div>
+
+<p>Tags: <span class=m>measured</span> means I ran it or read it in code or docs, <span class=i>inferred</span> means reasoned from what I read, <span class=g>guess</span> means an estimate.</p>
+
+<nav><details><summary>Contents</summary><ol>
+<li><a href='#claims'>Claim check</a></li><li><a href='#have'>What you already have</a></li><li><a href='#arch'>Architecture</a></li><li><a href='#ipc'>IPC protocol</a></li><li><a href='#registry'>Command registry</a></li><li><a href='#keys'>Keys and prefix keys</a></li><li><a href='#effects'>Effect vocabulary</a></li><li><a href='#ui'>Open question: who defines the UI</a></li><li><a href='#toolkit'>egui or GPUI</a></li><li><a href='#proto'>Stage 1 prototype</a></li><li><a href='#audit'>Audit of the current setup</a></li><li><a href='#order'>Build order</a></li><li><a href='#risks'>Risks</a></li><li><a href='#evidence'>Evidence</a></li></ol></details></nav>
+
+<h2 id=claims>1. Claim check</h2>
+<p>Checked against Rex preview.19 (API revision 14), its docs in /tmp/rex-study, rexy at 7b102f1 and the W230 spike.</p>
+<div class=table><table>
+<tr><th>Claim in the paste</th><th>Verdict</th><th>Evidence</th></tr>
+<tr><td>Rex's API is self-describing: <code>rex api list --json</code>, <code>rex api describe METHOD --json</code></td><td class=ok>True. The help document lists 74 server methods and 3 block types with 21 block methods, each with a JSON Schema for input and output, request and response examples and validation notes. <code>target.complete</code> also completes session, window and block names as you type, which suits prompts. <span class=m>measured</span></td><td class=cite>rex api list --json against a live server; /tmp/rex-study/reference_cli.md lines 949 to 972</td></tr>
+<tr><td><code>client.keymap</code> gives the keymap</td><td class=ok>True, and more than that. The client <i>sends</i> its own layers (<code>defaults</code> below init.lua, <code>overrides</code> above) and the actions it performs; the server merges them with init.lua and the client's Lua scripts, returns bindings, warnings for shadowed keys and unknown actions, and a hash. Sequences such as ctrl+b then c are supported, but the server keeps no state between keys: waiting for the next key is the client's job. A key bound to a Lua function comes back as <code>client.key.forward</code>. <span class=m>measured</span></td><td class=cite>/tmp/rex-study/reference_api.md lines 189 to 255</td></tr>
+<tr><td>Program Status Protocol, OSC 7501, states working, blocked, idle, finished, failed</td><td class=gap>Partly wrong. The states are <b>idle, working, done, blocked, error</b>; blocked has a kind (permission, question, auth); records nest by id (build/test) and carry app, msg, progress and the owning process. Read with the block method <code>com.superlogical.terminal.program_status</code>; changes arrive as <code>program_status_changed</code> block events. <span class=m>measured</span></td><td class=cite>/tmp/rex-study/build_program-status.md line 175; mx-prototype/events.ndjson</td></tr>
+<tr><td>Rex detects agents</td><td class=gap>Not by itself. Rex only knows what a program reports. agent-shell.el already emits OSC 7501 for bbh Workers; Claude Code, pi or Codex run bare in a pane would need a hook or wrapper. Herdr instead guesses from process names. <span class=i>inferred</span></td><td class=cite>/home/engstrand/guix/desktop/configs/doom/agent-shell.el line 513</td></tr>
+<tr><td>Stream terminal data with <code>data.connect</code> tickets over WebSocket, no bb hop</td><td class=ok>True. One-time ticket, then a WebSocket to /api/data with a HELLO. The connection must be attached with <code>session.attach</code> or <code>session.bootstrap</code>; <code>attach_all</code> is not enough. <code>session.bootstrap</code> already returns tickets, which the W230 spike used. <span class=m>measured</span></td><td class=cite>/tmp/rex-study/reference_api.md lines 379 to 402; rex-vs-herdr.html section 6</td></tr>
+<tr><td>rexy uses egui and libghostty with a Ghostty worker thread per pane</td><td class=ok>True: eframe 0.37 with glow, and <code>terminal.rs</code> spawns a <code>rex-terminal</code> thread for each terminal. <span class=m>measured</span></td><td class=cite>rexy Cargo.toml line 13; src/terminal.rs line 249</td></tr>
+<tr><td>Rex holds remote connections</td><td class=ok>True: <code>hosts.*</code>, Tailscale, forwards, and Lua <code>rex.server(LABEL)</code>. <span class=m>measured</span></td><td class=cite>reference_api.md hosts, reference_cli.md rex forward</td></tr>
+<tr><td>Generate commands from the API, plus local Clojure commands</td><td class=ok>Works: stage 1 below. One addition: commands can also be <i>reported to Rex</i> as client actions, so <code>rex do</code>, init.lua bindings and other clients can call them by name. <span class=m>measured</span> for generation, <span class=i>inferred</span> for reporting</td><td class=cite>reference_cli.md line 113, reference_api.md line 195</td></tr>
+<tr><td>Sidecar process, not babashka pods</td><td class=ok>Agree. Dusk already runs bb as a child over stdin and stdout and recorded why: it dies with the core and needs no rendezvous. <span class=m>measured</span></td><td class=cite>/home/engstrand/guix/desktop/build/dusk/decisions.tsv line 6</td></tr>
+<tr><td>egui first, over GPUI</td><td class=gap>Disagree for this setup: section 9.</td><td></td></tr>
+<tr><td>JSON or Transit over the pipe</td><td class=gap>Use EDN lines, as Dusk does. Dusk's Rust EDN parser exists and was measured at 0.86 ms for a 6,661-command catalogue. <span class=m>measured</span></td><td class=cite>/home/engstrand/guix/desktop/build/keybindings/palette-performance.md</td></tr>
+</table></div>
+
+<h2 id=have>2. What you already have</h2>
+<p>The paste designs from zero. Three pieces of this repo already do much of it. <span class=m>measured</span></p>
+<div class=card><b>Dusk</b> (/home/engstrand/guix/desktop/build/dusk) is your Wayland shell: about 3,760 lines of Rust on GPUI, pinned to Zed rev 7f7520b, plus a babashka runtime. bb sends a map of surface id to an EDN UI tree (<code>dusk.ui</code>: layer, row, column, box, stack, text, icon, button, input, progress); Rust re-renders the tree each frame and sends events back. It replaced Noctalia in October and draws the wallpaper, notifications (it owns <code>org.freedesktop.Notifications</code>), the volume and brightness OSD, the dmenu launcher, the command palette, the leader which-key panel and window hints. Hot reload took 71 ms. Its config is /home/engstrand/guix/desktop/configs/dusk/config.clj (332 lines).</div>
+<div class=card><b>leader.edn</b> (/home/engstrand/guix/desktop/configs/keybindings/leader.edn) is already a command registry as data: 44 bindings with <code>:keys</code>, <code>:label</code>, groups, and an implementation per context (<code>:herdr</code>, <code>:doom</code>, <code>:nvim</code>, <code>:idea</code>, <code>:desktop</code>); 17 of them have a <code>:herdr</code> implementation. <b>palette.edn</b> lists Chrome and IntelliJ commands for the palette. keyleader (543 lines) runs them and keeps Hyprland's binds in step.</div>
+<div class=card><b>Emacs M-x through Dusk.</b> palette.el sends Emacs's 6,661 commands to Dusk's palette; warm opening is 91 ms. The tuning notes say what matters: big catalogues cost in bb's EDN parse (20 ms before trimming) and in IPC, so filter in Rust and send the catalogue once.</div>
+<p><b>So:</b> the Rex client is Dusk's architecture with a terminal in it, and its commands are leader.edn's with a <code>:rex</code> context. That is the main design change from the paste.</p>
+
+<h2 id=arch>3. Architecture</h2>
+<svg viewBox='0 0 900 470' role=img aria-label='Architecture'>
+<defs><marker id=ar viewBox='0 0 10 10' refX=9 refY=5 markerWidth=7 markerHeight=7 orient=auto><path d='M0,0L10,5L0,10z' fill='#5d6678'/></marker></defs>
+<rect x=10 y=10 width=880 height=40 rx=8 fill='#f0e9f6' stroke='#7a4fa0'/><text x=450 y=36 text-anchor=middle font-size=15 font-weight=700 fill='#7a4fa0'>Hyprland (stays): Chrome, IntelliJ, Emacs GUI, Dusk layers, global keys, dictation</text>
+<rect x=10 y=70 width=520 height=250 rx=10 fill='#fff' stroke='#2f6f8f' stroke-width=2 /><text x=24 y=94 font-size=15 font-weight=700 fill='#2f6f8f'>rexmux window: Rust, GPUI, built from Dusk's crates</text>
+<rect x=26 y=106 width=150 height=96 rx=6 fill='#e6f0f5'/><text x=101 y=128 text-anchor=middle font-size=13 font-weight=600>sidebar, panels</text><text x=101 y=148 text-anchor=middle font-size=12 fill='#5d6678'>EDN trees from bb</text><text x=101 y=166 text-anchor=middle font-size=12 fill='#5d6678'>(Dusk's ui DSL)</text><text x=101 y=184 text-anchor=middle font-size=12 fill='#5d6678'>agents, sessions</text>
+<rect x=190 y=106 width=326 height=96 rx=6 fill='#e4f3ea'/><text x=353 y=128 text-anchor=middle font-size=13 font-weight=600>panes: Rust only</text><text x=353 y=148 text-anchor=middle font-size=12 fill='#5d6678'>layout from session.view</text><text x=353 y=166 text-anchor=middle font-size=12 fill='#5d6678'>libghostty-vt thread per pane</text><text x=353 y=184 text-anchor=middle font-size=12 fill='#5d6678'>keys: local keymap, client.key</text>
+<rect x=26 y=214 width=490 height=44 rx=6 fill='#f7efdc'/><text x=271 y=241 text-anchor=middle font-size=13 font-weight=600>minibuffer: text input, nucleo filtering, prompts, which-key</text>
+<rect x=26 y=268 width=490 height=40 rx=6 fill='#faf9f5' stroke='#dedad0'/><text x=271 y=293 text-anchor=middle font-size=12.5>effect applier: rex/call, ui/*, keymap/*, layer/*</text>
+<rect x=580 y=70 width=310 height=150 rx=10 fill='#fff' stroke='#8a6a1f' stroke-width=2 /><text x=735 y=94 text-anchor=middle font-size=15 font-weight=700 fill='#8a6a1f'>bb sidecar (child process)</text><text x=735 y=118 text-anchor=middle font-size=12.5>command registry, contexts</text><text x=735 y=138 text-anchor=middle font-size=12.5>keymap layer, workflows</text><text x=735 y=158 text-anchor=middle font-size=12.5>agent/*, plugins, panels</text><text x=735 y=178 text-anchor=middle font-size=12.5>reads leader.edn, palette.edn</text><text x=735 y=198 text-anchor=middle font-size=12.5>nREPL on demand</text>
+<line x1=530 y1=140 x2=578 y2=140 stroke='#5d6678' stroke-width=2 marker-end='url(#ar)'/><line x1=578 y1=170 x2=532 y2=170 stroke='#5d6678' stroke-width=2 marker-end='url(#ar)'/><text x=554 y=132 text-anchor=middle font-size=10.5 fill='#5d6678'>EDN</text><text x=554 y=188 text-anchor=middle font-size=10.5 fill='#5d6678'>lines</text>
+<rect x=10 y=360 width=880 height=50 rx=10 fill='#e4f3ea' stroke='#2e7d4f' stroke-width=2 /><text x=450 y=383 text-anchor=middle font-size=15 font-weight=700 fill='#2e7d4f'>rex server (Home service): sessions, PTYs, init.lua keymap, OSC 7501, hosts</text><text x=450 y=402 text-anchor=middle font-size=12 fill='#5d6678'>unix socket: /api/control (JSON) and /api/data (bytes)</text>
+<line x1=200 y1=320 x2=200 y2=358 stroke='#2e7d4f' stroke-width=2.5 marker-end='url(#ar)'/><text x=210 y=344 font-size=11 fill='#2e7d4f'>control + one data stream per pane</text>
+<line x1=735 y1=220 x2=735 y2=358 stroke='#8a6a1f' stroke-width=2 stroke-dasharray='6 4' marker-end='url(#ar)'/><text x=745 y=290 font-size=11 fill='#8a6a1f'>reads: rex api call,</text><text x=745 y=305 font-size=11 fill='#8a6a1f'>rex events --json</text>
+<text x=450 y=440 text-anchor=middle font-size=12 fill='#5d6678'>Terminal bytes never pass through bb. bb never draws a pane. Keys reach bb only when they name a bb command.</text>
+</svg>
+<ul>
+<li><b>Three processes.</b> The rex server (a Home service) owns sessions, PTYs, remote hosts and OSC 7501. The Rust client, working name <b>rexmux</b>, owns the window, panes, input and the minibuffer widget. A bb child owns commands, contexts, workflows, plugins and the contents of panels. <span class=i>inferred</span></li>
+<li><b>Rust talks to Rex</b> on one control WebSocket and one data WebSocket per visible pane, as in the W230 spike: tokio-tungstenite on the Unix socket, a libghostty-vt thread per pane as rexy does. The window and widgets are GPUI, with Dusk's fonts, style and EDN renderer moved into a shared crate. <span class=i>inferred</span></li>
+<li><b>bb reads Rex directly</b> for queries and events, with <code>rex api call</code> (21 ms per call measured) and one long-lived <code>rex events --json</code> (measured: it streamed <code>program_status_changed</code> as a program reported working then done). Later it can open its own socket: bb can open the Unix socket (measured), but has no WebSocket client for it, so that is about 100 lines of framing. <span class=m>measured</span></li>
+<li><b>bb asks Rust to act</b> by returning effects. bb runs side effects it can do itself (files, processes, <code>rex</code> calls that are not about this client). Anything that belongs to this client, such as its focus, its keymap, its UI, or a call that needs this connection's identity, is an effect. <span class=i>inferred</span></li>
+<li><b>A separate process from the Dusk shell</b>, built from the same crates. A terminal crash must not take down notifications and the wallpaper. <span class=i>inferred</span></li>
+</ul>
+
+<h2 id=ipc>4. IPC protocol</h2>
+<p>One EDN map per line on the child's stdin and stdout, the same framing and parser as Dusk (<code>src/edn.rs</code>, <code>runtime.clj</code>). Requests carry <code>:id</code>; replies echo it. Everything else is a notification. <span class=i>inferred</span></p>
+<div class=table><table>
+<tr><th>Direction</th><th>Message</th><th>Meaning</th></tr>
+<tr><td>bb → Rust</td><td><code>{:op :ready}</code></td><td>Runtime loaded; Rust sends <code>:hello</code>.</td></tr>
+<tr><td>Rust → bb</td><td><code>{:op :hello :client-id .. :socket .. :api-revision 14}</code></td><td>Who this client is, so bb can scope its own calls.</td></tr>
+<tr><td>Rust → bb</td><td><code>{:op :context :ctx {:session-id .. :window-id .. :block-id .. :program "pi" :mode nil :status {..}}}</code></td><td>Sent on focus or program change, debounced. bb evaluates <code>:when</code> against it.</td></tr>
+<tr><td>bb → Rust</td><td><code>{:op :commands/changed :commands [{:id :agent/next-blocked :title .. :category .. :keys .. :doc ..}] :keymap {:name "mx" :bindings [..]}}</code></td><td>The whole catalogue and its keymap layer, sent on load and on change, never per keystroke. Rust filters with nucleo and only shows those whose <code>:when</code> bb marked true for the current context.</td></tr>
+<tr><td>Rust → bb</td><td><code>{:op :commands/invoke :id 7 :command :rex/session.new_split :args {..} :ctx {..} :origin :mx}</code></td><td>Run a command. Origin is mx, key, rex-do or panel.</td></tr>
+<tr><td>bb → Rust</td><td><code>{:op :reply :id 7 :prompt [{:name :direction :enum [..] :doc ..}] :partial {..}}</code></td><td>Missing arguments: Rust prompts in the minibuffer, then invokes again with the answers. Completion of ids uses <code>target.complete</code>.</td></tr>
+<tr><td>bb → Rust</td><td><code>{:op :reply :id 7 :effects [[:rex/call ..] [:ui/message ..]]}</code></td><td>Done: apply the effects in order and stop at the first failure.</td></tr>
+<tr><td>bb → Rust</td><td><code>{:op :reply :id 7 :error ".." :invalid [{:arg :direction :error ..}]}</code></td><td>Schema or command error, shown in the echo area.</td></tr>
+<tr><td>bb → Rust</td><td><code>{:op :effects :effects [..]}</code></td><td>Unprompted effects, from a workflow or a Rex event bb watched.</td></tr>
+<tr><td>bb → Rust</td><td><code>{:op :render :panels {:sidebar [:column ..]}}</code></td><td>Dusk UI trees for panels. Same DSL as <code>dusk.ui</code>.</td></tr>
+<tr><td>Rust → bb</td><td><code>{:op :panel/event :panel :sidebar :handler 12 :value ..}</code></td><td>A click or input in a panel, routed to the handler bb registered, as Dusk does.</td></tr>
+<tr><td>Rust → bb</td><td><code>{:op :effect/result :id 7 :results [..]}</code></td><td>What the effects returned, for workflows that continue.</td></tr>
+<tr><td>Rust → bb</td><td><code>{:op :eval :id 9 :code ".."}</code></td><td>describe-command, reloads and tests; nREPL stays opt-in.</td></tr>
+</table></div>
+<p>This is the paste's commands/list, commands/invoke, state/changed and effect/apply, reshaped so the catalogue moves once and filtering stays in Rust.</p>
+
+<h2 id=registry>5. Command registry</h2>
+<pre><code>(mx/register!
+ {:id :agent/next-blocked
+  :title "Agents: focus the next blocked one"
+  :category :agent
+  :keys {:rex ["ctrl+b" "n"]}         ; becomes a binding in the mx keymap layer
+  :when (mx/has :session-id)            ; a predicate over the context map
+  :args [{:name :agent :type :block :complete :agents :required false}]
+  :run (fn [ctx {:keys [agent]}]
+         [[:rex/call "session.focus_block" {:session_id (:session-id ctx) :block_id agent}]
+          [:ui/message "claude asks: Which file?"]])})</code></pre>
+<ul>
+<li><b>Sources.</b> (a) Generated from the help document, one per method and block method, with id <code>:rex/&lt;method&gt;</code>, the method's description as doc, its input schema as <code>:args</code>, and <code>:needs</code> derived from required <code>session_id</code> and <code>block_id</code>. (b) leader.edn entries with a <code>:rex</code> implementation, so one file still drives Doom, Neovim, IntelliJ, Hyprland and the client. (c) Local Clojure: agent/*, session/*, workflow/*. (d) Extensions loaded from a directory and reloaded on save, as Dusk does. <span class=i>inferred</span></li>
+<li><b>Arguments.</b> Context fills <code>session_id</code>, <code>window_id</code>, <code>block_id</code> and <code>client_id</code>. The rest is checked against the JSON Schema (type, enum, unknown keys) before any call; missing required ones become prompts. Free-form objects such as a split's <code>layout</code> come with the method's request example as a template. <span class=m>measured</span> in stage 1</li>
+<li><b>Help.</b> describe-command prints the registry entry, the schema and the Rex description; describe-key reads the merged keymap and its source layer. <span class=i>inferred</span></li>
+<li><b>Workflows</b> are commands whose <code>:run</code> returns effects and then continues on <code>:effect/result</code>, or plain bb code that calls Rex itself. agent/new-worktree is a jj workspace plus <code>session.new_window</code> running the agent; agent/collect-results reads <code>rex capture</code> or the bbh transcripts. <span class=g>guess</span></li>
+</ul>
+
+<h2 id=keys>6. Keys and prefix keys</h2>
+<p>Keys must never wait on bb. <span class=i>inferred</span></p>
+<ol>
+<li>bb compiles every <code>:keys</code> into one keymap layer named <code>mx</code> and the command ids into the <code>actions</code> list. Rust sends both to <code>client.keymap</code> as a <code>defaults</code> layer, so init.lua and recorded overrides sit above it, and Rex reports shadowed keys and unknown actions as diagnostics. One merged keymap, one conflict checker. <span class=m>measured</span> that the API takes layers and actions; <span class=i>inferred</span> that this layout suits us</li>
+<li>Rust keeps the merged result locally. A key press resolves in Rust: a bb command goes to <code>:commands/invoke</code>; <code>client.key.forward</code> goes to <code>client.key</code> (init.lua runs it); a server or block action goes to <code>client.action</code>; anything else is typed into the pane.</li>
+<li>Prefix keys: the server keeps no state between keys, so Rust holds the pending prefix, shows the continuations in a which-key panel (the Dusk leader-hint panel, moved in-window) and times out.</li>
+<li>Outside callers use Rex, not a private socket: <code>rex -C rexmux do agent.next_blocked</code> from Hyprland, keyleader or bbh, and <code>client.perform</code> from other clients. That replaces keyleader's direct Herdr socket calls. <span class=i>inferred</span> from reference_cli.md line 113</li>
+</ol>
+
+<h2 id=effects>7. Effect vocabulary</h2>
+<p>Effects are vectors <code>[kind arg]</code>, applied in order by Rust. Keep the set small and add a kind only when bb cannot do the thing itself. <span class=i>inferred</span></p>
+<div class=table><table>
+<tr><th>Effect</th><th>Rust does</th><th>Example use</th></tr>
+<tr><td><code>[:rex/call method args]</code></td><td>Sends the request on its control connection and returns the result in <code>:effect/result</code>.</td><td>Every generated command; anything needing this client's identity, such as <code>session.own_block</code>.</td></tr>
+<tr><td><code>[:rex/key keys]</code></td><td>Sends <code>client.key</code> for each key to the focused block.</td><td>Macros, sending ctrl+c to an agent.</td></tr>
+<tr><td><code>[:pane/write block text]</code></td><td><code>com.superlogical.terminal.write</code>, bracketed when it is a paste.</td><td>agent/send, agent/broadcast.</td></tr>
+<tr><td><code>[:focus/block id]</code>, <code>[:focus/window id]</code></td><td>Focus, and raise the rexmux window through Hyprland if needed.</td><td>agent/next-blocked, a click on a notification.</td></tr>
+<tr><td><code>[:layer/float {:argv .. :size [0.8 0.7] :close-on-exit true}]</code></td><td><code>session.new_layer</code> plus <code>float_block</code>, drawn above the panes.</td><td>jjui, sesh-like pickers, the bbh inbox frame.</td></tr>
+<tr><td><code>[:ui/prompt spec]</code></td><td>Opens the minibuffer with a prompt; the answer re-invokes the command.</td><td>Schema-driven argument prompts.</td></tr>
+<tr><td><code>[:ui/pick {:title .. :items [..] :then cmd}]</code></td><td>Minibuffer list with nucleo filtering.</td><td>Agent picker, session switcher.</td></tr>
+<tr><td><code>[:ui/panel {:id :sidebar :open true}]</code></td><td>Shows or hides a panel whose tree bb renders.</td><td>Sidebar of agents and sessions.</td></tr>
+<tr><td><code>[:ui/message text]</code></td><td>Echo area.</td><td>Results, errors, describe-key.</td></tr>
+<tr><td><code>[:ui/doc data]</code></td><td>A help buffer in a floating layer.</td><td>describe-command.</td></tr>
+<tr><td><code>[:keymap/layer layer]</code></td><td>Resends <code>client.keymap</code> with the new layer.</td><td>Modes and dynamic keymaps.</td></tr>
+<tr><td><code>[:clipboard/copy text]</code></td><td>Wayland clipboard.</td><td>Copy a pane's capture.</td></tr>
+</table></div>
+<p>Not effects: desktop notifications (bb calls bbh's <code>notify</code> or <code>notify-send</code>, which Dusk shows), files, jj, other processes, and read-only Rex calls.</p>
+
+<h2 id=ui>8. Open question: should Clojure define the UI?</h2>
+<p><b>Recommendation: Clojure defines panels and all behaviour; Rust owns panes, layout, keys and the minibuffer widget.</b> <span class=i>inferred</span></p>
+<div class=split>
+<div class=card><b>Clojure defines</b><ul><li>The sidebar, agent list, session list, dialogs, help buffers: Dusk EDN trees, re-rendered on change, hot-reloaded.</li><li>What the minibuffer lists and prompts: commands, items, argument specs.</li><li>Commands, keymap layers, modes, workflows.</li></ul></div>
+<div class=card><b>Rust owns</b><ul><li>The terminal panes: cells, cursor, selection, scrollback, mouse, Kitty graphics later.</li><li>Pane tiling, taken from Rex's <code>session.view</code>, not from Clojure.</li><li>Key resolution and the minibuffer's text input, IME and fuzzy filtering.</li><li>The effect applier.</li></ul></div>
+</div>
+<p><b>Why.</b> Dusk already proved the declarative half here: one EDN tree per surface, stateless hot reload, a 3,760-line Rust side. But Dusk's trees are small and change on events; a terminal changes every frame, and a 20 ms bb round trip per keystroke would be felt. Rex already owns the layout, so a Clojure layout DSL would duplicate <code>session.view</code>. Defining panels in Rust instead would make every new panel a Rust rebuild of several minutes, which works against live extension. The split also matches the paste's own idea of high-level primitives, since Dusk's DSL is such a set.</p>
+
+<h2 id=toolkit>9. egui or GPUI</h2>
+<p><b>Recommendation: GPUI, sharing Dusk's pinned revision and renderer.</b></p>
+<div class=table><table>
+<tr><th></th><th>GPUI</th><th>egui (eframe)</th></tr>
+<tr><td>Already in this repo</td><td>Yes: Dusk, with Guix fixes for fontconfig and Vulkan ICDs, an EDN renderer, style, input and IME handling. <span class=m>measured</span></td><td>No. rexy is a reference, not ours. <span class=m>measured</span></td></tr>
+<tr><td>Terminal rendering proven</td><td>Zed's terminal is GPUI, on alacritty_terminal; we would render libghostty-vt cells the same way. <span class=i>inferred</span></td><td>rexy renders libghostty-vt in egui today. <span class=m>measured</span></td></tr>
+<tr><td>Size and build</td><td>Dusk locks 708 crates; its first build took 4 min 44 s. <span class=m>measured</span></td><td>rexy locks 422; the W230 client plan locks 129 without a GUI. <span class=m>measured</span></td></tr>
+<tr><td>Stability</td><td>Pinned git revision of Zed, no semver promise; Dusk already lives with that. <span class=m>measured</span></td><td>Versioned crates with a changelog; better. <span class=i>inferred</span></td></tr>
+<tr><td>Text, IME, fonts</td><td>Good: GPUI is built for an editor. <span class=i>inferred</span></td><td>Adequate; IME and font fallback are weaker. <span class=g>guess</span></td></tr>
+<tr><td>Consolidation</td><td>One toolkit, one EDN protocol, one runtime, one set of Guix workarounds, shared widgets (launcher, which-key). <span class=i>inferred</span></td><td>A second toolkit and protocol next to Dusk. <span class=i>inferred</span></td></tr>
+</table></div>
+<p><b>This changes the first page's choice of a terminal UI inside Ghostty.</b> That choice avoided a GUI's fonts, GPU, clipboard and IME work. Dusk has already done that work on this machine, and the M-x minibuffer, sidebar and floating panels are what the paste wants, which a GUI draws better. The cost is the phone's SSH view (section 11). <span class=i>inferred</span></p>
+<p>egui would win if Dusk did not exist: smaller, versioned, with rexy as a worked example. Given Dusk, the shared code and the single place to fix Guix and Asahi problems outweigh that.</p>
+
+<h2 id=proto>10. Stage 1 prototype</h2>
+<p>/home/engstrand/.local/state/bbh/workflows/20261117-093543-020-investigation/evidence/mx-prototype/mx.bb (149 lines, throwaway, outside the repo) is a sidecar speaking the protocol above in JSON lines, run against a real Rex preview.19 server in a scratch HOME. <span class=m>measured</span></p>
+<div class=table><table>
+<tr><th>Request</th><th>Result</th></tr>
+<tr><td>Startup</td><td>98 commands: 95 generated (74 server methods, 21 block methods) and 3 written in Clojure (agent/list, agent/next-blocked, describe-command).</td></tr>
+<tr><td>list, query <i>split</i>, no session in context</td><td><code>rex/session.new_split</code> hidden; only commands that need no session shown.</td></tr>
+<tr><td>list, query <i>split</i>, with a session</td><td><code>rex/session.new_split</code> first.</td></tr>
+<tr><td>invoke new_split with no args</td><td>A prompt for <code>direction</code> (enum horizontal, vertical), <code>side</code> (before, after) and <code>layout</code> with the request example; <code>session_id</code> came from context.</td></tr>
+<tr><td>invoke with direction <i>diagonal</i></td><td>Rejected before calling Rex: expected horizontal or vertical.</td></tr>
+<tr><td>agent/list</td><td>One record: claude, blocked, kind question, msg <i>Which file?</i>, from a pane that printed an OSC 7501 report.</td></tr>
+<tr><td>agent/next-blocked</td><td>Effects <code>[:rex/call session.focus_block ..]</code> and a notice; applying the call by hand returned revision 1.</td></tr>
+<tr><td>Timing</td><td>All 8 requests, bb startup and loading the help document: 247 ms. One <code>rex api call</code> from bb: 21 ms.</td></tr>
+<tr><td>Events</td><td><code>rex events -s w242 --json</code> streamed <code>program_status_changed</code> working, then done, from a new pane.</td></tr>
+</table></div>
+<p>Not built: the Rust side, nucleo, keymap layers, and EDN instead of JSON on the pipe. The prototype shells out per call; the real sidecar keeps one events stream and, if 21 ms hurts, its own socket.</p>
+
+<h2 id=audit>11. Audit of the current setup</h2>
+<p>What the client could remove or merge, assuming the gate in the first page opens and the client reaches its milestones. Nothing here changes the live setup. Costs are <span class=g>guess</span> unless marked.</p>
+<div class=table><table>
+<tr><th>Piece</th><th>Today</th><th>Call</th><th>Why</th><th>Migration cost</th></tr>
+<tr><td><b>Herdr</b></td><td>herdr.scm 101 lines, feature 59, config.toml 165, sesh.toml 15, three plugins, Super+B, login start <span class=m>measured</span></td><td><b>Remove</b></td><td>The client is its replacement: sessions, tabs, splits, popups, agent status.</td><td>The client itself (first page, about 4 to 6 weeks) plus a week of moving the pieces below. Keep Herdr installed until Rex is the default.</td></tr>
+<tr><td>Herdr plugins: sesh, tiny-fingers, jjui popup</td><td>Session picker, hint copying, jjui in a popup</td><td><b>Remove</b>, absorbed</td><td>sesh becomes a session/switch command; jjui becomes <code>:layer/float</code>; tiny-fingers becomes a hints mode reading the screen from libghostty-vt.</td><td>Session switch and jjui: a day. Hints mode: 2 to 4 days of Rust.</td></tr>
+<tr><td>herdr-agent-pick, herdr-workspace-pick, workspace-or-herdr-tab, herdr-terminal</td><td>338 lines of bb <span class=m>measured</span></td><td><b>Remove</b></td><td>agent/pick, session/switch and window focus are client commands; Hyprland binds call <code>rex do</code>.</td><td>1 to 2 days, mostly the agent picker's ordering rules.</td></tr>
+<tr><td><b>Hyprland</b></td><td>Compositor; Super+Return/E/D/G jump to Herdr tabs 1 to 4; Alt+Space and Super+Y send keys into Herdr; dictation, screenshots, media keys</td><td><b>Keep</b>; consolidate the Herdr glue</td><td>It also runs Chrome, IntelliJ, Emacs GUI frames and Dusk's layer surfaces, and owns global keys. The client can become the main workspace for terminals and agents, as Herdr is now, but a compositor is not a client's job. With every terminal a Rex block, Hyprland tiles only a few app windows.</td><td>About a day: retarget 11 Herdr references in keys.lua and the four workspace binds to <code>rex do</code>.</td></tr>
+<tr><td><b>Dusk</b></td><td>GPUI shell: wallpaper, notifications, OSD, launcher, palette, which-key, window hints</td><td><b>Keep</b>, and share its crates</td><td>It is the client's toolkit and protocol. The shell stays a separate process.</td><td>2 to 3 days to split the renderer, fonts, style and EDN code into a library crate both binaries use.</td></tr>
+<tr><td>keyleader, leader.edn, palette.edn, keyguide</td><td>Cross-app leader keys; keyleader has 107 Herdr references and calls Herdr's socket <span class=m>measured</span></td><td><b>Consolidate</b></td><td>leader.edn becomes a source of the client's registry with a <code>:rex</code> context replacing <code>:herdr</code> (17 entries). keyleader's pane-edge and scrollback calls become Rex calls.</td><td>3 to 5 days, the largest piece outside the client.</td></tr>
+<tr><td>Launchers: custom-launcher, palette, clipboard-history, winhint</td><td>Dusk surfaces for the whole desktop</td><td><b>Keep</b></td><td>They act on the desktop, not on terminals. Share nucleo with the client, since Dusk's launcher scores in bb today.</td><td>Optional; a day for nucleo in Dusk.</td></tr>
+<tr><td>Notifications</td><td>Dusk is the daemon; bbh notify.clj focuses the Herdr window by class</td><td><b>Keep</b>; one small change</td><td>The client sends none of its own (rexy's zbus notifier is not needed). notify.clj's fallback at line 317 matches <i>herdr</i>; point it at rexmux and add <code>rex block focus</code>.</td><td>Hours.</td></tr>
+<tr><td>Status bar</td><td>None: the bar was disabled before Dusk <span class=m>measured</span></td><td>Nothing to do</td><td>Agent state shows in the client's sidebar.</td><td>None.</td></tr>
+<tr><td>kanata</td><td>Keyboard layers (base, cmd, alt) and per-app layers; apps.edn maps the Herdr Ghostty class to <i>terminal</i></td><td><b>Keep</b></td><td>It works below every app. The client needs one line in apps.edn for its window class.</td><td>Minutes.</td></tr>
+<tr><td><b>Emacs</b> (Doom)</td><td>Editor; palette.el sends M-x to Dusk; agent-shell.el reports to Herdr and emits OSC 7501</td><td><b>Keep</b>; small edits</td><td>Drop <code>herdr pane report-agent</code> (13 references); bbh-super.el's J opens jjui through <code>rex do</code> (20 references); key-navigate.el hands off at the edge as before.</td><td>1 to 2 days.</td></tr>
+<tr><td>bbh Router, Worker buffers, transcripts, Inbox</td><td>Buffers in the bbh-super Emacs daemon, opened as emacsclient -t frames</td><td><b>Keep</b></td><td>The daemon is bbh's chosen surface; bbh-super.el and agent-shell.el are 3,031 lines. The frames run in Rex blocks like any terminal. Rex has no restore, so a bb script recreates those frames from bbh's conversation ids at login. Later, an inbox badge in the sidebar from bbh's model.</td><td>Resume script: a day.</td></tr>
+<tr><td>Phone</td><td>bbh web to super say!; SSH into Herdr's terminal UI</td><td><b>Keep</b> bbh web</td><td>A GUI client cannot be used over SSH. <code>rex capture</code> and <code>rex send</code> over SSH cover reading and typing; Rex's Tailscale carrier could serve a phone client later.</td><td>None for bbh web; the SSH terminal view is lost.</td></tr>
+<tr><td>Voice</td><td>Hyprland binds run Hex dictation and bbh say</td><td><b>Keep</b></td><td>Already independent of the multiplexer. Optional agent/dictate sends text to the focused pane.</td><td>None.</td></tr>
+<tr><td>Ghostty</td><td>The window around Herdr, and ad hoc terminals</td><td><b>Consolidate</b></td><td>The client is a GUI, so Herdr's outer Ghostty goes. Keep Ghostty for ad hoc and test use; its zig-0.17 is needed for libghostty-vt anyway.</td><td>None.</td></tr>
+</table></div>
+<p><b>Net.</b> About 680 lines of Herdr package, config and pickers go, and about 170 Herdr references in keyleader, Hyprland, Emacs and bbh change. Hyprland, kanata, Emacs, bbh, Dusk, the phone and voice stay. The biggest merge is leader.edn becoming the shared registry. <span class=m>measured</span> counts, <span class=i>inferred</span> calls</p>
+
+<h2 id=order>12. Build order</h2>
+<p>The paste's order, adjusted for Dusk. Each stage ends with something usable or a decision. <span class=g>guess</span> for durations</p>
+<ol>
+<li><b>Stage 0, done:</b> native build check on Asahi. Dusk's GPUI pin plus libghostty-vt in one crate under Guix rust 1.96 and zig-0.17 (section 13).</li>
+<li><b>Stage 1, done as a prototype:</b> the bb registry over <code>rex api</code>. Next: EDN framing, leader.edn as a source, keymap layer output, a test against the help document of each Rex revision.</li>
+<li><b>Stage 2, 1 to 2 weeks:</b> split Dusk's renderer into a library crate; a GPUI window with a sidebar panel from bb, one pane and the minibuffer. Start with the pane drawn from <code>session.view</code> and a snapshot only.</li>
+<li><b>Stage 3, 2 to 3 weeks:</b> live data streams per pane, <code>client.key</code> input, keymap layers and prefix keys, floating layers, resize and ownership.</li>
+<li><b>Stage 4, 1 to 2 weeks:</b> agent workflows (next-blocked, send, broadcast, new-worktree, collect-results), the bbh resume script, then the audit's migrations with Herdr still installed as a fallback.</li>
+</ol>
+<p>Stages 0 and 1 are worth doing before the Rex gate opens because both carry over: stage 0 tests Guix and Asahi, and the registry's leader.edn and keymap work helps whichever multiplexer wins. Stage 2 onward should wait for a stable, licensed Rex, as the first page says.</p>
+
+<h2 id=risks>13. Stage 0 result and risks</h2>
+<div class='card good'><b>Stage 0 measured.</b> A copy of Dusk in /tmp/w242-dusk with libghostty-vt (rev 483ea3d) added built under Guix rust 1.96 and the repo's zig-0.17 on this Asahi machine: 7 min 32 s clean with 4 jobs, 19 s incremental. Rust 1.96 compiles the GPUI pin that Dusk built with 1.93. The one fix was the lockfile: libghostty-vt needs bitflags 2.11 or later, and Dusk locked 2.10.0, so <code>cargo update -p bitflags@2.10.0</code> moved it to 2.13.2; the lock went from 708 to 713 crates. A <code>dusk ghostty-probe</code> subcommand fed <i>ESC[1;31mRED ESC[0m from libghostty inside dusk</i> to a libghostty-vt terminal and read back the plain text. Binary 58.7 MB before, 75.0 MB after, with line tables. <span class=m>measured</span></div>
+<div class=table><table>
+<tr><th>Risk</th><th>How bad</th><th>Mitigation</th></tr>
+<tr><td>Rex itself: no stable release, no license, no restore, revision churn (first page).</td><td>High; unchanged.</td><td>Stop after stages 0 and 1 until the gate opens.</td></tr>
+<tr><td>GPUI is a pinned Zed revision. Moving it costs work each time, and newer Zed needed Rust 1.98 when Dusk pinned it.</td><td>Medium.</td><td>Move Dusk and the client together, rarely, as Dusk does now.</td></tr>
+<tr><td>Drawing terminal cells in GPUI is not yet tried here.</td><td>Medium.</td><td>First task of stage 2: a GPUI element that draws a libghostty-vt render state, measured for frame time.</td></tr>
+<tr><td>A slow bb blocks commands.</td><td>Low: keys resolve in Rust and only invocations wait.</td><td>Show a pending marker after 100 ms; a watchdog restarts the child, as Dusk's runtime reports errors.</td></tr>
+<tr><td>Agents that do not emit OSC 7501 do not show up.</td><td>Medium for bare Claude Code, pi or Codex panes.</td><td>Use hooks or wrappers that emit it; bbh Workers already do through agent-shell.el.</td></tr>
+<tr><td>Two registries drift: leader.edn and the client's.</td><td>Medium.</td><td>One loader namespace that keyleader and the sidecar both use.</td></tr>
+<tr><td>Losing the phone's SSH terminal view.</td><td>Low to medium; depends on how often you use it.</td><td>rex capture and rex send over SSH; a phone client later.</td></tr>
+</table></div>
+
+<h2 id=evidence>14. Evidence</h2>
+<ul class=cite>
+<li>Rex docs and binary: /tmp/rex-study (reference_api.md, reference_cli.md, build_program-status.md), rex 0.1.0-preview.19, API revision 14, run with HOME=/tmp/rex-study/home and stopped afterwards.</li>
+<li>Help document: /tmp/w242-api.json (rex api list --json).</li>
+<li>Stage 1 prototype, requests, replies and the events capture: /home/engstrand/.local/state/bbh/workflows/20261117-093543-020-investigation/evidence/mx-prototype</li>
+<li>Stage 0 build: /home/engstrand/.local/state/bbh/workflows/20261117-093543-020-investigation/evidence/dusk-ghostty-build-full.log and dusk-ghostty-probe.log, the script dusk-ghostty-build.sh and the diff dusk-ghostty.diff in the same directory; the tree is /tmp/w242-dusk.</li>
+<li>Dusk: /home/engstrand/guix/desktop/build/dusk/Cargo.toml, decisions.tsv, runtime/dusk/ui.clj, runtime/dusk/runtime.clj; /home/engstrand/guix/desktop/configs/dusk/config.clj</li>
+<li>Registry and keys: /home/engstrand/guix/desktop/configs/keybindings/leader.edn, palette.edn; /home/engstrand/guix/desktop/bin/keyleader; /home/engstrand/guix/desktop/build/keybindings/palette-performance.md</li>
+<li>Hyprland and kanata: /home/engstrand/guix/desktop/configs/hypr/hyprland.lua lines 47 to 115, keys.lua; /home/engstrand/guix/desktop/kanata.kbd; /home/engstrand/guix/desktop/configs/kanata/apps.edn</li>
+<li>bbh: /home/engstrand/guix/desktop/build/bbh/src/bbh/super/emacs.clj, notify.clj line 317, pane.clj</li>
+<li>rexy at 7b102f1: /home/engstrand/.cache/checkouts/github.com/haydn-jones/rexy (Cargo.toml line 13, src/terminal.rs line 249)</li>
+</ul>
+</main></body></html>
