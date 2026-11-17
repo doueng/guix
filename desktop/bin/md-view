@@ -1,17 +1,20 @@
 #!/usr/bin/env bb
-;; Flatpak Chrome only sees ~/Downloads among home dirs (not ~/.cache or host /tmp).
-
-(require '[babashka.fs :as fs]
-         '[babashka.process :as p]
-         '[clojure.string :as str])
-
-(import '(java.net URI URLDecoder)
-        '(java.security MessageDigest)
-        '(java.util Base64))
+(ns md-view
+  "Render Markdown or Org with pandoc and show it in Chrome with live reload, in a
+  terminal pane, or in the phone's bbh Docs list."
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [clojure.string :as str]
+            [org.httpkit.client :as client]
+            [org.httpkit.server :as server])
+  (:import (java.net URI URLDecoder URLEncoder)
+           (java.security MessageDigest)
+           (java.util Base64)))
 
 (def home (System/getProperty "user.home"))
-(def out-dir (fs/path (or (System/getenv "MD_VIEW_DIR") (fs/path home "Downloads" ".md-view"))))
-(def max-pages 200)
+(def port (parse-long (or (second (drop-while #(not= "serve" %) *command-line-args*))
+                          (System/getenv "MD_VIEW_PORT") "7341")))
+(def origin (str "http://127.0.0.1:" port))
 (def pandoc (str (or (fs/which "pandoc") (fs/path home ".guix-home/profile/bin/pandoc"))))
 
 (def css "
@@ -37,116 +40,184 @@ code span.co,code span.do,code span.an,code span.cv{color:var(--co);font-style:i
 code span.dt,code span.dv,code span.bn,code span.fl,code span.cn,code span.sc{color:var(--dt)}
 code span.fu,code span.bu,code span.at,code span.va{color:var(--fu)}code span.er,code span.al{color:var(--er)}
 code span.op,code span.ot,code span.pp{color:inherit}
+.note,.tip,.important,.warning,.caution{--c:var(--link);border-left:4px solid var(--c);padding:2px 14px;margin:1em 0;background:var(--card)}
+.tip{--c:var(--st)}.important{--c:var(--kw)}.warning{--c:var(--dt)}.caution{--c:var(--er)}
+.title p{margin:6px 0 0;font-weight:600;color:var(--c)}
 ")
 
-(def template
-  (str "<!doctype html>\n<html><head><meta charset=utf-8>"
-       "<meta name=viewport content='width=device-width,initial-scale=1'>"
-       "<title>$pagetitle$</title><style>" css "</style></head>\n"
-       "<body><main><div class=src>$source$</div>\n$body$\n</main></body></html>\n"))
+(def live-js
+  "(()=>{const k='md-view'+location.search,y=sessionStorage.getItem(k);
+if(y!==null){scrollTo(0,+y);sessionStorage.removeItem(k)}let s=null;
+setInterval(async()=>{try{const t=await (await fetch('/stamp'+location.search,{cache:'no-store'})).text();
+if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catch(e){}},400)})()")
 
-(defn sha1 [s]
-  (let [d (.digest (MessageDigest/getInstance "SHA-1") (.getBytes (str s) "UTF-8"))]
-    (apply str (map #(format "%02x" %) d))))
+(defn escape [s] (str/escape (str s) {\& "&amp;" \" "&quot;" \< "&lt;" \> "&gt;"}))
 
-(defn page-for [src] (fs/path out-dir (str (sha1 src) ".html")))
+(defn input-format [path]
+  (condp re-find (str path)
+    #"(?i)\.org$" "org"
+    #"(?i)\.(md|markdown|mdown|mkd)$" "gfm+footnotes"
+    nil))
+
+(defn doc? [path] (boolean (and path (input-format path) (fs/regular-file? path))))
 
 (defn ->path [arg]
   (fs/canonicalize (if (str/starts-with? arg "file:") (fs/path (URI. arg)) arg)))
 
+(def body-template
+  (delay (let [f (fs/create-temp-file {:prefix "md-view-" :suffix ".html"})]
+           (fs/delete-on-exit f)
+           (spit (str f) "$if(title)$<h1 class=title>$title$</h1>\n$endif$$body$\n")
+           (str f))))
+
+(defn pandoc! [src & args]
+  (let [{:keys [out err exit]} (apply p/shell {:out :string :err :string :continue true :dir (str (fs/parent src))}
+                                      pandoc (str "--from=" (input-format src)) "--wrap=none"
+                                      (concat args [(str src)]))]
+    (when-not (zero? exit)
+      (throw (ex-info (str "pandoc failed on " src "\n" err) {})))
+    out))
+
 (defn relative? [url]
   (not (or (str/blank? url) (str/starts-with? url "#") (str/starts-with? url "/")
            (re-find #"^[a-zA-Z][a-zA-Z0-9+.-]*:" url))))
-
-(defn resolve-url [dir url]
-  (let [[path frag] (str/split url #"#" 2)]
-    [(fs/normalize (fs/path dir (URLDecoder/decode path "UTF-8"))) frag]))
-
-(defn markdown? [path] (re-find #"(?i)\.(md|markdown|mdown|mkd)$" (str path)))
 
 (def mime {"png" "image/png" "jpg" "image/jpeg" "jpeg" "image/jpeg" "gif" "image/gif"
            "webp" "image/webp" "svg" "image/svg+xml" "avif" "image/avif"})
 
 (defn data-uri [path]
   (when-let [m (and (fs/regular-file? path) (mime (str/lower-case (fs/extension path))))]
-    (str "data:" m ";base64,"
-         (.encodeToString (Base64/getEncoder) (fs/read-all-bytes path)))))
+    (str "data:" m ";base64," (.encodeToString (Base64/getEncoder) (fs/read-all-bytes path)))))
 
-(defn escape-attr [s] (str/escape (str s) {\& "&amp;" \" "&quot;" \< "&lt;"}))
+(defn file-uri [path] (str (.toUri (fs/path path))))
+
+(defn view-url [path] (str "/view?path=" (URLEncoder/encode (str path) "UTF-8")))
 
 (defn rewrite
-  "Point relative hrefs at rendered pages or file:// URLs and inline relative images.
-  Returns [html linked-markdown-sources]."
-  [html dir]
-  (let [linked (volatile! #{})
-        html (str/replace html #"(href|src)=\"([^\"]*)\""
+  "Inline relative images and point relative links at LINK-DOC for a Markdown or
+  Org file, else at a file:// URL."
+  [html dir link-doc]
+  (str/replace html #"(href|src)=\"([^\"]*)\""
                (fn [[whole attr url]]
                  (let [url (str/replace url "&amp;" "&")]
                    (if-not (relative? url)
                      whole
-                     (let [[path frag] (resolve-url dir url)
+                     (let [[path frag] (str/split url #"#" 2)
+                           path (fs/normalize (fs/path dir (URLDecoder/decode path "UTF-8")))
                            frag (when frag (str "#" frag))]
                        (cond
-                         (= attr "src")
-                         (if-let [uri (data-uri path)] (str "src=\"" uri "\"") whole)
+                         (= attr "src") (if-let [uri (data-uri path)] (str "src=\"" uri "\"") whole)
+                         (doc? path) (str "href=\"" (escape (str (link-doc (fs/canonicalize path)) frag)) "\"")
+                         :else (str "href=\"" (escape (str (file-uri path) frag)) "\""))))))))
 
-                         (and (markdown? path) (fs/regular-file? path))
-                         (let [path (fs/canonicalize path)]
-                           (vswap! linked conj path)
-                           (str "href=\"" (fs/file-name (page-for path)) frag "\""))
+(defn page
+  "SRC as one self-contained HTML page. LINK-DOC maps a linked document's path to
+  its href; HEAD is extra markup for <head>; LIVE? adds the reload poller."
+  [src {:keys [link-doc head live?] :or {link-doc file-uri}}]
+  (str "<!doctype html>\n<html><head><meta charset=utf-8>"
+       "<meta name=viewport content='width=device-width,initial-scale=1'>"
+       "<title>" (escape (fs/file-name src)) "</title>" head "<style>" css "</style></head>\n"
+       "<body><main><div class=src>" (escape src) "</div>\n"
+       (rewrite (pandoc! src "--to=html5" "--standalone" (str "--template=" @body-template)) (fs/parent src) link-doc)
+       "\n</main>" (when live? (str "<script>" live-js "</script>")) "</body></html>\n"))
 
-                         :else
-                         (str "href=\"" (escape-attr (str (.toUri (fs/path path)) frag)) "\"")))))))]
-    [html @linked]))
+(defn stamp [path] (str (fs/file-time->millis (fs/last-modified-time path))))
 
-(defn render! [src template-file]
-  (let [page (page-for src)
-        dir (fs/parent src)
-        fresh? (and (fs/exists? page)
-                    (every? #(pos? (compare (fs/last-modified-time page) (fs/last-modified-time %)))
-                            [src template-file]))]
-    (if fresh?
-      (let [links (str page ".links")]
-        (when (fs/exists? links)
-          (map fs/path (remove str/blank? (str/split-lines (slurp links))))))
-      (let [{:keys [out err exit]}
-            (p/shell {:out :string :err :string :continue true :dir (str dir)}
-                     pandoc "--from=gfm+footnotes" "--to=html5" "--standalone" "--wrap=none"
-                     (str "--template=" template-file)
-                     "--highlight-style=pygments"
-                     "-M" (str "pagetitle=" (fs/file-name src))
-                     "-V" (str "source=" src)
-                     (str src))]
-        (when-not (zero? exit)
-          (binding [*out* *err*] (println "md-view: pandoc failed on" (str src) "\n" err))
-          (System/exit 1))
-        (let [[html linked] (rewrite out dir)]
-          (spit (str page) html)
-          (spit (str page ".links") (str/join "\n" linked))
-          linked)))))
+(defn query-path [query]
+  (when-let [[_ v] (some->> query (re-find #"(?:^|&)path=([^&]*)"))]
+    (let [s (URLDecoder/decode v "UTF-8")]
+      (when (str/starts-with? s "/") (fs/canonicalize s)))))
 
-(defn render-all!
-  "Render root and the markdown it links to, breadth first, up to max-pages."
-  [root]
-  (let [template-file (str (fs/path out-dir "template.html"))]
-    (fs/create-dirs out-dir)
-    (when-not (= template (when (fs/exists? template-file) (slurp template-file)))
-      (spit template-file template))
-    (loop [queue [root] seen #{root}]
-      (when-let [src (first queue)]
-        (let [linked (remove seen (render! src template-file))
-              room (max 0 (- max-pages (count seen)))
-              linked (take room linked)]
-          (recur (into (subvec queue 1) linked) (into seen linked)))))
-    (page-for root)))
+(defn handler
+  "Serve only Markdown and Org files, and only to a page this server's own origin
+  named, so a web page cannot read files through a rebound DNS name."
+  [{:keys [uri query-string headers]}]
+  (let [path (query-path query-string)
+        text (fn [status body] {:status status :headers {"content-type" "text/plain; charset=utf-8"} :body body})]
+    (cond
+      (not (#{(str "127.0.0.1:" port) (str "localhost:" port)} (get headers "host"))) (text 403 "forbidden host")
+      (= uri "/health") (text 200 "md-view")
+      (not (#{"/view" "/stamp"} uri)) (text 404 "not found")
+      (not (doc? path)) (text 404 "not a Markdown or Org file")
+      (= uri "/stamp") (assoc-in (text 200 (stamp path)) [:headers "cache-control"] "no-store")
+      :else (try {:status 200 :headers {"content-type" "text/html; charset=utf-8"}
+                  :body (page path {:link-doc view-url :live? true})}
+                 (catch Exception e (text 500 (ex-message e)))))))
 
-(let [no-open? (some #{"--no-open"} *command-line-args*)
-      files (remove #{"--no-open"} *command-line-args*)]
-  (when (empty? files)
-    (binding [*out* *err*] (println "usage: md-view [--no-open] FILE.md|file://URI ..."))
-    (System/exit 2))
-  (let [pages (mapv (comp render-all! ->path) files)]
-    (if no-open?
-      (run! (comp println str) pages)
-      (apply p/exec (str home "/.local/bin/chrome-unified")
-             (map #(str (.toUri (fs/path %))) pages)))))
+(defn serve! []
+  (server/run-server handler {:ip "127.0.0.1" :port port})
+  (println "md-view serving" origin)
+  @(promise))
+
+(defn up? [] (= 200 (:status @(client/get (str origin "/health") {:timeout 300}))))
+
+(defn ensure-server!
+  "Start `md-view serve` when the Home service is not running it, as before a
+  reconfigure."
+  []
+  (when-not (up?)
+    (let [log (fs/path home ".local/state/md-view.log")]
+      (fs/create-dirs (fs/parent log))
+      (p/process {:out :append :err :append :out-file (fs/file log) :err-file (fs/file log)}
+                 "setsid" "-f" (str (fs/real-path *file*)) "serve" (str port))
+      (loop [n 0]
+        (when-not (or (up?) (> n 50))
+          (Thread/sleep 100)
+          (recur (inc n)))))))
+
+(defn sha1 [s]
+  (apply str (map #(format "%02x" %) (.digest (MessageDigest/getInstance "SHA-1") (.getBytes (str s) "UTF-8")))))
+
+(defn phone!
+  "Write SRC where the bbh Docs list finds it and return the path."
+  [src]
+  (let [out (fs/path (or (System/getenv "MD_VIEW_PHONE_DIR") "/tmp")
+                     (str "md-view-" (str/replace (fs/strip-ext (fs/file-name src)) #"[^\w.-]" "_")
+                          "-" (subs (sha1 src) 0 8) ".html"))]
+    (spit (str out) (page src {:head (str "<meta name=\"bbh-doc\" content=\"md-view\">"
+                                          "<meta name=\"description\" content=\"" (escape src) "\">")}))
+    (str out)))
+
+(defn columns []
+  (let [{:keys [out]} (p/shell {:in (fs/file "/dev/tty") :out :string :err :string :continue true} "stty" "size")]
+    (or (some-> (re-find #"\d+ (\d+)" (str out)) second parse-long) 100)))
+
+(defn term!
+  "Show SRC as styled text. In a terminal, page it with less and rewrite the page on
+  save, so R in less shows the new text; piped, print plain text."
+  [src]
+  (if-not (System/console)
+    (print (pandoc! src "--to=plain" "--columns=100"))
+    (let [cols (min 100 (- (columns) 2))
+          out (fs/create-temp-file {:prefix "md-view-" :suffix ".txt"})
+          render! #(spit (str out) (pandoc! src "--to=ansi" (str "--columns=" cols)))
+          watcher (future (loop [seen (stamp src)]
+                            (Thread/sleep 300)
+                            (let [now (stamp src)]
+                              (when (not= now seen) (try (render!) (catch Exception _)))
+                              (recur now))))]
+      (render!)
+      (try (p/shell {:continue true} "less" "-R" "-Psmd-view ?e(END) .R reloads, q quits" (str out))
+           (finally (future-cancel watcher) (fs/delete-if-exists out))))))
+
+(defn -main [args]
+  (let [flags (set (filter #(str/starts-with? % "-") args))
+        files (map ->path (remove flags args))
+        mode (some #{"--term" "-t" "--phone" "--no-open"} flags)]
+    (cond
+      (= "serve" (first args)) (serve!)
+      (or (empty? files) (seq (remove #{"--term" "-t" "--phone" "--no-open"} flags)) (not-every? doc? files))
+      (do (binding [*out* *err*]
+            (println "usage: md-view [-t|--term|--phone|--no-open] FILE.md|FILE.org|file://URI ...")
+            (println "       md-view serve [PORT]"))
+          (System/exit 2))
+      (#{"-t" "--term"} mode) (run! term! files)
+      (= "--phone" mode) (run! (comp println phone!) files)
+      :else (let [urls (map #(str origin (view-url %)) files)]
+              (ensure-server!)
+              (if (= "--no-open" mode)
+                (run! println urls)
+                (apply p/exec (str home "/.local/bin/chrome-unified") urls))))))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (-main *command-line-args*))

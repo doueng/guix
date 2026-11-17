@@ -374,6 +374,24 @@ ultimately to plain `find-file' when the current directory is not a project."
    (t
     (call-interactively #'find-file))))
 
+(defun eng/md-view (&optional phone)
+  "Save, then show this Markdown or Org file in Chrome with md-view's live reload.
+With PHONE, the prefix argument, send a snapshot to the phone's bbh Docs list."
+  (interactive "P")
+  (unless buffer-file-name (user-error "md-view needs a file"))
+  (save-buffer)
+  (let ((md-view (or (executable-find "md-view") (expand-file-name "~/.local/bin/md-view"))))
+    (if phone
+        (message "md-view: %s" (string-trim (with-output-to-string
+                                               (call-process md-view nil standard-output nil
+                                                             "--phone" buffer-file-name))))
+      (call-process md-view nil 0 nil buffer-file-name))))
+
+(map! :after markdown-mode :map (markdown-mode-map gfm-mode-map)
+      :localleader :desc "View in md-view" "v" #'eng/md-view)
+(map! :after org :map org-mode-map
+      :localleader :desc "View in md-view" "v" #'eng/md-view)
+
 (load (expand-file-name "keybindings.el" eng/doom-config-dir) t 'nomessage)
 (load (expand-file-name "clojure.el" eng/doom-config-dir) t 'nomessage)
 (load (expand-file-name "agent-shell.el" eng/doom-config-dir) nil 'nomessage)

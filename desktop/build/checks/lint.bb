@@ -75,21 +75,32 @@
               nil)
           [(str/trim (str err out))])))))
 
+(defn tested
+  "A problem naming WHAT when test command ARGV, run with options OPTS, fails, or
+  nil. It reruns only when a file in OWN changed since it last passed; the stamp is
+  PREFIX-sha256(SEED, OWN)."
+  [what prefix seed own opts argv]
+  (let [key (apply sha256 seed (mapcat (fn [f] [f (sha256 (fs/read-all-bytes (str c/root "/" f)))]) (sort own)))
+        stamp (fs/path (or (System/getenv "XDG_CACHE_HOME") (str (fs/home) "/.cache")) "guix-lint" (str prefix "-" key))]
+    (when-not (fs/exists? stamp)
+      (let [{:keys [exit out err]} (apply c/sh opts argv)]
+        (if (zero? exit)
+          (do (fs/create-dirs (fs/parent stamp)) (spit (str stamp) "") nil)
+          (str what " failed:\n" (str/join "\n" (take-last 30 (c/lines (str out err))))))))))
+
 (defn chrome-problems []
   (let [exts (sort (distinct (keep #(second (re-find #"^desktop/build/chrome/([^/]+)/bb\.edn$" %)) files)))]
     (doall
      (for [ext exts
            :let [dir (str "desktop/build/chrome/" ext "/")
-                 own (sort (filter #(str/starts-with? % dir) files))
-                 key (apply sha256 ext (mapcat (fn [f] [f (sha256 (fs/read-all-bytes (str c/root "/" f)))]) own))
-                 stamp (fs/path (or (System/getenv "XDG_CACHE_HOME") (str (fs/home) "/.cache")) "guix-lint" (str "chrome-" key))
-                 problem (when-not (fs/exists? stamp)
-                           (let [{:keys [exit out err]} (c/sh {:dir (str c/root "/" dir)} "bb" "test")]
-                             (if (zero? exit)
-                               (do (fs/create-dirs (fs/parent stamp)) (spit (str stamp) "") nil)
-                               (str dir " bb test failed:\n" (str/join "\n" (take-last 30 (c/lines (str out err))))))))]
+                 problem (tested (str dir " bb test") "chrome" ext (filter #(str/starts-with? % dir) files)
+                                 {:dir (str c/root "/" dir)} ["bb" "test"])]
            :when problem]
        problem))))
+
+(defn md-view-problems []
+  (keep identity [(tested "make md-view-test" "md-view" "md-view" (filter #(or (= % "desktop/bin/md-view") (str/starts-with? % "desktop/build/md-view/")) files)
+                          {:dir c/root} ["bb" "desktop/build/md-view/test.bb"])]))
 
 (defn ext-reload-problems
   "Each extension ext-reload serves must reload itself when its manifest.json changed: ext-reload's disable and
@@ -109,6 +120,7 @@
   [["scheme" scheme-problems]
    ["chrome" chrome-problems]
    ["ext-reload" ext-reload-problems]
+   ["md-view" md-view-problems]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
    ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))
                             (filter (fn [f] (or (str/ends-with? f ".bb") (re-find #"^#!.*\bbb\b" (first-line f)))) files))]

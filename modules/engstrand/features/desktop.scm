@@ -64,7 +64,7 @@ StartupWMClass=oilfm
               (string-append "[Desktop Entry]
 Type=Application
 Name=Markdown Viewer
-Comment=Render markdown and open it in Chrome
+Comment=Render markdown and open it in Chrome with live reload
 Exec=/home/engstrand/.local/bin/md-view %U
 Icon=text-x-generic
 Terminal=false

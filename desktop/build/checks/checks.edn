@@ -29,7 +29,7 @@
    :checks ["make lint"]
    :slow ["make chrome-e2e"]}
   {:name "md-view"
-   :paths ["desktop/bin/md-view" "desktop/build/md-view/**"]
+   :paths ["desktop/bin/md-view" "desktop/build/md-view/**" "modules/engstrand/features/md-view.scm"]
    :checks ["make lint" "make md-view-test"]}
   {:name "second brain"
    :paths ["modules/engstrand/system/second-brain.scm" "modules/engstrand/packages/second-brain.scm"
