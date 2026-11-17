@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Jolt and other Clojure dialects measured on Asahi, a map of Guix&#39;s parts, four porting levels with effort and risk, and a recommendation backed by a working Babashka store-protocol spike.">
+<meta name="bbh-doc" content="T201">
+<title>Guix in Clojure: what it would take</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Guix in Clojure: what it would take</h1>
+
+<p class=sub>T201 · W243 · 2026-11-17 · each claim tagged <span class='tag measured'>measured</span>, <span class='tag inferred'>inferred</span> or <span class='tag guess'>guess</span>. The spikes ran on this M1 (aarch64, Asahi, Guix), outside the repo. Scripts are in the evidence directory, listed at the end.</p>
+<nav><a href='#answer'>Answer</a><a href='#jolt'>Jolt</a><a href='#dialects'>Other dialects</a><a href='#guix'>Guix's parts</a><a href='#spikes'>Spikes</a><a href='#levels'>Levels</a><a href='#course'>Course and bbh</a><a href='#rec'>Recommendation</a></nav>
+
+<h2 id=answer>Answer</h2>
+<div class='card good'><b>Build level 1 in Babashka, with a small amount of level 2. Leave the daemon, the bootstrap and the 33k packages to Guix.</b> A Clojure front end that talks to the real <code>guix-daemon</code> took about 100 lines here. It wrote a <code>.drv</code>, the daemon accepted it and built it, and the output landed at the store path the Clojure code had computed <span class='tag measured'>measured</span>. From there your derivations can depend on any <code>.drv</code> Guix produces, so you keep all of Guix's packages and substitutes. You'd be writing glue in Clojure, not running a fork.</div>
+<div class='card warn'><b>Jolt is promising but not ready to build on.</b> It's Clojure compiled to Chez Scheme (not Guile). It is 5½ months old and mostly one author's work, and has no Linux aarch64 release. It did build and run here from source (with a patched Chez and two workarounds) and starts in 0.11 s, against Babashka's 0.01 s. It has no Unix-domain sockets and no SHA-256 built in, and Guix needs both on day one <span class='tag measured'>measured</span>. Check again in 6–12 months. Its one real advantage is that it can be built from source, so in principle it could run <em>inside</em> builds. Babashka can't: you install a prebuilt GraalVM binary.</div>
+<div class='card bad'><b>Levels 3 and 4 (your own daemon, a translated package collection) take person-years and mean maintaining a fork forever.</b> The C++ daemon alone is 16,752 lines. Guix has 32,957 packages, and most of their build phases are Guile code that runs inside the build. Upstream has been working on a Guile daemon for years and it still isn't on master <span class='tag measured'>measured</span>/<span class='tag inferred'>inferred</span>.</div>
+
+<h2 id=jolt>What Jolt is</h2>
+<div class=table><table>
+<tr><th>Question</th><th>Finding</th></tr>
+<tr><td>Runtime</td><td>Clojure source → host-neutral IR → Scheme → native code via <b>Chez Scheme 10.4.1 carrying 9 jolt patches</b>. Gambit is a secondary target. It does not run on Guile <span class='tag measured'>measured</span> (README.md, host/chez/chez-patches/)</td></tr>
+<tr><td>Maturity</td><td>First commit 2026-06-01. 5,452 commits, latest tag v0.8.27, commits landing every day. About 5,060 of the commits are by Yogthos / Dmitri Sotnikov, the same person under two names <span class='tag measured'>measured</span> (git log). Conformance against a JVM-sourced corpus is “broad, but not yet total” (README)</td></tr>
+<tr><td>Licence</td><td>EPL-2.0, with bundled parts (Chez Apache-2.0, babashka fs/process/cli) under their own licences <span class='tag measured'>measured</span></td></tr>
+<tr><td>Platforms</td><td>Release binaries for Linux x86_64, macOS, Windows and Android arm64. <b>None for Linux aarch64</b> <span class='tag measured'>measured</span>. It isn't packaged in Guix <span class='tag inferred'>inferred</span></td></tr>
+<tr><td>On Asahi/Guix</td><td>Works from source. <code>provision-chez.sh</code> built the patched Chez with Guix's gcc in a <code>guix shell</code>, and <code>bin/jolt</code> ran. <code>make build</code> needed ncurses, util-linux:lib and an empty <code>libtinfo.a</code> stub (Guix folds tinfo into ncurses). The result was a 35.7 MB binary that needs <code>LD_LIBRARY_PATH</code> for libncursesw <span class='tag measured'>measured</span></td></tr>
+<tr><td>Startup</td><td>Built binary: 0.09–0.12 s and 108 MB RSS for <code>-e '(+ 1 2)'</code>. Source mode with no dev cache: 5.9 s. For comparison, bb 0.01 s / 62 MB and JVM <code>clojure -M</code> 0.26–0.90 s / 97–132 MB <span class='tag measured'>measured</span></td></tr>
+<tr><td>Macros</td><td><code>defmacro</code> with syntax-quote works <span class='tag measured'>measured</span>. It also has an open <code>#</code> dispatch table (<code>jolt.reader/set-dispatch-macro!</code>), so <code>#~</code>/<code>#$</code> gexp syntax could actually be done, which neither bb nor JVM Clojure allows <span class='tag inferred'>inferred</span> (README)</td></tr>
+<tr><td>Interop</td><td>Java calls go to a shimmed subset of <code>java.*</code> written in Scheme. There's no reflection. C calls go through <code>jolt.ffi</code> (defcfn, arenas, callbacks), and it can build a shared library with a C ABI <span class='tag measured'>measured</span></td></tr>
+<tr><td>What Guix needs</td><td>Processes (babashka.process): yes. File system (babashka.fs): yes. <code>future</code>: yes. TCP sockets: yes. <b>Unix-domain socket</b> (the daemon's socket): <b>no</b>, <code>UnixDomainSocketAddress</code> has no provider. <b>SHA-256</b>: <b>no</b>, <code>MessageDigest</code> has no provider <span class='tag measured'>measured</span>. Both could be added with <code>jolt.ffi</code> on libc/libcrypto or a pure-Clojure SHA-256 (the course hands out an 81-line one in Guile) <span class='tag inferred'>inferred</span>. Fibers and an epoll poller exist <span class='tag measured'>measured</span> (stdlib/jolt/fibers.clj, io_poller.clj)</td></tr>
+<tr><td>Bootstrappability</td><td>A source checkout runs off a checked-in <b>4.9 MB generated Scheme seed</b> (host/chez/seed/image.ss, prelude.ss) <span class='tag measured'>measured</span>. By Guix's standards that's a binary seed. Still a far smaller one than GraalVM, which Babashka needs <span class='tag inferred'>inferred</span></td></tr>
+</table></div>
+
+<h2 id=dialects>Other dialects</h2>
+<div class=table><table>
+<tr><th>Option</th><th>Fit for a Guix port</th></tr>
+<tr><td><b>Babashka / SCI</b></td><td>Already your stack (bbh, wf, scripts). Starts in 0.01 s. Has the JDK classes Guix needs: Unix sockets, MessageDigest, ProcessBuilder, threads. The store client spike ran unchanged <span class='tag measured'>measured</span>. Drawbacks: the interpreter is slow for heavy computation, you can't add reader macros, and the Guix package is a prebuilt GraalVM binary (modules/engstrand/packages/babashka.scm), so bb can't be a from-source builder input <span class='tag measured'>measured</span>. SCI is the interpreter inside bb, so you could embed it in a JVM daemon to evaluate configs <span class='tag inferred'>inferred</span></td></tr>
+<tr><td><b>Clojure on the JVM</b></td><td>The most complete, and OpenJDK 25 is built from source in Guix. Startup 0.26–0.9 s <span class='tag measured'>measured</span>. Fine for a long-running service such as a daemon or a build coordinator. Too slow for a CLI you run many times. A daemon would need the FFM API for namespaces, chroot, setuid and mounts <span class='tag inferred'>inferred</span></td></tr>
+<tr><td><b>Jank</b></td><td>Clojure on C++/LLVM. Not in Guix <span class='tag measured'>measured</span>, alpha, and pulls in all of LLVM <span class='tag inferred'>inferred</span>. Not a near-term base</td></tr>
+<tr><td><b>ClojureCLR</b></td><td>Needs .NET, which Guix supports poorly (Mono only) <span class='tag inferred'>inferred</span>. No</td></tr>
+<tr><td><b>Lokke</b> (Clojure on Guile)</td><td>The only option that could call Guix's own modules in-process. Licence LGPL-2.1+/EPL-1.0, and version 0.0.0-2.10dfebe is packaged in Guix, <b>but the package fails to build today</b> (<code>-Werror</code> in lokke-pcre2.c) <span class='tag measured'>measured</span>. Upstream looks dormant <span class='tag guess'>guess</span>. Interesting as a bridge, not something to depend on</td></tr>
+<tr><td>Jolt</td><td>See above. The one most likely to become a from-source Clojure that can run inside builds <span class='tag inferred'>inferred</span></td></tr>
+</table></div>
+
+<h2 id=guix>What Guix is made of</h2>
+<p>Line counts are from the installed Guix modules (guix 704ad8ced) and a sparse checkout of master 63483906 (2026-11-16) <span class='tag measured'>measured</span>.</p>
+<div class=table><table>
+<tr><th>Part</th><th>Size</th><th>What porting it means</th></tr>
+<tr><td>guix-daemon (C++, nix/)</td><td>16,752 lines. build.cc 4,519, local-store 1,655, nix-daemon 1,090, gc 785, spawn 899</td><td>Sandboxing (namespaces, chroot, build users), SQLite store DB, locking, GC, the offload hook. This is the dangerous part to rewrite: it runs as root. Upstream's Guile daemon work is not on master: no daemon module in guix/, only guix/store/{database,deduplication,roots}.scm <span class='tag measured'>measured</span></td></tr>
+<tr><td>Store protocol</td><td>remote-procedures.scm 364, store.scm 2,112</td><td>Version 0x164 over a Unix socket. Little-endian u64s, length-prefixed strings padded to 8 bytes, stderr frames (<code>olmg</code>/<code>alts</code>/<code>cxtp</code>…), and about 30 RPCs. Easy <span class='tag measured'>measured</span> (spike)</td></tr>
+<tr><td>Derivations, .drv ATerm</td><td>derivations.scm 1,450</td><td>A text format, hashing modulo fixed outputs, output path formula, nix-base32. Easy and testable bit for bit <span class='tag measured'>measured</span> (spike, course stages 06–07)</td></tr>
+<tr><td>Nar, serialization</td><td>serialization.scm 730, nar.scm 295</td><td>Needed for <code>add-to-store</code> of directories and for substitutes. Easy (course stage 04)</td></tr>
+<tr><td>Gexps</td><td>gexp.scm 2,441</td><td>Quasiquote that records what the code depends on, lowered to a builder script in the store. In Clojure a macro over syntax-quote gets you most of the way. The catch is that the <em>build side</em> stays Guile: the builder that runs is Guile code <span class='tag inferred'>inferred</span></td></tr>
+<tr><td>Monads</td><td>monads.scm 635</td><td>The store monad threads the connection through. In Clojure a store argument or a dynamic var replaces it, which is simpler <span class='tag inferred'>inferred</span></td></tr>
+<tr><td>Packages DSL</td><td>packages.scm 2,255</td><td>Records, inheritance, inputs, lowering to a bag and then a derivation</td></tr>
+<tr><td>Build systems</td><td>50 build systems, 27,990 lines host side. Builder side gnu-build-system 1,003 + build/utils 1,694</td><td>Host side lowers to a derivation. Builder side is Guile running in the sandbox</td></tr>
+<tr><td>Package collection</td><td><b>32,957 packages</b>, 596 package modules. guix/ + gnu/ hold 1.51M lines of Scheme</td><td>Mostly data, but phases are Guile code that runs at build time</td></tr>
+<tr><td>System and Home services</td><td>gnu/services.scm 1,496. 67 system and 31 home service modules</td><td>Service graph, folding extensions, activation, Shepherd configs</td></tr>
+<tr><td>Substitutes</td><td>scripts/substitute.scm 855, narinfo.scm 372</td><td>Narinfo plus signed nars. They're keyed by output path, so you get them only if your .drv is byte-identical to Guix's <span class='tag inferred'>inferred</span></td></tr>
+<tr><td>Bootstrap</td><td>commencement.scm, bootstrap.scm</td><td>The full-source bootstrap from a 357-byte seed via Mes. It's written in Guile, and Guile is part of the chain <span class='tag inferred'>inferred</span></td></tr>
+</table></div>
+
+<h2 id=spikes>Spikes</h2>
+<h3>1. Store-protocol client in Babashka</h3>
+<p>client.bb, 58 lines: handshake, <code>add-text-to-store</code>, <code>valid-path?</code> and <code>query-path-hash</code> against <code>/var/guix/daemon-socket/socket</code>. The daemon reported protocol 0x164. The run took 23 ms wall clock, 3.8 ms of it protocol. The returned path <code>/gnu/store/cm0hpisinmav4dvg673ccgnvyrjxpq6z-bb-spike.txt</code> matched what <code>guix repl</code> with <code>add-text-to-store</code> returns for the same text <span class='tag measured'>measured</span>.</p>
+<h3>2. A derivation written in Clojure, built by guix-daemon</h3>
+<p>drv.bb, about 40 more lines: nix-base32, hash compression, the output path formula and ATerm printing. It added the .drv as text, with bash-minimal as a reference, then called <code>build-things</code>. The daemon offloaded the build to your guix-builder, and <code>/gnu/store/sqqq0305hkbc24pwbp9k6p843a0biw7x-hello-from-clojure</code> contained “built by a derivation written in Clojure” <span class='tag measured'>measured</span>.</p>
+<pre><code>Derive([("out","/gnu/store/sqqq…-hello-from-clojure","","")],[],
+ ["/gnu/store/9yxv…-bash-minimal-5.2.37"],"aarch64-linux",
+ "/gnu/store/9yxv…-bash-minimal-5.2.37/bin/bash",["-c","echo … > $out"],[…])</code></pre>
+<h3>3. Jolt on Asahi</h3>
+<p>Patched Chez 10.4.1 built from source in about 5 minutes. <code>bin/jolt</code> ran in source mode at 5.9 s per call. <code>make build</code> worked after the two library workarounds above. The probe script (shell, fs, future, macro, TCP: yes. SHA-256, Unix socket: no) took 0.18 s <span class='tag measured'>measured</span>.</p>
+
+<h2 id=levels>Levels of porting</h2>
+<svg viewBox='0 0 640 150' role=img aria-label='effort by level'><g font-size=13>
+<rect x=10 y=10 width=40 height=24 fill='#2e7d4f'/><text x=60 y=27>1 Front end over the store protocol: 1–3 weeks</text>
+<rect x=10 y=44 width=110 height=24 fill='#2f6f8f'/><text x=130 y=61>2 Clojure DSL → Guix Scheme or .drv: 1–3 months</text>
+<rect x=10 y=78 width=420 height=24 fill='#8a6a1f'/><text x=20 y=95 fill=white>3 Own daemon + core: 1–3 years</text>
+<rect x=10 y=112 width=620 height=24 fill='#b3382c'/><text x=20 y=129 fill=white>4 Translate 33k packages and keep up with upstream: never finished</text></g></svg>
+<p>Effort is for one person working evenings <span class='tag guess'>guess</span>. Bar lengths are illustrative.</p>
+
+<div class='card good'><h3>Level 1: a Clojure front end to the existing daemon</h3>
+<p><b>What:</b> a <code>guix.store</code> library (RPCs including <code>add-to-store</code> with nar streaming, <code>build-things</code>, <code>query-path-info</code>, GC roots), <code>guix.drv</code> (ATerm read/write, hashing modulo inputs, fixed outputs), <code>guix.nar</code> and <code>guix.base32</code>. About 600–900 lines. The course's reference has the same parts in 578 lines of Guile (store 207, derivation 226, nar 145) <span class='tag measured'>measured</span>.<br>
+<b>Reusing Guix:</b> get a package's .drv from <code>guix build -d hello</code> (or read Guix's .drv files) and list it as an input. Your derivations then sit on top of the whole collection and its substitutes <span class='tag inferred'>inferred</span>.<br>
+<b>Risks:</b> protocol drift (low: it's at 0x164 and keeps backwards compatibility). Builder code is whatever you can run in the sandbox, which today means bash, Guile, or a binary you copy into the store.<br>
+<b>Gain:</b> scripting the store from bbh/wf at bb speed, inspecting the store and deps graph from your REPL, and an understanding of Guix's core that you can test.</p></div>
+
+<div class='card'><h3>Level 2: a Clojure package and service DSL</h3>
+<p><b>2a, compile to Guix Scheme:</b> EDN or Clojure macros print <code>(package …)</code> and <code>(service …)</code> forms into a channel module, and Guix does everything else. Gexps go across as quoted Guile forms. A few weeks gets a subset that covers your 54 modules in modules/engstrand <span class='tag measured'>measured</span>/<span class='tag guess'>guess</span>. Risks: two languages per bug, errors point at generated Scheme, and every Guix service record needs a mapping. The gain is small, since Guix's Scheme <em>is</em> already a Lisp DSL.<br>
+<b>2b, compile straight to .drv:</b> you'd reimplement lowering for the build systems you use (gnu-build-system first). The builder side can reuse Guix's Guile build modules as store inputs, or be Clojure, which needs a Clojure runtime in the store built from source. Jolt is the only candidate, and not yet. Byte-identical .drvs, the only way to get Guix's substitutes, would mean matching how Guix prints its builder scripts exactly. Expect your own builds instead <span class='tag inferred'>inferred</span>.</p></div>
+
+<div class='card bad'><h3>Level 3: full reimplementation including the daemon</h3>
+<p>That's 16.7k lines of C++ semantics (sandbox, users, locking, SQLite schema, GC, offload) plus about 20k lines of core Guile (store, derivations, gexp, packages, profiles, grafts…) <span class='tag measured'>measured</span>. A daemon would run as root, and mistakes there are security holes. Guix's own Guile-daemon effort has run for years without landing <span class='tag inferred'>inferred</span>. JVM Clojure would be the sensible runtime for it. Gain: deep understanding, which the course already gives you at about 1,300 lines.</p></div>
+
+<div class='card bad'><h3>Level 4: translating the package collection</h3>
+<p>32,957 packages. The forms translate mechanically, but phases and snippets are Guile that runs in builds, and the bootstrap (commencement.scm) is Guile all the way down. Guix gets many commits a day <span class='tag guess'>guess</span>, so the translation is stale within a week unless you re-run it on a schedule. And it still wouldn't give you substitutes unless the .drvs come out identical. Not worth doing.</p></div>
+
+<h2 id=course>How it relates to the course and bbh</h2>
+<ul>
+<li><b>Course (T191, /home/engstrand/projects/build-your-own-guix):</b> its tester only runs <code>./byog</code> as a process, so stages 01–11 and 13–17 work in any language (README) <span class='tag measured'>measured</span>. Stages 12 (package language) and 18 (gexp) need a Lisp, and Clojure is one. <b>A Clojure track of the course is level 1 plus a toy level 2</b>, and stages 01–07 already check against real Guix values. That's the natural home for this work.</li>
+<li><b>bbh/Babashka:</b> level 1 as a bb library drops straight into bbh. For example, wf could query <code>query-path-info</code>/references, check a revision's derivation without <code>guix repl</code>, or build ad-hoc derivations <span class='tag inferred'>inferred</span>. The spike code is already bb.</li>
+<li><b>Your Guix config:</b> keep it in Scheme. Level 2a only pays off if a Clojure DSL removes real pain, and nothing in this investigation showed that pain <span class='tag guess'>guess</span>.</li>
+</ul>
+
+<h2 id=rec>Recommendation</h2>
+<ol>
+<li>Build <b>level 1 in Babashka</b> as a Clojure track of the course: store client, drv, nar, base32, building the course's stages and checked against Guix's values. Estimate 1–3 weeks <span class='tag guess'>guess</span>.</li>
+<li>Add a <b>small level 2</b> on top: a <code>defpackage</code> macro that lowers to a .drv over Guix's own .drvs, with builders in bash or Guile. Stop there unless it turns out to be fun.</li>
+<li><b>Track Jolt</b>, and re-run the probe when it ships an aarch64-linux binary, Unix sockets and a digest provider. Those are what would make it worth a look as a builder-side Clojure. Upstreaming a Guix package for it (patched Chez + seed) would be its own project.</li>
+<li><b>Don't do</b> levels 3 or 4.</li>
+</ol>
+
+<h2>Evidence</h2>
+<ul class=cite>
+<li>Spike scripts and logs: /home/engstrand/.local/state/bbh/workflows/20261117-145041-211-investigation/evidence/spikes</li>
+<li>Jolt checkout: /home/engstrand/.cache/checkouts/github.com/jolt-lang/jolt (README.md, llms.txt, Makefile, host/chez/provision-chez.sh, stdlib/jolt/socket.clj)</li>
+<li>Jolt build tree: /tmp/jolt-spike/jolt, patched Chez at /tmp/jolt-spike/local/chezscheme-10.4.1</li>
+<li>Guix modules: /gnu/store/agjym83nqgwcvwa46a1wl5lizsyp2bph-guix-704ad8ced-modules/share/guile/site/3.0/guix/remote-procedures.scm and store.scm</li>
+<li>Guix master daemon sources: /tmp/guix-sparse/nix</li>
+<li>Lokke build log: /var/log/guix/drvs/y1/65ly1ywy161ybyqy88l2djdm6imv72-lokke-0.0.0-2.10dfebe.drv.gz</li>
+<li>Course: /home/engstrand/projects/build-your-own-guix/README.md</li>
+</ul>
+</main></body></html>
