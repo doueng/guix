@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="simmis (replikativ) compared with bbh: four ideas worth adapting, two for later, and what to skip">
+<meta name="bbh-doc" content="T202">
+<title>What bbh could take from simmis</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>What bbh could take from simmis</h1>
+
+<p class=lede>Goal: find what bbh could borrow from <b>replikativ/simmis</b>, rank those ideas by value against effort, and say what to skip. This doc proposes changes and makes none.</p>
+
+<h2>Short answer</h2>
+<p>simmis is a large alpha workspace: chat rooms, a wiki, a ledger and agents, all on the replikativ stack. It has about 530 source files under <code>src/is</code> and 550 under <code>test/is</code> (measured: <code>git ls-files</code>). Most of its big ideas already exist in bbh in another form. Its <i>forks plus proposals</i> are bbh's jj workspace, review ask and landing. Its <i>failure is a value, never a fallback</i> rule is already a bbh rule. Its <i>SCI sandbox with a documented vocabulary</i> is bbh's Router sandbox and verb table. Four things are worth taking:</p>
+<ol>
+<li><b>Recall with citations</b> over past threads (high value, low effort).</li>
+<li><b>Known-hole tests</b> for the security gaps bbh already documents (medium value, low effort).</li>
+<li><b>Spend allowances</b> per Worker, where a child's budget is taken from its parent's (high value, medium effort).</li>
+<li><b>A benchmark of the Router</b> on frozen past requests (medium value, low to medium effort).</li>
+</ol>
+<p>Two more fit later: <b>paused scheduled Workers</b> and <b>egress capabilities</b>. Each is blocked on the allowance or on process isolation.</p>
+<p><b>Licence:</b> MIT, copyright 2024-2026 Christian Weilbach and contributors (measured: <code>LICENSE.md</code>). You may reuse the code if you keep the notice. In practice there is almost nothing to lift. simmis is JVM Clojure built on Datahike, spindel and dvergr, and its libraries carry their own licences, which its README notes. Take the ideas, not the code.</p>
+
+<h2>Value against effort</h2>
+<svg viewBox="0 0 340 240" role=img aria-label="Ideas plotted by value against effort" style="width:100%;max-width:520px">
+<rect x=40 y=10 width=290 height=200 fill="#f6f8fa" stroke="#bbb"/>
+<rect x=40 y=10 width=145 height=100 fill="#e6f4ea"/>
+<text x=45 y=24 font-size=10 fill="#2e7d32">do first</text>
+<text x=185 y=232 font-size=11 text-anchor=middle>effort →</text>
+<text x=14 y=110 font-size=11 transform="rotate(-90 14 110)" text-anchor=middle>value →</text>
+<g font-size=11>
+<circle cx=90 cy=40 r=6 fill="#1a7f37"/><text x=100 y=44>1 recall</text>
+<circle cx=70 cy=100 r=6 fill="#1a7f37"/><text x=80 y=104>2 known holes</text>
+<circle cx=200 cy=50 r=6 fill="#bf8700"/><text x=210 y=54>3 allowance</text>
+<circle cx=140 cy=85 r=6 fill="#1a7f37"/><text x=150 y=89>4 Router bench</text>
+<circle cx=235 cy=110 r=6 fill="#bf8700"/><text x=245 y=114>5 schedules</text>
+<circle cx=300 cy=90 r=6 fill="#cf222e"/><text x=258 y=78>6 egress</text>
+<circle cx=75 cy=170 r=6 fill="#888"/><text x=85 y=174>7 as-of view</text>
+</g></svg>
+<p class=note>Placements are my judgement (inferred), not measurements. Green: do soon. Amber: needs a design pass. Red: blocked on process isolation.</p>
+
+<h2>Ranked ideas</h2>
+
+<h3>1. Recall with exact citations</h3>
+<p><b>simmis:</b> <code>memory/search</code> and <code>memory/read</code> return bounded results with receipts. Its digest design (<code>doc/conversation-digests-and-knowledge.md</code>) rests on one rule: <i>a digest is not an admission filter</i>. A summary only points the way. Any claim must cite exact original messages, and processing records which originals it covered.</p>
+<p><b>bbh today:</b> the design says archived threads, their summaries, events and conversation links are "kept indefinitely and searchable", and adds "no memory subsystem until that is a problem" (<code>docs/super-agent.md</code> §14). But no search verb exists. The Router's read verbs are <code>super-threads</code>, <code>super-thread</code>, <code>super-events</code> and <code>super-projects</code> (measured: <code>src/bbh/super/verbs.clj</code>). So "what did we decide about kanata chords last month?" means paging through events by hand.</p>
+<p><b>Sketch:</b> add an SQLite FTS5 table that the controller fills from events as it commits them: thread titles, notes, ask text and details, reply notes, and Worker briefs and final reports. Then add a read verb, <code>(super-search "kanata chord" {:limit 10})</code>. Each hit returns <code>{:thread :seq :kind :snippet}</code> and the <code>messages.jsonl</code> path of the conversation behind it. The Router and Workers then read the originals for the details. Add no model-written summaries. Thread notes are already summaries, and the citation rule keeps them hints. Effort: one migration, a fold hook and a verb, about 100 lines plus a test (inferred).</p>
+
+<h3>2. Known-hole tests</h3>
+<p><b>simmis:</b> its authority tests (<code>CLAUDE.md</code>, Testing) run real attacks. An attack that still succeeds is a <code>known-hole</code> test. It <i>passes while the hole is open and fails once it is closed</i>, which forces whoever closes it to flip it into a refusal test.</p>
+<p><b>bbh today:</b> <code>docs/super-agent.md</code> §10 names two holes in prose. A Worker can read the owner token at <code>~/.local/share/bbh/super/token</code>, and it can forge a <code>tailscale-user-login</code> header to the loopback web server. No test pins either (measured: no match for <code>known.hole</code> in <code>test/</code>).</p>
+<p><b>Sketch:</b> add one test file. It starts a scratch controller, opens a Worker token, and asserts that (a) the owner token file is readable from the Worker's uid and (b) a forged header is accepted. Each test carries the comment "known hole, see super-agent.md §10". When bubblewrap or a separate uid closes a hole, its test fails and becomes a refusal test. Effort: an hour or two with the existing scratch stack (inferred).</p>
+
+<h3>3. Spend allowances that conserve budget</h3>
+<p><b>simmis:</b> every Run draws on a finite allowance held in its kontor ledger. Delegation is <i>attenuation, not inheritance</i>: a child grant's budget is debited from its parent and does not copy the parent's ceiling (<code>doc/tool-authorization.md</code>). Background work needs "a configured model, a finite allowance and explicit activation". Subscription use still counts against the allowance even when its dollar cost is zero.</p>
+<p><b>bbh today:</b> each conversation records tokens and cost in <code>runs.jsonl</code>, and <code>/usage</code> shows subscription limits. The controller has no budget concept (measured: no budget, allowance or cost match in <code>src/bbh/super/</code>). <code>policy.edn</code> allows ten Workers, and the design itself expects parallel Workers to use up subscription limits faster (§12).</p>
+<p><b>Sketch:</b> add an optional <code>:allowance {:tokens 5e6}</code> or <code>{:usd 3}</code> on <code>super-start!</code>, with a default in <code>policy.edn</code>. The session already writes usage, so it sends a <code>:usage!</code> command after each turn, and the fold sums usage per Worker and thread. When usage crosses 80 %, the controller files an ask: "T12 used 4M of 5M tokens: extend, stop, or let it finish". At 100 % the Worker is held after its current turn. If Workers ever start child Workers, the child's allowance is taken from the parent's. Effort: a few events, a fold rule, one ask path and TLA+ model updates (the verify skill applies), about a day (inferred).</p>
+
+<h3>4. A frozen benchmark for the Router</h3>
+<p><b>simmis:</b> a workflow is benchmarked on retained cases with evaluator-held answers and frozen inputs, and the candidate's cost counts toward the result (<code>doc/coordinator-work.md</code>, <code>doc/wiki-maintenance-workflow.md</code>). A completed run never proves its answer is right.</p>
+<p><b>bbh today:</b> rollout phase 4 says "routing accuracy on real requests is not yet measured", and the Router model choice waits on that number (§13, §14). bbh already has fork replay (<code>eval/README.md</code>), which resumes a recorded session under another prompt without running tools.</p>
+<p><b>Sketch:</b> take 30 to 50 past <code>:message</code> events the Router handled. Label each with the correct action (thread and verb) in an EDN file kept outside the Router's sight. Fork-replay the Router on each under candidate prompts and models, and score the first verb it called against the label. Report accuracy and cost per arm. This is the measurement §14 asks for, built on code that exists. Effort: low to medium. Labelling is most of it (inferred).</p>
+
+<h3>5. Scheduled Workers, installed paused</h3>
+<p><b>simmis:</b> a schedule is installed inactive. Activation, model choice and a finite allowance are separate explicit steps. Results land as proposals and are never merged automatically.</p>
+<p><b>bbh today:</b> "work the agent starts on its own" is listed under Later (§11), with speculative threads that stay in Quiet until <code>wf</code> reaches done with an independent review.</p>
+<p><b>Sketch:</b> a <code>schedules.edn</code> entry <code>{:id :doom-doctor :cron "0 7 * * 1" :brief … :workflow :investigation :allowance … :enabled false}</code>. The controller's health pass appends a <code>:schedule-due</code> event, which starts a Worker on a speculative thread. Enabling a schedule is an ask. Needs idea 3 first, so a schedule cannot spend without a cap. Effort: medium (inferred).</p>
+
+<h3>6. Egress as a capability granted in advance</h3>
+<p><b>simmis:</b> "review cannot cover irreversible actions: by the time you are reviewing, the mail has been sent". So email, HTTP, money and pushes are authorized in advance with a budget, and writes are reviewed after the fact (<code>doc/agents.md</code>).</p>
+<p><b>bbh today:</b> code goes through review before landing, and <code>make switch</code> is always an action ask. The design admits that a Worker with a shell under your uid can do anything, and that a controller check cannot close that (§10).</p>
+<p><b>Sketch:</b> once Workers run in bubblewrap or a Guix container, give each Worker a <code>:may #{:push :http :mail}</code> set on start. The container gets network or a credential only for the listed kinds. Until isolation exists, this would be honour-system only, so skip it for now and keep the principle in the design doc. Effort: high, mostly the isolation (inferred).</p>
+
+<h3>7. An as-of view of controller state</h3>
+<p><b>simmis:</b> Datahike stores history, so any store can be read <code>as-of</code> a point in time, and the UI shows how a page reached its current state.</p>
+<p><b>bbh today:</b> the state is already a fold over an append-only SQLite log with snapshots (<code>src/bbh/super/store.clj</code> <code>replay</code>). So an as-of view is a fold that stops at sequence number N.</p>
+<p><b>Sketch:</b> add <code>bbh super state --at SEQ</code> for debugging ("why was T40 in Stopped yesterday?"). Small and low value, but nearly free (inferred).</p>
+
+<h2>Skip, and why</h2>
+<table>
+<tr><th>simmis idea</th><th>Why skip</th></tr>
+<tr><td>Datahike, konserve, yggdrasil and kabel as the store</td><td>bbh has one writer and one reader on SQLite, with idempotent commands and a fold that TLA+ models. Datahike would add a JVM or a pod and replication bbh does not need. Time travel comes nearly free from the log (idea 7).</td></tr>
+<tr><td>Forks and proposals</td><td>Already there: a jj workspace per Worker, a review ask on an immutable revision plus evidence hash, stale approvals rejected, and landing on your line.</td></tr>
+<tr><td>SCI sandbox with documented vocabulary</td><td>Already there: the Router runs sandboxed with <code>BBH_ROLE=router</code>, and every verb carries a <code>:doc</code>. simmis calls its own sandbox a soft boundary, which is no better than bbh's.</td></tr>
+<tr><td>Humans and agents as one kind of party; ReBAC grants; JWT audiences</td><td>Multi-user machinery. bbh has one person, and its tokens already separate you, the Router and each Worker.</td></tr>
+<tr><td>Telegram mirror of rooms</td><td>The phone page over <code>tailscale serve</code> covers this, with the owner-login check and no third party.</td></tr>
+<tr><td>Model family resolution (latest version in a family, never fall back across families)</td><td>Claude Code resolves models, and <code>policy.edn</code> pins a short list. The useful part, never falling back silently, is already a bbh rule.</td></tr>
+<tr><td>Compaction coverage markers</td><td>bbh never compacts. It rolls over to a new conversation that points at the old <code>messages.jsonl</code>.</td></tr>
+<tr><td>Agent-to-agent hop budget, reset by human input (roadmap)</td><td>bbh Workers do not message each other. Revisit if they ever do.</td></tr>
+<tr><td>Ledger, wiki, office documents, screen capture</td><td>Product features of a team workspace, outside a coding-agent harness.</td></tr>
+<tr><td>Transcripts that wake no agent</td><td>A nice rule ("an hour of call is nobody's turn"), but bbh voice is dictation aimed at the Router. It becomes relevant only if bbh starts recording meetings.</td></tr>
+</table>
+
+<h2>One caution from reading it</h2>
+<p>simmis's docs are long and dense with invariants: <code>doc/authority.md</code> is 1,335 lines and <code>doc/architecture.md</code> is 1,264 (measured). The code they describe is alpha, and the README lists real gaps, such as blob reads that are authenticated but not authorized. The thing worth copying is the habit of naming each invariant and testing it, as in idea 2. The volume of prose is not.</p>
+
+<h2>Sources</h2>
+<ul>
+<li>simmis checkout at commit a5b8945: /home/engstrand/.cache/checkouts/github.com/replikativ/simmis (README.md, CLAUDE.md, LICENSE.md, doc/architecture.md, doc/agents.md, doc/tool-authorization.md, doc/coordinator-work.md, doc/conversation-digests-and-knowledge.md, doc/wiki-maintenance-workflow.md, doc/recursive-work-roadmap.md)</li>
+<li>bbh: /home/engstrand/guix/desktop/build/bbh/README.md, docs/super-agent.md, src/bbh/super/verbs.clj, src/bbh/super/store.clj, src/bbh/models.clj, eval/README.md, and /home/engstrand/guix/desktop/configs/bbh/policy.edn</li>
+</ul>
+
+</main></body></html>
