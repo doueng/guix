@@ -16,6 +16,15 @@
                           (System/getenv "MD_VIEW_PORT") "7341")))
 (def origin (str "http://127.0.0.1:" port))
 (def pandoc (str (or (fs/which "pandoc") (fs/path home ".guix-home/profile/bin/pandoc"))))
+(def script (str (fs/real-path *file*)))
+
+(defn sha1 [s]
+  (apply str (map #(format "%02x" %) (.digest (MessageDigest/getInstance "SHA-1") (.getBytes (str s) "UTF-8")))))
+
+(def version
+  "The script's own source, hashed, so a client can tell a server still running an
+  older md-view from one running this file."
+  (delay (subs (sha1 (slurp script)) 0 12)))
 
 (def css "
 :root{color-scheme:light dark;--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--link:#2f6f8f;--code:#ece9e1;
@@ -160,7 +169,7 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
         text (fn [status body] {:status status :headers {"content-type" "text/plain; charset=utf-8"} :body body})]
     (cond
       (not (#{(str "127.0.0.1:" port) (str "localhost:" port)} (get headers "host"))) (text 403 "forbidden host")
-      (= uri "/health") (text 200 "md-view")
+      (= uri "/health") (text 200 (str "md-view " @version))
       (not (#{"/view" "/stamp"} uri)) (text 404 "not found")
       (not (doc? path)) (text 404 "not a Markdown, Org or HTML file")
       (= uri "/stamp") (assoc-in (text 200 (stamp path)) [:headers "cache-control"] "no-store")
@@ -173,24 +182,60 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
   (println "md-view serving" origin)
   @(promise))
 
-(defn up? [] (= 200 (:status @(client/get (str origin "/health") {:timeout 300}))))
+(defn health
+  "The running server's /health body, as \"md-view VERSION\", or nil when none answers."
+  []
+  (let [{:keys [status body]} @(client/get (str origin "/health") {:timeout 300 :as :text})]
+    (when (= 200 status) (str body))))
+
+(defn current? [] (= (str "md-view " @version) (health)))
+
+(defn listener-pid
+  "The pid of this user's process listening on the port, from ss."
+  []
+  (let [ss (str (or (fs/which "ss") "/run/current-system/profile/sbin/ss"))
+        {:keys [out]} (p/shell {:out :string :err :string :continue true} ss "-ltnpH" (str "sport = :" port))]
+    (some->> out (re-find #"pid=(\d+)") second)))
+
+(defn herd [& args]
+  (when (fs/which "herd")
+    (apply p/shell {:out :string :err :string :continue true} "herd" args)))
+
+(defn wait-until [pred]
+  (loop [n 0]
+    (cond (pred) true
+          (> n 50) false
+          :else (do (Thread/sleep 100) (recur (inc n))))))
+
+(defn stop-stale!
+  "Stop a server that runs another version of this script, such as one started
+  before the script changed: through the Home service when it owns it, else by pid."
+  []
+  (when (some-> (health) (str/starts-with? "md-view"))
+    (if (and (= origin "http://127.0.0.1:7341")
+             (some->> (herd "status" "md-view") :out (re-find #"It is running")))
+      (herd "restart" "md-view")
+      (when-let [pid (listener-pid)]
+        (p/shell {:continue true :err :string} "kill" pid)
+        (wait-until #(nil? (health)))))))
 
 (defn ensure-server!
-  "Start `md-view serve` when the Home service is not running it, as before a
-  reconfigure."
+  "Make sure a server running this version of the script answers: restart one
+  running an older version, then start the Home service or, without one, a server
+  of our own."
   []
-  (when-not (up?)
-    (let [log (fs/path home ".local/state/md-view.log")]
-      (fs/create-dirs (fs/parent log))
-      (p/process {:out :append :err :append :out-file (fs/file log) :err-file (fs/file log)}
-                 "setsid" "-f" (str (fs/real-path *file*)) "serve" (str port))
-      (loop [n 0]
-        (when-not (or (up?) (> n 50))
-          (Thread/sleep 100)
-          (recur (inc n)))))))
-
-(defn sha1 [s]
-  (apply str (map #(format "%02x" %) (.digest (MessageDigest/getInstance "SHA-1") (.getBytes (str s) "UTF-8")))))
+  (when-not (current?)
+    (when (health) (stop-stale!))
+    (when (and (not (current?)) (= origin "http://127.0.0.1:7341"))
+      (herd "enable" "md-view")
+      (herd "start" "md-view")
+      (wait-until #(some? (health))))
+    (when-not (health)
+      (let [log (fs/path home ".local/state/md-view.log")]
+        (fs/create-dirs (fs/parent log))
+        (p/process {:out :append :err :append :out-file (fs/file log) :err-file (fs/file log)}
+                   "setsid" "-f" script "serve" (str port))
+        (wait-until current?)))))
 
 (defn phone!
   "Write SRC where the bbh Docs list finds it and return the path."

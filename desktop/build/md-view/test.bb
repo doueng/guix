@@ -152,6 +152,31 @@
       (is (str/includes? kept "content=\"Mine\""))
       (is (= 1 (count (re-seq #"name=\"description\"" kept)))))))
 
+(deftest replaces-a-server-left-running-from-an-older-md-view
+  (fs/with-temp-dir [d {}]
+    (let [stale-port (+ 40000 (rand-int 20000))
+          stale-origin (str "http://127.0.0.1:" stale-port)
+          ;; The server md-view 1 left behind: healthy, but no HTML.
+          stale (p/process {:out :string :err :string} "bb" "-e"
+                           (str "(require '[org.httpkit.server :as s])"
+                                "(s/run-server (fn [{:keys [uri]}] (if (= uri \"/health\") {:status 200 :body \"md-view\"}"
+                                " {:status 404 :body \"not a Markdown or Org file\"})) {:ip \"127.0.0.1\" :port " stale-port "})"
+                                "@(promise)"))
+          src (fs/path (html-fixture d) "doc.html")]
+      (try
+        (loop [n 0] (when (and (< n 100) (not= 200 (:status (GET (str stale-origin "/health"))))) (Thread/sleep 100) (recur (inc n))))
+        (is (= 404 (:status (GET (str stale-origin "/view?path=" (java.net.URLEncoder/encode (str src) "UTF-8"))))))
+        (let [{:keys [out exit]} (md-view {"MD_VIEW_PORT" (str stale-port)} "--no-open" (str src))
+              page (GET (str/trim out))]
+          (is (zero? exit))
+          (is (= 200 (:status page)) "the stale server is gone and a current one serves HTML")
+          (is (str/includes? (:body page) "Own Doc")))
+        (finally
+          (p/destroy-tree stale)
+          (some-> (p/shell {:out :string :continue true} "pgrep" "-f" (str script " serve " stale-port))
+                  :out str/split-lines
+                  (->> (remove str/blank?) (run! #(p/shell {:continue true} "kill" %)))))))))
+
 (deftest rejects-files-it-cannot-render
   (fs/with-temp-dir [d {}]
     (spit (str (fs/path d "x.txt")) "x")

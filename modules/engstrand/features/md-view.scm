@@ -10,7 +10,7 @@
   (simple-service 'familiar-md-view home-shepherd-service-type
     (list (shepherd-service
            (provision '(md-view))
-           (documentation "Serve live-reloading Markdown and Org pages on 127.0.0.1:7341.")
+           (documentation "Serve live-reloading Markdown, Org and HTML pages on 127.0.0.1:7341.")
            (respawn? #t)
            (respawn-limit #~'(5 . 60))
            (respawn-delay 2)
