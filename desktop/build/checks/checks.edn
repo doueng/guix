@@ -74,10 +74,6 @@
   {:name "herdr tiny-fingers"
    :paths ["desktop/build/herdr/tiny-fingers/**"]
    :checks ["cd desktop/build/herdr/tiny-fingers && bb tests.bb"]}
-  {:name "midjourney mcp"
-   :paths ["modules/engstrand/packages/midjourney-mcp-cli.scm" "desktop/pi/agent/mcp.json"]
-   :checks ["make lint"]
-   :slow ["MIDJOURNEY_CHROME_LAUNCH=0 MIDJOURNEY_CDP_URL=http://127.0.0.1:1 \"$(guix build -L modules -e '(@ (engstrand packages midjourney-mcp-cli) midjourney-mcp-cli)')/bin/midjourney-cli\" whoami --json"]}
   {:name "herdr jjui popup"
    :paths ["desktop/build/herdr/jjui/**"]
    :checks ["cd desktop/build/herdr/jjui && bb tests.bb"]
