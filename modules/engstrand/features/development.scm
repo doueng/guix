@@ -6,6 +6,7 @@
   #:use-module (engstrand packages pi-coding-agent)
   #:use-module (engstrand packages dasel)
   #:use-module (engstrand packages hyperfine)
+  #:use-module (engstrand packages midjourney-mcp-cli)
   #:use-module (engstrand packages shellcheck)
   #:use-module (engstrand packages shfmt)
   #:use-module (engstrand packages tree-sitter)
@@ -17,7 +18,7 @@
 
 (define %development-home-packages
   (cons* babashka bun github-cli pi-coding-agent
-         dasel hyperfine shellcheck shfmt tree-sitter ty typst uv
+         dasel hyperfine midjourney-mcp-cli shellcheck shfmt tree-sitter ty typst uv
          (map specification->package
               '("clojure-tools"
                 "curl"

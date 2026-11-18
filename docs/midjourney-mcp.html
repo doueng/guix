@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Review of thenavidm/midjourney-mcp-cli and how it is installed for Pi">
+<meta name="bbh-doc" content="T206">
+<title>Midjourney MCP for Pi: review and install</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Midjourney MCP for Pi: review and install</h1>
+
+<h2>Outcome</h2>
+<p>The Midjourney MCP server and CLI by thenavidm are packaged in Guix Home and registered with Pi. <code>pi mcp list</code> shows <b>midjourney: connected, 32 tools (codemode)</b>, and a Pi session called <code>mcp__midjourney__whoami</code>, which answered that the browser is not running and nobody is signed in. Nothing has touched Midjourney yet.</p>
+
+<h2>What it is</h2>
+<ul>
+<li>One TypeScript program, published on npm as @thenavidm/midjourney-mcp-cli 2.0.1. It is both an MCP server (<code>midjourney-mcp</code>) and a CLI (<code>midjourney-cli</code>), with 32 tools: imagine, vary, upscale, pan, zoom, animate, jobs, downloads, moodboards and explore.</li>
+<li>MIT licence. Runtime dependencies: Slipway (Apache-2.0, same author), the MCP SDK, zod and ajv. That is 9 packages in total, with no install scripts.</li>
+<li>Midjourney has no API, and the program needs no key or cookie. It starts its own Chrome profile in <code>~/.midjourney-mcp/chrome-profile</code>, which you sign into once. It then calls midjourney.com's own <code>/api/</code> endpoints with <code>fetch()</code> inside that page, over the Chrome DevTools protocol.</li>
+</ul>
+
+<h2>Security review</h2>
+<ul>
+<li><b>Network.</b> The code contacts only the Midjourney origin (through the page), cdn.midjourney.com for downloads, and the local DevTools port. There is no telemetry, analytics or update check. Slipway fetches a URL only in its own developer <code>check</code> command, and runs a subprocess only in <code>install &lt;client&gt;</code>, which writes MCP client configs. This setup uses neither.</li>
+<li><b>Build provenance.</b> I compiled git tag v2.0.1 with tsc. The npm tarball's dist is byte-identical, excluding source maps, so the package uses the published tarball.</li>
+<li><b>Risk 1: the DevTools port.</b> While the controlled Chrome runs, any local process can drive your Midjourney session through its DevTools port. The default port is 9222. The wrappers move it to 127.0.0.1:9339, so the server never attaches to another Chrome.</li>
+<li><b>Risk 2: spending.</b> Slipway's guard asks a person through MCP elicitation. Pi does not support elicitation, so it falls back to <code>confirm: true</code>, which the model can set itself. An agent could therefore spend fast GPU time without asking you, and the default speed is <i>fast</i>. For that reason Pi's entry sets <code>MIDJOURNEY_ALLOW_DESTRUCTIVE=0</code>, which refuses paid and irreversible calls. I checked that <code>imagine</code> is refused under it.</li>
+<li><b>Unofficial.</b> Driving the web app's private API may break or go against Midjourney's terms. The tool paces its requests at 700 ms apart.</li>
+</ul>
+
+<h2>How it is installed</h2>
+<ul>
+<li>/home/engstrand/guix/modules/engstrand/packages/midjourney-mcp-cli.scm pins the npm tarball and each dependency by hash, and runs the program on Guix node 24. The wrappers point <code>MIDJOURNEY_CHROME_PATH</code> at a small launcher for the Flatpak Chrome (<code>--filesystem=~/.midjourney-mcp</code>) and set the port.</li>
+<li>/home/engstrand/guix/modules/engstrand/features/development.scm adds it to the Home packages.</li>
+<li>/home/engstrand/guix/desktop/pi/agent/mcp.json registers the server with codemode exposure. Stow links it to ~/.pi/agent/mcp.json.</li>
+<li>No secrets: the login lives in the Chrome profile under ~/.midjourney-mcp, outside the repo.</li>
+</ul>
+
+<h2>To use it</h2>
+<ol>
+<li><code>make home-apply</code> installs the package and links mcp.json.</li>
+<li><code>midjourney-cli login</code> opens the controlled Chrome; sign in to Midjourney there once.</li>
+<li>Read-only tools, such as <code>whoami</code>, <code>list_jobs</code> and <code>download_job</code>, then work from Pi. For Pi to generate, remove <code>MIDJOURNEY_ALLOW_DESTRUCTIVE</code> from mcp.json.</li>
+</ol>
+
+</main></body></html>
