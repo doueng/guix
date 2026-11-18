@@ -1,0 +1,16 @@
+{:paths ["sidecar" "test" "verify"]
+ :tasks {sidecar {:doc "Run the sidecar on stdin and stdout (the window starts it)."
+                  :requires ([rexmux.sidecar])
+                  :task (rexmux.sidecar/-main)}
+         test {:doc "Unit and property tests of the sidecar: protocol, schema, registry, agents (fast; make lint runs it)."
+               :requires ([rexmux.test-runner])
+               :task (rexmux.test-runner/-main)}
+         test:live {:doc "Sidecar tests against a throwaway Rex server on a private socket."
+                    :requires ([rexmux.live-test])
+                    :task (rexmux.live-test/-main)}
+         verify {:doc "Every live check: the sidecar on a throwaway Rex server, then the window's (make rexmux-verify)."
+                 :requires ([rexmux.verify])
+                 :task (apply rexmux.verify/-main *command-line-args*)}
+         verify:tla {:doc "Model-check verify/tla with TLC. Args: [CONFIG...]."
+                     :requires ([rexmux.tla])
+                     :task (apply rexmux.tla/-main *command-line-args*)}}}

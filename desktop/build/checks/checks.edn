@@ -28,6 +28,10 @@
    :paths ["desktop/build/chrome/vimium-cljs/**" "desktop/build/chrome/cookie-autoaccept/**"]
    :checks ["make lint"]
    :slow ["make chrome-e2e"]}
+  {:name "rexmux"
+   :paths ["desktop/build/rexmux/**" "modules/engstrand/packages/rex.scm"]
+   :checks ["make lint" "make rexmux-test"]
+   :slow ["make rexmux-tla" "make rexmux-verify"]}
   {:name "md-view"
    :paths ["desktop/bin/md-view" "desktop/build/md-view/**" "modules/engstrand/features/md-view.scm"]
    :checks ["make lint" "make md-view-test"]}

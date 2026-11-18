@@ -1,0 +1,36 @@
+[package]
+name = "rexmux"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+description = "Rex client: GPUI window with libghostty terminals, driven by a Babashka sidecar"
+
+# GPUI at Dusk's pin, so both share the Guix build costs (T194, W242 section 9).
+# libghostty-vt at the commit W230 and W242 built on Asahi; it reads Rex's
+# Ghostty snapshots. Edition and Rust 1.96 follow libghostty-vt.
+[features]
+default = ["gui"]
+gui = ["dep:gpui", "dep:gpui_platform", "dep:smol"]
+
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "7f7520b98ed1a0ce03dab1d5ddcb87163f1bcdb8", default-features = false, features = ["font-kit", "wayland"], optional = true }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "7f7520b98ed1a0ce03dab1d5ddcb87163f1bcdb8", features = ["font-kit", "wayland"], optional = true }
+smol = { version = "2", optional = true }
+libghostty-vt = { git = "https://github.com/Uzaaft/libghostty-rs", rev = "483ea3d5247b214060da58ef6037a95f30ae89fb", default-features = false }
+anyhow = "1"
+base64 = "0.22"
+libc = "0.2"
+serde_json = "1"
+tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+
+[patch.crates-io]
+async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }
+calloop = { git = "https://github.com/zed-industries/calloop" }
+
+[profile.release]
+debug = "line-tables-only"
+
+[[bin]]
+name = "rexmux"
+path = "src/main.rs"

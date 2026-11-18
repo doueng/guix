@@ -102,6 +102,10 @@
   (keep identity [(tested "make md-view-test" "md-view" "md-view" (filter #(or (= % "desktop/bin/md-view") (str/starts-with? % "desktop/build/md-view/")) files)
                           {:dir c/root} ["bb" "desktop/build/md-view/test.bb"])]))
 
+(defn rexmux-problems []
+  (keep identity [(tested "make rexmux-test" "rexmux" "rexmux" (filter #(and (str/starts-with? % "desktop/build/rexmux/") (re-find #"\.(clj|edn|json|ndjson)$" %)) files)
+                          {:dir (str c/root "/desktop/build/rexmux")} ["bb" "test"])]))
+
 (defn ext-reload-problems
   "Each extension ext-reload serves must reload itself when its manifest.json changed: ext-reload's disable and
   enable keep the manifest Chrome first loaded, so without it a new command never gets its key (T197's Cmd+T)."
@@ -121,6 +125,7 @@
    ["chrome" chrome-problems]
    ["ext-reload" ext-reload-problems]
    ["md-view" md-view-problems]
+   ["rexmux" rexmux-problems]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
    ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))
                             (filter (fn [f] (or (str/ends-with? f ".bb") (re-find #"^#!.*\bbb\b" (first-line f)))) files))]

@@ -1,0 +1,115 @@
+(ns rexmux.registry-test
+  "The registry against a real help document (Rex preview.21, API revision
+  18, saved in test/fixtures), so a new Rex revision that breaks command
+  generation fails here first."
+  (:require [cheshire.core :as json]
+            [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
+            [rexmux.commands :as commands]
+            [rexmux.props :refer [trials]]
+            [rexmux.registry :as reg]
+            [rexmux.schema :as schema]))
+
+(def help (json/parse-string (slurp "test/fixtures/rex-api-rev18.json") true))
+(def api (reg/api-commands help))
+(def registry (reg/merge-sources api commands/all))
+(def ctx {:session-id "session:1" :window-id "window:1" :block-id "block:1" :client-id "client:1"})
+
+(deftest every-method-and-block-method-is-a-command
+  (is (= (+ (count (:methods help)) (count (mapcat :methods (:block_types help)))) (count api)))
+  (is (apply distinct? (map :id api)))
+  (is (contains? registry :rex/session.new_split))
+  (is (contains? registry :rex/com.superlogical.terminal.write)))
+
+(defn gen-value
+  "A generator of values valid for SCHEMA (the subset Rex uses)."
+  [{:keys [type enum minimum maximum]}]
+  (let [t (if (sequential? type) (first (remove #{"null"} type)) type)]
+    (cond enum (gen/elements enum)
+          (= t "integer") (gen/choose (or minimum 0) (or maximum 1000))
+          (= t "number") (gen/fmap double (gen/choose (or minimum 0) (or maximum 1000)))
+          (= t "boolean") gen/boolean
+          (= t "string") (gen/fmap #(str "x" %) gen/nat)
+          (= t "array") (gen/return [])
+          :else (gen/return {}))))
+
+(defn gen-args
+  "Generator of valid argument maps for CMD: every required non-context
+  argument, and some of the optional ones."
+  [cmd]
+  (let [props (get-in cmd [:schema :properties])
+        req (set (map keyword (get-in cmd [:schema :required])))
+        own (vec (remove #(contains? reg/ctx-args (key %)) props))]
+    (gen/let [chosen (gen/vector gen/boolean (count own))
+              vals (apply gen/tuple (gen/return nil) (map (comp gen-value val) own))]
+      (into {} (keep (fn [[[k] v pick]] (when (or (req k) pick) [k v]))
+                     (map vector own (rest vals) chosen))))))
+
+(def simple-api
+  "API commands whose arguments the generator can fill: no object-typed
+  arguments, whose shape the schema leaves open."
+  (filter (fn [c] (every? (fn [[_ s]] (not (some #{"object"} (flatten [(:type s)])))) (get-in c [:schema :properties]))) api))
+
+(defn- call-ok? [cmd [kind method call-args]]
+  (and (= :rex/call kind)
+       (if (:block-method cmd)
+         (and (= "block.method" method) (empty? (schema/errors (:schema cmd) (:args call-args))))
+         (and (= (name (:id cmd)) method) (empty? (schema/errors (:schema cmd) call-args))))))
+
+(deftest valid-arguments-become-exactly-one-checked-rex-call
+  (is (:pass? (tc/quick-check
+               (trials 400)
+               (prop/for-all [[cmd args] (gen/bind (gen/elements simple-api) (fn [c] (gen/tuple (gen/return c) (gen-args c))))]
+                 (let [{:keys [effects prompt error]} (reg/invoke registry ctx (:id cmd) args)]
+                   (and (nil? prompt) (nil? error) (= 1 (count effects)) (call-ok? cmd (first effects)))))))))
+
+(deftest missing-required-arguments-prompt-instead-of-calling
+  (is (:pass? (tc/quick-check
+               (trials 200)
+               (prop/for-all [cmd (gen/elements (filter #(seq (remove (comp reg/ctx-args :name) (filter :required (:args %)))) simple-api))]
+                 (let [{:keys [effects prompt]} (reg/invoke registry ctx (:id cmd) {})]
+                   (and (nil? effects) (seq prompt) (every? :required prompt))))))))
+
+(deftest wrong-values-are-refused-before-rex-sees-them
+  (let [r (reg/invoke registry ctx :rex/session.focus_direction {:direction "sideways"})]
+    (is (nil? (:effects r)))
+    (is (= [[:direction]] (map :path (:invalid r)))))
+  (is (re-find #"needs session-id" (:error (reg/invoke registry {} :rex/session.view {})))))
+
+(deftest context-fills-ids
+  (is (= [[:rex/call "session.view" {:session_id "session:1"}]]
+         (:effects (reg/invoke registry ctx :rex/session.view {})))))
+
+(deftest keymap-layer-declares-every-bound-action-and-has-no-conflicts
+  (let [{:keys [layer actions]} (reg/keymap-layer registry)
+        declared (set (map :name actions))]
+    (is (= "mx" (:name layer)))
+    (is (seq (:bindings layer)))
+    (is (every? #(declared (:action %)) (:bindings layer)))
+    (is (every? #(re-matches #"mx\.[a-z0-9_.]+" %) declared))
+    (is (= [] (reg/key-conflicts registry)))))
+
+(deftest conflicts-are-found
+  (let [r (reg/merge-sources [{:id :a/x :keys [["ctrl+b" "n"]]} {:id :a/y :keys [["ctrl+b" "n"]]} {:id :a/z :keys [["ctrl+b"]]}])]
+    (is (= #{:duplicate :prefix} (set (map :problem (reg/key-conflicts r)))))))
+
+(deftest leader-entries-with-rex-become-commands
+  (let [leader {:bindings [{:keys ["w" "v"] :label "Split right" :rex ["session.new_split" {:direction "horizontal"}]}
+                           {:keys ["a"] :label "Agents" :rex :agent/pick}
+                           {:keys ["f" "s"] :label "Save" :doom "save-buffer"}]}
+        cmds (reg/leader-commands leader ["ctrl+b" "space"])
+        r (reg/merge-sources api commands/all cmds)]
+    (is (= 2 (count cmds)))
+    (is (= [["ctrl+b" "space" "w" "v"]] (:keys (first cmds))))
+    (is (= [[:rex/call "session.new_split" {:direction "horizontal"}]] (:effects (reg/invoke r ctx (:id (first cmds)) {}))))
+    (testing "an alias runs the command it names"
+      (is (= [[:ui/message "No agents."]]
+             (:effects (reg/invoke r (assoc ctx :world {:agents {:blocks {}}}) (:id (second cmds)) {})))))))
+
+(deftest catalogue-is-plain-data-with-enabled-flags
+  (let [c (reg/catalogue registry {})]
+    (is (every? #(not (fn? (:run %))) c))
+    (is (false? (:enabled (first (filter #(= :rex/session.view (:id %)) c)))))
+    (is (true? (:enabled (first (filter #(= :rex/server.status (:id %)) c)))))))

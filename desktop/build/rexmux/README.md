@@ -1,0 +1,31 @@
+# rexmux
+
+A client for the [Rex](https://rex.superlogical.com) terminal server, built as an
+opt-in alternative to Herdr (T194 design: docs/rex-vs-herdr.html and
+docs/rex-client-design.html; T207 build). Herdr stays the default.
+
+- **Window** (Rust, `src/`): GPUI at Dusk's pin, libghostty-vt terminals fed
+  straight from Rex data streams. Owns panes, keys and drawing.
+- **Sidecar** (Babashka, `sidecar/rexmux/`): one child process over EDN lines.
+  Owns the command registry (generated from Rex's `rex api list --json`,
+  leader.edn entries with `:rex`, local commands, extensions), the `mx` keymap
+  layer, M-x, agent status from OSC 7501, and workflows. Nothing per key goes
+  through it.
+
+## Protocol (sidecar)
+
+One EDN map per line, each with `:op` and `:seq`. Each direction numbers its
+messages from 1; the receiver drops repeats and reports gaps. A request's
+`:id` gets exactly one `:reply`. See `sidecar/rexmux/proto.clj`.
+
+## Checks
+
+| Command | What |
+| --- | --- |
+| `make rexmux-test` | sidecar unit and property tests (in `make lint`) |
+| `make rexmux-tla` | TLC on `verify/tla/Rexmux.tla`: link, streams, agents |
+| `make rexmux-verify` | live tests on a throwaway Rex server (private socket) |
+| `make rexmux` | build the window (`build.bb`, Guix profile from `manifest.scm`) |
+
+Tests never touch your Rex at /run/user/UID/rex: `test/rexmux/testserver.clj`
+starts its own server with `--listen` on a temp socket and `--restore=false`.

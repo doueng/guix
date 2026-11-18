@@ -13,7 +13,7 @@ JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))
 COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
-        home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify oilfm oilfm-test pi-sci pi-sci-test \
+        home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify rexmux rexmux-test rexmux-verify rexmux-tla oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test ext-reload-test chrome-e2e \
         doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check test-display-check clipboard-check \
         clipboard-history-test taildrop-test parinfer-check parinfer-fix
@@ -61,6 +61,10 @@ help:
 	@echo 'dusk          build the dusk shell (desktop/build/dusk)'
 	@echo 'dusk-test     run isolated runtime and headless GPUI tests'
 	@echo 'dusk-verify   run dusk end-to-end checks on the live session'
+	@echo 'rexmux        build the rexmux Rex client (desktop/build/rexmux)'
+	@echo 'rexmux-test   rexmux sidecar unit and property tests (make lint runs them)'
+	@echo 'rexmux-verify rexmux live tests on a throwaway Rex server and the test display'
+	@echo 'rexmux-tla    model-check the rexmux link, pane, stream and agent model with TLA+'
 	@echo 'oilfm         build the oilfm file manager (~/projects/oilfm)'
 	@echo 'oilfm-test    run oilfm tests, headless GPUI ones included'
 	@echo 'doom-check    fail on doom doctor warnings missing from the baseline'
@@ -238,6 +242,18 @@ dusk-test:
 
 dusk-verify:
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/dusk/verify.bb
+
+rexmux:
+	desktop/build/rexmux/build.bb
+
+rexmux-test:
+	cd desktop/build/rexmux && "$(HOME)/.guix-home/profile/bin/bb" test
+
+rexmux-verify:
+	cd desktop/build/rexmux && "$(HOME)/.guix-home/profile/bin/bb" verify
+
+rexmux-tla:
+	cd desktop/build/rexmux && "$(HOME)/.guix-home/profile/bin/bb" verify:tla
 
 OILFM ?= $(HOME)/projects/oilfm
 
