@@ -29,7 +29,7 @@
 ;; The terminal multiplexer: 'herdr, 'rex or 'ghostty-rex (T207). make mux
 ;; MUX=rex or MUX=ghostty-rex switches, make mux MUX=herdr rolls back; see
 ;; desktop/build/ghostty-rex/README.md.
-(define %terminal-mux 'herdr)
+(define %terminal-mux 'ghostty-rex)
 
 (define %root-uuid "c4f25409-b1a5-4ef0-8ac9-8e75f011668c")
 (define %esp-uuid "5CDF-1DF4")
