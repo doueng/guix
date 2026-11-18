@@ -23,7 +23,7 @@
              [[:ui/message "No agent is blocked."]]))}
    {:id :agent/next-attention :title "Agents: focus the next one wanting attention" :category "agent"
     :doc "Focus the next blocked, failed or finished agent, most urgent first."
-    :keys [["ctrl+b" "N"]] :source :local
+    :keys [["ctrl+b" "shift+n"]] :source :local
     :run (fn [ctx _]
            (if-let [a (agents/next-attention (:agents (world ctx)) (:block-id ctx))]
              [(focus-effect a) [:ui/message (agents/line a)]]
@@ -74,7 +74,7 @@
              [[:rex/call "session.new_window" {:session_id (:session-id ctx) :label name
                                                  :layout {:block {:flavor "com.superlogical.terminal.shell"
                                                                   :label name
-                                                                  :options {:argv ["sh" "-lc" command] :cwd dir}}}}]
+                                                                  :options {:command ["sh" "-lc" command] :cwd dir}}}}]
               [:ui/message (str "Workspace " dir)]]))}])
 
 (def session-commands
