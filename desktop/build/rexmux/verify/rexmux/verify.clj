@@ -3,7 +3,8 @@
   failure does not hide the rest."
   (:require [babashka.process :as p]))
 
-(def checks [["sidecar on a real Rex server" ["bb" "test:live"]]])
+(def checks [["sidecar on a real Rex server" ["bb" "test:live"]]
+             ["Bombadil over rexmux tty" ["bb" "test:bombadil" "--time" (or (System/getenv "REXMUX_BOMBADIL_TIME") "120")]]])
 
 (defn -main [& _]
   (let [results (doall (for [[what argv] checks]

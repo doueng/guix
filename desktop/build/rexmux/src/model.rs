@@ -867,6 +867,11 @@ impl Model {
             "escape" | "ctrl+g" => {
                 self.minibuffer = None;
                 self.echo = "Quit".into();
+                // Quitting also drops commands typed here that have not
+                // answered yet, so a late prompt cannot reopen the minibuffer.
+                self.pending.retain(|_, origin| origin.is_some());
+                let pending = &self.pending;
+                self.invoked.retain(|id, _| pending.contains_key(id));
                 return vec![];
             }
             "backspace" => {

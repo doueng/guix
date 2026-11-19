@@ -8,6 +8,9 @@
          test:live {:doc "Sidecar tests against a throwaway Rex server on a private socket."
                     :requires ([rexmux.live-test])
                     :task (rexmux.live-test/-main)}
+         test:bombadil {:doc "Bombadil over rexmux tty on a throwaway Rex server: pane focus, M-x, keymaps, agent attention. Args: [--time S] [--reproduce DIR] [--keep]."
+                        :requires ([rexmux.bombadil])
+                        :task (apply rexmux.bombadil/-main *command-line-args*)}
          verify {:doc "Every live check: the sidecar on a throwaway Rex server, then the window's (make rexmux-verify)."
                  :requires ([rexmux.verify])
                  :task (apply rexmux.verify/-main *command-line-args*)}

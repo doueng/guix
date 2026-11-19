@@ -170,6 +170,15 @@ pub fn run(servers: Vec<(String, Option<String>)>) -> i32 {
                 for (y, l) in lines.iter().enumerate() {
                     out.push_str(&format!("\x1b[{};1H\x1b[2K{l}", y + 1));
                 }
+                // The cursor sits where the minibuffer types, and is hidden at
+                // the top left otherwise, so tests can tell the two apart.
+                match &app.model.minibuffer {
+                    Some(mb) => {
+                        let col = app.model.prompt_text().chars().count() + mb.input.chars().count() + 1;
+                        out.push_str(&format!("\x1b[{};{}H\x1b[?25h", h, col));
+                    }
+                    None => out.push_str("\x1b[?25l\x1b[1;1H"),
+                }
                 print!("{out}");
                 let _ = std::io::stdout().flush();
                 last = lines;

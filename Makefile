@@ -63,7 +63,7 @@ help:
 	@echo 'dusk-verify   run dusk end-to-end checks on the live session'
 	@echo 'rexmux        build the rexmux Rex client (desktop/build/rexmux)'
 	@echo 'rexmux-test   rexmux sidecar unit and property tests (make lint runs them)'
-	@echo 'rexmux-verify rexmux live tests on a throwaway Rex server and the test display'
+	@echo 'rexmux-verify rexmux live tests on a throwaway Rex server: the sidecar, then Bombadil over rexmux tty (REXMUX_BOMBADIL_TIME s, default 120)'
 	@echo 'rexmux-tla    model-check the rexmux link, pane, stream and agent model with TLA+'
 	@echo 'oilfm         build the oilfm file manager (~/projects/oilfm)'
 	@echo 'oilfm-test    run oilfm tests, headless GPUI ones included'
