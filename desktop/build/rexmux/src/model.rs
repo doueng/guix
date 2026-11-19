@@ -232,6 +232,7 @@ impl Model {
         let mut c = serde_json::Map::new();
         if let Some(v) = self.view() {
             c.insert("session-id".into(), json!(v.session));
+            c.insert("window-ids".into(), json!(v.windows.iter().map(|w| w.id.clone()).collect::<Vec<_>>()));
             if let Some(w) = v.active_window() {
                 c.insert("window-id".into(), json!(w.id));
                 if let Some(b) = &w.focused {
@@ -534,6 +535,10 @@ impl Model {
                         self.echo = format!("server {label}");
                         let mut outs = self.refresh_streams();
                         outs.extend(self.context_changed());
+                        // A server shown for the first time attaches its newest session.
+                        if self.servers[i].view.is_none() {
+                            outs.push(Out::Rex { server: i, method: "session.list".into(), payload: json!({}), tag: Tag::Sessions { server: i } });
+                        }
                         outs
                     }
                     None => {
@@ -782,6 +787,7 @@ impl Model {
         seq.push(chord.clone());
         if let Some((_, action)) = self.bindings.iter().find(|(ks, _)| *ks == seq) {
             self.prefix.clear();
+            self.echo.clear();
             let action = action.clone();
             return match self.catalogue.iter().find(|c| c.action == action).map(|c| c.id.clone()) {
                 Some(id) => self.invoke(&id, vec![], None),

@@ -35,6 +35,11 @@ pub fn key_of(ks: &gpui::Keystroke) -> Option<KeyPress> {
     }
     let m = &ks.modifiers;
     let mut k = KeyPress { key, ctrl: m.control, alt: m.alt, shift: m.shift, sup: m.platform, text: None };
+    // Some keymaps name a shifted symbol itself (% rather than shift-5); keep the physical key.
+    if let Some(base) = crate::keys::unshifted(&k.key) {
+        k.key = base;
+        k.shift = true;
+    }
     if !k.ctrl && !k.alt && !k.sup {
         k.text = ks.key_char.clone().or_else(|| crate::keys::typed(&k.key, k.shift));
     }
@@ -211,5 +216,6 @@ mod tests {
         let n = key_of(&ks("shift-n")).unwrap();
         assert_eq!((n.chord().as_str(), n.text.as_deref()), ("shift+n", Some("N")));
         assert_eq!(key_of(&ks("enter")).unwrap().text.as_deref(), Some("\r"));
+        assert_eq!(key_of(&ks("shift-5")).unwrap().chord(), "%");
     }
 }

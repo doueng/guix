@@ -16,14 +16,14 @@
 (def agent-commands
   [{:id :agent/next-blocked :title "Agents: focus the next blocked one" :category "agent"
     :doc "Focus the next agent that waits for you (OSC 7501 blocked), wrapping around."
-    :keys [["ctrl+b" "n"]] :source :local
+    :keys [["ctrl+b" "u"]] :source :local
     :run (fn [ctx _]
            (if-let [a (agents/next-blocked (:agents (world ctx)) (:block-id ctx))]
              [(focus-effect a) [:ui/message (agents/line a)]]
              [[:ui/message "No agent is blocked."]]))}
    {:id :agent/next-attention :title "Agents: focus the next one wanting attention" :category "agent"
     :doc "Focus the next blocked, failed or finished agent, most urgent first."
-    :keys [["ctrl+b" "shift+n"]] :source :local
+    :keys [["ctrl+b" "shift+u"]] :source :local
     :run (fn [ctx _]
            (if-let [a (agents/next-attention (:agents (world ctx)) (:block-id ctx))]
              [(focus-effect a) [:ui/message (agents/line a)]]
@@ -79,7 +79,7 @@
 
 (def session-commands
   [{:id :session/switch :title "Sessions: switch" :category "session" :source :local
-    :keys [["ctrl+b" "s"]]
+    :keys [["ctrl+b" "w"] ["ctrl+b" "e"] ["ctrl+b" "b"] ["ctrl+b" "s"]]
     :run (fn [ctx _]
            (let [ss (rex ctx :sessions)]
              [[:ui/pick {:title "Session" :items (mapv (fn [s] {:label (or (not-empty (:label s)) (:session_id s)) :value (:session_id s)}) ss)
@@ -101,12 +101,47 @@
     :schema {:type "object" :properties {:server {:type "string"}} :required ["server"]}
     :run (fn [_ {:keys [server]}] [[:focus/server {:server server}]])}
    {:id :layer/jjui :title "Layers: jjui over the panes" :category "layer" :source :local
-    :keys [["ctrl+b" "j"]] :needs #{:session-id}
+    :keys [["ctrl+b" "g"]] :needs #{:session-id}
     :run (fn [ctx _] [[:layer/float {:argv ["jjui"] :cwd (:cwd ctx) :size [0.9 0.85] :close-on-exit true}]])}])
+
+(defn- rex-cmd
+  "A keyed command that runs Rex API METHOD with ARGS, through the API
+  command so context, defaults and the schema check apply."
+  [id title keys method args]
+  {:id id :title title :category (namespace id) :source :local :keys keys
+   :needs #{:session-id}
+   :run (fn [_ _] [[:invoke (keyword "rex" method) args]])})
+
+(def pane-commands
+  "Panes and tabs on Herdr's keys (desktop/configs/herdr/config.toml): Ctrl+b
+  c new tab, n next tab, 1..9 and Ctrl+1..9 a tab, h j k l focus; plus tmux's
+  % and \" splits, x close and z zoom."
+  (vec (concat
+        [(rex-cmd :pane/split-right "Panes: split right" [["ctrl+b" "%"]] "session.new_split" {:direction "horizontal" :side "after"})
+         (rex-cmd :pane/split-down "Panes: split down" [["ctrl+b" "\""]] "session.new_split" {:direction "vertical" :side "after"})
+         (rex-cmd :pane/zoom "Panes: zoom or unzoom" [["ctrl+b" "z"]] "session.zoom_block" {})
+         (rex-cmd :pane/next "Panes: next" [["ctrl+b" "o"]] "session.focus_next_pane" {})
+         {:id :pane/close :title "Panes: close" :category "pane" :source :local :keys [["ctrl+b" "x"]]
+          :needs #{:session-id :block-id}
+          :run (fn [_ _] [[:invoke :rex/block.close {}]])}
+         (rex-cmd :tab/new "Tabs: new" [["ctrl+b" "c"]] "session.new_window" {})
+         (rex-cmd :tab/next "Tabs: next" [["ctrl+b" "n"]] "session.focus_next_window" {})
+         (rex-cmd :tab/previous "Tabs: previous" [["ctrl+b" "p"]] "session.focus_previous_window" {})
+         (rex-cmd :tab/close "Tabs: close" [["ctrl+b" "&"]] "session.close_window" {})]
+        (for [[d k] [["left" "h"] ["down" "j"] ["up" "k"] ["right" "l"]]]
+          (rex-cmd (keyword "pane" (str "focus-" d)) (str "Panes: focus " d) [["ctrl+b" k]]
+                   "session.focus_direction" {:direction d}))
+        (for [n (range 1 10)]
+          {:id (keyword "tab" (str "select-" n)) :title (str "Tabs: select " n) :category "tab" :source :local
+           :keys [["ctrl+b" (str n)] [(str "ctrl+" n)]] :needs #{:session-id}
+           :run (fn [ctx _]
+                  (if-let [w (get (vec (:window-ids ctx)) (dec n))]
+                    [[:invoke :rex/session.focus_window {:window_id w}]]
+                    [[:ui/message (str "No tab " n)]]))}))))
 
 (def help-commands
   [{:id :mx/describe-command :title "Help: describe a command" :category "help" :source :local
-    :keys [["ctrl+h" "x"]]
+    :keys [["ctrl+b" "?"]]
     :args [{:name :command :type "string" :required true :complete :commands}]
     :schema {:type "object" :properties {:command {:type "string"}} :required ["command"]}
     :run (fn [ctx {:keys [command]}]
@@ -117,4 +152,4 @@
    {:id :mx/reload :title "Help: reload commands and keys" :category "help" :source :local
     :run (fn [_ _] [[:sidecar/reload {}]])}])
 
-(def all (vec (concat agent-commands session-commands help-commands)))
+(def all (vec (concat agent-commands session-commands pane-commands help-commands)))

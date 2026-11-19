@@ -111,7 +111,10 @@ fn char_key(c: char) -> KeyPress {
         c if (c as u32) < 27 => KeyPress { key: ((b'a' + c as u8 - 1) as char).to_string(), ctrl: true, ..Default::default() },
         ' ' => KeyPress { key: "space".into(), text: Some(" ".into()), ..Default::default() },
         c if c.is_ascii_uppercase() => KeyPress { key: c.to_ascii_lowercase().to_string(), shift: true, text: Some(c.to_string()), ..Default::default() },
-        c => KeyPress { key: c.to_string(), text: Some(c.to_string()), ..Default::default() },
+        c => match crate::keys::unshifted(&c.to_string()) {
+            Some(base) => KeyPress { key: base, shift: true, text: Some(c.to_string()), ..Default::default() },
+            None => KeyPress { key: c.to_string(), text: Some(c.to_string()), ..Default::default() },
+        },
     }
 }
 
@@ -182,7 +185,8 @@ mod tests {
 
     #[test]
     fn raw_bytes_become_keys() {
-        let ks: Vec<String> = parse_keys(b"a\x1bx\x02n\x1b[A\rN").iter().map(KeyPress::chord).collect();
-        assert_eq!(ks, ["a", "alt+x", "ctrl+b", "n", "up", "enter", "shift+n"]);
+        let ks: Vec<String> = parse_keys(b"a\x1bx\x02n\x1b[A\rN%").iter().map(KeyPress::chord).collect();
+        assert_eq!(ks, ["a", "alt+x", "ctrl+b", "n", "up", "enter", "shift+n", "%"]);
+        assert_eq!(parse_keys(b"%")[0].to_rex()["key"], "digit_5");
     }
 }

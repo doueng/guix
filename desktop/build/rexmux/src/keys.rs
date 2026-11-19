@@ -41,21 +41,30 @@ impl KeyPress {
             }
         }
         k.key = key.to_lowercase();
+        // A shifted symbol, such as %, is its physical key with shift.
+        if let Some(base) = unshifted(&k.key) {
+            k.key = base;
+            k.shift = true;
+        }
         if !k.ctrl && !k.alt && !k.sup {
             k.text = typed(&k.key, k.shift);
         }
         k
     }
 
-    /// The chord name in Rex's notation.
+    /// The chord name in Rex's notation. A shifted digit or symbol is named
+    /// by what it types: shift+5 is %.
     pub fn chord(&self) -> String {
+        let symbol = (self.shift && self.key.chars().count() == 1 && !self.key.chars().all(|c| c.is_ascii_alphabetic()))
+            .then(|| typed(&self.key, true))
+            .flatten();
         let mut s = String::new();
-        for (on, name) in [(self.ctrl, "ctrl+"), (self.alt, "alt+"), (self.shift, "shift+"), (self.sup, "super+")] {
+        for (on, name) in [(self.ctrl, "ctrl+"), (self.alt, "alt+"), (self.shift && symbol.is_none(), "shift+"), (self.sup, "super+")] {
             if on {
                 s.push_str(name);
             }
         }
-        s.push_str(&self.key);
+        s.push_str(symbol.as_deref().unwrap_or(&self.key));
         s
     }
 
@@ -104,6 +113,18 @@ pub fn typed(key: &str, shift: bool) -> Option<String> {
         other => other,
     };
     Some(shifted.to_string())
+}
+
+/// The key that types symbol KEY with shift on a US layout, such as 5 for %.
+pub fn unshifted(key: &str) -> Option<String> {
+    let mut cs = key.chars();
+    let (Some(c), None) = (cs.next(), cs.next()) else { return None };
+    let base = match c {
+        '!' => '1', '@' => '2', '#' => '3', '$' => '4', '%' => '5', '^' => '6', '&' => '7', '*' => '8', '(' => '9', ')' => '0',
+        '_' => '-', '+' => '=', '{' => '[', '}' => ']', '|' => '\\', ':' => ';', '"' => '\'', '<' => ',', '>' => '.', '?' => '/', '~' => '`',
+        _ => return None,
+    };
+    Some(base.to_string())
 }
 
 /// The W3C KeyboardEvent code of KEY on a US layout, in snake case.
@@ -155,7 +176,7 @@ mod tests {
 
     #[test]
     fn chords_round_trip() {
-        for c in ["ctrl+b", "alt+x", "shift+n", "enter", "ctrl+shift+tab", "n"] {
+        for c in ["ctrl+b", "alt+x", "shift+n", "enter", "ctrl+shift+tab", "n", "%", "ctrl+b", "?", "\"", "ctrl+1"] {
             assert_eq!(KeyPress::parse(c).chord(), c);
         }
     }

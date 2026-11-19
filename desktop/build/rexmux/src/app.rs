@@ -217,9 +217,10 @@ impl App {
         let server = self.model.current;
         let Some(c) = self.controls.get(server).and_then(Option::as_ref) else { return };
         for t in view.visible() {
-            let cols = ((t.rect[2] * w as f32).round() as u16).max(2);
-            // A pane's first row is its title.
-            let rows = ((t.rect[3] * h as f32).round() as u16).saturating_sub(1).max(1);
+            // A pane's first row is its title, and a divider may take its first column.
+            let (_, _, tw, th) = crate::screen::tile_cells(t.rect, w as usize, h as usize);
+            let cols = (tw as u16).max(2);
+            let rows = (th as u16).saturating_sub(1).max(1);
             if self.sizes.get(&t.block) != Some(&(cols, rows)) {
                 self.sizes.insert(t.block.clone(), (cols, rows));
                 c.request("session.own_block", json!({"session_id": view.session, "block_ids": [t.block], "mode": "take"}), 0);

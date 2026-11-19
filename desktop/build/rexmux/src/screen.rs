@@ -68,6 +68,34 @@ pub fn pane_area(w: usize, h: usize) -> (usize, usize) {
     (w, h.saturating_sub(3))
 }
 
+/// Where tile RECT goes in a PW x PH pane area, in cells: (x, y, width,
+/// height) of its title row and content, below the tab bar. A tile that does
+/// not start at the left edge gives its first column to a │ divider.
+pub fn tile_cells(rect: [f32; 4], pw: usize, ph: usize) -> (usize, usize, usize, usize) {
+    let left = (rect[0] * pw as f32).round() as usize;
+    let right = ((rect[0] + rect[2]) * pw as f32).round() as usize;
+    let x0 = if left > 0 { left + 1 } else { left };
+    let y0 = 1 + (rect[1] * ph as f32).round() as usize;
+    let th = ((rect[3] * ph as f32).round() as usize).max(1);
+    (x0, y0, right.saturating_sub(x0).max(1), th)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn side_by_side_tiles_share_the_width_with_one_divider() {
+        let (pw, ph) = (101, 30);
+        let a = tile_cells([0.0, 0.0, 0.5, 1.0], pw, ph);
+        let b = tile_cells([0.5, 0.0, 0.5, 1.0], pw, ph);
+        assert_eq!(a.0, 0);
+        assert_eq!(b.0, a.0 + a.2 + 1, "one column between them for the divider");
+        assert_eq!(b.0 + b.2, pw, "together they fill the width");
+        assert_eq!((a.1, a.3), (1, ph));
+    }
+}
+
 pub fn render(m: &Model, grids: &HashMap<String, Grid>, w: usize, h: usize) -> Screen {
     let mut s = Screen::new(w, h);
     let (pw, ph) = pane_area(w, h);
@@ -88,10 +116,12 @@ pub fn render(m: &Model, grids: &HashMap<String, Grid>, w: usize, h: usize) -> S
     let focused = m.focused_block();
     if let Some(v) = m.view() {
         for t in v.visible() {
-            let x0 = (t.rect[0] * pw as f32).round() as usize;
-            let y0 = 1 + (t.rect[1] * ph as f32).round() as usize;
-            let tw = ((t.rect[2] * pw as f32).round() as usize).max(1);
-            let th = ((t.rect[3] * ph as f32).round() as usize).max(1);
+            let (x0, y0, tw, th) = tile_cells(t.rect, pw, ph);
+            if x0 > 0 {
+                for y in y0..(y0 + th).min(s.h.saturating_sub(2)) {
+                    s.put(x0 - 1, y, "│", 1);
+                }
+            }
             let agent = m.agents.iter().find(|a| a.block == t.block);
             let mark = if focused.as_deref() == Some(t.block.as_str()) { "▶" } else { "─" };
             let status = agent.map(|a| format!(" {} {}", crate::model::icon(&a.state), a.app)).unwrap_or_default();
