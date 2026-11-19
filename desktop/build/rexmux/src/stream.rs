@@ -8,13 +8,14 @@ use std::io::{ErrorKind, Read};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use base64::Engine;
 use libghostty_vt::render::{CellIterator, RowIterator};
 use libghostty_vt::style::Underline;
+use libghostty_vt::terminal::ScrollViewport;
 use libghostty_vt::{RenderState, Terminal, snapshot};
 use serde_json::Value as Json;
 use tungstenite::{Message, WebSocket};
@@ -41,6 +42,10 @@ pub struct Grid {
     pub fg: [u8; 3],
     pub bg: [u8; 3],
     pub exited: Option<i64>,
+    /// The program asked for mouse reports, so clicks and the wheel go to it.
+    pub mouse: bool,
+    /// The view is scrolled back into history, not following the output.
+    pub scrolled: bool,
 }
 
 impl Grid {
@@ -165,6 +170,8 @@ pub fn grid_of<'a, 'cb>(term: &Terminal<'a, 'cb>, state: &mut RenderState<'a>, r
         fg: [colors.foreground.r, colors.foreground.g, colors.foreground.b],
         bg: [colors.background.r, colors.background.g, colors.background.b],
         exited: None,
+        mouse: term.is_mouse_tracking().unwrap_or(false),
+        scrolled: !term.viewport_active().unwrap_or(true),
     };
     if snap.cursor_visible()? {
         if let Some(c) = snap.cursor_viewport()? {
@@ -203,13 +210,28 @@ pub fn grid_of<'a, 'cb>(term: &Terminal<'a, 'cb>, state: &mut RenderState<'a>, r
     Ok(grid)
 }
 
+/// Asked of the stream thread: scroll the view by this many rows (up is
+/// negative), or back to the bottom.
+const BOTTOM: i64 = i64::MIN;
+
 pub struct StreamHandle {
     stop: Arc<AtomicBool>,
+    scroll: Arc<AtomicI64>,
 }
 
 impl StreamHandle {
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
+    }
+
+    /// Scroll the view into history (negative ROWS) or back toward the output.
+    pub fn scroll(&self, rows: i64) {
+        let _ = self.scroll.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(if v == BOTTOM { rows } else { v + rows }));
+    }
+
+    /// Follow the output again.
+    pub fn bottom(&self) {
+        self.scroll.store(BOTTOM, Ordering::Relaxed);
     }
 }
 
@@ -226,18 +248,19 @@ where
     F: Fn(StreamEvent) + Send + 'static,
 {
     let stop = Arc::new(AtomicBool::new(false));
-    let s = stop.clone();
+    let scroll = Arc::new(AtomicI64::new(0));
+    let (s, sc) = (stop.clone(), scroll.clone());
     std::thread::spawn(move || {
-        let why = match run(&sock, &ticket, &s, &out) {
+        let why = match run(&sock, &ticket, &s, &sc, &out) {
             Ok(()) => "stopped".to_string(),
             Err(e) => e.to_string(),
         };
         out(StreamEvent::Closed(why));
     });
-    StreamHandle { stop }
+    StreamHandle { stop, scroll }
 }
 
-fn run<F: Fn(StreamEvent)>(sock: &PathBuf, ticket: &str, stop: &AtomicBool, out: &F) -> Result<()> {
+fn run<F: Fn(StreamEvent)>(sock: &PathBuf, ticket: &str, stop: &AtomicBool, scroll: &AtomicI64, out: &F) -> Result<()> {
     let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(ticket)?;
     let mut ws = rex::websocket(sock, "/api/data", "rex.data.terminal.v1")?;
     let mut hello = vec![1u8];
@@ -292,6 +315,17 @@ fn run<F: Fn(StreamEvent)>(sock: &PathBuf, ticket: &str, stop: &AtomicBool, out:
             Ok(_) => {}
             Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
             Err(e) => return Err(e.into()),
+        }
+        match scroll.swap(0, Ordering::Relaxed) {
+            0 => {}
+            BOTTOM => {
+                term.scroll_viewport(ScrollViewport::Bottom);
+                dirty = true;
+            }
+            rows => {
+                term.scroll_viewport(ScrollViewport::Delta(rows as isize));
+                dirty = true;
+            }
         }
         // Batch repaints to about 60 a second.
         if dirty && last.elapsed() >= Duration::from_millis(16) {

@@ -94,7 +94,25 @@
                                     (sc/build-registry help (sc/read-config "../../configs/rexmux/config.edn")))]
     (is (str/ends-with? (:leader-file config) "/.config/keybindings/leader.edn") "~ is expanded")
     (is (:term-nav config))
-    (is (= ["emacs" "bbh" "jjui" "shell"] (map :label (get-in config [:startup :windows]))))
+    ;; The Herdr guix workspace's tabs, in order, so Super+Return E D G match.
+    (is (= ["shell" "bbh" "pi" "jjui"] (map :label (get-in config [:startup :windows]))))
+    (is (= "fish" (:shell config)) "blocks run fish, as Herdr's default_shell")
+    (doseq [id [:hints/open :pane/scrollback :pane/search :tab/rename :session/rename :session/last
+                :session/project :clipboard/paste :pane/resize-left]]
+      (is (contains? registry id) (str id " is in the registry")))
     (is (= [] errors))
     (is (= [] (rexmux.registry/key-conflicts registry)))
     (is (contains? registry :pane/term-nav-left))))
+
+(deftest a-newly-blocked-agent-elsewhere-notifies-once
+  (let [sent (atom [])
+        io {:notify (fn [s b] (swap! sent conj [s b]))}
+        blocked (fn [a block] (rexmux.agents/report a {:session "s" :block block :id "1" :record {:state "blocked" :app "pi" :msg "approve?"}}))
+        a1 (blocked rexmux.agents/empty-state "block:x")]
+    (sc/notify-attention! io {:block-id "block:here"} rexmux.agents/empty-state a1)
+    (is (= 1 (count @sent)))
+    (is (= "pi needs you" (ffirst @sent)))
+    (sc/notify-attention! io {:block-id "block:here"} a1 a1)
+    (is (= 1 (count @sent)) "still blocked is no news")
+    (sc/notify-attention! io {:block-id "block:y"} a1 (blocked a1 "block:y"))
+    (is (= 1 (count @sent)) "not for the pane being looked at")))

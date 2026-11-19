@@ -132,3 +132,16 @@
     (is (every? #(not (fn? (:run %))) c))
     (is (false? (:enabled (first (filter #(= :rex/session.view (:id %)) c)))))
     (is (true? (:enabled (first (filter #(= :rex/server.status (:id %)) c)))))))
+
+(deftest herdr-parity-commands-make-their-effects
+  (testing "Ctrl+b f opens tiny fingers in the window"
+    (is (= [[:hints/open {}]] (:effects (reg/invoke registry ctx :hints/open {})))))
+  (testing "copy mode and search float the scrollback helper over the pane"
+    (let [[[kind {:keys [argv close-on-exit]}]] (:effects (reg/invoke registry ctx :pane/search {:text "error"}))]
+      (is (= :layer/float kind))
+      (is close-on-exit)
+      (is (re-find #"desktop/bin/rexmux-scrollback$" (first argv)))
+      (is (= ["session:1" "block:1" "error"] (rest argv)))))
+  (testing "renaming a tab names the focused window"
+    (is (= [[:rex/call "session.set_window_label" {:session_id "session:1" :window_id "window:1" :label "logs"}]]
+           (:effects (reg/invoke registry ctx :tab/rename {:label "logs"}))))))

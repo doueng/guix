@@ -4165,6 +4165,7 @@ dependencies = [
  "gpui_platform",
  "libc",
  "libghostty-vt",
+ "regex",
  "serde_json",
  "smol",
  "tungstenite",

@@ -29,6 +29,9 @@ pub struct CellStyle {
     pub underline: bool,
 }
 
+/// A tiny-fingers hint: black on yellow, bold.
+pub const HINT: CellStyle = CellStyle { fg: [0, 0, 0], bg: Some([0xf5, 0xc2, 0x11]), bold: true, italic: false, underline: false };
+
 impl Screen {
     fn new(w: usize, h: usize) -> Screen {
         Screen { w, h, rows: vec![vec![' '; w]; h], styles: vec![vec![None; w]; h], cursor: None, selected: None }
@@ -125,7 +128,8 @@ pub fn render(m: &Model, grids: &HashMap<String, Grid>, w: usize, h: usize) -> S
             let agent = m.agents.iter().find(|a| a.block == t.block);
             let mark = if focused.as_deref() == Some(t.block.as_str()) { "▶" } else { "─" };
             let status = agent.map(|a| format!(" {} {}", crate::model::icon(&a.state), a.app)).unwrap_or_default();
-            let title = format!("{mark} {}{status} ", short(&t.block));
+            let history = if grids.get(&t.block).is_some_and(|g| g.scrolled) { " ↑ history (type to return)" } else { "" };
+            let title = format!("{mark} {}{status}{history} ", short(&t.block));
             let fill: String = std::iter::repeat_n('─', tw).collect();
             s.put(x0, y0, &fill, tw);
             s.put(x0, y0, &title, tw);
@@ -141,7 +145,40 @@ pub fn render(m: &Model, grids: &HashMap<String, Grid>, w: usize, h: usize) -> S
                         }
                     }
                 }
-                if focused.as_deref() == Some(t.block.as_str()) {
+                // A mouse selection, drawn reversed.
+                if let Some((_, a, b)) = m.selection.as_ref().filter(|s| s.0 == t.block) {
+                    let ((c0, r0), (c1, r1)) = if (a.1, a.0) <= (b.1, b.0) { (*a, *b) } else { (*b, *a) };
+                    for r in r0..=r1 {
+                        let (from, to) = (if r == r0 { c0 } else { 0 }, if r == r1 { c1 + 1 } else { tw });
+                        let y = y0 + 1 + r;
+                        if r + 1 >= th || y >= s.h {
+                            break;
+                        }
+                        for c in from..to.min(tw) {
+                            if x0 + c < s.w {
+                                let st = s.styles[y][x0 + c].unwrap_or(CellStyle { fg: [0xd8, 0xd8, 0xd8], bg: None, bold: false, italic: false, underline: false });
+                                s.styles[y][x0 + c] = Some(CellStyle { fg: st.bg.unwrap_or(g.bg), bg: Some(st.fg), ..st });
+                            }
+                        }
+                    }
+                }
+                // Tiny fingers: each hint over the start of its text, black on yellow
+                // as the plugin drew them; typed letters narrow the set.
+                if let Some(h) = m.hints.as_ref().filter(|h| h.block == t.block) {
+                    for tg in h.targets.iter().filter(|tg| tg.hint.starts_with(&h.input)) {
+                        let (x, y) = (x0 + tg.col, y0 + 1 + tg.row);
+                        if tg.row + 1 < th && tg.col < tw && y < s.h {
+                            let room = tw - tg.col;
+                            s.put(x, y, &tg.hint, room);
+                            for i in 0..tg.hint.chars().count().min(room) {
+                                if x + i < s.w {
+                                    s.styles[y][x + i] = Some(HINT);
+                                }
+                            }
+                        }
+                    }
+                }
+                if m.hints.is_none() && focused.as_deref() == Some(t.block.as_str()) {
                     if let Some((cx, cy)) = g.cursor {
                         if (cx as usize) < tw && (cy as usize) + 1 < th {
                             s.cursor = Some((x0 + cx as usize, y0 + 1 + cy as usize));

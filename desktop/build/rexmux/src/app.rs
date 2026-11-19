@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
-use serde_json::json;
+use serde_json::{Value as Json, json};
 
 use crate::keys::KeyPress;
 use crate::link::{Incoming, Link, SidecarCommand, Verdict};
@@ -18,8 +18,42 @@ pub enum AppEvent {
     Rex(usize, RexIn),
     Stream(String, u64, StreamEvent),
     Key(KeyPress),
+    Mouse(Mouse),
     Resize(u16, u16),
     Quit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MouseKind {
+    Press,
+    Release,
+    Drag,
+    /// Rows to scroll, down positive.
+    Wheel(i64),
+}
+
+/// A mouse event at a screen cell (column, row), as screen::render lays it out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mouse {
+    pub kind: MouseKind,
+    pub col: usize,
+    pub row: usize,
+    /// left, middle or right.
+    pub button: &'static str,
+}
+
+/// The text of SEL on GRID: rows from the earlier end to the later, lines
+/// joined with newlines and trailing blanks dropped.
+pub fn selected_text(g: &Grid, a: (usize, usize), b: (usize, usize)) -> String {
+    let ((c0, r0), (c1, r1)) = if (a.1, a.0) <= (b.1, b.0) { (a, b) } else { (b, a) };
+    let mut out = Vec::new();
+    for r in r0..=r1.min(g.rows.saturating_sub(1) as usize) {
+        let line: Vec<char> = g.line(r as u16).chars().collect();
+        let from = if r == r0 { c0 } else { 0 };
+        let to = if r == r1 { (c1 + 1).min(line.len()) } else { line.len() };
+        out.push(line.get(from.min(to)..to).map(|s| s.iter().collect::<String>()).unwrap_or_default());
+    }
+    out.join("\n")
 }
 
 pub struct App {
@@ -49,6 +83,7 @@ impl App {
                 let mut m = Model::new(servers);
                 m.prefer_session = std::env::var("REXMUX_SESSION").ok();
                 m.startup = crate::startup();
+                m.shell = crate::shell();
                 m
             },
             grids: HashMap::new(),
@@ -149,7 +184,12 @@ impl App {
                 let t = self.tags.map.remove(&tag).unwrap_or(crate::model::Tag::Ignore);
                 self.model.rex_response(t, result)
             }
-            AppEvent::Rex(i, RexIn::Event(e)) => self.model.rex_event(i, &e),
+            AppEvent::Rex(i, RexIn::Event(e)) => {
+                if std::env::var_os("REXMUX_DEBUG").is_some() {
+                    eprintln!("rexmux: event {e}");
+                }
+                self.model.rex_event(i, &e)
+            }
             AppEvent::Rex(i, RexIn::Closed(why)) => {
                 self.controls[i] = None;
                 self.model.echo = format!("{} disconnected: {why}", self.model.servers[i].label);
@@ -172,7 +212,17 @@ impl App {
                     }
                 }
             }
-            AppEvent::Key(k) => self.model.key(&k),
+            AppEvent::Key(k) => {
+                // Typing follows the output again and drops a selection, as a terminal does.
+                self.model.selection = None;
+                if self.model.minibuffer.is_none() && self.model.hints.is_none() {
+                    if let Some((_, h)) = self.model.focused_block().and_then(|b| self.streams.get(&b)) {
+                        h.bottom();
+                    }
+                }
+                self.model.key(&k)
+            }
+            AppEvent::Mouse(m) => self.mouse(m),
             AppEvent::Resize(c, r) => {
                 self.area = (c, r);
                 vec![]
@@ -183,7 +233,98 @@ impl App {
             }
         };
         self.perform(outs);
+        if self.model.hints_wanted {
+            self.open_hints();
+        }
         self.sync_sizes();
+    }
+
+    /// The visible pane under screen cell (COL, ROW): (block, pane column,
+    /// pane row), the row None on its title line.
+    pub fn pane_at(&self, col: usize, row: usize) -> Option<(String, usize, Option<usize>)> {
+        let view = self.model.view()?;
+        let (w, h) = (self.area.0 as usize, self.area.1 as usize);
+        view.visible().into_iter().rev().find_map(|t| {
+            let (x0, y0, tw, th) = crate::screen::tile_cells(t.rect, w, h);
+            (col >= x0 && col < x0 + tw && row >= y0 && row < y0 + th)
+                .then(|| (t.block.clone(), col - x0, (row > y0).then(|| row - y0 - 1)))
+        })
+    }
+
+    /// Clicks focus a pane and start a selection; dragging extends it and
+    /// releasing copies it. The wheel scrolls the pane's history. A program
+    /// that asked for mouse reports, such as Vim or jjui, gets them instead.
+    fn mouse(&mut self, m: Mouse) -> Vec<Out> {
+        let Some(sid) = self.model.session_id_pub() else { return vec![] };
+        let hit = self.pane_at(m.col, m.row);
+        let mut outs = Vec::new();
+        if let (MouseKind::Press, Some((block, _, _))) = (m.kind, &hit) {
+            if self.model.focused_block().as_deref() != Some(block.as_str()) {
+                outs.push(self.model.rex_out("session.focus_block", json!({"session_id": sid, "block_id": block})));
+            }
+        }
+        let Some((block, x, Some(y))) = hit else {
+            if m.kind == MouseKind::Release {
+                self.finish_selection(&mut outs);
+            }
+            return outs;
+        };
+        let reports = self.grids.get(&block).is_some_and(|g| g.mouse);
+        if reports {
+            let event = match m.kind {
+                MouseKind::Wheel(rows) => json!({"type": "wheel", "payload": {"x": x, "y": y, "delta_y": rows, "delta_mode": "line"}}),
+                MouseKind::Press => json!({"type": "mouse", "payload": {"action": "press", "button": m.button, "x": x, "y": y}}),
+                MouseKind::Release => json!({"type": "mouse", "payload": {"action": "release", "button": m.button, "x": x, "y": y}}),
+                MouseKind::Drag => json!({"type": "mouse", "payload": {"action": "motion", "button": m.button, "buttons": Json::Object([(m.button.to_string(), json!(true))].into_iter().collect()), "x": x, "y": y}}),
+            };
+            outs.push(self.model.rex_out("block.event", json!({"session_id": sid, "block_id": block, "event": event})));
+            return outs;
+        }
+        match m.kind {
+            MouseKind::Wheel(rows) => {
+                if let Some((_, h)) = self.streams.get(&block) {
+                    h.scroll(rows);
+                }
+            }
+            MouseKind::Press if m.button == "left" => self.model.selection = Some((block, (x, y), (x, y))),
+            MouseKind::Press if m.button == "middle" => {
+                outs.push(Out::Paste { server: self.model.current, session: sid, block });
+            }
+            MouseKind::Drag => {
+                if let Some(sel) = self.model.selection.as_mut().filter(|s| s.0 == block) {
+                    sel.2 = (x, y);
+                }
+            }
+            MouseKind::Release => self.finish_selection(&mut outs),
+            _ => {}
+        }
+        outs
+    }
+
+    fn finish_selection(&mut self, outs: &mut Vec<Out>) {
+        let Some((block, a, b)) = self.model.selection.clone() else { return };
+        if a == b {
+            self.model.selection = None;
+            return;
+        }
+        if let Some(g) = self.grids.get(&block) {
+            let text = selected_text(g, a, b);
+            self.model.echo = format!("Copied {} characters", text.chars().count());
+            outs.push(Out::Clipboard(text));
+        }
+    }
+
+    /// Tiny fingers on the focused pane, from the screen its stream shows.
+    fn open_hints(&mut self) {
+        self.model.hints_wanted = false;
+        let Some(block) = self.model.focused_block() else { return };
+        match self.grids.get(&block) {
+            Some(g) => {
+                let lines: Vec<String> = (0..g.rows).map(|y| g.line(y)).collect();
+                self.model.open_hints(&block, &lines, g.cols as usize);
+            }
+            None => self.model.echo = "The focused pane shows nothing yet.".into(),
+        }
     }
 
     pub fn perform(&mut self, outs: Vec<Out>) {
@@ -218,8 +359,41 @@ impl App {
                     self.grids.remove(&block);
                     self.sizes.remove(&block);
                 }
-                Out::Clipboard(text) => {
-                    let _ = std::process::Command::new("wl-copy").arg(text).spawn();
+                // Tests set REXMUX_CLIPBOARD_FILE and REXMUX_OPEN_FILE, so a copy or a
+                // URL lands in a file rather than on the desktop.
+                Out::Clipboard(text) => match std::env::var_os("REXMUX_CLIPBOARD_FILE") {
+                    Some(f) => {
+                        let _ = std::fs::write(f, text);
+                    }
+                    None => {
+                        let _ = std::process::Command::new("wl-copy").arg("--").arg(text).spawn();
+                    }
+                },
+                Out::Paste { server, session, block } => {
+                    let text = match std::env::var_os("REXMUX_CLIPBOARD_FILE") {
+                        Some(f) => std::fs::read_to_string(f).ok(),
+                        None => std::process::Command::new("wl-paste").arg("--no-newline").output().ok()
+                            .filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()),
+                    };
+                    match text {
+                        Some(t) if !t.is_empty() => self.perform(vec![Out::Rex {
+                            server,
+                            method: "block.event".into(),
+                            payload: json!({"session_id": session, "block_id": block, "event": {"type": "paste", "payload": {"text": t}}}),
+                            tag: crate::model::Tag::Ignore,
+                        }]),
+                        _ => self.model.echo = "The clipboard is empty.".into(),
+                    }
+                }
+                Out::Open(url) if std::env::var_os("REXMUX_OPEN_FILE").is_some() => {
+                    let _ = std::fs::write(std::env::var_os("REXMUX_OPEN_FILE").unwrap(), url);
+                }
+                Out::Open(url) => {
+                    // As tiny-fingers did: xdg-open (Chrome, by mimeapps), then focus Chrome.
+                    let _ = std::process::Command::new("xdg-open").arg(&url)
+                        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+                    let _ = std::process::Command::new("hyprctl").args(["dispatch", "hl.dsp.focus({ window = \"class:google-chrome\" })"])
+                        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
                 }
                 Out::Quit => self.quit = true,
             }

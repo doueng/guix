@@ -12,6 +12,7 @@ mod conv;
 mod fonts;
 #[cfg(feature = "gui")]
 mod gui;
+mod hints;
 mod keys;
 mod link;
 mod model;
@@ -39,9 +40,34 @@ fn config() -> Option<edn::Value> {
     std::fs::read_to_string(&path).ok().and_then(|t| edn::parse(&t).ok())
 }
 
-/// The config's :startup session, as JSON for the model.
+/// The config's :startup session, as JSON for the model, with a leading ~
+/// in its :cwd expanded, since Rex wants an absolute directory.
 pub fn startup() -> Option<serde_json::Value> {
-    config().and_then(|c| c.get("startup").map(conv::to_json))
+    let mut s = config().and_then(|c| c.get("startup").map(conv::to_json))?;
+    if let Some(cwd) = s["cwd"].as_str().map(expand_home) {
+        s["cwd"] = serde_json::json!(cwd);
+    }
+    Some(s)
+}
+
+/// The config's :shell, the shell every new block runs; $REXMUX_SHELL overrides it.
+/// A bare name becomes its path on this PATH: a tab Rex restores after a reboot
+/// runs a login shell whose PATH may not have it.
+pub fn shell() -> Option<String> {
+    let sh = std::env::var("REXMUX_SHELL").ok().filter(|s| !s.is_empty())
+        .or_else(|| config().and_then(|c| conv::str_of(c.get("shell"))))?;
+    if sh.contains('/') || sh == "none" {
+        return Some(sh);
+    }
+    let found = std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(&sh)).find(|f| f.is_file()));
+    Some(found.map(|f| f.to_string_lossy().into_owned()).unwrap_or(sh))
+}
+
+pub fn expand_home(p: &str) -> String {
+    match p.strip_prefix("~") {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("{}{rest}", std::env::var("HOME").unwrap_or_default()),
+        _ => p.to_string(),
+    }
 }
 
 /// The servers in the config file, as (label, address).

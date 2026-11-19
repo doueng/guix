@@ -11,10 +11,16 @@
  :leader-prefix ["ctrl+b" "space"]
  ;; Bare Ctrl+h/j/k/l through keyleader term-nav, as Herdr has them.
  :term-nav true
- ;; The session made on a server with none, like Herdr's sesh layout
- ;; (desktop/configs/herdr/sesh.toml): Super+Return/E/D pick these tabs.
+ ;; The shell every new block runs, as Herdr's default_shell; without it Rex
+ ;; uses the server's $SHELL, which is bash when a script autostarted it.
+ :shell "fish"
+ ;; The session rexmux shows, made when the server lacks it, in the order of
+ ;; the Herdr guix workspace's tabs: Super+Return, E, D and G pick them.
  :startup {:label "main"
-           :windows [{:label "emacs" :command ["emacs-project-start"]}
+           :cwd "~/guix"
+           :windows [{:label "shell"}
                      {:label "bbh" :command ["emacs-bbh"]}
-                     {:label "jjui" :command ["jjui"]}
-                     {:label "shell"}]}}
+                     ;; After a reboot Rex brings the tabs back as bare shells;
+                     ;; rexmux runs :restore (else :command) in them again.
+                     {:label "pi" :command ["pi"] :restore ["pi" "--continue"]}
+                     {:label "jjui" :command ["jjui"]}]}}

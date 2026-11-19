@@ -4,7 +4,8 @@
   {:agents agents-state :servers [..] :server label :registry reg :rex fns}.
   :rex holds the read-only calls a command may make itself, so tests can
   replace them."
-  (:require [clojure.string :as str]
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [rexmux.agents :as agents]
             [rexmux.registry :as reg]))
 
@@ -104,6 +105,25 @@
     :keys [["ctrl+b" "g"]] :needs #{:session-id}
     :run (fn [ctx _] [[:layer/float {:argv ["jjui"] :cwd (:cwd ctx) :size [0.9 0.85] :close-on-exit true}]])}])
 
+(defn- focused-cwd
+  "The focused pane's working directory, for Herdr's new_cwd = follow; nil
+  when Rex cannot say."
+  [ctx]
+  (when (:block-id ctx)
+    (try (not-empty (rex ctx :cwd (:session-id ctx) (:block-id ctx))) (catch Exception _ nil))))
+
+(defn- shell-here [ctx]
+  {:block (cond-> {:flavor "com.superlogical.terminal.shell"}
+            (focused-cwd ctx) (assoc :options {:cwd (focused-cwd ctx)}))})
+
+(defn- follow-cmd
+  "A keyed command running Rex METHOD with ARGS and a new shell in the
+  focused pane's directory, as Herdr's new_cwd = follow opened them."
+  [id title keys method args]
+  {:id id :title title :category (namespace id) :source :local :keys keys
+   :needs #{:session-id}
+   :run (fn [ctx _] [[:invoke (keyword "rex" method) (assoc args :layout (shell-here ctx))]])})
+
 (defn- rex-cmd
   "A keyed command that runs Rex API METHOD with ARGS, through the API
   command so context, defaults and the schema check apply."
@@ -117,14 +137,14 @@
   c new tab, n next tab, 1..9 and Ctrl+1..9 a tab, h j k l focus; plus tmux's
   % and \" splits, x close and z zoom."
   (vec (concat
-        [(rex-cmd :pane/split-right "Panes: split right" [["ctrl+b" "%"]] "session.new_split" {:direction "horizontal" :side "after"})
-         (rex-cmd :pane/split-down "Panes: split down" [["ctrl+b" "\""]] "session.new_split" {:direction "vertical" :side "after"})
+        [(follow-cmd :pane/split-right "Panes: split right" [["ctrl+b" "%"]] "session.new_split" {:direction "horizontal" :side "after"})
+         (follow-cmd :pane/split-down "Panes: split down" [["ctrl+b" "\""]] "session.new_split" {:direction "vertical" :side "after"})
          (rex-cmd :pane/zoom "Panes: zoom or unzoom" [["ctrl+b" "z"]] "session.zoom_block" {})
          (rex-cmd :pane/next "Panes: next" [["ctrl+b" "o"]] "session.focus_next_pane" {})
          {:id :pane/close :title "Panes: close" :category "pane" :source :local :keys [["ctrl+b" "x"]]
           :needs #{:session-id :block-id}
           :run (fn [_ _] [[:invoke :rex/block.close {}]])}
-         (rex-cmd :tab/new "Tabs: new" [["ctrl+b" "c"]] "session.new_window" {})
+         (follow-cmd :tab/new "Tabs: new" [["ctrl+b" "c"]] "session.new_window" {})
          (rex-cmd :tab/next "Tabs: next" [["ctrl+b" "n"]] "session.focus_next_window" {})
          (rex-cmd :tab/previous "Tabs: previous" [["ctrl+b" "p"]] "session.focus_previous_window" {})
          (rex-cmd :tab/close "Tabs: close" [["ctrl+b" "&"]] "session.close_window" {})
@@ -174,6 +194,67 @@ Router sees it as [routed to T12 W3 from rex]."
            (rex ctx :spawn (:server ctx) ["bbh" "say" "--from" "rex" text] {})
            [[:ui/message (str "Sent: " text)]])}])
 
+(def ^:private bin-dir
+  "desktop/bin beside this checkout, so new helpers work before make stow links them."
+  (str (fs/normalize (fs/absolutize (fs/path (fs/parent *file*) ".." ".." ".." ".." "bin")))))
+
+(defn- scrollback [ctx text]
+  [[:layer/float {:argv (cond-> [(str bin-dir "/rexmux-scrollback") (:session-id ctx) (:block-id ctx)] text (conj text))
+                  :size [0.96 0.92] :close-on-exit true}]])
+
+(defn project-dirs
+  "Directories the project picker offers, as Herdr's sesh did: ~/guix and
+  each directory under ~/projects."
+  [home]
+  (let [guix (fs/path home "guix") projects (fs/path home "projects")]
+    (vec (concat (when (fs/directory? guix) [(str guix)])
+                 (when (fs/directory? projects) (sort (map str (filter fs/directory? (fs/list-dir projects)))))))))
+
+(def herdr-parity-commands
+  "What Herdr gave besides panes and tabs (docs/rex-parity.html):
+  tiny fingers, copy mode and search over the scrollback, renaming, resizing,
+  paste, and project sessions."
+  [{:id :hints/open :title "Copy: tiny fingers, hints over the pane" :category "copy" :source :local
+    :doc "Label each URL, path, hash, UUID, jj change and [bookmark] the focused pane shows; type a label to copy it (a web URL also opens), or Shift and the label to paste it. Herdr's Ctrl+b f, and Super+Y."
+    :keys [["ctrl+b" "f"]] :needs #{:session-id :block-id}
+    :run (fn [_ _] [[:hints/open {}]])}
+   {:id :pane/scrollback :title "Copy: the pane's scrollback in the editor" :category "copy" :source :local
+    :doc "Copy mode: the focused pane's whole scrollback in $EDITOR, at the end; search with ? and /, yank with \"+y. Herdr's Ctrl+b E."
+    :keys [["ctrl+b" "["] ["ctrl+b" "shift+e"]] :needs #{:session-id :block-id}
+    :run (fn [ctx _] (scrollback ctx nil))}
+   {:id :pane/search :title "Copy: search the pane's scrollback" :category "copy" :source :local
+    :keys [["ctrl+b" "/"]] :needs #{:session-id :block-id}
+    :args [{:name :text :type "string" :required true}]
+    :schema {:type "object" :properties {:text {:type "string"}} :required ["text"]}
+    :run (fn [ctx {:keys [text]}] (scrollback ctx text))}
+   {:id :clipboard/paste :title "Copy: paste the clipboard into the pane" :category "copy" :source :local
+    :keys [["ctrl+shift+v"]] :needs #{:session-id :block-id}
+    :run (fn [_ _] [[:clipboard/paste {}]])}
+   {:id :tab/rename :title "Tabs: rename" :category "tab" :source :local
+    :keys [["ctrl+b" ","]] :needs #{:session-id :window-id}
+    :args [{:name :label :type "string" :required true}]
+    :schema {:type "object" :properties {:label {:type "string"}} :required ["label"]}
+    :run (fn [ctx {:keys [label]}] [[:invoke :rex/session.set_window_label {:window_id (:window-id ctx) :label label}]])}
+   {:id :session/rename :title "Sessions: rename" :category "session" :source :local
+    :keys [["ctrl+b" "$"]] :needs #{:session-id}
+    :args [{:name :label :type "string" :required true}]
+    :schema {:type "object" :properties {:label {:type "string"}} :required ["label"]}
+    :run (fn [_ {:keys [label]}] [[:invoke :rex/session.set_label {:label label}]])}
+   {:id :session/last :title "Sessions: the previous one" :category "session" :source :local
+    :keys [["ctrl+b" "shift+b"]]
+    :run (fn [_ _] [[:session/last {}]])}
+   {:id :session/project :title "Sessions: open a project" :category "session" :source :local
+    :doc "Pick a project directory; show its session, made with the startup tabs (shell, bbh, pi, jjui) there when missing. Herdr's sesh picker, Ctrl+b O."
+    :keys [["ctrl+b" "shift+o"]]
+    :run (fn [_ _]
+           [[:ui/pick {:title "Project" :then :session/open-project :arg :dir
+                       :items (mapv (fn [d] {:label (str (fs/file-name d) "  " d) :value d})
+                                    (project-dirs (or (System/getenv "HOME") (str (fs/home)))))}]])}
+   {:id :session/open-project :title "Sessions: open a project directory" :category "session" :source :local
+    :args [{:name :dir :type "string" :required true}]
+    :schema {:type "object" :properties {:dir {:type "string"}} :required ["dir"]}
+    :run (fn [_ {:keys [dir]}] [[:session/startup {:label (str (fs/file-name dir)) :cwd dir}]])}])
+
 (def help-commands
   [{:id :mx/describe-command :title "Help: describe a command" :category "help" :source :local
     :keys [["ctrl+b" "?"]]
@@ -187,4 +268,12 @@ Router sees it as [routed to T12 W3 from rex]."
    {:id :mx/reload :title "Help: reload commands and keys" :category "help" :source :local
     :run (fn [_ _] [[:sidecar/reload {}]])}])
 
-(def all (vec (concat agent-commands session-commands pane-commands bbh-commands help-commands)))
+(def resize-commands
+  "Ctrl+b H J K L move the focused pane's border, five cells at a time."
+  (vec (for [[d k] [["left" "h"] ["down" "j"] ["up" "k"] ["right" "l"]]]
+         {:id (keyword "pane" (str "resize-" d)) :title (str "Panes: grow " d) :category "pane" :source :local
+          :keys [["ctrl+b" (str "shift+" k)]] :needs #{:session-id :block-id}
+          :run (fn [_ _] [[:pane/resize {:direction d :cells 5}]])})))
+
+(def all (vec (concat agent-commands session-commands pane-commands bbh-commands herdr-parity-commands
+                      resize-commands help-commands)))

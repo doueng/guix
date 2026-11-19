@@ -8,11 +8,12 @@ use std::time::Duration;
 
 use gpui::{
     App, AppContext, Bounds, Context, FocusHandle, Font, FontStyle, FontWeight, Hsla, InteractiveElement,
-    IntoElement, KeyDownEvent, ParentElement, Render, Rgba, StyledText, Styled, Task, TextRun,
-    UnderlineStyle, Window, WindowBounds, WindowOptions, div, px, size,
+    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Point, Render, Rgba, ScrollDelta, ScrollWheelEvent, StyledText, Styled, Task, TextRun, UnderlineStyle, Window,
+    WindowBounds, WindowOptions, div, px, size,
 };
 
-use crate::app::{App as Client, AppEvent};
+use crate::app::{App as Client, AppEvent, Mouse, MouseKind};
 use crate::keys::KeyPress;
 use crate::screen::{self, CellStyle};
 
@@ -34,7 +35,10 @@ pub fn key_of(ks: &gpui::Keystroke) -> Option<KeyPress> {
         return None;
     }
     let m = &ks.modifiers;
-    let mut k = KeyPress { key, ctrl: m.control, alt: m.alt, shift: m.shift, sup: m.platform, text: None };
+    // A keymap with a capital letter on its own key (as wtype makes) types it without shift.
+    let one_capital = |s: &str| s.chars().count() == 1 && s.chars().all(|c| c.is_ascii_uppercase());
+    let capital = one_capital(&ks.key) || ks.key_char.as_deref().is_some_and(one_capital);
+    let mut k = KeyPress { key, ctrl: m.control, alt: m.alt, shift: m.shift || capital, sup: m.platform, text: None };
     // Some keymaps name a shifted symbol itself (% rather than shift-5); keep the physical key.
     if let Some(base) = crate::keys::unshifted(&k.key) {
         k.key = base;
@@ -62,7 +66,19 @@ struct RexView {
     rx: mpsc::Receiver<AppEvent>,
     focus: FocusHandle,
     font: Font,
+    /// One cell's width and height in pixels, from the last render.
+    cell: (f32, f32),
+    /// Wheel movement not yet a whole row.
+    wheel: f32,
     _poll: Task<()>,
+}
+
+fn button_name(b: MouseButton) -> &'static str {
+    match b {
+        MouseButton::Right => "right",
+        MouseButton::Middle => "middle",
+        _ => "left",
+    }
 }
 
 impl RexView {
@@ -79,7 +95,7 @@ impl RexView {
                 }
             }
         });
-        RexView { client, rx, focus, font: gpui::font(family), _poll: poll }
+        RexView { client, rx, focus, font: gpui::font(family), cell: (8.0, FONT_SIZE * LINE), wheel: 0.0, _poll: poll }
     }
 
     fn drain(&mut self, cx: &mut Context<Self>) {
@@ -103,6 +119,37 @@ impl RexView {
             cx.stop_propagation();
             self.drain(cx);
             cx.notify();
+        }
+    }
+
+    /// The screen cell under window position P (the view has 4px of padding).
+    fn cell_at(&self, p: Point<Pixels>) -> (usize, usize) {
+        let (x, y): (f32, f32) = (p.x.into(), p.y.into());
+        (((x - 4.0) / self.cell.0).max(0.0) as usize, ((y - 4.0) / self.cell.1).max(0.0) as usize)
+    }
+
+    fn on_mouse(&mut self, kind: MouseKind, p: Point<Pixels>, button: &'static str, cx: &mut Context<Self>) {
+        let (col, row) = self.cell_at(p);
+        if std::env::var_os("REXMUX_DEBUG").is_some() {
+            eprintln!("rexmux: mouse {kind:?} {button} at cell {col},{row} -> {:?}", self.client.pane_at(col, row));
+        }
+        self.client.handle(AppEvent::Mouse(Mouse { kind, col, row, button }));
+        self.drain(cx);
+        cx.notify();
+    }
+
+    fn on_wheel(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        // GPUI's delta is positive when the content should move down, that is
+        // when scrolling up into history; Rex counts rows down as positive.
+        let rows = match ev.delta {
+            ScrollDelta::Lines(d) => -d.y * 3.0,
+            ScrollDelta::Pixels(d) => -f32::from(d.y) / self.cell.1,
+        };
+        self.wheel += rows;
+        let whole = self.wheel.trunc();
+        if whole != 0.0 {
+            self.wheel -= whole;
+            self.on_mouse(MouseKind::Wheel(whole as i64), ev.position, "left", cx);
         }
     }
 
@@ -140,6 +187,7 @@ impl Render for RexView {
         let id = ts.resolve_font(&self.font);
         let cw: f32 = ts.advance(id, px(FONT_SIZE), 'm').map(|s| s.width.into()).unwrap_or(FONT_SIZE * 0.6);
         let lh = FONT_SIZE * LINE;
+        self.cell = (cw, lh);
         let vp = window.viewport_size();
         let (vw, vh): (f32, f32) = (vp.width.into(), vp.height.into());
         let w = ((vw - 8.0) / cw).floor().max(20.0) as usize;
@@ -174,6 +222,18 @@ impl Render for RexView {
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.on_key(ev, cx)))
+            .on_any_mouse_down(cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+                this.on_mouse(MouseKind::Press, ev.position, button_name(ev.button), cx)
+            }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, _, cx| {
+                this.on_mouse(MouseKind::Release, ev.position, "left", cx)
+            }))
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
+                if ev.pressed_button == Some(MouseButton::Left) {
+                    this.on_mouse(MouseKind::Drag, ev.position, "left", cx)
+                }
+            }))
+            .on_scroll_wheel(cx.listener(|this, ev: &ScrollWheelEvent, _, cx| this.on_wheel(ev, cx)))
             .size_full()
             .p(px(4.0))
             .bg(color(BG))

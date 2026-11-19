@@ -70,6 +70,8 @@ pub struct Win {
     pub focused: Option<String>,
     pub zoomed: Option<String>,
     pub tiles: Vec<Tile>,
+    /// The tiled layer's layout tree, as session.view gives it, for resizing.
+    pub layout: Json,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -85,6 +87,8 @@ impl View {
     pub fn from_json(v: &Json) -> View {
         let windows = v["windows"].as_array().cloned().unwrap_or_default().iter().map(|w| {
             let mut tiles = Vec::new();
+            let layout = w["layers"].as_array().and_then(|ls| ls.iter().find(|l| l["kind"] == "tiled"))
+                .map(|l| l["layout"].clone()).unwrap_or(Json::Null);
             for layer in w["layers"].as_array().cloned().unwrap_or_default() {
                 if layer["state"] == "minimized" {
                     continue;
@@ -97,6 +101,7 @@ impl View {
                 focused: w["focused_block_id"].as_str().map(str::to_string),
                 zoomed: w["zoomed_block_id"].as_str().map(str::to_string),
                 tiles,
+                layout,
             }
         }).collect();
         View {
@@ -122,6 +127,44 @@ impl View {
             None => vec![],
         }
     }
+}
+
+/// The session.resize_pane payload (less session_id) that moves the border
+/// nearest BLOCK of the split DIRECTION crosses by DELTA of that split:
+/// left and right move a vertical border, up and down a horizontal one.
+pub fn resize_request(layout: &Json, block: &str, direction: &str, delta: f64) -> Option<Json> {
+    let (orient, sign) = match direction {
+        "left" => ("horizontal", -1.0),
+        "right" => ("horizontal", 1.0),
+        "up" => ("vertical", -1.0),
+        "down" => ("vertical", 1.0),
+        _ => return None,
+    };
+    fn contains(node: &Json, block: &str) -> bool {
+        node["block_id"].as_str() == Some(block)
+            || (!node["split"].is_null() && (contains(&node["split"]["before"], block) || contains(&node["split"]["after"], block)))
+    }
+    fn first_leaf(node: &Json) -> Option<String> {
+        node["block_id"].as_str().map(str::to_string).or_else(|| first_leaf(&node["split"]["before"]))
+    }
+    // The deepest split of ORIENT on the way to BLOCK.
+    fn find<'a>(node: &'a Json, block: &str, orient: &str, best: Option<&'a Json>) -> Option<&'a Json> {
+        let sp = &node["split"];
+        if sp.is_null() {
+            return best;
+        }
+        let best = if sp["direction"] == orient { Some(sp) } else { best };
+        for side in ["before", "after"] {
+            if contains(&sp[side], block) {
+                return find(&sp[side], block, orient, best);
+            }
+        }
+        best
+    }
+    let sp = find(layout, block, orient, None)?;
+    let ratio = (sp["ratio"].as_f64().unwrap_or(0.5) + sign * delta).clamp(0.1, 0.9);
+    Some(json!({"direction": orient, "before_block_id": first_leaf(&sp["before"])?,
+                "after_block_id": first_leaf(&sp["after"])?, "ratio": ratio}))
 }
 
 fn s(v: &Json) -> String {
@@ -160,6 +203,10 @@ pub enum Tag {
     Ticket { server: usize, block: String },
     Sessions { server: usize },
     Perform { server: usize, request: String },
+    /// A startup tab's process, to see whether a restart left it a bare shell.
+    Revive { server: usize, block: String, window: String },
+    /// The sessions, to show LABEL's or make it with the startup tabs in CWD.
+    Project { server: usize, label: String, cwd: Option<String> },
     Ignore,
 }
 
@@ -170,7 +217,20 @@ pub enum Out {
     OpenStream { server: usize, block: String, ticket: String },
     CloseStream { block: String },
     Clipboard(String),
+    /// Open a web URL in the browser (tiny fingers).
+    Open(String),
+    /// Paste the clipboard into BLOCK (the app reads it).
+    Paste { server: usize, session: String, block: String },
     Quit,
+}
+
+/// Tiny fingers over one pane (hints.rs).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HintMode {
+    pub block: String,
+    pub session: String,
+    pub targets: Vec<crate::hints::Target>,
+    pub input: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -200,6 +260,21 @@ pub struct Model {
     /// The session to create on a server with none (config :startup), as
     /// {label, windows: [{label, command: [argv]}]}; it is also the one shown first.
     pub startup: Option<Json>,
+    /// The shell new blocks run (config :shell), such as fish.
+    pub shell: Option<String>,
+    /// Tiny fingers, while open.
+    pub hints: Option<HintMode>,
+    /// A command asked for hints; the app opens them with the pane's text.
+    pub hints_wanted: bool,
+    /// The session shown before this one, for Ctrl+b B.
+    pub previous_session: Option<String>,
+    /// Text selected with the mouse: (block, anchor, end) in pane cells.
+    pub selection: Option<(String, (usize, usize), (usize, usize))>,
+    /// The startup session was found at launch: once its view arrives, check
+    /// each tab for a program the Rex server lost in a restart.
+    pub revive_pending: bool,
+    /// A session was just made: show its first tab once its view arrives.
+    pub focus_first_pending: bool,
     next_id: i64,
     /// Requests sent to the sidecar and not answered, with where they came from.
     pub pending: HashMap<i64, Option<(usize, String)>>,
@@ -386,18 +461,71 @@ impl Model {
 
 /// session.create's payload for a :startup spec: one window per entry, each
 /// a shell block running its command (or a login shell when it has none).
-pub fn startup_request(spec: &Json) -> Json {
+/// SHELL (config :shell) is the shell blocks start, since Rex otherwise uses
+/// the server's $SHELL, which is bash when a script autostarted it.
+pub fn startup_request(spec: &Json, shell: Option<&str>) -> Json {
     let windows: Vec<Json> = spec["windows"].as_array().cloned().unwrap_or_default().iter().map(|w| {
         let mut block = json!({"flavor": "com.superlogical.terminal.shell"});
         if let Some(l) = w["label"].as_str() {
             block["label"] = json!(l);
         }
+        let mut options = serde_json::Map::new();
         if w["command"].is_array() {
-            block["options"] = json!({"command": w["command"]});
+            options.insert("command".into(), w["command"].clone());
+        }
+        if let Some(sh) = shell {
+            options.insert("shell".into(), json!(sh));
+        }
+        if let Some(cwd) = spec["cwd"].as_str() {
+            options.insert("cwd".into(), json!(cwd));
+        }
+        if !options.is_empty() {
+            block["options"] = Json::Object(options);
         }
         json!({"window_label": w["label"].as_str().unwrap_or(""), "layout": {"block": block}})
     }).collect();
     json!({"label": spec["label"].as_str().unwrap_or("main"), "initial_windows": windows})
+}
+
+/// S quoted for a POSIX shell or fish: bare when it is plain, else in single quotes.
+pub fn shell_quote(s: &str) -> String {
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:@+,".contains(c)) {
+        s.to_string()
+    } else {
+        // '"'"' closes the quote, adds a quoted ', and reopens: bash and fish both read it.
+        format!("'{}'", s.replace('\'', "'\"'\"'"))
+    }
+}
+
+/// Give every new shell block in a request's layout SHELL, unless it names
+/// one, so tabs, splits and layers run the configured shell rather than the
+/// Rex server's $SHELL.
+pub fn with_shell(v: &mut Json, shell: &str) {
+    with_options(v, &[("shell", json!(shell))]);
+}
+
+/// Give every new shell block in V's layout each of OPTS it does not set.
+pub fn with_options(v: &mut Json, opts: &[(&str, Json)]) {
+    match v {
+        Json::Object(m) => {
+            if m.get("flavor").and_then(Json::as_str) == Some("com.superlogical.terminal.shell") {
+                let o = m.entry("options").or_insert_with(|| json!({}));
+                if o.is_null() {
+                    *o = json!({});
+                }
+                if let Json::Object(o) = o {
+                    for (k, val) in opts {
+                        o.entry(k.to_string()).or_insert_with(|| val.clone());
+                    }
+                }
+            }
+            for (_, child) in m.iter_mut() {
+                with_options(child, opts);
+            }
+        }
+        Json::Array(a) => a.iter_mut().for_each(|c| with_options(c, opts)),
+        _ => {}
+    }
 }
 
 /// The agent picker's icon for an OSC 7501 state.
@@ -414,8 +542,8 @@ pub fn icon(state: &str) -> &'static str {
 
 fn perform_reply(server: usize, request: &str, result: Result<Json, String>) -> Out {
     let payload = match result {
-        Ok(v) => json!({"request_id": request, "result": v}),
-        Err(e) => json!({"request_id": request, "error": {"code": "refused", "message": e}}),
+        Ok(v) => json!({"call_id": request, "result": v}),
+        Err(e) => json!({"call_id": request, "error": {"code": "refused", "message": e}}),
     };
     Out::Rex { server, method: "client.reply".into(), payload, tag: Tag::Ignore }
 }
@@ -510,7 +638,27 @@ impl Model {
         self.view().map(|v| v.session.clone())
     }
 
-    fn rex(&self, method: &str, payload: Json, tag: Tag) -> Out {
+    /// What every new shell block gets unless it says otherwise: the
+    /// configured shell.
+    pub fn block_options(&self) -> Vec<(&'static str, Json)> {
+        let mut o = Vec::new();
+        if let Some(sh) = &self.shell {
+            o.push(("shell", json!(sh)));
+        }
+        o
+    }
+
+    pub fn session_id_pub(&self) -> Option<String> {
+        self.session_id()
+    }
+
+    /// A Rex request on the current server whose answer nobody waits for.
+    pub fn rex_out(&self, method: &str, payload: Json) -> Out {
+        self.rex(method, payload, Tag::Effect)
+    }
+
+    fn rex(&self, method: &str, mut payload: Json, tag: Tag) -> Out {
+        with_options(&mut payload, &self.block_options());
         Out::Rex { server: self.current, method: method.into(), payload, tag }
     }
 
@@ -572,7 +720,15 @@ impl Model {
                 let Some(sid) = self.session_id() else { return vec![] };
                 let size = j["size"].as_array().cloned().unwrap_or_else(|| vec![json!(0.8), json!(0.7)]);
                 let (w, h) = (size[0].as_f64().unwrap_or(0.8), size[1].as_f64().unwrap_or(0.7));
-                let mut options = json!({"command": j["argv"]});
+                // The layer runs in the Rex server's environment; give it this
+                // window's Wayland display, so a copy inside it reaches the clipboard.
+                let mut argv = j["argv"].clone();
+                if let (Ok(wd), Some(a)) = (std::env::var("WAYLAND_DISPLAY"), argv.as_array()) {
+                    let mut with_env = vec![json!("env"), json!(format!("WAYLAND_DISPLAY={wd}"))];
+                    with_env.extend(a.iter().cloned());
+                    argv = json!(with_env);
+                }
+                let mut options = json!({"command": argv});
                 if let Some(cwd) = j["cwd"].as_str() {
                     options["cwd"] = json!(cwd);
                 }
@@ -607,6 +763,43 @@ impl Model {
                 vec![]
             }
             "clipboard/copy" => vec![Out::Clipboard(arg.as_str().unwrap_or("").to_string())],
+            "hints/open" => {
+                self.hints_wanted = true;
+                vec![]
+            }
+            "clipboard/paste" => match (self.session_id(), self.focused_block()) {
+                (Some(session), Some(block)) => vec![Out::Paste { server: self.current, session, block }],
+                _ => vec![],
+            },
+            "session/last" => match self.previous_session.clone() {
+                // A session that is gone fails to attach, and Rex says so.
+                Some(p) => self.attach(self.current, &p),
+                _ => {
+                    self.echo = "No previous session.".into();
+                    vec![]
+                }
+            },
+            "session/startup" => {
+                // Ask for the sessions first: rexmux keeps no live list of them.
+                let server = self.current;
+                vec![Out::Rex { server, method: "session.list".into(), payload: json!({}),
+                                tag: Tag::Project { server, label: j["label"].as_str().unwrap_or("main").into(),
+                                                    cwd: j["cwd"].as_str().map(str::to_string) } }]
+            }
+            "pane/resize" => {
+                let (Some(sid), Some(block)) = (self.session_id(), self.focused_block()) else { return vec![] };
+                let layout = self.view().and_then(|v| v.active_window()).map(|w| w.layout.clone()).unwrap_or(Json::Null);
+                match resize_request(&layout, &block, j["direction"].as_str().unwrap_or(""), j["delta"].as_f64().unwrap_or(0.05)) {
+                    Some(mut p) => {
+                        p["session_id"] = json!(sid);
+                        vec![self.rex("session.resize_pane", p, Tag::Effect)]
+                    }
+                    None => {
+                        self.echo = "No border to move that way.".into();
+                        vec![]
+                    }
+                }
+            }
             "keymap/layer" => self.send_keymap(),
             other => {
                 self.echo = format!("unknown effect {other}");
@@ -631,10 +824,69 @@ impl Model {
         outs
     }
 
+    fn startup_window(&self, label: &str) -> Option<Json> {
+        self.startup.as_ref()?["windows"].as_array()?.iter().find(|w| w["label"] == label).cloned()
+    }
+
+    /// Ask every pane what it runs (session persistence). A startup tab's
+    /// first pane is asked under its tab's label, so it can get its program
+    /// back; any other pane under none, so it only gets the configured shell.
+    fn revive_checks(&self, server: usize) -> Vec<Out> {
+        let Some(v) = self.servers[server].view.as_ref() else { return vec![] };
+        v.windows.iter().flat_map(|w| {
+            let program = self.startup_window(&w.label).is_some();
+            w.tiles.iter().filter(|t| !t.floating).enumerate().map(move |(i, t)| Out::Rex {
+                server, method: "block.method".into(),
+                payload: json!({"session_id": v.session, "block_id": t.block, "method": "process"}),
+                tag: Tag::Revive { server, block: t.block.clone(), window: if program && i == 0 { w.label.clone() } else { String::new() } },
+            })
+        }).collect()
+    }
+
+    /// Rex keeps sessions across a reboot but starts each block's shell anew,
+    /// in the server's $SHELL, without its program. A startup tab whose
+    /// foreground is a bare shell gets its program again (its :restore, such
+    /// as pi --continue, else its :command) and the configured shell, as
+    /// Herdr's resume_agents_on_restore did. A program's tab otherwise closes
+    /// when the program exits, so a bare shell there means a restart. Any
+    /// other pane left a bare shell other than the configured one (a renamed
+    /// tab, a split) gets the configured shell, as Herdr's default_shell. A
+    /// shell the user started inside another is not bare: the block's own
+    /// process (child) is then not the foreground one.
+    pub fn revive(&mut self, server: usize, block: &str, window: &str, process: &Json) -> Vec<Out> {
+        let spec = self.startup_window(window);
+        let fg = process["foreground"]["name"].as_str().unwrap_or("");
+        let shells = ["bash", "sh", "zsh", "fish", "dash"];
+        let bare = process["child"]["pid"].is_null() || process["child"]["pid"] == process["foreground"]["pid"];
+        if !shells.contains(&fg) || !bare {
+            return vec![];
+        }
+        let shell = self.shell.clone().unwrap_or_else(|| "fish".into());
+        let argv = spec.as_ref().and_then(|s| s["restore"].as_array().or(s["command"].as_array()).cloned());
+        let line = match argv {
+            Some(a) => {
+                let words: Vec<String> = a.iter().filter_map(|x| x.as_str()).map(shell_quote).collect();
+                format!("exec {shell} -l -c {}\r", shell_quote(&words.join(" ")))
+            }
+            // A plain shell tab only needs the right shell.
+            None if fg != shell.rsplit('/').next().unwrap_or(&shell) => format!("exec {shell} -l\r"),
+            None => return vec![],
+        };
+        let Some(sid) = self.servers[server].view.as_ref().map(|v| v.session.clone()) else { return vec![] };
+        self.echo = if window.is_empty() { "restored a pane's shell".into() } else { format!("restored tab {window}") };
+        vec![Out::Rex { server, method: "com.superlogical.terminal.write".into(),
+                        payload: json!({"session_id": sid, "block_id": block, "args": {"data": line}}), tag: Tag::Effect }]
+    }
+
     /// Show SESSION of SERVER: attach, and read its view.
     pub fn attach(&mut self, server: usize, session: &str) -> Vec<Out> {
         if session.is_empty() {
             return vec![];
+        }
+        if let Some(old) = self.servers[server].view.as_ref().map(|v| v.session.clone()) {
+            if old != session {
+                self.previous_session = Some(old);
+            }
         }
         self.current = server;
         vec![Out::Rex { server, method: "session.attach".into(), payload: json!({"session_id": session}), tag: Tag::View { server } }]
@@ -671,17 +923,21 @@ impl Model {
                     .collect();
                 self.servers[server].sessions = list.clone();
                 if self.servers[server].view.is_none() && server == self.current {
-                    if list.is_empty() {
-                        if let Some(create) = self.startup.as_ref().map(startup_request) {
+                    let want = self.prefer_session.clone()
+                        .or_else(|| self.startup.as_ref().and_then(|s| s["label"].as_str().map(str::to_string)));
+                    let found = want.as_ref()
+                        .and_then(|w| list.iter().find(|(id, l)| id == w || l == w || id.ends_with(w.as_str())));
+                    // The startup session is made when it is missing, even beside
+                    // other sessions, which may be dead leftovers.
+                    let startup_missing = self.prefer_session.is_none() && found.is_none();
+                    if startup_missing || list.is_empty() {
+                        if let Some(create) = self.startup.as_ref().map(|s| startup_request(s, self.shell.as_deref())) {
                             self.echo = "starting the startup session".into();
                             return vec![Out::Rex { server, method: "session.create".into(), payload: create, tag: Tag::Created { server } }];
                         }
                     }
-                    let want = self.prefer_session.clone()
-                        .or_else(|| self.startup.as_ref().and_then(|s| s["label"].as_str().map(str::to_string)));
-                    let pick = want.as_ref()
-                        .and_then(|w| list.iter().find(|(id, l)| id == w || l == w || id.ends_with(w.as_str())))
-                        .or(list.last());
+                    self.revive_pending = found.is_some() && self.prefer_session.is_none();
+                    let pick = found.or(list.last());
                     if let Some((sid, _)) = pick {
                         return self.attach(server, &sid.clone());
                     }
@@ -690,6 +946,8 @@ impl Model {
             }
             Tag::Created { server } => {
                 let sid = v["session_id"].as_str().unwrap_or("").to_string();
+                // Rex shows a new session's last tab; start on the first, the shell.
+                self.focus_first_pending = true;
                 self.attach(server, &sid)
             }
             Tag::Ticket { server, block } => match v["ticket"].as_str() {
@@ -699,6 +957,22 @@ impl Model {
                 }
                 _ => vec![],
             },
+            Tag::Revive { server, block, window } => self.revive(server, &block, &window, &v),
+            Tag::Project { server, label, cwd } => {
+                let found = v["sessions"].as_array().and_then(|ss| ss.iter().find(|s| s["label"] == label.as_str()))
+                    .and_then(|s| s["session_id"].as_str()).map(str::to_string);
+                if let Some(sid) = found {
+                    return self.attach(server, &sid);
+                }
+                let mut spec = self.startup.clone().unwrap_or_else(|| json!({"windows": [{"label": "shell"}]}));
+                spec["label"] = json!(label);
+                if let Some(cwd) = cwd {
+                    spec["cwd"] = json!(cwd);
+                }
+                let mut payload = startup_request(&spec, self.shell.as_deref());
+                with_options(&mut payload, &self.block_options());
+                vec![Out::Rex { server, method: "session.create".into(), payload, tag: Tag::Created { server } }]
+            }
             Tag::Effect | Tag::Perform { .. } | Tag::Ignore => vec![],
         }
     }
@@ -711,6 +985,17 @@ impl Model {
         }
         self.servers[server].view = Some(view);
         let mut outs = if server == self.current { self.refresh_streams() } else { vec![] };
+        if std::mem::take(&mut self.revive_pending) {
+            outs.extend(self.revive_checks(server));
+        }
+        if std::mem::take(&mut self.focus_first_pending) {
+            if let Some(v) = self.servers[server].view.as_ref() {
+                if let Some(first) = v.windows.first().filter(|w| Some(&w.id) != v.active.as_ref()) {
+                    outs.push(Out::Rex { server, method: "session.focus_window".into(),
+                                         payload: json!({"session_id": v.session, "window_id": first.id}), tag: Tag::Effect });
+                }
+            }
+        }
         outs.extend(self.context_changed());
         outs
     }
@@ -762,7 +1047,7 @@ impl Model {
             }
             "client_perform_requested" => {
                 let action = payload["action"].as_str().unwrap_or("");
-                let request = payload["request_id"].as_str().unwrap_or("").to_string();
+                let request = payload["call_id"].as_str().unwrap_or("").to_string();
                 match self.catalogue.iter().find(|c| c.action == action).map(|c| c.id.clone()) {
                     Some(id) => {
                         let args = match &payload["args"] {
@@ -792,7 +1077,67 @@ impl Model {
         out
     }
 
+    /// Open tiny fingers on BLOCK, whose screen shows LINES and soft-wraps at WIDTH.
+    pub fn open_hints(&mut self, block: &str, lines: &[String], width: usize) {
+        self.hints_wanted = false;
+        let targets = crate::hints::targets(lines, width);
+        if targets.is_empty() {
+            self.echo = "Nothing to copy on this pane.".into();
+            return;
+        }
+        self.echo = format!("{} hints: type one to copy, Shift to paste, Esc to quit", targets.len());
+        self.hints = Some(HintMode { block: block.into(), session: self.session_id().unwrap_or_default(), targets, input: String::new() });
+    }
+
+    fn hint_key(&mut self, k: &KeyPress) -> Vec<Out> {
+        let Some(h) = self.hints.as_mut() else { return vec![] };
+        if k.key == "escape" || (k.ctrl && (k.key == "c" || k.key == "g")) {
+            self.hints = None;
+            self.echo.clear();
+            return vec![];
+        }
+        if k.key == "backspace" {
+            h.input.pop();
+            return vec![];
+        }
+        let letter = k.key.chars().count() == 1 && k.key.chars().all(|c| c.is_ascii_lowercase()) && !k.ctrl && !k.alt && !k.sup;
+        if !letter {
+            return vec![];
+        }
+        let input = format!("{}{}", h.input, k.key);
+        match crate::hints::step(&h.targets, &input) {
+            Err(()) => {
+                h.input.clear();
+                vec![]
+            }
+            Ok(None) => {
+                h.input = input;
+                vec![]
+            }
+            Ok(Some(t)) => {
+                let text = t.text.clone();
+                let (block, session) = (h.block.clone(), h.session.clone());
+                self.hints = None;
+                let short: String = text.chars().take(40).collect();
+                if k.shift {
+                    self.echo = format!("Pasted: {short}");
+                    return vec![self.rex("block.event", json!({"session_id": session, "block_id": block,
+                                                                "event": {"type": "paste", "payload": {"text": text}}}), Tag::Ignore)];
+                }
+                self.echo = format!("Copied: {short}");
+                let mut outs = vec![Out::Clipboard(text.clone())];
+                if crate::hints::web_url(&text) {
+                    outs.push(Out::Open(text));
+                }
+                outs
+            }
+        }
+    }
+
     pub fn key(&mut self, k: &KeyPress) -> Vec<Out> {
+        if self.hints.is_some() {
+            return self.hint_key(k);
+        }
         if self.doc.is_some() && (k.key == "escape" || k.key == "q" || (k.ctrl && k.key == "g")) {
             self.doc = None;
             return vec![];
@@ -997,6 +1342,98 @@ mod tests {
         assert_eq!(ws[1]["window_label"], "bbh");
         assert_eq!(ws[1]["layout"]["block"]["options"]["command"], json!(["emacs-bbh"]));
         assert!(ws[2]["layout"]["block"].get("options").is_none(), "no command is a login shell");
+    }
+
+    #[test]
+    fn a_server_with_only_other_sessions_still_gets_the_startup_session() {
+        let mut m = with_startup();
+        m.shell = Some("fish".into());
+        let outs = m.rex_response(Tag::Sessions { server: 0 }, Ok(json!({"sessions": [
+            {"session_id": "session:x", "label": "spike"}, {"session_id": "session:y", "label": "w242"}]})));
+        let Some(Out::Rex { method, payload, .. }) = outs.first() else { panic!("no request") };
+        assert_eq!(method, "session.create");
+        for w in payload["initial_windows"].as_array().unwrap() {
+            assert_eq!(w["layout"]["block"]["options"]["shell"], "fish");
+        }
+    }
+
+    #[test]
+    fn new_shell_blocks_get_the_configured_shell() {
+        let mut v = json!({"layout": {"split": {"before": {"block": {"flavor": "com.superlogical.terminal.shell"}},
+                                                "after": {"block": {"flavor": "com.superlogical.terminal.shell", "options": {"shell": "none"}}}}}});
+        with_shell(&mut v, "fish");
+        assert_eq!(v["layout"]["split"]["before"]["block"]["options"]["shell"], "fish");
+        assert_eq!(v["layout"]["split"]["after"]["block"]["options"]["shell"], "none", "an explicit shell stays");
+    }
+
+    #[test]
+    fn a_restored_bare_shell_gets_its_program_back_in_the_configured_shell() {
+        let mut m = with_startup();
+        m.shell = Some("fish".into());
+        m.startup.as_mut().unwrap()["windows"][1]["restore"] = json!(["emacs-bbh", "--resume", "it's"]);
+        m.servers[0].view = Some(View { session: "session:a".into(), ..Default::default() });
+        let bare = json!({"foreground": {"name": "bash"}});
+        let Some(Out::Rex { method, payload, .. }) = m.revive(0, "block:b", "bbh", &bare).pop() else { panic!("nothing typed") };
+        assert_eq!(method, "com.superlogical.terminal.write");
+        let line = payload["args"]["data"].as_str().unwrap();
+        let quoted = line.strip_prefix("exec fish -l -c ").and_then(|l| l.strip_suffix('\r')).expect("exec fish -l -c ...");
+        // What the restored shell hands fish -c: the command line, quoted once more.
+        let said = std::process::Command::new("sh").args(["-c", &format!("printf %s {quoted}")]).output().unwrap().stdout;
+        assert_eq!(String::from_utf8(said).unwrap(), "emacs-bbh --resume 'it'\"'\"'s'");
+        // A running program, or a fish shell tab, is left alone; a bash shell tab becomes fish.
+        assert!(m.revive(0, "block:b", "bbh", &json!({"foreground": {"name": "emacs"}})).is_empty());
+        assert!(m.revive(0, "block:s", "shell", &json!({"foreground": {"name": "fish"}})).is_empty());
+        let Some(Out::Rex { payload, .. }) = m.revive(0, "block:s", "shell", &bare).pop() else { panic!() };
+        assert_eq!(payload["args"]["data"], "exec fish -l\r");
+        // A split or renamed tab's bash pane gets fish too, but not a bash the user started in fish.
+        let Some(Out::Rex { payload, .. }) = m.revive(0, "block:t", "", &bare).pop() else { panic!("a bare bash pane stays bash") };
+        assert_eq!(payload["args"]["data"], "exec fish -l\r");
+        let nested = json!({"child": {"pid": 1, "name": "fish"}, "foreground": {"pid": 2, "name": "bash"}});
+        assert!(m.revive(0, "block:t", "", &nested).is_empty());
+        assert!(m.revive(0, "block:b", "bbh", &nested).is_empty());
+    }
+
+    #[test]
+    fn a_perform_request_is_answered_under_its_call_id() {
+        // Rex's client_perform_requested names the call call_id; client.reply must echo it.
+        let mut m = Model::new(vec![("t".into(), None)]);
+        let ev = json!({"type": "client_perform_requested", "payload": {"call_id": "7", "action": "mx.nothing"}});
+        let Some(Out::Rex { method, payload, .. }) = m.rex_event(0, &ev).pop() else { panic!("no reply") };
+        assert_eq!(method, "client.reply");
+        assert_eq!(payload["call_id"], "7");
+    }
+
+    #[test]
+    fn resizing_moves_the_nearest_border_of_the_right_kind() {
+        let layout = json!({"split": {"direction": "horizontal", "ratio": 0.5,
+            "before": {"block_id": "block:a"},
+            "after": {"split": {"direction": "vertical", "ratio": 0.5,
+                "before": {"block_id": "block:b"}, "after": {"block_id": "block:c"}}}}});
+        let r = resize_request(&layout, "block:c", "left", 0.05).unwrap();
+        assert_eq!((r["direction"].as_str(), r["before_block_id"].as_str(), r["after_block_id"].as_str()),
+                   (Some("horizontal"), Some("block:a"), Some("block:b")));
+        assert!((r["ratio"].as_f64().unwrap() - 0.45).abs() < 1e-9);
+        let r = resize_request(&layout, "block:b", "down", 0.05).unwrap();
+        assert_eq!((r["before_block_id"].as_str(), r["after_block_id"].as_str()), (Some("block:b"), Some("block:c")));
+        assert!(resize_request(&layout, "block:a", "up", 0.05).is_none(), "no horizontal border above a");
+    }
+
+    #[test]
+    fn tiny_fingers_copy_open_or_paste_the_picked_text() {
+        let mut m = Model::new(vec![("t".into(), None)]);
+        m.servers[0].view = Some(View { session: "session:a".into(), ..Default::default() });
+        let lines = vec!["see https://example.com/x and /tmp/f".to_string()];
+        m.open_hints("block:a", &lines, 80);
+        assert_eq!(m.hints.as_ref().unwrap().targets.len(), 2);
+        assert_eq!(m.key(&KeyPress::parse("a")), vec![Out::Clipboard("https://example.com/x".into()), Out::Open("https://example.com/x".into())]);
+        assert!(m.hints.is_none());
+        m.open_hints("block:a", &lines, 80);
+        let outs = m.key(&KeyPress::parse("shift+s"));
+        let Some(Out::Rex { method, payload, .. }) = outs.first() else { panic!("no paste") };
+        assert_eq!((method.as_str(), &payload["event"]["payload"]["text"]), ("block.event", &json!("/tmp/f")));
+        m.open_hints("block:a", &lines, 80);
+        assert!(m.key(&KeyPress::parse("escape")).is_empty());
+        assert!(m.hints.is_none(), "Escape leaves tiny fingers");
     }
 
     #[test]

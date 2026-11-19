@@ -23,7 +23,8 @@ Herdr is the default. One word in `modules/engstrand/config.scm`,
 - `make mux MUX=rex` builds rexmux, sets the word to `rex`, runs
   `make home-apply` and reloads Hyprland. Super+B then opens the rexmux window,
   which starts the local Rex server and its `:startup` session from
-  `desktop/configs/rexmux/config.edn` (emacs, bbh, jjui, shell tabs).
+  `desktop/configs/rexmux/config.edn` (shell, bbh, pi and jjui tabs, as in
+  Herdr). docs/rex-parity.html lists what matches Herdr and how each is tested.
 - `make mux MUX=herdr` switches back the same way. `guix home roll-back` also
   works, since the choice is part of the Home generation. Both stay installed,
   and Herdr's sessions are untouched while Rex is in use.

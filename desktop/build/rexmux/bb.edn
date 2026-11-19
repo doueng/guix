@@ -11,6 +11,9 @@
          test:bombadil {:doc "Bombadil over rexmux tty on a throwaway Rex server: pane focus, M-x, keymaps, agent attention. Args: [--time S] [--reproduce DIR] [--keep]."
                         :requires ([rexmux.bombadil])
                         :task (apply rexmux.bombadil/-main *command-line-args*)}
+         test:e2e {:doc "The window end to end on the hidden test display and a throwaway Rex server: startup tabs, tiny fingers, mouse, rename, resize, persistence. Args: [--keep]."
+                   :requires ([rexmux.e2e])
+                   :task (apply rexmux.e2e/-main *command-line-args*)}
          verify {:doc "Every live check: the sidecar on a throwaway Rex server, then the window's (make rexmux-verify)."
                  :requires ([rexmux.verify])
                  :task (apply rexmux.verify/-main *command-line-args*)}

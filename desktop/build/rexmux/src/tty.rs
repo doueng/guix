@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::app::{App, AppEvent};
+use crate::app::{App, AppEvent, Mouse, MouseKind};
 use crate::keys::KeyPress;
 use crate::screen;
 
@@ -32,7 +32,7 @@ impl Drop for Raw {
         unsafe {
             libc::tcsetattr(0, libc::TCSANOW, &self.0);
         }
-        print!("\x1b[?1049l\x1b[?25h");
+        print!("\x1b[?1006l\x1b[?1002l\x1b[?1049l\x1b[?25h");
         let _ = std::io::stdout().flush();
     }
 }
@@ -118,9 +118,39 @@ fn char_key(c: char) -> KeyPress {
     }
 }
 
+/// SGR mouse reports (ESC [ < b ; x ; y M or m) taken out of BYTES, as
+/// screen-cell mouse events, and the bytes left for keys. Button 0, 1 and 2
+/// are left, middle and right; 32 adds motion, 64 and 65 the wheel.
+pub fn split_mouse(bytes: &[u8]) -> (Vec<u8>, Vec<Mouse>) {
+    let text = String::from_utf8_lossy(bytes);
+    let re = regex::Regex::new(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])").unwrap();
+    let mut mice = Vec::new();
+    for c in re.captures_iter(&text) {
+        let n = |i: usize| c[i].parse::<usize>().unwrap_or(0);
+        let (b, col, row) = (n(1), n(2).saturating_sub(1), n(3).saturating_sub(1));
+        let button = match b & 3 {
+            1 => "middle",
+            2 => "right",
+            _ => "left",
+        };
+        let kind = if b & 64 != 0 {
+            MouseKind::Wheel(if b & 1 == 1 { 3 } else { -3 })
+        } else if b & 32 != 0 {
+            MouseKind::Drag
+        } else if &c[4] == "m" {
+            MouseKind::Release
+        } else {
+            MouseKind::Press
+        };
+        mice.push(Mouse { kind, col, row, button });
+    }
+    (re.replace_all(&text, "").into_owned().into_bytes(), mice)
+}
+
 pub fn run(servers: Vec<(String, Option<String>)>) -> i32 {
     let _raw = Raw::enter();
-    print!("\x1b[?1049h\x1b[?25l");
+    // Button-event mouse tracking in SGR form: clicks, drags and the wheel.
+    print!("\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1006h");
     let (tx, rx) = mpsc::channel();
     let mut app = App::new(servers, "rexmux-tty", tx.clone());
     let (w, h) = size();
@@ -136,7 +166,13 @@ pub fn run(servers: Vec<(String, Option<String>)>) -> i32 {
                     return;
                 }
                 Ok(n) => {
-                    for k in parse_keys(&buf[..n]) {
+                    let (rest, mice) = split_mouse(&buf[..n]);
+                    for m in mice {
+                        if tx.send(AppEvent::Mouse(m)).is_err() {
+                            return;
+                        }
+                    }
+                    for k in parse_keys(&rest) {
                         if tx.send(AppEvent::Key(k)).is_err() {
                             return;
                         }
@@ -197,5 +233,14 @@ mod tests {
         let ks: Vec<String> = parse_keys(b"a\x1bx\x02n\x1b[A\rN%").iter().map(KeyPress::chord).collect();
         assert_eq!(ks, ["a", "alt+x", "ctrl+b", "n", "up", "enter", "shift+n", "%"]);
         assert_eq!(parse_keys(b"%")[0].to_rex()["key"], "digit_5");
+    }
+
+    #[test]
+    fn sgr_mouse_reports_become_mouse_events() {
+        let (rest, mice) = split_mouse(b"a\x1b[<0;3;5M\x1b[<32;9;5M\x1b[<0;9;5m\x1b[<64;1;1M");
+        assert_eq!(rest, b"a");
+        let kinds: Vec<MouseKind> = mice.iter().map(|m| m.kind).collect();
+        assert_eq!(kinds, [MouseKind::Press, MouseKind::Drag, MouseKind::Release, MouseKind::Wheel(-3)]);
+        assert_eq!((mice[0].col, mice[0].row), (2, 4));
     }
 }

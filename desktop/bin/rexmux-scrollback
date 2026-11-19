@@ -1,0 +1,37 @@
+#!/usr/bin/env bb
+;; A Rex pane's scrollback in $EDITOR, for rexmux's copy mode and search
+;; (Ctrl+b [, Ctrl+b E and Ctrl+b /), as Herdr's edit_scrollback opened it.
+;; rexmux runs it in a floating layer over the pane:
+;;   rexmux-scrollback SESSION BLOCK [TEXT]
+;; It opens at the end, as the pane was; with TEXT it searches back for it,
+;; and n and N find the others. Yank into the + register for the clipboard;
+;; the layer closes with the editor.
+(require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str])
+
+(defn vim-string [s] (str "'" (str/replace s "'" "''") "'"))
+
+(defn editor-argv
+  "The editor's argv for FILE, at the end, searching back for TEXT if given."
+  [editor file text]
+  (if (re-find #"(^|/)n?vim?$" editor)
+    (cond-> [editor "-R" "-c" "normal! G$"]
+      (seq text) (into ["-c" (str "let @/ = " (vim-string (str "\\V" (str/replace text "\\" "\\\\"))))
+                        "-c" "set hlsearch" "-c" "call search(@/, 'bW')"])
+      true (conj file))
+    [editor file]))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (let [[session block text] *command-line-args*
+        _ (when-not (and session block)
+            (binding [*out* *err*] (println "usage: rexmux-scrollback SESSION BLOCK [TEXT]"))
+            (System/exit 2))
+        file (str (fs/create-temp-file {:prefix "rexmux-scrollback-" :suffix ".txt"}))
+        {:keys [exit out err]} (p/sh "rex" "capture" "-s" session "-b" block "--unwrap" "--trim")]
+    (when-not (zero? exit)
+      (binding [*out* *err*] (println "rex capture:" err))
+      (System/exit 1))
+    (spit file out)
+    (let [editor (or (not-empty (System/getenv "EDITOR")) "nvim")
+          code (:exit @(p/process (editor-argv editor file text) {:inherit true}))]
+      (fs/delete-if-exists file)
+      (System/exit code))))

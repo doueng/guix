@@ -102,6 +102,18 @@
         res (cond-> res reload? (update :effects (fn [es] (vec (remove #(= :sidecar/reload (first %)) es)))))]
     {:reply (merge {:op :reply :id id} res) :reload? reload?}))
 
+(defn notify-attention!
+  "Tell the desktop about each agent that newly wants the person (blocked,
+  failed or done) in a pane they are not looking at, as Herdr's system toasts
+  did. IO's :notify gets a summary and a body."
+  [io ctx before after]
+  (when-let [notify (:notify io)]
+    (let [old (set (map :block (agents/attention before)))]
+      (doseq [{:keys [block state app msg] :as row} (agents/attention after)
+              :when (and (not (old block)) (not= block (:block-id ctx)))]
+        (notify (str (or app "agent") " " ({"blocked" "needs you" "error" "failed" "done" "is done"} state state))
+                (str (when-not (str/blank? msg) (str msg "\n")) "Ctrl+b u in rexmux: " (agents/line row)))))))
+
 (defn deliver
   "[state' outgoing-msgs] for one MSG already accepted. IO holds :load-help
   (fn [server]) and :rex, the read-only calls commands may make. Rex events
@@ -137,6 +149,7 @@
                                     (:closed r) (agents/block-closed a (:block r))
                                     :else (agents/report a (assoc r :server (:server msg))))
                            s (assoc state :agents a2)]
+                       (notify-attention! io (:ctx state) a a2)
                        [s (when (not= a a2) [(agents-msg s)])])
           :effect/result [state []]
           :panel/event [state []]
@@ -175,10 +188,16 @@
   (let [config (read-config (config-path))
         state (atom (initial-state config))
         io {:load-help rex/help
+            :notify (fn [summary body]
+                      (babashka.process/process ["notify-send" "--app-name=rexmux" summary body]
+                                                {:out :discard :err :discard}))
             :resync (fn [] (vec (for [srv (:servers config)
                                       r (try (rex/program-statuses srv) (catch Exception _ []))]
                                   (assoc r :server (:label srv)))))
             :rex {:capture (fn [session block] (rex/capture (first (:servers config)) session block))
+                  :cwd (fn [session block]
+                         (let [p (rex/call (first (:servers config)) "block.method" {:session_id session :block_id block :method "process"})]
+                           (or (get-in p [:foreground :cwd]) (get-in p [:child :cwd]))))
                   :spawn (fn [server argv env]
                            (let [address (:address (or (some #(when (= server (:label %)) %) (:servers config))
                                                        (first (:servers config))))]
