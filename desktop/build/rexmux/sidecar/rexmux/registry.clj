@@ -22,6 +22,12 @@
   "Rex argument names the client fills from its context."
   {:session_id :session-id :block_id :block-id :window_id :window-id :client_id :client-id})
 
+(def arg-defaults
+  "Values for arguments M-x would otherwise ask for or leave out: a new
+  block is a shell, and a block the user makes gets focus."
+  {:layout {:block {:flavor "com.superlogical.terminal.shell"}}
+   :focus true})
+
 (defn has [& ks] (fn [ctx] (every? #(some? (get ctx %)) ks)))
 
 (defn enabled?
@@ -112,7 +118,9 @@
             :alias (when (keyword? rex) rex)
             :run (if (keyword? rex)
                    (fn [_ _] [[:invoke rex {}]])
-                   (let [[m a] rex] (fn [_ _] [[:rex/call m (or a {})]])))}))))
+                   ;; Through the API command, so context, defaults and the
+                   ;; schema check apply as they do in M-x.
+                   (let [[m a] rex] (fn [_ _] [[:invoke (keyword "rex" m) (or a {})]])))}))))
 
 ;; ---- the registry ----
 
@@ -163,11 +171,15 @@
 ;; ---- invoking ----
 
 (defn fill
-  "ARGS with context arguments filled in from CTX where the command takes them."
+  "ARGS with context arguments filled in from CTX where the command takes
+  them, and absent arguments from arg-defaults."
   [cmd ctx args]
   (reduce (fn [a {:keys [name]}]
             (let [ck (ctx-args name)]
-              (if (and ck (nil? (get a name)) (some? (get ctx ck))) (assoc a name (get ctx ck)) a)))
+              (cond (contains? a name) a
+                    (and ck (some? (get ctx ck))) (assoc a name (get ctx ck))
+                    (and (= :rex-api (:source cmd)) (contains? arg-defaults name)) (assoc a name (arg-defaults name))
+                    :else a)))
           (or args {}) (:args cmd)))
 
 (defn invoke

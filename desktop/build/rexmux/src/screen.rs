@@ -12,11 +12,26 @@ pub struct Screen {
     pub w: usize,
     pub h: usize,
     pub rows: Vec<Vec<char>>,
+    /// Each cell's terminal style, for cells a pane drew; None for chrome.
+    pub styles: Vec<Vec<Option<CellStyle>>>,
+    /// The focused pane's cursor, in screen cells.
+    pub cursor: Option<(usize, usize)>,
+    /// The row of the selected minibuffer candidate.
+    pub selected: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CellStyle {
+    pub fg: [u8; 3],
+    pub bg: Option<[u8; 3]>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
 }
 
 impl Screen {
     fn new(w: usize, h: usize) -> Screen {
-        Screen { w, h, rows: vec![vec![' '; w]; h] }
+        Screen { w, h, rows: vec![vec![' '; w]; h], styles: vec![vec![None; w]; h], cursor: None, selected: None }
     }
 
     fn put(&mut self, x: usize, y: usize, text: &str, limit: usize) {
@@ -26,6 +41,7 @@ impl Screen {
         for (i, c) in text.chars().take(limit).enumerate() {
             if x + i < self.w {
                 self.rows[y][x + i] = c;
+                self.styles[y][x + i] = None;
             }
         }
     }
@@ -33,6 +49,7 @@ impl Screen {
     fn line(&mut self, y: usize, text: &str) {
         if y < self.h {
             self.rows[y] = vec![' '; self.w];
+            self.styles[y] = vec![None; self.w];
             self.put(0, y, text, self.w);
         }
     }
@@ -85,6 +102,21 @@ pub fn render(m: &Model, grids: &HashMap<String, Grid>, w: usize, h: usize) -> S
             if let Some(g) = grids.get(&t.block) {
                 for y in 0..(th.saturating_sub(1)).min(g.rows as usize) {
                     s.put(x0, y0 + 1 + y, &g.line(y as u16), tw);
+                    let sy = y0 + 1 + y;
+                    for x in 0..tw.min(g.cols as usize) {
+                        if sy < s.h && x0 + x < s.w {
+                            if let Some(c) = g.cells.get(y * g.cols as usize + x) {
+                                s.styles[sy][x0 + x] = Some(CellStyle { fg: c.fg, bg: c.bg, bold: c.bold, italic: c.italic, underline: c.underline });
+                            }
+                        }
+                    }
+                }
+                if focused.as_deref() == Some(t.block.as_str()) {
+                    if let Some((cx, cy)) = g.cursor {
+                        if (cx as usize) < tw && (cy as usize) + 1 < th {
+                            s.cursor = Some((x0 + cx as usize, y0 + 1 + cy as usize));
+                        }
+                    }
                 }
             }
         }
@@ -107,11 +139,16 @@ pub fn render(m: &Model, grids: &HashMap<String, Grid>, w: usize, h: usize) -> S
     }
     if let Some(mb) = &m.minibuffer {
         let cands = m.candidates();
-        let room = ph.min(10);
+        // The candidates sit right above the status line, the selected one marked.
+        let room = ph.min(10).min(cands.len());
         let first = mb.selected.saturating_sub(room.saturating_sub(1));
         for (i, (label, _)) in cands.iter().skip(first).take(room).enumerate() {
             let sel = first + i == mb.selected;
-            s.line(h.saturating_sub(3) - (room - 1 - i).min(h.saturating_sub(3)), &format!("{} {label}", if sel { ">" } else { " " }));
+            let y = h.saturating_sub(3) - (room - 1 - i).min(h.saturating_sub(3));
+            s.line(y, &format!("{} {label}", if sel { ">" } else { " " }));
+            if sel {
+                s.selected = Some(y);
+            }
         }
         s.line(h.saturating_sub(1), &format!("{}{}", m.prompt_text(), mb.input));
     } else if !m.prefix.is_empty() {

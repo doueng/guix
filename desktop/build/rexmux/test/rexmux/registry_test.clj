@@ -68,7 +68,7 @@
 (deftest missing-required-arguments-prompt-instead-of-calling
   (is (:pass? (tc/quick-check
                (trials 200)
-               (prop/for-all [cmd (gen/elements (filter #(seq (remove (comp reg/ctx-args :name) (filter :required (:args %)))) simple-api))]
+               (prop/for-all [cmd (gen/elements (filter #(seq (remove (comp (some-fn reg/ctx-args reg/arg-defaults) :name) (filter :required (:args %)))) simple-api))]
                  (let [{:keys [effects prompt]} (reg/invoke registry ctx (:id cmd) {})]
                    (and (nil? effects) (seq prompt) (every? :required prompt))))))))
 
@@ -96,14 +96,17 @@
     (is (= #{:duplicate :prefix} (set (map :problem (reg/key-conflicts r)))))))
 
 (deftest leader-entries-with-rex-become-commands
-  (let [leader {:bindings [{:keys ["w" "v"] :label "Split right" :rex ["session.new_split" {:direction "horizontal"}]}
+  (let [leader {:bindings [{:keys ["w" "v"] :label "Split right" :rex ["session.new_split" {:direction "horizontal" :side "after"}]}
                            {:keys ["a"] :label "Agents" :rex :agent/pick}
                            {:keys ["f" "s"] :label "Save" :doom "save-buffer"}]}
         cmds (reg/leader-commands leader ["ctrl+b" "space"])
         r (reg/merge-sources api commands/all cmds)]
     (is (= 2 (count cmds)))
     (is (= [["ctrl+b" "space" "w" "v"]] (:keys (first cmds))))
-    (is (= [[:rex/call "session.new_split" {:direction "horizontal"}]] (:effects (reg/invoke r ctx (:id (first cmds)) {}))))
+    (testing "a direct call gets context, defaults and the schema check"
+      (is (= [[:rex/call "session.new_split" {:session_id "session:1" :window_id "window:1" :direction "horizontal" :side "after"
+                                               :layout (:layout reg/arg-defaults) :focus true}]]
+             (:effects (reg/invoke r ctx (:id (first cmds)) {})))))
     (testing "an alias runs the command it names"
       (is (= [[:ui/message "No agents."]]
              (:effects (reg/invoke r (assoc ctx :world {:agents {:blocks {}}}) (:id (second cmds)) {})))))))
