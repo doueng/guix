@@ -29,7 +29,8 @@
    :checks ["make lint"]
    :slow ["make chrome-e2e"]}
   {:name "rexmux"
-   :paths ["desktop/build/rexmux/**" "modules/engstrand/packages/rex.scm"]
+   :paths ["desktop/build/rexmux/**" "modules/engstrand/packages/rex.scm"
+           "desktop/bin/{mux-terminal,rexmux}" "desktop/lib/mux.clj"]
    :checks ["make lint" "make rexmux-test"]
    :slow ["make rexmux-tla" "make rexmux-verify"]}
   {:name "md-view"

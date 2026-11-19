@@ -102,8 +102,12 @@
   (keep identity [(tested "make md-view-test" "md-view" "md-view" (filter #(or (= % "desktop/bin/md-view") (str/starts-with? % "desktop/build/md-view/")) files)
                           {:dir c/root} ["bb" "desktop/build/md-view/test.bb"])]))
 
+(defn rexmux-file? [f]
+  (or (#{"desktop/bin/mux-terminal" "desktop/bin/rexmux" "desktop/lib/mux.clj"} f)
+      (and (str/starts-with? f "desktop/build/rexmux/") (re-find #"\.(clj|edn|json|ndjson)$" f))))
+
 (defn rexmux-problems []
-  (keep identity [(tested "make rexmux-test" "rexmux" "rexmux" (filter #(and (str/starts-with? % "desktop/build/rexmux/") (re-find #"\.(clj|edn|json|ndjson)$" %)) files)
+  (keep identity [(tested "make rexmux-test" "rexmux" "rexmux" (filter rexmux-file? files)
                           {:dir (str c/root "/desktop/build/rexmux")} ["bb" "test"])]))
 
 (defn ext-reload-problems

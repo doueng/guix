@@ -1,12 +1,20 @@
 #!/usr/bin/env bb
 ;; The terminal multiplexer's window, as ~/.config/engstrand/mux chooses
 ;; (T207): Herdr in Ghostty (herdr-terminal, the default) or the rexmux window.
+;; Both launchers are this script's siblings, run by path: Hyprland's PATH has
+;; the Guix Home profile but not ~/.local/bin, so a bare rexmux is not found
+;; and Super+Return opens nothing. MUX_TERMINAL_DRY_RUN=1 prints the argv
+;; instead (rexmux.launch-test).
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs]
          '[babashka.process :as p])
-(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(def here (fs/parent (fs/real-path *file*)))
+(classpath/add-classpath (str (fs/path here "../lib")))
 (require '[mux])
 
-(case (mux/backend)
-  :rex (apply p/exec "rexmux" "gui" *command-line-args*)
-  (apply p/exec (str (fs/path (fs/parent (fs/real-path *file*)) "herdr-terminal")) *command-line-args*))
+(let [argv (case (mux/backend)
+             :rex (into [(str (fs/path here "rexmux")) "gui"] *command-line-args*)
+             (into [(str (fs/path here "herdr-terminal"))] *command-line-args*))]
+  (if (System/getenv "MUX_TERMINAL_DRY_RUN")
+    (prn argv)
+    (apply p/exec argv)))
