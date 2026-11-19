@@ -87,3 +87,14 @@
                        invokes (keep #(when (= :commands/invoke (:op %)) (:id %)) msgs)]
                    (and (= (map :seq out) (range 1 (inc (count out))))
                         (= invokes (keep #(when (= :reply (:op %)) (:id %)) out)))))))))
+
+(deftest the-shipped-config-loads-with-the-real-leader-and-no-key-conflicts
+  (let [config (sc/read-config "../../configs/rexmux/config.edn")
+        {:keys [registry errors]} (with-redefs [babashka.fs/home (constantly (babashka.fs/path "../.."))]
+                                    (sc/build-registry help (sc/read-config "../../configs/rexmux/config.edn")))]
+    (is (str/ends-with? (:leader-file config) "/.config/keybindings/leader.edn") "~ is expanded")
+    (is (:term-nav config))
+    (is (= ["emacs" "bbh" "jjui" "shell"] (map :label (get-in config [:startup :windows]))))
+    (is (= [] errors))
+    (is (= [] (rexmux.registry/key-conflicts registry)))
+    (is (contains? registry :pane/term-nav-left))))

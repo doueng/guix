@@ -45,7 +45,12 @@ impl App {
     pub fn new(servers: Vec<(String, Option<String>)>, label: &str, tx: Sender<AppEvent>) -> App {
         let n = servers.len();
         let mut app = App {
-            model: { let mut m = Model::new(servers); m.prefer_session = std::env::var("REXMUX_SESSION").ok(); m },
+            model: {
+                let mut m = Model::new(servers);
+                m.prefer_session = std::env::var("REXMUX_SESSION").ok();
+                m.startup = crate::startup();
+                m
+            },
             grids: HashMap::new(),
             link: None,
             link_gen: 0,
@@ -71,6 +76,17 @@ impl App {
     fn connect(&mut self, i: usize) {
         let tx = self.tx.clone();
         let address = self.model.servers[i].address.clone();
+        // The local server starts on demand, as the rex CLI does, so it runs
+        // with this window's environment (Wayland, PATH) like Herdr's server.
+        if address.is_none() && std::env::var_os("REX_SERVER").is_none() && !rex::socket_path(None).exists() {
+            let rex = std::env::var("REXMUX_REX").unwrap_or_else(|_| "rex".into());
+            let started = std::process::Command::new(&rex).args(["server", "start"])
+                .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+                .status();
+            if !matches!(started, Ok(s) if s.success()) {
+                self.model.echo = format!("{rex} server start failed");
+            }
+        }
         match Control::connect(address.as_deref(), &self.label, move |ev| {
             let _ = tx.send(AppEvent::Rex(i, ev));
         }) {

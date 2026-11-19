@@ -20,12 +20,17 @@ pub const API_REVISION: i64 = 18;
 pub const API_MIN_REVISION: i64 = 14;
 
 /// The socket path of a server address: unix:///path, or a bare path. None
-/// means the local default, REX_SERVER or /run/user/UID/rex/server.sock.
+/// means the local default: REX_SERVER, else rex/server.sock under
+/// XDG_RUNTIME_DIR (or /run/user/UID), where `rex server start` puts it.
 pub fn socket_path(address: Option<&str>) -> PathBuf {
     let addr = address
         .map(str::to_string)
         .or_else(|| std::env::var("REX_SERVER").ok())
-        .unwrap_or_else(|| format!("/run/user/{}/rex/server.sock", unsafe { libc::getuid() }));
+        .unwrap_or_else(|| {
+            let run = std::env::var("XDG_RUNTIME_DIR").ok().filter(|d| !d.is_empty())
+                .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() }));
+            format!("{run}/rex/server.sock")
+        });
     PathBuf::from(addr.strip_prefix("unix://").unwrap_or(&addr))
 }
 

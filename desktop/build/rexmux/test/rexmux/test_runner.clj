@@ -3,7 +3,7 @@
   multiplies property trials (default 1)."
   (:require [clojure.test :as t]))
 
-(def namespaces '[rexmux.proto-test rexmux.schema-test rexmux.registry-test rexmux.agents-test rexmux.sidecar-test])
+(def namespaces '[rexmux.proto-test rexmux.schema-test rexmux.registry-test rexmux.agents-test rexmux.sidecar-test rexmux.switch-test])
 
 (defn -main [& _]
   (apply require namespaces)

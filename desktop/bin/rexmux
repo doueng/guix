@@ -1,0 +1,13 @@
+#!/usr/bin/env bb
+;; The rexmux Rex client (desktop/build/rexmux), built in place by make rexmux
+;; as dusk is. mux-terminal runs it when ~/.config/engstrand/mux says rex.
+(require '[babashka.fs :as fs] '[babashka.process :as p])
+(let [here (fs/parent (fs/real-path *file*))
+      bin (str here "/../build/rexmux/target/release/rexmux")]
+  (when-not (fs/executable? bin)
+    (let [msg (str "rexmux is not built (" (fs/normalize bin) " is missing): run make rexmux")]
+      (binding [*out* *err*] (println msg))
+      (try (p/shell {:continue true :out :string :err :string} "hyprctl" "notify" "3" "30000" "0" msg)
+           (catch Exception _))
+      (System/exit 1)))
+  (apply p/exec bin *command-line-args*))

@@ -16,6 +16,7 @@
   #:use-module (engstrand features shell)
   #:use-module (engstrand features system-design-prep)
   #:use-module (engstrand features tailscale)
+  #:use-module (engstrand features terminal-mux)
   #:use-module (engstrand packages assets)
   #:use-module (engstrand system asahi)
   #:use-module (gnu)
@@ -24,6 +25,10 @@
   #:use-module (rde features)
   #:use-module (rde features base)
   #:export (%familiar-config))
+
+;; The terminal multiplexer: 'herdr or 'rex (T207). make mux MUX=rex switches,
+;; make mux MUX=herdr rolls back; see desktop/build/rexmux/README.md.
+(define %terminal-mux 'herdr)
 
 (define %root-uuid "c4f25409-b1a5-4ef0-8ac9-8e75f011668c")
 (define %esp-uuid "5CDF-1DF4")
@@ -49,6 +54,7 @@
            (feature-familiar-development)
            ;; This precedes dotfiles because Herdr activation consumes its live config.
            (feature-familiar-herdr)
+           (feature-familiar-terminal-mux %terminal-mux)
            (feature-familiar-bbh-web)
            (feature-familiar-research-lab)
            (feature-familiar-builder-alert)

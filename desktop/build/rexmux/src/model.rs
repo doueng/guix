@@ -197,6 +197,9 @@ pub struct Model {
     pub sidecar_up: bool,
     /// The session to show first, by label or id (REXMUX_SESSION); else the newest.
     pub prefer_session: Option<String>,
+    /// The session to create on a server with none (config :startup), as
+    /// {label, windows: [{label, command: [argv]}]}; it is also the one shown first.
+    pub startup: Option<Json>,
     next_id: i64,
     /// Requests sent to the sidecar and not answered, with where they came from.
     pub pending: HashMap<i64, Option<(usize, String)>>,
@@ -379,6 +382,22 @@ impl Model {
         }
         outs
     }
+}
+
+/// session.create's payload for a :startup spec: one window per entry, each
+/// a shell block running its command (or a login shell when it has none).
+pub fn startup_request(spec: &Json) -> Json {
+    let windows: Vec<Json> = spec["windows"].as_array().cloned().unwrap_or_default().iter().map(|w| {
+        let mut block = json!({"flavor": "com.superlogical.terminal.shell"});
+        if let Some(l) = w["label"].as_str() {
+            block["label"] = json!(l);
+        }
+        if w["command"].is_array() {
+            block["options"] = json!({"command": w["command"]});
+        }
+        json!({"window_label": w["label"].as_str().unwrap_or(""), "layout": {"block": block}})
+    }).collect();
+    json!({"label": spec["label"].as_str().unwrap_or("main"), "initial_windows": windows})
 }
 
 /// The agent picker's icon for an OSC 7501 state.
@@ -652,7 +671,14 @@ impl Model {
                     .collect();
                 self.servers[server].sessions = list.clone();
                 if self.servers[server].view.is_none() && server == self.current {
-                    let want = self.prefer_session.clone();
+                    if list.is_empty() {
+                        if let Some(create) = self.startup.as_ref().map(startup_request) {
+                            self.echo = "starting the startup session".into();
+                            return vec![Out::Rex { server, method: "session.create".into(), payload: create, tag: Tag::Created { server } }];
+                        }
+                    }
+                    let want = self.prefer_session.clone()
+                        .or_else(|| self.startup.as_ref().and_then(|s| s["label"].as_str().map(str::to_string)));
                     let pick = want.as_ref()
                         .and_then(|w| list.iter().find(|(id, l)| id == w || l == w || id.ends_with(w.as_str())))
                         .or(list.last());
@@ -943,5 +969,42 @@ impl Model {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_startup() -> Model {
+        let mut m = Model::new(vec![("t".into(), None)]);
+        m.startup = Some(json!({"label": "main", "windows": [
+            {"label": "emacs", "command": ["emacs-project-start"]},
+            {"label": "bbh", "command": ["emacs-bbh"]},
+            {"label": "shell"}]}));
+        m
+    }
+
+    #[test]
+    fn a_server_with_no_sessions_gets_the_startup_session() {
+        let mut m = with_startup();
+        let outs = m.rex_response(Tag::Sessions { server: 0 }, Ok(json!({"sessions": []})));
+        let Some(Out::Rex { method, payload, .. }) = outs.first() else { panic!("no request") };
+        assert_eq!(method, "session.create");
+        assert_eq!(payload["label"], "main");
+        let ws = payload["initial_windows"].as_array().unwrap();
+        assert_eq!(ws.len(), 3);
+        assert_eq!(ws[1]["window_label"], "bbh");
+        assert_eq!(ws[1]["layout"]["block"]["options"]["command"], json!(["emacs-bbh"]));
+        assert!(ws[2]["layout"]["block"].get("options").is_none(), "no command is a login shell");
+    }
+
+    #[test]
+    fn the_startup_session_is_shown_first_when_it_exists() {
+        let mut m = with_startup();
+        let outs = m.rex_response(Tag::Sessions { server: 0 }, Ok(json!({"sessions": [
+            {"session_id": "session:a", "label": "main"}, {"session_id": "session:b", "label": "other"}]})));
+        let Some(Out::Rex { method, payload, .. }) = outs.first() else { panic!("no request") };
+        assert_eq!((method.as_str(), &payload["session_id"]), ("session.attach", &json!("session:a")));
     }
 }

@@ -30,14 +30,23 @@ const USAGE: &str = "usage: rexmux [gui] | tty | probe [--text] | version
 Servers come from $REXMUX_CONFIG, else ~/.config/rexmux/config.edn
 ({:servers [{:label \"local\" :address nil}]}); REX_SERVER sets the default.";
 
-/// The servers in the config file, as (label, address).
-pub fn servers() -> Vec<(String, Option<String>)> {
+fn config() -> Option<edn::Value> {
     let path = std::env::var_os("REXMUX_CONFIG").map(PathBuf::from).unwrap_or_else(|| {
         let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"));
         base.join("rexmux/config.edn")
     });
-    let parsed = std::fs::read_to_string(&path).ok().and_then(|t| edn::parse(&t).ok());
+    std::fs::read_to_string(&path).ok().and_then(|t| edn::parse(&t).ok())
+}
+
+/// The config's :startup session, as JSON for the model.
+pub fn startup() -> Option<serde_json::Value> {
+    config().and_then(|c| c.get("startup").map(conv::to_json))
+}
+
+/// The servers in the config file, as (label, address).
+pub fn servers() -> Vec<(String, Option<String>)> {
+    let parsed = config();
     let list: Vec<(String, Option<String>)> = parsed
         .as_ref()
         .and_then(|c| c.get("servers"))

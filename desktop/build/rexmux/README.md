@@ -12,6 +12,22 @@ docs/rex-client-design.html; T207 build). Herdr stays the default.
   layer, M-x, agent status from OSC 7501, and workflows. Nothing per key goes
   through it.
 
+## Switching between Herdr and Rex
+
+Herdr is the default. One word in `modules/engstrand/config.scm`,
+`(define %terminal-mux 'herdr)`, picks the multiplexer; Home writes it to
+`~/.config/engstrand/mux`, which Hyprland's Super+B, `mux-terminal`,
+`workspace-or-herdr-tab`, keyleader and bbh's notifications read
+(`desktop/lib/mux.clj`).
+
+- `make mux MUX=rex` builds rexmux, sets the word to `rex`, runs
+  `make home-apply` and reloads Hyprland. Super+B then opens the rexmux window,
+  which starts the local Rex server and its `:startup` session from
+  `desktop/configs/rexmux/config.edn` (emacs, bbh, jjui, shell tabs).
+- `make mux MUX=herdr` switches back the same way. `guix home roll-back` also
+  works, since the choice is part of the Home generation. Both stay installed,
+  and Herdr's sessions are untouched while Rex is in use.
+
 ## Protocol (sidecar)
 
 One EDN map per line, each with `:op` and `:seq`. Each direction numbers its

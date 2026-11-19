@@ -28,8 +28,12 @@
    :term-nav false
    :extensions-dir nil})
 
+(defn- expand-home [p] (if (and (string? p) (str/starts-with? p "~/")) (str (fs/path (fs/home) (subs p 2))) p))
+
 (defn read-config [path]
-  (merge default-config (when (and path (fs/exists? path)) (edn/read-string (slurp path)))))
+  (-> (merge default-config (when (and path (fs/exists? path)) (edn/read-string (slurp path))))
+      (update :leader-file expand-home)
+      (update :extensions-dir expand-home)))
 
 (defn load-extensions
   "Commands from every .clj file in DIR; each file's last form is a vector of
