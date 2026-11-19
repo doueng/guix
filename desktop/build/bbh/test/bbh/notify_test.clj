@@ -216,6 +216,7 @@
   (let [parent {300 200 200 100 100 1 1 nil}]
     (is (= 100 (notify/window-pid [{:pid 100 :class "ghostty"}] [300] parent)))
     (is (= 50 (notify/window-pid [{:pid 50 :class "com.mitchellh.ghostty.herdr" :focusHistoryID 0}] [300] parent)))
+    (is (= 60 (notify/window-pid [{:pid 60 :class "rexmux" :focusHistoryID 0}] [300] parent)) "or to the rexmux window")
     (is (nil? (notify/window-pid [{:pid 50 :class "google-chrome"}] [300] parent)))))
 
 (deftest tick-shows-with-the-policy-expiry

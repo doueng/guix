@@ -50,7 +50,7 @@ hl.bind("SUPER + SHIFT + U", hl.dsp.focus({ workspace = 3 }))
 hl.bind("SUPER + E", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 2"))
 hl.bind("SUPER + D", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 3"))
 hl.bind("SUPER + G", hl.dsp.exec_cmd("~/.local/bin/workspace-or-herdr-tab 4"))
-hl.bind("SUPER + B", hl.dsp.exec_cmd("~/.local/bin/herdr-terminal"))
+hl.bind("SUPER + B", hl.dsp.exec_cmd("~/.local/bin/mux-terminal"))
 hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("ghostty -e nvim ~/.config/hypr/hyprland.lua"))
 hl.bind("SUPER + SLASH", hl.dsp.exec_cmd("~/.local/bin/keyguide"))
 -- Hyprland reports M's release only while Cmd is held, so Cmd's release (code:133/134) also stops;

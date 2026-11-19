@@ -129,14 +129,24 @@
       (when-not (zero? exit) (throw (ex-info (str "Hex vocabulary: " err) {:exit exit})))))
   {:synced true})
 
+(defn typed!
+  "Typed TEXT from FROM, a say! origin such as :rex: a message to the thread
+  it names, else the Router, with none of the spoken-word handling."
+  [from text]
+  (when-not (str/blank? text)
+    (call! {:command :say! :args {:origin from :text (str/trim text)}})))
+
 (defn -main
-  "bbh say [--selected] start|stop [TAKE] | vocabulary | TEXT. Words go to the
-  thread they name or the Router; --selected acts on the Inbox selection instead."
+  "bbh say [--selected] start|stop [TAKE] | vocabulary | TEXT, or bbh say
+  --from ORIGIN TEXT for typed text, such as rexmux's. Words go to the thread
+  they name or the Router; --selected acts on the Inbox selection instead."
   [& args]
   (try
     (let [target (when (some #{"--selected"} args) :selected)
-          args (remove #{"--selected"} args)]
-      (prn (case (first args)
+          args (remove #{"--selected"} args)
+          [flag from & typed] args]
+      (prn (case (if (= "--from" flag) "--from" (first args))
+             "--from" (typed! (keyword from) (str/join " " typed))
              "start" (if-let [take (second args)]
                        (take! take :target target)
                        (let [{:keys [exit err]} (hex! "dictation" "start")]

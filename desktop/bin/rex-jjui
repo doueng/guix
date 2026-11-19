@@ -1,0 +1,34 @@
+#!/usr/bin/env bb
+;; jjui in a floating Rex layer over the caller's window: rex-jjui DIR opens
+;; it in DIR (one at a time: a second call replaces the first), rex-jjui
+;; --close closes it. Rex removes the layer when jjui quits. The Rex
+;; counterpart of the herdr-jjui popup that bbh-super.el's J opens (T207).
+(require '[babashka.classpath :as classpath]
+         '[babashka.fs :as fs])
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[mux])
+
+(defn state-file []
+  (str (fs/path (or (System/getenv "XDG_RUNTIME_DIR") (System/getProperty "java.io.tmpdir"))
+                (str "rex-jjui-" (last (str/split (str (mux/rex-session)) #":"))))))
+
+(defn close! []
+  (when-let [layer (some-> (state-file) (#(when (fs/exists? %) (str/trim (slurp %)))) not-empty)]
+    (try (mux/rex-call! "session.close_layer" {:layer_id layer})
+         (catch Exception _ nil))
+    (fs/delete-if-exists (state-file))))
+
+(defn open! [dir]
+  (close!)
+  (let [{:keys [layer_id]} (mux/rex-call! "session.new_layer"
+                                          {:bounds [0.04 0.04 0.92 0.92] :focus true
+                                           :layout {:block {:flavor "com.superlogical.terminal.shell" :label "jjui"
+                                                            :options {:command ["jjui"] :cwd dir}}}})]
+    (spit (state-file) layer_id)))
+
+(let [[a] *command-line-args*]
+  (cond
+    (nil? (mux/rex-session)) (do (binding [*out* *err*] (println "rex-jjui: not in a Rex pane (no REX_SESSION)")) (System/exit 1))
+    (= "--close" a) (close!)
+    (and a (fs/directory? a)) (open! (str (fs/absolutize a)))
+    :else (do (binding [*out* *err*] (println "usage: rex-jjui DIR | --close")) (System/exit 2))))

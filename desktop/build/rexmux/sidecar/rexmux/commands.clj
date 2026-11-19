@@ -127,7 +127,16 @@
          (rex-cmd :tab/new "Tabs: new" [["ctrl+b" "c"]] "session.new_window" {})
          (rex-cmd :tab/next "Tabs: next" [["ctrl+b" "n"]] "session.focus_next_window" {})
          (rex-cmd :tab/previous "Tabs: previous" [["ctrl+b" "p"]] "session.focus_previous_window" {})
-         (rex-cmd :tab/close "Tabs: close" [["ctrl+b" "&"]] "session.close_window" {})]
+         (rex-cmd :tab/close "Tabs: close" [["ctrl+b" "&"]] "session.close_window" {})
+         {:id :tab/pick :title "Tabs: pick one" :category "tab" :source :local :needs #{:session-id}
+          :run (fn [ctx _]
+                 [[:ui/pick {:title "Tab" :then :tab/focus :arg :window
+                             :items (vec (map-indexed (fn [i [w l]] {:label (str (inc i) " " (if (str/blank? l) w l)) :value w})
+                                                      (map vector (:window-ids ctx) (concat (:window-labels ctx) (repeat "")))))}]])}
+         {:id :tab/focus :title "Tabs: show a tab" :category "tab" :source :local :needs #{:session-id}
+          :args [{:name :window :type "string" :required true}]
+          :schema {:type "object" :properties {:window {:type "string"}} :required ["window"]}
+          :run (fn [_ {:keys [window]}] [[:invoke :rex/session.focus_window {:window_id window}]])}]
         (for [[d k] [["left" "h"] ["down" "j"] ["up" "k"] ["right" "l"]]]
           (rex-cmd (keyword "pane" (str "focus-" d)) (str "Panes: focus " d) [["ctrl+b" k]]
                    "session.focus_direction" {:direction d}))
@@ -138,6 +147,32 @@
                   (if-let [w (get (vec (:window-ids ctx)) (dec n))]
                     [[:invoke :rex/session.focus_window {:window_id w}]]
                     [[:ui/message (str "No tab " n)]]))}))))
+
+(def term-nav-commands
+  "Bare Ctrl+h/j/k/l as in Herdr (config :term-nav true): keyleader term-nav
+  gives the key to Vim, Emacs and friends, and otherwise moves focus, leaving
+  the window for Hyprland at the layout's edge."
+  (vec (for [[d k] [["left" "h"] ["down" "j"] ["up" "k"] ["right" "l"]]]
+         {:id (keyword "pane" (str "term-nav-" d)) :title (str "Panes: " d ", or the key to an editor")
+          :category "pane" :source :local :keys [[(str "ctrl+" k)]] :needs #{:session-id :block-id}
+          :run (fn [ctx _]
+                 (rex ctx :spawn (:server ctx) ["keyleader" "term-nav" d]
+                      {"REX_BLOCK" (:block-id ctx) "REX_SESSION" (:session-id ctx) "TERM_PROGRAM" "rex"})
+                 [])})))
+
+(def bbh-commands
+  "bbh from rexmux, as Herdr's prefix t popup and typed messages had it."
+  [{:id :bbh/inbox :title "bbh: inbox, the threads that need you" :category "bbh" :source :local
+    :keys [["ctrl+b" "t"]] :needs #{:session-id}
+    :run (fn [_ _] [[:layer/float {:argv ["bbh" "inbox"] :size [0.85 0.8] :close-on-exit true}]])}
+   {:id :bbh/say :title "bbh: tell the Router, or a thread as T12 ..." :category "bbh" :source :local
+    :doc "Sends TEXT with bbh say --from rex: to the thread it starts with, else the Router. A Worker's
+Router sees it as [routed to T12 W3 from rex]."
+    :args [{:name :text :type "string" :required true}]
+    :schema {:type "object" :properties {:text {:type "string"}} :required ["text"]}
+    :run (fn [ctx {:keys [text]}]
+           (rex ctx :spawn (:server ctx) ["bbh" "say" "--from" "rex" text] {})
+           [[:ui/message (str "Sent: " text)]])}])
 
 (def help-commands
   [{:id :mx/describe-command :title "Help: describe a command" :category "help" :source :local
@@ -152,4 +187,4 @@
    {:id :mx/reload :title "Help: reload commands and keys" :category "help" :source :local
     :run (fn [_ _] [[:sidecar/reload {}]])}])
 
-(def all (vec (concat agent-commands session-commands pane-commands help-commands)))
+(def all (vec (concat agent-commands session-commands pane-commands bbh-commands help-commands)))

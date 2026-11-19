@@ -1,0 +1,12 @@
+#!/usr/bin/env bb
+;; The terminal multiplexer's window, as ~/.config/engstrand/mux chooses
+;; (T207): Herdr in Ghostty (herdr-terminal, the default) or the rexmux window.
+(require '[babashka.classpath :as classpath]
+         '[babashka.fs :as fs]
+         '[babashka.process :as p])
+(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
+(require '[mux])
+
+(case (mux/backend)
+  :rex (apply p/exec "rexmux" "gui" *command-line-args*)
+  (apply p/exec (str (fs/path (fs/parent (fs/real-path *file*)) "herdr-terminal")) *command-line-args*))

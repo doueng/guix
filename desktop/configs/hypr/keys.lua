@@ -42,14 +42,30 @@ function M.cancel(submap, keys, key)
   end
 end
 
-M.herdr_class = "com.mitchellh.ghostty.herdr"
+-- The terminal multiplexer's window: Herdr's Ghostty, or rexmux when
+-- ~/.config/engstrand/mux says rex (T207; Guix Home writes it).
+local function mux_backend()
+  local ok, word = pcall(function()
+    local home = os.getenv("XDG_CONFIG_HOME") or ((os.getenv("HOME") or "") .. "/.config")
+    local f = io.open(home .. "/engstrand/mux", "r")
+    if not f then return "herdr" end
+    local s = f:read("*l") or ""
+    f:close()
+    return (s:gsub("%s", ""))
+  end)
+  if ok and word == "rex" then return "rex" end
+  return "herdr"
+end
+
+M.mux = mux_backend()
+M.herdr_class = M.mux == "rex" and "rexmux" or "com.mitchellh.ghostty.herdr"
 
 local function send_to_herdr(chords)
   local active = hl.get_active_window()
   if not (active and active.class == M.herdr_class) then
     local terminal = hl.get_windows({ class = M.herdr_class })[1]
     if not terminal then
-      hl.exec_cmd("~/.local/bin/herdr-terminal")
+      hl.exec_cmd("~/.local/bin/mux-terminal")
       return false
     end
     hl.dispatch(hl.dsp.focus({ window = "address:" .. terminal.address }))
@@ -65,7 +81,7 @@ end
 
 function M.herdr_menu()
   if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "space" } }) then
-    M.log("Alt+Space", "Forwarded to herdr", "forward")
+    M.log("Alt+Space", "Forwarded to " .. M.mux, "forward")
   end
 end
 

@@ -25,6 +25,7 @@
   {:servers [{:label "local" :address nil}]
    :leader-file nil
    :leader-prefix nil
+   :term-nav false
    :extensions-dir nil})
 
 (defn read-config [path]
@@ -49,6 +50,7 @@
     {:registry (reg/merge-sources (reg/api-commands help)
                                   (reg/leader-commands leader (:leader-prefix config))
                                   commands/all
+                                  (when (:term-nav config) commands/term-nav-commands)
                                   (:cmds ext))
      :errors (:errors ext)}))
 
@@ -173,6 +175,11 @@
                                       r (try (rex/program-statuses srv) (catch Exception _ []))]
                                   (assoc r :server (:label srv)))))
             :rex {:capture (fn [session block] (rex/capture (first (:servers config)) session block))
+                  :spawn (fn [server argv env]
+                           (let [address (:address (or (some #(when (= server (:label %)) %) (:servers config))
+                                                       (first (:servers config))))]
+                             (babashka.process/process argv {:extra-env (cond-> env address (assoc "REX_SERVER" address))
+                                                             :out :discard :err :discard})))
                   :sessions (fn [] (rex/sessions (first (:servers config))))
                   :new-workspace (fn [cwd name]
                                    (let [dir (str (fs/path (fs/parent (or cwd ".")) name))]

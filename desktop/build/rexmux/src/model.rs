@@ -233,6 +233,7 @@ impl Model {
         if let Some(v) = self.view() {
             c.insert("session-id".into(), json!(v.session));
             c.insert("window-ids".into(), json!(v.windows.iter().map(|w| w.id.clone()).collect::<Vec<_>>()));
+            c.insert("window-labels".into(), json!(v.windows.iter().map(|w| w.label.clone()).collect::<Vec<_>>()));
             if let Some(w) = v.active_window() {
                 c.insert("window-id".into(), json!(w.id));
                 if let Some(b) = &w.focused {

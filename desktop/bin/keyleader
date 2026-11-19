@@ -9,7 +9,8 @@
 (load-file (str (fs/parent (fs/real-path *file*)) "/keyguide"))
 (require '[hypr.dispatch :as hypr]
          '[dusk.palette :as palette]
-         '[keylog])
+         '[keylog]
+         '[mux])
 
 (def desktop-leader "Cmd+Space")
 (def desktop-leader-mod {:hypr "SUPER" :modmask 64})
@@ -180,26 +181,33 @@
   (hypr/dispatch! ["focus" {:direction direction}])
   (keylog/log! "action" "hyprland" keys (str "Focus " direction " window")))
 
+(defn- herdr-nav! [pane direction keys]
+  (let [edges (try (get-in (herdr-json "pane" "edges" "--pane" pane) [:result :edges])
+                   (catch Exception e
+                     (throw (ex-info "Herdr did not report pane edges" {:pane pane} e))))
+        at-edge (get edges (keyword direction))]
+    (cond
+      (or (true? at-edge) (and (false? at-edge) (true? (get-in edges [:layout :zoomed]))))
+      (move-desktop-focus! direction keys)
+      (false? at-edge)
+      (do (run! ["herdr" "pane" "focus" "--direction" direction "--pane" pane])
+          (keylog/log! "action" "herdr" keys (str "Focus " direction " pane")))
+      :else (throw (ex-info "Herdr did not report pane edges" {:pane pane :direction direction})))))
+
 (defn nav!
-  "Focus DIRECTION in the innermost layer that has a neighbor: the Herdr pane
-  containing the caller, then Hyprland. Editors call this at their own edge.
-  Inside Herdr, focus leaves the terminal only when Herdr reports the edge.
-  A zoomed pane fills the terminal, so focus leaves it for Hyprland."
+  "Focus DIRECTION in the innermost layer that has a neighbor: the Herdr or
+  Rex pane containing the caller, then Hyprland. Editors call this at their
+  own edge. Inside a multiplexer, focus leaves the terminal only at the edge
+  of its layout. A zoomed pane fills the terminal, so focus leaves it for
+  Hyprland."
   [direction & [keys]]
   (let [keys (or keys (str "focus " direction))]
-    (if-let [pane (herdr-pane)]
-      (let [edges (try (get-in (herdr-json "pane" "edges" "--pane" pane) [:result :edges])
-                       (catch Exception e
-                         (throw (ex-info "Herdr did not report pane edges" {:pane pane} e))))
-            at-edge (get edges (keyword direction))]
-        (cond
-          (or (true? at-edge) (and (false? at-edge) (true? (get-in edges [:layout :zoomed]))))
-          (move-desktop-focus! direction keys)
-          (false? at-edge)
-          (do (run! ["herdr" "pane" "focus" "--direction" direction "--pane" pane])
-              (keylog/log! "action" "herdr" keys (str "Focus " direction " pane")))
-          :else (throw (ex-info "Herdr did not report pane edges" {:pane pane :direction direction}))))
-      (move-desktop-focus! direction keys))))
+    (cond
+      (mux/rex-block) (if (mux/rex-focus! direction)
+                        (keylog/log! "action" "rex" keys (str "Focus " direction " pane"))
+                        (move-desktop-focus! direction keys))
+      (herdr-pane) (herdr-nav! (herdr-pane) direction keys)
+      :else (move-desktop-focus! direction keys))))
 
 (def nav-keys {"left" "h" "down" "j" "up" "k" "right" "l"})
 
@@ -216,15 +224,19 @@
            program)))
 
 (defn term-nav!
-  "Bare Ctrl+h/j/k/l in Herdr. A program that keeps the key under :terminal
-  :keeps gets it; elsewhere focus moves like Ctrl+b h/j/k/l."
+  "Bare Ctrl+h/j/k/l in Herdr or in rexmux. A program that keeps the key
+  under :terminal :keeps gets it; elsewhere focus moves like Ctrl+b h/j/k/l."
   [grammar direction]
-  (let [pane (herdr-pane)
+  (let [block (mux/rex-block)
+        pane (when-not block (herdr-pane))
         key (str "ctrl+" (nav-keys direction))
-        keys (str "Ctrl+" (nav-keys direction))]
-    (if-let [program (keeper (get-in grammar [:terminal :keeps]) (nav-keys direction) (foreground-programs pane))]
-      (do (run! ["herdr" "pane" "send-keys" pane key])
-          (keylog/log! "forward" "herdr" keys (str "Forwarded to " (keylog/program-id program))))
+        keys (str "Ctrl+" (nav-keys direction))
+        programs (if block [(mux/rex-foreground block)] (foreground-programs pane))]
+    (if-let [program (keeper (get-in grammar [:terminal :keeps]) (nav-keys direction) programs)]
+      (do (if block
+            (mux/rex-send-key! block key)
+            (run! ["herdr" "pane" "send-keys" pane key]))
+          (keylog/log! "forward" (if block "rex" "herdr") keys (str "Forwarded to " (keylog/program-id program))))
       (nav! direction keys))))
 
 (defn submap-panel

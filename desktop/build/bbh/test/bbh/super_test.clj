@@ -1337,7 +1337,13 @@
         (call dir {:command :say! :args {:text "what is running" :origin :phone}})
         (is (wait-for #(seq (prompts))))
         (is (wait-for #(= 2 (count (prompts)))))
-        (is (= ["[routed to T1 W1 from herdr] keep the alias" "o4 [phone] what is running"] (sort (prompts))))))))
+        (is (= ["[routed to T1 W1 from herdr] keep the alias" "o4 [phone] what is running"] (sort (prompts))))
+        (testing "rexmux's typed messages route the same way, from rex"
+          (call dir {:command :say! :args {:text "T1 and under Rex" :origin :rex}})
+          (call dir {:command :say! :args {:text "anything else" :origin :rex}})
+          (is (wait-for #(= 4 (count (prompts)))))
+          (is (some #{"[routed to T1 W1 from rex] and under Rex"} (prompts)))
+          (is (some #(re-find #"^o\d+ \[rex\] anything else$" %) (prompts))))))))
 
 (deftest approval-binds-to-the-reviewed-revision-and-its-evidence
   (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-ap"}))

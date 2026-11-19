@@ -770,19 +770,30 @@ In the prompt RET saves the note and C-n saves it and sends."
 (defvar eng/bbh-inbox-herdr-jjui "herdr-jjui"
   "The herdr-jjui command, which opens and closes the jjui popup.")
 
+(defvar eng/bbh-inbox-rex-jjui "rex-jjui"
+  "The rex-jjui command, which opens and closes jjui in a floating Rex layer.")
+
 (defun eng/bbh-inbox--herdr-jjui (args frame)
   "Run herdr-jjui ARGS against the Herdr that FRAME is in, as told by the
-frame's HERDR_SOCKET_PATH, and show its error if it fails.  Its buffer goes
-when it ends, so repeated calls leave nothing behind."
+frame's HERDR_SOCKET_PATH, or rex-jjui when FRAME is in a Rex pane
+\(TERM_PROGRAM=rex), and show its error if it fails.  Its buffer goes when it
+ends, so repeated calls leave nothing behind."
   (let* ((out (generate-new-buffer " *herdr-jjui*"))
+         (rex (equal (getenv "TERM_PROGRAM" frame) "rex"))
          (socket (getenv "HERDR_SOCKET_PATH" frame))
-         (process-environment (if socket
-                                  (cons (concat "HERDR_SOCKET_PATH=" socket) process-environment)
-                                process-environment))
+         (process-environment
+          (cond (rex (append (mapcar (lambda (v) (concat v "=" (or (getenv v frame) "")))
+                                     '("TERM_PROGRAM" "REX_BLOCK" "REX_SESSION"))
+                             process-environment))
+                (socket (cons (concat "HERDR_SOCKET_PATH=" socket) process-environment))
+                (t process-environment)))
          (default-directory (expand-file-name "~/")))
     (make-process
      :name "herdr-jjui" :noquery t :buffer out :connection-type 'pipe
-     :command (cons eng/bbh-inbox-herdr-jjui args)
+     ;; A Rex layer floats over the Inbox, so nothing needs reopening after jjui.
+     :command (if rex
+                  (cons eng/bbh-inbox-rex-jjui (seq-take args 1))
+                (cons eng/bbh-inbox-herdr-jjui args))
      :sentinel (lambda (process _)
                  (when (memq (process-status process) '(exit signal))
                    (let ((text (with-current-buffer out (string-trim (buffer-string)))))

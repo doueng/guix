@@ -725,7 +725,7 @@
 
 (defmethod decide* :say! [state {{:keys [text origin]} :args :keys [id]}]
   (when (str/blank? text) (refuse :invalid :field :text))
-  (when-not (#{:phone :emacs :herdr :voice} origin) (refuse :invalid :field :origin))
+  (when-not (#{:phone :emacs :herdr :rex :voice} origin) (refuse :invalid :field :origin))
   (let [[thread message] (parse-handle text)
         t (when thread (or (get-in state [:threads thread]) (refuse :no-such-thread :thread thread)))
         w (some-> (get-in state [:workers (:worker t)]) deliverable-worker!)]

@@ -15,6 +15,7 @@
 (def help (json/parse-string (slurp "test/fixtures/rex-api-rev18.json") true))
 (def api (reg/api-commands help))
 (def registry (reg/merge-sources api commands/all))
+(def reg-repo "../../..")
 (def ctx {:session-id "session:1" :window-id "window:1" :block-id "block:1" :client-id "client:1"})
 
 (deftest every-method-and-block-method-is-a-command
@@ -110,6 +111,21 @@
     (testing "an alias runs the command it names"
       (is (= [[:ui/message "No agents."]]
              (:effects (reg/invoke r (assoc ctx :world {:agents {:blocks {}}}) (:id (second cmds)) {})))))))
+
+(deftest the-real-leader-maps-onto-rexmux-commands
+  (let [leader (clojure.edn/read-string (slurp (str reg-repo "/desktop/configs/keybindings/leader.edn")))
+        cmds (reg/leader-commands leader ["ctrl+b" "space"])
+        r (reg/merge-sources api commands/all cmds)
+        by-keys (into {} (for [c cmds k (:keys c)] [k c]))]
+    (testing "every mapped binding runs a command that exists, with no key conflicts"
+      (is (every? #(or (vector? %) (contains? r %)) (keep (fn [b] (or (:rex b) (reg/herdr->rex b))) (:bindings leader))))
+      (is (= [] (reg/key-conflicts r))))
+    (testing "Herdr's leader keys reach the same actions"
+      (is (= :pane/split-right (:alias (by-keys ["ctrl+b" "space" "w" "v"]))))
+      (is (= :pane/focus-left (:alias (by-keys ["ctrl+b" "space" "w" "h"]))))
+      (is (= :agent/pick (:alias (by-keys ["ctrl+b" "space" "a"]))))
+      (is (= :tab/pick (:alias (by-keys ["ctrl+b" "space" "b" "b"]))))
+      (is (= :session/switch (:alias (by-keys ["ctrl+b" "space" "tab" "."])))))))
 
 (deftest catalogue-is-plain-data-with-enabled-flags
   (let [c (reg/catalogue registry {})]

@@ -103,17 +103,44 @@
 
 ;; ---- commands from leader.edn ----
 
+(defn herdr->rex
+  "The rexmux command for a leader.edn binding's :nav or :herdr action, so
+  one leader.edn serves both multiplexers; nil when Rex has no counterpart."
+  [{:keys [nav herdr]}]
+  (cond
+    nav (keyword "pane" (str "focus-" nav))
+    (keyword? herdr) ({:choose-tab :tab/pick :next-tab :tab/next :previous-tab :tab/previous :close-tab :tab/close
+                       :close-pane :pane/close :choose-workspace :session/switch :choose-agent :agent/pick} herdr)
+    (vector? herdr) (let [[noun verb & flags] herdr
+                          dir (second (drop-while #(not= "--direction" %) flags))]
+                      (case [noun verb]
+                        ["pane" "split"] ({"down" :pane/split-down "right" :pane/split-right} dir)
+                        ["pane" "zoom"] :pane/zoom
+                        nil))
+    (map? herdr) ({["fullerzz.sesh" "open-picker"] :session/switch} [(:plugin herdr) (:action herdr)])))
+
+(defn- chord-of
+  "A leader.edn key as rexmux names it: TAB is tab, SPC space, D shift+d."
+  [k]
+  (cond (= "TAB" k) "tab"
+        (= "SPC" k) "space"
+        (re-matches #"[A-Z]" k) (str "shift+" (str/lower-case k))
+        :else k))
+
 (defn leader-commands
-  "Commands for leader.edn bindings that name a :rex implementation:
-  a command id keyword (an alias of another command, run with no arguments),
-  or [method args] for a direct Rex call. With a PREFIX, such as
-  [\"ctrl+b\" \"space\"], the leader's keys are bound under it in Rex too;
-  without one, keyleader reaches them through rex do."
+  "Commands for leader.edn bindings with a :rex implementation, or a :nav or
+  :herdr one that herdr->rex maps: a command id keyword (an alias of another
+  command, run with no arguments), or [method args] for a direct Rex call.
+  With a PREFIX, such as [\"ctrl+b\" \"space\"], the leader's keys are bound
+  under it; without one, keyleader reaches them through rex do."
   [leader prefix]
-  (vec (for [{:keys [keys label rex]} (:bindings leader) :when rex]
+  (vec (for [b (:bindings leader)
+             :let [{:keys [keys label]} b
+                   rex (or (:rex b) (herdr->rex b))]
+             :when rex]
          (let [id (keyword "leader" (str/join "-" (map #(str/replace % #"[^A-Za-z0-9]" "_") keys)))]
            {:id id :title (str "Leader: " label) :category "leader" :doc label
-            :keys (if prefix [(into (vec prefix) (map #(if (= % "TAB") "tab" %) keys))] [])
+            :keys (if prefix [(into (vec prefix) (map chord-of keys))] [])
             :source :leader
             :alias (when (keyword? rex) rex)
             :run (if (keyword? rex)
