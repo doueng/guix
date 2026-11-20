@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="MUX=ghostty-rex: Ghostty draws, Rex holds sessions, bb does the rest; how to switch and roll back, and the 35 live parity checks.">
+<meta name="bbh-doc" content="T207">
+<title>ghostty-rex: Rex in Ghostty with a Babashka client</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>ghostty-rex: Rex in Ghostty with a Babashka client</h1>
+
+<div class='card good'><b>Outcome.</b> <code>MUX=ghostty-rex</code> is now the third choice of <code>%terminal-mux</code>. Ghostty draws, Rex holds the sessions, and Babashka does everything else, with no Rust to compile. One Ghostty window shows one Rex session the way Herdr does: tabs, splits, title rows, status line, which-key, M-x and tiny fingers. Ghostty's own tabs and splits are not used. The parity list passes 35 of 35 live checks in a real Ghostty on the hidden test display. Herdr is still the default and rexmux is untouched.</div>
+
+<h2>Try it, and roll back</h2>
+<pre><code>cd ~/guix
+make mux MUX=ghostty-rex   # set %terminal-mux, home-apply, reload Hyprland
+# Super+B or Super+Return opens it; Super+Return/E/D/G pick tabs 1-4
+make mux MUX=herdr         # back to Herdr (or: guix home roll-back)
+make mux MUX=rex           # or rexmux</code></pre>
+<p>Your Rex sessions survive a switch: Rex keeps them, and the rexmux and ghostty-rex windows show the same <code>main</code> session. Guix Home builds with the ghostty-rex choice (checked), installs <code>rexg-render</code> and writes <code>ghostty-rex</code> to <code>~/.config/engstrand/mux</code>.</p>
+
+<h2>How it is built</h2>
+<svg viewBox='0 0 640 250' role='img' aria-label='architecture'>
+<rect x='10' y='10' width='620' height='230' rx='10' fill='#fff' stroke='#dedad0'/>
+<text x='24' y='34' font-size='14' font-weight='700'>Ghostty window, class dev.engstrand.Rex (draws only)</text>
+<rect x='30' y='48' width='580' height='180' rx='8' fill='#e6f0f5' stroke='#2f6f8f'/>
+<text x='44' y='72' font-size='14' font-weight='700' fill='#2f6f8f'>bb attach (rexg.main): keys, Rex connection, model</text>
+<rect x='48' y='88' width='260' height='120' rx='8' fill='#f0e9f6' stroke='#7a4fa0'/>
+<text x='60' y='110' font-size='13' font-weight='700' fill='#7a4fa0'>rexmux sidecar, in-process</text>
+<text x='60' y='132' font-size='12'>command registry, M-x from Rex's API</text>
+<text x='60' y='150' font-size='12'>leader.edn keymaps, term-nav</text>
+<text x='60' y='168' font-size='12'>agent status, attention, notify</text>
+<text x='60' y='186' font-size='12'>bbh say --from rex, inbox</text>
+<rect x='330' y='88' width='262' height='120' rx='8' fill='#e4f3ea' stroke='#2e7d4f'/>
+<text x='342' y='110' font-size='13' font-weight='700' fill='#2e7d4f'>rexg-render (C, libghostty-vt)</text>
+<text x='342' y='132' font-size='12'>one VT per Rex pane, fed by</text>
+<text x='342' y='150' font-size='12'>Rex data streams; composes panes</text>
+<text x='342' y='168' font-size='12'>and chrome into the window</text>
+<text x='342' y='186' font-size='12'>(the only compiled part, ~580 lines)</text>
+</svg>
+<ul>
+<li>Edit any <code>.clj</code> under <code>desktop/build/ghostty-rex/src/rexg/</code> or the rexmux sidecar, then reopen the window. There is no build step.</li>
+<li>Pane bytes never reach Ghostty, so each terminal query gets one reply, from Rex. This avoids the double-reply risk named in rex-client-languages.html.</li>
+<li>Cost: Kitty graphics inside panes are not shown, since cells are composed. True colour, ligatures and the Kitty keyboard protocol work.</li>
+<li>Packages: <code>libghostty-vt</code> 1.0.1 and <code>rexg-render</code> for aarch64, in modules/engstrand/packages/ghostty.scm.</li>
+</ul>
+
+<h2>What was tested</h2>
+<p><code>make ghostty-rex-verify</code> runs a real Ghostty on the hidden test display (test-display, headless sway) against a throwaway Rex server with its own HOME and socket. Stubs stand in for emacs-bbh, pi, jjui, bbh, nvim and notify-send. It took about 5 minutes and passed 35 of 35 checks <span class='tag measured'>measured</span>. A second run used the Guix-built rexg-render.</p>
+<div class='table'><table>
+<tr><th>Parity item</th><th>Check</th></tr>
+<tr><td>Startup tabs</td><td>Beside a stray dead session, <code>main</code> is made with shell, bbh, pi and jjui in order. Each runs its program, and the shell runs fish.</td></tr>
+<tr><td>Super+Return/E/D/G</td><td><code>rex -C ghostty-rex do mx.tab.select_3</code> shows the pi tab</td></tr>
+<tr><td>Tiny fingers</td><td>A label copies, a web URL opens, and Shift with a label pastes</td></tr>
+<tr><td>Mouse</td><td>A drag copies a line, and the wheel scrolls into history. Both go through a pty, because the headless display has no pointer.</td></tr>
+<tr><td>Copy mode, search</td><td>Ctrl+b [ and Ctrl+b / open the scrollback in $EDITOR, with the search already run</td></tr>
+<tr><td>Clipboard</td><td>Ghostty's Ctrl+Shift+V pastes the Wayland clipboard into the pane</td></tr>
+<tr><td>Panes, tabs</td><td>A split follows the pane's directory, Ctrl+b L resizes, and Ctrl+b , and Ctrl+b $ rename</td></tr>
+<tr><td>Workspaces</td><td>Ctrl+b O opens a project session (a second press shows the same one), and Ctrl+b B returns</td></tr>
+<tr><td>jjui, bbh</td><td>Ctrl+b g and Ctrl+b t float jjui and the inbox, and each layer closes when its program exits. M-x bbh: tell runs <code>bbh say --from rex</code>.</td></tr>
+<tr><td>Notifications</td><td>An agent that blocks in another tab sends exactly one notify-send</td></tr>
+<tr><td>Persistence</td><td>After the server is killed uncleanly, as in a reboot, the session returns, pi resumes with --continue, and the split panes of a renamed tab run fish</td></tr>
+<tr><td>Bombadil</td><td>rexmux's specs <code>rexmux.ts</code> (focus, M-x, Escape, which-key, Ctrl+b u reaching a blocked agent) and <code>startup.ts</code> run for 60 s each over <code>bb attach</code>, with no violations</td></tr>
+<tr><td>TLA+</td><td><code>make rexmux-tla</code>: all 14 properties hold. The in-process sidecar is the model without Crash and Restart, and a sidecar error now still answers its request.</td></tr>
+</table></div>
+
+<h2>Not covered, and known rough edges</h2>
+<div class='card warn'><ul>
+<li>The real pointer path in Ghostty: the headless display has no pointer, so mouse checks feed SGR reports through a pty into the same handler.</li>
+<li>Desktop notifications were checked through a notify-send stub, not on your desktop.</li>
+<li>After a reboot, each restored pane briefly shows the <code>exec fish -l</code> line that brought its shell back. rexmux does the same.</li>
+<li>It has not been run on your real Rex server or Hyprland session. <code>make mux MUX=ghostty-rex</code> is the first real use.</li>
+</ul></div>
+<p class='cite'>Code: desktop/build/ghostty-rex (README.md), desktop/bin/ghostty-rex, desktop/configs/ghostty-rex. Commits: M1 swoxqomu, M2 oklrxnut, M3 ytpmvpor.</p>
+
+</main></body></html>
