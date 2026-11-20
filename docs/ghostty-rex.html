@@ -79,7 +79,7 @@ make mux MUX=rex           # or rexmux</code></pre>
 <tr><td>Clipboard</td><td>Ghostty's Ctrl+Shift+V pastes the Wayland clipboard into the pane</td></tr>
 <tr><td>Panes, tabs</td><td>A split follows the pane's directory, Ctrl+b L resizes, and Ctrl+b , and Ctrl+b $ rename</td></tr>
 <tr><td>Workspaces</td><td>Ctrl+b O opens a project session (a second press shows the same one), and Ctrl+b B returns</td></tr>
-<tr><td>jjui, bbh</td><td>Ctrl+b g and Ctrl+b t float jjui and the inbox, and each layer closes when its program exits. M-x bbh: tell runs <code>bbh say --from rex</code>.</td></tr>
+<tr><td>jjui, bbh</td><td>Ctrl+b g and Ctrl+b t float jjui and the inbox in a framed layer, and each layer closes when its program exits. M-x bbh: tell runs <code>bbh say --from rex</code>.</td></tr>
 <tr><td>Notifications</td><td>An agent that blocks in another tab sends exactly one notify-send</td></tr>
 <tr><td>Persistence</td><td>After the server is killed uncleanly, as in a reboot, the session returns, pi resumes with --continue, and the split panes of a renamed tab run fish</td></tr>
 <tr><td>Bombadil</td><td>rexmux's specs <code>rexmux.ts</code> (focus, M-x, Escape, which-key, Ctrl+b u reaching a blocked agent) and <code>startup.ts</code> run for 60 s each over <code>bb attach</code>, with no violations</td></tr>
@@ -93,6 +93,6 @@ make mux MUX=rex           # or rexmux</code></pre>
 <li>After a reboot, each restored pane briefly shows the <code>exec fish -l</code> line that brought its shell back. rexmux does the same.</li>
 <li>It has not been run on your real Rex server or Hyprland session. <code>make mux MUX=ghostty-rex</code> is the first real use.</li>
 </ul></div>
-<p class='cite'>Code: desktop/build/ghostty-rex (README.md), desktop/bin/ghostty-rex, desktop/configs/ghostty-rex. Commits: M1 swoxqomu, M2 oklrxnut, M3 ytpmvpor.</p>
+<p class='cite'>Code: desktop/build/ghostty-rex (README.md), desktop/bin/ghostty-rex, desktop/configs/ghostty-rex. Commits: M1 swoxqomu, M2 oklrxnut, M3 ytpmvpor, framed floating layers lsptnslt.</p>
 
 </main></body></html>
