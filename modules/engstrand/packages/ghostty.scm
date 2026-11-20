@@ -1,4 +1,5 @@
 (define-module (engstrand packages ghostty)
+  #:use-module (engstrand packages assets)
   #:use-module (gnu packages base)
   #:use-module (gnu packages compression)
   #:use-module (gnu packages fontutils)
@@ -251,6 +252,95 @@ through /tmp/zig-env instead of /usr/bin/env.")
     (synopsis "Zig packages Ghostty builds with")
     (description "The build.zig.zon dependencies of Ghostty, as zig fetch
 unpacks them.")
+    (home-page "https://ghostty.org")
+    (license license:expat)))
+
+(define libghostty-vt-version "1.0.1")
+
+;; libghostty-vt alone, for the ghostty-rex client's compositor (T207): the
+;; terminal emulator library rexmux links, at the release whose headers match
+;; rexmux's pin. Its deps tarball is the --system directory zig reads, so the
+;; build fetches nothing (PACKAGING-LIBGHOSTTY.md in the source).
+(define-public libghostty-vt
+  (package
+    (name "libghostty-vt")
+    (version libghostty-vt-version)
+    (source (origin
+              (method url-fetch)
+              (uri (string-append "https://release.files.ghostty.org/libghostty-vt/"
+                                  version "/libghostty-vt-" version ".tar.gz"))
+              (sha256 (base32 "1aipxynq94hdnwbp93qflnnsmaw6ml3qkq5rdd9rpvs1fvlzqg9k"))))
+    (build-system gnu-build-system)
+    (supported-systems '("aarch64-linux"))
+    (arguments
+     (list
+      #:tests? #f
+      #:modules '((guix build gnu-build-system) (guix build utils)
+                  (ice-9 popen) (ice-9 rdelim))
+      #:phases
+      #~(let ()
+          #$zig-environment-definition
+          (modify-phases %standard-phases
+           (delete 'configure)
+           (replace 'build
+             (lambda* (#:key inputs parallel-build? #:allow-other-keys)
+               (zig-environment (search-input-file inputs "/bin/env")
+                                (assoc-ref inputs "libc"))
+               (mkdir-p "/tmp/lgvt-deps")
+               (invoke "tar" "-xzf" #$(this-package-native-input "libghostty-vt-deps")
+                       "-C" "/tmp/lgvt-deps" "--strip-components=1")
+               (invoke "zig" "build"
+                       "--prefix" #$output
+                       "--system" "/tmp/lgvt-deps"
+                       "-Doptimize=ReleaseFast" "-Dcpu=baseline"
+                       (string-append "-j" (number->string
+                                              (if parallel-build? (parallel-job-count) 1))))))
+           (delete 'install)))))
+    (native-inputs
+     (list zig-0.17 coreutils
+           (origin
+             (method url-fetch)
+             (uri (string-append "https://release.files.ghostty.org/libghostty-vt/"
+                                 libghostty-vt-version "/libghostty-vt-"
+                                 libghostty-vt-version "-deps.tar.gz"))
+             (file-name "libghostty-vt-deps")
+             (sha256 (base32 "0v9mwdyx2kysbc2x60yrdjfsiy5gvln2mahm9fzzaax5c04y394i")))))
+    (synopsis "Ghostty's terminal emulation library")
+    (description "libghostty-vt is the terminal emulator core of Ghostty as a C
+library: VT parsing, screen state, render state and Ghostty snapshots.")
+    (home-page "https://ghostty.org")
+    (license license:expat)))
+
+;; The drawing half of the ghostty-rex Rex client (T207): one libghostty-vt
+;; terminal per Rex block, composed into the Ghostty window it runs in. The
+;; bb client in desktop/build/ghostty-rex runs it.
+(define-public rexg-render
+  (package
+    (name "rexg-render")
+    (version "0.1.0")
+    (source (package-asset "desktop/build/ghostty-rex/csrc/rexg-render.c"))
+    (build-system gnu-build-system)
+    (supported-systems '("aarch64-linux"))
+    (arguments
+     (list
+      #:tests? #f
+      #:phases
+      #~(modify-phases %standard-phases
+          (replace 'unpack
+            (lambda* (#:key source #:allow-other-keys)
+              (copy-file source "rexg-render.c")))
+          (delete 'configure)
+          (replace 'build
+            (lambda _
+              (invoke "gcc" "-O2" "-Wall" "-o" "rexg-render" "rexg-render.c"
+                      "-lghostty-vt" "-lpthread")))
+          (replace 'install
+            (lambda _
+              (install-file "rexg-render" (string-append #$output "/bin")))))))
+    (inputs (list libghostty-vt))
+    (synopsis "Pane compositor of the ghostty-rex Rex client")
+    (description "rexg-render keeps a libghostty-vt terminal per Rex block and
+draws the visible ones, with the client's chrome, into its own terminal.")
     (home-page "https://ghostty.org")
     (license license:expat)))
 

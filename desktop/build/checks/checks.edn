@@ -33,6 +33,13 @@
            "desktop/bin/{mux-terminal,rexmux}" "desktop/lib/mux.clj"]
    :checks ["make lint" "make rexmux-test"]
    :slow ["make rexmux-tla" "make rexmux-verify"]}
+  {:name "ghostty-rex"
+   :paths ["desktop/build/ghostty-rex/**" "desktop/bin/ghostty-rex" "desktop/configs/ghostty-rex/**"
+           "modules/engstrand/packages/ghostty.scm" "modules/engstrand/features/terminal-mux.scm"
+           "desktop/bin/{mux-terminal,workspace-or-herdr-tab}" "desktop/lib/mux.clj"
+           "desktop/build/rexmux/sidecar/**"]
+   :checks ["make lint" "make ghostty-rex-test" "make rexmux-test"]
+   :slow ["make ghostty-rex-verify" "make rexmux-tla"]}
   {:name "md-view"
    :paths ["desktop/bin/md-view" "desktop/build/md-view/**" "modules/engstrand/features/md-view.scm"]
    :checks ["make lint" "make md-view-test"]}

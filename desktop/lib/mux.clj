@@ -4,7 +4,8 @@
 
   The choice is one word in ~/.config/engstrand/mux, written by Guix Home from
   %terminal-mux in modules/engstrand/config.scm: herdr (the default, also when
-  the file is missing) or rex. Hyprland, notify.clj and the launch scripts read
+  the file is missing), rex (the rexmux window) or ghostty-rex (Ghostty with
+  the bb ghostty-rex client). Hyprland, notify.clj and the launch scripts read
   it; a program inside a pane follows the pane it is in (REX_BLOCK or
   HERDR_PANE_ID), whatever the file says."
   (:require [babashka.fs :as fs]
@@ -12,7 +13,7 @@
             [cheshire.core :as json]
             [clojure.string :as str]))
 
-(def backends #{:herdr :rex})
+(def backends #{:herdr :rex :ghostty-rex})
 
 (defn config-file []
   (str (fs/path (or (System/getenv "XDG_CONFIG_HOME") (fs/path (fs/home) ".config")) "engstrand" "mux")))
@@ -31,7 +32,11 @@
 
 (def window-class
   "The Hyprland class of each backend's terminal window."
-  {:herdr "com.mitchellh.ghostty.herdr" :rex "rexmux"})
+  {:herdr "com.mitchellh.ghostty.herdr" :rex "rexmux" :ghostty-rex "dev.engstrand.Rex"})
+
+(def rex-client
+  "The client label each Rex backend connects with, for rex -C LABEL do."
+  {:rex "rexmux" :ghostty-rex "ghostty-rex"})
 
 (defn rex-block
   "The Rex block the caller runs in: REX_BLOCK, when TERM_PROGRAM says Rex is

@@ -184,30 +184,37 @@
     (doseq [m msgs] (println (proto/encode m)))
     (flush)))
 
+(defn make-io
+  "The :io map handle gets in a live process: Rex through the rex CLI,
+  desktop notifications as APP. The rexmux sidecar process and the
+  ghostty-rex client, which runs the sidecar in-process, both use it."
+  [config app]
+  {:load-help rex/help
+   :notify (fn [summary body]
+             (babashka.process/process ["notify-send" (str "--app-name=" app) summary body]
+                                       {:out :discard :err :discard}))
+   :resync (fn [] (vec (for [srv (:servers config)
+                             r (try (rex/program-statuses srv) (catch Exception _ []))]
+                         (assoc r :server (:label srv)))))
+   :rex {:capture (fn [session block] (rex/capture (first (:servers config)) session block))
+         :cwd (fn [session block]
+                (let [p (rex/call (first (:servers config)) "block.method" {:session_id session :block_id block :method "process"})]
+                  (or (get-in p [:foreground :cwd]) (get-in p [:child :cwd]))))
+         :spawn (fn [server argv env]
+                  (let [address (:address (or (some #(when (= server (:label %)) %) (:servers config))
+                                              (first (:servers config))))]
+                    (babashka.process/process argv {:extra-env (cond-> env address (assoc "REX_SERVER" address))
+                                                    :out :discard :err :discard})))
+         :sessions (fn [] (rex/sessions (first (:servers config))))
+         :new-workspace (fn [cwd name]
+                          (let [dir (str (fs/path (fs/parent (or cwd ".")) name))]
+                            (babashka.process/shell {:dir cwd} "jj" "workspace" "add" "--name" name dir)
+                            dir))}})
+
 (defn -main [& _]
   (let [config (read-config (config-path))
         state (atom (initial-state config))
-        io {:load-help rex/help
-            :notify (fn [summary body]
-                      (babashka.process/process ["notify-send" "--app-name=rexmux" summary body]
-                                                {:out :discard :err :discard}))
-            :resync (fn [] (vec (for [srv (:servers config)
-                                      r (try (rex/program-statuses srv) (catch Exception _ []))]
-                                  (assoc r :server (:label srv)))))
-            :rex {:capture (fn [session block] (rex/capture (first (:servers config)) session block))
-                  :cwd (fn [session block]
-                         (let [p (rex/call (first (:servers config)) "block.method" {:session_id session :block_id block :method "process"})]
-                           (or (get-in p [:foreground :cwd]) (get-in p [:child :cwd]))))
-                  :spawn (fn [server argv env]
-                           (let [address (:address (or (some #(when (= server (:label %)) %) (:servers config))
-                                                       (first (:servers config))))]
-                             (babashka.process/process argv {:extra-env (cond-> env address (assoc "REX_SERVER" address))
-                                                             :out :discard :err :discard})))
-                  :sessions (fn [] (rex/sessions (first (:servers config))))
-                  :new-workspace (fn [cwd name]
-                                   (let [dir (str (fs/path (fs/parent (or cwd ".")) name))]
-                                     (babashka.process/shell {:dir cwd} "jj" "workspace" "add" "--name" name dir)
-                                     dir))}}
+        io (make-io config "rexmux")
         step! (fn [f]
                 (locking lock
                   (let [[s msgs] (f @state)]

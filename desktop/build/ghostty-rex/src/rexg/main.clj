@@ -1,0 +1,356 @@
+(ns rexg.main
+  "The ghostty-rex client (T207): Ghostty draws, Rex holds the sessions, and
+  this bb process does the rest. It attaches to one Rex session per Ghostty
+  window and shows all of it in that one terminal, as Herdr does: the tab
+  bar, the panes of the active tab with their titles, the status line and
+  the overlays. rexg-render (csrc/rexg-render.c, libghostty-vt) composes the
+  panes; this process owns the Rex connection, keys, the model (rexg.model)
+  and the sidecar (rexmux.sidecar, run in-process).
+
+  One thread runs every state change, from a queue: keys, Rex responses and
+  events, sidecar messages, renderer lines. Pane bytes go straight from each
+  stream's reader to the renderer and never wait on it."
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [rexg.keys :as keys]
+            [rexg.model :as model]
+            [rexg.rex :as rex]
+            [rexg.screen :as screen]
+            [rexmux.proto :as proto]
+            [rexmux.rex :as rexcli]
+            [rexmux.sidecar :as sidecar])
+  (:import [java.util.concurrent LinkedBlockingQueue]))
+
+;; ---- configuration ----
+
+(defn- expand-home [p] (if (and (string? p) (str/starts-with? p "~")) (str (fs/home) (subs p 1)) p))
+
+(defn config-path []
+  (or (not-empty (System/getenv "REXG_CONFIG"))
+      (let [base (or (System/getenv "XDG_CONFIG_HOME") (str (fs/path (fs/home) ".config")))
+            own (str (fs/path base "ghostty-rex" "config.edn"))]
+        (if (fs/exists? own) own (str (fs/path base "rexmux" "config.edn"))))))
+
+(defn shell-path
+  "The configured shell, a bare name resolved on PATH: a tab Rex restores
+  after a reboot runs a login shell whose PATH may lack it."
+  [sh]
+  (when sh
+    (if (or (str/includes? sh "/") (= sh "none")) sh (or (some-> (fs/which sh) str) sh))))
+
+(defn load-config [path]
+  (let [c (sidecar/read-config path)]
+    (cond-> c
+      (get-in c [:startup :cwd]) (update-in [:startup :cwd] expand-home)
+      true (assoc :shell (shell-path (or (not-empty (System/getenv "REXG_SHELL")) (:shell c)))))))
+
+;; ---- the renderer ----
+
+(defn- frame! [{:keys [^java.io.OutputStream in lock]} type ^bytes payload]
+  (locking lock
+    (let [n (alength payload)]
+      (.write in (byte-array [(unchecked-byte (int type)) (unchecked-byte (bit-shift-right n 24)) (unchecked-byte (bit-shift-right n 16))
+                              (unchecked-byte (bit-shift-right n 8)) (unchecked-byte n)]))
+      (.write in payload)
+      (.flush in))))
+
+(defn- send-str! [r type s] (frame! r type (.getBytes (str s) "UTF-8")))
+
+(defn- clean [s] (str/replace (str s) #"[\t\n\r\u0000-\u001f]" " "))
+
+(defn spans-text
+  "Spans as rexg-render's overlay lines: ROW COL FG BG FLAGS, a tab, the text."
+  [spans]
+  (str/join "\n" (for [{:keys [row col fg bg flags text]} spans]
+                     (str row " " col " " (or fg "-") " " (or bg "-") " " flags "\t" (clean text)))))
+
+;; ---- the app ----
+
+(defn- base64 [^String s] (.encodeToString (java.util.Base64/getEncoder) (.getBytes s "UTF-8")))
+
+(defn run
+  "Run the client. OPTS: :render (rexg-render's path), :config, :label (the
+  Rex client label, for rex -C), :session (show this one instead of the
+  startup session)."
+  [{:keys [render config label session]}]
+  (let [;; The client label Rex knows us by, for rex -C LABEL do mx.tab.select_N.
+        client-label label
+        cfg (load-config (or config (config-path)))
+        servers (mapv #(select-keys % [:label :address]) (or (seq (:servers cfg)) [{:label "local" :address nil}]))
+        q (LinkedBlockingQueue.)
+        put! (fn [ev] (.put q ev))
+        rproc (p/process {:in :stream :out :inherit :err :stream} render)
+        r {:in (:in rproc) :lock (Object.)}
+        app (atom {:m (model/new-model servers {:startup (:startup cfg) :shell (:shell cfg) :prefer-session session})
+                   :conns {} :tags {} :streams {} :sizes {} :wh [80 24] :panes {} :text-reqs {} :next-req 0
+                   :last-draw nil :title nil :sidecar (sidecar/initial-state cfg) :tx proto/sender})
+        sc-io (sidecar/make-io cfg "ghostty-rex")
+        sc-exec (java.util.concurrent.Executors/newSingleThreadExecutor)
+        log (fn [& xs] (when-let [f (System/getenv "REXG_LOG")] (spit f (str (str/join " " xs) "\n") :append true)))]
+    ;; Renderer lines: size, pane readiness and modes, text replies.
+    (future
+      (with-open [rd (io/reader (:err rproc))]
+        (loop [lines (line-seq rd)]
+          (when-let [l (first lines)]
+            (if (str/starts-with? l "t ")
+              (let [[_ req c] (str/split l #" ")
+                    body (take-while #(not= "." %) (rest lines))]
+                (put! [:text req (parse-long c) (vec body)])
+                (recur (drop (inc (count body)) (rest lines))))
+              (do (put! [:render-line l]) (recur (rest lines))))))
+        (put! [:quit "renderer exited"])))
+    ;; Keys from the terminal.
+    (future
+      (let [rd (java.io.InputStreamReader. System/in "UTF-8") buf (char-array 4096)]
+        (loop [rest-s ""]
+          (let [n (.read rd buf)]
+            (if (neg? n)
+              (put! [:quit "terminal closed"])
+              (let [s (str rest-s (String. buf 0 n))
+                    _ (log "input" (pr-str s))
+                    [evs more] (keys/read-input s)]
+                (doseq [e evs] (put! e))
+                ;; An unfinished escape sequence waits for the rest briefly.
+                (recur more)))))))
+    (letfn [(sidecar-send! [msg]
+              (let [[tx m] (proto/stamp (:tx @app) msg)]
+                (swap! app assoc :tx tx)
+                (.submit sc-exec ^Runnable
+                         (fn []
+                           (try
+                             (let [[s msgs] (sidecar/handle (:sidecar @app) sc-io m)]
+                               (swap! app assoc :sidecar s)
+                               (doseq [o msgs] (put! [:sidecar o])))
+                             (catch Throwable e (log "sidecar" (ex-message e)) (put! [:sidecar {:op :log :text (str "sidecar: " (ex-message e))}])))))))
+            (rex-send! [srv method payload tag]
+              (if-let [c (get-in @app [:conns srv])]
+                (try (let [id ((:send! c) method payload)]
+                       (swap! app assoc-in [:tags srv id] tag))
+                     (catch Exception e (swap! app update :m assoc :echo (str method ": " (ex-message e)))))
+                (swap! app update :m assoc :echo (str (get-in @app [:m :servers srv :label]) " is not connected"))))
+            (close-stream! [block]
+              (when-let [close (get-in @app [:streams block])]
+                (close)
+                (swap! app update :streams dissoc block)
+                (send-str! r \x block)))
+            (perform! [outs]
+              (doseq [[kind & xs :as o] outs]
+                (when-not (= "client.keymap" (nth o 2 nil)) (log "out" (pr-str o)))
+                (case kind
+                  :sidecar (sidecar-send! (first xs))
+                  :rex (apply rex-send! xs)
+                  :open-stream (let [[srv block ticket] xs
+                                     sock (rex/socket-path (get-in @app [:m :servers srv :address]))]
+                                 (close-stream! block)
+                                 (send-str! r \o block)
+                                 ;; A new pane needs the layout again to know its place.
+                                 (swap! app assoc-in [:last-draw :layout] nil)
+                                 (try
+                                   (let [prefix (.getBytes (str block "\u0000") "UTF-8")
+                                         close (rex/open-stream! sock ticket
+                                                                 (fn [^bytes b]
+                                                                   (let [out (byte-array (+ (alength prefix) (alength b)))]
+                                                                     (System/arraycopy prefix 0 out 0 (alength prefix))
+                                                                     (System/arraycopy b 0 out (alength prefix) (alength b))
+                                                                     (frame! r \d out)))
+                                                                 (fn [msg] (put! [:stream-msg block msg]))
+                                                                 (fn [why] (put! [:stream-closed block why])))]
+                                     (swap! app assoc-in [:streams block] close))
+                                   (catch Exception e (put! [:stream-closed block (ex-message e)]))))
+                  :close-stream (close-stream! (first xs))
+                  ;; OSC 52: Ghostty puts it on the clipboard. Tests also get a file.
+                  :clipboard (do (send-str! r \w (str "\u001b]52;c;" (base64 (first xs)) "\u0007"))
+                                 (when-let [f (System/getenv "REXG_CLIPBOARD_FILE")] (spit f (first xs))))
+                  :open (if-let [f (System/getenv "REXG_OPEN_FILE")]
+                          (spit f (first xs))
+                          (p/process ["xdg-open" (first xs)] {:out :discard :err :discard}))
+                  :paste (let [[srv session block text] xs
+                               text (or text (let [{:keys [exit out]} (p/sh "wl-paste" "--no-newline")] (when (zero? exit) out)))]
+                           (when (seq text)
+                             (rex-send! srv "block.event" {:session_id session :block_id block
+                                                            :event {:type "paste" :payload {:text text}}} [:ignore])))
+                  :hints (let [n (inc (:next-req @app)) req (str "h" n)]
+                           (swap! app #(-> % (assoc :next-req n) (assoc-in [:text-reqs req] [:hints (first xs)])))
+                           (send-str! r \t (str req " " (first xs))))
+                  :quit (put! [:quit "quit"])
+                  nil)))
+            (step! [f & args]
+              (let [[m outs] (apply f (:m @app) args)]
+                (swap! app assoc :m m)
+                (perform! outs)))
+            (sync-sizes! []
+              (let [{:keys [m wh sizes]} @app
+                    [w h] wh
+                    sid (model/session-id m)]
+                (when sid
+                  (doseq [[block [c rr]] (screen/content-sizes m w h) :when (not= [c rr] (get sizes block))]
+                    (swap! app assoc-in [:sizes block] [c rr])
+                    (rex-send! (:current m) "session.own_block" {:session_id sid :block_ids [block] :mode "take"} [:ignore])
+                    (rex-send! (:current m) "com.superlogical.terminal.resize"
+                               {:session_id sid :block_id block :args {:columns c :rows rr}} [:ignore])))))
+            (draw! []
+              (let [{:keys [m wh panes last-draw title]} @app
+                    [w h] wh
+                    {:keys [layout spans cursor] :as d} (screen/render m w h panes)
+                    lay (str/join "\n" (for [{:keys [block x y] tw :w th :h} layout] (str block " " x " " y " " tw " " th)))
+                    sp (spans-text spans)
+                    cur (str/join " " (map #(if (keyword? %) (name %) %) cursor))]
+                (when (not= lay (:layout last-draw)) (send-str! r \l lay))
+                (when (not= sp (:spans last-draw)) (send-str! r \v sp))
+                (when (not= cur (:cursor last-draw)) (send-str! r \c cur))
+                (when (not= (:title d) title)
+                  (send-str! r \w (str "\u001b]2;" (clean (:title d)) "\u0007"))
+                  (swap! app assoc :title (:title d)))
+                (swap! app assoc :last-draw {:layout lay :spans sp :cursor cur})))
+            (mouse! [{:keys [button x y kind]}]
+              (let [{:keys [m wh panes]} @app
+                    [w h] wh
+                    sid (model/session-id m)
+                    hit (screen/pane-at m w h x y)
+                    wheel (when (<= 64 button 65) (if (= 64 button) -3 3))
+                    drag (pos? (bit-and button 32))
+                    btn (case (bit-and button 3) 0 "left" 1 "middle" 2 "right" "none")
+                    [block px py] hit]
+                (when sid
+                  (when (and (= kind :press) block (not wheel) (not drag) (not= block (model/focused-block m)))
+                    (rex-send! (:current m) "session.focus_block" {:session_id sid :block_id block} [:effect]))
+                  (cond
+                    (or (nil? hit) (nil? py))
+                    (when (= kind :release) (step! (fn [m] [(assoc m :selection nil) []])))
+                    ;; A program that asked for mouse reports, such as Vim or jjui, gets them.
+                    (get-in panes [block :mouse])
+                    (rex-send! (:current m) "block.event"
+                               {:session_id sid :block_id block
+                                :event (cond wheel {:type "wheel" :payload {:x px :y py :delta_y (quot wheel 3) :delta_mode "line"}}
+                                             drag {:type "mouse" :payload {:action "motion" :button btn :buttons {btn true} :x px :y py}}
+                                             :else {:type "mouse" :payload {:action (name kind) :button btn :x px :y py}})}
+                               [:ignore])
+                    wheel (send-str! r \s (str block " " wheel))
+                    (and (= kind :press) (not drag) (= btn "left")) (step! (fn [m] [(assoc m :selection [block [px py] [px py]]) []]))
+                    (and drag (= block (first (:selection m)))) (step! (fn [m] [(assoc-in m [:selection 2] [px py]) []]))
+                    (and (= kind :press) (= btn "middle")) (perform! [[:paste (:current m) sid block nil]])
+                    (= kind :release)
+                    (let [[b a z] (:selection m)]
+                      (if (or (nil? b) (= a z))
+                        (step! (fn [m] [(assoc m :selection nil) []]))
+                        (let [n (inc (:next-req @app)) req (str "s" n)]
+                          (swap! app #(-> % (assoc :next-req n) (assoc-in [:text-reqs req] [:select b a z])))
+                          (send-str! r \t (str req " " b)))))))))
+            (selected-text [lines [c0 r0] [c1 r1]]
+              (let [[[c0 r0] [c1 r1]] (sort-by (fn [[c rr]] [rr c]) [[c0 r0] [c1 r1]])]
+                (str/join "\n" (for [rr (range r0 (inc r1)) :let [l (get lines rr "")]]
+                                   (str/trimr (subs l (min (count l) (if (= rr r0) c0 0)) (min (count l) (if (= rr r1) (inc c1) (count l)))))))))
+            (handle! [[kind & xs]]
+              (case kind
+                :key (let [k (first xs) m (:m @app)]
+                       (log "key" (pr-str k) (keys/chord k))
+                       ;; Typing follows the output again and drops a selection.
+                       (when (and (nil? (:minibuffer m)) (nil? (:hints m)) (model/focused-block m)
+                                  (get-in @app [:panes (model/focused-block m) :scrolled]))
+                         (send-str! r \s (str (model/focused-block m) " bottom")))
+                       (swap! app update :m assoc :selection nil)
+                       (step! model/key k))
+                :paste (let [m (:m @app)]
+                         (when (and (model/session-id m) (model/focused-block m))
+                           (perform! [[:paste (:current m) (model/session-id m) (model/focused-block m) (first xs)]])))
+                :mouse (mouse! (first xs))
+                :focus nil
+                :rex (let [[srv [k & more]] xs]
+                       (case k
+                         :response (let [[id result] more
+                                         tag (get-in @app [:tags srv id])]
+                                     (swap! app update-in [:tags srv] dissoc id)
+                                     (when tag (step! model/rex-response tag result)))
+                         :event (step! model/rex-event srv (first more))
+                         :closed (do (swap! app update :conns dissoc srv)
+                                     (swap! app update :m assoc :echo (str "Rex closed: " (first more))))))
+                :sidecar (step! model/sidecar (first xs))
+                :stream-msg (let [[block msg] xs]
+                              (case (:type msg)
+                                "resize" (send-str! r \r (str block " " (:cols msg 80) " " (:rows msg 24)))
+                                "child_exited" (swap! app assoc-in [:panes block :exited] (:exit_code msg 0))
+                                nil))
+                :stream-closed (let [[block why] xs]
+                                 (when (get-in @app [:streams block])
+                                   (swap! app update :streams dissoc block)
+                                   (send-str! r \x block)
+                                   (swap! app update :m assoc :echo (str "stream closed: " why))
+                                   (step! model/stream-closed block)))
+                :render-line (let [[w a b] (str/split (first xs) #" ")]
+                               (log "render" (first xs))
+                               (case w
+                                 "size" (do (swap! app assoc :wh [(parse-long a) (parse-long b)] :last-draw nil)
+                                            (send-str! r \f ""))
+                                 "mode" (let [bits (parse-long b)]
+                                          (swap! app assoc-in [:panes a] {:mouse (odd? bits) :scrolled (pos? (bit-and bits 2))}))
+                                 "err" (when (get-in @app [:streams a])
+                                         (swap! app update :m assoc :echo (str "pane " a ": " b)))
+                                 nil))
+                :text (let [[req cols lines] xs
+                            [what & args] (get-in @app [:text-reqs req])]
+                        (swap! app update :text-reqs dissoc req)
+                        (case what
+                          :hints (swap! app update :m model/open-hints (first args) lines cols)
+                          :select (let [[_ a z] args text (selected-text lines a z)]
+                                    (swap! app update :m assoc :echo (str "Copied " (count text) " characters"))
+                                    (perform! [[:clipboard text]]))
+                          nil))
+                :connect (let [srv (first xs)
+                               {:keys [address] srv-label :label} (get-in @app [:m :servers srv])
+                               sock (rex/socket-path address)]
+                           ;; The local server starts on demand, as the rex CLI does, so it
+                           ;; runs with this window's environment, like Herdr's server.
+                           (when (and (nil? address) (nil? (System/getenv "REX_SERVER")) (not (fs/exists? sock)))
+                             (p/sh (or (System/getenv "REXG_REX") "rex") "server" "start"))
+                           (try
+                             (let [c (rex/connect! sock client-label (fn [msg] (put! [:rex srv msg])))]
+                               (swap! app assoc-in [:conns srv] c)
+                               (step! model/connected srv (:client-id c)))
+                             (catch Exception e
+                               (swap! app update :m assoc :echo (str srv-label ": " (ex-message e))))))
+                nil))]
+      ;; Agents' status from OSC 7501, as the rexmux sidecar follows it.
+      (doseq [srv (:servers cfg)]
+        (rexcli/events! srv (fn [ev] (.submit sc-exec ^Runnable
+                                              (fn [] (try (let [[s msgs] (sidecar/deliver (:sidecar @app) sc-io {:op :rex/event :event ev :server (:label srv)})]
+                                                            (swap! app assoc :sidecar s)
+                                                            (doseq [o msgs] (put! [:sidecar o])))
+                                                          (catch Throwable _)))))))
+      (doseq [i (range (count servers))]
+        (put! [:connect i]))
+      ;; The sidecar says ready; the model answers hello.
+      (put! [:sidecar {:op :ready}])
+      (loop []
+        (let [ev (.take q)]
+          (if (= :quit (first ev))
+            (do (log "quit" (second ev))
+                (doseq [[_ close] (:streams @app)] (try (close) (catch Exception _)))
+                (try (frame! r \q (byte-array 0)) (catch Exception _))
+                (deref rproc 2000 nil)
+                (shutdown-agents)
+                (System/exit 0))
+            (do (try (handle! ev)
+                     ;; Batch: handle what else is queued before drawing once.
+                     (loop [] (when-let [e (.poll q)]
+                                (if (= :quit (first e)) (.put q e) (do (handle! e) (recur)))))
+                     (sync-sizes!)
+                     (draw!)
+                     (catch Throwable e
+                       (log "error" (pr-str ev) (ex-message e))
+                       (swap! app update :m assoc :echo (str "error: " (ex-message e)))))
+                (recur))))))))
+
+(defn -main [& args]
+  (let [opts (loop [[a b & more :as as] args o {}]
+               (cond (empty? as) o
+                     (= a "--session") (recur more (assoc o :session b))
+                     (= a "--config") (recur more (assoc o :config b))
+                     (= a "--render") (recur more (assoc o :render b))
+                     :else (recur (rest as) o)))]
+    (run (merge {:render (or (System/getenv "REXG_RENDER") "rexg-render")
+                 :label (or (System/getenv "REXG_LABEL") "ghostty-rex")}
+                opts))))

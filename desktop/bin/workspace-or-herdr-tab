@@ -10,7 +10,8 @@
          '[hypr.dispatch :as hypr]
          '[mux])
 
-;; The multiplexer's window: Herdr's Ghostty, or rexmux (~/.config/engstrand/mux).
+;; The multiplexer's window: Herdr's Ghostty, rexmux or ghostty-rex
+;; (~/.config/engstrand/mux).
 (def backend (mux/backend))
 (def mux-class (mux/window-class backend))
 
@@ -24,11 +25,11 @@
 (defn focus-tab! [tab]
   (case backend
     :herdr (herdr/focus-tab! tab)
-    ;; rexmux declares mx.tab.select_N and performs it for rex do.
-    :rex (let [{:keys [exit err]} @(p/process ["rex" "-C" "rexmux" "do" (str "mx.tab.select_" tab)]
-                                              {:out :string :err :string})]
-           (when-not (zero? exit)
-             (throw (ex-info (str "rex do mx.tab.select_" tab ": " err) {}))))))
+    ;; rexmux and ghostty-rex declare mx.tab.select_N and perform it for rex do.
+    (let [{:keys [exit err]} @(p/process ["rex" "-C" (mux/rex-client backend) "do" (str "mx.tab.select_" tab)]
+                                         {:out :string :err :string})]
+      (when-not (zero? exit)
+        (throw (ex-info (str "rex do mx.tab.select_" tab ": " err) {}))))))
 
 (defn main [& args]
   (if-let [tab (and (= 1 (count args))

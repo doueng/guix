@@ -1,0 +1,21 @@
+# The ghostty-rex window (T207): Ghostty only draws. Panes, splits and tabs
+# are Rex's, and the bb client reads every key, so Ghostty's own tab and
+# split keys are cleared here. Loaded after ~/.config/ghostty/config, so the
+# font, theme and opacity are the same as Herdr's window.
+
+# The client is not a shell: no shell integration, and no prompt marks.
+shell-integration = none
+# Mouse reports go to the client, which focuses panes, selects and scrolls;
+# hold Shift for Ghostty's own selection.
+mouse-shift-capture = never
+
+keybind = clear
+keybind = ctrl+shift+c=copy_to_clipboard
+keybind = ctrl+shift+v=paste_from_clipboard
+keybind = shift+insert=paste_from_clipboard
+keybind = ctrl+equal=increase_font_size:1
+keybind = ctrl+minus=decrease_font_size:1
+keybind = ctrl+zero=reset_font_size
+keybind = shift+ctrl+alt+r=reload_config
+keybind = super+left=text:\x01
+keybind = super+right=text:\x05

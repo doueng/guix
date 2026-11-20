@@ -15,3 +15,8 @@
     (is (= "(define %terminal-mux 'rex)" (second (first diff))))
     (is (= real back) "herdr is the default the repo ships")
     (is (thrown? Exception (set-mux "(define x 1)" "rex")))))
+
+(deftest a-hyphenated-mux-switches-and-rolls-back
+  (let [g (set-mux real "ghostty-rex")]
+    (is (str/includes? g "(define %terminal-mux 'ghostty-rex)"))
+    (is (= real (set-mux g "herdr")))))

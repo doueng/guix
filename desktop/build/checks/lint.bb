@@ -110,6 +110,15 @@
   (keep identity [(tested "make rexmux-test" "rexmux" "rexmux" (filter rexmux-file? files)
                           {:dir (str c/root "/desktop/build/rexmux")} ["bb" "test"])]))
 
+(defn ghostty-rex-file? [f]
+  (or (#{"desktop/bin/ghostty-rex" "desktop/lib/mux.clj"} f)
+      (and (str/starts-with? f "desktop/build/rexmux/sidecar/") (str/ends-with? f ".clj"))
+      (and (str/starts-with? f "desktop/build/ghostty-rex/") (re-find #"\.(clj|edn)$" f))))
+
+(defn ghostty-rex-problems []
+  (keep identity [(tested "make ghostty-rex-test" "ghostty-rex" "ghostty-rex" (filter ghostty-rex-file? files)
+                          {:dir (str c/root "/desktop/build/ghostty-rex")} ["bb" "test"])]))
+
 (defn ext-reload-problems
   "Each extension ext-reload serves must reload itself when its manifest.json changed: ext-reload's disable and
   enable keep the manifest Chrome first loaded, so without it a new command never gets its key (T197's Cmd+T)."
@@ -130,6 +139,7 @@
    ["ext-reload" ext-reload-problems]
    ["md-view" md-view-problems]
    ["rexmux" rexmux-problems]
+   ["ghostty-rex" ghostty-rex-problems]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
    ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))
                             (filter (fn [f] (or (str/ends-with? f ".bb") (re-find #"^#!.*\bbb\b" (first-line f)))) files))]

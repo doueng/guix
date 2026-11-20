@@ -309,13 +309,13 @@
 (defn window-pid
   "Of CLIENTS (hyprctl clients), the pid of the window whose process is
   among ANCESTORS (pid -> parent pid) of PIDS; else the multiplexer's window,
-  Herdr's Ghostty or rexmux, where a pane's tty belongs to the multiplexer's
+  Herdr's Ghostty, rexmux or the ghostty-rex Ghostty, where a pane's tty belongs to the multiplexer's
   server, not to the window; else nil."
   [clients pids parent]
   (let [windows (set (map :pid clients))
         up (fn [pid] (take-while some? (take 64 (iterate parent pid))))]
     (or (some #(some windows (up %)) pids)
-        (some #(when (re-find #"herdr|^rexmux$" (str (:class %))) (:pid %)) (sort-by :focusHistoryID clients)))))
+        (some #(when (re-find #"herdr|^rexmux$|^dev\.engstrand\.Rex$" (str (:class %))) (:pid %)) (sort-by :focusHistoryID clients)))))
 
 (defn- lua-string [s]
   (str "\"" (-> s (str/replace "\\" "\\\\") (str/replace "\"" "\\\"")) "\""))

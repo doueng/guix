@@ -1,6 +1,7 @@
 #!/usr/bin/env bb
 ;; The terminal multiplexer's window, as ~/.config/engstrand/mux chooses
-;; (T207): Herdr in Ghostty (herdr-terminal, the default) or the rexmux window.
+;; (T207): Herdr in Ghostty (herdr-terminal, the default), the rexmux window,
+;; or Ghostty with the ghostty-rex client.
 ;; Both launchers are this script's siblings, run by path: Hyprland's PATH has
 ;; the Guix Home profile but not ~/.local/bin, so a bare rexmux is not found
 ;; and Super+Return opens nothing. MUX_TERMINAL_DRY_RUN=1 prints the argv
@@ -14,6 +15,7 @@
 
 (let [argv (case (mux/backend)
              :rex (into [(str (fs/path here "rexmux")) "gui"] *command-line-args*)
+             :ghostty-rex (into [(str (fs/path here "ghostty-rex"))] *command-line-args*)
              (into [(str (fs/path here "herdr-terminal"))] *command-line-args*))]
   (if (System/getenv "MUX_TERMINAL_DRY_RUN")
     (prn argv)

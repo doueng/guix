@@ -13,7 +13,7 @@ JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))
 COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
-        home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify rexmux rexmux-test rexmux-verify rexmux-tla mux oilfm oilfm-test pi-sci pi-sci-test \
+        home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify rexmux rexmux-test rexmux-verify rexmux-tla ghostty-rex ghostty-rex-test ghostty-rex-verify mux oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test ext-reload-test chrome-e2e \
         doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check test-display-check clipboard-check \
         clipboard-history-test taildrop-test parinfer-check parinfer-fix
@@ -65,7 +65,10 @@ help:
 	@echo 'rexmux-test   rexmux sidecar unit and property tests (make lint runs them)'
 	@echo 'rexmux-verify rexmux live tests on a throwaway Rex server: the sidecar, then Bombadil over rexmux tty (REXMUX_BOMBADIL_TIME s, default 120)'
 	@echo 'rexmux-tla    model-check the rexmux link, pane, stream and agent model with TLA+'
-	@echo 'mux           choose the terminal multiplexer: MUX=rex builds rexmux and switches, MUX=herdr rolls back (sets %terminal-mux, then home-apply)'
+	@echo 'ghostty-rex   build rexg-render, the C half of the ghostty-rex client, into its target/ (desktop/build/ghostty-rex)'
+	@echo 'ghostty-rex-test ghostty-rex client unit and property tests: keys, model, hints, screen (make lint runs them)'
+	@echo 'ghostty-rex-verify ghostty-rex live tests on the hidden test display and a throwaway Rex server, then Bombadil over the client'
+	@echo 'mux           choose the terminal multiplexer: MUX=rex builds rexmux, MUX=ghostty-rex uses Ghostty with the bb client, MUX=herdr rolls back (sets %terminal-mux, then home-apply)'
 	@echo 'oilfm         build the oilfm file manager (~/projects/oilfm)'
 	@echo 'oilfm-test    run oilfm tests, headless GPUI ones included'
 	@echo 'doom-check    fail on doom doctor warnings missing from the baseline'
@@ -256,13 +259,22 @@ rexmux-verify:
 rexmux-tla:
 	cd desktop/build/rexmux && "$(HOME)/.guix-home/profile/bin/bb" verify:tla
 
+ghostty-rex:
+	cd desktop/build/ghostty-rex && "$(HOME)/.guix-home/profile/bin/bb" build
+
+ghostty-rex-test:
+	cd desktop/build/ghostty-rex && "$(HOME)/.guix-home/profile/bin/bb" test
+
+ghostty-rex-verify:
+	cd desktop/build/ghostty-rex && "$(HOME)/.guix-home/profile/bin/bb" verify
+
 mux:
-	@test "$(MUX)" = rex -o "$(MUX)" = herdr || { echo 'usage: make mux MUX=rex|herdr' >&2; exit 2; }
+	@test "$(MUX)" = rex -o "$(MUX)" = ghostty-rex -o "$(MUX)" = herdr || { echo 'usage: make mux MUX=rex|ghostty-rex|herdr' >&2; exit 2; }
 	@if [ "$(MUX)" = rex ]; then $(MAKE) rexmux; fi
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/build/rexmux/switch.bb $(MUX)
 	$(MAKE) home-apply
 	-hyprctl reload >/dev/null
-	@echo 'Now on $(MUX): Super+B opens it. make mux MUX=$(if $(filter rex,$(MUX)),herdr,rex) switches back.'
+	@echo 'Now on $(MUX): Super+B opens it. make mux MUX=$(if $(filter herdr,$(MUX)),ghostty-rex,herdr) switches back.'
 
 OILFM ?= $(HOME)/projects/oilfm
 

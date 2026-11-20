@@ -42,8 +42,9 @@ function M.cancel(submap, keys, key)
   end
 end
 
--- The terminal multiplexer's window: Herdr's Ghostty, or rexmux when
--- ~/.config/engstrand/mux says rex (T207; Guix Home writes it).
+-- The terminal multiplexer's window: Herdr's Ghostty, rexmux when
+-- ~/.config/engstrand/mux says rex, or the ghostty-rex Ghostty when it says
+-- ghostty-rex (T207; Guix Home writes it).
 local function mux_backend()
   local ok, word = pcall(function()
     local home = os.getenv("XDG_CONFIG_HOME") or ((os.getenv("HOME") or "") .. "/.config")
@@ -53,12 +54,13 @@ local function mux_backend()
     f:close()
     return (s:gsub("%s", ""))
   end)
-  if ok and word == "rex" then return "rex" end
+  if ok and (word == "rex" or word == "ghostty-rex") then return word end
   return "herdr"
 end
 
 M.mux = mux_backend()
-M.herdr_class = M.mux == "rex" and "rexmux" or "com.mitchellh.ghostty.herdr"
+M.herdr_class = ({ rex = "rexmux", ["ghostty-rex"] = "dev.engstrand.Rex" })[M.mux]
+  or "com.mitchellh.ghostty.herdr"
 
 local function send_to_herdr(chords)
   local active = hl.get_active_window()

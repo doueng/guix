@@ -1,0 +1,24 @@
+;; The ghostty-rex Rex client (desktop/build/ghostty-rex). make stow links
+;; this file to ~/.config/ghostty-rex/config.edn; the client reads it at start,
+;; the sidecar on M-x Help: reload. The same keys as rexmux's config.edn.
+{;; Rex servers, the first shown at start. A nil address is the local server,
+ ;; which the client starts when it is not running.
+ :servers [{:label "local" :address nil}]
+ ;; One leader menu for Herdr and Rex: leader.edn's :herdr actions run the
+ ;; matching command under Ctrl+b Space.
+ :leader-file "~/.config/keybindings/leader.edn"
+ :leader-prefix ["ctrl+b" "space"]
+ ;; Bare Ctrl+h/j/k/l through keyleader term-nav, as Herdr has them.
+ :term-nav true
+ ;; The shell every new block runs, as Herdr's default_shell.
+ :shell "fish"
+ ;; The session shown, made when the server lacks it, in the order of the
+ ;; Herdr guix workspace's tabs: Super+Return, E, D and G pick them.
+ :startup {:label "main"
+           :cwd "~/guix"
+           :windows [{:label "shell"}
+                     {:label "bbh" :command ["emacs-bbh"]}
+                     ;; After a reboot Rex brings the tabs back as bare shells;
+                     ;; the client runs :restore (else :command) in them again.
+                     {:label "pi" :command ["pi"] :restore ["pi" "--continue"]}
+                     {:label "jjui" :command ["jjui"]}]}}

@@ -1,0 +1,12 @@
+{:paths ["src" "../rexmux/sidecar" "test" "../rexmux/test" "../rexmux/verify"]
+ :tasks {attach {:doc "The client in this terminal: shows the Rex session (the window runs this). Args: [--session S] [--render PATH]."
+                 :requires ([rexg.main])
+                 :task (apply rexg.main/-main *command-line-args*)}
+         build {:doc "Compile rexg-render into target/ (make ghostty-rex)."
+                :task (load-file "build.bb")}
+         test {:doc "Unit and property tests of the client: keys, model, hints, screen (fast; make lint runs them)."
+               :requires ([rexg.test-runner])
+               :task (rexg.test-runner/-main)}
+         verify {:doc "Live tests: the client in Ghostty on the hidden test display against a throwaway Rex server, then Bombadil (make ghostty-rex-verify). Args: [--keep]."
+                 :requires ([rexg.verify])
+                 :task (apply rexg.verify/-main *command-line-args*)}}}
