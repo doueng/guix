@@ -61,7 +61,8 @@ reaches the client, and keeps copy, paste and font size.
   the parity list in docs/rex-parity.html: startup tabs and their programs,
   `rex -C ghostty-rex do mx.tab.select_3` (Super+D), tiny fingers, mouse drag
   and wheel, rename, split cwd, resize, copy mode and search, Ctrl+Shift+V,
-  project sessions, and a simulated reboot. Then Bombadil types into
+  project sessions, jjui and bbh's inbox layers, bbh say --from rex, session
+  rename, a desktop notification for a blocked agent, and a simulated reboot. Then Bombadil types into
   `bb attach` with rexmux's specs (`../rexmux/test/bombadil/rexmux.ts` and
   `startup.ts`), 60 s each (`--time N`, `--no-bombadil`, `--keep`).
 - `make rexmux-tla` model-checks the stream, link and agent rules this client

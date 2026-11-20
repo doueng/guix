@@ -18,10 +18,15 @@
   - rename, split in the pane's directory, resize, copy mode and search
     (the scrollback in a stub $EDITOR), Ghostty's Ctrl+Shift+V paste,
     project sessions (Ctrl+b O) and Ctrl+b B back;
+  - jjui and bbh's inbox float over the panes and close when they exit,
+    M-x bbh: tell runs bbh say --from rex, Ctrl+b $ renames the session, and
+    a blocked agent in another tab sends one desktop notification (stubs
+    record notify-send and bbh);
   - persistence: after the server dies with its programs, as in a reboot,
     a new client brings each startup tab's program back (pi --continue).
   Copies and opened URLs go to files (REXG_CLIPBOARD_FILE, REXG_OPEN_FILE),
-  and a screenshot of each step lands in the run's directory."
+  and a screenshot of each step lands in the run's directory, which a
+  passing run removes unless --keep."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
             [cheshire.core :as json]
@@ -148,13 +153,34 @@
                         "script" "-qfec" (str "stty cols 120 rows 30; exec " (fs/which "bb") " attach --session " sid " 2>>" root "/tty.log") "/dev/null")]
     {:proc proc :in (:in proc)}))
 
+(defn- blocks-of
+  "Every block of session SID's view, floating layers too."
+  [s sid]
+  (set (keep :block_id (tree-seq coll? seq (:windows (view s sid))))))
+
+(defn- desktop-stubs!
+  "Stand-ins that record what the client asks of the desktop: notify-send
+  and bbh (inbox waits like a TUI; say writes its arguments)."
+  [dir root]
+  (doseq [[n body] [["notify-send" (str "(spit \"" root "/notified\" (str (clojure.string/join \" \" *command-line-args*) \"\\n\") :append true)")]
+                    ["bbh" (str "(if (= \"inbox\" (first *command-line-args*)) (do (println \"STUB bbh inbox\") (Thread/sleep 100000000))"
+                                " (spit \"" root "/bbh-args\" (pr-str *command-line-args*)))")]]]
+    (let [f (str (fs/path dir n))]
+      (spit f (str "#!" (fs/which "bb") "\n" body "\n"))
+      (fs/set-posix-file-permissions f "rwxr-xr-x"))))
+
+(defn- new-block!
+  "Wait for a block of SID that BEFORE lacks and whose screen shows TEXT."
+  [s sid before text]
+  (wait-for 8000 #(some (fn [b] (when (str/includes? (str (capture s sid b)) text) b)) (remove before (blocks-of s sid)))))
+
 (defn- send-bytes! [{:keys [in]} s] (.write in (.getBytes ^String s "UTF-8")) (.flush in))
 (defn- stop-tty! [{:keys [proc]}] (p/destroy-tree proc) (str (:out (deref proc 3000 {}))))
 
 (defn e2e!
   "The window checks; returns the run directory."
   [root]
-  (let [bin (e2e/stubs! (str root "/stubs"))
+  (let [bin (doto (e2e/stubs! (str root "/stubs")) (desktop-stubs! root))
         s (ts/start! {:root (str root "/srv") :restore true :path-prepend bin})
         config (str root "/ghostty-rex.edn")
         shipped (config! s config)
@@ -277,6 +303,42 @@
           (when-not (get-in (view s sid) [:windows 0 :layers 0 :layout :split])
             (keys! [:ctrl "b"] "%")
             (wait-for 3000 #(get-in (view s sid) [:windows 0 :layers 0 :layout :split]))))
+        ;; jjui and bbh's inbox float over the panes; Ctrl+C ends each, and its layer closes.
+        (doseq [[k text name] [["g" "STUB jjui" "Ctrl+b g floats jjui over the panes"]
+                               ["t" "STUB bbh inbox" "Ctrl+b t floats bbh's inbox over the panes"]]]
+          (let [before (blocks-of s sid)]
+            (keys! [:ctrl "b"] k)
+            (let [b (new-block! s sid before text)]
+              (check! name b)
+              (shot! root (str "07-layer-" k))
+              (when b
+                (ts/rex! s "send" "-s" sid "-b" b "\u0003")
+                (check! (str name ", and closes when it exits") (wait-for 5000 #(not ((blocks-of s sid) b))))))))
+        ;; bbh routing: M-x bbh: tell sends bbh say with the rex origin.
+        (keys! [:alt "x"] "bbh: tell" [:key "Return"])
+        (Thread/sleep 500)
+        (keys! "T207 hello from ghostty-rex" [:key "Return"])
+        (check! "M-x bbh: tell runs bbh say --from rex"
+                (wait-for 5000 #(= ["say" "--from" "rex" "T207 hello from ghostty-rex"] (some-> (slurp? (str root "/bbh-args")) edn/read-string)))
+                (slurp? (str root "/bbh-args")))
+        ;; Session rename, then back.
+        (keys! [:ctrl "b"] "$" "renamed" [:key "Return"])
+        (check! "Ctrl+b $ renames the session" (wait-for 3000 #(= "renamed" (:label (view s sid)))) (:label (view s sid)))
+        (keys! [:ctrl "b"] "$" "main" [:key "Return"])
+        ;; Notifications: an agent that turns blocked in a tab you are not on.
+        (let [before-windows (set (map :window_id (:windows (view s sid))))]
+          (api s "session.new_window"
+               {:session_id sid :focus false
+                :layout {:block {:flavor "com.superlogical.terminal.shell"
+                                 :options {:command ["sh" "-c" "sleep 1; printf '\\033]7501;state=blocked:app=pi\\033\\\\'; exec sleep 100000"]}}}})
+          (check! "a blocked agent in another tab sends one desktop notification"
+                  (wait-for 8000 #(str/includes? (str (slurp? (str root "/notified"))) "pi needs you"))
+                  (slurp? (str root "/notified")))
+          (Thread/sleep 1500)
+          (check! "the notification is sent once" (= 1 (count (re-seq #"needs you" (str (slurp? (str root "/notified")))))))
+          (shot! root "08-blocked")
+          (when-let [agent-w (first (remove before-windows (map :window_id (:windows (view s sid)))))]
+            (api s "session.close_window" {:session_id sid :window_id agent-w})))
         ;; Persistence: the server dies with its programs, as in a reboot.
         (stop-window! win)
         (ts/kill! s)
@@ -371,5 +433,6 @@
     (let [failed (remove :ok @results)]
       (spit (str root "/results.edn") (pr-str @results))
       (println (format "e2e: %d checks, %d failed; screenshots and logs in %s" (count @results) (count failed) root))
-      (when (and (empty? failed) (not keep?)) nil)
+      ;; A passing run leaves nothing behind (each Bombadil trace is ~90 MB) unless --keep.
+      (when (and (empty? failed) (not keep?)) (fs/delete-tree root) (println "removed" root))
       (System/exit (if (empty? failed) 0 1)))))

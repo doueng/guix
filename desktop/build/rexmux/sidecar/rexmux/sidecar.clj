@@ -112,7 +112,7 @@
       (doseq [{:keys [block state app msg] :as row} (agents/attention after)
               :when (and (not (old block)) (not= block (:block-id ctx)))]
         (notify (str (or app "agent") " " ({"blocked" "needs you" "error" "failed" "done" "is done"} state state))
-                (str (when-not (str/blank? msg) (str msg "\n")) "Ctrl+b u in rexmux: " (agents/line row)))))))
+                (str (when-not (str/blank? msg) (str msg "\n")) "Ctrl+b u goes there: " (agents/line row)))))))
 
 (defn deliver
   "[state' outgoing-msgs] for one MSG already accepted. IO holds :load-help
