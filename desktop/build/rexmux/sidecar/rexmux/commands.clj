@@ -194,7 +194,7 @@ Router sees it as [routed to T12 W3 from rex]."
            (rex ctx :spawn (:server ctx) ["bbh" "say" "--from" "rex" text] {})
            [[:ui/message (str "Sent: " text)]])}])
 
-(def ^:private bin-dir
+(def bin-dir
   "desktop/bin beside this checkout, so new helpers work before make stow links them."
   (str (fs/normalize (fs/absolutize (fs/path (fs/parent *file*) ".." ".." ".." ".." "bin")))))
 

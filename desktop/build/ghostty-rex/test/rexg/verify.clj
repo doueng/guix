@@ -85,6 +85,15 @@
 (defn- foreground [s sid block]
   (get-in (api s "block.method" {:session_id sid :block_id block :method "process"}) [:foreground :name]))
 (defn- capture [s sid block] (:out (ts/rex! s "capture" "-s" sid "-b" block "--trim")))
+(defn visible-rows
+  "The last ROWS lines of CAP, a capture with --format vt: the screen without
+  the scrollback, where a shell's Ctrl+L leaves what it cleared."
+  [cap rows]
+  (let [lines (str/split (str/replace (str cap) #"\u001b\[[0-9;?]*[A-Za-z]" "") #"\r?\n" -1)]
+    (vec (take-last rows (if (= "" (last lines)) (butlast lines) lines)))))
+(defn- screen [s sid block]
+  (let [{:keys [rows]} (api s "block.method" {:session_id sid :block_id block :method "size"})]
+    (visible-rows (:out (ts/rex! s "capture" "-s" sid "-b" block "--format" "vt")) rows)))
 (defn- clipboard [root] (let [f (str root "/clipboard")] (when (fs/exists? f) (slurp f))))
 (defn- slurp? [f] (when (fs/exists? f) (slurp f)))
 
@@ -108,12 +117,23 @@
                               :startup (assoc (:startup shipped) :cwd (:root s)))))
     shipped))
 
+(defn hyprland-path
+  "PATH as a window Hyprland opens has it: no ~/.local/bin, where make stow
+  links keyleader and bbh, and no bbh shims. The client must find its
+  helpers without them (Ctrl+L failed with keyleader not found, T207)."
+  [path]
+  (str/join ":" (remove #(or (= % (str (fs/path (fs/home) ".local" "bin"))) (str/includes? % "/bbh/shims"))
+                         (str/split (str path) #":"))))
+
 (defn client-env
   "The client's environment against server S: the test HOME, the config,
-  and files in place of the clipboard and the browser."
+  Hyprland's PATH, the checkout's leader.edn, and files in place of the
+  clipboard and the browser."
   [s root config]
   (merge (ts/env s)
-         {"REXG_CONFIG" config "REXMUX_CONFIG" config "REXG_RENDER" (render-bin)
+         {"PATH" (hyprland-path (get (ts/env s) "PATH"))
+          "KEYLEADER_CONFIG" (str (fs/path checkout "desktop" "configs" "keybindings" "leader.edn"))
+          "REXG_CONFIG" config "REXMUX_CONFIG" config "REXG_RENDER" (render-bin)
           "REXG_LOG" (str root "/client.log")
           "REXG_CLIPBOARD_FILE" (str root "/clipboard") "REXG_OPEN_FILE" (str root "/opened")}))
 
@@ -255,6 +275,18 @@
         (check! "Ctrl+b L moves the border"
                 (wait-for 3000 #(> (get-in (view s sid) [:windows 0 :layers 0 :layout :split :ratio] 0.5) 0.5))
                 (get-in (view s sid) [:windows 0 :layers 0 :layout :split :ratio]))
+        ;; Bare Ctrl+h/j/k/l as in Herdr: Ctrl+h moves to the left pane, and
+        ;; fish keeps Ctrl+L, so it clears the screen and focus stays.
+        (let [focused #(get-in (view s sid) [:windows 0 :focused_block_id])]
+          (keys! [:ctrl "h"])
+          (check! "Ctrl+h focuses the left pane" (wait-for 5000 #(= shell (focused))) (focused))
+          (ts/rex! s "send" "-s" sid "-b" shell "echo before-ctrl-l\r")
+          (wait-for 5000 #(some (fn [l] (= "before-ctrl-l" (str/trim l))) (screen s sid shell)))
+          (keys! [:ctrl "l"])
+          (check! "Ctrl+L clears the shell pane's screen and keeps focus"
+                  (wait-for 8000 #(and (not-any? (fn [l] (str/includes? l "before-ctrl-l")) (screen s sid shell))
+                                       (= shell (focused))))
+                  (pr-str (take 4 (screen s sid shell)))))
         (shot! root "04-rename-resize")
         ;; Copy mode and search: the scrollback in a stub $EDITOR that
         ;; records its arguments and the file it was given.

@@ -184,6 +184,25 @@
     (doseq [m msgs] (println (proto/encode m)))
     (flush)))
 
+(defn spawn-env
+  "The environment a command the sidecar spawns gets on top of its own: ENV,
+  REX_SERVER when ADDRESS is set, and desktop/bin last on PATH. The window
+  inherits Hyprland's PATH, which lacks ~/.local/bin, so a bare keyleader or
+  bbh was not found and Ctrl+L showed an error instead of clearing (T207).
+  Last, so what PATH already has, such as a test's stubs, comes first."
+  [env address path]
+  (cond-> (assoc env "PATH" (str (when-not (str/blank? path) (str path ":")) commands/bin-dir))
+    address (assoc "REX_SERVER" address)))
+
+(defn resolve-argv
+  "ARGV with a bare program name found on the PATH of ENV, as spawn-env
+  makes it. The JVM looks the program up on its own PATH, not the child's."
+  [[program & args :as argv] env]
+  (if-let [found (and (not (str/includes? program "/"))
+                      (fs/which program {:paths (str/split (get env "PATH" "") #":")}))]
+    (into [(str found)] args)
+    argv))
+
 (defn make-io
   "The :io map handle gets in a live process: Rex through the rex CLI,
   desktop notifications as APP. The rexmux sidecar process and the
@@ -202,9 +221,10 @@
                   (or (get-in p [:foreground :cwd]) (get-in p [:child :cwd]))))
          :spawn (fn [server argv env]
                   (let [address (:address (or (some #(when (= server (:label %)) %) (:servers config))
-                                              (first (:servers config))))]
-                    (babashka.process/process argv {:extra-env (cond-> env address (assoc "REX_SERVER" address))
-                                                    :out :discard :err :discard})))
+                                              (first (:servers config))))
+                        env (spawn-env env address (System/getenv "PATH"))]
+                    (babashka.process/process (resolve-argv argv env)
+                                              {:extra-env env :out :discard :err :discard})))
          :sessions (fn [] (rex/sessions (first (:servers config))))
          :new-workspace (fn [cwd name]
                           (let [dir (str (fs/path (fs/parent (or cwd ".")) name))]

@@ -104,6 +104,23 @@
     (is (= [] (rexmux.registry/key-conflicts registry)))
     (is (contains? registry :pane/term-nav-left))))
 
+(deftest spawned-helpers-are-found-on-hyprlands-path
+  ;; A window Hyprland opens has no ~/.local/bin on PATH, so a bare keyleader
+  ;; (bare Ctrl+h/j/k/l, Ctrl+L in a shell) was not found (T207).
+  (let [hypr "/gnu/profile/bin:/run/current-system/profile/bin"
+        env (sc/spawn-env {"TERM_PROGRAM" "rex"} "unix:///tmp/r.sock" hypr)]
+    (is (= (str hypr ":" rexmux.commands/bin-dir) (get env "PATH")))
+    (is (= "unix:///tmp/r.sock" (get env "REX_SERVER")))
+    (is (not (contains? (sc/spawn-env {} nil hypr) "REX_SERVER")))
+    (doseq [helper ["keyleader" "bbh"]]
+      (is (= [(str (babashka.fs/path rexmux.commands/bin-dir helper)) "x"] (sc/resolve-argv [helper "x"] env))
+          (str helper " resolves to desktop/bin")))
+    (is (= ["/bin/sh" "-c"] (sc/resolve-argv ["/bin/sh" "-c"] env)) "a path stays as it is")
+    (is (= ["no-such-program-w260"] (sc/resolve-argv ["no-such-program-w260"] env)))
+    (is (= ["/run/current-system/profile/bin/ls"]
+           (sc/resolve-argv ["ls"] (sc/spawn-env {} nil "/run/current-system/profile/bin")))
+        "a program on the inherited PATH wins over desktop/bin")))
+
 (deftest a-newly-blocked-agent-elsewhere-notifies-once
   (let [sent (atom [])
         io {:notify (fn [s b] (swap! sent conj [s b]))}

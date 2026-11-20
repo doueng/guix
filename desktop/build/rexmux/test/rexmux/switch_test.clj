@@ -5,7 +5,8 @@
 
 (load-file "switch.bb")
 
-(def real (slurp "../../../modules/engstrand/config.scm"))
+;; From herdr, whatever make mux last chose: the user's switch edits this file.
+(def real (set-mux (slurp "../../../modules/engstrand/config.scm") "herdr"))
 
 (deftest switching-changes-only-the-mux-line-and-rolls-back
   (let [rex (set-mux real "rex")
@@ -13,7 +14,7 @@
         diff (remove (fn [[a b]] (= a b)) (map vector (str/split-lines real) (str/split-lines rex)))]
     (is (= 1 (count diff)))
     (is (= "(define %terminal-mux 'rex)" (second (first diff))))
-    (is (= real back) "herdr is the default the repo ships")
+    (is (= real back) "switching back to herdr restores the file")
     (is (thrown? Exception (set-mux "(define x 1)" "rex")))))
 
 (deftest a-hyphenated-mux-switches-and-rolls-back

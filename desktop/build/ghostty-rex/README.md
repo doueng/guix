@@ -60,11 +60,14 @@ reaches the client, and keeps copy, paste and font size.
   Ghostty on the hidden test display against a throwaway Rex server, through
   the parity list in docs/rex-parity.html: startup tabs and their programs,
   `rex -C ghostty-rex do mx.tab.select_3` (Super+D), tiny fingers, mouse drag
-  and wheel, rename, split cwd, resize, copy mode and search, Ctrl+Shift+V,
+  and wheel, rename, split cwd, resize, bare Ctrl+h and Ctrl+L (keyleader
+  term-nav: focus moves left, a shell's screen clears), copy mode and search, Ctrl+Shift+V,
   project sessions, jjui and bbh's inbox layers, bbh say --from rex, session
   rename, a desktop notification for a blocked agent, and a simulated reboot. Then Bombadil types into
   `bb attach` with rexmux's specs (`../rexmux/test/bombadil/rexmux.ts` and
-  `startup.ts`), 60 s each (`--time N`, `--no-bombadil`, `--keep`).
+  `startup.ts`), 60 s each (`--time N`, `--no-bombadil`, `--keep`). The
+  client runs with Hyprland's PATH, which lacks ~/.local/bin, as the real
+  window does.
 - `make rexmux-tla` model-checks the stream, link and agent rules this client
   shares with rexmux. The sidecar runs in-process here, so the model's Crash
   and Restart never happen, and a sidecar exception still answers its request.
