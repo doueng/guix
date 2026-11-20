@@ -125,7 +125,11 @@
                              (let [[s msgs] (sidecar/handle (:sidecar @app) sc-io m)]
                                (swap! app assoc :sidecar s)
                                (doseq [o msgs] (put! [:sidecar o])))
-                             (catch Throwable e (log "sidecar" (ex-message e)) (put! [:sidecar {:op :log :text (str "sidecar: " (ex-message e))}])))))))
+                             (catch Throwable e
+                               (log "sidecar" (ex-message e))
+                               (put! [:sidecar {:op :log :text (str "sidecar: " (ex-message e))}])
+                               ;; A request still ends with one answer (Rexmux.tla's link rule).
+                               (when (:id m) (put! [:sidecar {:op :reply :id (:id m) :error (str "sidecar: " (ex-message e))}]))))))))
             (rex-send! [srv method payload tag]
               (if-let [c (get-in @app [:conns srv])]
                 (try (let [id ((:send! c) method payload)]

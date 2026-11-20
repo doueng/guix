@@ -56,8 +56,14 @@ reaches the client, and keeps copy, paste and font size.
 ## Tests
 
 - `make ghostty-rex-test`: unit tests of keys, model, hints and screen (lint runs them).
-- `make ghostty-rex-verify`: the window end to end on the hidden test display
-  against a throwaway Rex server, then Bombadil over `ghostty-rex attach` with
-  rexmux's specs (test/bombadil/*.ts).
+- `make ghostty-rex-verify` (`test/rexg/verify.clj`, about 5 minutes): a real
+  Ghostty on the hidden test display against a throwaway Rex server, through
+  the parity list in docs/rex-parity.html: startup tabs and their programs,
+  `rex -C ghostty-rex do mx.tab.select_3` (Super+D), tiny fingers, mouse drag
+  and wheel, rename, split cwd, resize, copy mode and search, Ctrl+Shift+V,
+  project sessions, and a simulated reboot. Then Bombadil types into
+  `bb attach` with rexmux's specs (`../rexmux/test/bombadil/rexmux.ts` and
+  `startup.ts`), 60 s each (`--time N`, `--no-bombadil`, `--keep`).
 - `make rexmux-tla` model-checks the stream, link and agent rules this client
-  shares with rexmux.
+  shares with rexmux. The sidecar runs in-process here, so the model's Crash
+  and Restart never happen, and a sidecar exception still answers its request.

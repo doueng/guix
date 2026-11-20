@@ -13,7 +13,9 @@
          (map k/chord (keys-of "\u001b[98;5u\u001b[37;;37u\u001b[117;2;85u\u001b[120;3u\u001b[13u\u001b[27u\u001b[97;;97u"))))
   (is (= "A" (:text (first (keys-of "\u001b[97;2;65u")))) "the terminal's text wins")
   (is (= ["up" "ctrl+left" "pagedown" "f5"] (map k/chord (keys-of "\u001b[A\u001b[1;5D\u001b[6~\u001b[15~"))))
-  (is (empty? (keys-of "\u001b[57441;2u")) "a lone modifier is ignored"))
+  (is (empty? (keys-of "\u001b[57441;2u")) "a lone modifier is ignored")
+  (is (= ["shift+o" "shift+l"] (map k/chord (keys-of "\u001b[79;;79u\u001b[108;2;76u")))
+      "an uppercase key code, as wtype sends it, is the letter with shift"))
 
 (deftest plain-bytes-read-too
   (is (= ["ctrl+b" "%" "enter" "alt+x" "backspace" "A"] (map #(if (= "a" (:key %)) (:text %) (k/chord %)) (keys-of "\u0002%\r\u001bx\u007fA")))))

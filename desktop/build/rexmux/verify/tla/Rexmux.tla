@@ -16,7 +16,13 @@
    change as an event to the sidecar, which folds it and sends the window its
    attention list. The person presses next-blocked. A blocked agent must be
    in the window's list once the events have arrived, and pressing
-   next-blocked must eventually reach every agent that stays blocked. *)
+   next-blocked must eventually reach every agent that stays blocked.
+
+   ghostty-rex (desktop/build/ghostty-rex) runs the same sidecar in-process:
+   its two pipes are a single-thread executor and the client's event queue,
+   both FIFO, and a sidecar exception answers the request with an error, so
+   it is this model without Crash and Restart, and the rules below hold for
+   it too. *)
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS Panes, Streams, MaxReq, MaxRestarts, MaxReports, MaxDrops

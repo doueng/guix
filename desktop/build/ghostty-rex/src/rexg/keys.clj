@@ -116,7 +116,10 @@
           (let [k (with-mods {:key key} (or m 1))
                 ;; A shifted symbol arrives as its base key with shift; a
                 ;; symbol typed directly (no shift on this layout) stays itself.
-                k (if-let [base (unshifted key)] (assoc k :key base :shift true) k)]
+                k (if-let [base (unshifted key)] (assoc k :key base :shift true) k)
+                ;; An uppercase letter as the key itself (wtype, some layouts)
+                ;; is that letter with shift.
+                k (cond-> k (and (< code 57344) (Character/isUpperCase (int code))) (assoc :shift true))]
             (finish (cond-> k text (assoc :text text)))))))))
 
 (defn- char-key [c]
