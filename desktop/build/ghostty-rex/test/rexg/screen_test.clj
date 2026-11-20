@@ -37,6 +37,22 @@
     (is (= [:focus "block:aaaaaa"] cursor))
     (is (= [{:block "block:aaaaaa" :x 0 :y 2 :w 50 :h 26} {:block "block:bbbbbb" :x 51 :y 2 :w 49 :h 26}] layout))))
 
+(deftest a-floating-pane-is-framed-and-nothing-crosses-it
+  (let [fl {:block "block:ffffff" :rect [0.25 0.2 0.5 0.6] :floating true}
+        model (-> (m/new-model [{:label "local"}])
+                  (assoc-in [:servers 0 :view] (update-in view [:windows 0 :tiles] conj fl))
+                  (assoc :sidecar-up true))
+        {:keys [spans layout]} (s/render model 100 30 {})
+        at (fn [row col] (get (row-text spans row 100) col \space))]
+    ;; The float covers columns 25-74 and rows 6-21: title row 6, rule row 21.
+    (is (= {:block "block:ffffff" :x 26 :y 7 :w 48 :h 14} (last layout)) "its pane sits inside the frame")
+    (is (= \│ (at 3 50)) "the split's divider above the float")
+    (is (= \space (at 10 50)) "but not through it")
+    (is (= [\│ \│] [(at 10 25) (at 10 74)]) "left and right borders")
+    (is (= \─ (at 21 40)) "a bottom rule")
+    (is (= [\┌ \┐ \└ \┘] [(at 6 25) (at 6 74) (at 21 25) (at 21 74)]) "joined corners")
+    (is (str/includes? (row-text spans 6 100) "─ ffffff") "its title row")))
+
 (deftest which-key-shows-under-a-prefix
   (let [model (-> (m/new-model [{:label "local"}]) (assoc-in [:servers 0 :view] view)
                   (assoc :prefix ["ctrl+b"] :catalogue [{:id "tab/new" :title "Tabs: new" :action "mx.tab.new"}]

@@ -30,11 +30,43 @@
     [x0 y0 (max 1 (- right x0)) th]))
 
 (defn tiles
-  "The visible tiles with cells: [{:block :x :y :w :h}], y the title row."
+  "The visible tiles with cells: [{:block :x :y :w :h :floating}], y the
+  title row. A floating tile's cells include its frame: a right border and a
+  bottom rule (see content-rect)."
   [m w h]
   (let [[pw ph] (pane-area w h)]
     (vec (for [t (some-> (model/view m) model/visible)]
            (let [[x y tw th] (tile-cells (:rect t) pw ph)] (assoc t :x x :y y :w tw :h th))))))
+
+(defn content-rect
+  "[x y w h] of tile T's pane cells: below its title row, and inside the
+  frame of a floating one."
+  [{:keys [x y floating] tw :w th :h}]
+  (if floating
+    [x (inc y) (max 1 (dec tw)) (max 1 (- th 2))]
+    [x (inc y) tw (max 0 (dec th))]))
+
+(defn- box
+  "The cells floating tile T covers, its frame included: [c0 c1 r0 r1), the
+  pane area ending at row LAST."
+  [{:keys [x y] tw :w th :h} last]
+  [(if (pos? x) (dec x) x) (+ x tw) y (min (+ y th) last)])
+
+(defn- clip
+  "SPAN without the cells under BOXES, as zero or more spans."
+  [boxes {:keys [row col text] :as span}]
+  (reduce (fn [pieces [c0 c1 r0 r1]]
+            (if-not (and (<= r0 row) (< row r1))
+              pieces
+              (mapcat (fn [{:keys [col text] :as p}]
+                        (let [end (+ col (count text))]
+                          (if (or (>= col c1) (<= end c0))
+                            [p]
+                            (cond-> []
+                              (< col c0) (conj (assoc p :text (subs text 0 (- c0 col))))
+                              (> end c1) (conj (assoc p :col c1 :text (subs text (- c1 col))))))))
+                      pieces)))
+          [span] boxes))
 
 (defn pane-at
   "The visible pane under screen cell COL ROW: [block pane-col pane-row], the
@@ -48,7 +80,7 @@
 (defn content-sizes
   "{block [cols rows]} of each visible pane, for Rex's resize."
   [m w h]
-  (into {} (for [{:keys [block] tw :w th :h} (tiles m w h)] [block [(max 2 tw) (max 1 (dec th))]])))
+  (into {} (for [t (tiles m w h) :let [[_ _ cw ch] (content-rect t)]] [(:block t) [(max 2 cw) (max 1 ch)]])))
 
 (defn- span [row col fg bg flags text] {:row row :col col :fg fg :bg bg :flags flags :text text})
 (defn- fit [s n] (let [s (str s)] (if (> (count s) n) (subs s 0 (max 0 n)) s)))
@@ -79,18 +111,27 @@
             (when (< col w) (add! (span 0 col (if active tab-fg bar-fg) (if active tab bar) (if active 1 0) (fit txt (- w col)))))
             (recur (rest ws) (+ col (count txt))))))
       (add! (span 0 0 bar-fg bar 0 " no session")))
-    ;; Pane titles and dividers.
-    (doseq [{:keys [block x y] tw :w th :h} ts]
-      (when (pos? x)
-        (doseq [yy (range y (min (+ y th) (- h 2)))] (add! (span yy (dec x) title nil 0 "│"))))
-      (let [agent (some #(when (= block (:block %)) %) (:agents m))
-            f? (= block focused)
-            st (when agent (str " " (model/icon (:state agent)) " " (:app agent)))
-            hist (when (get-in panes [block :scrolled]) " ↑ history (type to return)")
-            t (str (if f? "▶" "─") " " (short block) st hist " ")]
-        (add! (span y x (if f? focus title) nil (if f? 1 0) (str (fit t tw) (apply str (repeat (max 0 (- tw (count t))) "─")))))
-        (when (and agent (= "blocked" (:state agent)))
-          (add! (span y (+ x 2 (count (short block))) blocked nil 1 (fit (str " " (model/icon "blocked")) (max 0 (- tw 8))))))))
+    ;; Pane titles and dividers. A floating pane is framed, and the tiled
+    ;; panes' chrome under it is cut away, so nothing crosses it.
+    (let [boxes (mapv #(box % (- h 2)) (filter :floating ts))]
+      (doseq [{:keys [block x y floating] tw :w th :h :as t} ts]
+        (let [last (min (+ y th) (- h 2))
+              agent (some #(when (= block (:block %)) %) (:agents m))
+              f? (= block focused)
+              st (when agent (str " " (model/icon (:state agent)) " " (:app agent)))
+              hist (when (get-in panes [block :scrolled]) " ↑ history (type to return)")
+              ttl (str (if f? "▶" "─") " " (short block) st hist " ")
+              own (cond-> []
+                    (pos? x) (into (for [yy (range y last)] (span yy (dec x) title nil 0 "│")))
+                    true (conj (span y x (if f? focus title) nil (if f? 1 0) (str (fit ttl tw) (apply str (repeat (max 0 (- tw (count ttl))) "─")))))
+                    (and agent (= "blocked" (:state agent)))
+                    (conj (span y (+ x 2 (count (short block))) blocked nil 1 (fit (str " " (model/icon "blocked")) (max 0 (- tw 8)))))
+                    floating (into (for [yy (range (inc y) (dec last))] (span yy (+ x tw -1) title nil 0 "│")))
+                    floating (conj (span (dec last) (if (pos? x) (dec x) x) title nil 0
+                                         (str (when (pos? x) "└") (apply str (repeat (dec tw) "─")) "┘"))
+                                   (span y (+ x tw -1) title nil 0 "┐"))
+                    (and floating (pos? x)) (conj (span y (dec x) title nil 0 "┌")))]
+          (doseq [s (if floating own (mapcat #(clip boxes %) own))] (add! s)))))
     ;; A mouse selection, reversed in place.
     (when-let [[b [c0 r0] [c1 r1]] (:selection m)]
       (when-let [{:keys [x y] tw :w th :h} (some #(when (= b (:block %)) %) ts)]
@@ -148,7 +189,7 @@
             :else
             (do (add! (span (- h 1) 0 nil nil 0 (pad (:echo m) w)))
                 (if (and focused (not (:hints m)) (not (:doc m))) [:focus focused] [:hide])))]
-      {:layout (vec (for [{:keys [block x y] tw :w th :h} ts] {:block block :x x :y (inc y) :w tw :h (max 0 (dec th))}))
+      {:layout (vec (for [t ts :let [[x y cw ch] (content-rect t)]] {:block (:block t) :x x :y y :w cw :h ch}))
        :spans (persistent! spans)
        :cursor cursor
        :title (str (if v (if (str/blank? (:label v)) (short (:session v)) (:label v)) "rex")
