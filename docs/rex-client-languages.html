@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Rust rexmux versus Lisps and hot-reloadable stacks for the Rex client: measured rebuild times, three spikes (xterm.js webview, Emacs eat/vterm, FFI to libghostty from JVM, Guile and Jolt), a ranked recommendation and a migration path.">
+<meta name="bbh-doc" content="T207">
+<title>Which language for the Rex client</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+nav a{white-space:nowrap}
+</style></head>
+<body><main>
+<h1>Which language for the Rex client</h1>
+
+<nav><a href='#answer'>Answer</a><a href='#native'>What needs native code</a><a href='#measured'>Measurements</a><a href='#candidates'>Candidates</a><a href='#hybrid'>Hybrid savings</a><a href='#rank'>Ranking</a><a href='#migrate'>Migration</a><a href='#risks'>Risks</a><a href='#sources'>Sources</a></nav>
+
+<h2 id=answer>Answer</h2>
+<p>Goal: a Rex client you can change and rerun in seconds, without Rust's compile times.</p>
+<div class='card good'><b>1. Babashka and a Chrome app window running xterm.js, over a tiny native core.</b> I built a spike that streams a real Rex pane into xterm.js. bb holds the Rex connections, a 45-line C filter uses libghostty-vt to turn Rex's Ghostty snapshot into plain VT, and the page is 41 lines of JS. A key takes 16.6 ms (median) to show up on screen, and 200,000 lines render in 0.59 s <span class='tag measured'>measured</span>. Changes reload with no build: bb starts in about 12 ms, and a JS edit takes a page reload. The C core compiles in 0.7 s and should rarely change <span class='tag measured'>measured</span>. rexmux's bb sidecar moves in as it is. Only the rules in <code>model.rs</code> need porting.</div>
+<div class='card'><b>2. Clojure on the JVM, as the same design without the C.</b> Java's FFM API calls libghostty-vt directly from Clojure (0.42 s for the whole run, 26 ms of it decoding and formatting) <span class='tag measured'>measured</span>. It's the fallback if the bb process ever needs libghostty in-process. Most bb code runs on it unchanged.</div>
+<div class='card'><b>3. Emacs, with eat panes.</b> It works with the same pane process. Keys take 12–27 ms and 200k lines take 3.4 s, about 6× slower than xterm.js <span class='tag measured'>measured</span>. It is the most hot-reloadable option and gets M-x and which-key for free. But it would put a busy terminal on Emacs's single thread, and its terminal fidelity is lower.</div>
+<div class='card warn'><b>Not now: Jolt.</b> Its FFI did call libghostty-vt here and produced the same output, but a run took 7.9 s in source mode <span class='tag measured'>measured</span>. It still has no Unix sockets and no GUI path, and no Linux aarch64 release (T201, <span class='tag inferred'>inferred</span>). Guile was the surprise: its FFI ran the same decode in 28 ms total <span class='tag measured'>measured</span>. But Guile has no terminal widget, so the renderer would be yours to write.</div>
+<p>On compile time: today a one-line Rust change costs 12–14 s to rebuild, and a clean build or a GPUI bump costs 7 min 47 s <span class='tag measured'>measured</span>. The recommended hybrid's only native piece is the 45-line C file, at 0.7 s, plus libghostty-vt.so, which Guix would build once per Ghostty bump. So it saves essentially all of the compile time, not just most of it.</p>
+
+<h2 id=native>What actually needs native code</h2>
+<p>Rex's API is JSON over a WebSocket on a Unix socket. Any language with sockets can speak it: bb did, with a 64-line hand-written WebSocket client (<code>rexws.clj</code>) <span class='tag measured'>measured</span>. The one hard part is the pane data stream. It starts with a <b>Ghostty snapshot</b>, which Rex's docs say is <i>meant for terminal emulators built on Ghostty</i> (<code>/llms.txt</code>, The Terminal Stream). After the snapshot it's ordinary VT plus <code>ESC _ rex1;nonce;json ESC \</code> messages. So a client needs libghostty-vt in one of three ways:</p>
+<ul>
+<li><b>A filter process</b>: <code>rex-vt</code> decodes the snapshot, writes it back out with libghostty's own VT formatter (screen, palette, modes, cursor), then passes the stream through. Any terminal can then draw the pane: xterm.js, eat, vterm, even Ghostty itself <span class='tag measured'>measured</span>.</li>
+<li><b>FFI</b> to <code>libghostty-vt.so</code>: measured working from the JVM (FFM), Guile and Jolt <span class='tag measured'>measured</span>. SBCL, Racket and Janet have comparable FFIs <span class='tag inferred'>inferred</span>. bb has none.</li>
+<li><b>WASM</b>: libghostty-vt ships a <code>wasm.h</code> API, and ghostty-web 0.4.0 (coder, updated 2026-11-18) is an xterm.js-compatible terminal built on it <span class='tag measured'>measured</span> (npm view). It could decode snapshots in the page and drop the C filter. Its snapshot support is untested <span class='tag guess'>guess</span>.</li>
+</ul>
+<div style='overflow-x:auto'><div style='min-width:600px'><svg viewBox='0 0 640 230' width='100%' role='img' aria-label='Proposed client architecture'>
+<style>text{font:13px sans-serif}.s{font-size:11px;fill:#555}</style>
+<rect x='10' y='20' width='170' height='190' rx='10' fill='#eef3ea' stroke='#7a9a6a'/>
+<text x='95' y='42' text-anchor='middle' font-weight='bold'>Rex server</text>
+<text x='95' y='64' text-anchor='middle' class='s'>Unix socket, WebSocket</text>
+<text x='95' y='90' text-anchor='middle'>/api/control</text><text x='95' y='106' text-anchor='middle' class='s'>JSON requests, events</text>
+<text x='95' y='140' text-anchor='middle'>/api/data</text><text x='95' y='156' text-anchor='middle' class='s'>Ghostty snapshot, then VT</text>
+<rect x='230' y='20' width='200' height='190' rx='10' fill='#f3efe6' stroke='#a08c5a'/>
+<text x='330' y='42' text-anchor='middle' font-weight='bold'>bb process (hot reload)</text>
+<text x='330' y='66' text-anchor='middle' class='s'>sidecar today: registry, keymaps,</text>
+<text x='330' y='80' text-anchor='middle' class='s'>M-x, agents, workflows</text>
+<text x='330' y='102' text-anchor='middle' class='s'>+ model.rs rules ported to Clojure</text>
+<text x='330' y='124' text-anchor='middle' class='s'>+ rexws: 64-line WS client</text>
+<rect x='255' y='145' width='150' height='50' rx='6' fill='#fff' stroke='#c0392b' stroke-dasharray='4 3'/>
+<text x='330' y='166' text-anchor='middle'>rex-vt (45 lines C)</text><text x='330' y='184' text-anchor='middle' class='s'>libghostty-vt.so from Guix</text>
+<rect x='480' y='20' width='150' height='190' rx='10' fill='#e8eef6' stroke='#5a7aa0'/>
+<text x='555' y='42' text-anchor='middle' font-weight='bold'>Chrome --app</text>
+<text x='555' y='70' text-anchor='middle' class='s'>xterm.js per pane</text>
+<text x='555' y='86' text-anchor='middle' class='s'>(later ghostty-web)</text>
+<text x='555' y='112' text-anchor='middle' class='s'>layout, tabs, minibuffer</text>
+<text x='555' y='128' text-anchor='middle' class='s'>in HTML/CSS</text>
+<text x='555' y='156' text-anchor='middle' class='s'>edit JS, reload: no build</text>
+<line x1='180' y1='100' x2='230' y2='100' stroke='#333' marker-end='url(#a)'/><line x1='230' y1='110' x2='180' y2='110' stroke='#333' marker-end='url(#a)'/>
+<line x1='180' y1='150' x2='255' y2='165' stroke='#333' marker-end='url(#a)'/>
+<line x1='405' y1='170' x2='480' y2='150' stroke='#333' marker-end='url(#a)'/>
+<line x1='480' y1='100' x2='430' y2='100' stroke='#333' marker-end='url(#a)'/>
+<text x='455' y='92' text-anchor='middle' class='s'>keys</text><text x='455' y='186' text-anchor='middle' class='s'>VT</text>
+<defs><marker id='a' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0,0L10,5L0,10z'/></marker></defs>
+</svg></div></div>
+<p>Rex can also listen on TCP (<code>--extra-listen http://127.0.0.1:PORT</code>). But a plain TCP listener needs <code>--allow-anonymous</code>, which gives every local connection full access. So the browser should not talk to Rex directly. Keep the Unix socket, with its peer-credential check, and let bb bridge to it <span class='tag inferred'>inferred</span>.</p>
+
+<h2 id=measured>Measurements</h2>
+<table>
+<tr><th>What</th><th>Result</th></tr>
+<tr><td>rexmux release rebuild after touching <code>model.rs</code> / editing a doc comment in <code>screen.rs</code></td><td>13.96 s / 11.67 s <span class='tag measured'>measured</span></td></tr>
+<tr><td>rexmux clean release build, <code>-j4</code> (GPUI, libghostty-vt via Zig)</td><td>7 min 47 s wall, 29 min 45 s CPU <span class='tag measured'>measured</span>. W242 got 7:32 for Dusk</td></tr>
+<tr><td><code>rex-vt.c</code> compile with gcc</td><td>0.68 s <span class='tag measured'>measured</span></td></tr>
+<tr><td>xterm.js in Chrome --app (flatpak Chrome 157), via bb and rex-vt: key to painted frame, 40 samples</td><td>p50 16.6 ms, p90 17.2, min 5.2 <span class='tag measured'>measured</span>. This includes waiting for the next frame, so it's about one vsync</td></tr>
+<tr><td>same, <code>seq 1 200000</code> until the marker is drawn (1.49 MB)</td><td>0.59 s <span class='tag measured'>measured</span></td></tr>
+<tr><td>Emacs 31.1 pgtk + eat 0.9.4: key to redisplay / 200k lines</td><td>p50 12.1–26.7 ms over two runs / 3.2–3.4 s <span class='tag measured'>measured</span></td></tr>
+<tr><td>Emacs + vterm: default <code>vterm-timer-delay</code> 0.1 s</td><td>p50 110 ms / 2.9 s <span class='tag measured'>measured</span></td></tr>
+<tr><td>Emacs + vterm, timer off</td><td>p50 6.1 ms / 3.4 s <span class='tag measured'>measured</span></td></tr>
+<tr><td>Startup (<code>-e 1</code>): bb, Guile, Fennel / Node / Emacs batch / nvim / Clojure JVM</td><td>~0.01 s / 0.02 / 0.05 / 0.07–0.10 / 0.22–0.30 s <span class='tag measured'>measured</span>. Not real apps</td></tr>
+<tr><td>Snapshot → VT through FFI, whole process: Guile / JVM Clojure / Jolt (source mode)</td><td>0.03 s / 0.42 s / 7.9 s, the same 5801 bytes each <span class='tag measured'>measured</span></td></tr>
+<tr><td>Chrome --app keys with the page focused: Ctrl+W, Ctrl+T, Ctrl+N</td><td>All reached bash; no new windows opened <span class='tag measured'>measured</span>. With the page unfocused, Ctrl+T opened a new Chrome window <span class='tag measured'>measured</span></td></tr>
+</table>
+<p>Not measured: rexmux GPUI's own key latency, so I can't compare it to xterm.js here. The Emacs and browser latencies use different end points (redisplay done versus next animation frame), so compare them only roughly.</p>
+
+<h2 id=candidates>Candidates</h2>
+<p>Loop means edit to running. Term means terminal emulation quality. Guix means availability on aarch64 Guix (<code>guix package -A</code>, which lists packages but doesn't prove they build here). Reuse means how much of rexmux carries over.</p>
+<div style='overflow-x:auto'><table>
+<tr><th>Option</th><th>Loop</th><th>Term / render</th><th>libghostty</th><th>WS + Unix socket</th><th>Guix aarch64</th><th>Maturity</th><th>Reuse</th></tr>
+<tr><td><b>bb + Chrome app + xterm.js</b></td><td>bb REPL reload, page reload <span class='tag measured'>measured</span></td><td>xterm.js (VS Code's terminal), WebGL addon available. 16.6 ms, 0.59 s <span class='tag measured'>measured</span></td><td>C filter or WASM</td><td>hand-written client works <span class='tag measured'>measured</span>; http-kit server built in</td><td>bb, node yes; Chrome is flatpak, ungoogled-chromium listed</td><td>High (bb, xterm.js)</td><td>Sidecar as is, model ported, Bombadil web driver</td></tr>
+<tr><td>bb + scittle/squint in the page</td><td>Same</td><td>Same</td><td>Same</td><td>Same</td><td>npm</td><td>Medium</td><td>As above, with Clojure in the page too <span class='tag inferred'>inferred</span></td></tr>
+<tr><td>Clojure JVM (+ webview or Swing)</td><td>nREPL reload; start 0.2 s+, a real app likely 1–3 s <span class='tag guess'>guess</span></td><td>Webview: as above. Swing: you draw cells</td><td>FFM direct <span class='tag measured'>measured</span></td><td>JDK UnixDomainSocket + java.net.http WS (TCP only) <span class='tag inferred'>inferred</span></td><td>openjdk 25, clojure 1.12.6; <b>no OpenJFX</b> <span class='tag measured'>measured</span></td><td>High</td><td>Like bb, plus libghostty in-process</td></tr>
+<tr><td>ClojureScript / nbb / Electron / Tauri</td><td>Fast (nbb), slow (Tauri is Rust)</td><td>xterm.js</td><td>WASM, or a Node FFI addon</td><td>Node <code>net</code> + <code>ws</code> package (ws+unix) <span class='tag inferred'>inferred</span></td><td>node 24, esbuild; Electron and Tauri not in Guix <span class='tag measured'>measured</span></td><td>High (Electron), but heavy</td><td>Sidecar logic needs porting to CLJS</td></tr>
+<tr><td><b>Emacs Lisp (eat/vterm)</b></td><td>eval-defun, instant</td><td>eat: 12–27 ms, 3.4 s. vterm (libvterm): 6–110 ms, 2.9–3.4 s <span class='tag measured'>measured</span></td><td>Pane process via rex-vt <span class='tag measured'>measured</span></td><td>Unix sockets native; WS via websocket.el <span class='tag inferred'>inferred</span></td><td>emacs-eat 0.9.4, emacs-vterm <span class='tag measured'>measured</span></td><td>High</td><td>Keymaps and M-x map onto Emacs; one thread for every pane</td></tr>
+<tr><td>Guile + guile-gi/GTK or Chickadee</td><td>REPL, Geiser</td><td>No terminal widget; you'd render cells yourself (VTE through GI is possible <span class='tag guess'>guess</span>)</td><td>FFI <span class='tag measured'>measured</span></td><td>guile-websocket 0.3.0 listed; Unix sockets native</td><td>guile 3.0.11, guile-gi, chickadee 0.10 <span class='tag measured'>measured</span></td><td>Medium-low for GUI</td><td>Little; Scheme, not Clojure</td></tr>
+<tr><td>Fennel/Lua in Neovim or WezTerm</td><td>Lua reload, fast</td><td>Neovim <code>:terminal</code> uses libvterm, like vterm. WezTerm has its own mux</td><td>Pane process</td><td>Neovim has <code>vim.uv</code> pipes; WS by hand <span class='tag inferred'>inferred</span></td><td>neovim 0.12.1, fennel 1.6.1, wezterm listed <span class='tag measured'>measured</span></td><td>High</td><td>Little</td></tr>
+<tr><td>Janet</td><td>REPL</td><td>No GUI story in Guix <span class='tag inferred'>inferred</span></td><td>FFI <span class='tag inferred'>inferred</span></td><td>net/ has Unix sockets <span class='tag inferred'>inferred</span></td><td>janet 1.42.1, spork <span class='tag measured'>measured</span></td><td>Medium</td><td>Little</td></tr>
+<tr><td>Common Lisp (SBCL + McCLIM or SDL2)</td><td>Best-in-class live redefinition</td><td>No terminal widget; you'd render it yourself</td><td>CFFI <span class='tag inferred'>inferred</span></td><td>sb-bsd-sockets local sockets, websocket-driver <span class='tag inferred'>inferred</span></td><td>sbcl 2.6.4, mcclim, sbcl-sdl2 <span class='tag measured'>measured</span></td><td>High runtime, thin GUI</td><td>Little</td></tr>
+<tr><td>Racket (racket/gui)</td><td>REPL, module reload is clunky <span class='tag inferred'>inferred</span></td><td>No terminal widget</td><td>FFI <span class='tag inferred'>inferred</span></td><td>unix-socket lib, rfc6455 <span class='tag inferred'>inferred</span></td><td>racket 9.3 <span class='tag measured'>measured</span></td><td>High runtime</td><td>Little</td></tr>
+<tr><td>Jolt</td><td>7.9 s per run in source mode here; T201 saw 0.18 s after <code>make build</code> <span class='tag measured'>measured</span></td><td>No GUI</td><td>jolt.ffi works <span class='tag measured'>measured</span></td><td>TCP only; Unix sockets missing (T201)</td><td>Builds from source with a patched Chez; no package</td><td>Low: 5½ months old, 725 commits this month</td><td>Clojure, so the sidecar would mostly carry over <span class='tag inferred'>inferred</span></td></tr>
+</table></div>
+
+<h2 id=hybrid>How much compiling a hybrid saves</h2>
+<table>
+<tr><th>Shape</th><th>A behaviour change</th><th>A drawing change</th><th>A dependency bump</th></tr>
+<tr><td>rexmux today (Rust holds model, drawing, streams)</td><td>12–14 s <span class='tag measured'>measured</span></td><td>12–14 s <span class='tag measured'>measured</span></td><td>~8 min <span class='tag measured'>measured</span></td></tr>
+<tr><td>Keep the Rust GPUI renderer, move <code>model.rs</code> into bb</td><td>~0 s, bb reload <span class='tag inferred'>inferred</span></td><td>12–14 s <span class='tag inferred'>inferred</span></td><td>~8 min (GPUI pin) <span class='tag inferred'>inferred</span></td></tr>
+<tr><td>bb + browser + <code>rex-vt</code> C core</td><td>~0 s <span class='tag inferred'>inferred</span></td><td>~0 s, page reload <span class='tag inferred'>inferred</span></td><td>rex-vt 0.7 s <span class='tag measured'>measured</span>; libghostty-vt rebuilt by Guix once per Ghostty bump (2 min 19 s clean in T194, <span class='tag measured'>measured</span>)</td></tr>
+<tr><td>JVM Clojure + FFM, or the browser + ghostty-web WASM</td><td>~0 s</td><td>~0 s</td><td>No code of your own to compile</td></tr>
+</table>
+<p>Keeping GPUI and moving only the behaviour out saves the common case, but drawing work, which is most of the parity list (tiny fingers, copy mode, mouse, minibuffer), still pays Rust's price <span class='tag inferred'>inferred</span>. Moving the drawing out too removes compiling from the loop.</p>
+
+<h2 id=rank>Ranking</h2>
+<ol>
+<li><b>bb + Chrome app window + xterm.js, with <code>rex-vt</code> on a Guix-built libghostty-vt.</b> Fastest loop, the best measured rendering, the most reuse, and Bombadil's native target (web and terminal UIs). Swap in ghostty-web later to get Ghostty's own emulation in the page.</li>
+<li><b>The same on Clojure JVM with FFM</b>, if bb hits a wall, such as needing libghostty's render state in-process for selection or search.</li>
+<li><b>Emacs + eat</b> as a second front end on the same pane process, for the 'Rex inside Emacs' workflow. Not as the main window.</li>
+<li>Guile, then SBCL: good FFI and live coding, but you'd write a terminal renderer.</li>
+<li>Neovim/Fennel, Racket, Janet: viable, but nothing here favours them.</li>
+<li>Jolt: track it. Revisit when it ships aarch64 builds, Unix sockets and a GUI or webview story.</li>
+</ol>
+
+<h2 id=migrate>Migration from rexmux</h2>
+<ol>
+<li><b>Package libghostty-vt in Guix</b> next to <code>modules/engstrand/packages/ghostty.scm</code> (it already builds Ghostty with zig-0.17). Then add <code>rex-vt</code> as a small package. Both come from substitutes after that.</li>
+<li><b>Grow the sidecar into the client process.</b> The bb process opens Rex itself (<code>rexws</code> replaces the per-call <code>rex api call</code> CLI in <code>sidecar/rexmux/rex.clj</code>) and serves the page. The EDN-lines link to Rust goes away, and so does the <i>link</i> part of <code>Rexmux.tla</code>. The streams and agents parts stay.</li>
+<li><b>Port <code>model.rs</code> (1447 lines with tests) to Clojure</b>, as pure functions from keys and events to effects, as it already is in Rust. Keep a text renderer like <code>screen.rs</code>, so the Bombadil tty specs keep working while you add a Bombadil web spec.</li>
+<li><b>Page</b>: one xterm.js per visible block, layout from <code>session.view</code> in CSS grid, minibuffer and which-key in HTML, fit addon for resize, search addon for copy-mode search. Port tiny fingers' regexes from <code>hints.rs</code>.</li>
+<li><b>Ship it as a third mux value</b> (<code>make mux MUX=rexweb</code>), with Herdr staying the default. Walk <code>docs/rex-parity.html</code> item by item. Retire the Rust window once it matches.</li>
+<li>Later: try ghostty-web for in-page snapshot decoding and drop <code>rex-vt</code>.</li>
+</ol>
+
+<h2 id=risks>Risks and open questions</h2>
+<ul>
+<li><b>Browser keys</b>: Ctrl+W/T/N reached the shell in an app window <span class='tag measured'>measured</span>. Ctrl+Shift+I, Ctrl+L, F11 and Alt menus are untested <span class='tag guess'>guess</span>. Hyprland or kanata can remap any that leak.</li>
+<li><b>Two languages</b>: the page is JS. Scittle or squint keep it Clojure without a build <span class='tag inferred'>inferred</span>, or keep the page a dumb renderer and put all logic in bb.</li>
+<li><b>Chrome is a flatpak here.</b> A Guix ungoogled-chromium or WebKitGTK window would make it reproducible. Each needs a check of its WebGL and latency <span class='tag guess'>guess</span>.</li>
+<li><b>Fidelity</b>: xterm.js isn't Ghostty. Kitty keyboard protocol and graphics differ, which matters for pi and jjui <span class='tag inferred'>inferred</span>. ghostty-web is the way out.</li>
+<li><b>Data connection reuse</b>: Rex allows one data connection per client per block. A bridge must close the Rex stream when its page goes away; the spike didn't, and a second page got nothing <span class='tag measured'>measured</span>.</li>
+</ul>
+
+<h2 id=sources>Sources</h2>
+<ul>
+<li>Spike code and raw numbers: <code>/home/engstrand/.local/state/bbh/workflows/20261120-142008-592-investigation/evidence/spikes/</code> (<code>rex-vt.c</code>, <code>rexws.clj</code>, <code>bridge.clj</code>, <code>pane.clj</code>, <code>app.js</code>, <code>bench.el</code>, <code>ffm.clj</code>, <code>ffi.scm</code>, jolt <code>ffi.clj</code>, <code>measurements.edn</code>, <code>xterm-shot.png</code>)</li>
+<li>Rust timings: a copy of <code>desktop/build/rexmux</code> at rromotxl in <code>/tmp/w256</code>, built with its own Guix profile and env as in <code>build.bb</code></li>
+<li>Rex protocol: <code>/llms.txt</code> from a throwaway server started with <code>test/rexmux/testserver.clj</code> (rex 0.1.0-preview.21)</li>
+<li>libghostty-vt headers: <code>snapshot.h</code>, <code>formatter.h</code>, <code>wasm.h</code> in rexmux's build tree</li>
+<li>Earlier docs: <code>docs/guix-in-clojure.html</code> (Jolt), <code>docs/rex-vs-herdr.html</code>, <code>docs/rex-client-design.html</code>, <code>docs/rex-parity.html</code></li>
+</ul>
+
+</main></body></html>
