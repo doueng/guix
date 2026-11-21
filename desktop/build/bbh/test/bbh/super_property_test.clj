@@ -43,7 +43,7 @@
   "Each command kind, as often as it should come up."
   (vec (mapcat (fn [[k n]] (repeat n k))
                {:thread! 3 :start-worker! 4 :router-start! 1 :promote-worker! 2 :worker-running! 4 :finish-worker! 2
-                :cancel! 1 :cancel-delivered! 1 :health! 3 :resume! 2 :steer! 1 :ask! 5 :foreign-ask! 1 :reply! 5
+                :cancel! 1 :cancel-delivered! 1 :cancel-blocked! 1 :abandon-job! 1 :health! 3 :resume! 2 :steer! 1 :ask! 5 :foreign-ask! 1 :reply! 5
                 :approve! 2 :draft! 1 :read! 1 :dismiss! 1 :archive! 1 :say! 2 :register-router! 1 :note! 1 :answered! 2
                 :outbox! 3 :job-exited! 1 :effect! 3 :repeat 2})))
 
@@ -90,6 +90,13 @@
                                              :args {:thread (thread-of state (if (and (seq archived) (odd? b)) (pick archived a) worker)) :reason (pick ["stop" "" "stop"] b)}}])
       :cancel-delivered! [:controller {:id id :command :cancel-delivered!
                                        :args {:worker (pick-id (keep #(when (= :cancelling (:state %)) (:id %)) (vals (:workers state))) b worker)}}]
+      :cancel-blocked! [:controller {:id id :command :cancel-blocked!
+                                     :args {:worker (pick-id (keep #(when (= :cancelling (:state %)) (:id %)) (vals (:workers state))) b worker)
+                                            :jobs (pick [["j1"] ["j1" "j2"] [] nil] c)}}]
+      :abandon-job! (let [blocked (keep #(when (seq (:cancel-blocked %)) %) (vals (:workers state)))
+                          w (pick blocked b)]
+                      [(pick [:owner :router] c) {:id id :command :abandon-job!
+                                                  :args {:thread (if w (:thread w) thread) :job (pick (concat (:cancel-blocked w) ["j9"]) a)}}])
       :health! (let [w (get-in state [:workers worker])
                      alive? (and (odd? b) (not (and w (model/session-ended? w))))]
                  [:controller {:id id :command :health!

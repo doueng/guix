@@ -6,7 +6,8 @@
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS NW, Threads, Cap, MaxAsks, MaxReplies, Chat,  \* Chat: model turns and health passes
-          Timers  \* Timers: model the :starting and :cancelling deadlines
+          Timers, \* Timers: model the :starting and :cancelling deadlines
+          Jobs    \* Jobs: model a job nobody can identify, which holds a cancel
 
 Workers == 1..NW
 None == 0
@@ -30,10 +31,13 @@ VARIABLES
   hbusy,     \* :busy of the Worker's stored health, the last pass's view of busy
   fresh,     \* a health pass ran on the Worker since the person last typed to it
   csig,      \* the Worker's cancellation as an outbox row: "none", "owed" or "taken"
-  overdue    \* :overdue of each Worker: the state a timer found it in too long, or "none"
+  overdue,   \* :overdue of each Worker: the state a timer found it in too long, or "none"
+  job,       \* the Worker's jobs as reconcile! reads them: "none" left, one "lost" (:unknown or :lost), or "abandoned"
+  noted      \* :cancel-blocked of the Worker is set: the person sees what holds its cancel
 
 chat == <<busy, hbusy, fresh>>
-vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, busy, hbusy, fresh, csig, overdue>>
+jobv == <<job, noted>>
+vars == <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, busy, hbusy, fresh, csig, overdue, job, noted>>
 
 \* typed: the person typed a prompt into the Worker's session after the ask
 \* opened (:prompted-at after :opened-at), which answers it.
@@ -54,6 +58,8 @@ Init ==
   /\ fresh = [w \in Workers |-> FALSE]
   /\ csig = [w \in Workers |-> "none"]
   /\ overdue = [w \in Workers |-> "none"]
+  /\ job = [w \in Workers |-> "none"]
+  /\ noted = [w \in Workers |-> FALSE]
 
 \* next-id: ids are handed out in order, so Worker w exists only after w-1.
 NextWorker(w) == wstate[w] = "none" /\ \A v \in Workers : v < w => wstate[v] /= "none"
@@ -143,10 +149,11 @@ Cancel(w) ==
   /\ csig' = [csig EXCEPT ![w] = IF launched[w] THEN "owed" ELSE "none"]
   /\ UNCHANGED <<wthread, launched, tworker, resolved, asks, replies>>
 
-\* decide* :cancel-delivered!, which reconcile! sends once cancel-owed? is false
-\* or no session lives.
+\* decide* :cancel-delivered!, which model/cancel-plan asks for once no job
+\* nobody can identify holds the cancel (blocking-jobs) and cancel-owed? is
+\* false or no session lives.
 CancelDelivered(w) ==
-  /\ wstate[w] = "cancelling" /\ (csig[w] /= "owed" \/ ended[w])
+  /\ wstate[w] = "cancelling" /\ (csig[w] /= "owed" \/ ended[w]) /\ job[w] /= "lost"
   /\ WorkerFinished(w, "cancelled")
   /\ UNCHANGED csig
 
@@ -268,6 +275,30 @@ TimerFired(w) ==
   /\ overdue' = [overdue EXCEPT ![w] = wstate[w]]
   /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, chat, csig>>
 
+\* conversation-jobs reads a job of a launched Worker that can no longer be
+\* identified as the process that started it (process state :unknown or :lost).
+JobLost(w) ==
+  /\ launched[w] /\ wstate[w] \in Active /\ job[w] = "none"
+  /\ job' = [job EXCEPT ![w] = "lost"]
+  /\ UNCHANGED noted
+
+\* decide* :cancel-blocked!, which model/cancel-plan asks for when such a job
+\* holds the cancel; fold* :cancel-blocked. Only the shown jobs change.
+CancelBlocked(w) ==
+  /\ wstate[w] = "cancelling" /\ job[w] = "lost" /\ ~noted[w]
+  /\ noted' = [noted EXCEPT ![w] = TRUE]
+  /\ UNCHANGED job
+
+\* decide* :abandon-job! by the person or the Router, fold* :job-abandoned:
+\* only a job the cancel was shown to wait on.
+AbandonJob(w) ==
+  /\ wstate[w] = "cancelling" /\ job[w] = "lost" /\ noted[w]
+  /\ job' = [job EXCEPT ![w] = "abandoned"]
+  /\ noted' = [noted EXCEPT ![w] = FALSE]
+
+\* cancel-blocked: the thread shows what holds the cancel and how to abandon it.
+NeedsPerson(w) == wstate[w] = "cancelling" /\ job[w] = "lost" /\ noted[w]
+
 \* overdue: the thread shows under Needs attention while this holds.
 Overdue(w) == overdue[w] /= "none" /\ overdue[w] = wstate[w]
 
@@ -288,11 +319,22 @@ Moves ==
   \/ \E w \in Workers, r \in ReplyIds : Take(w, r)
   \/ \E w \in Workers : TakeCancel(w)
 
+JobMoves(w) == JobLost(w) \/ CancelBlocked(w) \/ AbandonJob(w)
+
 Next ==
-  \/ Moves /\ UNCHANGED overdue
-  \/ Timers /\ \E w \in Workers : TimerFired(w)
+  \/ Moves /\ UNCHANGED <<overdue, job, noted>>
+  \/ Timers /\ \E w \in Workers : TimerFired(w) /\ UNCHANGED jobv
+  \/ Jobs /\ \E w \in Workers : JobMoves(w)
+        /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, busy, hbusy, fresh, csig, overdue>>
 
 Spec == Init /\ [][Next]_vars
+
+\* reconcile! runs a pass every few seconds and acts on its plan, and a live
+\* session takes the cancel in its mailbox; the person may never abandon.
+FairSpec == Spec /\ \A w \in Workers :
+  /\ WF_vars(CancelDelivered(w) /\ UNCHANGED <<csig, ended, chat, overdue, job, noted>>)
+  /\ WF_vars(CancelBlocked(w) /\ UNCHANGED <<wstate, wthread, launched, tworker, resolved, asks, replies, ended, busy, hbusy, fresh, csig, overdue, job>>)
+  /\ WF_vars(TakeCancel(w) /\ UNCHANGED <<overdue, job, noted>>)
 
 \* The cap counts launched Workers on live threads; holds-slot? frees the slot
 \* of an archived thread.
@@ -323,6 +365,12 @@ NoLaunchOnArchived == [][\A w \in Workers :
 TimerKillsNothing == [][overdue' /= overdue =>
   /\ UNCHANGED <<wstate, tworker, resolved, asks, replies, csig>>
   /\ \A w \in Workers : overdue'[w] /= overdue[w] => Overdue(w)']_vars
+\* A cancel ends, or the person is shown the job that holds it (W262 stuck
+\* cancelling on an :unknown job, with nothing to say why).
+CancelEnds == \A w \in Workers : wstate[w] = "cancelling" ~> (wstate[w] \in Finished \/ NeedsPerson(w))
+\* Only a job the person was shown is abandoned, and a cancel completes only
+\* once no lost job holds it.
+CancelledNotHeld == \A w \in Workers : wstate[w] = "cancelled" /\ launched[w] => job[w] /= "lost"
 \* Only a launched Worker is found starting too long.
 OverdueStartingLaunched == \A w \in Workers : overdue[w] = "starting" => launched[w]
 ====

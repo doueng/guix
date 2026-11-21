@@ -37,6 +37,8 @@
           'super-steer! {:command :steer! :args [:thread :text] :options #{:for}
                          :doc "Mail TEXT to THREAD's Worker, resuming it first when its session ended. THREAD may be the Worker's id."}
           'super-cancel! {:command :cancel! :args [:thread :reason] :options #{:for} :doc "Cancel THREAD's Worker, saying REASON. THREAD may be the Worker's id."}
+          'super-abandon-job! {:command :abandon-job! :args [:thread :job] :options #{:for}
+                               :doc "Let THREAD's cancelling Worker finish without job JOB, which its cancel waits on because nobody can identify its process. Do it only when the person says so."}
           'super-note! {:command :note! :args [:thread :text] :doc "Set THREAD's summary line."}
           'super-milestone! {:command :milestone! :args [:thread :text] :doc "Mark progress on THREAD worth the person's notice."}}))
 

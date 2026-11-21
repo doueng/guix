@@ -11,9 +11,9 @@
   (throw (ex-info (or message (name error)) (assoc (dissoc more :message) :error error))))
 
 (def ^:private grants
-  {:router #{:thread! :start-worker! :steer! :cancel! :note! :milestone!}
+  {:router #{:thread! :start-worker! :steer! :cancel! :abandon-job! :note! :milestone!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :machine-observed! :finish-worker! :cancel-delivered! :effect-done! :effect-failed! :timer-fired!}})
+   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :machine-observed! :finish-worker! :cancel-delivered! :cancel-blocked! :effect-done! :effect-failed! :timer-fired!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, how long a live
@@ -390,6 +390,74 @@
   (let [w (get-in state [:workers worker])]
     (when-not (= :cancelling (:state w)) (refuse :not-cancelling))
     {:events [(finished w {:state :cancelled :reason (:cancel-reason w)})]
+     :result worker}))
+
+(defn- blocking-jobs
+  "The jobs in JOBS that hold Worker W's cancel: those that can no longer be
+  identified as the process that started them (:unknown or :lost), unless the
+  person or the Router abandoned them."
+  [w jobs]
+  (let [abandoned (set (:abandoned-jobs w))]
+    (filterv #(and (#{:unknown :lost} (:state %)) (not (abandoned (:id %)))) jobs)))
+
+(defn cancel-plan
+  "The effects that move :cancelling Worker W on, from OBS, what the controller
+  just read: :agent, its live session or nil, and :jobs. Each is [kind x]:
+  [:command cmd] commits CMD as the controller, [:job/stop job] stops a running
+  job and records its exit, or is false when it cannot, and [:promote] lets a
+  queued Worker take the slot. A command without :id gets a fresh one; its
+  decide is a no-op when it would change nothing. The controller performs them in order and stops
+  at a stop that fails, so the cancel completes only once every job stopped.
+  A job that can no longer be identified blocks the cancel; the plan names it
+  with :cancel-blocked!, so the person sees why, until they or the Router
+  abandon it with :abandon-job!. Returns [] when the cancel waits on the
+  session to take it."
+  [state w {:keys [agent jobs]}]
+  (let [blocking (blocking-jobs w jobs)
+        stops (mapv #(vector :job/stop %) (filter #(= :running (:state %)) jobs))]
+    (cond
+      (seq blocking)
+      (let [ids (mapv :id blocking)]
+        (cond-> []
+          (not= ids (:cancel-blocked w))
+          (conj [:command {:command :cancel-blocked! :args {:worker (:id w) :jobs ids}}])
+          true (into stops)))
+
+      (or (not agent) (not (cancel-owed? state w)))
+      (conj stops
+            [:command {:id (str "cancelled-" (:id w)) :command :cancel-delivered! :args {:worker (:id w)}}]
+            [:promote])
+
+      (seq (:cancel-blocked w))
+      (into [[:command {:command :cancel-blocked! :args {:worker (:id w) :jobs []}}]] stops)
+
+      :else stops)))
+
+(defn cancel-blocked
+  "What to tell the person while Worker W's cancel waits on jobs nobody can
+  identify, or nil."
+  [w]
+  (when (and (= :cancelling (:state w)) (seq (:cancel-blocked w)))
+    (format "%s's cancel waits on job %s, which can no longer be identified; check it, then abandon it with bbh inbox abandon %s %s or ask the Router."
+            (:id w) (str/join ", " (:cancel-blocked w)) (:thread w) (first (:cancel-blocked w)))))
+
+(defmethod decide* :cancel-blocked! [state {{:keys [worker jobs]} :args}]
+  (let [w (get-in state [:workers worker])]
+    (when-not (= :cancelling (:state w)) (refuse :not-cancelling :worker worker))
+    (when-not (and (vector? jobs) (every? string? jobs)) (refuse :invalid :field :jobs))
+    {:events (if (= jobs (:cancel-blocked w)) [] [{:kind :cancel-blocked :thread (:thread w) :data {:worker worker :jobs jobs}}])
+     :result worker}))
+
+(defmethod decide* :abandon-job! [state {{:keys [job for] :as args} :args :keys [principal]}]
+  (let [thread (target-thread state args)
+        worker (or (thread-worker state thread) (refuse :no-worker :thread thread :message (str thread " has no Worker")))
+        w (get-in state [:workers worker])]
+    (when-not (= :cancelling (:state w))
+      (refuse :not-cancelling :worker worker :message (str worker " is not cancelling; only a cancel waits on a job nobody can identify")))
+    (when-not (some #{job} (:cancel-blocked w))
+      (refuse :invalid :field :job :message (str worker "'s cancel does not wait on job " (pr-str job)
+                                                 (when (seq (:cancel-blocked w)) (str "; it waits on " (str/join ", " (:cancel-blocked w)))))))
+    {:events [{:kind :job-abandoned :thread (:thread w) :data (merge {:worker worker :job job} (authority state principal for))}]
      :result worker}))
 
 (defn health
@@ -914,6 +982,14 @@
                (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation :text text
                                            :state :pending :message nil :delivery :cancel}))))
 
+(defmethod fold* :cancel-blocked [state {{:keys [worker jobs]} :data}]
+  (assoc-in state [:workers worker :cancel-blocked] jobs))
+
+(defmethod fold* :job-abandoned [state {{:keys [worker job]} :data}]
+  (-> state
+      (update-in [:workers worker :abandoned-jobs] (fnil conj []) job)
+      (update-in [:workers worker :cancel-blocked] #(filterv (complement #{job}) %))))
+
 (defmethod fold* :timer-fired [state {{:keys [kind subject since]} :data}]
   (if (= :notify kind)
     (assoc-in state [:notified subject] since)
@@ -1011,7 +1087,7 @@
           (seq open) :waiting
           resolved-at :archived
           (and (or (= :failed execution) (#{:needs-human :session-ended} (get-in state [:workers (:worker (get-in state [:threads id])) :health :classification]))) (empty? open)) :needs-attention
-          (some (some-fn stuck-effect overdue) (filter #(= id (:thread %)) (vals (:workers state)))) :needs-attention
+          (some (some-fn stuck-effect overdue cancel-blocked) (filter #(= id (:thread %)) (vals (:workers state)))) :needs-attention
           (some #(= :sent (:state %)) replies) :sent
           (unread? t) :new
           (#{:working :queued} execution) :working
@@ -1046,6 +1122,7 @@
                          ask (ask-line state (:id t))]]
                (assoc t :section s :status (status s (:execution t)) :unread (unread? t) :ask ask :asks (vec (sort-by :seq (vals (open-asks state (:id t)))))
                       :line (or (:text ask)
+                                (some-> (get-in state [:workers (:worker t)]) cancel-blocked)
                                 (get-in state [:workers (:worker t) :health :problem])
                                 (when (= :failed (:execution t)) (get-in state [:workers (peek (:history t)) :reason]))
                                 (some (fn [w] (when (= (:id t) (:thread w))

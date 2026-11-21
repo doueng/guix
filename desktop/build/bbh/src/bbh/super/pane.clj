@@ -269,6 +269,7 @@
       "resume" (call! {:command :resume! :args {:thread id}})
       "archive" (call! {:command :archive! :args {:thread id}})
       "cancel" (println (cancel! id))
+      "abandon" (println (call! {:command :abandon-job! :args {:thread id :job n}}))
       "read" (read! (remove nil? (list* id n more)) true)
       "unread" (read! (remove nil? (list* id n more)) false)
       "buffer" (println (buffer id))
@@ -278,7 +279,7 @@
               (println (if (notify/toggle-dnd! (when (fs/exists? f) (edn/read-string (slurp (str f)))))
                          "Do not disturb: bbh notifications are off; gn turns them on"
                          "bbh notifications are on")))
-      (println "usage: bbh inbox [org|split [T [select]]|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|read T...|all|unread T...|buffer T|dir T|register PORT|dnd]"))
+      (println "usage: bbh inbox [org|split [T [select]]|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|abandon T JOB|read T...|all|unread T...|buffer T|dir T|register PORT|dnd]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))

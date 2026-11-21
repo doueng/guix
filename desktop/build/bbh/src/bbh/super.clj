@@ -639,6 +639,23 @@ still running (T163)."
           (boolean (bencode/read-bencode (java.io.PushbackInputStream. (.getInputStream s)))))))
     (catch Exception _ false)))
 
+(defn- perform!
+  "Perform one effect of a model plan, such as model/cancel-plan's. Returns
+  false when the plan should stop here."
+  [c [kind x]]
+  (case kind
+    :command (do (run! c :controller (cond-> x (nil? (:id x)) (assoc :id (new-id)))) true)
+    :job/stop (if (process/stop-job! x)
+                (do (spit (str (:base x) ".exit") "137\n") true)
+                false)
+    :promote (do (promote! c) true)
+    (throw (ex-info (str "bbh super: unknown effect " (pr-str kind)) {:error :unknown-effect :effect kind}))))
+
+(defn- perform-plan!
+  "Perform the effects of PLAN in order, up to the first that fails."
+  [c plan]
+  (reduce (fn [_ effect] (or (perform! c effect) (reduced false))) true plan))
+
 (defn reconcile!
   "Observe before acting, including after sleep/restart. A Worker whose
   session ended waits for the person to resume it; nothing here relaunches a
@@ -673,14 +690,7 @@ still running (T163)."
                                :args (merge (select-keys w [:conversation :wf-run :workspace :buffer :started-at]) {:worker (:id w)})})
 
           (= :cancelling (:state w))
-          (let [blocked (filter #(#{:unknown :lost} (:state %)) jobs)
-                running (filter #(= :running (:state %)) jobs)
-                stopped? (every? true? (mapv process/stop-job! running))]
-            (when (and (empty? blocked) stopped?)
-              (doseq [j running] (spit (str (:base j) ".exit") "137\n"))
-              (when (or (not agent) (not (model/cancel-owed? @state w)))
-                (run! c :controller {:id (str "cancelled-" (:id w)) :command :cancel-delivered! :args {:worker (:id w)}})
-                (promote! c))))
+          (perform-plan! c (model/cancel-plan @state w {:agent agent :jobs jobs}))
 
           (and (not agent) (= :starting (:state w)) (:workspace w) (:conversation w)
                (> (- now (or (:started-at w) (:boot-at c))) grace)
