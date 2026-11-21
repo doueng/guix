@@ -65,6 +65,9 @@
            "desktop/bin/{keyleader,keyguide,keylog,palette,winhint,hyprkan}"]
    :checks ["make keybindings-check"]
    :slow ["make hypr-nested-check"]}
+  {:name "chrome fullscreen"
+   :paths ["desktop/configs/hypr/**" "desktop/build/hypr/**"]
+   :slow ["make chrome-fullscreen-check"]}
   {:name "test display"
    :paths ["desktop/bin/test-display" "modules/engstrand/features/agent-control.scm"]
    :checks ["make lint"]

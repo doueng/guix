@@ -36,6 +36,9 @@ hl.env("XCURSOR_SIZE", "20")
 require("startup")
 
 hl.window_rule({ name = "intellij-workspace", match = { class = "jetbrains-idea" }, workspace = "4" })
+-- Chrome asks to be maximized when it opens and again when it leaves page fullscreen (Esc),
+-- which would cover the other tiles; ignoring that keeps it tiled.
+hl.window_rule({ name = "chrome-stay-tiled", match = { class = "google-chrome" }, suppress_event = "maximize" })
 hl.window_rule({
   name = "chrome-extension-popup",
   match = { initial_title = "_crx_.*" },
