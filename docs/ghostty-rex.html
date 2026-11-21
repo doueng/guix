@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<meta name="description" content="MUX=ghostty-rex: Ghostty draws, Rex holds sessions, bb does the rest; how to switch and roll back, and the 35 live parity checks.">
-<meta name="bbh-doc" content="T207">
-<title>ghostty-rex: Rex in Ghostty with a Babashka client</title>
+<meta name="description" content="How the MUX=ghostty-rex terminal works: the Ghostty window, the bb client, rexg-render and the Rex server; startup, keys, output, the status line, agents, Cmd+Space, Guix, processes and recovery.">
+<meta name="bbh-doc" content="T210">
+<title>How Ghostty plus Rex works (MUX=ghostty-rex)</title>
 <style>
 :root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
 *{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
@@ -27,72 +27,265 @@ th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-alig
 svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
 @media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+.scr{font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:#1e1e2e;color:#cdd6f4;border-radius:8px;padding:6px 0;overflow-x:auto;margin:10px 0}
+.scr .r{white-space:pre;padding:0 8px 0 0}.scr .bar{background:#1f2430;color:#c8ccd4}.scr .act{background:#3b4252;color:#fff;font-weight:700}
+.scr .foc{color:#89b4fa;font-weight:700}.scr .ttl{color:#6c7086}.scr .st{background:#181825;color:#a6adc8}
+.scr .n,.scr .g{display:inline-block;width:20px;text-align:center;margin-right:4px;background:#1e1e2e}
+.scr .n{color:#000;background:#f2b705;font:700 11px system-ui,sans-serif;border-radius:0 9px 9px 0}
 </style></head>
 <body><main>
-<h1>ghostty-rex: Rex in Ghostty with a Babashka client</h1>
+<h1>How Ghostty plus Rex works (MUX=ghostty-rex)</h1>
 
-<div class='card good'><b>Outcome.</b> <code>MUX=ghostty-rex</code> is now the third choice of <code>%terminal-mux</code>. Ghostty draws, Rex holds the sessions, and Babashka does everything else, with no Rust to compile. One Ghostty window shows one Rex session the way Herdr does: tabs, splits, title rows, status line, which-key, M-x and tiny fingers. Ghostty's own tabs and splits are not used. The parity list passes 35 of 35 live checks in a real Ghostty on the hidden test display. Herdr is still the default and rexmux is untouched.</div>
+<p class='sub'>How the MUX=ghostty-rex terminal works, from the code as of T208 and T210: the parts, what happens when you press a key, how output reaches the screen, and how to debug it. Use this page to understand it. The dev page is for changing it.</p>
+<nav><details><summary>Contents</summary><ol>
+<li><a href='#short'>In short</a></li><li><a href='#picture'>The big picture</a></li><li><a href='#start'>Cmd+Return to a usable window</a></li>
+<li><a href='#keys'>A keypress</a></li><li><a href='#output'>Output to the screen</a></li><li><a href='#screen'>Reading the screen: main, the hex IDs, the status line</a></li>
+<li><a href='#agents'>Agent status and bbh</a></li><li><a href='#launcher'>Cmd+Space</a></li><li><a href='#guix'>Guix packaging and the MUX switch</a></li>
+<li><a href='#procs'>The processes, and how to see them</a></li><li><a href='#debug'>Debug and recover</a></li><li><a href='#more'>Other Rex docs</a></li></ol></details></nav>
 
-<h2>Try it, and roll back</h2>
-<pre><code>cd ~/guix
-make mux MUX=ghostty-rex   # set %terminal-mux, home-apply, reload Hyprland
-# Super+B or Super+Return opens it; Super+Return/E/D/G pick tabs 1-4
-make mux MUX=herdr         # back to Herdr (or: guix home roll-back)
-make mux MUX=rex           # or rexmux</code></pre>
-<p>Your Rex sessions survive a switch: Rex keeps them, and the rexmux and ghostty-rex windows show the same <code>main</code> session. Guix Home builds with the ghostty-rex choice (checked), installs <code>rexg-render</code> and writes <code>ghostty-rex</code> to <code>~/.config/engstrand/mux</code>.</p>
+<h2 id='short'>In short</h2>
+<div class='card good'>Your terminal window is a plain <b>Ghostty</b> that only draws. Your shells and agents live in the <b>Rex server</b>, a separate daemon, so closing the window, reloading the client or switching multiplexers loses nothing. Between the two sit two processes: <b>bb attach</b>, a Babashka program that talks to Rex, reads your keys and decides what to draw, and <b>rexg-render</b>, a small C program on Ghostty's own terminal library that turns each pane's output into cells and composes the window. Herdr is still installed, and <code>make mux MUX=herdr</code> switches back.</div>
+<div class='table'><table><tr><th>Herdr word</th><th>Rex word</th><th>On screen</th></tr>
+<tr><td>workspace</td><td>session (here <code>main</code>)</td><td>left of the tab bar</td></tr>
+<tr><td>tab</td><td>window</td><td><code>[1 shell]  2 bbh  3 pi  4 jjui</code></td></tr>
+<tr><td>pane</td><td>block (a pty, Rex's VT and a program)</td><td>a title row like <code>▶ 4c19ab</code></td></tr>
+<tr><td>floating pane</td><td>layer</td><td>framed box over the panes</td></tr></table></div>
 
-<h2>How it is built</h2>
-<svg viewBox='0 0 640 250' role='img' aria-label='architecture'>
-<rect x='10' y='10' width='620' height='230' rx='10' fill='#fff' stroke='#dedad0'/>
-<text x='24' y='34' font-size='14' font-weight='700'>Ghostty window, class dev.engstrand.Rex (draws only)</text>
-<rect x='30' y='48' width='580' height='180' rx='8' fill='#e6f0f5' stroke='#2f6f8f'/>
-<text x='44' y='72' font-size='14' font-weight='700' fill='#2f6f8f'>bb attach (rexg.main): keys, Rex connection, model</text>
-<rect x='48' y='88' width='260' height='120' rx='8' fill='#f0e9f6' stroke='#7a4fa0'/>
-<text x='60' y='110' font-size='13' font-weight='700' fill='#7a4fa0'>rexmux sidecar, in-process</text>
-<text x='60' y='132' font-size='12'>command registry, M-x from Rex's API</text>
-<text x='60' y='150' font-size='12'>leader.edn keymaps, term-nav</text>
-<text x='60' y='168' font-size='12'>agent status, attention, notify</text>
-<text x='60' y='186' font-size='12'>bbh say --from rex, inbox</text>
-<rect x='330' y='88' width='262' height='120' rx='8' fill='#e4f3ea' stroke='#2e7d4f'/>
-<text x='342' y='110' font-size='13' font-weight='700' fill='#2e7d4f'>rexg-render (C, libghostty-vt)</text>
-<text x='342' y='132' font-size='12'>one VT per Rex pane, fed by</text>
-<text x='342' y='150' font-size='12'>Rex data streams; composes panes</text>
-<text x='342' y='168' font-size='12'>and chrome into the window</text>
-<text x='342' y='186' font-size='12'>(the only compiled part, ~580 lines)</text>
+<h2 id='picture'>The big picture</h2>
+<svg viewBox='0 0 360 500' role='img' aria-label='The processes: Hyprland, the Ghostty window with bb attach and rexg-render, and the Rex server with session main'>
+<defs><marker id='ah' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto-start-reverse'><path d='M0,0L10,5L0,10z' fill='#5d6678'/></marker></defs>
+<rect x='10' y='8' width='340' height='30' rx='6' fill='#f7efdc' stroke='#8a6a1f'/>
+<text x='20' y='28' font-size='12.5' font-weight='700' fill='#8a6a1f'>Hyprland: Cmd keys, Alt+Space routing</text>
+<line x1='180' y1='38' x2='180' y2='52' stroke='#5d6678' marker-end='url(#ah)'/>
+<rect x='10' y='54' width='340' height='200' rx='8' fill='#fff' stroke='#2f6f8f'/>
+<text x='20' y='72' font-size='12.5' font-weight='700' fill='#2f6f8f'>Ghostty window, class dev.engstrand.Rex</text>
+<text x='20' y='87' font-size='11' fill='#5d6678'>draws cells on the GPU; its pty is the client's tty</text>
+<rect x='20' y='96' width='184' height='148' rx='7' fill='#e6f0f5' stroke='#2f6f8f'/>
+<text x='28' y='113' font-size='12' font-weight='700'>bb attach (rexg.main)</text>
+<text x='28' y='128' font-size='11'>Rex connection, keys, model,</text>
+<text x='28' y='141' font-size='11'>tab bar, titles, status line</text>
+<rect x='28' y='150' width='168' height='86' rx='6' fill='#f0e9f6' stroke='#7a4fa0'/>
+<text x='36' y='166' font-size='11.5' font-weight='700' fill='#7a4fa0'>sidecar (in-process)</text>
+<text x='36' y='181' font-size='11'>M-x, leader.edn keys</text>
+<text x='36' y='195' font-size='11'>agent status, notify-send</text>
+<text x='36' y='209' font-size='11'>bbh inbox, bbh say</text>
+<text x='36' y='223' font-size='11'>child: rex events --all</text>
+<rect x='214' y='96' width='126' height='148' rx='7' fill='#e4f3ea' stroke='#2e7d4f'/>
+<text x='222' y='113' font-size='12' font-weight='700' fill='#2e7d4f'>rexg-render</text>
+<text x='222' y='128' font-size='11'>C, libghostty-vt</text>
+<text x='222' y='146' font-size='11'>one VT per pane;</text>
+<text x='222' y='160' font-size='11'>composes panes and</text>
+<text x='222' y='174' font-size='11'>chrome, writes the</text>
+<text x='222' y='188' font-size='11'>frame to Ghostty</text>
+<line x1='204' y1='208' x2='212' y2='208' stroke='#5d6678' marker-end='url(#ah)'/>
+<line x1='214' y1='226' x2='206' y2='226' stroke='#5d6678' marker-end='url(#ah)'/>
+<text x='222' y='212' font-size='10' fill='#5d6678'>frames on stdin</text>
+<text x='222' y='230' font-size='10' fill='#5d6678'>lines on stderr</text>
+<line x1='80' y1='244' x2='80' y2='306' stroke='#2f6f8f' stroke-width='2' marker-end='url(#ah)' marker-start='url(#ah)'/>
+<line x1='150' y1='244' x2='150' y2='306' stroke='#2e7d4f' stroke-width='2' marker-end='url(#ah)' marker-start='url(#ah)'/>
+<text x='88' y='272' font-size='10.5' fill='#2f6f8f'>control</text>
+<text x='158' y='266' font-size='10.5' fill='#2e7d4f'>data, one WebSocket</text>
+<text x='158' y='279' font-size='10.5' fill='#2e7d4f'>per visible pane</text>
+<text x='88' y='285' font-size='10.5' fill='#2f6f8f'>(1)</text>
+<rect x='10' y='308' width='340' height='184' rx='8' fill='#fff' stroke='#2e7d4f'/>
+<text x='20' y='326' font-size='12.5' font-weight='700' fill='#2e7d4f'>Rex server (rex server run, a daemon)</text>
+<text x='20' y='341' font-size='10.5' fill='#5d6678'>unix:///run/user/1000/rex/server.sock</text>
+<rect x='20' y='350' width='320' height='132' rx='7' fill='#e4f3ea' stroke='#2e7d4f'/>
+<text x='28' y='367' font-size='12' font-weight='700'>session main (ID df5e10)</text>
+<rect x='28' y='376' width='72' height='22' rx='4' fill='#3b4252'/><text x='36' y='391' font-size='11' fill='#fff'>1 shell</text>
+<rect x='106' y='376' width='72' height='22' rx='4' fill='#fff' stroke='#2e7d4f'/><text x='114' y='391' font-size='11'>2 bbh</text>
+<rect x='184' y='376' width='72' height='22' rx='4' fill='#fff' stroke='#2e7d4f'/><text x='192' y='391' font-size='11'>3 pi</text>
+<rect x='262' y='376' width='70' height='22' rx='4' fill='#fff' stroke='#2e7d4f'/><text x='270' y='391' font-size='11'>4 jjui</text>
+<text x='28' y='414' font-size='11'>tabs are Rex windows; each holds a tiled</text>
+<text x='28' y='428' font-size='11'>layout of panes (Rex blocks): a pty, Rex&#39;s</text>
+<text x='28' y='442' font-size='11'>own VT and the program (fish, emacs-bbh, pi,</text>
+<text x='28' y='456' font-size='11'>jjui). Floating layers (jjui, inbox) sit on top.</text>
+<text x='28' y='472' font-size='11' fill='#5d6678'>Everything here outlives the window.</text>
 </svg>
 <ul>
-<li>Edit any <code>.clj</code> under <code>desktop/build/ghostty-rex/src/rexg/</code> or the rexmux sidecar, then reopen the window. There is no build step.</li>
-<li>Pane bytes never reach Ghostty, so each terminal query gets one reply, from Rex. This avoids the double-reply risk named in rex-client-languages.html.</li>
-<li>Cost: Kitty graphics inside panes are not shown, since cells are composed. True colour, ligatures and the Kitty keyboard protocol work.</li>
-<li>Packages: <code>libghostty-vt</code> 1.0.1 and <code>rexg-render</code> for aarch64, in modules/engstrand/packages/ghostty.scm.</li>
+<li><b>Ghostty</b> is started with its own class and an extra config, /home/engstrand/.config/ghostty-rex/ghostty, which clears Ghostty's tab and split keys so every key reaches the client. Its only job is to show what rexg-render writes and to send keys and mouse reports back.</li>
+<li><b>bb attach</b> (desktop/build/ghostty-rex/src/rexg/) runs straight from the checkout, so an edit needs no build. One thread handles every change in order: keys, Rex replies and events, sidecar messages, renderer lines. After each batch it draws once.</li>
+<li><b>The sidecar</b> is rexmux's command layer (desktop/build/rexmux/sidecar/), loaded into the same bb process. It owns M-x, the leader keys, agent status and bbh. It starts one child, <code>rex events --all --json</code>, to follow agent reports.</li>
+<li><b>rexg-render</b> (csrc/rexg-render.c, about 580 lines of C) keeps one libghostty-vt terminal per visible pane. bb tells it the layout, the chrome text and the cursor, and it writes only changed cells to Ghostty.</li>
+<li><b>The Rex server</b> owns sessions, tabs, panes and their programs. bb talks to it over the socket through one control WebSocket (requests, replies, events) and one data WebSocket per visible pane.</li>
+</ul>
+<div class='card'><b>Why two halves?</b> Pane bytes never reach Ghostty itself. Rex's own terminal already answers a program's queries (cursor position, colours), so nothing answers twice. Ghostty's library does the parsing, and Babashka keeps all the logic editable without Rust or Zig. The cost is that Kitty graphics inside panes are not shown. The design is in /home/engstrand/guix/docs/rex-client-languages.html (option 1).</div>
+
+<h2 id='start'>Cmd+Return to a usable window</h2>
+<ol>
+<li><b>Hyprland.</b> Cmd is Super. <code>SUPER + RETURN</code> runs <code>~/.local/bin/workspace-or-herdr-tab 1</code> (desktop/configs/hypr/hyprland.lua). Cmd+E, D and G do the same for tabs 2 to 4, and Cmd+B always opens a new window. Hyprland also starts one at login (startup.lua).</li>
+<li><b>Is a window open?</b> workspace-or-herdr-tab reads the backend from /home/engstrand/.config/engstrand/mux (<code>ghostty-rex</code>) and looks for a window of class <code>dev.engstrand.Rex</code>. If one is focused, it runs <code>rex -C ghostty-rex do mx.tab.select_1</code>, and Rex asks the client to switch tabs. If one exists elsewhere, it focuses it. If none exists, it runs <code>mux-terminal</code>.</li>
+<li><b>Launch.</b> mux-terminal runs desktop/bin/ghostty-rex, which execs <code>ghostty --class=dev.engstrand.Rex --gtk-single-instance=false --config-file=~/.config/ghostty-rex/ghostty -e …/ghostty-rex attach</code>.</li>
+<li><b>Inside Ghostty</b>, <code>ghostty-rex attach</code> finds rexg-render: <code>REXG_RENDER</code>, else the Guix one on PATH, else the checkout's target/ build. A Hyprland notification says when it is missing. It then execs <code>bb --config desktop/build/ghostty-rex/bb.edn attach</code>.</li>
+<li><b>bb starts.</b> It reads /home/engstrand/.config/ghostty-rex/config.edn (servers, shell <code>fish</code>, leader file, startup tabs) and starts rexg-render as a child. rexg-render switches Ghostty to the alternate screen, turns on mouse reports, bracketed paste and the Kitty keyboard protocol, and reports the size.</li>
+<li><b>Server.</b> The socket is $XDG_RUNTIME_DIR/rex/server.sock. If it is missing, or a connection fails, bb runs <code>rex server start</code>. That command does nothing when a server already runs, and it replaces a socket a dead server left. The server is a daemon, so it outlives the window, as Herdr's does.</li>
+<li><b>Connect.</b> bb opens the control WebSocket, says hello as client <code>ghostty-rex</code> and gets a welcome with its client ID. It registers its keymap and its commands, so <code>rex -C ghostty-rex do …</code> works, and asks for the session list.</li>
+<li><b>Pick the session.</b> If <code>main</code> exists, bb attaches to it. If not, bb creates it from <code>:startup</code>: four tabs in ~/guix, <code>shell</code> (fish), <code>bbh</code> (emacs-bbh), <code>pi</code> and <code>jjui</code>, each a Rex block running its program in fish. Then it focuses tab 1.</li>
+<li><b>Revive after a reboot.</b> When Rex restarts, it brings each pane back as your login shell, bash, without its program. For the startup session, bb asks each pane what runs in it. A bare shell gets a new block beside it running fish, or the tab's program (<code>pi --continue</code> for pi), with the same label and directory. Then the bare shell's block closes. Nothing is typed into the old shell, so no exec line shows (T210). The echo line says <code>restored tab pi</code>.</li>
+<li><b>Streams and sizes.</b> For each visible pane, bb asks Rex for a data ticket (<code>data.connect</code>) and opens a data WebSocket. It takes ownership of the pane's size and tells Rex its size in cells, so programs lay out for the space they have. The first frame shows a snapshot of each pane.</li>
+</ol>
+<div class='card'><b>Reconnect.</b> If the control connection drops, the status line turns red with <code>local not connected, reconnecting</code>, and the bottom line says why and when the next try is. Tries come after 0.25 s, then double up to every 4 s, each one starting the local server if needed. When it answers, bb reattaches to the session it showed. You never need to kill the window.</div>
+
+<h2 id='keys'>A keypress</h2>
+<svg viewBox='0 0 360 372' role='img' aria-label='A key from the keyboard to the pane'>
+<defs><marker id='ak' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0,0L10,5L0,10z' fill='#5d6678'/></marker></defs>
+<g font-size='11.5'>
+<rect x='10' y='6' width='340' height='40' rx='6' fill='#f7efdc' stroke='#8a6a1f'/>
+<text x='20' y='22' font-weight='700' fill='#8a6a1f'>1 kanata, then Hyprland</text>
+<text x='20' y='38'>keep the Cmd chords; pass Alt+Space to this window</text>
+<line x1='180' y1='46' x2='180' y2='60' stroke='#5d6678' marker-end='url(#ak)'/>
+<rect x='10' y='62' width='340' height='40' rx='6' fill='#fff' stroke='#2f6f8f'/>
+<text x='20' y='78' font-weight='700' fill='#2f6f8f'>2 Ghostty</text>
+<text x='20' y='94'>keeps copy, paste and font keys; sends the rest</text>
+<line x1='180' y1='102' x2='180' y2='116' stroke='#5d6678' marker-end='url(#ak)'/>
+<rect x='10' y='118' width='340' height='40' rx='6' fill='#e6f0f5' stroke='#2f6f8f'/>
+<text x='20' y='134' font-weight='700' fill='#2f6f8f'>3 bb reads its stdin (rexg.keys)</text>
+<text x='20' y='150'>escape codes become chords: alt+space, ctrl+h</text>
+<line x1='180' y1='158' x2='180' y2='172' stroke='#5d6678' marker-end='url(#ak)'/>
+<rect x='10' y='174' width='340' height='124' rx='6' fill='#f0e9f6' stroke='#7a4fa0'/>
+<text x='20' y='190' font-weight='700' fill='#7a4fa0'>4 the model decides (rexg.model/key)</text>
+<text x='20' y='207'>hints, help or minibuffer open: they take it</text>
+<text x='20' y='223'>Alt+x: M-x</text>
+<text x='20' y='239'>Alt+Space starts a prefix; which-key shows the rest</text>
+<text x='20' y='255'>a bound sequence runs its command (sidecar)</text>
+<text x='20' y='271'>bare Ctrl+h/j/k/l: term-nav, focus or the program</text>
+<text x='20' y='287'>anything else goes on to the pane</text>
+<line x1='180' y1='298' x2='180' y2='312' stroke='#5d6678' marker-end='url(#ak)'/>
+<rect x='10' y='314' width='340' height='52' rx='6' fill='#e4f3ea' stroke='#2e7d4f'/>
+<text x='20' y='330' font-weight='700' fill='#2e7d4f'>5 Rex: client.key on the focused block</text>
+<text x='20' y='346'>Rex encodes it for that program&#39;s modes</text>
+<text x='20' y='361'>and writes it to the pane&#39;s pty</text>
+</g></svg>
+<ul>
+<li><b>Hyprland keeps the Cmd chords</b> for the desktop. Alt+Space is routed per window class by leader.edn's <code>:apps</code>: for <code>dev.engstrand.Rex</code> it is <code>:pass</code>, so Hyprland sends Alt+Space on to the window. In most other windows it opens the launcher.</li>
+<li><b>Ghostty keeps</b> Ctrl+Shift+C and V, Shift+Insert, font size (Ctrl+= and Ctrl+-) and config reload (Ctrl+Shift+Alt+R). Cmd+Left and Cmd+Right become Ctrl+A and Ctrl+E. Everything else goes through the Kitty keyboard protocol, so chords such as Ctrl+Enter or Alt+Space arrive whole.</li>
+<li><b>Alt+Space is the only prefix</b> (T208). It starts a sequence from leader.edn: <code>w v</code> splits right, <code>t r</code> renames the tab, <code>u</code> jumps to the next blocked agent, <code>i</code> opens the bbh inbox, <code>Space</code> opens M-x, and so on. Which-key lists what can follow, and Escape or Ctrl+G cancels. <b>Ctrl+b is not a prefix here</b>: it reaches fish or Emacs. Alt+x also opens M-x.</li>
+<li><b>Bare Ctrl+h/j/k/l</b> go through keyleader's term-nav. Vim, Emacs, pi and fzf keep the keys they use, and otherwise focus moves to the neighbouring pane.</li>
+<li><b>Everything else</b> is sent to Rex as <code>client.key</code> for the focused pane. Rex encodes it for that program's keyboard mode and writes it to the pane. Typing also leaves scrollback and clears a mouse selection.</li>
+<li><b>Mouse.</b> A click focuses a pane. A program that asked for mouse reports, such as Vim or jjui, gets them. Otherwise a drag selects and copies, the wheel scrolls into history, and a middle click pastes. Hold Shift to use Ghostty's own selection instead.</li>
 </ul>
 
-<h2>What was tested</h2>
-<p><code>make ghostty-rex-verify</code> runs a real Ghostty on the hidden test display (test-display, headless sway) against a throwaway Rex server with its own HOME and socket. Stubs stand in for emacs-bbh, pi, jjui, bbh, nvim and notify-send. It took about 5 minutes and passed 35 of 35 checks <span class='tag measured'>measured</span>. A second run used the Guix-built rexg-render.</p>
-<div class='table'><table>
-<tr><th>Parity item</th><th>Check</th></tr>
-<tr><td>Startup tabs</td><td>Beside a stray dead session, <code>main</code> is made with shell, bbh, pi and jjui in order. Each runs its program, and the shell runs fish.</td></tr>
-<tr><td>Super+Return/E/D/G</td><td><code>rex -C ghostty-rex do mx.tab.select_3</code> shows the pi tab</td></tr>
-<tr><td>Tiny fingers</td><td>A label copies, a web URL opens, and Shift with a label pastes</td></tr>
-<tr><td>Mouse</td><td>A drag copies a line, and the wheel scrolls into history. Both go through a pty, because the headless display has no pointer.</td></tr>
-<tr><td>Copy mode, search</td><td>Alt+Space e and Alt+Space s b open the scrollback in $EDITOR, with the search already run</td></tr>
-<tr><td>Clipboard</td><td>Ghostty's Ctrl+Shift+V pastes the Wayland clipboard into the pane</td></tr>
-<tr><td>Panes, tabs</td><td>A split follows the pane's directory, Alt+Space w L resizes, and Alt+Space t r and Alt+Space TAB r rename</td></tr>
-<tr><td>Workspaces</td><td>Alt+Space p p opens a project session (a second press shows the same one), and Alt+Space TAB ` returns</td></tr>
-<tr><td>jjui, bbh</td><td>Alt+Space o g and Alt+Space i float jjui and the inbox in a framed layer, and each layer closes when its program exits. M-x bbh: tell runs <code>bbh say --from rex</code>.</td></tr>
-<tr><td>Notifications</td><td>An agent that blocks in another tab sends exactly one notify-send</td></tr>
-<tr><td>Persistence</td><td>After the server is killed uncleanly, as in a reboot, the session returns, pi resumes with --continue, and the split panes of a renamed tab run fish</td></tr>
-<tr><td>Bombadil</td><td>rexmux's specs <code>rexmux.ts</code> (focus, M-x, Escape, which-key, Alt+Space u reaching a blocked agent, Ctrl+b opening no prefix) and <code>startup.ts</code> run for 60 s each over <code>bb attach</code>, with no violations</td></tr>
-<tr><td>TLA+</td><td><code>make rexmux-tla</code>: all 14 properties hold. The in-process sidecar is the model without Crash and Restart, and a sidecar error now still answers its request.</td></tr>
-</table></div>
+<h2 id='output'>Output to the screen</h2>
+<svg viewBox='0 0 360 300' role='img' aria-label='Output from a program to the screen'>
+<defs><marker id='ao' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0,0L10,5L0,10z' fill='#5d6678'/></marker></defs>
+<g font-size='11.5'>
+<rect x='10' y='6' width='340' height='40' rx='6' fill='#e4f3ea' stroke='#2e7d4f'/>
+<text x='20' y='22' font-weight='700' fill='#2e7d4f'>1 program writes to its pty</text>
+<text x='20' y='38'>Rex&#39;s own VT parses it and answers its queries</text>
+<line x1='180' y1='46' x2='180' y2='60' stroke='#5d6678' marker-end='url(#ao)'/>
+<rect x='10' y='62' width='340' height='40' rx='6' fill='#e4f3ea' stroke='#2e7d4f'/>
+<text x='20' y='78' font-weight='700' fill='#2e7d4f'>2 the pane&#39;s data WebSocket</text>
+<text x='20' y='94'>a Ghostty snapshot first, then the same bytes live</text>
+<line x1='180' y1='102' x2='180' y2='116' stroke='#5d6678' marker-end='url(#ao)'/>
+<rect x='10' y='118' width='340' height='40' rx='6' fill='#e6f0f5' stroke='#2f6f8f'/>
+<text x='20' y='134' font-weight='700' fill='#2f6f8f'>3 bb splits off Rex&#39;s APC messages</text>
+<text x='20' y='150'>(resize, child exited); bytes go on as a d frame</text>
+<line x1='180' y1='158' x2='180' y2='172' stroke='#5d6678' marker-end='url(#ao)'/>
+<rect x='10' y='174' width='340' height='56' rx='6' fill='#e4f3ea' stroke='#2e7d4f'/>
+<text x='20' y='190' font-weight='700' fill='#2e7d4f'>4 rexg-render</text>
+<text x='20' y='206'>feeds the pane&#39;s libghostty-vt; draws visible panes</text>
+<text x='20' y='222'>at bb&#39;s layout, with bb&#39;s chrome spans on top</text>
+<line x1='180' y1='230' x2='180' y2='244' stroke='#5d6678' marker-end='url(#ao)'/>
+<rect x='10' y='246' width='340' height='48' rx='6' fill='#fff' stroke='#2f6f8f'/>
+<text x='20' y='262' font-weight='700' fill='#2f6f8f'>5 Ghostty shows the frame</text>
+<text x='20' y='280'>only changed cells, inside a synchronized update</text>
+</g></svg>
+<ul>
+<li>Output from panes is never queued behind keys. Each stream's reader thread writes its bytes straight to rexg-render, tagged with the pane ID. Only Rex's own messages, a resize or a program exiting, go through bb's queue.</li>
+<li>rexg-render does not choose where a pane goes. bb sends it the layout (<code>l</code>: pane, x, y, width, height), the chrome (<code>v</code>: tab bar, titles, status line, menus), and the cursor (<code>c</code>: in the focused pane, at a point, or hidden). It sends each only when it changed.</li>
+<li>rexg-render reports back on stderr: the window size, each pane's mouse and scroll mode, errors, and the text of a pane for tiny fingers and mouse copies.</li>
+<li>A pane that hides its cursor (<code>ESC [ ?25 l</code>) shows none, and a pane scrolled into history says <code>↑ history (type to return)</code> in its title.</li>
+</ul>
 
-<h2>Not covered, and known rough edges</h2>
-<div class='card warn'><ul>
-<li>The real pointer path in Ghostty: the headless display has no pointer, so mouse checks feed SGR reports through a pty into the same handler.</li>
-<li>Desktop notifications were checked through a notify-send stub, not on your desktop.</li>
-<li>After a reboot, each restored pane briefly shows the <code>exec fish -l</code> line that brought its shell back. rexmux does the same.</li>
-<li>It has not been run on your real Rex server or Hyprland session. <code>make mux MUX=ghostty-rex</code> is the first real use.</li>
-</ul></div>
-<p class='cite'>Code: desktop/build/ghostty-rex (README.md), desktop/bin/ghostty-rex, desktop/configs/ghostty-rex. Commits: M1 swoxqomu, M2 oklrxnut, M3 ytpmvpor, framed floating layers lsptnslt.</p>
+<h2 id='screen'>Reading the screen</h2>
+<p>A sketch of the window with two panes. The lines are as wide as the real ones, so on a phone it scrolls sideways.</p>
+<div class='scr'><div class='r bar'><span class='n'>A</span><b> main │</b><span class='act'> [1 shell]</span>  2 bbh   3 pi   4 jjui </div><div class='r'><span class='n'>B</span><span class='foc'>▶ 4c19ab ──────────</span><span class='ttl'>│─ 7e02d1 ● bbh ───</span></div><div class='r'><span class='g'></span>~/guix&gt; jj st      │ (bbh inbox)</div><div class='r'><span class='n'>C</span>Working copy (@) … │</div><div class='r'><span class='g'></span>~/guix&gt; █          │</div><div class='r st'><span class='n'>D</span> local │ focus 4c19ab │ agents 1 │ blocked 0 │ attention 0 </div><div class='r'><span class='n'>E</span>Copied 42 characters</div></div>
+<div class='table'><table><tr><th></th><th>What it is</th></tr>
+<tr><td>A</td><td><b>Tab bar.</b> <code>main</code> is the Rex session's label, from <code>:startup :label</code> in config.edn. A session without a label shows the last 6 characters of its ID instead. Then the tabs, numbered and labelled, with the active one in brackets. Cmd+Return, E, D and G pick 1 to 4.</td></tr>
+<tr><td>B</td><td><b>Pane title rows.</b> <code>▶</code> marks the focused pane, and <code>─</code> marks the others. The 6 hex characters are the end of the pane's Rex block ID, the same ID <code>rex</code> commands take with <code>-b</code>. An agent's pane adds its state icon and app: <code>●</code> working, <code>○</code> idle, <code>✓</code> done, <code>!</code> blocked (in red), <code>✗</code> error. Dividers <code>│</code> separate tiled panes, and floating layers get a full frame.</td></tr>
+<tr><td>C</td><td><b>Pane contents</b>, drawn by rexg-render from that pane's terminal.</td></tr>
+<tr><td>D</td><td><b>Status line.</b> <code>local</code> is the Rex server's label (config.edn <code>:servers</code>; there is only the local one). <code>focus 4c19ab</code> is the focused pane's short ID. <code>agents</code> counts panes that reported a status (OSC 7501). <code>blocked</code> counts those waiting for you. <code>attention</code> counts the blocked, failed and unseen finished ones, which Alt+Space U cycles through. It turns red when something is blocked or the server is down. Then it reads <code>local not connected, reconnecting</code>, or <code>connecting to local</code> at start. <code>sidecar down</code> shows only before the sidecar is ready.</td></tr>
+<tr><td>E</td><td><b>Echo line.</b> The last message, such as <code>Copied 42 characters</code>, <code>restored tab pi</code>, <code>Quit</code> or an error. It also shows the M-x prompt, or the prefix you have typed so far (<code>alt+space w-</code>).</td></tr></table></div>
+<p>The window title is the session label, with <code>! 2 blocked</code> added when agents wait, so Hyprland and the task switcher show it too.</p>
+
+<h2 id='agents'>Agent status and bbh</h2>
+<ol>
+<li><b>Reporting.</b> A program reports its state by printing OSC 7501 into its own terminal. For example, the bbh agent shell in Emacs prints <code>ESC ]7501;state=working:app=bbh ESC \</code> (desktop/configs/doom/agent-shell.el). Rex stores the record on that block.</li>
+<li><b>Following.</b> The sidecar reads every Rex event through <code>rex events --all --json</code>. When it starts, it also loads every record Rex already holds, so it agrees with Rex from the start. It ranks blocks blocked first, then error, then unseen done, and sends the list to the model. That list is what you see in the titles and the status line.</li>
+<li><b>Notifications.</b> When an agent first becomes blocked, fails or finishes, the sidecar runs <code>notify-send --app-name=ghostty-rex</code>, for example <i>bbh needs you</i>. bbh's own notifications focus this window when the source is a pane, since they match the class <code>dev.engstrand.Rex</code> (bbh/super/notify.clj).</li>
+<li><b>Getting there.</b> Alt+Space u focuses the next blocked agent, and Alt+Space U the next one wanting attention. Focusing a finished agent marks it seen.</li>
+<li><b>bbh from the window.</b> Alt+Space i floats <code>bbh inbox</code> over the panes, and the layer closes when it exits. M-x <i>bbh: tell the Router, or a thread as T12 …</i> runs <code>bbh say --from rex TEXT</code>, which goes to the thread the text names, else to the Router. The <code>bbh</code> tab runs emacs-bbh, which is <code>emacsclient -s bbh-super -t</code>.</li>
+</ol>
+
+<h2 id='launcher'>Cmd+Space</h2>
+<p>Cmd+Space runs <code>~/.local/bin/palette</code> (T208). When the focused window is <code>dev.engstrand.Rex</code>, it asks Rex for what the client shows: <code>rex client inspect ghostty-rex</code> gives the session and the commands the client registered, <code>session.view</code> gives the focused pane, and <code>block.method process</code> gives the program running in it. The list then shows:</p>
+<ol><li>the focused program's own entries, such as fish's or jjui's;</li>
+<li>the leader.edn rows the client offers, with their Alt+Space keys shown, so you learn them;</li>
+<li>every other M-x command;</li><li>then the desktop's global entries.</li></ol>
+<p>Picking a Rex row runs <code>rex -C ghostty-rex do ACTION</code>. Rex forwards it to the client as a perform request, the client runs the command, and it replies. This is the same remote control that Cmd+Return and E/D/G use for tabs, and that <code>make ghostty-rex-reload</code> uses (<code>mx.client.reload</code>). It is also why two ghostty-rex windows make <code>rex -C ghostty-rex</code> ambiguous.</p>
+
+<h2 id='guix'>Guix packaging and the MUX switch</h2>
+<div class='table'><table><tr><th>Piece</th><th>Where it comes from</th></tr>
+<tr><td><code>rex</code> 0.1.0-preview.21</td><td>Upstream's Go binary, modules/engstrand/packages/rex.scm, in Guix Home whatever the choice</td></tr>
+<tr><td><code>libghostty-vt</code> 1.0.1</td><td>Ghostty's terminal library, built with Zig 0.17 from its release tarball (modules/engstrand/packages/ghostty.scm)</td></tr>
+<tr><td><code>rexg-render</code> 0.1.0</td><td>csrc/rexg-render.c built with gcc against libghostty-vt, in the same file; in Home only when the choice is ghostty-rex</td></tr>
+<tr><td><code>ghostty</code> 1.4.0</td><td>the window, same file</td></tr>
+<tr><td>bb client and sidecar</td><td>not packaged: run from /home/engstrand/guix/desktop/build/ghostty-rex by the launcher</td></tr>
+<tr><td>configs</td><td>desktop/configs/ghostty-rex/, which <code>make stow</code> links to ~/.config/ghostty-rex/</td></tr></table></div>
+<p><b>The switch.</b> <code>(define %terminal-mux 'ghostty-rex)</code> in modules/engstrand/config.scm is the choice (herdr, rex or ghostty-rex). feature-familiar-terminal-mux (modules/engstrand/features/terminal-mux.scm) installs the packages above and writes the one word to ~/.config/engstrand/mux. Hyprland's keys.lua, mux-terminal, workspace-or-herdr-tab, the palette, keyleader and bbh's notify all read that word, through desktop/lib/mux.clj or their own copy. A <code>MUX</code> environment variable overrides it for one command.</p>
+<pre><code>make mux MUX=ghostty-rex   # edit config.scm, make home-apply, hyprctl reload
+make mux MUX=herdr         # back to Herdr
+guix home roll-back        # also brings back the previous word</code></pre>
+<p>Rex sessions survive a switch, because Rex keeps them and the rexmux and ghostty-rex windows both show <code>main</code>. Herdr's sessions are its own.</p>
+
+<h2 id='procs'>The processes, and how to see them</h2>
+<p>From <code>ps</code> on this machine with one window open <span class='tag measured'>measured</span>:</p>
+<pre><code>8898  ghostty --class=dev.engstrand.Rex … -e …/desktop/bin/ghostty-rex attach
+8926   └ bb --config …/ghostty-rex/bb.edn attach --render …/rexg-render
+12855     ├ rexg-render
+12860     └ rex --autostart=false events --all --json
+8959  rex server run --listen unix:///run/user/1000/rex/server.sock …   (parent: PID 1)
+9025   ├ -fish          the startup tabs' shells
+9039   ├ -fish
+9042   └ -fish
+9195       └ emacsclient -s bbh-super -t --eval (eng/bbh-inbox)</code></pre>
+<div class='table'><table><tr><th>To see</th><th>Run</th></tr>
+<tr><td>the window and its processes</td><td><code>ps -eo pid,ppid,etime,args | rg 'dev.engstrand|ghostty-rex|rexg-render|rex '</code></td></tr>
+<tr><td>the server, its version and log path</td><td><code>rex server status</code></td></tr>
+<tr><td>who is attached</td><td><code>rex client list</code> (one <code>ghostty-rex</code> per window)</td></tr>
+<tr><td>sessions and their short IDs</td><td><code>rex session list</code> (<code>main df5e10</code>)</td></tr>
+<tr><td>what a pane shows</td><td><code>rex capture -s main -b 4c19ab</code></td></tr>
+<tr><td>the Hyprland window</td><td><code>hyprctl -j clients</code>, class <code>dev.engstrand.Rex</code></td></tr>
+<tr><td>which backend is chosen</td><td><code>cat ~/.config/engstrand/mux</code></td></tr></table></div>
+<p>The bb process keeps its PID across a reload, because the reload replaces it with exec. The renderer and the events follower get new PIDs. A <code>[rex] &lt;defunct&gt;</code> child under bb after a reload is the old events follower, which the new bb never reaps. It is harmless. <span class='tag inferred'>inferred</span></p>
+
+<h2 id='debug'>Debug and recover</h2>
+<div class='table'><table><tr><th>You see</th><th>What it means and what to do</th></tr>
+<tr><td>Red status line, <code>local not connected, reconnecting</code></td><td>The control connection to the Rex server dropped: the server stopped, crashed, or was replaced by a newer build. The client retries every 0.25 to 4 s and starts the server itself, then reattaches to the same session. If it stays red, run <code>rex server status</code> and read the log it names. A stuck socket is fixed by <code>rex server start</code>.</td></tr>
+<tr><td><code>connecting to local</code> that never ends</td><td>The first connection hasn't succeeded. Same checks. Also check that <code>rex</code> is on Hyprland's PATH, the Guix Home profile.</td></tr>
+<tr><td>Notification: rexg-render is missing</td><td>Run <code>make home-apply</code> with %terminal-mux set to ghostty-rex, or <code>make ghostty-rex</code> for a checkout build.</td></tr>
+<tr><td>A tab shows bash, or lacks its program</td><td>Revival runs only for the startup session, when a window opens. Close the window and press Cmd+B. A reload, or a window opened with <code>--session</code>, skips it.</td></tr>
+<tr><td>An edit doesn't show</td><td>bb code, config.edn and leader.edn: <code>make ghostty-rex-reload</code> (M-x <i>Client: reload</i>). C code: <code>make home-apply</code>, then reload. The Ghostty config: Ctrl+Shift+Alt+R in the window.</td></tr>
+<tr><td>Cmd+E, D or G or the launcher act oddly</td><td><code>rex client list</code>. Two <code>ghostty-rex</code> clients make <code>rex -C</code> ambiguous, so close one window.</td></tr>
+<tr><td>Window frozen</td><td><code>make ghostty-rex-reload</code> first. If that fails, run <code>pkill -f 'ghostty-rex/bb.edn attach'</code> (SIGTERM ends bb and rexg-render cleanly), then Cmd+Return. Your panes stay in Rex.</td></tr></table></div>
+<h3>Logs</h3>
+<ul>
+<li><b>Client:</b> it logs only when <code>REXG_LOG</code> is set, so start a window from a terminal: <code>REXG_LOG=/tmp/rexg.log /home/engstrand/guix/desktop/bin/ghostty-rex</code>. The log has keys, every request (<code>out</code>), <code>lost</code> with the reason, <code>rex server start</code> results, renderer lines and <code>quit</code> with its reason.</li>
+<li><b>Server:</b> one log per server under /home/engstrand/.local/state/rex/servers/, and <code>rex server status</code> prints the current one. Look for <code>Rex server ready</code> and <code>stopped</code>.</li>
+<li><b>Bottom line:</b> errors from Rex requests and pane streams (<code>stream closed: …</code>, <code>pane ID: …</code>) appear on the echo line.</li>
+</ul>
+<h3>make switch and make home-apply</h3>
+<p><code>make switch</code> reconfigures the system and reloads kanata. It does not touch the Rex server, the window or Guix Home. <code>make home-apply</code> installs new <code>rex</code>, <code>rexg-render</code> and Ghostty builds, but running processes keep their old binaries. A new rexg-render takes effect at the next reload. A new Ghostty takes effect in a new window. A new Rex server takes effect only after the old server stops. That is when the red <code>not connected</code> line appears briefly. The client starts the new server, Rex restores the sessions, and step 9 above revives the startup tabs. Rex restores a session after any restart, clean or not, including a reboot.</p>
+
+<h2 id='more'>Other Rex docs</h2>
+<ul>
+<li>/home/engstrand/guix/docs/ghostty-rex-dev.html: editing, reloading, tests and troubleshooting in more depth</li>
+<li>/home/engstrand/guix/docs/rex-parity.html: the Herdr features this window matches</li>
+<li>/home/engstrand/guix/docs/rex-vs-herdr.html: Rex compared with Herdr</li>
+<li>/home/engstrand/guix/docs/rex-client-languages.html: why this client is bb plus C</li>
+<li>/home/engstrand/guix/docs/keybindings.html: Alt+Space, the leader keys and the launcher</li>
+<li>/home/engstrand/guix/desktop/build/ghostty-rex/README.md: the code's map</li>
+</ul>
+<p class='cite'>Sources: desktop/bin/ghostty-rex, mux-terminal, workspace-or-herdr-tab, palette; desktop/lib/mux.clj; desktop/build/ghostty-rex/src/rexg/{main,model,screen,rex,keys}.clj and csrc/rexg-render.c; desktop/build/rexmux/sidecar/rexmux/{sidecar,agents,commands,rex}.clj; desktop/configs/ghostty-rex/, hypr/{hyprland,keys,startup}.lua, keybindings/leader.edn; modules/engstrand/features/terminal-mux.scm, packages/{ghostty,rex}.scm, config.scm. Live ps, rex server status, rex client list and rex session list on 2026-11-21.</p>
 
 </main></body></html>
