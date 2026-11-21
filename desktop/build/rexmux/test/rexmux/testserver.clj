@@ -25,9 +25,12 @@
    "TERM" "xterm-256color" "REX_SERVER" address "REXMUX_REX" bin})
 
 (defn rex!
-  "Run the rex CLI against server S; returns {:exit :out :err}."
+  "Run the rex CLI against server S; returns {:exit :out :err}. -S names S:
+  rex server status and stop ignore REX_SERVER and act on the account's own
+  server (found through /run/user/UID/rex/servers), so without it a test's
+  cleanup stopped the live Rex server (T210)."
   [s & args]
-  (apply p/sh {:env (env s)} (:bin s) "--autostart=false" args))
+  (apply p/sh {:env (env s)} (:bin s) "--autostart=false" "-S" (:address s) args))
 
 (defn- wait-up [s]
   (loop [n 0]
@@ -38,11 +41,12 @@
 (defn start!
   "Start a server; returns {:root :address :bin :proc} once it answers.
   :root reuses a directory, :restore true keeps sessions across restarts
-  (as the real server does), :path-prepend puts a directory first on PATH."
+  (as the real server does), :path-prepend puts a directory first on PATH,
+  :bin runs that rex instead of rex-bin's."
   ([] (start! {}))
-  ([{:keys [root restore path-prepend]}]
+  ([{:keys [root restore path-prepend bin]}]
    (let [root (str (or root (fs/create-temp-dir {:prefix "rexmux-test-"})))
-         bin (rex-bin)
+         bin (or bin (rex-bin))
          s (cond-> {:root root :address (str "unix://" root "/run/rex.sock") :bin bin}
              path-prepend (assoc :path-prepend path-prepend))
          log (str root "/server.log")]
@@ -69,6 +73,7 @@
 
 (defn stop! [{:keys [proc root] :as s}]
   (when (fs/exists? root)
-    (rex! s "server" "stop")
+    (when (or (nil? proc) (.isAlive ^Process (:proc proc)))
+      (rex! s "server" "stop"))
     (when proc (p/destroy-tree proc) (deref proc 5000 nil))
     (fs/delete-tree root)))
