@@ -190,3 +190,37 @@
     (is (empty? (filter #(= "data.connect" (nth % 2 nil)) outs2)) "the same view asks for no second stream")
     (let [[_ outs3] (m/set-view model2 0 (assoc view :revision 3 :windows [{:id "w" :tiles [{:block "b2" :rect [0 0 1 1]}]}]))]
       (is (some #(= [:close-stream "b1"] %) outs3) "a pane no longer shown closes its stream"))))
+
+(deftest the-mouse-selects-copies-scrolls-and-passes-reports-on
+  (let [model (-> (with-startup)
+                  (assoc-in [:servers 0 :view] {:session "session:p" :label "" :revision 0 :active "w1"
+                                                :windows [{:id "w1" :focused "block:a" :layout {:block {:id "block:a"}}}]}))
+        press {:button 0 :kind :press} drag {:button 32 :kind :press} release {:button 0 :kind :release}]
+    (testing "a press on another pane focuses it and starts a selection"
+      (let [[m outs] (m/mouse model ["block:b" 2 1] press)]
+        (is (= [[:rex 0 "session.focus_block" {:session_id "session:p" :block_id "block:b"} [:effect]]] outs))
+        (is (= ["block:b" [2 1] [2 1]] (:selection m)))))
+    (testing "a drag extends it, and a release asks for the text to copy"
+      (let [[m] (m/mouse model ["block:a" 2 1] press)
+            [m] (m/mouse m ["block:a" 5 2] drag)
+            [m outs] (m/mouse m ["block:a" 5 2] release)]
+        (is (= [[:read-text [:select "block:a" [2 1] [5 2]] "block:a"]] outs))
+        (let [[m2 outs] (m/text-read m [:select "block:a" [2 1] [5 2]] ["zero" "one line  " "two lines"] 80)]
+          (is (= [[:clipboard "e line\ntwo li"]] outs))
+          (is (= "Copied 13 characters" (:echo m2))))))
+    (testing "a click without a drag selects nothing"
+      (let [[m] (m/mouse model ["block:a" 2 1] press)
+            [m outs] (m/mouse m ["block:a" 2 1] release)]
+        (is (= [] outs))
+        (is (nil? (:selection m)))))
+    (testing "the wheel scrolls the pane, unless its program wants mouse reports"
+      (is (= [[:scroll "block:a" -3]] (second (m/mouse model ["block:a" 1 1] {:button 64 :kind :press}))))
+      (let [vim (assoc-in model [:panes "block:a" :mouse] true)
+            [_ [[_ _ method payload]]] (m/mouse vim ["block:a" 1 1] {:button 65 :kind :press})]
+        (is (= "block.event" method))
+        (is (= {:type "wheel" :payload {:x 1 :y 1 :delta_y 1 :delta_mode "line"}} (:event payload)))))
+    (testing "a middle press pastes; a release off the panes drops the selection"
+      (is (= [[:paste 0 "session:p" "block:a" nil]] (second (m/mouse model ["block:a" 1 1] {:button 1 :kind :press}))))
+      (is (nil? (:selection (first (m/mouse (assoc model :selection ["block:a" [0 0] [1 1]]) nil release))))))
+    (testing "no session, no effect"
+      (is (= [(with-startup) []] (m/mouse (with-startup) ["block:a" 1 1] press))))))

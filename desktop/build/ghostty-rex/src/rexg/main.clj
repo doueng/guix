@@ -206,9 +206,12 @@
                            (when (seq text)
                              (rex-send! srv "block.event" {:session_id session :block_id block
                                                             :event {:type "paste" :payload {:text text}}} [:ignore])))
-                  :hints (let [n (inc (:next-req @app)) req (str "h" n)]
-                           (swap! app #(-> % (assoc :next-req n) (assoc-in [:text-reqs req] [:hints (first xs)])))
-                           (send-str! r \t (str req " " (first xs))))
+                  ;; rexg-render answers with the block's screen, as [:text req cols lines].
+                  :read-text (let [[what block] xs
+                                   n (inc (:next-req @app)) req (str "t" n)]
+                               (swap! app #(-> % (assoc :next-req n) (assoc-in [:text-reqs req] what)))
+                               (send-str! r \t (str req " " block)))
+                  :scroll (let [[block lines] xs] (send-str! r \s (str block " " lines)))
                   :quit (put! [:quit "quit"])
                   :reload (put! [:quit "reload"])
                   ;; Each answer names its attempt; rexg.model drops a stale one.
@@ -275,45 +278,10 @@
                   (send-str! r \w (str "\u001b]2;" (clean (:title d)) "\u0007"))
                   (swap! app assoc :title (:title d)))
                 (swap! app assoc :last-draw {:layout lay :spans sp :cursor cur})))
-            (mouse! [{:keys [button x y kind]}]
+            (mouse! [{:keys [x y] :as ev}]
               (let [{:keys [m wh]} @app
-                    panes (:panes m)
-                    [w h] wh
-                    sid (model/session-id m)
-                    hit (screen/pane-at m w h x y)
-                    wheel (when (<= 64 button 65) (if (= 64 button) -3 3))
-                    drag (pos? (bit-and button 32))
-                    btn (case (bit-and button 3) 0 "left" 1 "middle" 2 "right" "none")
-                    [block px py] hit]
-                (when sid
-                  (when (and (= kind :press) block (not wheel) (not drag) (not= block (model/focused-block m)))
-                    (rex-send! (:current m) "session.focus_block" {:session_id sid :block_id block} [:effect]))
-                  (cond
-                    (or (nil? hit) (nil? py))
-                    (when (= kind :release) (step! (fn [m] [(assoc m :selection nil) []])))
-                    ;; A program that asked for mouse reports, such as Vim or jjui, gets them.
-                    (get-in panes [block :mouse])
-                    (rex-send! (:current m) "block.event"
-                               {:session_id sid :block_id block
-                                :event (cond wheel {:type "wheel" :payload {:x px :y py :delta_y (quot wheel 3) :delta_mode "line"}}
-                                             drag {:type "mouse" :payload {:action "motion" :button btn :buttons {btn true} :x px :y py}}
-                                             :else {:type "mouse" :payload {:action (name kind) :button btn :x px :y py}})}
-                               [:ignore])
-                    wheel (send-str! r \s (str block " " wheel))
-                    (and (= kind :press) (not drag) (= btn "left")) (step! (fn [m] [(assoc m :selection [block [px py] [px py]]) []]))
-                    (and drag (= block (first (:selection m)))) (step! (fn [m] [(assoc-in m [:selection 2] [px py]) []]))
-                    (and (= kind :press) (= btn "middle")) (perform! [[:paste (:current m) sid block nil]])
-                    (= kind :release)
-                    (let [[b a z] (:selection m)]
-                      (if (or (nil? b) (= a z))
-                        (step! (fn [m] [(assoc m :selection nil) []]))
-                        (let [n (inc (:next-req @app)) req (str "s" n)]
-                          (swap! app #(-> % (assoc :next-req n) (assoc-in [:text-reqs req] [:select b a z])))
-                          (send-str! r \t (str req " " b)))))))))
-            (selected-text [lines [c0 r0] [c1 r1]]
-              (let [[[c0 r0] [c1 r1]] (sort-by (fn [[c rr]] [rr c]) [[c0 r0] [c1 r1]])]
-                (str/join "\n" (for [rr (range r0 (inc r1)) :let [l (get lines rr "")]]
-                                   (str/trimr (subs l (min (count l) (if (= rr r0) c0 0)) (min (count l) (if (= rr r1) (inc c1) (count l)))))))))
+                    [w h] wh]
+                (step! model/mouse (screen/pane-at m w h x y) ev)))
             (handle! [[kind & xs]]
               (case kind
                 :key (let [k (first xs)]
@@ -358,14 +326,9 @@
                                          (swap! app update :m assoc :echo (str "pane " a ": " b)))
                                  nil))
                 :text (let [[req cols lines] xs
-                            [what & args] (get-in @app [:text-reqs req])]
+                            what (get-in @app [:text-reqs req])]
                         (swap! app update :text-reqs dissoc req)
-                        (case what
-                          :hints (swap! app update :m model/open-hints (first args) lines cols)
-                          :select (let [[_ a z] args text (selected-text lines a z)]
-                                    (swap! app update :m assoc :echo (str "Copied " (count text) " characters"))
-                                    (perform! [[:clipboard text]]))
-                          nil))
+                        (when what (step! model/text-read what lines cols)))
                 ;; The connection is rexg.model's state machine; this only connects.
                 :connect (step! model/connect (first xs))
                 ;; The model adopts the attempt or closes it ([:conn/adopt] or [:conn/close]).

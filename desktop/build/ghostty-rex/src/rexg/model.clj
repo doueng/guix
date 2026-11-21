@@ -6,7 +6,8 @@
 
   Outs: [:sidecar msg] [:rex server method payload tag] [:open-stream server
   block ticket] [:close-stream block] [:clipboard text] [:open url]
-  [:paste server session block text] [:hints block] [:quit].
+  [:paste server session block text] [:read-text what block] [:scroll block lines]
+  [:quit]. A [:read-text] answer comes back to text-read with WHAT.
   Tags: [:view s] [:effect] [:created s] [:ticket s block] [:sessions s]
   [:revive s block window] [:replaced s block focus?] [:project s label cwd]
   [:ignore]."
@@ -326,7 +327,7 @@
                                      :input "" :selected 0})
                []]
     "clipboard/copy" [m [[:clipboard (str arg)]]]
-    "hints/open" (if-let [b (focused-block m)] [m [[:hints b]]] [(assoc m :echo "No focused pane.") []])
+    "hints/open" (if-let [b (focused-block m)] [m [[:read-text [:hints b] b]]] [(assoc m :echo "No focused pane.") []])
     "clipboard/paste" (if (and (session-id m) (focused-block m))
                         [m [[:paste (:current m) (session-id m) (focused-block m) nil]]]
                         [m []])
@@ -704,6 +705,64 @@
   "Pane BLOCK's program exited with CODE."
   [m block code]
   [(assoc-in m [:panes block :exited] code) []])
+
+(defn selected-text
+  "The text of LINES between two cells [col row], in reading order, each
+  line's trailing blanks trimmed."
+  [lines a z]
+  (let [[[c0 r0] [c1 r1]] (sort-by (fn [[c r]] [r c]) [a z])]
+    (str/join "\n" (for [r (range r0 (inc r1)) :let [l (get lines r "")]]
+                       (str/trimr (subs l (min (count l) (if (= r r0) c0 0)) (min (count l) (if (= r r1) (inc c1) (count l)))))))))
+
+(defn mouse
+  "A mouse report {:button :kind} that HIT [block col row] in a pane's
+  content (col and row nil on its title or border; HIT nil off every pane).
+  A press focuses its pane. A program that asked for mouse reports, such as
+  Vim or jjui, gets them; else the wheel scrolls the pane's history, a left
+  drag selects, a release copies the selection ([:read-text [:select ..]]),
+  and a middle press pastes."
+  [m hit {:keys [button kind]}]
+  (let [sid (session-id m)
+        srv (:current m)
+        wheel (when (<= 64 button 65) (if (= 64 button) -3 3))
+        drag (pos? (bit-and button 32))
+        btn (case (bit-and button 3) 0 "left" 1 "middle" 2 "right" "none")
+        [block px py] hit
+        focus (when (and (= kind :press) block (not wheel) (not drag) (not= block (focused-block m)))
+                [:rex srv "session.focus_block" {:session_id sid :block_id block} [:effect]])
+        [m2 outs] (cond
+                   (or (nil? hit) (nil? py))
+                   [(cond-> m (= kind :release) (assoc :selection nil)) []]
+                   (get-in m [:panes block :mouse])
+                   [m [[:rex srv "block.event"
+                        {:session_id sid :block_id block
+                         :event (cond wheel {:type "wheel" :payload {:x px :y py :delta_y (quot wheel 3) :delta_mode "line"}}
+                                      drag {:type "mouse" :payload {:action "motion" :button btn :buttons {btn true} :x px :y py}}
+                                      :else {:type "mouse" :payload {:action (name kind) :button btn :x px :y py}})}
+                        [:ignore]]]]
+                   wheel [m [[:scroll block wheel]]]
+                   (and (= kind :press) (not drag) (= btn "left")) [(assoc m :selection [block [px py] [px py]]) []]
+                   (and drag (= block (first (:selection m)))) [(assoc-in m [:selection 2] [px py]) []]
+                   (and (= kind :press) (= btn "middle")) [m [[:paste srv sid block nil]]]
+                   (= kind :release)
+                   (let [[b a z] (:selection m)]
+                     (if (or (nil? b) (= a z))
+                       [(assoc m :selection nil) []]
+                       [m [[:read-text [:select b a z] b]]]))
+                   :else [m []])]
+    (if sid
+      [m2 (cond->> outs focus (into [focus]))]
+      [m []])))
+
+(defn text-read
+  "rexg-render's answer to [:read-text WHAT block]: BLOCK's screen as LINES,
+  soft-wrapping at COLS. Tiny fingers open on it, or the selection is copied."
+  [m [what & args] lines cols]
+  (case what
+    :hints [(open-hints m (first args) lines cols) []]
+    :select (let [[_ a z] args text (selected-text lines a z)]
+              [(assoc m :echo (str "Copied " (count text) " characters")) [[:clipboard text]]])
+    [m []]))
 
 (defn- dispatch-key [m k]
   (let [ch (keys/chord k)]
