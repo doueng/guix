@@ -1,7 +1,7 @@
 (define-module (engstrand system bootloader)
-  #:use-module (asahi guix build modules)
-  #:use-module (asahi guix packages bootloader)
-  #:use-module (asahi guix packages linux)
+  #:use-module (engstrand asahi boot)
+  #:use-module (engstrand asahi kernel)
+  #:use-module (engstrand asahi services)
   #:use-module (engstrand packages omarchy-ane)
   #:use-module (gnu bootloader)
   #:use-module (gnu bootloader grub)
@@ -14,16 +14,9 @@
   #:use-module (guix modules)
   #:use-module (guix packages))
 
-(define-public asahi-linux-keyd
-  (customize-linux
-   #:name "asahi-linux-keyd"
-   #:linux asahi-linux
-   #:configs '("CONFIG_INPUT_UINPUT=m")
-   #:extra-version "keyd"))
+(define-public linux-asahi-ane (omarchy-ane-module linux-asahi))
 
-(define-public asahi-linux-keyd-ane (omarchy-ane-module asahi-linux-keyd))
-
-(define-public asahi-dtbs-ane (dtbs-with-ane asahi-linux-keyd))
+(define-public asahi-dtbs-ane (dtbs-with-ane linux-asahi))
 
 (define %bootloader-module-dir
   (dirname (canonicalize-path
@@ -44,10 +37,10 @@
 (define m1n1-u-boot-grub-installer
   (with-extensions (list coreutils bash-minimal gzip guile-sqlite3)
     (with-imported-modules (source-module-closure
-                            '((asahi guix build bootloader m1n1))
-                            #:select? import-asahi-module?)
+                            '((engstrand build m1n1))
+                            #:select? import-build-module?)
       #~(lambda (bootloader efi-dir mount-point)
-          (use-modules (asahi guix build bootloader m1n1))
+          (use-modules (engstrand build m1n1))
           (setenv "PATH" (string-join
                           (filter string?
                                   (list (getenv "PATH")

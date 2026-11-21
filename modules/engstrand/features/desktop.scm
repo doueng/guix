@@ -1,10 +1,11 @@
 (define-module (engstrand features desktop)
+  #:use-module (engstrand asahi home-sound)
   #:use-module (engstrand features packages)
   #:use-module (engstrand packages bluetui)
   #:use-module (engstrand packages ghostty)
   #:use-module (engstrand packages hex)
-  #:use-module (asahi guix systems desktop)
   #:use-module (gnu home services)
+  #:use-module (gnu home services desktop)
   #:use-module (gnu home services shepherd)
   #:use-module (gnu home services xdg)
   #:use-module (gnu packages)
@@ -171,9 +172,10 @@ MimeType=text/markdown;text/x-markdown;
    #:system-packages %desktop-system-packages
    #:system-services (list (service bluetooth-service-type
                                     (bluetooth-configuration (auto-enable? #t))))
-   #:home-services (append %asahi-desktop-home-services
-                           (list %home-mime-service
-                                 %home-desktop-entries
-                                 %home-flatpak-desktop-entries
-                                 %home-user-dirs-service
-                                 %clipboard-history-service))))
+   #:home-services (list (service home-dbus-service-type)
+                         (service home-pipewire-service-type)
+                         %home-mime-service
+                         %home-desktop-entries
+                         %home-flatpak-desktop-entries
+                         %home-user-dirs-service
+                         %clipboard-history-service)))

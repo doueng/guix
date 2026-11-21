@@ -49,6 +49,11 @@
            "desktop/build/second-brain/**"]
    :checks ["make lint" "make second-brain-test"]
    :slow ["make second-brain-status"]}
+  {:name "asahi kernel and boot chain"
+   :paths ["modules/engstrand/asahi/**" "modules/engstrand/build/**"
+           "modules/engstrand/system/bootloader.scm" "desktop/build/asahi/**"]
+   :checks ["make lint"]
+   :slow ["bb desktop/build/asahi/check-kernel.bb"]}
   {:name "apple neural engine"
    :paths ["modules/engstrand/packages/omarchy-ane.scm" "modules/engstrand/system/bootloader.scm"
            "modules/engstrand/system/asahi.scm" "desktop/build/ane/**"]

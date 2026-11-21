@@ -22,7 +22,7 @@ export async function launch({ port, width = 1024, height = 768, ext = join(ROOT
   ];
   const [cmd, args] = chromeBin
     ? [chromeBin, flags]
-    : ['flatpak', ['run', `--filesystem=${ROOT}:ro`, `--filesystem=${ext}`, `--filesystem=${profile}`,
+    : ['flatpak', ['run', '--no-documents-portal', `--filesystem=${ROOT}:ro`, `--filesystem=${ext}`, `--filesystem=${profile}`,
        ...(headed ? ['--socket=wayland', '--nosocket=x11'] : []), 'com.google.Chrome', ...flags]];
   const proc = spawn(cmd, args, { stdio: ['ignore', 'ignore', process.env.CHROME_LOG ? 'inherit' : 'ignore', 'pipe', 'pipe'] });
   let id = 0, buf = '';

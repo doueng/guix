@@ -1,16 +1,13 @@
 (define-module (engstrand system asahi)
-  #:use-module (asahi guix config)
-  #:use-module (asahi guix initrd)
-  #:use-module ((asahi guix services sound) #:prefix asahi:)
-  #:use-module (asahi guix services substitutes)
-  #:use-module (asahi guix services udev)
-  #:use-module (asahi guix systems base)
-  #:use-module (asahi guix systems desktop)
+  #:use-module (engstrand asahi kernel)
+  #:use-module (engstrand asahi services)
+  #:use-module ((engstrand asahi sound) #:prefix asahi:)
   #:use-module (engstrand packages flatpak)
   #:use-module (engstrand system bootloader)
   #:use-module (engstrand system builder-keys)
   #:use-module (gnu)
   #:use-module (gnu packages bash)
+  #:use-module (gnu packages gnome)
   #:use-module (gnu packages linux)
   #:use-module (gnu packages ncurses)
   #:use-module (gnu packages package-management)
@@ -85,22 +82,26 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
         (close-port (open-file log "a"))
         (chmod log #o644))))
 
+(define %grub-keyboard-layout
+  (keyboard-layout "us" #:options '("caps:ctrl_modifier" "terminate:ctrl_alt_bksp")))
+
 (define* (make-base-os #:key root-uuid esp-uuid channels)
   (unless (and (string? root-uuid) (string? esp-uuid) (pair? channels))
     (error "Supply root/ESP UUIDs and pinned channels"))
   (operating-system
-    (inherit asahi-base-os)
-    (kernel asahi-linux-keyd)
-    (kernel-loadable-modules (list asahi-linux-keyd-ane))
+    (kernel linux-asahi)
+    (kernel-loadable-modules (list linux-asahi-ane))
+    (kernel-arguments (cons "net.ifnames=0" %default-kernel-arguments))
     (host-name "asahi-guix")
     (timezone "Europe/London")
     (locale "en_US.utf8")
     (keyboard-layout (keyboard-layout "us"))
     (bootloader
      (bootloader-configuration
-      (inherit (operating-system-bootloader asahi-base-os))
-      (bootloader m1n1-u-boot-grub-bootloader-os-prepare)))
-    (initrd-modules (cons* "uas" asahi-initrd-modules))
+      (bootloader m1n1-u-boot-grub-bootloader-os-prepare)
+      (targets '("/boot/efi"))
+      (keyboard-layout %grub-keyboard-layout)))
+    (initrd-modules (cons* "uas" %asahi-initrd-modules))
     (users
      (cons* (user-account
              (name "root")
@@ -128,7 +129,7 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
             %base-file-systems))
     (packages
      (cons* flatpak/stable-exports ncurses git neovim brightnessctl alsa-utils
-            (operating-system-packages asahi-base-os)))
+            e2fsprogs network-manager %base-packages))
     (services
      (append
       (list %udev-backlight-service
@@ -172,19 +173,22 @@ printf '%(%Y-%m-%dT%H:%M:%S%z)T pid=%s uid=%s name=%s\\n' -1 \"${EARLYOOM_PID}\"
             (service upower-service-type)
             (service ntp-service-type)
             (service x11-socket-directory-service-type))
-      (modify-services (operating-system-user-services asahi-base-os)
-        (delete openssh-service-type)
-        (delete asahi-substitutes-service-type)
+      (modify-services (cons* %udev-mtd-by-name-service
+                              (service asahi-firmware-service-type)
+                              (service iwd-service-type)
+                              (service network-manager-service-type
+                                       (network-manager-configuration
+                                        (shepherd-requirement '(iwd))))
+                              %base-services)
+        (console-font-service-type config => (console-font-terminus config))
         (guix-service-type
          config => (guix-configuration
                      (inherit config)
                      (channels channels)
-                     (authorized-keys (append %asahi-substitute-keys
-                                              (if %builder? (list %builder-signing-key) '())
+                     (authorized-keys (append (if %builder? (list %builder-signing-key) '())
                                               (guix-configuration-authorized-keys config)))
                      (substitute-urls (append (if %builder? (list %builder-publish-url) '())
                                               '("https://bordeaux.guix.gnu.org")
-                                              %asahi-substitute-urls
                                               '("https://ci.guix.gnu.org")))
                      (build-machines (append %builder-machines
                                              (guix-configuration-build-machines config)))

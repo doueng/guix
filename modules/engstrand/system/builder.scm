@@ -1,5 +1,4 @@
 (define-module (engstrand system builder)
-  #:use-module (asahi guix config)
   #:use-module (engstrand features tailscale)
   #:use-module (engstrand system builder-keys)
   #:use-module (engstrand system reader)
@@ -161,12 +160,10 @@ to your address."
                 (guix-service-type
                  config => (guix-configuration
                             (inherit config)
-                            (substitute-urls (append '("https://bordeaux.guix.gnu.org")
-                                                     %asahi-substitute-urls
-                                                     '("https://ci.guix.gnu.org")))
+                            (substitute-urls '("https://bordeaux.guix.gnu.org"
+                                               "https://ci.guix.gnu.org"))
                             (authorized-keys
-                             (append %asahi-substitute-keys
-                                     (filter-map builder-key-file
+                             (append (filter-map builder-key-file
                                                  '("laptop-signing.pub"))
                                      (guix-configuration-authorized-keys config)))
                             (extra-options '("--max-jobs=1" "--cores=4"

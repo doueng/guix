@@ -6,19 +6,19 @@
 (defn out [& args]
   (str/trim (:out (apply shell {:out :string :err :inherit} args))))
 
-(defn build [sym]
+(defn build [module sym]
   (last (str/split-lines
          (out "guix" "build" "-L" "modules" "-e"
-              (str "(@ (engstrand system bootloader) " sym ")")))))
+              (str "(@ " module " " sym ")")))))
 
 (def failures (atom []))
 (defn check! [ok? msg]
   (println (if ok? "ok  " "FAIL") msg)
   (when-not ok? (swap! failures conj msg)))
 
-(def kernel (build "asahi-linux-keyd"))
-(def module (build "asahi-linux-keyd-ane"))
-(def dtbs (build "asahi-dtbs-ane"))
+(def kernel (build "(engstrand asahi kernel)" "linux-asahi"))
+(def module (build "(engstrand system bootloader)" "linux-asahi-ane"))
+(def dtbs (build "(engstrand system bootloader)" "asahi-dtbs-ane"))
 (def dtc-bin (str (last (str/split-lines (out "guix" "build" "dtc"))) "/bin/"))
 
 (def kernel-release (str (fs/file-name (first (fs/list-dir (str kernel "/lib/modules"))))))
