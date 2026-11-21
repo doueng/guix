@@ -25,7 +25,7 @@
           (or (some (fn [[i o]] (when (= (:recommended ask) (:id o)) (inc i))) options) 0)
           :else (some (fn [[i o]] (when (= words (plain (:label o))) (inc i))) options))))
 
-(defn target
+(defn resolve-target
   "Which thread spoken TEXT is for, and its words: the thread its handle
   names, else, only for TARGET :selected, the thread the Inbox cursor
   SELECTED ({:thread :ask :at}) in the minute before NOW, so a cursor resting
@@ -39,7 +39,7 @@
      :words (plain (if handle rest text))}))
 
 (defn interpret
-  "What to do for TARGET (from target) given VIEW, its thread as the
+  "What to do for TARGET (from resolve-target) given VIEW, its thread as the
   controller shows it (nil when there is none), and SELECTED, the Inbox
   cursor. {:do [effect ...] :result r} or {:refuse message :data {...}}. An
   effect is [:pick thread n ask-id], [:send thread] or [:say text]. Voice
@@ -70,10 +70,12 @@
 
 (defn send-refusal
   "Why VIEW's draft may not be sent by voice, or nil: there is none, or it
-  picks an option of an action ask, which needs the keyboard."
+  picks an option of an action or review ask, which needs the keyboard, as
+  voice never approves."
   [{:keys [draft asks]}]
-  (cond (some #(and (= :action (:kind %)) (contains? (:picks draft) (:id %))) asks) "Action asks require keyboard confirmation"
-        (not draft) "No draft to send"))
+  (if-let [kind (some #(when (and (#{:action :review} (:kind %)) (contains? (:picks draft) (:id %))) (:kind %)) asks)]
+    (str (str/capitalize (name kind)) " asks require keyboard confirmation")
+    (when-not draft "No draft to send")))
 
 (defn- send-draft!
   "Send thread THREAD's draft, as it is after any pick, unless send-refusal
@@ -88,13 +90,13 @@
   send the draft, or both in one breath (\"option two, send\"); anything else
   is a message. With no spoken handle the message goes to the Router. Only
   TARGET :selected uses the thread your Inbox cursor selected in the last
-  minute; target and interpret decide, this performs."
+  minute; resolve-target and interpret decide, this performs."
   [text & {:keys [target] :or {target :router}}]
   (when-not (str/blank? text)
     (pane/with-state-lock!
       (fn []
         (let [{:keys [selected]} (pane/client-state)
-              tgt (bbh.super.voice/target text {:selected selected :now (System/currentTimeMillis) :target target})
+              tgt (resolve-target text {:selected selected :now (System/currentTimeMillis) :target target})
               view (when (:thread tgt) (call! {:command :thread :args {:id (:thread tgt)}}))
               {:keys [refuse data result] effects :do} (interpret tgt view selected)]
           (when refuse (throw (ex-info refuse data)))
