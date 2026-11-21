@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launch, available, sleep, ROOT } from '../lib/chrome.mjs';
@@ -9,6 +9,8 @@ const arg = (name, dflt) => { const i = process.argv.indexOf(name); return i > 0
 const time = arg('--time', '3m');
 const page = arg('--page', ''); // a fixture to start on, as docs.html
 const out = arg('--output', mkdtempSync(join(tmpdir(), 'vimium-cljs-bombadil-')));
+mkdirSync(out, { recursive: true });
+const trace = join(out, 'trace.bin'); // Bombadil 0.8 writes one binary trace file; read it with bombadil trace
 
 function bombadilBin() {
   if (process.env.BOMBADIL) return process.env.BOMBADIL;
@@ -46,11 +48,11 @@ const origin = `http://127.0.0.1:${port}/`;
 console.log(`bombadil: ${time} on ${origin}${page}, output ${out}`);
 const child = spawn(bin, ['browser', 'test-external', '--remote-debugger', `http://127.0.0.1:${devtoolsPort}`, '--create-target',
   '--allow-url', `http://127.0.0.1:${port}/*`, '--allow-url', `http://localhost:${port}/*`,
-  '--time-limit', time, '--exit-on-violation', '--output-path', out, '--output-path-overwrite',
+  '--time-limit', time, '--exit-on-violation', '--output-path', trace, '--output-path-overwrite',
   origin + page, join(ROOT, 'test/bombadil/spec.ts')], { stdio: 'inherit' });
 const code = await new Promise((ok) => child.on('exit', (c) => ok(c ?? 1)));
 b.close();
 server.closeAllConnections();
 server.close();
-console.log(code === 0 ? 'bombadil: no property violated' : `bombadil: exit ${code}; trace in ${out}`);
+console.log(code === 0 ? 'bombadil: no property violated' : `bombadil: exit ${code}; trace ${trace}`);
 setTimeout(() => process.exit(code), 2000);

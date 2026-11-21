@@ -4,7 +4,7 @@
   status line, M-x selection, Escape leaving the minibuffer, prefix keys
   showing what follows, and Ctrl+b u reaching a blocked agent.
 
-    bb test:bombadil [--spec tabs|startup] [--time 60] [--reproduce DIR] [--keep]
+    bb test:bombadil [--spec tabs|startup] [--time 60] [--reproduce TRACE] [--keep]
 
   --spec startup, test/bombadil/startup.ts: the shipped :startup tabs
   (shell, bbh, pi, jjui) appear on an empty server, stay, and each runs its
@@ -88,7 +88,7 @@
         {:keys [file setup]} (or (specs spec) (throw (ex-info (str "bb test:bombadil: no spec " spec) {})))
         root (str (fs/create-temp-dir {:prefix "rexmux-bombadil-"}))
         s (ts/start! {:root (str root "/srv") :path-prepend (e2e/stubs! (str root "/stubs"))})
-        trace (str (fs/path root "trace"))
+        trace (str (fs/path root "trace.bin"))
         log (str (fs/path root "rexmux.log"))
         config (str (fs/path root "rexmux.edn"))]
     (try

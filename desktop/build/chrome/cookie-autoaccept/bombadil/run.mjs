@@ -282,8 +282,8 @@ async function main() {
       'browser', 'test-external', '--remote-debugger', `http://127.0.0.1:${port}`, '--create-target',
       ...allowed.flatMap((u) => ['--allow-url', u]),
       ...(o.reproduce
-        ? ['--reproduce', join(o.reproduce, 'trace.jsonl'), '--output-path', out, '--output-path-overwrite']
-        : ['--output-path', out, '--output-path-overwrite', '--exit-on-violation', '--time-limit', `${o.time}s`]),
+        ? ['--reproduce', join(o.reproduce, 'trace.bin'), '--output-path', join(out, 'trace.bin'), '--output-path-overwrite']
+        : ['--output-path', join(out, 'trace.bin'), '--output-path-overwrite', '--exit-on-violation', '--time-limit', `${o.time}s`]),
       origin, SPEC,
     ];
     const started = Date.now();

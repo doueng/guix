@@ -5,7 +5,7 @@
   test/bombadil/<view>.ts on every screen.
 
     bb test:bombadil [--view inbox|worker] [--time 120] [--seed N]
-                     [--reproduce DIR] [--keep] [--step-ms 1000]
+                     [--reproduce TRACE] [--keep] [--step-ms 1000]
 
   The inbox view (inbox.ts, inbox.el) is the split Inbox over fake Workers.
   The worker view (worker.ts, worker.el) is the Router's and Workers'
@@ -18,7 +18,7 @@
   (T75), BBH_ and WF_ session variables are dropped, and BBH_EMACS_SERVER
   names a daemon that does not exist (inbox) or this run's own socket under
   the temp root (worker), never bbh-super (T163). A failure prints the trace
-  directory and the seed, and --reproduce replays that trace's keys against
+  file and the seed, and --reproduce replays that trace's keys against
   a fixture churned from the same seed."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
@@ -368,11 +368,15 @@
      :faults (if (fs/exists? (fs/path root "faults.log")) (count (fs/read-all-lines (fs/path root "faults.log"))) 0)
      :hang (when (fs/exists? (fs/path root "watchdog.log")) (slurp (str (fs/path root "watchdog.log"))))}))
 
-(defn- trace-keys [trace]
-  (some->> (fs/glob trace "**trace.jsonl") first str
-           (#(with-open [r (clojure.java.io/reader %)]
-               (mapv (fn [line] (second (re-find #"^\{[^{]*\"action\":\{\"TypeText\":\{\"text\":\"((?:[^\"\\]|\\.)*)\"" line)))
-                     (line-seq r))))))
+(defn- trace-keys
+  "The text each state typed, from the binary trace file through bombadil trace
+  --json, still JSON-escaped as key-name expects; nil without a trace."
+  [trace]
+  (when (fs/exists? trace)
+    (let [proc (p/process {:out :stream :err :string} (System/getenv "BBH_BOMBADIL_BIN") "trace" "--json" trace)]
+      (with-open [r (clojure.java.io/reader (:out proc))]
+        (mapv (fn [line] (second (re-find #"\"action\":\{\"TypeText\":\{\"text\":\"((?:[^\"\\]|\\.)*)\"" line)))
+              (line-seq r))))))
 
 (defn- key-name [k]
   (case k
@@ -384,7 +388,7 @@
 
 (defn- run-bombadil! [{:keys [time seed reproduce keep rows columns view]} root]
   (let [log (str (fs/path root "fixture.log"))
-        trace (str (fs/path root "trace"))
+        trace (str (fs/path root "trace.bin"))
         emacs (System/getenv "BBH_BOMBADIL_EMACS")
         worker? (= "worker" view)
         stop (if worker? (worker-fixture! root seed log) (fixture! root seed log))]

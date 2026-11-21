@@ -544,7 +544,7 @@
         dir (str root "/bombadil-" spec)
         s (ts/start! {:root (str dir "/srv") :path-prepend (e2e/stubs! (str dir "/stubs"))})
         config (str dir "/ghostty-rex.edn")
-        trace (str dir "/trace")]
+        trace (str dir "/trace.bin")]
     (try
       (let [session (setup s config)
             env (client-env s dir config)

@@ -8,7 +8,7 @@
          test:live {:doc "Sidecar tests against a throwaway Rex server on a private socket."
                     :requires ([rexmux.live-test])
                     :task (rexmux.live-test/-main)}
-         test:bombadil {:doc "Bombadil over rexmux tty on a throwaway Rex server: pane focus, M-x, keymaps, agent attention. Args: [--time S] [--reproduce DIR] [--keep]."
+         test:bombadil {:doc "Bombadil over rexmux tty on a throwaway Rex server: pane focus, M-x, keymaps, agent attention. Args: [--time S] [--reproduce TRACE-FILE] [--keep]."
                         :requires ([rexmux.bombadil])
                         :task (apply rexmux.bombadil/-main *command-line-args*)}
          test:e2e {:doc "The window end to end on the hidden test display and a throwaway Rex server: startup tabs, tiny fingers, mouse, rename, resize, persistence. Args: [--keep]."

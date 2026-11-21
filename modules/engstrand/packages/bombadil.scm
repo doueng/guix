@@ -2,7 +2,7 @@
   #:use-module (engstrand packages release-binary)
   #:use-module ((guix licenses) #:prefix license:))
 
-(define bombadil-version "0.7.10")
+(define bombadil-version "0.8.0")
 
 (define-public bombadil
   (let ((version bombadil-version))
@@ -11,7 +11,7 @@
      #:version version
      #:uri (string-append "https://github.com/antithesishq/bombadil/releases/download/v"
                           version "/bombadil-aarch64-linux")
-     #:hash "0wwya04ib6rkkv28ca8v3bspg0k729rk2yz3zq6akaw7qach1vk7"
+     #:hash "1ls6s8q2lfvjbvywcllkg6d7nq8hyfx200j82xqfr5ljc1my5ica"
      #:file "bombadil"
      #:install-plan '(("bombadil" "bin/"))
      #:synopsis "Property-based testing for web and terminal UIs"
