@@ -66,7 +66,20 @@ or choose <b>Client: reload its bb code and config</b> in M-x (Alt+Space Space).
 <li>To install it for every window, run <code>make home-apply</code> (or the full <code>make switch</code>), then <code>make ghostty-rex-reload</code>.</li>
 </ol>
 <h3>Keys</h3>
-<p>Alt+Space is the local prefix, and leader.edn's <code>:rex</code> actions run under it; see /home/engstrand/guix/docs/keybindings.html. A leader.edn edit takes effect after a reload.</p>
+<p>Alt+Space is Rex's only prefix. Ctrl+b is no prefix in Rex, so it reaches the program in the pane: fish and readline move back a character, and Emacs gets C-b. Every prefixed key is a row of <code>desktop/configs/keybindings/leader.edn</code>: rows with <code>:herdr</code> or <code>:nav</code> map to Rex commands in <code>rexmux.registry/herdr-&gt;rex</code>, and Rex-only rows name the command with <code>:rex</code>. <code>rexmux.commands</code> holds no prefixed keys, only Ctrl+1..9, Ctrl+h/j/k/l and Ctrl+Shift+V. The Cmd+Space launcher reads the same rows, so it shows each command's Alt+Space keys. A leader.edn edit takes effect after a reload. The whole map is in /home/engstrand/guix/docs/keybindings.html</p>
+<div class=table><table>
+<tr><th>Was</th><th>Now</th><th>Command</th></tr>
+<tr><td>Ctrl+b c, n, p, &amp;, 1-9, ,</td><td>Alt+Space t n, t l, t h, t d, t 1-9, t r</td><td>Tabs: new, next, previous, close, select, rename</td></tr>
+<tr><td>Ctrl+b %, ", z, x, o</td><td>Alt+Space w v, w s, w m, d (or w d), w w</td><td>Panes: split right, split below, zoom, close, next</td></tr>
+<tr><td>Ctrl+b h j k l, H J K L</td><td>Alt+Space w h j k l, w H J K L</td><td>Panes: focus, grow</td></tr>
+<tr><td>Ctrl+b w, e, b, s</td><td>Alt+Space . (or TAB .)</td><td>Sessions: switch</td></tr>
+<tr><td>Ctrl+b O, B, $</td><td>Alt+Space p p, TAB `, TAB r</td><td>Sessions: open a project, the previous one, rename</td></tr>
+<tr><td>Ctrl+b f</td><td>Alt+Space s l, or Cmd+Y</td><td>Tiny fingers</td></tr>
+<tr><td>Ctrl+b [ and E, /</td><td>Alt+Space e, s b</td><td>Copy mode, search the scrollback</td></tr>
+<tr><td>Ctrl+b a, u, U</td><td>Alt+Space a, u, U</td><td>Agents: pick, next blocked, next wanting attention</td></tr>
+<tr><td>Ctrl+b g, t</td><td>Alt+Space o g, i</td><td>jjui and the bbh inbox over the panes</td></tr>
+<tr><td>Ctrl+b ?, Ctrl+b Space</td><td>Alt+Space ?, Alt+Space Space</td><td>Describe a command, M-x</td></tr>
+</table></div>
 
 <h2 id=tests>Tests</h2>
 <div class=table><table>
@@ -76,6 +89,7 @@ or choose <b>Client: reload its bb code and config</b> in M-x (Alt+Space Space).
 <tr><td><code>cd desktop/build/ghostty-rex; bb verify --no-bombadil --keep</code></td><td>about 6 min</td><td>the e2e alone, keeping screenshots and logs</td></tr>
 <tr><td><code>make affected</code></td><td>instant</td><td>the checks that cover what <code>@</code> changed</td></tr>
 </table></div>
+<p>The key checks in verify press Alt+Space for every prefixed command and check that Ctrl+b reaches fish in a pane (echo ctrlb-ab, Ctrl+b, X prints ctrlb-aXb).</p>
 <p>The T210 checks in verify: after a reboot no tab shows a typed exec line; the window survives its server stopping and a server from another build taking over, with a red status while it retries, and typing works again; SIGTERM ends the client and rexg-render with no kill -9; reload brings up a new client on the same session and drops the old one; a pane that sends ESC [ ?25 l gets no cursor. Bombadil's <code>restored</code> spec runs <code>startup.ts</code> with its new <code>noTypedExecLine</code> property on a session Rex brought back as bare bash.</p>
 <div class='card warn'><b>Live tests stay off your screen and your server.</b> Everything runs in <code>test-display</code> (a headless sway) and a throwaway Rex server under /tmp. Until T210, a test's cleanup ran <code>rex server stop</code>, which ignores REX_SERVER and stopped the <em>live</em> server. The harness now names its server with <code>-S</code>.</div>
 

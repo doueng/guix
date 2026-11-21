@@ -6,7 +6,8 @@ import { always, eventually, next, now } from "@antithesishq/bombadil";
 import { actions, extract, weighted } from "@antithesishq/bombadil/terminal";
 
 const ESC = "\x1b";
-const CB = "\x02";
+// Alt+Space, the local prefix, as a terminal sends it: Escape then Space.
+const AS = "\x1b ";
 const MX = "\x1bx";
 
 type View = {
@@ -51,7 +52,7 @@ const view = extract((s): View => {
   const cands = lines.slice(1, n - 2).filter((l) => /^[> ] \S/.test(l));
   const fm = status.match(/focus (\S+)/);
   const bm = status.match(/blocked (\d+)/);
-  const prefix = /^ctrl\+b-$/.test(last);
+  const prefix = /^alt\+space( \S+)*-$/.test(last);
   const key = typed(s.lastAction);
   const v: View = {
     tabs: ((lines[0] ?? "").match(/(\[\d+|  \d+)/g) ?? []).length,
@@ -68,7 +69,7 @@ const view = extract((s): View => {
     selected: cands.filter((l) => l.startsWith("> ")).length,
     candidates: cands.length,
     prefix,
-    whichKey: prefix ? lines.slice(1, n - 2).filter((l) => /^  \S+  \S/.test(l)).length : 0,
+    whichKey: prefix ? lines.slice(1, n - 2).filter((l) => /^  \S+( \S+)*  \S/.test(l)).length : 0,
     key,
     wasPrefix: lastPrefix,
     wasMinibuffer: lastMinibuffer,
@@ -93,14 +94,18 @@ export const mxSelectsOneCandidate = always(() => !v().mx || v().candidates === 
 export const escapeLeavesTheMinibuffer = always(
   () => !(v().wasMinibuffer && (v().key === ESC || v().key === "\x07")) || !v().minibuffer);
 
-// Keymaps: Ctrl+b starts a prefix and shows what can follow it.
+// Keymaps: Alt+Space starts a prefix and shows what can follow it.
 export const prefixShowsItsKeys = always(
-  () => !(v().key === CB && !v().wasPrefix && !v().wasMinibuffer) || (v().prefix && v().whichKey > 0));
+  () => !(v().key === AS && !v().wasPrefix && !v().wasMinibuffer) || (v().prefix && v().whichKey > 0));
 
-// Agent attention: with a blocked agent anywhere, Ctrl+b u reaches one.
+// Agent attention: with a blocked agent anywhere, Alt+Space u reaches one.
 export const nextBlockedReachesABlockedAgent = always(
-  now(() => v().key === CB + "u" && v().blocked > 0 && !v().wasMinibuffer && !v().wasPrefix)
+  now(() => v().key === AS + "u" && v().blocked > 0 && !v().wasMinibuffer && !v().wasPrefix)
     .implies(eventually(() => v().markedBlocked).within(3, "seconds")));
+
+// Ctrl+b goes to the shell: it opens no prefix and no which-key.
+export const ctrlBIsNoPrefix = always(
+  () => !(v().key === "\x02" && !v().wasPrefix && !v().wasMinibuffer) || !v().prefix);
 
 // A blocked agent is never hidden: the status line keeps counting it.
 export const blockedAgentStaysCounted = always(
@@ -112,22 +117,24 @@ const key = (k: string) => ({ TypeText: { Regexp: k.replace(/[.\[\]()?*+|^$\\]/g
 const SAFE_MX = ["panes: next", "tabs: next", "panes: zoom", "agents: focus the next blocked", "panes: focus left"];
 
 export const normal = weighted([
-  [4, actions(() => [key(CB + "h"), key(CB + "j"), key(CB + "k"), key(CB + "l"), key(CB + "o")])],
-  [3, actions(() => [key(CB + "n"), key(CB + "p"), key(CB + "1"), key(CB + "2")])],
-  [3, actions(() => [key(CB + "u")])],
-  [1, actions(() => [key(CB + "U")])],
-  [2, actions(() => [key(CB + "%"), key(CB + '"')]).when(() => v().panes < 5)],
-  [1, actions(() => [key(CB + "c")]).when(() => v().tabs < 4)],
-  [1, actions(() => [key(CB + "x")]).when(() => v().panes > 2 && !v().markedBlocked)],
-  [1, actions(() => [key(CB + "z")])],
-  [2, actions(() => [key(CB)])],
+  [4, actions(() => [key(AS + "wh"), key(AS + "wj"), key(AS + "wk"), key(AS + "wl"), key(AS + "ww")])],
+  [3, actions(() => [key(AS + "tl"), key(AS + "th"), key(AS + "t1"), key(AS + "t2")])],
+  [3, actions(() => [key(AS + "u")])],
+  [1, actions(() => [key(AS + "U")])],
+  [2, actions(() => [key(AS + "wv"), key(AS + "ws")]).when(() => v().panes < 5)],
+  [1, actions(() => [key(AS + "tn")]).when(() => v().tabs < 4)],
+  [1, actions(() => [key(AS + "d")]).when(() => v().panes > 2 && !v().markedBlocked)],
+  [1, actions(() => [key(AS + "wm")])],
+  [2, actions(() => [key(AS)])],
   [3, actions(() => [key(MX)])],
-  [1, actions(() => [key(CB + "w")])],
+  [1, actions(() => [key(AS + ".")])],
+  // Ctrl+b goes to the shell.
+  [1, actions(() => [key("\x02")])],
   [1, actions(() => [key("ls\r")])],
 ]).when(() => !v().minibuffer && !v().prefix);
 
 export const inPrefix = weighted([
-  [3, actions(() => [key("h"), key("l"), key("u"), key("n")])],
+  [3, actions(() => [key("w"), key("t"), key("u"), key("l")])],
   [2, actions(() => [key(ESC), key("\x07")])],
   [1, actions(() => [key("q")])],
 ]).when(() => v().prefix);

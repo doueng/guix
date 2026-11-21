@@ -3,15 +3,18 @@
   "The launcher (T208). Cmd+Space opens one list: the focused program's
   commands first, then the global ones, each with its keys. Typing an old
   Cmd+Space sequence, such as bb, ranks its row first."
-  (:require [babashka.fs :as fs]
+  (:require [babashka.classpath :as cp]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
 (load-file (str (fs/parent (fs/real-path *file*)) "/keyleader"))
+(cp/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) ".." "build" "rexmux" "sidecar")))
 (require '[dusk.palette :as dusk]
-         '[keylog])
+         '[keylog]
+         '[rexmux.registry :as rexmux])
 
 (defn sh-out [& argv]
   (let [{:keys [exit out]} @(p/process (vec argv) {:out :string :err :string})]
@@ -76,10 +79,7 @@
   "The action rexmux's sidecar declares for the leader.edn binding at KEYS
   (rexmux.registry/leader-commands)."
   [keys]
-  (str/lower-case
-   (str "mx.leader." (str/join "_" (map #(-> (if (re-matches #"[A-Z]" %) (str "shift_" (str/lower-case %)) %)
-                                             (str/replace #"[^A-Za-z0-9_]" "_"))
-                                         keys)))))
+  (rexmux/action-name (rexmux/leader-id keys)))
 
 (defn active-window
   "Hyprland's focused window. PALETTE_WINDOW, its JSON, stands in for tests

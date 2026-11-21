@@ -75,14 +75,14 @@ make mux MUX=rex           # or rexmux</code></pre>
 <tr><td>Super+Return/E/D/G</td><td><code>rex -C ghostty-rex do mx.tab.select_3</code> shows the pi tab</td></tr>
 <tr><td>Tiny fingers</td><td>A label copies, a web URL opens, and Shift with a label pastes</td></tr>
 <tr><td>Mouse</td><td>A drag copies a line, and the wheel scrolls into history. Both go through a pty, because the headless display has no pointer.</td></tr>
-<tr><td>Copy mode, search</td><td>Ctrl+b [ and Ctrl+b / open the scrollback in $EDITOR, with the search already run</td></tr>
+<tr><td>Copy mode, search</td><td>Alt+Space e and Alt+Space s b open the scrollback in $EDITOR, with the search already run</td></tr>
 <tr><td>Clipboard</td><td>Ghostty's Ctrl+Shift+V pastes the Wayland clipboard into the pane</td></tr>
-<tr><td>Panes, tabs</td><td>A split follows the pane's directory, Ctrl+b L resizes, and Ctrl+b , and Ctrl+b $ rename</td></tr>
-<tr><td>Workspaces</td><td>Ctrl+b O opens a project session (a second press shows the same one), and Ctrl+b B returns</td></tr>
-<tr><td>jjui, bbh</td><td>Ctrl+b g and Ctrl+b t float jjui and the inbox in a framed layer, and each layer closes when its program exits. M-x bbh: tell runs <code>bbh say --from rex</code>.</td></tr>
+<tr><td>Panes, tabs</td><td>A split follows the pane's directory, Alt+Space w L resizes, and Alt+Space t r and Alt+Space TAB r rename</td></tr>
+<tr><td>Workspaces</td><td>Alt+Space p p opens a project session (a second press shows the same one), and Alt+Space TAB ` returns</td></tr>
+<tr><td>jjui, bbh</td><td>Alt+Space o g and Alt+Space i float jjui and the inbox in a framed layer, and each layer closes when its program exits. M-x bbh: tell runs <code>bbh say --from rex</code>.</td></tr>
 <tr><td>Notifications</td><td>An agent that blocks in another tab sends exactly one notify-send</td></tr>
 <tr><td>Persistence</td><td>After the server is killed uncleanly, as in a reboot, the session returns, pi resumes with --continue, and the split panes of a renamed tab run fish</td></tr>
-<tr><td>Bombadil</td><td>rexmux's specs <code>rexmux.ts</code> (focus, M-x, Escape, which-key, Ctrl+b u reaching a blocked agent) and <code>startup.ts</code> run for 60 s each over <code>bb attach</code>, with no violations</td></tr>
+<tr><td>Bombadil</td><td>rexmux's specs <code>rexmux.ts</code> (focus, M-x, Escape, which-key, Alt+Space u reaching a blocked agent, Ctrl+b opening no prefix) and <code>startup.ts</code> run for 60 s each over <code>bb attach</code>, with no violations</td></tr>
 <tr><td>TLA+</td><td><code>make rexmux-tla</code>: all 14 properties hold. The in-process sidecar is the model without Crash and Restart, and a sidecar error now still answers its request.</td></tr>
 </table></div>
 

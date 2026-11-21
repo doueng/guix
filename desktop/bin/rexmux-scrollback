@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 ;; A Rex pane's scrollback in $EDITOR, for rexmux's copy mode and search
-;; (Ctrl+b [, Ctrl+b E and Ctrl+b /), as Herdr's edit_scrollback opened it.
+;; (Alt+Space e and Alt+Space s s), as Herdr's edit_scrollback opened it.
 ;; rexmux runs it in a floating layer over the pane:
 ;;   rexmux-scrollback SESSION BLOCK [TEXT]
 ;; It opens at the end, as the pane was; with TEXT it searches back for it,

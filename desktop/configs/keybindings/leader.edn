@@ -8,7 +8,7 @@
  ;; the :context's bindings. Every other class opens the launcher.
  :apps [{:class "dev.engstrand.Rex" :alt-space :pass}
         {:class "com.mitchellh.ghostty.herdr" :alt-space ["ctrl+b" "space"]}
-        {:class "rexmux" :alt-space ["ctrl+b" "space"]}
+        {:class "rexmux" :alt-space :pass}
         {:class "google-chrome" :alt-space :submap :context :chrome}
         {:class "com.mitchellh.ghostty" :alt-space :pass}
         {:class "emacs" :alt-space :pass}]
@@ -32,6 +32,11 @@
   {:keys ["d"] :label "Close pane" :doom-match :differs :herdr :close-pane}
   {:keys ["a"] :label "Agents" :doom-match :differs :herdr :choose-agent}
   {:keys ["e"] :label "Edit scrollback" :herdr :edit-scrollback}
+  ;; Rex only: commands Herdr lacks, run under Alt+Space, Rex's only prefix.
+  {:keys ["u"] :label "Next blocked agent" :doom-match :differs :rex :agent/next-blocked}
+  {:keys ["U"] :label "Next agent wanting attention" :rex :agent/next-attention}
+  {:keys ["i"] :label "bbh inbox" :doom-match :differs :rex :bbh/inbox}
+  {:keys ["?"] :label "Describe a command" :rex :mx/describe-command}
   {:keys ["w" "h"] :label "Focus left" :doom-match :exact :nav "left"}
   {:keys ["w" "j"] :label "Focus down" :doom-match :exact :nav "down"}
   {:keys ["w" "k"] :label "Focus up" :doom-match :exact :nav "up"}
@@ -45,6 +50,11 @@
   {:keys ["w" "m"] :label "Maximize or zoom" :doom-match :exact :idea "<Action>(HideAllWindows)" :nvim "<cmd>lua Snacks.zoom()<cr>"
    :doom "doom/window-maximize-buffer" :desktop ["window.fullscreen" {:mode "maximized"}]
    :herdr ["pane" "zoom" "--toggle"]}
+  {:keys ["w" "w"] :label "Next pane" :doom-match :analogous :rex :pane/next}
+  {:keys ["w" "H"] :label "Grow pane left" :doom-match :differs :rex :pane/resize-left}
+  {:keys ["w" "J"] :label "Grow pane down" :doom-match :differs :rex :pane/resize-down}
+  {:keys ["w" "K"] :label "Grow pane up" :doom-match :differs :rex :pane/resize-up}
+  {:keys ["w" "L"] :label "Grow pane right" :doom-match :differs :rex :pane/resize-right}
   {:keys ["w" "="] :label "Balance windows" :doom-match :exact :nvim "<C-w>=" :doom "balance-windows"}
   {:keys ["b" "b"] :label "Choose buffer, tab or window" :doom-match :exact :idea "<Action>(Switcher)"
    :nvim "<cmd>Telescope buffers sort_mru=true ignore_current_buffer=true<cr>"
@@ -58,7 +68,7 @@
   {:keys ["f" "s"] :label "Save file" :doom-match :exact :idea "<Action>(SaveAll)" :nvim "<cmd>write<cr>" :doom "save-buffer"}
   {:keys ["f" "r"] :label "Recent files" :doom-match :exact :idea "<Action>(RecentFiles)" :nvim "<cmd>Telescope oldfiles<cr>" :doom "recentf-open-files"}
   {:keys ["s" "b"] :label "Search buffer" :doom-match :exact :idea "<Action>(Find)" :nvim "<cmd>Telescope current_buffer_fuzzy_find<cr>"
-   :doom "consult-line"}
+   :doom "consult-line" :rex :pane/search}
   {:keys ["s" "l"] :label "Copy visible text by hint" :doom-match :analogous :herdr {:plugin "hotchpotch.herdr-tiny-fingers" :action "open"}}
   {:keys ["c" "d"] :label "Find definition" :doom-match :exact :idea "<Action>(GotoDeclaration)" :nvim "<cmd>lua vim.lsp.buf.definition()<cr>"
    :doom "eng/lsp-find-definition"}
@@ -74,12 +84,14 @@
   {:keys ["o" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}
   {:keys ["o" "n"] :label "Open Chrome incognito" :desktop-command ["~/.local/bin/chrome-unified" "--incognito"]
    :chrome "ctrl+shift+n"}
+  {:keys ["o" "g"] :label "jjui over the panes" :rex :layer/jjui}
   {:keys ["o" "s"] :label "Send to phone" :doom-match :differs :desktop-command ["~/.local/bin/taildrop" "send"]}
   {:keys ["p" "p"] :label "Switch project" :doom-match :exact :doom "projectile-switch-project"
    :idea "<Action>(ManageRecentProjects)" :herdr {:plugin "fullerzz.sesh" :action "open-picker"}}
   {:keys ["TAB" "."] :label "Switch workspace" :doom-match :exact :doom "+workspace/switch-to" :herdr :choose-workspace}
   {:keys ["TAB" "`"] :label "Last workspace" :doom-match :exact :doom "+workspace/other"
    :herdr {:plugin "fullerzz.sesh" :action "last"} :desktop ["focus" {:workspace "previous"}]}
+  {:keys ["TAB" "r"] :label "Rename workspace" :doom-match :analogous :rex :session/rename}
   {:keys ["t" "n"] :label "New tab" :doom-match :differs :herdr :new-tab :chrome "ctrl+shift+y"}
   {:keys ["t" "l"] :label "Next tab" :doom-match :differs :herdr :next-tab :chrome "ctrl+pagedown"}
   {:keys ["t" "h"] :label "Previous tab" :herdr :previous-tab :chrome "ctrl+pageup"}

@@ -5,7 +5,7 @@ hl.bind("SUPER + SPACE", keys.launcher)
 hl.bind("ALT + SPACE", keys.alt_space({
   ["dev.engstrand.Rex"] = "pass",
   ["com.mitchellh.ghostty.herdr"] = { { mods = "CTRL", key = "b" }, { mods = "", key = "space" } },
-  ["rexmux"] = { { mods = "CTRL", key = "b" }, { mods = "", key = "space" } },
+  ["rexmux"] = "pass",
   ["google-chrome"] = "local-chrome",
   ["com.mitchellh.ghostty"] = "pass",
   ["emacs"] = "pass",

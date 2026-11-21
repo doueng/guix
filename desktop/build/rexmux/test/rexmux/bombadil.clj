@@ -2,7 +2,8 @@
   "Bombadil types into `rexmux tty` on a throwaway Rex server and checks
   test/bombadil/rexmux.ts on every screen: one focused pane named by the
   status line, M-x selection, Escape leaving the minibuffer, prefix keys
-  showing what follows, and Ctrl+b u reaching a blocked agent.
+  showing what follows, Alt+Space u reaching a blocked agent, and Ctrl+b
+  reaching the shell rather than starting a prefix.
 
     bb test:bombadil [--spec tabs|startup] [--time 60] [--reproduce TRACE] [--keep]
 
@@ -66,7 +67,10 @@
   and a working one; rexmux shows it."
   [s config]
   (fixture! s)
-  (spit config (pr-str {:servers [{:label "test" :address (:address s)}]}))
+  ;; Alt+Space, Rex's only prefix, comes from this checkout's leader.edn.
+  (spit config (pr-str {:servers [{:label "test" :address (:address s)}]
+                        :leader-file (str (fs/path checkout "desktop" "configs" "keybindings" "leader.edn"))
+                        :leader-prefix ["alt+space"]}))
   {"REXMUX_SESSION" "work"})
 
 (defn- startup-setup

@@ -55,10 +55,10 @@
 
 (deftest which-key-shows-under-a-prefix
   (let [model (-> (m/new-model [{:label "local"}]) (assoc-in [:servers 0 :view] view)
-                  (assoc :prefix ["ctrl+b"] :catalogue [{:id "tab/new" :title "Tabs: new" :action "mx.tab.new"}]
-                         :bindings [[["ctrl+b" "c"] "mx.tab.new"]]))
+                  (assoc :prefix ["alt+space"] :catalogue [{:id "tab/new" :title "Tabs: new" :action "mx.tab.new"}]
+                         :bindings [[["alt+space" "c"] "mx.tab.new"]]))
         {:keys [spans cursor]} (s/render model 100 30 {})]
-    (is (= "ctrl+b-" (row-text spans 29 100)))
+    (is (= "alt+space-" (row-text spans 29 100)))
     (is (str/includes? (row-text spans 27 100) "c  Tabs: new"))
     (is (= [:hide] cursor))))
 

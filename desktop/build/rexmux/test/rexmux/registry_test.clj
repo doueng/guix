@@ -4,6 +4,7 @@
   generation fails here first."
   (:require [cheshire.core :as json]
             [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -100,14 +101,14 @@
   (let [leader {:bindings [{:keys ["w" "v"] :label "Split right" :rex ["session.new_split" {:direction "horizontal" :side "after"}]}
                            {:keys ["a"] :label "Agents" :rex :agent/pick}
                            {:keys ["f" "s"] :label "Save" :doom "save-buffer"}]}
-        all (reg/leader-commands leader ["ctrl+b" "space"])
+        all (reg/leader-commands leader ["alt+space"])
         cmds (remove #(= :leader/palette (:id %)) all)
         r (reg/merge-sources api commands/all all)]
     (is (= 2 (count cmds)))
     (testing "the prefix and Space open M-x"
       (is (= [[:ui/mx {}]] (:effects (reg/invoke r ctx :leader/palette {}))))
-      (is (= [["ctrl+b" "space" "space"]] (:keys (get r :leader/palette)))))
-    (is (= [["ctrl+b" "space" "w" "v"]] (:keys (first cmds))))
+      (is (= [["alt+space" "space"]] (:keys (get r :leader/palette)))))
+    (is (= [["alt+space" "w" "v"]] (:keys (first cmds))))
     (testing "a direct call gets context, defaults and the schema check"
       (is (= [[:rex/call "session.new_split" {:session_id "session:1" :window_id "window:1" :direction "horizontal" :side "after"
                                                :layout (:layout reg/arg-defaults) :focus true}]]
@@ -118,18 +119,30 @@
 
 (deftest the-real-leader-maps-onto-rexmux-commands
   (let [leader (clojure.edn/read-string (slurp (str reg-repo "/desktop/configs/keybindings/leader.edn")))
-        cmds (reg/leader-commands leader ["ctrl+b" "space"])
-        r (reg/merge-sources api commands/all cmds)
+        cmds (reg/leader-commands leader ["alt+space"])
+        r (reg/merge-sources api commands/all commands/term-nav-commands cmds)
         by-keys (into {} (for [c cmds k (:keys c)] [k c]))]
     (testing "every mapped binding runs a command that exists, with no key conflicts"
       (is (every? #(or (vector? %) (contains? r %)) (keep (fn [b] (or (:rex b) (reg/herdr->rex b))) (:bindings leader))))
-      (is (= [] (reg/key-conflicts r))))
+      (is (= [] (reg/key-conflicts r)))
+      (is (= (count cmds) (count (distinct (map :id cmds)))) "each leader key has its own action, , . and ? too"))
+    (testing "no command binds Ctrl+b, so it reaches the pane"
+      (is (= [] (for [c (vals r) ks (:keys c) :when (= "ctrl+b" (first ks))] ks))))
     (testing "Herdr's leader keys reach the same actions"
-      (is (= :pane/split-right (:alias (by-keys ["ctrl+b" "space" "w" "v"]))))
-      (is (= :pane/focus-left (:alias (by-keys ["ctrl+b" "space" "w" "h"]))))
-      (is (= :agent/pick (:alias (by-keys ["ctrl+b" "space" "a"]))))
-      (is (= :tab/pick (:alias (by-keys ["ctrl+b" "space" "b" "b"]))))
-      (is (= :session/switch (:alias (by-keys ["ctrl+b" "space" "tab" "."])))))))
+      (is (= :pane/split-right (:alias (by-keys ["alt+space" "w" "v"]))))
+      (is (= :pane/focus-left (:alias (by-keys ["alt+space" "w" "h"]))))
+      (is (= :agent/pick (:alias (by-keys ["alt+space" "a"]))))
+      (is (= :tab/pick (:alias (by-keys ["alt+space" "b" "b"]))))
+      (is (= :tab/pick (:alias (by-keys ["alt+space" ","]))))
+      (is (= :session/switch (:alias (by-keys ["alt+space" "."]))))
+      (is (= :session/switch (:alias (by-keys ["alt+space" "tab" "."])))))
+    (testing "what Rex's Ctrl+b keys did has an Alt+Space sequence"
+      (doseq [[ks id] [[["u"] :agent/next-blocked] [["shift+u"] :agent/next-attention] [["i"] :bbh/inbox]
+                       [["?"] :mx/describe-command] [["e"] :pane/scrollback] [["s" "b"] :pane/search]
+                       [["s" "l"] :hints/open] [["w" "w"] :pane/next] [["w" "shift+l"] :pane/resize-right]
+                       [["o" "g"] :layer/jjui] [["p" "p"] :session/project] [["tab" "`"] :session/last]
+                       [["tab" "r"] :session/rename] [["t" "r"] :tab/rename] [["t" "n"] :tab/new]]]
+        (is (= id (:alias (by-keys (into ["alt+space"] ks)))) (str/join " " ks))))))
 
 (deftest alt-space-reaches-the-tab-commands
   (let [leader (clojure.edn/read-string (slurp (str reg-repo "/desktop/configs/keybindings/leader.edn")))
@@ -147,7 +160,10 @@
       (is (= [[:rex/call "session.focus_previous_window" {:session_id "session:1"}]] (run ["alt+space" "t" "h"] ctx)))
       (is (= "session.close_window" (second (first (run ["alt+space" "t" "d"] ctx)))))
       (is (= [[:rex/call "session.focus_window" {:session_id "session:1" :window_id "window:2"}]] (run ["alt+space" "t" "3"] four)))
-      (is (= ["label"] (map (comp name :name) (:prompt (reg/invoke r ctx (:id (by-keys ["alt+space" "t" "r"])) {}))))))
+      (is (= ["label"] (map (comp name :name) (:prompt (reg/invoke r ctx (:id (by-keys ["alt+space" "t" "r"])) {})))))
+      (is (= [[:rex/call "session.set_window_label" {:session_id "session:1" :window_id "window:1" :label "logs"}]]
+             (:effects (reg/invoke r ctx (:id (by-keys ["alt+space" "t" "r"])) {:label "logs"})))
+          "the label the prompt gathered reaches the aliased command"))
     (testing "t H and t L move the tab, and are not t h and t l"
       (is (not= (reg/action-name (:id (by-keys ["alt+space" "t" "shift+h"])))
                 (reg/action-name (:id (by-keys ["alt+space" "t" "h"])))))
@@ -167,7 +183,7 @@
     (is (true? (:enabled (first (filter #(= :rex/server.status (:id %)) c)))))))
 
 (deftest herdr-parity-commands-make-their-effects
-  (testing "Ctrl+b f opens tiny fingers in the window"
+  (testing "Alt+Space s l opens tiny fingers in the window"
     (is (= [[:hints/open {}]] (:effects (reg/invoke registry ctx :hints/open {})))))
   (testing "copy mode and search float the scrollback helper over the pane"
     (let [[[kind {:keys [argv close-on-exit]}]] (:effects (reg/invoke registry ctx :pane/search {:text "error"}))]

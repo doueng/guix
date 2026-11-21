@@ -80,9 +80,9 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <p>Hyprland binds Alt+Space once and routes by window class, from <code>leader.edn</code>'s <code>:apps</code>:</p>
 <div class="table"><table>
 <tr><th>Window</th><th>Alt+Space goes to</th><th>Why</th></tr>
-<tr><td>Ghostty-plus-Rex <code>dev.engstrand.Rex</code></td><td>The client itself, unchanged</td><td>Its keymap binds <code>alt+space</code> sequences natively</td></tr>
+<tr><td>Ghostty-plus-Rex <code>dev.engstrand.Rex</code></td><td>The client itself, unchanged</td><td>Its keymap binds <code>alt+space</code> sequences natively. It is Rex's only prefix: Ctrl+b reaches the pane's program</td></tr>
 <tr><td>Herdr <code>com.mitchellh.ghostty.herdr</code></td><td>Ctrl+b Space, Herdr's leader popup</td><td>Herdr's own keys are one key after its prefix, so two-key sequences like <code>t n</code> live in <code>keyleader herdr</code>. Hyprland no longer jumps to Herdr from other windows</td></tr>
-<tr><td>rexmux <code>rexmux</code></td><td>Ctrl+b Space</td><td>As Herdr; rexmux keeps its prefix</td></tr>
+<tr><td>rexmux <code>rexmux</code></td><td>The window itself, unchanged</td><td>rexmux shares the Rex sidecar's keymap, so it binds the same <code>alt+space</code> sequences and has no Ctrl+b prefix either</td></tr>
 <tr><td>Chrome</td><td>A generated Hyprland submap with a which-key panel</td><td>Chrome has no key sequences; each key sends a Chrome or vimium-cljs chord</td></tr>
 <tr><td>Plain Ghostty, Emacs GUI</td><td>The window, unchanged</td><td>Doom's <code>doom-leader-alt-key</code> is M-SPC, so there Alt+Space is the Doom leader</td></tr>
 <tr><td>Anything else</td><td>The launcher</td><td>No local map, and GTK windows never see Alt+Space</td></tr>
@@ -100,19 +100,40 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td>b b</td><td>Choose tab</td><td>yes</td><td>yes</td><td>vimium-cljs tab search</td></tr>
 <tr><td>b n, b p, b d</td><td>Next, previous, close tab</td><td>yes</td><td>yes</td><td></td></tr>
 <tr><td>, . ` d a e</td><td>Switch tab, workspace picker, last, close pane, agents, edit scrollback</td><td>yes</td><td>where Rex has it</td><td></td></tr>
+<tr><td>u, U</td><td>Next blocked agent, next agent wanting attention</td><td></td><td>yes</td><td></td></tr>
+<tr><td>i, ?</td><td>bbh inbox over the panes, describe a command</td><td></td><td>yes</td><td></td></tr>
 <tr><td>w h j k l s v d m</td><td>Panes: focus, split, close, zoom</td><td>yes</td><td>yes</td><td></td></tr>
+<tr><td>w w, w H J K L</td><td>Next pane, grow the pane</td><td></td><td>yes</td><td></td></tr>
 <tr><td>o n</td><td>Open Chrome incognito</td><td></td><td></td><td>Ctrl+Shift+N</td></tr>
+<tr><td>o g</td><td>jjui over the panes</td><td></td><td>yes</td><td></td></tr>
+<tr><td>s b</td><td>Search the scrollback</td><td></td><td>yes</td><td></td></tr>
+<tr><td>TAB r</td><td>Rename the session</td><td></td><td>yes</td><td></td></tr>
 <tr><td>s l, p p, TAB . , TAB `</td><td>Copy by hint, projects, workspaces</td><td>yes</td><td>where Rex has it</td><td></td></tr>
 <tr><td>Space</td><td>The local list</td><td>Herdr leader palette</td><td>M-x</td><td>the launcher</td></tr>
 </table></div>
-<p>The <code>t</code> keys follow Doom's SPC TAB workspace keys where they can (n, d, r, digits) and vim's h and l for direction, with Shift to move, as Ctrl+Alt+Shift+h/l moves windows. Ctrl+b keeps working in Herdr and Rex for their one-key natives (c, n, 1–9, f); Alt+Space covers everything the leader table names.</p>
+<p>The <code>t</code> keys follow Doom's SPC TAB workspace keys where they can (n, d, r, digits) and vim's h and l for direction, with Shift to move, as Ctrl+Alt+Shift+h/l moves windows. Herdr keeps its Ctrl+b prefix for its one-key natives (c, n, 1–9, f); Alt+Space covers everything the leader table names.</p>
+<h3>Rex has no Ctrl+b</h3>
+<p>In Ghostty-plus-Rex and rexmux, Alt+Space is the only prefix. Ctrl+b goes to the program in the pane, so fish moves back a character and Emacs gets C-b. Every command Rex had under Ctrl+b is a <code>leader.edn</code> row: the Herdr rows Rex maps, plus Rex-only rows with <code>:rex</code> (u, U, i, ?, w w, w H J K L, o g, s b, TAB r). The Rex sidecar binds them under Alt+Space and the launcher lists them with those keys, both from that file. Cmd+Y sends Alt+Space s l to the Rex window and still Ctrl+b f to Herdr.</p>
+<div class="table"><table>
+<tr><th>Rex had</th><th>Now Alt+Space</th><th>Why these keys</th></tr>
+<tr><td>Ctrl+b c n p &amp; 1-9 ,</td><td>t n, t l, t h, t d, t 1-9, t r</td><td>The tab group, as in Herdr and Chrome</td></tr>
+<tr><td>Ctrl+b % " z x o</td><td>w v, w s, w m, d, w w</td><td>Doom's window keys; w w is Doom's other window</td></tr>
+<tr><td>Ctrl+b h j k l, H J K L</td><td>w h j k l, w H J K L</td><td>Focus in the window group; Shift grows the pane that way</td></tr>
+<tr><td>Ctrl+b w e b s</td><td>. or TAB .</td><td>The workspace picker</td></tr>
+<tr><td>Ctrl+b O, B, $</td><td>p p, TAB `, TAB r</td><td>Projects, last and rename workspace, as Doom</td></tr>
+<tr><td>Ctrl+b f</td><td>s l (Cmd+Y)</td><td>Herdr's hint row</td></tr>
+<tr><td>Ctrl+b [ and E, /</td><td>e, s b</td><td>Herdr's edit scrollback; Doom's search buffer</td></tr>
+<tr><td>Ctrl+b a, u, U</td><td>a, u, U</td><td>Unchanged after the prefix</td></tr>
+<tr><td>Ctrl+b g, t</td><td>o g, i</td><td>Open jjui (git); inbox</td></tr>
+<tr><td>Ctrl+b ?, Space</td><td>?, Space</td><td>Help; Space opens M-x after every leader</td></tr>
+</table></div>
 
 <h2>Clashes</h2>
 <div class="table"><table>
 <tr><th>Key</th><th>Who wanted it</th><th>Outcome</th></tr>
 <tr><td>Cmd+Space</td><td>The desktop leader submap</td><td>Replaced by the launcher; old sequences are launcher shortcuts</td></tr>
 <tr><td>Alt+Space</td><td>Hyprland: focus Herdr and open its leader from any window</td><td>Now local. Cmd+B and Cmd+Return still bring Herdr forward</td></tr>
-<tr><td>Alt+Space in Emacs</td><td>Doom's alt leader (M-SPC), Emacs cycle-spacing</td><td>Outside a multiplexer Emacs gets it, so it is the Doom leader. Inside Herdr or Rex the multiplexer takes it, as Ctrl+b would; use SPC there</td></tr>
+<tr><td>Alt+Space in Emacs</td><td>Doom's alt leader (M-SPC), Emacs cycle-spacing</td><td>Outside a multiplexer Emacs gets it, so it is the Doom leader. Inside Herdr or Rex the multiplexer takes it; use SPC there. Rex leaves C-b to Emacs</td></tr>
 <tr><td>Alt+Space in GTK</td><td>Client-side decorations' window menu</td><td>Never reaches GTK windows: Hyprland opens the launcher</td></tr>
 <tr><td>Alt+Space in Chrome</td><td>Its window menu on some platforms</td><td>Hyprland consumes it for the Chrome submap</td></tr>
 <tr><td>SPC t in Doom</td><td>Doom's toggles group</td><td>Unchanged. The t group exists only in Herdr, Rex and Chrome</td></tr>
@@ -122,7 +143,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <h2>Tests</h2>
 <ul>
 <li><code>make lint</code> runs the bb keybinding tests: grammar, generated Alt+Space routing and Chrome submaps, launcher entries and shortcut ranking, Herdr tab actions, Rex tab commands.</li>
-<li>Ghostty-plus-Rex live test on the hidden test display: Alt+Space t n opens a tab; the launcher opens in a Dusk on that display, filters, runs a local command (new tab) and a global one (open Ghostty).</li>
+<li>Ghostty-plus-Rex live test on the hidden test display: Alt+Space t n opens a tab; the launcher opens in a Dusk on that display, filters, runs a local command (new tab) and a global one (open Ghostty). Every command Rex had under Ctrl+b runs from its Alt+Space keys, and Ctrl+b reaches fish in a pane. rexmux's e2e and Bombadil specs press the same keys, and <code>ctrlBIsNoPrefix</code> checks that Ctrl+b opens no which-key.</li>
 <li><code>palette-test.clj</code>: the launcher lists Open Chrome incognito with <code>Cmd+Space o n</code> in every context, choosing it runs <code>chrome-unified --incognito</code>, and Chrome's <code>Alt+Space o n</code> sends Ctrl+Shift+N. Live on the hidden test display, that argv opened one incognito Chrome window, and vimium-cljs keys typed with wtype worked there: <code>j</code>, <code>G</code>, <code>gg</code> scrolled and <code>f</code> showed hints.</li>
 <li><code>make hypr-nested-check</code>: Super+Space runs the launcher, Alt+Space routes by class.</li>
 </ul>

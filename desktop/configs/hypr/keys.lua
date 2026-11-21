@@ -137,8 +137,13 @@ M.chrome_vomnibar_new_tab = in_chrome("CTRL", "t", "y", "Cmd+T", "Vomnibar, pick
 -- Chrome keeps Ctrl+L for its address bar and never gives it to an extension. Elsewhere Ctrl+L stays clear-screen etc.
 M.chrome_vomnibar = in_chrome("CTRL", "l", "h", "Ctrl+L", "Vomnibar, pick opens in this tab")
 
+-- Tiny fingers: Herdr's Ctrl+b f, or Alt+Space s l in Rex, which has no Ctrl+b prefix.
+local yank_chords = M.mux == "herdr"
+  and { { mods = "CTRL", key = "b" }, { mods = "", key = "f" } }
+  or { { mods = "ALT", key = "space" }, { mods = "", key = "s" }, { mods = "", key = "l" } }
+
 function M.herdr_yank()
-  if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "f" } }) then
+  if send_to_herdr(yank_chords) then
     M.log("Cmd+Y", "Copy visible text by hint")
   end
 end

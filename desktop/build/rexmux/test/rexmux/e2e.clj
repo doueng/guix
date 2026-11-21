@@ -10,11 +10,11 @@
   - startup: a server with only a stray session gets the shipped config's
     :startup session, its tabs in order (shell, bbh, pi, jjui) running their
     programs (stubs named emacs-bbh, pi and jjui) in the configured shell;
-  - tiny fingers: Ctrl+b f labels a URL and a path, a label copies (and a web
+  - tiny fingers: Alt+Space s l labels a URL and a path, a label copies (and a web
     URL opens), Shift and a label pastes into the pane;
   - mouse: a drag across a line copies it, and the wheel scrolls history
     (through rexmux tty's SGR mouse reports: the headless display has no pointer);
-  - rename and resize: Ctrl+b , names the tab, Ctrl+b L moves a border;
+  - rename and resize: Alt+Space t r names the tab, Alt+Space w L moves a border;
   - persistence: after the server dies with its programs, as in a reboot, a
     new rexmux brings each startup tab's program back (pi with --continue).
   Copies and opened URLs go to files (REXMUX_CLIPBOARD_FILE, REXMUX_OPEN_FILE),
@@ -59,6 +59,7 @@
          (mapcat (fn [k]
                    (concat (cond (string? k) [k]
                                  (= :key (first k)) ["-k" (second k)]
+                                 (= :alt-space (first k)) ["-M" "alt" "-k" "space" "-m" "alt"]
                                  :else (let [[mod key] k] ["-M" (name mod) key "-m" (name mod)]))
                            ["-s" "120"]))
                  ks))
@@ -110,7 +111,9 @@
     (spit fish (str "set -gx PATH " (:path-prepend s) " $PATH\nset -gx EDITOR nvim\n"))
     (fs/create-dirs (fs/path (:root s) "projects" "demo")))
   (let [shipped (edn/read-string (slurp (str (fs/path checkout "desktop" "configs" "rexmux" "config.edn"))))]
+    ;; This checkout's leader.edn, not the one linked into ~/.config.
     (spit file (pr-str (assoc shipped :servers [{:label "test" :address (:address s)}]
+                              :leader-file (str (fs/path checkout "desktop" "configs" "keybindings" "leader.edn"))
                               :startup (assoc (:startup shipped) :cwd (:root s)))))
     shipped))
 
@@ -197,12 +200,12 @@
         (ts/rex! s "send" "-s" sid "-b" (first blocks) "clear; printf 'see https://example.com/e2e and /tmp/e2e-path\\n'\r")
         (wait-for 5000 #(str/includes? (capture s sid (first blocks)) "e2e-path"))
         (Thread/sleep 800)
-        (keys! [:ctrl "b"] "f")
+        (keys! [:alt-space] "s" "l")
         (shot! root "02-tiny-fingers")
         (keys! "a")
         (check! "tiny fingers: a label copies the URL" (wait-for 3000 #(= "https://example.com/e2e" (clipboard root))) (clipboard root))
         (check! "tiny fingers: a web URL opens" (wait-for 3000 #(= "https://example.com/e2e" (slurp (str root "/opened")))))
-        (keys! [:ctrl "b"] "f" "S")
+        (keys! [:alt-space] "s" "l" "S")
         (check! "tiny fingers: Shift and a label pastes into the pane"
                 ;; The prompt line, not the printed one, ends with the pasted path.
                 (wait-for 3000 #(let [l (last (str/split-lines (capture s sid (first blocks))))]
@@ -226,60 +229,60 @@
             (check! "mouse: the wheel scrolls the pane into its history" (str/includes? out "↑ history"))))
         (shot! root "03-mouse")
         ;; Rename the tab and split, then move the border.
-        (keys! [:ctrl "b"] "," "logs" [:key "Return"])
-        (check! "Ctrl+b , renames the tab" (wait-for 3000 #(= "logs" (get-in (view s sid) [:windows 0 :label]))))
+        (keys! [:alt-space] "t" "r" "logs" [:key "Return"])
+        (check! "Alt+Space t r renames the tab" (wait-for 3000 #(= "logs" (get-in (view s sid) [:windows 0 :label]))))
         (ts/rex! s "send" "-s" sid "-b" (first blocks) "cd /tmp\r")
         (Thread/sleep 800)
-        (keys! [:ctrl "b"] "%")
+        (keys! [:alt-space] "w" "v")
         (let [after (wait-for 3000 #(get-in (view s sid) [:windows 0 :layers 0 :layout :split :after :block_id]))]
           (check! "a split opens in the focused pane's directory (Herdr's new_cwd follow)"
                   (wait-for 5000 #(= "/tmp" (get-in (api s "block.method" {:session_id sid :block_id after :method "process"}) [:foreground :cwd])))))
-        (keys! [:ctrl "b"] "L")
-        (check! "Ctrl+b L moves the border"
+        (keys! [:alt-space] "w" "L")
+        (check! "Alt+Space w L moves the border"
                 (wait-for 3000 #(> (get-in (view s sid) [:windows 0 :layers 0 :layout :split :ratio] 0.5) 0.5))
                 (get-in (view s sid) [:windows 0 :layers 0 :layout :split :ratio]))
         (shot! root "04-rename-resize")
         ;; Copy mode and search: the scrollback in $EDITOR, a stub nvim that
         ;; records its arguments and the file it was given, then exits.
-        (keys! [:ctrl "b"] "1")
+        (keys! [:alt-space] "t" "1")
         (Thread/sleep 500)
         (let [focused (get-in (view s sid) [:windows 0 :focused_block_id])]
           (ts/rex! s "send" "-s" sid "-b" focused "echo scrollback-marker\r")
           (wait-for 3000 #(str/includes? (capture s sid focused) "scrollback-marker")))
-        (keys! [:ctrl "b"] "[")
-        (check! "Ctrl+b [ opens the scrollback in the editor"
+        (keys! [:alt-space] "e")
+        (check! "Alt+Space e opens the scrollback in the editor"
                 (wait-for 8000 #(str/includes? (slurp (str root "/editor-file")) "scrollback-marker"))
                 (some-> (str root "/editor-args") (#(when (fs/exists? %) (slurp %))) str/trim))
-        (keys! [:ctrl "b"] "/" "e2e-path" [:key "Return"])
-        (check! "Ctrl+b / searches the scrollback"
+        (keys! [:alt-space] "s" "b" "e2e-path" [:key "Return"])
+        (check! "Alt+Space s b searches the scrollback"
                 (wait-for 8000 #(str/includes? (slurp (str root "/editor-args")) "e2e-path"))
                 (some-> (slurp (str root "/editor-args")) str/trim))
         ;; Paste: Ctrl+Shift+V types the clipboard into the pane.
         (spit (str root "/clipboard") "pasted-from-clipboard")
-        (keys! [:ctrl "b"] "x")
+        (keys! [:alt-space] "d")
         (wait-for 3000 #(nil? (get-in (view s sid) [:windows 0 :layers 0 :layout :split])))
         (apply in-display "wtype" ["-k" "Shift_L" "-s" "100" "-M" "ctrl" "-M" "shift" "v" "-m" "shift" "-m" "ctrl"])
         (check! "Ctrl+Shift+V pastes the clipboard"
                 (wait-for 3000 #(some (fn [b] (str/includes? (capture s sid b) "pasted-from-clipboard"))
                                       (map (fn [w] (get-in w [:layers 0 :layout :block_id])) (:windows (view s sid))))))
-        ;; Projects: Ctrl+b O picks a directory and makes its session; Ctrl+b B returns.
-        (keys! [:ctrl "b"] "O" "demo" [:key "Return"])
+        ;; Projects: Alt+Space p p picks a directory and makes its session; Alt+Space TAB ` returns.
+        (keys! [:alt-space] "p" "p" "demo" [:key "Return"])
         (let [demo (wait-for 8000 #(session s "demo"))]
-          (check! "Ctrl+b O opens a project session with the startup tabs"
+          (check! "Alt+Space p p opens a project session with the startup tabs"
                   (and demo (= labels (mapv :label (:windows (view s (:session_id demo)))))))
           (shot! root "05-project")
-          (keys! [:ctrl "b"] "O" "demo" [:key "Return"])
+          (keys! [:alt-space] "p" "p" "demo" [:key "Return"])
           (Thread/sleep 1500)
-          (check! "Ctrl+b O on an open project shows it, not a second one"
+          (check! "Alt+Space p p on an open project shows it, not a second one"
                   (= 1 (count (filter #(= "demo" (:label %)) (:sessions (api s "session.list"))))))
           ;; Back in main, a rename lands on main's first tab.
-          (keys! [:ctrl "b"] "B")
+          (keys! [:alt-space] [:key "Tab"] "`")
           (Thread/sleep 800)
-          (keys! [:ctrl "b"] "," "back" [:key "Return"])
-          (check! "Ctrl+b B returns to the previous session"
+          (keys! [:alt-space] "t" "r" "back" [:key "Return"])
+          (check! "Alt+Space TAB ` returns to the previous session"
                   (wait-for 3000 #(= "back" (get-in (view s sid) [:windows 0 :label])))
                   (get-in (view s sid) [:windows 0 :label]))
-          (keys! [:ctrl "b"] "," "logs" [:key "Return"]))
+          (keys! [:alt-space] "t" "r" "logs" [:key "Return"]))
         ;; Persistence: the server dies with its programs, as in a reboot.
         (stop-window! win)
         (ts/kill! s)

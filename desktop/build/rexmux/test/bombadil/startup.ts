@@ -6,7 +6,8 @@ import { always, eventually, next, now } from "@antithesishq/bombadil";
 import { actions, extract, weighted } from "@antithesishq/bombadil/terminal";
 
 const ESC = "\x1b";
-const CB = "\x02";
+// Alt+Space, the local prefix, as a terminal sends it.
+const AS = "\x1b ";
 const STARTUP = ["shell", "bbh", "pi", "jjui"];
 const PROGRAM: Record<string, string> = { bbh: "emacs-bbh", pi: "pi", jjui: "jjui" };
 // hints.rs ALPHABET: with at most 26 targets, target i has letter i.
@@ -73,9 +74,9 @@ export const bbhRunsEmacsBbh = always(now(() => v().active === "bbh").implies(ev
 export const piRunsPi = always(now(() => v().active === "pi").implies(eventually(runs("pi")).within(20, "seconds")));
 export const jjuiRunsJjui = always(now(() => v().active === "jjui").implies(eventually(runs("jjui")).within(20, "seconds")));
 
-// Tiny fingers: Ctrl+b f on a pane showing a URL labels at least it.
+// Tiny fingers: Alt+Space s l on a pane showing a URL labels at least it.
 export const tinyFingersLabelsTargets = always(
-  now(() => v().key === CB + "f" && v().wasHints === 0 && /https:\/\/example\.com\/\S+/.test(v().text))
+  now(() => v().key === AS + "sl" && v().wasHints === 0 && /https:\/\/example\.com\/\S+/.test(v().text))
     .implies(eventually(() => v().hints > 0).within(3, "seconds")));
 
 // A label picks its target: lowercase copies, Shift pastes, and hints close.
@@ -100,9 +101,9 @@ export const noTypedExecLine = always(() => !/exec \S*fish -l/.test(v().text));
 const key = (k: string) => ({ TypeText: { Regexp: k.replace(/[.\[\]()?*+|^$\\]/g, (c) => "\\" + c) } });
 
 export const normal = weighted([
-  [4, actions(() => [key(CB + "1"), key(CB + "2"), key(CB + "3"), key(CB + "4")])],
-  [2, actions(() => [key(CB + "n"), key(CB + "p")])],
-  [4, actions(() => [key(CB + "f")])],
+  [4, actions(() => [key(AS + "t1"), key(AS + "t2"), key(AS + "t3"), key(AS + "t4")])],
+  [2, actions(() => [key(AS + "tl"), key(AS + "th")])],
+  [4, actions(() => [key(AS + "sl")])],
 ]).when(() => v().hints === 0);
 
 export const inHints = weighted([

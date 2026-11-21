@@ -45,7 +45,7 @@ Hard constraints override the score.
 - Generated submap actions use `keys.leave`, which runs the action and then leaves the submap. The catch-all uses `keys.cancel`, because Hyprland also runs the catch-all after a bound key. `make hypr-nested-check` exercises both.
 - Do not hand-edit generated files: `shared-keys.fnl`, `shared-keys.el`, `shared-keys.vim`, `hypr/leader.lua`, and `hypr/keybindings.lua`. Edit `leader.edn` and run the generator.
 - Application layers change Cmd chords only, and only by Hyprland window class. Emacs and other terminal programs share Ghostty's class, so no layer can target them. Every changed chord needs a case in `desktop/build/keybindings/kanata-test.bb`.
-- Ctrl belongs to applications. Put new Herdr actions under Ctrl+b. Its native defaults must be checked as well as custom commands.
+- Ctrl belongs to applications. Put new Herdr actions under Ctrl+b. Its native defaults must be checked as well as custom commands. Rex has no Ctrl+b prefix: put a Rex action in `leader.edn`, with `:rex` when Herdr lacks it, and it runs under Alt+Space.
 - One chord has one action in each context. Name any replaced binding and its reason.
 - Keep paired operations consistent. Rare commands use mnemonic prefix sequences rather than another global modifier chord.
 - Chrome native shortcuts and Vimium page-mode mappings are separate contexts. Use the installed extension's command names when editing `desktop/configs/vimium/keybindings.txt`.

@@ -111,7 +111,8 @@
     nav (keyword "pane" (str "focus-" nav))
     (keyword? herdr) ({:choose-tab :tab/pick :next-tab :tab/next :previous-tab :tab/previous :close-tab :tab/close
                        :new-tab :tab/new :rename-tab :tab/rename
-                       :close-pane :pane/close :choose-workspace :session/switch :choose-agent :agent/pick} herdr)
+                       :close-pane :pane/close :choose-workspace :session/switch :choose-agent :agent/pick
+                       :edit-scrollback :pane/scrollback} herdr)
     (:tab herdr) (keyword "tab" (str "select-" (:tab herdr)))
     (vector? herdr) (let [[noun verb & flags] herdr
                           dir (second (drop-while #(not= "--direction" %) flags))]
@@ -119,7 +120,9 @@
                         ["pane" "split"] ({"down" :pane/split-down "right" :pane/split-right} dir)
                         ["pane" "zoom"] :pane/zoom
                         nil))
-    (map? herdr) ({["fullerzz.sesh" "open-picker"] :session/switch} [(:plugin herdr) (:action herdr)])))
+    (map? herdr) ({["fullerzz.sesh" "open-picker"] :session/project
+                    ["fullerzz.sesh" "last"] :session/last
+                    ["hotchpotch.herdr-tiny-fingers" "open"] :hints/open} [(:plugin herdr) (:action herdr)])))
 
 (defn- chord-of
   "A leader.edn key as rexmux names it: TAB is tab, SPC space, D shift+d."
@@ -129,11 +132,31 @@
         (re-matches #"[A-Z]" k) (str "shift+" (str/lower-case k))
         :else k))
 
+(def ^:private symbol-names
+  "Words for the symbols a leader.edn key may be, so , . and ? name distinct
+  actions."
+  {"," "comma" "." "period" "`" "grave" "?" "question" "=" "equal" "/" "slash"
+   "-" "minus" ";" "semicolon" "'" "quote" "[" "lbracket" "]" "rbracket" "\\" "backslash"})
+
+(defn- key-word
+  "A leader.edn key as part of an action name: D is shift_d, , is comma."
+  [k]
+  (cond (re-matches #"[A-Z]" k) (str "shift_" (str/lower-case k))
+        (symbol-names k) (symbol-names k)
+        :else (str/replace k #"[^A-Za-z0-9_]" "_")))
+
+(defn leader-id
+  "The command id of the leader.edn binding at KEYS, such as :leader/t-shift_h
+  for t H. Action names are lower case, so an upper-case key is shift_ and the
+  letter. desktop/bin/palette names the same action from it."
+  [keys]
+  (keyword "leader" (str/join "-" (map key-word keys))))
+
 (defn leader-commands
   "Commands for leader.edn bindings with a :rex implementation, or a :nav or
   :herdr one that herdr->rex maps: a command id keyword (an alias of another
   command, run with no arguments), or [method args] for a direct Rex call.
-  With a PREFIX, such as [\"ctrl+b\" \"space\"], the leader's keys are bound
+  With a PREFIX, such as [\"alt+space\"], the leader's keys are bound
   under it; without one, keyleader reaches them through rex do."
   [leader prefix]
   (vec (concat
@@ -146,16 +169,14 @@
               :let [{:keys [keys label]} b
                     rex (or (:rex b) (herdr->rex b))]
               :when rex]
-          ;; An upper-case key is shift_ and the letter, since action names are lower case (t H, t h).
-          (let [id (keyword "leader" (str/join "-" (map #(str/replace (if (re-matches #"[A-Z]" %) (str "shift_" (str/lower-case %)) %)
-                                                                      #"[^A-Za-z0-9_]" "_")
-                                                        keys)))]
+          (let [id (leader-id keys)]
             {:id id :title (str "Leader: " label) :category "leader" :doc label
              :keys (if prefix [(into (vec prefix) (map chord-of keys))] [])
              :source :leader
              :alias (when (keyword? rex) rex)
              :run (if (keyword? rex)
-                    (fn [_ _] [[:invoke rex {}]])
+                    ;; With the arguments a prompt for the aliased command gathered.
+                    (fn [_ args] [[:invoke rex (or args {})]])
                     ;; Through the API command, so context, defaults and the
                     ;; schema check apply as they do in M-x.
                     (let [[m a] rex] (fn [_ _] [[:invoke (keyword "rex" m) (or a {})]])))})))))

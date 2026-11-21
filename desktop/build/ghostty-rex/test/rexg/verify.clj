@@ -11,15 +11,16 @@
     appears, its tabs in Herdr's order (shell, bbh, pi, jjui) running their
     programs (stubs named emacs-bbh, pi and jjui) in the configured shell;
   - Hyprland's Super+D: rex -C ghostty-rex do mx.tab.select_3 shows tab 3;
-  - tiny fingers: Ctrl+b f labels a URL and a path, a label copies (and a
+  - Ctrl+b binds nothing, so fish in a pane gets it;
+  - tiny fingers: Alt+Space s l labels a URL and a path, a label copies (and a
     web URL opens), Shift and a label pastes into the pane;
   - mouse, through the client in a script(1) pty, since the headless display
     has no pointer: a drag copies a line, the wheel scrolls into history;
   - rename, split in the pane's directory, resize, copy mode and search
     (the scrollback in a stub $EDITOR), Ghostty's Ctrl+Shift+V paste,
-    project sessions (Ctrl+b O) and Ctrl+b B back;
+    project sessions (Alt+Space p p) and Alt+Space TAB ` back;
   - jjui and bbh's inbox float over the panes and close when they exit,
-    M-x bbh: tell runs bbh say --from rex, Ctrl+b $ renames the session, and
+    M-x bbh: tell runs bbh say --from rex, Alt+Space TAB r renames the session, and
     a blocked agent in another tab sends one desktop notification (stubs
     record notify-send and bbh);
   - persistence: after the server dies with its programs, as in a reboot,
@@ -67,6 +68,7 @@
          (mapcat (fn [k]
                    (concat (cond (string? k) [k]
                                  (= :key (first k)) ["-k" (second k)]
+                                 (= :alt-space (first k)) ["-M" "alt" "-k" "space" "-m" "alt"]
                                  :else (let [[mod key] k] ["-M" (name mod) key "-m" (name mod)]))
                            ["-s" "120"]))
                  ks))
@@ -400,12 +402,12 @@
         (ts/rex! s "send" "-s" sid "-b" shell "clear; printf 'see https://example.com/e2e and /tmp/e2e-path\\n'\r")
         (wait-for 5000 #(str/includes? (capture s sid shell) "e2e-path"))
         (Thread/sleep 800)
-        (keys! [:ctrl "b"] "f")
+        (keys! [:alt-space] "s" "l")
         (shot! root "02-tiny-fingers")
         (keys! "a")
         (check! "tiny fingers: a label copies the URL" (wait-for 3000 #(= "https://example.com/e2e" (clipboard root))) (clipboard root))
         (check! "tiny fingers: a web URL opens" (wait-for 3000 #(= "https://example.com/e2e" (slurp? (str root "/opened")))))
-        (keys! [:ctrl "b"] "f" "S")
+        (keys! [:alt-space] "s" "l" "S")
         (check! "tiny fingers: Shift and a label pastes into the pane"
                 (wait-for 3000 #(let [l (last (str/split-lines (capture s sid shell)))]
                                   (and (str/ends-with? l "/tmp/e2e-path") (not (str/starts-with? l "see "))))))
@@ -425,16 +427,16 @@
           (check! "mouse: the wheel scrolls the pane into its history" (str/includes? (stop-tty! tty) "↑ history")))
         (shot! root "03-mouse")
         ;; Rename the tab and split, then move the border.
-        (keys! [:ctrl "b"] "," "logs" [:key "Return"])
-        (check! "Ctrl+b , renames the tab" (wait-for 3000 #(= "logs" (get-in (view s sid) [:windows 0 :label]))))
+        (keys! [:alt-space] "t" "r" "logs" [:key "Return"])
+        (check! "Alt+Space t r renames the tab" (wait-for 3000 #(= "logs" (get-in (view s sid) [:windows 0 :label]))))
         (ts/rex! s "send" "-s" sid "-b" shell "cd /tmp\r")
         (Thread/sleep 800)
-        (keys! [:ctrl "b"] "%")
+        (keys! [:alt-space] "w" "v")
         (let [after (wait-for 3000 #(get-in (view s sid) [:windows 0 :layers 0 :layout :split :after :block_id]))]
           (check! "a split opens in the focused pane's directory (Herdr's new_cwd follow)"
                   (wait-for 5000 #(= "/tmp" (get-in (api s "block.method" {:session_id sid :block_id after :method "process"}) [:foreground :cwd])))))
-        (keys! [:ctrl "b"] "L")
-        (check! "Ctrl+b L moves the border"
+        (keys! [:alt-space] "w" "L")
+        (check! "Alt+Space w L moves the border"
                 (wait-for 3000 #(> (get-in (view s sid) [:windows 0 :layers 0 :layout :split :ratio] 0.5) 0.5))
                 (get-in (view s sid) [:windows 0 :layers 0 :layout :split :ratio]))
         ;; Bare Ctrl+h/j/k/l as in Herdr: Ctrl+h moves to the left pane, and
@@ -448,25 +450,30 @@
           (check! "Ctrl+L clears the shell pane's screen and keeps focus"
                   (wait-for 8000 #(and (not-any? (fn [l] (str/includes? l "before-ctrl-l")) (screen s sid shell))
                                        (= shell (focused))))
-                  (pr-str (take 4 (screen s sid shell)))))
+                  (pr-str (take 4 (screen s sid shell))))
+          ;; Ctrl+b goes to fish, which moves back a character.
+          (keys! "echo ctrlb-ab" [:ctrl "b"] "X" [:key "Return"])
+          (check! "Ctrl+b reaches the shell (fish moves back a character): ctrlb-aXb"
+                  (wait-for 5000 #(some (fn [l] (= "ctrlb-aXb" (str/trim l))) (screen s sid shell)))
+                  (pr-str (take-last 4 (remove str/blank? (screen s sid shell))))))
         (shot! root "04-rename-resize")
         ;; Copy mode and search: the scrollback in a stub $EDITOR that
         ;; records its arguments and the file it was given.
-        (keys! [:ctrl "b"] "1")
+        (keys! [:alt-space] "t" "1")
         (Thread/sleep 500)
         (let [focused (get-in (view s sid) [:windows 0 :focused_block_id])]
           (ts/rex! s "send" "-s" sid "-b" focused "echo scrollback-marker\r")
           (wait-for 3000 #(str/includes? (capture s sid focused) "scrollback-marker")))
-        (keys! [:ctrl "b"] "[")
-        (check! "Ctrl+b [ opens the scrollback in the editor"
+        (keys! [:alt-space] "e")
+        (check! "Alt+Space e opens the scrollback in the editor"
                 (wait-for 8000 #(str/includes? (slurp? (str root "/editor-file")) "scrollback-marker"))
                 (slurp? (str root "/editor-args")))
-        (keys! [:ctrl "b"] "/" "e2e-path" [:key "Return"])
-        (check! "Ctrl+b / searches the scrollback"
+        (keys! [:alt-space] "s" "b" "e2e-path" [:key "Return"])
+        (check! "Alt+Space s b searches the scrollback"
                 (wait-for 8000 #(str/includes? (slurp? (str root "/editor-args")) "e2e-path"))
                 (slurp? (str root "/editor-args")))
         ;; Paste: Ghostty's Ctrl+Shift+V pastes the Wayland clipboard.
-        (keys! [:ctrl "b"] "x")
+        (keys! [:alt-space] "d")
         (wait-for 3000 #(nil? (get-in (view s sid) [:windows 0 :layers 0 :layout :split])))
         (in-display "sh" "-c" "printf pasted-from-clipboard | wl-copy >/dev/null 2>&1")
         (Thread/sleep 300)
@@ -475,36 +482,36 @@
                 (wait-for 3000 #(some (fn [b] (str/includes? (capture s sid b) "pasted-from-clipboard"))
                                       (map (fn [w] (get-in w [:layers 0 :layout :block_id])) (:windows (view s sid))))))
         (keys! [:ctrl "u"])
-        ;; Projects: Ctrl+b O picks a directory and makes its session; Ctrl+b B returns.
-        (keys! [:ctrl "b"] "O" "demo" [:key "Return"])
+        ;; Projects: Alt+Space p p picks a directory and makes its session; Alt+Space TAB ` returns.
+        (keys! [:alt-space] "p" "p" "demo" [:key "Return"])
         (let [demo (wait-for 8000 #(session s "demo"))]
-          (check! "Ctrl+b O opens a project session with the startup tabs"
+          (check! "Alt+Space p p opens a project session with the startup tabs"
                   (and demo (wait-for 5000 #(= labels (mapv :label (:windows (view s (:session_id demo)))))))
                   (some->> demo :session_id (view s) :windows (mapv :label) pr-str))
           (shot! root "05-project")
-          (keys! [:ctrl "b"] "O" "demo" [:key "Return"])
+          (keys! [:alt-space] "p" "p" "demo" [:key "Return"])
           (Thread/sleep 1500)
-          (check! "Ctrl+b O on an open project shows it, not a second one"
+          (check! "Alt+Space p p on an open project shows it, not a second one"
                   (= 1 (count (filter #(= "demo" (:label %)) (:sessions (api s "session.list"))))))
-          (keys! [:ctrl "b"] "B")
+          (keys! [:alt-space] [:key "Tab"] "`")
           (Thread/sleep 800)
-          (keys! [:ctrl "b"] "," "back" [:key "Return"])
-          (check! "Ctrl+b B returns to the previous session"
+          (keys! [:alt-space] "t" "r" "back" [:key "Return"])
+          (check! "Alt+Space TAB ` returns to the previous session"
                   (wait-for 3000 #(= "back" (get-in (view s sid) [:windows 0 :label])))
                   (get-in (view s sid) [:windows 0 :label]))
-          (keys! [:ctrl "b"] "," "logs" [:key "Return"])
+          (keys! [:alt-space] "t" "r" "logs" [:key "Return"])
           ;; The reboot check wants the first tab split in two.
           (when-not (get-in (view s sid) [:windows 0 :layers 0 :layout :split])
-            (keys! [:ctrl "b"] "%")
+            (keys! [:alt-space] "w" "v")
             (wait-for 3000 #(get-in (view s sid) [:windows 0 :layers 0 :layout :split]))))
         ;; jjui and bbh's inbox float over the panes; Ctrl+C ends each, and its layer closes.
-        (doseq [[k text name] [["g" "STUB jjui" "Ctrl+b g floats jjui over the panes"]
-                               ["t" "STUB bbh inbox" "Ctrl+b t floats bbh's inbox over the panes"]]]
+        (doseq [[ks text name] [[["o" "g"] "STUB jjui" "Alt+Space o g floats jjui over the panes"]
+                                [["i"] "STUB bbh inbox" "Alt+Space i floats bbh's inbox over the panes"]]]
           (let [before (blocks-of s sid)]
-            (keys! [:ctrl "b"] k)
+            (apply keys! [:alt-space] ks)
             (let [b (new-block! s sid before text)]
               (check! name b)
-              (shot! root (str "07-layer-" k))
+              (shot! root (str "07-layer-" (str/join ks)))
               (when b
                 (ts/rex! s "send" "-s" sid "-b" b "\u0003")
                 (check! (str name ", and closes when it exits") (wait-for 5000 #(not ((blocks-of s sid) b))))))))
@@ -516,9 +523,9 @@
                 (wait-for 5000 #(= ["say" "--from" "rex" "T207 hello from ghostty-rex"] (some-> (slurp? (str root "/bbh-args")) edn/read-string)))
                 (slurp? (str root "/bbh-args")))
         ;; Session rename, then back.
-        (keys! [:ctrl "b"] "$" "renamed" [:key "Return"])
-        (check! "Ctrl+b $ renames the session" (wait-for 3000 #(= "renamed" (:label (view s sid)))) (:label (view s sid)))
-        (keys! [:ctrl "b"] "$" "main" [:key "Return"])
+        (keys! [:alt-space] [:key "Tab"] "r" "renamed" [:key "Return"])
+        (check! "Alt+Space TAB r renames the session" (wait-for 3000 #(= "renamed" (:label (view s sid)))) (:label (view s sid)))
+        (keys! [:alt-space] [:key "Tab"] "r" "main" [:key "Return"])
         ;; Notifications: an agent that turns blocked in a tab you are not on.
         (let [before-windows (set (map :window_id (:windows (view s sid))))]
           (api s "session.new_window"
@@ -648,7 +655,13 @@
   (tabs on row 0, ▶ on the focused pane's title, the status line, the echo
   or minibuffer line). Each: the spec file, its setup, the session to show."
   {"tabs" {:file "rexmux.ts"
-           :setup (fn [s config] (fixture! s) (spit config (pr-str {:servers [{:label "test" :address (:address s)}]})) "work")}
+           ;; Alt+Space, Rex's only prefix, comes from leader.edn.
+           :setup (fn [s config]
+                    (fixture! s)
+                    (spit config (pr-str {:servers [{:label "test" :address (:address s)}]
+                                          :leader-file (str (fs/path checkout "desktop" "configs" "keybindings" "leader.edn"))
+                                          :leader-prefix ["alt+space"]}))
+                    "work")}
    "startup" {:file "startup.ts"
               :setup (fn [s config]
                        (config! s config)

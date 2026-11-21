@@ -207,6 +207,7 @@ No global keyboard listener or browser content script has been added.
 | Cmd+F sends Ctrl+F, find | Cmd+F picks a window by hint. Ctrl+F (Caps+F) still finds in Chrome, and Vimium has / | One key for window hints in every application |
 
 Herdr's Ctrl+b prefix still captures readline backward-char. Use Left or Cmd+h there.
+Rex (Ghostty-plus-Rex and rexmux) has no Ctrl+b prefix, so Ctrl+b reaches the shell or Emacs there. Its prefixed keys are `leader.edn` rows under Alt+Space: Herdr rows that `rexmux.registry/herdr->rex` maps, and Rex-only rows with `:rex`.
 Existing custom Herdr actions also override native defaults for Ctrl+b b, p, Shift+P, and o.
 Cmd+n still sends a bbh composer message. This existing local override is not a new-window command in that buffer.
 

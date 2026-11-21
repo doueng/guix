@@ -127,21 +127,21 @@
   (assoc model :sidecar-up true
          :catalogue [{:id "tab/new" :title "Tabs: new" :action "mx.tab.new" :enabled true}
                      {:id "pane/split-right" :title "Panes: split right" :action "mx.pane.split_right" :enabled true}]
-         :bindings [[["ctrl+b" "c"] "mx.tab.new"] [["ctrl+b" "%"] "mx.pane.split_right"]]))
+         :bindings [[["alt+space" "t" "n"] "mx.tab.new"] [["alt+space" "w" "v"] "mx.pane.split_right"]]))
 
 (deftest a-prefix-key-waits-then-runs-its-command
   (let [model (with-bindings (with-view (m/new-model [{:label "t"}]) "session:a"))
-        [w outs] (m/key model (keys/parse "ctrl+b"))]
+        [w outs] (m/key model (keys/parse "alt+space"))]
     (is (empty? outs))
-    (is (= ["ctrl+b"] (:prefix w)))
-    (is (= [["%" "Panes: split right"] ["c" "Tabs: new"]] (m/continuations w)) "which-key lists what may follow")
-    (let [[done [[kind msg]]] (m/key w (keys/parse "%"))]
+    (is (= ["alt+space"] (:prefix w)))
+    (is (= [["t n" "Tabs: new"] ["w v" "Panes: split right"]] (m/continuations w)) "which-key lists what may follow")
+    (let [[done [[kind msg]]] (reduce (fn [[mm _] k] (m/key mm (keys/parse k))) [w nil] ["w" "v"])]
       (is (= :sidecar kind))
       (is (= [:commands/invoke "pane/split-right"] ((juxt :op :command) msg)))
       (is (empty? (:prefix done))))
     (let [[u outs] (m/key w (keys/parse "q"))]
       (is (empty? outs))
-      (is (= "ctrl+b q is undefined" (:echo u))))))
+      (is (= "alt+space q is undefined" (:echo u))))))
 
 (deftest an-unbound-key-goes-to-the-focused-pane-through-rex
   (let [model (-> (m/new-model [{:label "t"}])
@@ -150,7 +150,12 @@
         [_ [[_ _ method payload]]] (m/key model (keys/parse "x"))]
     (is (= "client.key" method))
     (is (= "block:a" (:block_id payload)))
-    (is (= {:key "key_x" :text "x" :mods ""} (select-keys (:key payload) [:key :text :mods])))))
+    (is (= {:key "key_x" :text "x" :mods ""} (select-keys (:key payload) [:key :text :mods])))
+    (testing "Ctrl+b binds nothing, so the shell or Emacs gets it"
+      (let [[w [[_ _ method payload]]] (m/key (with-bindings model) (keys/parse "ctrl+b"))]
+        (is (empty? (:prefix w)))
+        (is (= "client.key" method))
+        (is (= {:key "key_b" :mods "ctrl"} (select-keys (:key payload) [:key :mods])))))))
 
 (deftest m-x-runs-the-fuzzy-best-command
   (let [model (with-bindings (with-view (m/new-model [{:label "t"}]) "session:a"))

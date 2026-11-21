@@ -5,10 +5,11 @@
  ;; which rexmux starts when it is not running. Add {:label .. :address
  ;; "unix:///path/to.sock"} entries for more; M-x Servers: switch moves between them.
  :servers [{:label "local" :address nil}]
- ;; One leader menu for Herdr and rexmux: leader.edn's :herdr actions run the
- ;; matching rexmux command under Ctrl+b Space.
+ ;; One leader menu for Herdr and rexmux: leader.edn's :herdr and :rex actions
+ ;; run the matching command under Alt+Space, the local prefix, which
+ ;; Hyprland passes to this window; Alt+Space Space opens M-x.
  :leader-file "~/.config/keybindings/leader.edn"
- :leader-prefix ["ctrl+b" "space"]
+ :leader-prefix ["alt+space"]
  ;; Bare Ctrl+h/j/k/l through keyleader term-nav, as Herdr has them.
  :term-nav true
  ;; The shell every new block runs, as Herdr's default_shell; without it Rex

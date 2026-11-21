@@ -49,11 +49,11 @@
              {:id "s" :label "Shell editing" :chord "Ctrl+a / Ctrl+e / Ctrl+r" :tip "Use line boundaries and history search. Alt+Backspace deletes a word. kanata sends Ctrl+Left/Right for Alt+Left/Right."}]}
   {:id "herdr" :label "Herdr prefix"
    :entries [{:id "l" :label "Local prefix" :chord "Alt+Space" :tip "Alt+Space is the focused program's prefix: Herdr's and Rex's leader menu, Chrome's tab keys, Doom's leader in Emacs. Alt+Space t n opens a tab, t l and t h step, t d closes, t 1..9 jump."}
-             {:id "c" :label "New tab" :chord "Alt+Space t n / Ctrl+b c" :tip "Alt+Space t n opens a tab in Herdr, Rex and Chrome. Cmd+1 through Cmd+9 select tabs directly."}
+             {:id "c" :label "New tab" :chord "Alt+Space t n / Ctrl+b c" :tip "Alt+Space t n opens a tab in Herdr, Rex and Chrome; Ctrl+b c is Herdr's, since Rex has no Ctrl+b prefix. Cmd+1 through Cmd+9 select tabs directly."}
              {:id "a" :label "Find agent" :chord "Ctrl+b a" :tip "Find an agent by name instead of scanning panes."}
              {:id "b" :label "Find workspace" :chord "Ctrl+b b" :tip "Ctrl+b b searches open workspaces. Ctrl+b Shift+O searches projects."}
              {:id "p" :label "Annotate selection" :chord "Ctrl+b p" :tip "Ctrl+b p captures a selection. Ctrl+b o reviews documents. Ctrl+b m manages annotations."}
-             {:id "f" :label "Copy visible text by hint" :chord "Cmd+Y / Ctrl+b f" :tip "Cmd+Y from any window, Ctrl+b f or Ctrl+b Space s l opens tiny-fingers. Ctrl+S and Cmd+S now reach terminal editors for save. Ctrl+b Shift+E edits scrollback."}]}
+             {:id "f" :label "Copy visible text by hint" :chord "Cmd+Y / Ctrl+b f" :tip "Cmd+Y from any window, Ctrl+b f or Alt+Space s l opens tiny-fingers (Rex has only Alt+Space s l). Ctrl+S and Cmd+S now reach terminal editors for save. Ctrl+b Shift+E edits scrollback."}]}
   {:id "p" :label "Power"
    :entries [{:id "s" :label "Suspend" :command ["loginctl" "suspend"] :confirm true}
              {:id "r" :label "Reboot" :command ["loginctl" "reboot"] :confirm true}

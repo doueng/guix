@@ -266,7 +266,7 @@ pub struct Model {
     pub hints: Option<HintMode>,
     /// A command asked for hints; the app opens them with the pane's text.
     pub hints_wanted: bool,
-    /// The session shown before this one, for Ctrl+b B.
+    /// The session shown before this one, for Alt+Space TAB `.
     pub previous_session: Option<String>,
     /// Text selected with the mouse: (block, anchor, end) in pane cells.
     pub selection: Option<(String, (usize, usize), (usize, usize))>,
