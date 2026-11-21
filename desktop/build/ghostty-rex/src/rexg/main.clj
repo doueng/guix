@@ -152,7 +152,7 @@
                            (try
                              (let [[s msgs] (sidecar/handle (:sidecar @app) sc-io m)]
                                (swap! app assoc :sidecar s)
-                               (doseq [o msgs] (put! [:sidecar o])))
+                               (doseq [o (sidecar/perform! sc-io msgs)] (put! [:sidecar o])))
                              (catch Throwable e
                                (log "sidecar" (ex-message e))
                                (put! [:sidecar {:op :log :text (str "sidecar: " (ex-message e))}])
@@ -227,7 +227,7 @@
                                      (fn [ev] (.submit sc-exec ^Runnable
                                                        (fn [] (try (let [[s msgs] (sidecar/deliver (:sidecar @app) sc-io {:op :rex/event :event ev :server (get-in @app [:m :servers srv :label])})]
                                                                      (swap! app assoc :sidecar s)
-                                                                     (doseq [o msgs] (put! [:sidecar o])))
+                                                                     (doseq [o (sidecar/perform! sc-io msgs)] (put! [:sidecar o])))
                                                                    (catch Throwable _))))))))
             (step! [f & args]
               (let [[m outs] (apply f (:m @app) args)]

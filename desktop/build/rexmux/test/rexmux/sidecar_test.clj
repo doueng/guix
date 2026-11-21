@@ -1,7 +1,7 @@
 (ns rexmux.sidecar-test
   (:require [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -72,6 +72,7 @@
                          :ping {:op :ping :id i}
                          :context {:op :context :ctx (assoc ctx :block-id (str "block:" (mod i 3)))}
                          :invoke {:op :commands/invoke :id i :command :agent/next-blocked}
+                         :say {:op :commands/invoke :id i :command :bbh/say :args {:text "hi"}}
                          :event {:op :rex/event :event (nth events (mod i (count events))) :server "local"}))
                      ops)))
 
@@ -81,9 +82,11 @@
 (deftest outgoing-numbering-has-no-holes-or-repeats
   (is (:pass? (tc/quick-check
                (trials 100)
-               (prop/for-all [ops (gen/vector (gen/elements [:ping :context :invoke :event]) 0 25)]
+               (prop/for-all [ops (gen/vector (gen/elements [:ping :context :invoke :say :event]) 0 25)]
                  (let [msgs (number-window (window-msgs ops))
                        [_ out] (run msgs)
+                       ;; spawns and notifications stay in the sidecar's process
+                       out (remove #(sc/local-ops (:op %)) out)
                        invokes (keep #(when (= :commands/invoke (:op %)) (:id %)) msgs)]
                    (and (= (map :seq out) (range 1 (inc (count out))))
                         (= invokes (keep #(when (= :reply (:op %)) (:id %)) out)))))))))
@@ -122,14 +125,59 @@
         "a program on the inherited PATH wins over desktop/bin")))
 
 (deftest a-newly-blocked-agent-elsewhere-notifies-once
-  (let [sent (atom [])
-        io {:notify (fn [s b] (swap! sent conj [s b]))}
-        blocked (fn [a block] (rexmux.agents/report a {:session "s" :block block :id "1" :record {:state "blocked" :app "pi" :msg "approve?"}}))
-        a1 (blocked rexmux.agents/empty-state "block:x")]
-    (sc/notify-attention! io {:block-id "block:here"} rexmux.agents/empty-state a1)
-    (is (= 1 (count @sent)))
-    (is (= "pi needs you" (ffirst @sent)))
-    (sc/notify-attention! io {:block-id "block:here"} a1 a1)
-    (is (= 1 (count @sent)) "still blocked is no news")
-    (sc/notify-attention! io {:block-id "block:y"} a1 (blocked a1 "block:y"))
-    (is (= 1 (count @sent)) "not for the pane being looked at")))
+  (let [blocked (fn [a block] (rexmux.agents/report a {:session "s" :block block :id "1" :record {:state "blocked" :app "pi" :msg "approve?"}}))
+        a1 (blocked rexmux.agents/empty-state "block:x")
+        [note :as notes] (sc/attention-notes {:block-id "block:here"} rexmux.agents/empty-state a1)]
+    (is (= 1 (count notes)))
+    (is (= {:op :notify :summary "pi needs you"} (select-keys note [:op :summary])))
+    (is (str/starts-with? (:body note) "approve?\nAlt+Space u goes there: "))
+    (is (= [] (sc/attention-notes {:block-id "block:here"} a1 a1)) "still blocked is no news")
+    (is (= [] (sc/attention-notes {:block-id "block:y"} a1 (blocked a1 "block:y"))) "not for the pane being looked at")
+    (testing "a Rex event's notification is performed, not sent to the window"
+      (let [sent (atom [])
+            io (assoc io :notify (fn [s b] (swap! sent conj s)))
+            [_ out] (run (concat (numbered [{:op :hello :ctx {:session-id "s"}}])
+                                 (for [e events] {:op :rex/event :event e :server "local"})))
+            window (sc/perform! io out)]
+        (is (seq (filter #(= :notify (:op %)) out)))
+        (is (= (count (filter #(= :notify (:op %)) out)) (count @sent)))
+        (is (not-any? #(sc/local-ops (:op %)) window))
+        (is (every? #(proto/op-ok? :to-rust (:op %)) window))))))
+
+(defn- invoke-spawns
+  "The spawn messages, and the window's reply, of invoking COMMAND with ARGS
+  in CTX on a sidecar whose config turns term-nav on."
+  [command args ctx]
+  (let [s (first (sc/handle (sc/initial-state (assoc sc/default-config :term-nav true)) io {:op :hello :seq 1 :ctx ctx}))
+        [_ out] (sc/handle s io {:op :commands/invoke :seq 2 :id 5 :command command :args args :ctx ctx})]
+    [(filterv #(= :spawn (:op %)) out) (first (filter #(= :reply (:op %)) out))]))
+
+(deftest spawning-commands-return-their-argv-and-env-as-data
+  (let [ctx {:session-id "session:1" :block-id "block:9" :server "far"}
+        config {:servers [{:label "local" :address nil} {:label "far" :address "unix:///tmp/far.sock"}]}
+        stubs (str (babashka.fs/create-temp-dir {:prefix "rexmux-path"}))
+        _ (doseq [p ["keyleader" "bbh"]]
+            (spit (str stubs "/" p) "#!/bin/sh\n") (babashka.fs/set-posix-file-permissions (str stubs "/" p) "rwxr-xr-x"))
+        hypr (str stubs ":/run/current-system/profile/bin")]
+    (doseq [[command args argv env] [[:pane/term-nav-left {} ["keyleader" "term-nav" "left"]
+                                      {"REX_BLOCK" "block:9" "REX_SESSION" "session:1" "TERM_PROGRAM" "rex"}]
+                                     [:pane/term-nav-down {} ["keyleader" "term-nav" "down"]
+                                      {"REX_BLOCK" "block:9" "REX_SESSION" "session:1" "TERM_PROGRAM" "rex"}]
+                                     [:bbh/say {:text "T12 go on"} ["bbh" "say" "--from" "rex" "T12 go on"] {}]]]
+      (let [[spawns reply] (invoke-spawns command args ctx)
+            spec (sc/spawn-spec config (first spawns) hypr)]
+        (is (= [{:op :spawn :server "far" :argv argv :env env}] spawns) (str command))
+        (is (nil? (:seq (first spawns))) "a local op takes no number")
+        (is (not-any? #(= :spawn (first %)) (:effects reply)))
+        (is (= (into [(str stubs "/" (first argv))] (rest argv)) (:argv spec)) "found on the child's PATH, a test's stubs first")
+        (is (= (merge env {"PATH" (str hypr ":" rexmux.commands/bin-dir) "REX_SERVER" "unix:///tmp/far.sock"}) (:env spec)))))
+    (testing "without stubs, the helpers resolve to desktop/bin, which Hyprland's PATH lacks"
+      (let [[[spawn]] (invoke-spawns :bbh/say {:text "hi"} (dissoc ctx :server))
+            spec (sc/spawn-spec config spawn "/run/current-system/profile/bin")]
+        (is (= (str (babashka.fs/path rexmux.commands/bin-dir "bbh")) (first (:argv spec))))
+        (is (not (contains? (:env spec) "REX_SERVER")) "the first server, local, has no address")))
+    (testing "perform! starts each spawn and passes the rest on"
+      (let [started (atom [])
+            [spawns reply] (invoke-spawns :pane/term-nav-left {} ctx)]
+        (is (= [reply] (sc/perform! {:spawn! #(swap! started conj (:argv %))} (conj spawns reply))))
+        (is (= [["keyleader" "term-nav" "left"]] @started))))))

@@ -3,7 +3,8 @@
   the context the window sent plus what the sidecar knows, under :world:
   {:agents agents-state :servers [..] :server label :registry reg :rex fns}.
   :rex holds the read-only calls a command may make itself, so tests can
-  replace them."
+  replace them. A program to start is the effect [:spawn {:server :argv :env}],
+  which sidecar/perform! starts."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [rexmux.agents :as agents]
@@ -170,9 +171,8 @@
          {:id (keyword "pane" (str "term-nav-" d)) :title (str "Panes: " d ", or the key to an editor")
           :category "pane" :source :local :keys [[(str "ctrl+" k)]] :needs #{:session-id :block-id}
           :run (fn [ctx _]
-                 (rex ctx :spawn (:server ctx) ["keyleader" "term-nav" d]
-                      {"REX_BLOCK" (:block-id ctx) "REX_SESSION" (:session-id ctx) "TERM_PROGRAM" "rex"})
-                 [])})))
+                 [[:spawn {:server (:server ctx) :argv ["keyleader" "term-nav" d]
+                           :env {"REX_BLOCK" (:block-id ctx) "REX_SESSION" (:session-id ctx) "TERM_PROGRAM" "rex"}}]])})))
 
 (def bbh-commands
   "bbh from rexmux, as Herdr's prefix t popup and typed messages had it."
@@ -184,8 +184,8 @@ Router sees it as [routed to T12 W3 from rex]."
     :args [{:name :text :type "string" :required true}]
     :schema {:type "object" :properties {:text {:type "string"}} :required ["text"]}
     :run (fn [ctx {:keys [text]}]
-           (rex ctx :spawn (:server ctx) ["bbh" "say" "--from" "rex" text] {})
-           [[:ui/message (str "Sent: " text)]])}])
+           [[:spawn {:server (:server ctx) :argv ["bbh" "say" "--from" "rex" text] :env {}}]
+            [:ui/message (str "Sent: " text)]])}])
 
 (def bin-dir
   "desktop/bin beside this checkout, so new helpers work before make stow links them."

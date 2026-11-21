@@ -4,8 +4,10 @@
   registry, the keymap layer, the agents' status and every command's logic;
   the window owns panes, keys and drawing, and never waits on bb for a key.
 
-  handle is pure apart from the :io functions it is given, so tests drive it
-  with fake Rex calls; main wires it to stdin, stdout and the rex CLI."
+  handle is pure apart from the read-only :io calls it is given, so tests
+  drive it with fake Rex calls. What it starts or shows on the desktop comes
+  back as local-ops, which perform! does; main wires it to stdin, stdout and
+  the rex CLI."
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.string :as str]
@@ -68,10 +70,15 @@
 
 (defn- out [state msg] (let [[tx m] (proto/stamp (:tx state) msg)] [(assoc state :tx tx) m]))
 
+(def local-ops
+  "Ops the sidecar's own process performs with perform!, never sent to the
+  window, so they take no number: start a program, notify the desktop."
+  #{:spawn :notify})
+
 (defn- emit
-  "[state' msgs] after stamping each of MSGS in order."
+  "[state' msgs] after stamping each of MSGS for the window in order."
   [state msgs]
-  (reduce (fn [[s acc] m] (let [[s m] (out s m)] [s (conj acc m)])) [state []] msgs))
+  (reduce (fn [[s acc] m] (if (local-ops (:op m)) [s (conj acc m)] (let [[s m] (out s m)] [s (conj acc m)]))) [state []] msgs))
 
 (defn- enabled-ids [registry ctx]
   (set (keep #(when (reg/enabled? % ctx) (:id %)) (vals registry))))
@@ -96,30 +103,37 @@
     (cond-> (assoc state :ctx ctx)
       (and blk (not= old blk)) (update :agents agents/focused blk))))
 
-(defn- run-command [state io {:keys [id command args ctx]}]
+(defn- run-command
+  "{:reply :reload? :spawns} for an invoke: the reply carries the effects for
+  the window; a :sidecar/reload and the programs to start are the sidecar's."
+  [state io {:keys [id command args ctx]}]
   (let [ctx (or ctx (:ctx state))
         cid (if (keyword? command) command (keyword (str/replace (str command) #"^:" "")))
         res (reg/invoke (:registry state) (assoc ctx :world (world state io)) cid args)
+        own? #(#{:sidecar/reload :spawn} (first %))
         reload? (some #(= :sidecar/reload (first %)) (:effects res))
-        res (cond-> res reload? (update :effects (fn [es] (vec (remove #(= :sidecar/reload (first %)) es)))))]
-    {:reply (merge {:op :reply :id id} res) :reload? reload?}))
+        spawns (vec (for [[kind spec] (:effects res) :when (= :spawn kind)] (assoc spec :op :spawn)))
+        res (cond-> res (some own? (:effects res)) (update :effects (fn [es] (vec (remove own? es)))))]
+    {:reply (merge {:op :reply :id id} res) :reload? reload? :spawns spawns}))
 
-(defn notify-attention!
-  "Tell the desktop about each agent that newly wants the person (blocked,
-  failed or done) in a pane they are not looking at, as Herdr's system toasts
-  did. IO's :notify gets a summary and a body."
-  [io ctx before after]
-  (when-let [notify (:notify io)]
-    (let [old (set (map :block (agents/attention before)))]
-      (doseq [{:keys [block state app msg] :as row} (agents/attention after)
-              :when (and (not (old block)) (not= block (:block-id ctx)))]
-        (notify (str (or app "agent") " " ({"blocked" "needs you" "error" "failed" "done" "is done"} state state))
-                (str (when-not (str/blank? msg) (str msg "\n")) "Alt+Space u goes there: " (agents/line row)))))))
+(defn attention-notes
+  "A desktop notification, {:op :notify :summary :body}, for each agent that
+  newly wants the person (blocked, failed or done) in a pane they are not
+  looking at (CTX), as Herdr's system toasts did."
+  [ctx before after]
+  (let [old (set (map :block (agents/attention before)))]
+    (vec (for [{:keys [block state app msg] :as row} (agents/attention after)
+               :when (and (not (old block)) (not= block (:block-id ctx)))]
+           {:op :notify
+            :summary (str (or app "agent") " " ({"blocked" "needs you" "error" "failed" "done" "is done"} state state))
+            :body (str (when-not (str/blank? msg) (str msg "\n")) "Alt+Space u goes there: " (agents/line row))}))))
 
 (defn deliver
   "[state' outgoing-msgs] for one MSG already accepted. IO holds :load-help
   (fn [server]) and :rex, the read-only calls commands may make. Rex events
-  arrive here as {:op :rex/event :event .. :server label}."
+  arrive here as {:op :rex/event :event .. :server label}. The outgoing
+  messages include local-ops, which perform! does and drops; the rest are
+  for the window."
   [state io msg]
   (let [[state msgs]
         (case (:op msg)
@@ -137,22 +151,22 @@
                          s (assoc s :enabled en)]
                      [s (cond-> [] changed? (conj (catalogue-msg s))
                                 (not= (:agents s) (:agents state)) (conj (agents-msg s)))])
-          :commands/invoke (let [{:keys [reply reload?]} (run-command state io msg)]
+          :commands/invoke (let [{:keys [reply reload? spawns]} (run-command state io msg)]
                              (if reload?
                                (let [{:keys [registry errors]} (build-registry ((:load-help io) (first (:servers state))) (:config state))
                                      s (assoc state :registry registry)]
-                                 [s (concat [(update reply :effects (fnil conj []) [:ui/message "Reloaded commands and keys."])
+                                 [s (concat spawns
+                                            [(update reply :effects (fnil conj []) [:ui/message "Reloaded commands and keys."])
                                              (catalogue-msg s)]
                                             (for [e errors] {:op :log :level :error :text e}))])
-                               [state [reply]]))
+                               [state (conj spawns reply)]))
           :rex/event (let [r (agents/from-event (:event msg))
                            a (:agents state)
                            a2 (cond (nil? r) a
                                     (:closed r) (agents/block-closed a (:block r))
                                     :else (agents/report a (assoc r :server (:server msg))))
                            s (assoc state :agents a2)]
-                       (notify-attention! io (:ctx state) a a2)
-                       [s (when (not= a a2) [(agents-msg s)])])
+                       [s (cond-> (attention-notes (:ctx state) a a2) (not= a a2) (conj (agents-msg s)))])
           :effect/result [state []]
           :panel/event [state []]
           :eval [state [{:op :reply :id (:id msg)
@@ -205,15 +219,41 @@
     (into [(str found)] args)
     argv))
 
+(defn spawn-spec
+  "The argv and env a {:server :argv :env} spawn runs with, given the servers
+  of CONFIG and the sidecar's own PATH: spawn-env's environment, REX_SERVER
+  of the named server (else the first), and the program found on the
+  child's PATH."
+  [config {:keys [server argv env]} path]
+  (let [address (:address (or (some #(when (= server (:label %)) %) (:servers config))
+                              (first (:servers config))))
+        env (spawn-env (or env {}) address path)]
+    {:argv (resolve-argv argv env) :env env}))
+
+(defn perform!
+  "Do the local-ops among MSGS with IO (:spawn! and :notify) and return the
+  rest, for the window, in order."
+  [io msgs]
+  (doseq [m msgs]
+    (case (:op m)
+      :spawn ((:spawn! io) m)
+      :notify (when-let [notify (:notify io)] (notify (:summary m) (:body m)))
+      nil))
+  (vec (remove #(local-ops (:op %)) msgs)))
+
 (defn make-io
   "The :io map handle gets in a live process: Rex through the rex CLI,
-  desktop notifications as APP. The rexmux sidecar process and the
-  ghostty-rex client, which runs the sidecar in-process, both use it."
+  desktop notifications as APP, and programs started as spawn-spec says.
+  The rexmux sidecar process and the ghostty-rex client, which runs the
+  sidecar in-process, both use it."
   [config app]
   {:load-help rex/help
    :notify (fn [summary body]
              (babashka.process/process ["notify-send" (str "--app-name=" app) summary body]
                                        {:out :discard :err :discard}))
+   :spawn! (fn [spec]
+             (let [{:keys [argv env]} (spawn-spec config spec (System/getenv "PATH"))]
+               (babashka.process/process argv {:extra-env env :out :discard :err :discard})))
    :resync (fn [] (vec (for [srv (:servers config)
                              r (try (rex/program-statuses srv) (catch Exception _ []))]
                          (assoc r :server (:label srv)))))
@@ -221,12 +261,6 @@
          :cwd (fn [session block]
                 (let [p (rex/call (first (:servers config)) "block.method" {:session_id session :block_id block :method "process"})]
                   (or (get-in p [:foreground :cwd]) (get-in p [:child :cwd]))))
-         :spawn (fn [server argv env]
-                  (let [address (:address (or (some #(when (= server (:label %)) %) (:servers config))
-                                              (first (:servers config))))
-                        env (spawn-env env address (System/getenv "PATH"))]
-                    (babashka.process/process (resolve-argv argv env)
-                                              {:extra-env env :out :discard :err :discard})))
          :sessions (fn [] (rex/sessions (first (:servers config))))
          :new-workspace (fn [cwd name]
                           (let [dir (str (fs/path (fs/parent (or cwd ".")) name))]
@@ -241,7 +275,7 @@
                 (locking lock
                   (let [[s msgs] (f @state)]
                     (reset! state s)
-                    (write! msgs))))]
+                    (write! (perform! io msgs)))))]
     (step! #(emit % [{:op :ready}]))
     (doseq [srv (:servers config)]
       (rex/events! srv (fn [ev] (step! #(deliver % io {:op :rex/event :event ev :server (:label srv)})))))
