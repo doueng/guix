@@ -47,7 +47,7 @@
          (zipmap (map str "qwertyuiop") (range 16 26))
          (zipmap (map str "asdfghjkl") (range 30 39))
          (zipmap (map str "zxcvbnm") (range 44 51))
-         {"ctrl" 29 "shift" 42 "alt" 56 "esc" 1 "enter" 28 "/" 53
+         {"ctrl" 29 "shift" 42 "alt" 56 "esc" 1 "enter" 28 "/" 53 "-" 12 "=" 13
           "tab" 15 "space" 57 "pageup" 104 "pagedown" 109}))
 
 (defn chord-events

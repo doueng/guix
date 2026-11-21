@@ -1,14 +1,25 @@
-{:chrome
- [{:label "Search open tabs" :keys "T" :type "T"}
+{;; Chrome's commands in the Cmd+Space launcher, first while Chrome has focus.
+ ;; Each row runs one way: :type types Vimium keys into the page, :chord sends a
+ ;; Chrome or vimium-cljs shortcut, :url opens a page in a new tab and :tab acts
+ ;; on the active tab, both through the ext-reload helper (desktop/bin/ext-reload).
+ ;; :url and :tab rows need no focus, so the launcher lists them everywhere.
+ :chrome
+ [{:label "Vomnibar: open a URL, bookmark or history here" :keys "Ctrl+L" :chord "ctrl+shift+h"}
+  {:label "Vomnibar: open in a new tab" :keys "Cmd+T" :chord "ctrl+shift+y"}
+  {:label "Tab selector: search open tabs" :keys "T, Cmd+Space b b" :chord "ctrl+shift+k"}
+  {:label "Side panel: the tab list" :keys "Alt+E" :chord "ctrl+shift+e"}
+  {:label "Link hints: follow a link" :keys "f" :type "f"}
   {:label "Open URL, bookmark or history" :keys "o" :type "o"}
   {:label "Open URL in a new tab" :keys "O" :type "O"}
   {:label "Open a bookmark" :keys "b" :type "b"}
-  {:label "Follow a link" :keys "f" :type "f"}
   {:label "Open a link in a new tab" :keys "F" :type "F"}
   {:label "Focus the first input" :keys "gi" :type "gi"}
   {:label "Find in page" :keys "/" :type "/"}
   {:label "Copy page URL" :keys "yy" :type "yy"}
-  {:label "Duplicate tab" :keys "yt" :type "yt"}
+  {:label "Duplicate tab" :keys "yt" :tab "duplicate"}
+  {:label "Pin or unpin tab" :tab "pin"}
+  {:label "Mute or unmute tab" :tab "mute"}
+  {:label "Move tab to a new window" :tab "detach"}
   {:label "Edit the URL" :keys "ge" :type "ge"}
   {:label "Go up one URL level" :keys "gu" :type "gu"}
   {:label "Back" :keys "H" :type "H"}
@@ -16,7 +27,7 @@
   {:label "Previous tab" :keys "J" :type "J"}
   {:label "Next tab" :keys "K" :type "K"}
   {:label "Close tab" :keys "x" :type "x"}
-  {:label "Restore closed tab" :keys "X" :type "X"}
+  {:label "Reopen closed tab" :keys "Ctrl+Shift+T" :chord "ctrl+shift+t"}
   {:label "Reload page" :keys "r" :type "r"}
   {:label "Scroll to top" :keys "gg" :type "gg"}
   {:label "Scroll to bottom" :keys "G" :type "G"}
@@ -26,11 +37,25 @@
   {:label "New tab" :keys "Ctrl+T" :chord "ctrl+t"}
   {:label "New window" :keys "Ctrl+N" :chord "ctrl+n"}
   {:label "Address bar" :keys "Alt+D" :chord "alt+d"}
-  {:label "History" :keys "Ctrl+H" :chord "ctrl+h"}
-  {:label "Downloads" :keys "Ctrl+J" :chord "ctrl+j"}
-  {:label "Bookmark manager" :keys "Ctrl+Shift+O" :chord "ctrl+shift+o"}
+  {:label "Find in page (Chrome)" :keys "Ctrl+F" :chord "ctrl+f"}
+  {:label "Print" :keys "Ctrl+P" :chord "ctrl+p"}
+  {:label "Zoom in" :keys "Ctrl+=" :chord "ctrl+="}
+  {:label "Zoom out" :keys "Ctrl+-" :chord "ctrl+-"}
+  {:label "Reset zoom" :keys "Ctrl+0" :chord "ctrl+0"}
   {:label "Developer tools" :keys "Ctrl+Shift+I" :chord "ctrl+shift+i"}
-  {:label "Reset zoom" :keys "Ctrl+0" :chord "ctrl+0"}]
+  {:label "Task manager" :keys "Shift+Esc" :chord "shift+esc"}
+  {:label "Chrome: passwords" :url "chrome://password-manager/passwords"}
+  {:label "Chrome: extensions" :url "chrome://extensions"}
+  {:label "Chrome: extension shortcuts" :url "chrome://extensions/shortcuts"}
+  {:label "Chrome: history" :keys "Ctrl+H" :url "chrome://history"}
+  {:label "Chrome: downloads" :keys "Ctrl+J" :url "chrome://downloads"}
+  {:label "Chrome: bookmark manager" :keys "Ctrl+Shift+O" :url "chrome://bookmarks"}
+  {:label "Chrome: settings" :url "chrome://settings"}
+  {:label "Chrome: privacy and security" :url "chrome://settings/privacy"}
+  {:label "Chrome: cookies and site data" :url "chrome://settings/cookies"}
+  {:label "Chrome: search engines" :url "chrome://settings/searchEngines"}
+  {:label "Chrome: site settings" :url "chrome://settings/content"}
+  {:label "Chrome: clear browsing data" :keys "Ctrl+Shift+Delete" :url "chrome://settings/clearBrowserData"}]
  :idea
  [{:label "Find action" :keys "Ctrl+Shift+A" :action "GotoAction"}
   {:label "Go to file" :keys "Ctrl+Shift+N" :action "GotoFile"}

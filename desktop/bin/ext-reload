@@ -8,6 +8,8 @@
 ;;   ext-reload list                                          the extensions and what Chrome has loaded
 ;;   ext-reload serve                                         the hub (the ext-reload Home service)
 ;;   ext-reload setup                                         put the helper extension in place
+;;   ext-reload open URL                                      open URL, chrome:// pages too, in a new tab
+;;   ext-reload tab pin|mute|duplicate|detach                 act on Chrome's active tab
 ;;
 (ns ext-reload
   (:require [babashka.fs :as fs]
@@ -239,10 +241,12 @@
 (defn -main [& args]
   (let [{:keys [names] :as opts} (parse-opts args)]
     (case (first names)
-      (nil "-h" "--help") (println (str/join "\n" (->> (str/split-lines (slurp *file*)) (drop 1) (take 10) (map #(subs % (min 3 (count %)))))))
+      (nil "-h" "--help") (println (str/join "\n" (->> (str/split-lines (slurp *file*)) (drop 1) (take 12) (map #(subs % (min 3 (count %)))))))
       "serve" (serve)
       "setup" (do (install-helper!) (println setup-hint))
       "list" (list-all)
+      "open" (let [r (hub! {:op "open" :url (second names)})] (when-not (:ok r) (explain r nil)))
+      "tab" (let [r (hub! {:op "tab" :action (second names)})] (when-not (:ok r) (explain r nil)))
       "load" (doseq [nm (rest names)] (load! nm opts))
       (doseq [nm names] (reload nm opts)))))
 

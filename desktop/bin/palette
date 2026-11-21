@@ -152,9 +152,14 @@
     {:label (:label b) :keys (str keyleader/local-prefix " " (str/join " " (:keys b)))
      :shortcut (keyleader/shortcut (:keys b)) :source "Chrome" :value (str "chord:" (:chrome b))}))
 
-(defn chrome-entries []
-  (for [[i e] (map-indexed vector (config :chrome))]
-    (assoc (select-keys e [:label :keys]) :source "Chrome" :value (str "chrome:" i))))
+(defn chrome-entries
+  "palette.edn's Chrome rows; with GLOBAL only those that need no focused
+  Chrome: pages it opens (:url) and actions on its active tab (:tab)."
+  ([] (chrome-entries false))
+  ([global]
+   (for [[i e] (map-indexed vector (config :chrome))
+         :when (or (not global) (:url e) (:tab e))]
+     (assoc (select-keys e [:label :keys]) :source "Chrome" :value (str "chrome:" i)))))
 
 (defn idea-entries [grammar]
   (let [from-leader (for [b (keyleader/in-context grammar :idea)
@@ -186,20 +191,6 @@
   (cond chord @(p/process (into ["ydotool" "key"] (keyleader/chord-events chord)))
         type @(p/process ["ydotool" "type" type])))
 
-(defn run-entry! [grammar ctx value]
-  (let [[_ runner arg] (re-matches #"(?s)([a-z]+):(.*)" value)]
-    (case runner
-      "text" (keyleader/run! ["herdr" "pane" "send-text" (:pane ctx) arg])
-      "herdr" (keyleader/run-herdr! grammar (keyleader/leader-keys arg) ctx)
-      "desktop" (keyleader/run-desktop-entry! grammar arg)
-      "chrome" (type-keys! (nth (config :chrome) (parse-long arg)))
-      "idea" (do (type-keys! {:chord "esc"})
-                 (type-keys! {:type (str ":action " arg)})
-                 (type-keys! {:chord "enter"})))))
-
-(defn tagged [runner entries]
-  (map #(update % :value (fn [v] (str runner ":" v))) entries))
-
 (defn rex-entries
   "The Rex window's commands: leader.edn's, under Alt+Space, then every other
   action the client declares (its M-x), run with rex -C CLIENT do."
@@ -215,6 +206,18 @@
             (for [a actions :when (not (str/starts-with? (:name a) "mx.leader."))]
               {:label (:title a) :source "Rex" :value (str "rex:" (:name a))}))))
 
+(def ext-reload
+  "The ext-reload helper beside this script; a window Hyprland starts has no ~/.local/bin on PATH."
+  (str (fs/path (fs/parent (fs/real-path *file*)) "ext-reload")))
+
+(defn run-chrome!
+  "Run palette.edn's Chrome row E: open its page or act on the active tab
+  through the ext-reload helper, else send its keys to the focused Chrome."
+  [e]
+  (cond (:url e) (keyleader/run! [ext-reload "open" (:url e)])
+        (:tab e) (keyleader/run! [ext-reload "tab" (:tab e)])
+        :else (type-keys! e)))
+
 (defn send-text! [ctx text]
   (case (:kind ctx)
     :herdr (keyleader/run! ["herdr" "pane" "send-text" (:pane ctx) text])
@@ -228,7 +231,7 @@
       "rex" (keyleader/run! ["rex" "-C" (:client ctx) "do" arg])
       "desktop" (keyleader/run-desktop-entry! grammar arg)
       "chord" (type-keys! {:chord arg})
-      "chrome" (type-keys! (nth (config :chrome) (parse-long arg)))
+      "chrome" (run-chrome! (nth (config :chrome) (parse-long arg)))
       "idea" (do (type-keys! {:chord "esc"})
                  (type-keys! {:type (str ":action " arg)})
                  (type-keys! {:chord "enter"})))))
@@ -252,8 +255,12 @@
      :rex (rex-entries grammar ctx)
      nil)))
 
-(defn global-entries [grammar]
-  (tagged "desktop" (keyleader/desktop-entries grammar)))
+(defn global-entries
+  "Rows that run from any window: the desktop's, then Chrome pages and tab
+  actions, which Chrome's own rows already hold while it has focus."
+  [grammar ctx]
+  (concat (tagged "desktop" (keyleader/desktop-entries grammar))
+          (when-not (= :chrome (:kind ctx)) (chrome-entries true))))
 
 (defn history-key
   "Where this context's choices are remembered, apart from keyleader's own
@@ -266,7 +273,7 @@
   [grammar ctx]
   (let [k (history-key ctx)]
     (concat (dusk/by-history k (local-entries grammar ctx))
-            (dusk/by-history k (global-entries grammar)))))
+            (dusk/by-history k (global-entries grammar ctx)))))
 
 (defn edn-entries
   "ENTRIES as the EDN vector Emacs appends to its M-x request. Each :value

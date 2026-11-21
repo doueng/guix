@@ -35,13 +35,26 @@ const brief = (x) => ({ id: x.id, name: x.name, version: x.version, enabled: x.e
 
 // An extension is named by its id when its manifest has a key (the id is then the same wherever it was
 // loaded from), else by its name. Copies with the same name and another id are stale, as from an old folder.
-async function handle({ op, extId, url, name, matches = [], tabs = 'all' }) {
+// An action on the active tab of the window last focused, which is Chrome's own even while another app has focus.
+async function tabAction(action) {
+  const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!t) return { ok: false, error: 'no-tab' };
+  if (action === 'pin') await chrome.tabs.update(t.id, { pinned: !t.pinned });
+  else if (action === 'mute') await chrome.tabs.update(t.id, { muted: !t.mutedInfo?.muted });
+  else if (action === 'duplicate') await chrome.tabs.duplicate(t.id);
+  else if (action === 'detach') await chrome.windows.create({ tabId: t.id, focused: true });
+  else throw new Error(`unknown tab action ${action}`);
+  return { ok: true };
+}
+
+async function handle({ op, extId, url, name, action, matches = [], tabs = 'all' }) {
   if (op === 'list') return { ok: true, extensions: (await dev()).map(brief) };
   if (op === 'open') {
     const t = await chrome.tabs.create({ url, active: true });
     await chrome.windows.update(t.windowId, { focused: true });
     return { ok: true };
   }
+  if (op === 'tab') return tabAction(action);
   if (op !== 'reload') throw new Error(`unknown op ${op}`);
   const all = await dev();
   const same = all.filter((x) => (extId ? x.id === extId : x.name === name));

@@ -62,8 +62,18 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <p>Super+Space no longer enters a Hyprland submap. It runs <code>palette</code>, which reads the focused window's class from <code>hyprctl -j activewindow</code> and shows one fuzzy list:</p>
 <ol>
 <li><b>Local</b>, for the focused program: Chrome's Alt+Space map and Vimium keys; in a Herdr or Ghostty-plus-Rex window, the multiplexer's Alt+Space map, then the pane's program (fish history and functions, jjui keys); IntelliJ actions.</li>
-<li><b>Global</b>: the old desktop leader actions, applications (Ghostty, Chrome, Chrome incognito, Emacs, bbh, Herdr), workspaces, windows, power (suspend, reboot, power off, log out, each asking again) and the guide tips.</li>
+<li><b>Global</b>: the old desktop leader actions, applications (Ghostty, Chrome, Chrome incognito, Emacs, bbh, Herdr), workspaces, windows, power (suspend, reboot, power off, log out, each asking again), the guide tips, and the Chrome pages and tab actions below.</li>
 </ol>
+<h3>Chrome's commands</h3>
+<p><code>desktop/configs/keybindings/palette.edn</code>'s <code>:chrome</code> table lists them, and each row runs one way:</p>
+<div class="table"><table>
+<tr><th>Row</th><th>How it runs</th><th>Commands</th><th>Where listed</th></tr>
+<tr><td><code>:url</code></td><td>The ext-reload helper extension opens the page in a new tab and brings Chrome forward (<code>ext-reload open URL</code>). chrome:// pages can't be typed or linked from a page, but an extension can open them</td><td>Passwords, extensions, extension shortcuts, history, downloads, bookmark manager, settings, privacy and security, cookies, search engines, site settings, clear browsing data</td><td>Chrome first; everywhere else after the desktop rows</td></tr>
+<tr><td><code>:tab</code></td><td>The helper acts on the active tab of Chrome's last focused window (<code>ext-reload tab ACTION</code>)</td><td>Pin or unpin, mute or unmute, duplicate, move to a new window</td><td>Chrome first; everywhere else after the desktop rows</td></tr>
+<tr><td><code>:chord</code></td><td>The Chrome or vimium-cljs shortcut, sent to the focused Chrome</td><td>Vomnibar here or in a new tab, tab selector, side panel tab list (Alt+E), reopen closed tab, find, print, zoom in, out and reset, developer tools, task manager, new tab and window, address bar</td><td>Chrome only, since it needs focus</td></tr>
+<tr><td><code>:type</code></td><td>Vimium keys typed into the page</td><td>Link hints, open a link in a new tab, scroll, history back and forward, copy the URL, and the rest of Vimium's normal mode</td><td>Chrome only</td></tr>
+</table></div>
+<p>Incognito stays a desktop row (Cmd+Space o n). <code>make chrome-palette-check</code> runs a headed Chrome on the hidden test display with the helper and a hub of its own, chooses Passwords, Extensions, Pin and Mute as the launcher does, and checks the page or the tab.</p>
 <p>Each row shows its keys. In Emacs, Emacs's own M-x list stays the list (it already caches thousands of commands), and the launcher appends the terminal and global rows to it, so one search still finds all three.</p>
 
 <h3>Old Cmd+Space sequences</h3>

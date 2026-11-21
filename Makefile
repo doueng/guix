@@ -15,7 +15,7 @@ COMMON := -L "$(MODULES)"
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify rexmux rexmux-test rexmux-verify rexmux-tla ghostty-rex ghostty-rex-test ghostty-rex-verify ghostty-rex-reload mux oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test ext-reload-test chrome-e2e \
-        doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check chrome-fullscreen-check test-display-check clipboard-check \
+        doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check chrome-palette-check chrome-fullscreen-check test-display-check clipboard-check \
         clipboard-history-test taildrop-test parinfer-check parinfer-fix
 
 help:
@@ -77,6 +77,7 @@ help:
 	@echo 'kanata-check  run kanata.kbd chord tests in the kanata simulator'
 	@echo 'keybindings-check kanata-check plus generated-binding, Hyprland, Emacs and Neovim tests'
 	@echo 'hypr-nested-check test Hyprland keybindings in a nested session'
+	@echo 'chrome-palette-check run launcher Chrome rows (passwords, extensions, pin, mute) in a Chrome on the hidden test display'
 	@echo 'chrome-fullscreen-check press F on a video in a throwaway Chrome in nested Hyprland: fills the screen, Esc back to the tile'
 	@echo 'test-display-check open a headed Chrome in the headless test display and prove the user'\''s screen and focus stay untouched'
 	@echo 'clipboard-check yank and paste between Emacs, Neovim and the Wayland clipboard (uses the live clipboard)'
@@ -343,6 +344,9 @@ keybindings-check: kanata-check
 
 hypr-nested-check:
 	bb desktop/build/keybindings/hypr-nested.bb
+
+chrome-palette-check:
+	node desktop/build/keybindings/chrome-palette-e2e.mjs
 
 chrome-fullscreen-check:
 	bb desktop/build/hypr/chrome-fullscreen-check.bb

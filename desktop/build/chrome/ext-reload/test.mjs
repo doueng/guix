@@ -71,7 +71,8 @@ try {
   assert.match(r.stderr, /helper is not connected/, 'says so when Chrome has no helper');
 
   const profile = join(tmp, 'profile');
-  chrome = spawn('flatpak', ['run', `--filesystem=${tmp}`, 'com.google.Chrome', '--headless=new', `--user-data-dir=${profile}`,
+  // --no-documents-portal: no file chooser here, and a stale portal mount makes bwrap refuse to start.
+  chrome = spawn('flatpak', ['run', '--no-documents-portal', `--filesystem=${tmp}`, 'com.google.Chrome', '--headless=new', `--user-data-dir=${profile}`,
     '--no-first-run', '--disable-gpu', '--remote-debugging-pipe', '--enable-unsafe-extension-debugging', 'about:blank'],
     { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
   let id = 0, buf = '';

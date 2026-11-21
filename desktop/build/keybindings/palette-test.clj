@@ -31,13 +31,13 @@
 (deftest the-focused-programs-commands-come-before-the-global-ones
   (let [sources (fn [ctx] (distinct (map :source (entries ctx))))]
     (with-redefs [palette/fish-entries (constantly [{:label "ls" :source "History" :value "text:ls"}])]
-      (is (= ["History" "Herdr" "Desktop" "Guide"] (sources {:kind :herdr :program {:id :fish}})))
-      (is (= ["Herdr" "Desktop" "Guide"] (sources {:kind :herdr :program nil}))))
-    (is (= ["jjui" "Herdr" "Desktop" "Guide"] (sources {:kind :herdr :program {:id :jjui}})))
-    (is (= ["jjui" "Rex" "Desktop" "Guide"] (sources {:kind :rex :program {:id :jjui} :actions rex-actions})))
+      (is (= ["History" "Herdr" "Desktop" "Guide" "Chrome"] (sources {:kind :herdr :program {:id :fish}})))
+      (is (= ["Herdr" "Desktop" "Guide" "Chrome"] (sources {:kind :herdr :program nil}))))
+    (is (= ["jjui" "Herdr" "Desktop" "Guide" "Chrome"] (sources {:kind :herdr :program {:id :jjui}})))
+    (is (= ["jjui" "Rex" "Desktop" "Guide" "Chrome"] (sources {:kind :rex :program {:id :jjui} :actions rex-actions})))
     (is (= ["Chrome" "Desktop" "Guide"] (sources {:kind :chrome})))
     (is (= "IntelliJ" (first (sources {:kind :idea}))))
-    (is (= ["Desktop" "Guide"] (sources {:kind :desktop}))))
+    (is (= ["Desktop" "Guide" "Chrome"] (sources {:kind :desktop}))))
   (testing "a recent global choice stays below the local rows"
     (let [es (entries {:kind :chrome} ["desktop:leader:b b"])]
       (is (= "Chrome" (:source (first es))))
@@ -89,6 +89,31 @@
   (is (= [{:chord "esc"} {:type ":action ReformatCode"} {:chord "enter"}] (run-with "idea:ReformatCode" {})))
   (is (= [{:label "New tab" :keys "Ctrl+T" :chord "ctrl+t"}]
          (run-with (str "chrome:" (first (keep-indexed #(when (= "New tab" (:label %2)) %1) (palette/config :chrome)))) {}))))
+
+(deftest chrome-commands-run-by-their-kind-and-pages-are-global
+  (let [row (fn [label] (some #(when (= label (:label %)) %) (entries {:kind :chrome})))
+        ext (fn [& args] (into [palette/ext-reload] args))]
+    (testing "a chrome:// page opens through the ext-reload helper"
+      (is (= [(ext "open" "chrome://password-manager/passwords")] (run-with (:value (row "Chrome: passwords")) {:kind :chrome})))
+      (is (= [(ext "open" "chrome://extensions")] (run-with (:value (row "Chrome: extensions")) {:kind :desktop}))))
+    (testing "a tab action goes to the helper too"
+      (is (= [(ext "tab" "pin")] (run-with (:value (row "Pin or unpin tab")) {:kind :chrome})))
+      (is (= [(ext "tab" "detach")] (run-with (:value (row "Move tab to a new window")) {:kind :chrome}))))
+    (testing "Chrome and vimium-cljs shortcuts are sent to Chrome"
+      (is (= [{:chord "shift+esc"}] (map #(select-keys % [:chord]) (run-with (:value (row "Task manager")) {:kind :chrome}))))
+      (is (= [{:chord "ctrl+shift+e"}] (map #(select-keys % [:chord]) (run-with (:value (row "Side panel: the tab list")) {:kind :chrome})))))
+    (testing "every chord is one ydotool can press"
+      (doseq [e (palette/config :chrome) :when (:chord e)]
+        (is (seq (keyleader/chord-events (:chord e))) (:chord e)))))
+  (testing "pages and tab actions are listed outside Chrome; keys that need Chrome focused are not"
+    (let [labels (set (map :label (filter #(= "Chrome" (:source %)) (entries {:kind :desktop}))))]
+      (is (labels "Chrome: passwords"))
+      (is (labels "Mute or unmute tab"))
+      (is (not (labels "Task manager")))
+      (is (not (labels "Link hints: follow a link")))))
+  (testing "with Chrome focused each Chrome row is listed once"
+    (let [chrome (filter #(= "Chrome" (:source %)) (entries {:kind :chrome}))]
+      (is (= (count chrome) (count (distinct (map :value chrome))))))))
 
 (deftest the-launcher-lists-and-runs-chrome-incognito
   (testing "a global row everywhere, with its Cmd+Space keys"
