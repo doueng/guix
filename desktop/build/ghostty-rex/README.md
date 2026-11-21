@@ -19,7 +19,10 @@ status line and an echo line. Ghostty's own tabs and splits are not used.
   from OSC 7501, notifications, and bbh routing (`bbh say --from rex`).
 - **rexg-render** (C, `csrc/rexg-render.c`): one libghostty-vt terminal per Rex
   block. It decodes the stream's Ghostty snapshot and composes the visible
-  panes and the client's chrome into the terminal it runs in. Pane bytes never
+  panes and the client's chrome into the terminal it runs in. The snapshot's
+  visible screen shows as soon as it is in, before history and images (pi's
+  pane can hold tens of MB of them); a pane shown before keeps its last
+  screen until then, and a new one says it is loading. Pane bytes never
   reach Ghostty, so terminal queries get one reply, from Rex. The Guix package
   `rexg-render` builds it on the `libghostty-vt` package, both in
   modules/engstrand/packages/ghostty.scm.
@@ -66,7 +69,10 @@ reaches the client, and keeps copy, paste and font size.
   and wheel, rename, split cwd, resize, bare Ctrl+h and Ctrl+L (keyleader
   term-nav: focus moves left, a shell's screen clears), copy mode and search, Ctrl+Shift+V,
   project sessions, jjui and bbh's inbox layers, bbh say --from rex, session
-  rename, a desktop notification for a blocked agent, and a simulated reboot. Then Bombadil types into
+  rename, a desktop notification for a blocked agent, a simulated reboot, and
+  switch timing: in a pty client, a pi tab holding a 24 MB image (as pi's
+  inline screenshots make it) must paint within 300 ms of a project switch
+  (`bb switch-timing` runs only this, in about a minute). Then Bombadil types into
   `bb attach` with rexmux's specs (`../rexmux/test/bombadil/rexmux.ts` and
   `startup.ts`), 60 s each (`--time N`, `--no-bombadil`, `--keep`), with
   `REXG_SYNC=0` so the renderer drops synchronized output and Bombadil

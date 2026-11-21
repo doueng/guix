@@ -24,7 +24,9 @@
     a blocked agent in another tab sends one desktop notification (stubs
     record notify-send and bbh);
   - persistence: after the server dies with its programs, as in a reboot,
-    a new client brings each startup tab's program back (pi --continue).
+    a new client brings each startup tab's program back (pi --continue);
+  - switch timing (switch-timing!, also bb switch-timing): a pi tab whose
+    pane holds a 24 MB image paints within 300 ms of a project switch.
   Copies and opened URLs go to files (REXG_CLIPBOARD_FILE, REXG_OPEN_FILE),
   and a screenshot of each step lands in the run's directory, which a
   passing run removes unless --keep."
@@ -632,6 +634,101 @@
             (wait-for 5000 #(not-any? alive? pids))
             (pr-str (filter alive? pids)))))
 
+(defn- pty-output
+  "Collect PROC's stdout with the time each chunk came. Returns {:now :size
+  :wait}: (wait t0 pos needle ms) is the ms after T0 when the chunk holding
+  NEEDLE, the first after byte POS, came; nil when none came within MS."
+  [proc]
+  (let [out (java.io.ByteArrayOutputStream.)
+        marks (atom [])
+        now #(quot (System/nanoTime) 1000000)]
+    (future (let [in (:out proc) buf (byte-array 65536)]
+              (loop [] (let [n (.read ^java.io.InputStream in buf)]
+                         (when (pos? n)
+                           (locking out (.write out buf 0 n) (swap! marks conj [(now) (.size out)]))
+                           (recur))))))
+    {:now now
+     :size #(locking out (.size out))
+     :wait (fn [t0 pos needle ms]
+             ;; The time the chunk holding NEEDLE came, else nil after MS.
+             (loop []
+               (let [b (locking out (.toByteArray out))
+                     t (String. ^bytes b (int pos) (int (- (alength ^bytes b) pos)) "ISO-8859-1")
+                     i (str/index-of t needle)]
+                 (cond i (- (some (fn [[tm sz]] (when (> sz (+ pos i)) tm)) @marks) t0)
+                       (> (- (now) t0) ms) nil
+                       :else (do (Thread/sleep 5) (recur))))))}))
+
+(defn switch-timing!
+  "How long a project switch takes to paint (T210), in the client in a
+  120x30 pty against a throwaway server, timing the renderer's own output:
+  pi tabs whose pane holds a 24 MB Kitty image (test/rexg/image_pi.bb), as
+  the real pi's held 51 MB on personal-site and showed nothing for 10 s.
+  The first look at such a pane paints within 300 ms (its screen, else the
+  loading placeholder) and is whole within 3 s; going back and forth between
+  two open projects paints within 300 ms each time."
+  [root]
+  (let [dir (str root "/switch-timing")
+        bin (e2e/stubs! (str dir "/stubs"))
+        _ (spit (str bin "/pi") (str "#!" (fs/which "bb") "\n" (slurp (str (fs/path here "test" "rexg" "image_pi.bb")))))
+        s (ts/start! {:root (str dir "/srv") :path-prepend bin})
+        config (str dir "/ghostty-rex.edn")
+        _ (config! s config)
+        project (str (:root s) "/projects/demo")
+        _ (fs/create-dirs project)
+        proc (p/process {:env (client-env s dir config) :dir here :err (str dir "/tty.log")}
+                        "script" "-qfec" (str "stty cols 120 rows 30; exec " (fs/which "bb") " attach 2>>" dir "/tty.log") "/dev/null")
+        {:keys [now size wait]} (pty-output proc)
+        ;; The stub prints its directory's first letter twenty times: rexg-render
+        ;; rewrites only changed cells, so the two panes' marks differ in each.
+        mark #(apply str (repeat 20 %))
+        pi-done (fn [label] (wait-for 30000 #(let [sid (:session_id (session s label))
+                                                   w (some (fn [w] (when (= "pi" (:label w)) w)) (:windows (view s sid)))]
+                                               (str/includes? (capture s sid (:focused_block_id w)) (mark (first (fs/file-name (if (= label "main") (:root s) project))))))))
+        do! #(ts/rex! s "-C" "ghostty-rex" "do" %)
+        first-look (fn [what letter]
+                     (let [t0 (now) pos (size)]
+                       (do! "mx.tab.select_3")
+                       (let [any (wait t0 pos (str (mark letter)) 300)
+                             any (or any (wait t0 pos "loading this pane" 300))
+                             ;; Wait past the budget, so a slow build shows its time
+                             ;; instead of switching away mid-decode.
+                             whole (wait t0 pos (mark letter) 15000)]
+                         (check! (str "switch timing: the first look at " what "'s pi tab paints within 300 ms") (and any (<= any 300)) (str any " ms"))
+                         (check! (str "switch timing: it is whole within 3 s") (and whole (<= whole 3000)) (str whole " ms")))))]
+    (try
+      (wait-for 20000 #(session s "main"))
+      (pi-done "main")
+      (Thread/sleep 1000)
+      (first-look "main" (first (fs/file-name (:root s))))
+      (ts/rex! s "-C" "ghostty-rex" "do" "mx.session.open_project" (str "dir=" project))
+      (wait-for 20000 #(session s "demo"))
+      (pi-done "demo")
+      (Thread/sleep 1000)
+      (first-look "a new project" \d)
+      (Thread/sleep 1000)
+      (let [times (vec (for [i (range 6)
+                             :let [letter (if (even? i) (first (fs/file-name (:root s))) \d)
+                                   t0 (now) pos (size)]]
+                         (do (do! "mx.session.last")
+                             (let [t (wait t0 pos (mark letter) 15000)] (Thread/sleep 700) t))))]
+        (check! "switch timing: back and forth between open projects paints within 300 ms"
+                (every? #(and % (<= % 300)) times) (str (pr-str times) " ms")))
+      (finally
+        (p/destroy-tree proc)
+        (try (ts/stop! s) (catch Exception _))))))
+
+(defn switch-timing-main
+  "bb switch-timing: only the switch timing checks; exits 1 when one fails."
+  [& _]
+  (let [root (str (fs/create-temp-dir {:prefix "ghostty-rex-switch-"}))]
+    (try (switch-timing! root) (catch Throwable e (check! "switch timing" false (ex-message e))))
+    (let [failed (remove :ok @results)]
+      (println (format "switch timing: %d checks, %d failed; logs in %s" (count @results) (count failed) root))
+      (when (empty? failed) (fs/delete-tree root))
+      (shutdown-agents)
+      (System/exit (if (empty? failed) 0 1)))))
+
 (defn- bombadil-bin []
   (or (some-> (fs/which "bombadil") str)
       (let [{:keys [exit out err]} (p/sh {:dir checkout} "guix" "build" "-L" "modules" "-e" "(@ (engstrand packages bombadil) bombadil)")]
@@ -730,6 +827,7 @@
         root (str (fs/create-temp-dir {:prefix "ghostty-rex-e2e-"}))]
     (println "e2e run in" root)
     (e2e! root)
+    (try (switch-timing! root) (catch Throwable e (check! "switch timing" false (ex-message e))))
     (when-not (some #{"--no-bombadil"} args)
       (doseq [spec ["tabs" "startup" "restored"]]
         (try (bombadil! root spec time)
