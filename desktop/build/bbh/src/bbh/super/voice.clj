@@ -25,56 +25,85 @@
           (or (some (fn [[i o]] (when (= (:recommended ask) (:id o)) (inc i))) options) 0)
           :else (some (fn [[i o]] (when (= words (plain (:label o))) (inc i))) options))))
 
+(defn target
+  "Which thread spoken TEXT is for, and its words: the thread its handle
+  names, else, only for TARGET :selected, the thread the Inbox cursor
+  SELECTED ({:thread :ask :at}) in the minute before NOW, so a cursor resting
+  on a row cannot redirect what you say. {:text :handle :thread :words}."
+  [text {:keys [selected now target]}]
+  (let [text (str/trim text)
+        [handle rest] (model/parse-handle text)
+        age (- now (or (:at selected) 0))]
+    {:text text :handle handle
+     :thread (or handle (when (and (= :selected target) (<= 0 age 60000)) (:thread selected)))
+     :words (plain (if handle rest text))}))
+
+(defn interpret
+  "What to do for TARGET (from target) given VIEW, its thread as the
+  controller shows it (nil when there is none), and SELECTED, the Inbox
+  cursor. {:do [effect ...] :result r} or {:refuse message :data {...}}. An
+  effect is [:pick thread n ask-id], [:send thread] or [:say text]. Voice
+  never approves: not with words, and no pick on an action or review ask."
+  [{:keys [text handle thread words]} view selected]
+  (let [[_ pick-words] (re-matches #"(.*?)\s*(?:and )?send" words)
+        send? (some? pick-words)
+        pick-words (if send? pick-words words)
+        open (sort-by :seq (filter #(= :open (:state %)) (:asks view)))
+        ask (or (when (= thread (:thread selected)) (some #(when (= (:ask selected) (:id %)) %) open)) (last open))
+        n (when (and thread (seq pick-words)) (pick-number ask pick-words))
+        refuse (fn [message data] {:refuse message :data data})]
+    (cond
+      (and handle (nil? view)) (refuse "No such thread" {:thread handle})
+      (and thread (re-matches #"(?:i )?approved?(?: .*)?" words))
+      (refuse "Voice cannot approve; press A in the inbox or tap Approve" {:thread thread})
+
+      (and thread n)
+      (cond (or (nil? ask) (#{:action :review} (:kind ask))) (refuse "Voice cannot approve action or review asks" {:thread thread})
+            (not (<= 1 n (count (:options ask)))) (refuse "No such option" {:thread thread})
+            :else {:do (cond-> [[:pick thread n (:id ask)]] send? (conj [:send thread]))
+                   :result (cond-> {:thread thread :draft true :option n} send? (assoc :sent true))})
+
+      (and thread send? (str/blank? pick-words))
+      {:do [[:send thread]] :result {:thread thread :sent true}}
+
+      :else {:do [[:say (if (and thread (not handle)) (str thread " " text) text)]]})))
+
+(defn send-refusal
+  "Why VIEW's draft may not be sent by voice, or nil: there is none, or it
+  picks an option of an action ask, which needs the keyboard."
+  [{:keys [draft asks]}]
+  (cond (some #(and (= :action (:kind %)) (contains? (:picks draft) (:id %))) asks) "Action asks require keyboard confirmation"
+        (not draft) "No draft to send"))
+
 (defn- send-draft!
-  "Send thread THREAD's draft, refusing a pick on an action ask."
+  "Send thread THREAD's draft, as it is after any pick, unless send-refusal
+  says no."
   [thread]
-  (let [{:keys [draft asks]} (call! {:command :thread :args {:id thread}})]
-    (when (some #(and (= :action (:kind %)) (contains? (:picks draft) (:id %))) asks)
-      (throw (ex-info "Action asks require keyboard confirmation" {:thread thread})))
-    (when-not draft
-      (throw (ex-info "No draft to send" {:thread thread})))
-    (pane/send! thread)))
+  (when-let [why (send-refusal (call! {:command :thread :args {:id thread}}))]
+    (throw (ex-info why {:thread thread})))
+  (pane/send! thread))
 
 (defn submit!
   "Act on one spoken utterance TEXT for the thread it names: pick an option,
   send the draft, or both in one breath (\"option two, send\"); anything else
   is a message. With no spoken handle the message goes to the Router. Only
   TARGET :selected uses the thread your Inbox cursor selected in the last
-  minute, and a pick goes to the ask the cursor is on, so a cursor resting
-  on a row cannot redirect what you say."
+  minute; target and interpret decide, this performs."
   [text & {:keys [target] :or {target :router}}]
   (when-not (str/blank? text)
     (pane/with-state-lock!
       (fn []
-        (let [text (str/trim text)
-              [handle rest] (model/parse-handle text)
-              {:keys [selected]} (pane/client-state)
-              age (- (System/currentTimeMillis) (or (:at selected) 0))
-              thread (or handle (when (and (= :selected target) (<= 0 age 60000)) (:thread selected)))
-              words (plain (if handle rest text))
-              [_ pick-words] (re-matches #"(.*?)\s*(?:and )?send" words)
-              send? (some? pick-words)
-              pick-words (if send? pick-words words)
-              t (when thread (call! {:command :thread :args {:id thread}}))
-              open (sort-by :seq (filter #(= :open (:state %)) (:asks t)))
-              ask (or (when (= thread (:thread selected)) (some #(when (= (:ask selected) (:id %)) %) open)) (last open))
-              n (when (and thread (seq pick-words)) (pick-number ask pick-words))]
-          (when (and handle (nil? t)) (throw (ex-info "No such thread" {:thread handle})))
-          (when (and thread (re-matches #"(?:i )?approved?(?: .*)?" words))
-            (throw (ex-info "Voice cannot approve; press A in the inbox or tap Approve" {:thread thread})))
-          (cond
-            (and thread n)
-            (do
-              (when (or (nil? ask) (#{:action :review} (:kind ask))) (throw (ex-info "Voice cannot approve action or review asks" {:thread thread})))
-              (when-not (<= 1 n (count (:options ask))) (throw (ex-info "No such option" {:thread thread})))
-              (pane/pick! thread n :ask (:id ask))
-              (when send? (send-draft! thread))
-              (cond-> {:thread thread :draft true :option n} send? (assoc :sent true)))
-
-            (and thread send? (str/blank? pick-words))
-            (do (send-draft! thread) {:thread thread :sent true})
-
-            :else (call! {:command :say! :args {:origin :voice :text (if (and thread (not handle)) (str thread " " text) text)}})))))))
+        (let [{:keys [selected]} (pane/client-state)
+              tgt (bbh.super.voice/target text {:selected selected :now (System/currentTimeMillis) :target target})
+              view (when (:thread tgt) (call! {:command :thread :args {:id (:thread tgt)}}))
+              {:keys [refuse data result] effects :do} (interpret tgt view selected)]
+          (when refuse (throw (ex-info refuse data)))
+          (reduce (fn [r [kind & xs]]
+                    (case kind
+                      :pick (let [[thread n ask] xs] (pane/pick! thread n :ask ask) r)
+                      :send (do (send-draft! (first xs)) r)
+                      :say (call! {:command :say! :args {:origin :voice :text (first xs)}})))
+                  result effects))))))
 
 (defn hex! [& args]
   (apply p/shell {:out :string :err :string :continue true} "hex" args))
