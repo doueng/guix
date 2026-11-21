@@ -856,6 +856,38 @@
       {:events [{:kind :outbox-dropped :thread (:thread o) :data {:id outbox}}] :result outbox}
       {:events [] :result outbox})))
 
+(defn outbox-plan
+  "The effects of one dispatcher pass on STATE. WAITING is the set of :sent
+  row ids whose mailbox file is still there, which the controller read. The
+  Router's pending rows go together, oldest first and each opening with its
+  id, unless all are summaries, which wait for a row that is not; every
+  other pending row goes to its Worker's mailbox; a sent row whose file is
+  gone is done; a row whose Worker has finished is dropped and its file
+  deleted. Effects: [:mailbox/send conversation {:message-id :text :kind}],
+  [:mailbox/delete conversation message-id] and [:command cmd], each command
+  under a fixed id, so a pass repeated after a crash changes nothing twice."
+  [state waiting]
+  (let [router (get-in state [:router :router :conversation])
+        rows (sort-by (comp id-order :id) (vals (:outbox state)))
+        router-row? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
+        batch (filter router-row? rows)
+        send (fn [{:keys [id conversation]} text kind]
+               ;; Named after the row, so a pass that died before recording the send rewrites the same message.
+               (let [m (message-id id)]
+                 [[:mailbox/send conversation (cond-> {:message-id m :text text} kind (assoc :kind kind))]
+                  [:command {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message m}}]]))]
+    (vec (concat
+          (when (some #(not= :summary (:delivery %)) batch)
+            (mapcat (fn [{:keys [id text delivery] :as o}] (send o (str (when-not (= :summary delivery) (str id " ")) text) nil)) batch))
+          (mapcat (fn [{:keys [id conversation text message] :as o}]
+                    (cond (dead-letter? state o)
+                          [[:command {:id (str "dropped-" id) :command :outbox-dropped! :args {:outbox id}}]
+                           [:mailbox/delete conversation (or message (message-id id))]]
+                          (= :pending (:state o)) (send o text (#{:steer :cancel} (:delivery o)))
+                          (and (= :sent (:state o)) (not (contains? waiting id)))
+                          [[:command {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}]]))
+                  (remove router-row? rows))))))
+
 (defn decide
   "Authorize and decide COMMAND for PRINCIPAL on STATE. Returns {:events :result}
   without :seq or :at on the events; the store assigns them. Throws ex-info

@@ -158,7 +158,7 @@ CancelDelivered(w) ==
   /\ UNCHANGED csig
 
 \* The Worker's live session interrupts on the cancel in its mailbox and deletes
-\* the file; dispatch! then marks the row :done (fold* :outbox-acked).
+\* the file; model/outbox-plan then marks the row :done (fold* :outbox-acked).
 TakeCancel(w) ==
   /\ wstate[w] = "cancelling" /\ csig[w] = "owed" /\ ~ended[w]
   /\ csig' = [csig EXCEPT ![w] = "taken"]

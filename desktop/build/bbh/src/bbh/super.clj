@@ -642,13 +642,17 @@ still running (T163)."
 (defn- perform!
   "Perform one effect of a model plan, such as model/cancel-plan's. Returns
   false when the plan should stop here."
-  [c [kind x]]
+  [c [kind x y]]
   (case kind
     :command (do (run! c :controller (cond-> x (nil? (:id x)) (assoc :id (new-id)))) true)
     :job/stop (if (process/stop-job! x)
                 (do (spit (str (:base x) ".exit") "137\n") true)
                 false)
     :promote (do (promote! c) true)
+    :mailbox/send (let [{:keys [message-id text] delivery :kind} y]
+                    (inbox/send! (conversation-root c x) text nil (cond-> {:message-id message-id} delivery (assoc :kind delivery)))
+                    true)
+    :mailbox/delete (do (inbox/ack! {:root (conversation-root c x)} y) true)
     (throw (ex-info (str "bbh super: unknown effect " (pr-str kind)) {:error :unknown-effect :effect kind}))))
 
 (defn- perform-plan!
@@ -730,33 +734,14 @@ still running (T163)."
           ((:open-router! launch) {:conversation conversation :token t}))))))
 
 (defn dispatch!
-  "One pass: send each pending outbox row to its Worker's mailbox, mark a sent
-  row done once its mailbox file is gone, and drop a row whose Worker has
-  finished, deleting its file. Each step is a command with a fixed id, so a
-  pass repeated after a crash changes nothing twice."
+  "One pass: read which sent rows' mailbox files are still there, then perform
+  model/outbox-plan, which sends, acks and drops outbox rows."
   [{:keys [state] :as c}]
-  (let [router (get-in @state [:router :router :conversation])
-        rows (sort-by (comp model/id-order :id) (vals (:outbox @state)))
-        for-router? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
-        batch (filter for-router? rows)
-        send! (fn [{:keys [id conversation]} text kind]
-                ;; Named after the row, so a pass that died before recording the send rewrites the same message.
-                (let [m (inbox/send! (conversation-root c conversation) text nil
-                                     (cond-> {:message-id (model/message-id id)} kind (assoc :kind kind)))]
-                  (run! c :controller {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message (:id m)}})))]
-    (when (some #(not= :summary (:delivery %)) batch)
-      (doseq [{:keys [id text delivery] :as o} batch]
-        (send! o (str (when-not (= :summary delivery) (str id " ")) text) nil)))
-   (doseq [{:keys [id conversation text message] :as o} rows
-           :when (not (and (= :pending (:state o)) (= router conversation)))]
-     (if (model/dead-letter? @state o)
-       (do (run! c :controller {:id (str "dropped-" id) :command :outbox-dropped! :args {:outbox id}})
-           (inbox/ack! {:root (conversation-root c conversation)} (or message (model/message-id id))))
-       (case (:state o)
-         :pending (send! o text (#{:steer :cancel} (:delivery o)))
-         :sent (when-not (inbox/waiting-since (conversation-root c conversation) message)
-                 (run! c :controller {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}))
-         nil)))))
+  (let [st @state
+        waiting (set (for [o (vals (:outbox st))
+                           :when (and (= :sent (:state o)) (inbox/waiting-since (conversation-root c (:conversation o)) (:message o)))]
+                       (:id o)))]
+    (perform-plan! c (model/outbox-plan st waiting))))
 
 (defn- fire-timers!
   "One pass over what is due on C's state by its clock: each Worker deadline is
