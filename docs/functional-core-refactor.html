@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Where IO is tangled with logic in bbh super and ghostty-rex, what a pure plan plus thin interpreter would look like, what it buys against W262, reconnect and PATH bugs, costs, and a ranked migration order.">
+<meta name="bbh-doc" content="T211">
+<title>Functional core, imperative shell for bbh and ghostty-rex</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Functional core, imperative shell for bbh and ghostty-rex</h1>
+<p class=sub>T211 · W269 · investigation, 2026-11-21. No code was changed. Tags: <span class='tag measured'>measured</span> read from code, logs or the super.db event log; <span class='tag inferred'>inferred</span> follows from what was read; <span class='tag guess'>guess</span> is judgment.</p>
+<nav><details><summary>Contents</summary><ol>
+<li><a href='#verdict'>Verdict</a></li>
+<li><a href='#map'>Where IO and logic are tangled today</a></li>
+<li><a href='#shape'>The shape: observe, plan, perform</a></li>
+<li><a href='#bbh'>bbh, area by area</a></li>
+<li><a href='#rexg'>ghostty-rex, area by area</a></li>
+<li><a href='#buys'>What it buys, bug by bug</a></li>
+<li><a href='#costs'>Costs, risks, and where it is not worth it</a></li>
+<li><a href='#order'>Migration order</a></li>
+</ol></details></nav>
+
+<h2 id=verdict>Verdict</h2>
+<div class='card good'><b>Most of the state is already a functional core.</b> <span class='tag measured'>measured</span>
+<ul>
+<li>bbh super: <code>bbh.super.model</code> is pure. <code>decide</code> turns a command into events and <code>fold</code> applies them. The state is a fold over the event log in super.db, which holds 24,984 events since 2 November. <code>store/commit!</code> is the only SQL. A property test drives random command sequences through it and checks Super.tla's rules.</li>
+<li>wf: <code>workflow/fold-event</code>, <code>replay</code> and <code>decide</code> are pure. <code>run-gates</code> and <code>attest!</code> are the shell.</li>
+<li>ghostty-rex: <code>rexg.model</code> is pure. Keys, Rex results and sidecar messages go in, and <code>[m outs]</code> comes back. The rexmux sidecar's <code>deliver</code> and <code>handle</code> return <code>[state msgs]</code>.</li>
+</ul></div>
+<div class='card warn'><b>What is still tangled is the layer that reacts to the world.</b> <span class='tag inferred'>inferred</span> These loops read processes, files and sockets, then decide what to do and do it in the same function. That layer is <code>reconcile!</code>, <code>dispatch!</code>, <code>launch-steps!</code> and <code>ensure-router!</code> in bbh/super.clj, <code>notify/tick!</code>, <code>voice/submit!</code>, the <code>handle!</code> and <code>:connect</code> code in rexg/main.clj, and the sidecar commands that spawn inside <code>:run</code>. Their decisions are not in the pure model, so property tests and TLA+ do not cover them. Two of the three recent bugs came from this layer.</div>
+<div class='card'><b>My opinion.</b> <span class='tag guess'>guess</span> Don't do a big refactor. The pure parts are already sound, and rewriting them buys little. Instead, take the decision out of each reactor into a pure <code>plan</code> function that returns effect data, and leave a dumb interpreter behind it. Do this one reactor at a time, starting with the ones behind real bugs: the cancel path (W262), the Rex reconnect, and sidecar spawning. Each step is small, keeps behavior, and adds a property test or a TLA+ action that matches the new code. Stop when what is left in the shell is IO with no <code>if</code> worth testing. Skip rexg-render, the SQL store, the jj, inbox and Emacs adapters, the web handlers and the sandbox.</div>
+<h2 id=map>Where IO and logic are tangled today</h2>
+<p>Per area: where the rules live, and whether a decision sits inside an IO function. Line counts are <span class='tag measured'>measured</span>.</p>
+<div class=table><table>
+<tr><th>Area</th><th>Pure core today</th><th>Tangled decision</th><th>Worth it</th></tr>
+<tr><td>Super event log and state</td><td>model.clj (1143 lines) decide/fold, store.clj (83) the only SQL</td><td>none worth moving; <code>append!</code> reads the clock</td><td>no</td></tr>
+<tr><td>Worker lifecycle</td><td>decide* for start, cancel, finish; <code>obligations</code>, <code>due</code>, <code>health</code></td><td><b>super.clj <code>reconcile!</code> lines 642-704</b>: cancel completion, relaunch, running detection, health commit</td><td><b>high</b></td></tr>
+<tr><td>Finish effects</td><td><code>obligations</code>, <code>effect-order</code>, Effects.tla</td><td><code>settle!</code> loop is thin already</td><td>low</td></tr>
+<tr><td>Launch and Router</td><td><code>next-queued</code>, <code>brief-text</code></td><td><code>launch-steps!</code> 110-124, <code>ensure-router!</code> 706-720 (grace window in an atom)</td><td>medium</td></tr>
+<tr><td>Outbox and inbox</td><td>outbox rows in state, <code>message-id</code></td><td><code>dispatch!</code> 722+: which rows to send, batch, ack and drop</td><td>medium</td></tr>
+<tr><td>Asks and replies</td><td>all in decide*: <code>reply-text</code>, <code>dismissal</code>, <code>ask-text-max</code></td><td>none</td><td>no</td></tr>
+<tr><td>Workflows (wf)</td><td>workflow.clj <code>decide</code>, <code>fold-event</code></td><td><code>run-command</code> shells out, then grades exit (fine)</td><td>no</td></tr>
+<tr><td>Notifications</td><td>notify.clj <code>plan</code>, <code>stale</code>, <code>due</code></td><td><b><code>tick!</code> 241-270</b> interleaves plan with shown-atom swaps, show/close calls, overrides file read</td><td>medium</td></tr>
+<tr><td>Voice</td><td><code>model/parse-handle</code>, <code>pick-number</code></td><td><b><code>submit!</code></b>: safety rules (voice cannot approve) mixed with lock, clock and socket calls</td><td>medium-high</td></tr>
+<tr><td>Phone (web.clj), Emacs (emacs.clj)</td><td>views from <code>model/sections</code></td><td>thin adapters</td><td>no</td></tr>
+<tr><td>Sandbox (32 lines)</td><td>n/a</td><td>none</td><td>no</td></tr>
+<tr><td>rexg key dispatch</td><td>keys.clj <code>read-input</code>, <code>model/key</code></td><td>main <code>:key</code>: scroll-to-bottom and selection reset done outside the model</td><td>low</td></tr>
+<tr><td>Command registry</td><td>registry.clj; most <code>:run</code> return effect vectors</td><td><b>term-nav and bbh say call <code>(rex ctx :spawn ...)</code> inside <code>:run</code></b>; <code>deliver</code> fires <code>notify-attention!</code></td><td><b>high</b> (PATH bugs)</td></tr>
+<tr><td>Layout and screen</td><td>screen.clj <code>render</code>, <code>pane-at</code>, <code>content-sizes</code></td><td>main <code>draw!</code> diff, <code>sync-sizes!</code>, <code>mouse!</code> selection rules (main 262-295)</td><td>medium</td></tr>
+<tr><td>Rex protocol</td><td><code>view-of</code>, <code>rex-response</code> by tag</td><td>request tags, <code>:text-reqs</code>, <code>:next-req</code> kept in main's <code>app</code> atom</td><td>medium</td></tr>
+<tr><td>Reconnect</td><td><code>disconnected</code>, <code>retry-ms</code></td><td><b>main <code>:connect</code> 356-378 and <code>lost!</code> 213-222</b>: start-local decision, retry scheduling, local? from REX_SERVER</td><td><b>high</b></td></tr>
+<tr><td>Spawning</td><td><code>spawn-env</code>, <code>resolve-argv</code> (pure since T207)</td><td><code>System/getenv</code> read in model.clj 307 (WAYLAND_DISPLAY) and in main; <code>start-local!</code>, <code>reload!</code></td><td>medium</td></tr>
+<tr><td>rexg-render (C, 584 lines)</td><td>it is the renderer</td><td>n/a</td><td>no</td></tr>
+</table></div>
+<div class=cite>/home/engstrand/guix/desktop/build/bbh/src/bbh/super.clj · /home/engstrand/guix/desktop/build/bbh/src/bbh/super/model.clj · /home/engstrand/guix/desktop/build/ghostty-rex/src/rexg/main.clj · /home/engstrand/guix/desktop/build/rexmux/sidecar/rexmux/sidecar.clj</div><h2 id=shape>The shape: observe, plan, perform</h2>
+<p>bbh super already has the inner loop: a command goes through <code>decide</code>, and the events it returns go through <code>fold</code>. What it lacks is an outer loop with the same discipline. Each reactor would split into three parts:</p><svg viewBox='0 0 640 200' role=img aria-label='observe, plan, perform loop'>
+<defs><marker id=ar viewBox='0 0 10 10' refX=9 refY=5 markerWidth=7 markerHeight=7 orient=auto><path d='M0,0L10,5L0,10z' fill='#5d6678'/></marker></defs>
+<rect x=10 y=60 width=150 height=70 rx=10 fill='#f7efdc' stroke='#8a6a1f'/><text x=85 y=88 text-anchor=middle font-size=15 font-weight=700>observe!</text><text x=85 y=110 text-anchor=middle font-size=12>ps, files, sockets, clock</text>
+<rect x=245 y=60 width=150 height=70 rx=10 fill='#e4f3ea' stroke='#2e7d4f'/><text x=320 y=88 text-anchor=middle font-size=15 font-weight=700>plan (pure)</text><text x=320 y=110 text-anchor=middle font-size=12>state + obs + now</text>
+<rect x=480 y=60 width=150 height=70 rx=10 fill='#f7efdc' stroke='#8a6a1f'/><text x=555 y=88 text-anchor=middle font-size=15 font-weight=700>perform!</text><text x=555 y=110 text-anchor=middle font-size=12>one case per effect</text>
+<line x1=160 y1=95 x2=243 y2=95 stroke='#5d6678' stroke-width=2 marker-end='url(#ar)'/><text x=202 y=86 text-anchor=middle font-size=11>obs map</text>
+<line x1=395 y1=95 x2=478 y2=95 stroke='#5d6678' stroke-width=2 marker-end='url(#ar)'/><text x=437 y=86 text-anchor=middle font-size=11>[effect ...]</text>
+<path d='M555,130 C555,185 320,185 320,132' fill=none stroke='#5d6678' stroke-width=2 marker-end='url(#ar)'/><text x=440 y=178 text-anchor=middle font-size=11>[:command ...] commits events, which fold into state</text>
+<rect x=245 y=8 width=150 height=34 rx=8 fill='#e6f0f5' stroke='#2f6f8f'/><text x=320 y=30 text-anchor=middle font-size=12>model/decide + fold</text>
+<line x1=320 y1=42 x2=320 y2=58 stroke='#2f6f8f' stroke-width=2/>
+</svg>
+<ol><li><b>observe!</b> reads the world into a plain map and decides nothing. It may stay lazy, as <code>emacs-up?</code> is a <code>delay</code> today.</li>
+<li><b>plan</b> is pure. From state, observations, now and policy it returns a vector of effects. All the <code>cond</code>s live here.</li>
+<li><b>perform!</b> is one <code>case</code> per effect kind. It contains no decisions. A failure becomes an event, or the next pass retries.</li></ol>
+<h3>Effect vocabulary, bbh super</h3>
+<pre><code>[:command {:id &quot;cancelled-W262&quot; :command :cancel-delivered! :args {...}}] ; commit via store, as run! does
+[:job/stop job]                       ; process/stop-job!, then write &lt;base&gt;.exit 137
+[:mailbox/send conv {:message-id m :text t :kind k}] then [:command :outbox-sent!]
+[:mailbox/delete conv message]
+[:session/open {:workspace :conversation :token-hash ...}]  ; token made in the shell, hash in the command
+[:session/release w]   [:session/end agent]
+[:wf/start w]  [:wf/close w]  [:jj/land w]  [:jj/advance w]  [:workspace/retire w]
+[:notify/show n prev-handle]  [:notify/close handle]  [:views/changed]
+[:promote]                            ; run next-queued again</code></pre>
+<p>The observations map, much of which <code>reconcile!</code> builds already when it calls <code>model/health</code>:</p>
+<pre><code>{:now 1795274265673
+ :emacs-up? true
+ :router-agent nil
+ :workers {&quot;W262&quot; {:agent {:pid 2288 :start &quot;70639339&quot;}
+                   :jobs [{:id &quot;1795269661329-245&quot; :state :unknown :pid nil}]
+                   :wf {:status :active :phase :diagnose}
+                   :repl? true
+                   :waits {&quot;o2357&quot; 1200}}}}</code></pre>
+<h3>Effect vocabulary, ghostty-rex</h3>
+<p>rexg.model already returns <code>[:rex ...] [:open-stream ...] [:close-stream ...] [:clipboard ...] [:open ...] [:paste ...] [:hints ...] [:quit]</code>. It would gain:</p>
+<pre><code>[:after ms event]           ; timer: the shell puts EVENT on the queue later
+[:connect srv]              ; try the control connection; result comes back as an event
+[:start-local-server srv]   ; rex server start
+[:spawn {:server s :argv [...] :env {...}}]   ; from sidecar commands, not inside :run
+[:notify summary body]      ; from the sidecar&#39;s deliver, not notify-send inside it
+[:render type payload]      ; one renderer frame: l v c w t s x o
+[:exec-reload {:session s}]</code></pre>
+<p>Its input events gain <code>[:connected srv client]</code>, <code>[:connect-failed srv why]</code> and <code>[:renderer-mode block bits]</code>. The environment it needs, such as <code>REX_SERVER</code> and <code>WAYLAND_DISPLAY</code>, is passed in once to <code>new-model</code> as <code>:env</code>.</p>
+<h2 id=bbh>bbh, area by area</h2>
+
+<h3>1. Worker lifecycle: the cancel that never finished (W262)</h3>
+<div class='card bad'><b>What the event log shows</b> <span class='tag measured'>measured</span>
+<ul>
+<li>14:01, seq 24246: W262's health is <code>:needs-human</code>. Job <code>1795269661329-245</code> is <code>:unknown</code> with pid nil: it "can no longer be identified as the process that started it".</li>
+<li>14:56, seq 24511 and 24513: <code>cancel-requested</code>, then outbox row o2357 sent and acked. The session took the cancel.</li>
+<li>15:06, seq 24522: <code>timer-fired :cancelling W262</code>. That was the 10-minute deadline from <code>model/deadlines</code>.</li>
+<li>No <code>worker-finished</code> follows. At 15:17 the Router started T210 (W266) to work around "W262 is stuck cancelling".</li>
+</ul></div>
+<p><b>Why it stuck</b> <span class='tag inferred'>inferred</span>. The cancel can complete only in the shell, in <code>reconcile!</code>:</p>
+<pre><code>;; super.clj 675-683, today
+(= :cancelling (:state w))
+(let [blocked (filter #(#{:unknown :lost} (:state %)) jobs)
+      running (filter #(= :running (:state %)) jobs)
+      stopped? (every? true? (mapv process/stop-job! running))]
+  (when (and (empty? blocked) stopped?)
+    (doseq [j running] (spit (str (:base j) &quot;.exit&quot;) &quot;137\n&quot;))
+    (when (or (not agent) (not (model/cancel-owed? @state w)))
+      (run! c :controller {:id (str &quot;cancelled-&quot; (:id w)) :command :cancel-delivered! ...})
+      (promote! c))))</code></pre>
+<p>An <code>:unknown</code> job makes <code>blocked</code> non-empty, so the branch does nothing on every pass, and nothing records why. Super.tla models the guard as <code>csig[w] /= "owed" \/ ended[w]</code>, without the job condition, and has no liveness rule that a cancel ends. The model checker passed while the code could wait forever. The person found out through the deadline timer. The deadline caught the hang, but it couldn't say what was blocking or offer a way out.</p>
+<p><b>After</b>: the decision moves into the model, where every outcome is named.</p>
+<pre><code>;; bbh.super.model, pure
+(defn cancel-plan
+  &quot;Effects that move :cancelling Worker W on, from OBS (its :agent and :jobs).&quot;
+  [state w {:keys [agent jobs]}]
+  (let [unknown (filterv #(#{:unknown :lost} (:state %)) jobs)
+        running (filterv #(= :running (:state %)) jobs)]
+    (cond
+      (seq unknown)
+      [[:command {:id (str &quot;cancel-blocked-&quot; (:id w) &quot;-&quot; (count unknown))
+                  :command :cancel-blocked! :args {:worker (:id w) :jobs (mapv :id unknown)}}]]
+      (seq running) (mapv #(vector :job/stop %) running)   ; next pass sees them gone
+      (or (not agent) (not (cancel-owed? state w)))
+      [[:command {:id (str &quot;cancelled-&quot; (:id w)) :command :cancel-delivered! :args {:worker (:id w)}}]
+       [:promote]]
+      :else [])))
+
+;; bbh.super, the shell
+(defn- perform! [c [kind x]]
+  (case kind
+    :command  (run! c :controller x)
+    :job/stop (when (process/stop-job! x) (spit (str (:base x) &quot;.exit&quot;) &quot;137\n&quot;))
+    :promote  (promote! c)))</code></pre>
+<p><code>:cancel-blocked!</code> folds into a <code>:needs</code> entry that the Inbox shows: "W262's cancel waits on job …245, which can no longer be identified; abandon it?". The person or the Router can answer with a <code>:abandon-job!</code> command. The TLA+ model gains a <code>Blocked(w)</code> variable and the liveness rule <code>Cancelling(w) ~&gt; (Finished(w) \/ NeedsPerson(w))</code>. TLC would have reported the W262 hang as a counterexample before the fix <span class='tag inferred'>inferred</span>.</p>
+<p>The same split applies to the rest of <code>reconcile!</code>: the health commit, the <code>:starting</code> to <code>:running</code> transition, and the relaunch after the restart grace. Together they make one <code>(model/reconcile-plan state obs now policy)</code>. Generating the token stays in the shell. The plan asks for one with <code>[:session/open ...]</code>, and the shell adds the hash to the <code>:issue-token!</code> command.</p>
+
+<h3>2. Outbox and inbox: dispatch!</h3>
+<p>The current version is safe: every step is a command with a fixed id, so a repeated pass is idempotent <span class='tag measured'>measured</span>. What remains in the shell is the choice of rows: Router batching, summaries, acking when the file is gone, and dropping rows of finished Workers. That becomes <code>(model/outbox-plan state {:mailbox-files #{...}})</code>, which returns <code>[:mailbox/send ...]</code>, <code>[:command :outbox-acked!]</code> and <code>[:mailbox/delete ...]</code>. You gain a property test for "a row of a finished Worker is never sent" and "the Router batch goes as one", without files. Medium value: no recent bug came from here.</p>
+
+<h3>3. Launch, promote, Router</h3>
+<p><code>launch-steps!</code> is a sequence in which each step needs the previous step's result: the workspace path, then the wf run id, then the buffer. Plans of effect data can only express that as several passes, one effect each, with the result fed back as a command. <code>:worker-prepared!</code> already does this. So the split costs more here than it buys. I'd only move the decision "start the Router now?" into the model: no Router agent, grace window passed, Emacs up. Today that decision depends on <code>(:router-tried c)</code>, an atom that a restart forgets <span class='tag inferred'>inferred</span>.</p>
+
+<h3>4. Event log, state, asks, workflows: leave them</h3>
+<p>These already follow the pattern. The one change worth making is to log raw observations as well as the results computed from them. <code>health-observed</code> (6,803 events) and <code>machine-observed</code> (4,695) already exist <span class='tag measured'>measured</span>. If <code>reconcile-plan</code>'s input were logged in a compact form, a bug report could replay a stuck Worker's exact pass. Keep the volume in mind: health is about 27% of all events. One option is to log observations only when the plan's output changes <span class='tag guess'>guess</span>.</p>
+
+<h3>5. Notifications: notify/tick!</h3>
+<pre><code>;; today: plan is pure, but tick! swaps atoms between show!/close! calls
+(doseq [n (plan p state)]
+  (when (= :burst (:key n)) (doseq [t ...] ((:close! effects) (@shown t)) (swap! shown dissoc t)))
+  (let [handle ((:show! effects) n (:handle prev))] (swap! shown assoc ...)))
+
+;; after: one pure step, handles come back as events
+(defn step [notifier state now policy overrides]
+  {:notifier notifier&#39; :effects [[:notify/close h] [:notify/show n prev-handle] ...] :due due})</code></pre>
+<p>The open question is which handle a show returns. The shell feeds it back as <code>[:shown key handle]</code>. This step is worth doing only when notification bugs come up. Today they don't.</p>
+
+<h3>6. Voice: submit!</h3>
+<p>The safety rules, such as "voice cannot approve", no picks on action or review asks, and the 60-second cursor window, are the most important logic in the file. Yet they sit inside <code>pane/with-state-lock!</code> next to socket calls and <code>System/currentTimeMillis</code>.</p>
+<pre><code>;; after: pure interpretation, in two phases because the thread is fetched by handle
+(voice/target text {:selected sel :now now})        ;=&gt; {:thread &quot;T12&quot; :words &quot;option two send&quot;}
+(voice/interpret words thread-view sel)             ;=&gt; {:do [[:pick &quot;T12&quot; 2 &quot;a40&quot;] [:send &quot;T12&quot;]]}
+                                                    ;   or {:refuse &quot;Voice cannot approve; press A ...&quot;}</code></pre>
+<p>A generative test can then check that no utterance ever yields a pick on an <code>:action</code> or <code>:review</code> ask. It is a small change with a safety payoff.</p>
+
+<h3>7. Emacs, phone (web.clj), sandbox, inbox, workspace (jj), store</h3>
+<p>These are adapters: they translate, then call IO. A pure core would be a copy of their arguments. Leave them.</p>
+<h2 id=rexg>ghostty-rex, area by area</h2>
+<p>rexg.model (644 lines) is a pure port of rexmux's model.rs, so the Bombadil specs and Rexmux.tla describe it. main.clj (423 lines) is meant to be the shell. But its <code>app</code> atom holds a second, untested model: <code>:conns :tags :streams :sizes :panes :text-reqs :next-req :last-draw :title</code>. Its <code>handle!</code>, <code>mouse!</code> and <code>:connect</code> branches make decisions <span class='tag measured'>measured</span>.</p>
+
+<h3>1. Reconnect, and 'local not connected'</h3>
+<p>The T210 mechanism found two causes <span class='tag measured'>measured</span>:</p>
+<ul>
+<li>(a) The shared test harness stopped the user's live Rex server, because <code>rex server stop</code> ignores <code>REX_SERVER</code>.</li>
+<li>(b) The client never reconnected. On <code>:closed</code> it only echoed, so every later request said "local is not connected".</li>
+</ul>
+<p><code>make switch</code> itself did not stop Rex. T210 fixed (b), but the reconnect policy now lives in the shell:</p>
+<pre><code>;; main.clj 356-378, today (abridged)
+:connect (let [local? (and (nil? address) (nil? (System/getenv &quot;REX_SERVER&quot;)))]
+           (when-not (get-in @app [:conns srv])
+             (when (and local? (not (fs/exists? sock))) (start-local! log))
+             (let [c (try (try!) (catch Exception e
+                       (if local? (do (start-local! log) (try (try!) (catch Exception e2 (ex-message e2))))
+                                  (ex-message e))))]
+               (if (map? c) (do (swap! app assoc-in [:conns srv] c) (follow-events! srv)
+                                (step! model/connected srv (:client-id c)))
+                            (lost! srv (or c &quot;no server&quot;))))))
+;; lost!: (step! model/disconnected ...) then (future (Thread/sleep in-ms) (put! [:connect srv]))</code></pre>
+<p>After: the connection becomes a state machine in the model, with <code>:conn</code> in <code>:down</code>, <code>:connecting</code> or <code>:up</code>. Every branch above becomes a returned out:</p>
+<pre><code>;; rexg.model, pure
+(defn connect-failed [m srv why]
+  (let [n (get-in m [:servers srv :attempt] 0)
+        ms (retry-ms n)
+        start? (and (local? m srv) (#{0 1} n))]        ; :env passed to new-model, no getenv
+    (let [[m outs] (disconnected m srv why ms)]
+      [m (cond-&gt; outs start? (conj [:start-local-server srv])
+                      true   (conj [:after ms [:connect srv]]))])))
+
+(defn closed [m srv why] (connect-failed m srv why))   ; one path for both
+
+;; rexg.main, the shell: no cond, results come back as events
+:connect (put! (let [c (try (rex/connect! sock label on-msg) (catch Exception e (ex-message e)))]
+                 (if (map? c) [:connected srv c] [:connect-failed srv c])))
+:start-local-server (start-local! log)
+:after (let [[ms ev] xs] (future (Thread/sleep ms) (put! ev)))</code></pre>
+<p>What this buys:</p>
+<ul>
+<li>A unit test of "closed, failed three times, then connected" that reads like the bug report and runs in milliseconds, not in the 5-minute e2e.</li>
+<li>Rexmux.tla can add <code>Drop</code> and <code>Reconnect</code> actions plus a liveness rule <code>ServerUp ~&gt; ClientAttached</code>. Today the model covers streams, the link and agents, not loss of the control connection <span class='tag measured'>measured</span>. This would have caught (b).</li>
+<li>It does not catch (a), which came from an ambient address: the Rex CLI acted on the account's server instead of <code>REX_SERVER</code>. The fix there, passing <code>-S</code> everywhere, follows the same principle of making inputs explicit, but at the test harness, not in a core.</li>
+</ul>
+
+<h3>2. Command registry and spawning (PATH bugs)</h3>
+<p>Most registry commands already return effect vectors: <code>:run (fn [ctx args] [[:layer/float {...}]])</code>. The exceptions are the commands behind the T207 PATH bugs <span class='tag measured'>measured</span>. They spawn while running:</p>
+<pre><code>;; rexmux/commands.clj 178-181, today
+:run (fn [ctx _]
+       (rex ctx :spawn (:server ctx) [&quot;keyleader&quot; &quot;term-nav&quot; d]
+            {&quot;REX_BLOCK&quot; (:block-id ctx) &quot;REX_SESSION&quot; (:session-id ctx) &quot;TERM_PROGRAM&quot; &quot;rex&quot;})
+       [])
+
+;; after: data out; make-io&#39;s interpreter applies spawn-env and resolve-argv
+:run (fn [ctx _]
+       [[:spawn {:server (:server ctx) :argv [&quot;keyleader&quot; &quot;term-nav&quot; d]
+                 :env {&quot;REX_BLOCK&quot; (:block-id ctx) &quot;REX_SESSION&quot; (:session-id ctx) &quot;TERM_PROGRAM&quot; &quot;rex&quot;}}]])</code></pre>
+<p>A test can then assert the exact argv and env every command produces. The one PATH rule, desktop/bin last via <code>spawn-env</code> and resolution against the child's PATH via <code>resolve-argv</code>, is applied in one interpreter and tested with a fake PATH. Ctrl+L or <code>bbh say</code> could no longer bypass it. In the same way, <code>notify-attention!</code> inside <code>sidecar/deliver</code> becomes an outgoing <code>{:op :notify ...}</code>, which makes <code>deliver</code> fully pure. The <code>:eval</code> op stays an intentional escape hatch.</p>
+<p>Limits <span class='tag inferred'>inferred</span>: the root of the PATH bugs is that Hyprland's environment differs from a terminal's. A pure core cannot observe that. The e2e that runs the client with Hyprland's PATH (verify.clj) stays necessary.</p>
+
+<h3>3. Rex protocol bookkeeping</h3>
+<p>Request ids map to tags in <code>(:tags @app)</code>, and renderer text requests map through <code>:text-reqs</code> and <code>:next-req</code>. Both are protocol state kept outside the model. Moving them into a pure <code>rexg.link</code> reducer, with outs like <code>(request link srv method payload tag) =&gt; [link' id]</code> and <code>(response link srv id) =&gt; [link' tag]</code>, would let Rexmux.tla's rules <code>EveryRequestAnswered</code> and <code>NoDuplicateReply</code> be property-tested against the code that runs. Medium value.</p>
+
+<h3>4. Layout, screen, mouse</h3>
+<p><code>screen/render</code> is pure. In main, <code>draw!</code> is a frame diff, which is fine as shell. <code>mouse!</code> (main 262-295), however, decides selection, wheel and click focus, and whether to pass the event to a program that wants mouse reports. That is UI logic of the kind Bombadil specs describe. As <code>(model/mouse m geometry panes ev) =&gt; [m outs]</code> it becomes unit-testable. Low to medium value.</p>
+
+<h3>5. Key dispatch</h3>
+<p>This is already pure: <code>keys/read-input</code> and <code>model/key</code>. The only leftover is two side rules in main's <code>:key</code> branch: scroll the focused pane to the bottom and drop the selection. They belong in <code>model/key</code>. It's a ten-minute change.</p>
+
+<h3>6. rexg-render (C)</h3>
+<p>It is the renderer, so it is the shell by definition. Its input is already a small framed protocol. Leave it.</p>
+<h2 id=buys>What it buys, bug by bug</h2>
+<div class=table><table>
+<tr><th>Bug</th><th>Root cause</th><th>Would the split have caught it?</th></tr>
+<tr><td>W262 stuck cancelling</td><td>A guard in <code>reconcile!</code> (unknown job) that no model contains, and no liveness rule</td><td><b>Likely yes</b> <span class='tag inferred'>inferred</span>. Once the guard sits in <code>cancel-plan</code>, the TLA+ action has to mirror it, and a liveness rule "cancel ends or needs the person" fails at once.</td></tr>
+<tr><td>'local not connected' (b): no reconnect</td><td>Reconnect was missing from both the model and the shell</td><td><b>Yes, with the TLA+ addition</b> <span class='tag inferred'>inferred</span>. A Drop action with a liveness rule shows the client never reattaches.</td></tr>
+<tr><td>'local not connected' (a): tests stop the live server</td><td>The Rex CLI ignores <code>REX_SERVER</code> for <code>server stop</code></td><td><b>No.</b> This was an environment and tooling bug. Explicit addresses in the test harness fixed it.</td></tr>
+<tr><td>PATH: keyleader and bbh not found from Hyprland</td><td>Spawn inside <code>:run</code> with the JVM's PATH</td><td><b>Partly</b> <span class='tag inferred'>inferred</span>. With one spawn interpreter there is a single place to fix and test. Noticing that Hyprland's PATH differs still takes the e2e.</td></tr>
+<tr><td>Echoed <code>exec fish -l</code> (T210)</td><td>Rex restores blocks with the passwd shell</td><td><b>Already pure:</b> <code>revive</code> is in the model, and the fix there was a pure change.</td></tr>
+</table></div>
+<ul>
+<li><b>Property tests</b>: plans are functions of maps, so test.check can generate observations: random job states, dead agents, missing files. super_property_test.clj (493 lines) does this already for <code>decide</code>. The plans would get the same treatment.</li>
+<li><b>TLA+ alignment</b>: each TLA+ action names one function, as Super.tla's comments already do ("decide* :cancel-delivered!, which reconcile! sends once …"). Once the guard is in the model, the comment can say "<code>cancel-plan</code>" and a reviewer can diff the two side by side.</li>
+<li><b>Bombadil</b>: in rexg, mouse and connection-status rules move into the model, so a failing Bombadil trace can be replayed as model input without a display.</li>
+<li><b>Replay</b>: super's state already replays from its log. With observations logged, a reconcile pass replays too. For rexg, logging the input queue (<code>REXG_LOG</code> already logs keys and outs) would make a session reproducible against <code>rexg.model</code> alone <span class='tag guess'>guess</span>.</li>
+<li><b>Less integration test weight</b>: super_test.clj is 2,231 lines and needs files, processes, jj or Emacs. Each decision moved out of it can become a fast unit test <span class='tag measured'>measured</span> (sizes).</li>
+</ul>
+
+<h2 id=costs>Costs, risks, and where it is not worth it</h2>
+<div class='card warn'><ul>
+<li><b>Results that feed the next step.</b> When an effect's result decides the next effect, as in launch (workspace, then wf run, then buffer) or connect (then attach), a plan needs one pass per step and the result fed back as an event. This is correct but indirect. Reading the code means following a loop instead of a <code>let</code>.</li>
+<li><b>Staleness.</b> A plan is computed from a snapshot. The shell must perform it under the same lock, or re-check, as <code>attest!</code> does with "the run moved while the gates ran". Commands with fixed ids keep this safe in bbh. In rexg everything runs on one thread, so it's free there.</li>
+<li><b>Observation cost.</b> A pure plan wants all its inputs up front. Today <code>emacs-up?</code> is lazy because checking costs a subprocess. Keep the observation lazy, or split observation by need.</li>
+<li><b>Two vocabularies to keep in sync</b>: the effect kinds and the interpreter's <code>case</code>. An unknown effect has to fail loudly, not hit <code>nil</code> as main's <code>perform!</code> does today.</li>
+<li><b>Regression risk on a live system.</b> bbh super runs every session, and a bad step stalls every Worker. Each step must keep command ids and event kinds unchanged, so the log stays replayable without upcasts.</li>
+<li><b>The pattern can become a goal in itself.</b> Building an effect monad or a generic interpreter framework would add code without catching bugs.</li>
+</ul></div>
+<p><b>Where it is not worth it</b> <span class='tag guess'>guess</span>: rexg-render, store.clj, inbox.clj file ops, workspace.clj (jj), emacs.clj, web.clj handlers, sandbox.clj, the CLI entry points, and <code>launch-steps!</code>'s sequence. Also anything already pure: the model, wf decide, the registry's non-spawning commands, screen and keys. The pane byte path in rexg must stay out of any queue. It goes reader → renderer directly today, and that is right.</p>
+<h2 id=order>Migration order</h2>
+<p>Ranked by value per unit of risk. Each step is one small change through the <code>change</code> workflow. Behavior stays the same except where noted, and existing checks stay green.</p>
+<ol>
+<li><b>Cancel path → <code>model/cancel-plan</code>, plus a TLA+ guard and liveness rule.</b> This is the one behavior change: an unknown job now raises a visible <code>:cancel-blocked</code> entry with an abandon command, instead of a silent stall. Add a property test, update Super.tla, and run <code>make verify</code>. About 1 day <span class='tag guess'>guess</span>.</li>
+<li><b>rexg connection state machine</b> (<code>connect-failed</code>, <code>[:after ...]</code>, <code>[:start-local-server]</code>, <code>:env</code> into <code>new-model</code>), plus Drop and Reconnect in Rexmux.tla. Keep the T210 e2e. Under 1 day.</li>
+<li><b>Sidecar <code>[:spawn ...]</code> and <code>:notify</code> as data.</b> This removes the last IO from <code>deliver</code> and <code>:run</code>. Add an argv and env test for each spawning command. Half a day.</li>
+<li><b><code>voice/interpret</code></b>, with a generative test that voice never approves. Half a day.</li>
+<li><b>The rest of <code>reconcile!</code> → <code>reconcile-plan</code></b>: health, running, relaunch, and the Router-start decision with <code>router-tried</code> as state. 1-2 days. This is the largest step; do it once 1 has been stable for a while.</li>
+<li><b><code>dispatch!</code> → <code>outbox-plan</code></b>. 1 day.</li>
+<li><b>rexg <code>app</code> bookkeeping → pure reducers</b> (link tags, text requests, mouse and selection, the <code>:key</code> side rules). 1 day, in pieces.</li>
+<li><b><code>notify/step</code></b>, when a notification bug shows up. Not before.</li>
+<li><b>Observation logging for replay</b>, only if 1 and 5 leave hangs that are hard to diagnose. Measure the event volume first.</li>
+</ol>
+<p>Steps 1-4 take about three days in total and cover the three bug classes the brief names <span class='tag guess'>guess</span>. After step 4, look at what is left and decide whether 5-9 are still worth doing.</p>
+<h3>Evidence</h3>
+<div class=cite>/home/engstrand/guix/desktop/build/bbh/src/bbh/super.clj line 642 (reconcile!) · /home/engstrand/guix/desktop/build/bbh/verify/tla/Super.tla line 148 (CancelDelivered) · /home/engstrand/.local/share/bbh/super/super.db events 24246, 24511-24522 (W262) · /home/engstrand/.local/state/bbh/workflows/20261121-151744-633-bug-fix/evidence/mechanism.md (T210) · /home/engstrand/guix/desktop/build/ghostty-rex/src/rexg/main.clj line 356 (:connect) · /home/engstrand/guix/desktop/build/rexmux/sidecar/rexmux/commands.clj line 178 (term-nav spawn) · /home/engstrand/guix/desktop/build/rexmux/verify/tla/Rexmux.tla</div>
+</main></body></html>
