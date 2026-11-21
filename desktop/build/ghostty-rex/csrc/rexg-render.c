@@ -61,6 +61,10 @@ static int wake[2], winch[2];
 static FILE *ctl;
 static pthread_mutex_t ctl_mu = PTHREAD_MUTEX_INITIALIZER;
 static volatile int dirty = 1, full = 1;
+// Synchronized output (CSI ?2026) around each frame; REXG_SYNC=0 drops it, so
+// Bombadil 0.8, which samples at each finished synchronized frame, waits for a
+// quiet gap instead and judges the screen once bb has handled the key.
+static int sync_out = 1;
 static struct termios saved;
 static int have_saved;
 // cursor: 0 hidden, 1 at focus pane, 2 at cx,cy
@@ -322,7 +326,8 @@ static void frame(void) {
     if (c->wide == 1 && s->col + 1 < W) blank(&back[s->row * W + s->col + 1]);
     *c = s->c;
   }
-  ostr("\x1b[?2026h\x1b[?25l");
+  if (sync_out) ostr("\x1b[?2026h");
+  ostr("\x1b[?25l");
   if (full) { ostr("\x1b[0m\x1b[2J"); for (int i = 0; i < W * H; i++) { blank(&front[i]); front[i].n = 255; } }
   Cell style; blank(&style); int have_style = 0;
   int px = -1, py = -1;
@@ -351,7 +356,7 @@ static void frame(void) {
     int dec = cs == 0 ? 6 : cs == 2 ? 4 : 0;
     ofmt("\x1b[%d q\x1b[%d;%dH\x1b[?25h", dec, y + 1, x + 1);
   }
-  ostr("\x1b[?2026l");
+  if (sync_out) ostr("\x1b[?2026l");
   oflush();
 }
 
@@ -528,6 +533,8 @@ static long now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t)
 
 int main(void) {
   ctl = stderr;
+  const char *sync_env = getenv("REXG_SYNC");
+  if (sync_env && !strcmp(sync_env, "0")) sync_out = 0;
   if (pipe(wake) < 0 || pipe(winch) < 0) return 1;
   fcntl(wake[0], F_SETFL, O_NONBLOCK); fcntl(winch[0], F_SETFL, O_NONBLOCK);
   if (tcgetattr(1, &saved) == 0) {

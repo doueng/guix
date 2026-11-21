@@ -99,11 +99,12 @@
 (defn- slurp? [f] (when (fs/exists? f) (slurp f)))
 
 (defn render-bin
-  "REXG_RENDER, else make ghostty-rex's build, made first when missing."
+  "REXG_RENDER, else make ghostty-rex's build, made first when missing or
+  older than csrc/."
   []
   (or (System/getenv "REXG_RENDER")
       (let [bin (str (fs/path here "target" "rexg-render"))]
-        (when-not (fs/exists? bin)
+        (when (or (not (fs/exists? bin)) (seq (fs/modified-since bin (fs/path here "csrc"))))
           (let [{:keys [exit]} @(p/process {:dir here :inherit true} "bb" "build")]
             (when-not (zero? exit) (throw (ex-info "building rexg-render failed" {})))))
         bin)))
@@ -547,7 +548,10 @@
         trace (str dir "/trace.bin")]
     (try
       (let [session (setup s config)
-            env (client-env s dir config)
+            ;; Unsynchronized frames: Bombadil 0.8 samples at each finished
+            ;; synchronized frame, and the renderer draws pane output on its own
+            ;; clock, so a frame can predate bb handling the key.
+            env (assoc (client-env s dir config) "REXG_SYNC" "0")
             cmd [(bombadil-bin) "terminal" "test"
                  "--specification" (str (fs/path checkout "desktop" "build" "rexmux" "test" "bombadil" file))
                  "--time-limit" (str time "s") "--exit-on-violation"

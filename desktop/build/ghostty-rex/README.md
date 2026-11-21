@@ -65,7 +65,9 @@ reaches the client, and keeps copy, paste and font size.
   project sessions, jjui and bbh's inbox layers, bbh say --from rex, session
   rename, a desktop notification for a blocked agent, and a simulated reboot. Then Bombadil types into
   `bb attach` with rexmux's specs (`../rexmux/test/bombadil/rexmux.ts` and
-  `startup.ts`), 60 s each (`--time N`, `--no-bombadil`, `--keep`). The
+  `startup.ts`), 60 s each (`--time N`, `--no-bombadil`, `--keep`), with
+  `REXG_SYNC=0` so the renderer drops synchronized output and Bombadil
+  judges the screen after a quiet gap, not at a pane-output frame. The
   client runs with Hyprland's PATH, which lacks ~/.local/bin, as the real
   window does.
 - `make rexmux-tla` model-checks the stream, link and agent rules this client
