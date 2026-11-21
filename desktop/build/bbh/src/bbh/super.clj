@@ -649,8 +649,10 @@ still running (T163)."
                 (do (spit (str (:base x) ".exit") "137\n") true)
                 false)
     :promote (do (promote! c) true)
-    :mailbox/send (let [{:keys [message-id text] delivery :kind} y]
-                    (inbox/send! (conversation-root c x) text nil (cond-> {:message-id message-id} delivery (assoc :kind delivery)))
+    :mailbox/send (let [{:keys [message-id text] delivery :kind} y
+                        m (inbox/send! (conversation-root c x) text nil (cond-> {:message-id message-id} delivery (assoc :kind delivery)))]
+                    ;; outbox-plan records the send under message-id; the file must be it.
+                    (assert (= message-id (:id m)) (str "mailbox wrote " (:id m) ", not " message-id))
                     true)
     :mailbox/delete (do (inbox/ack! {:root (conversation-root c x)} y) true)
     (throw (ex-info (str "bbh super: unknown effect " (pr-str kind)) {:error :unknown-effect :effect kind}))))
