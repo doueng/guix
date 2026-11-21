@@ -32,6 +32,7 @@
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
+            [rexg.model :as model]
             [rexmux.e2e :as e2e]
             [rexmux.testserver :as ts]))
 
@@ -305,6 +306,8 @@
         (dusk-msg "quit")
         (when-not (deref dusk 3000 nil) (p/destroy-tree dusk))))))
 
+(declare switch-checks! term-checks!)
+
 (defn e2e!
   "The window checks; returns the run directory."
   [root]
@@ -486,25 +489,91 @@
         (let [s2 (ts/start! {:root (:root s) :restore true :path-prepend bin})
               win2 (start-window! s2 root config)
               v2 (wait-for 15000 #(view s2 sid))
-              pi-block (some #(when (= "pi" (:label %)) (get-in % [:layers 0 :layout :block_id])) (:windows v2))]
+              ;; The client replaces each restored bash block with a new one,
+              ;; so block ids change: read the view again each time.
+              tab-blocks (fn [i] (->> (get-in (view s2 sid) [:windows i :layers 0 :layout])
+                                      (tree-seq map? (comp (juxt :before :after) :split))
+                                      (keep :block_id)))
+              pi-i (first (keep-indexed #(when (= "pi" (:label %2)) %1) (:windows v2)))]
           (check! "after a reboot the session comes back" (= labels (assoc (mapv :label (:windows v2)) 0 (first labels)))
                   (pr-str (mapv :label (:windows v2))))
           (check! "after a reboot pi resumes with --continue"
-                  (wait-for 20000 #(str/includes? (capture s2 sid pi-block) "STUB pi --continue")))
-          (let [panes (->> (get-in v2 [:windows 0 :layers 0 :layout]) (tree-seq map? (comp (juxt :before :after) :split))
-                           (keep :block_id))]
-            (check! "after a reboot a renamed tab's panes, a split too, run the configured shell"
-                    (and (= 2 (count panes)) (wait-for 15000 #(every? (fn [b] (= (:shell shipped) (foreground s2 sid b))) panes)))
-                    (pr-str (map #(foreground s2 sid %) panes))))
+                  (wait-for 20000 #(str/includes? (capture s2 sid (first (tab-blocks pi-i))) "STUB pi --continue")))
+          (check! "after a reboot a renamed tab's panes, a split too, run the configured shell"
+                  (wait-for 15000 #(let [panes (tab-blocks 0)]
+                                     (and (= 2 (count panes)) (every? (fn [b] (= (:shell shipped) (foreground s2 sid b))) panes))))
+                  (pr-str (map #(foreground s2 sid %) (tab-blocks 0))))
+          (Thread/sleep 1500)
+          (let [screens (for [i (range (count (:windows v2))) b (tab-blocks i)] (capture s2 sid b))]
+            (check! "after a reboot no tab shows a typed exec line (T210)"
+                    (not-any? #(re-find #"exec \S*fish" %) screens)
+                    (some #(re-find #".*exec \S*fish.*" %) screens)))
           (Thread/sleep 1000)
           (shot! root "06-restored")
-          (stop-window! win2)
-          (ts/stop! s2)))
+          (let [s3 (switch-checks! s2 root sid)]
+            (term-checks! root)
+            (stop-window! win2)
+            (ts/stop! s3))))
       (catch Throwable e
         (check! "no exception" false (ex-message e)))
       (finally
         (td "stop")
         (try (ts/stop! s) (catch Exception _))))))
+
+(defn- client-pids
+  "The pids of the e2e window's bb client and its rexg-render, found by the
+  REXG_LOG under ROOT in their environment, never a live window's."
+  [root]
+  (let [mark (str "REXG_LOG=" root "/client.log")]
+    (vec (for [d (fs/list-dir "/proc")
+               :let [pid (parse-long (str (fs/file-name d)))]
+               :when pid
+               :let [env (try (slurp (str d "/environ")) (catch Exception _ ""))]
+               :when (some #{mark} (str/split env #"\u0000"))]
+           pid))))
+
+(defn- alive? [pid] (fs/exists? (str "/proc/" pid)))
+
+(defn- switch-checks!
+  "A switch under an open window (T210): its server stops, as when a test or
+  a Home activation stopped the live one, and a server from another build,
+  the same rex at another store path, takes over. The window says it is not
+  connected and comes back on its own, with no kill. Returns the new server."
+  [s2 root sid]
+  (let [bin2 (str root "/other-build/bin/rex")]
+    (fs/create-dirs (fs/parent bin2))
+    (fs/copy (:bin s2) bin2 {:replace-existing true})
+    (ts/rex! s2 "server" "stop")
+    (deref (:proc s2) 5000 nil)
+    (check! "switch: with its server gone the window says so and retries"
+            (wait-for 8000 #(str/includes? (slurp? (str root "/client.log")) "lost")))
+    (Thread/sleep 600)
+    (shot! root "09-switch-down")
+    (let [s3 (ts/start! {:root (:root s2) :restore true :path-prepend (:path-prepend s2) :bin bin2})
+          shell-blocks #(->> (get-in (view s3 sid) [:windows 0 :layers 0 :layout])
+                             (tree-seq map? (comp (juxt :before :after) :split))
+                             (keep :block_id))]
+      (check! "switch: the window reconnects to a server from another build by itself"
+              (wait-for 20000 #(str/includes? (pr-str (api s3 "client.list")) "ghostty-rex")))
+      (Thread/sleep 1500)
+      (api s3 "session.focus_window" {:session_id sid :window_id (get-in (view s3 sid) [:windows 0 :window_id])})
+      (Thread/sleep 1500)
+      (keys! "echo switch-ok" [:key "Return"])
+      (check! "switch: typing reaches the shell again"
+              (wait-for 8000 #(some (fn [b] (re-find #"(?m)^switch-ok" (capture s3 sid b))) (shell-blocks))))
+      (shot! root "10-switch-back")
+      s3)))
+
+(defn- term-checks!
+  "SIGTERM ends the window's bb client and rexg-render, so closing it, or a
+  pkill without -9, is enough (T210)."
+  [root]
+  (let [pids (client-pids root)]
+    (check! "the e2e window's client and renderer are found" (<= 2 (count pids)) (pr-str pids))
+    (doseq [pid pids] (p/sh "kill" "-TERM" (str pid)))
+    (check! "SIGTERM ends the client and the renderer, no kill -9"
+            (wait-for 5000 #(not-any? alive? pids))
+            (pr-str (filter alive? pids)))))
 
 (defn- bombadil-bin []
   (or (some-> (fs/which "bombadil") str)
@@ -535,19 +604,47 @@
                        (config! s config)
                        (spit (str (fs/path (:root s) "config" "fish" "config.fish"))
                              "echo 'see https://example.com/shell and /tmp/stub-shell'\n" :append true)
-                       nil)}})
+                       nil)}
+   ;; startup.ts again on the startup session after a reboot: Rex brings its
+   ;; tabs back as bare bash, and no tab may show a typed exec line (T210).
+   "restored" {:file "startup.ts"
+               :restore true
+               :setup (fn [s config]
+                        (let [shipped (config! s config)
+                              startup (assoc (:startup shipped) :cwd (:root s))]
+                          (spit (str (fs/path (:root s) "config" "fish" "config.fish"))
+                                "echo 'see https://example.com/shell and /tmp/stub-shell'\n" :append true)
+                          (api s "session.create" (model/startup-request startup (str (fs/which (:shell shipped)))))
+                          ;; Rex saves each block a moment later; a kill before that
+                          ;; restores nothing.
+                          (wait-for 20000 #(<= (count (:windows startup))
+                                               (count (fs/glob (:root s) "state/**/snapshot/blocks/*"))))
+                          (Thread/sleep 1500)
+                          (ts/kill! s)
+                          (let [s2 (ts/start! {:root (:root s) :restore true :path-prepend (:path-prepend s)})
+                                sid (:session_id (wait-for 10000 #(session s2 "main")))
+                                fgs #(for [w (:windows (view s2 sid))] (foreground s2 sid (get-in w [:layers 0 :layout :block_id])))]
+                            (check! "restored spec: Rex brings the startup tabs back as bare bash"
+                                    (wait-for 10000 #(every? #{"bash"} (fgs))) (pr-str (fgs)))
+                            ;; No --session: the client finds main as its startup
+                            ;; session, which is what revives its tabs.
+                            {:session nil :server s2})))}})
 
 (defn bombadil!
   "Bombadil types into the client on a throwaway server for TIME seconds and
   checks SPEC on every screen; true when no property broke."
   [root spec time]
-  (let [{:keys [file setup]} (specs spec)
+  (let [{:keys [file setup restore]} (specs spec)
         dir (str root "/bombadil-" spec)
-        s (ts/start! {:root (str dir "/srv") :path-prepend (e2e/stubs! (str dir "/stubs"))})
+        s (ts/start! {:root (str dir "/srv") :restore (boolean restore) :path-prepend (e2e/stubs! (str dir "/stubs"))})
         config (str dir "/ghostty-rex.edn")
-        trace (str dir "/trace.bin")]
+        trace (str dir "/trace.bin")
+        restarted (volatile! nil)]
     (try
-      (let [session (setup s config)
+      (let [r (setup s config)
+            session (if (map? r) (:session r) r)
+            s (if (map? r) (:server r) s)
+            _ (when (map? r) (vreset! restarted s))
             ;; Unsynchronized frames: Bombadil 0.8 samples at each finished
             ;; synchronized frame, and the renderer draws pane output on its own
             ;; clock, so a frame can predate bb handling the key.
@@ -562,7 +659,7 @@
         (println (str/join "\n" (take-last 30 (remove #(str/includes? % "\u001b[") (str/split-lines (str out "\n" err))))))
         (check! (str "bombadil " spec " (" file ", " time " s)") (zero? exit) (str "trace " trace))
         (zero? exit))
-      (finally (try (ts/stop! s) (catch Exception _))))))
+      (finally (try (ts/stop! (or @restarted s)) (catch Exception _))))))
 
 (defn -main [& args]
   (let [keep? (some #{"--keep"} args)
@@ -571,7 +668,7 @@
     (println "e2e run in" root)
     (e2e! root)
     (when-not (some #{"--no-bombadil"} args)
-      (doseq [spec ["tabs" "startup"]]
+      (doseq [spec ["tabs" "startup" "restored"]]
         (try (bombadil! root spec time)
              (catch Throwable e (check! (str "bombadil " spec) false (ex-message e))))))
     (let [failed (remove :ok @results)]

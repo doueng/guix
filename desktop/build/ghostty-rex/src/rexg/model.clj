@@ -8,7 +8,8 @@
   block ticket] [:close-stream block] [:clipboard text] [:open url]
   [:paste server session block text] [:hints block] [:quit].
   Tags: [:view s] [:effect] [:created s] [:ticket s block] [:sessions s]
-  [:revive s block window] [:project s label cwd] [:ignore]."
+  [:revive s block window] [:replaced s block focus?] [:project s label cwd]
+  [:ignore]."
   (:require [clojure.string :as str]
             [rexg.hints :as hints]
             [rexg.keys :as keys]))
@@ -355,22 +356,48 @@
     []))
 
 (defn revive
-  "After a restart Rex starts each block's shell anew without its program. A
-  startup tab left a bare shell gets its :restore (else :command) again in
-  the configured shell; any other bare pane gets the configured shell."
+  "After a restart Rex brings each block back as the account's login shell
+  (bash, from /etc/passwd), whatever shell and command it was made with. A
+  startup tab left a bare shell gets its :restore (else :command) again, and
+  any other bare pane the configured shell. Typing exec into the old shell
+  would echo the line on screen, so a new block running the program in the
+  configured shell takes the old one's place: a split beside it, labelled as
+  it was, in its directory, and then the old block closes."
   [m srv block window process]
   (let [spec (startup-window m window)
         fg (get-in process [:foreground :name] "")
         bare (or (nil? (get-in process [:child :pid])) (= (get-in process [:child :pid]) (get-in process [:foreground :pid])))
         shell (or (:shell m) "fish")
         argv (when spec (or (:restore spec) (:command spec)))
-        line (cond (not (and (#{"bash" "sh" "zsh" "fish" "dash"} fg) bare)) nil
-                   argv (str "exec " shell " -l -c " (shell-quote (str/join " " (map shell-quote argv))) "\r")
-                   (not= fg (last (str/split shell #"/"))) (str "exec " shell " -l\r"))
-        sid (get-in m [:servers srv :view :session])]
-    (if (and line sid)
+        replace? (and (#{"bash" "sh" "zsh" "fish" "dash"} fg) bare
+                      (or argv (not= fg (last (str/split shell #"/")))))
+        v (get-in m [:servers srv :view])
+        sid (:session v)
+        w (some #(when (some (fn [t] (= block (:block t))) (:tiles %)) %) (:windows v))
+        focus? (and w (= block (:focused w)) (= (:id w) (:active v)))
+        cwd (or (get-in process [:child :cwd]) (get-in process [:foreground :cwd]))
+        opts (cond-> {:shell shell}
+               argv (assoc :command (vec argv))
+               cwd (assoc :cwd cwd))]
+    (if (and replace? sid)
       [(assoc m :echo (if (str/blank? window) "restored a pane's shell" (str "restored tab " window)))
-       [[:rex srv "com.superlogical.terminal.write" {:session_id sid :block_id block :args {:data line}} [:effect]]]]
+       [[:rex srv "session.new_split"
+         {:session_id sid :anchor_id block :direction "horizontal" :side "after" :focus false
+          :layout {:block (cond-> {:flavor "com.superlogical.terminal.shell" :options opts}
+                            (seq window) (assoc :label window))}}
+         [:replaced srv block focus?]]]]
+      [m []])))
+
+(defn replaced
+  "The new block of a revive is up: close the old one, and focus the new one
+  when the old had the active window's focus."
+  [m srv old focus? result]
+  (let [sid (get-in m [:servers srv :view :session])
+        new (first (:block_ids result))]
+    (if sid
+      [(update m :replaced (fnil conj #{}) old)
+       (cond-> [[:rex srv "block.close" {:session_id sid :block_id old} [:effect]]]
+           (and focus? new) (conj [:rex srv "session.focus_block" {:session_id sid :block_id new} [:effect]]))]
       [m []])))
 
 (defn set-view [m srv v]
@@ -389,21 +416,55 @@
         [m (vec (concat o1 o2 o3 o4))]))))
 
 (defn connected [m srv client-id]
-  (let [m (assoc-in m [:servers srv :client-id] client-id)]
+  (let [was (get-in m [:servers srv :conn])
+        m (-> m
+              (update-in [:servers srv] assoc :client-id client-id :conn :up :attempt 0)
+              (cond-> (= :down was) (assoc :echo (str (get-in m [:servers srv :label]) ": connected again"))))]
     [m (into [[:rex srv "session.list" {} [:sessions srv]]]
              (filter #(= srv (second %)) (send-keymap m)))]))
 
+(defn disconnected
+  "SRV's control connection is gone, or could not be made (WHY): forget its
+  client id and view but keep its session to attach again, close the current
+  server's streams, and say when the next try is (IN-MS). rexg.main retries
+  on its own, starting the local server when it is not running."
+  [m srv why in-ms]
+  (let [v (get-in m [:servers srv :view])
+        cur? (= srv (:current m))
+        s (get-in m [:servers srv])]
+    [(cond-> (-> m
+                 (update-in [:servers srv] assoc :conn :down :client-id "" :view nil
+                            :reattach (or (:session v) (:reattach s))
+                            :attempt (inc (or (:attempt s) 0)))
+                 (assoc :echo (str (:label s) " not connected: " why "; retrying in "
+                                   (format "%.1f" (/ in-ms 1000.0)) " s")))
+       cur? (assoc :streams {}))
+     (if cur? (mapv #(vector :close-stream %) (keys (:streams m))) [])]))
+
+(defn retry-ms
+  "The wait before connect attempt N (0 is the first retry): 250 ms,
+  doubling to at most 4 s."
+  [n]
+  (min 4000 (* 250 (bit-shift-left 1 (min n 4)))))
+
 (defn rex-response [m [tk srv & more :as tag] result]
   (if (contains? result :error)
-    [(cond-> (assoc m :echo (:error result)) (= tk :ticket) (update :streams dissoc (first more))) []]
+    ;; A late request for a block a revive replaced is no news.
+    (let [stale (some #(str/includes? (str (:error result)) %) (:replaced m))]
+      [(cond-> m
+         (not stale) (assoc :echo (:error result))
+         (= tk :ticket) (update :streams dissoc (first more)))
+       []])
     (let [v (:ok result)]
       (case tk
         :view (set-view m srv (view-of v))
         :sessions (let [lst (mapv (fn [s] [(str (:session_id s)) (str (:label s))]) (:sessions v))
                         m (assoc-in m [:servers srv :sessions] lst)]
                     (if (and (nil? (get-in m [:servers srv :view])) (= srv (:current m)))
-                      (let [want (or (:prefer-session m) (get-in m [:startup :label]))
-                            found (when want (some (fn [[id l :as e]] (when (or (= id want) (= l want) (str/ends-with? id want)) e)) lst))
+                      (let [match (fn [want] (when want (some (fn [[id l :as e]] (when (or (= id want) (= l want) (str/ends-with? id want)) e)) lst)))
+                            ;; After a reconnect, the session shown before it.
+                            found (or (match (:prefer-session m)) (match (get-in m [:servers srv :reattach]))
+                                      (when-not (:prefer-session m) (match (get-in m [:startup :label]))))
                             startup-missing (and (nil? (:prefer-session m)) (nil? found))]
                         (if (and (or startup-missing (empty? lst)) (:startup m))
                           [(assoc m :echo "starting the startup session")
@@ -417,6 +478,7 @@
                     [(assoc-in m [:streams block] :open) [[:open-stream srv block (:ticket v)]]]
                     [m []]))
         :revive (revive m srv (first more) (second more) v)
+        :replaced (replaced m srv (first more) (second more) v)
         :project (let [[label cwd] more
                        found (some #(when (= label (:label %)) (:session_id %)) (:sessions v))]
                    (if found

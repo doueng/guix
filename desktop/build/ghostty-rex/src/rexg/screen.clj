@@ -149,8 +149,13 @@
           nb (count (filter #(= "blocked" (:state %)) rows))
           s (str " " (:label (model/server m)) " │ focus " (if focused (short focused) "-")
                  " │ agents " (count rows) " │ blocked " nb " │ attention " (count (:attention m))
-                 (when-not (:sidecar-up m) " │ sidecar down"))]
-      (add! (span (- h 2) 0 (if (pos? nb) blocked status-fg) status 0 (pad s w))))
+                 (when-not (:sidecar-up m) " │ sidecar down")
+                 (case (:conn (model/server m))
+                   :up nil
+                   :down (str " │ " (:label (model/server m)) " not connected, reconnecting")
+                   (str " │ connecting to " (:label (model/server m)))))
+          down (not= :up (:conn (model/server m)))]
+      (add! (span (- h 2) 0 (if (or down (pos? nb)) blocked status-fg) status 0 (pad s w))))
     ;; Help text over the panes.
     (when-let [[t text] (:doc m)]
       (add! (span 1 0 menu-fg menu 1 (pad (str "── " t " (q closes) ──") w)))

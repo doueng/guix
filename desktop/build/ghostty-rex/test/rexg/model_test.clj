@@ -45,25 +45,33 @@
     (is (= "fish" (get-in v [:layout :split :before :block :options :shell])))
     (is (= "none" (get-in v [:layout :split :after :block :options :shell])) "an explicit shell stays")))
 
-(deftest a-restored-bare-shell-gets-its-program-back-in-the-configured-shell
+(deftest a-restored-bare-shell-is-replaced-by-its-program-in-the-configured-shell
   (let [model (-> (with-startup) (assoc :shell "fish")
                   (assoc-in [:startup :windows 1 :restore] ["emacs-bbh" "--resume" "it's"])
                   (with-view "session:a"))
-        bare {:foreground {:name "bash"}}
-        typed (fn [block window proc] (some-> (m/revive model 0 block window proc) second first (nth 3) :args :data))
-        line (typed "block:b" "bbh" bare)
-        quoted (-> line (str/replace #"^exec fish -l -c " "") (str/replace #"\r$" ""))]
-    (is (str/starts-with? line "exec fish -l -c "))
-    (is (= "emacs-bbh --resume 'it'\"'\"'s'" (:out (p/sh "sh" "-c" (str "printf %s " quoted)))))
+        bare {:child {:pid 5 :name "bash" :cwd "/home/u/guix"} :foreground {:pid 5 :name "bash"}}
+        out (fn [block window proc] (some-> (m/revive model 0 block window proc) second first))
+        opts (fn [block window proc] (some-> (out block window proc) (nth 3) :layout :block :options))
+        [_ _ method payload tag] (out "block:b" "bbh" bare)]
+    (is (= "session.new_split" method) "nothing is typed into the old shell")
+    (is (= {:shell "fish" :command ["emacs-bbh" "--resume" "it's"] :cwd "/home/u/guix"} (get-in payload [:layout :block :options])))
+    (is (= "bbh" (get-in payload [:layout :block :label])))
+    (is (= ["block:b" "horizontal" "after"] ((juxt :anchor_id :direction :side) payload)))
+    (is (= :replaced (first tag)))
+    (testing "the new block up, the old one closes"
+      (let [[m2 outs] (m/rex-response model tag {:ok {:block_ids ["block:n"]}})]
+        (is (= ["block.close" "block:b"] ((juxt #(nth % 2) #(:block_id (nth % 3))) (first outs))))
+        (is (nil? (:echo (first (m/rex-response (dissoc m2 :echo) [:ignore] {:error "block not found: block:b (not_found)"}))))
+            "a late request for the replaced block shows no error")))
     (testing "a running program, or a fish shell tab, is left alone; a bash shell tab becomes fish"
-      (is (nil? (typed "block:b" "bbh" {:foreground {:name "emacs"}})))
-      (is (nil? (typed "block:s" "shell" {:foreground {:name "fish"}})))
-      (is (= "exec fish -l\r" (typed "block:s" "shell" bare))))
+      (is (nil? (out "block:b" "bbh" {:foreground {:name "emacs"}})))
+      (is (nil? (out "block:s" "shell" {:foreground {:name "fish"}})))
+      (is (= {:shell "fish" :cwd "/home/u/guix"} (opts "block:s" "shell" bare))))
     (testing "a split's bare bash gets fish, a bash started inside fish does not"
-      (is (= "exec fish -l\r" (typed "block:t" "" bare)))
+      (is (= {:shell "fish" :cwd "/home/u/guix"} (opts "block:t" "" bare)))
       (let [nested {:child {:pid 1 :name "fish"} :foreground {:pid 2 :name "bash"}}]
-        (is (nil? (typed "block:t" "" nested)))
-        (is (nil? (typed "block:b" "bbh" nested)))))))
+        (is (nil? (out "block:t" "" nested)))
+        (is (nil? (out "block:b" "bbh" nested)))))))
 
 (deftest a-perform-request-is-answered-under-its-call-id
   (let [[_ outs] (m/rex-event (m/new-model [{:label "t"}]) 0 {:type "client_perform_requested" :payload {:call_id "7" :action "mx.nothing"}})

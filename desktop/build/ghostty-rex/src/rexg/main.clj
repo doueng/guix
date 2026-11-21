@@ -48,6 +48,13 @@
       (get-in c [:startup :cwd]) (update-in [:startup :cwd] expand-home)
       true (assoc :shell (shell-path (or (not-empty (System/getenv "REXG_SHELL")) (:shell c)))))))
 
+(defn start-local!
+  "Start the local Rex server, which rex server start does only when none
+  answers, replacing a socket a dead one left."
+  [log]
+  (let [{:keys [exit out err]} (p/sh (or (System/getenv "REXG_REX") "rex") "server" "start")]
+    (log "rex server start" exit (str/trim (str out err)))))
+
 ;; ---- the renderer ----
 
 (defn- frame! [{:keys [^java.io.OutputStream in lock]} type ^bytes payload]
@@ -182,6 +189,27 @@
                            (send-str! r \t (str req " " (first xs))))
                   :quit (put! [:quit "quit"])
                   nil)))
+            (lost! [srv why]
+              ;; Not connected: the model says so on the status line, and
+              ;; another try comes after a backoff (model/retry-ms).
+              (let [in-ms (model/retry-ms (get-in @app [:m :servers srv :attempt] 0))
+                    streams (keys (:streams @app))]
+                (log "lost" srv why)
+                (when (= srv (get-in @app [:m :current]))
+                  (doseq [b streams] (close-stream! b)))
+                (step! model/disconnected srv why in-ms)
+                (future (Thread/sleep in-ms) (put! [:connect srv]))))
+            (follow-events! [srv]
+              ;; Agents' status from OSC 7501, as the rexmux sidecar follows
+              ;; it; started again on each connect, since it ends with the server.
+              (when-let [old (get-in @app [:events srv])] (p/destroy old))
+              (swap! app assoc-in [:events srv]
+                     (rexcli/events! (nth servers srv)
+                                     (fn [ev] (.submit sc-exec ^Runnable
+                                                       (fn [] (try (let [[s msgs] (sidecar/deliver (:sidecar @app) sc-io {:op :rex/event :event ev :server (get-in @app [:m :servers srv :label])})]
+                                                                     (swap! app assoc :sidecar s)
+                                                                     (doseq [o msgs] (put! [:sidecar o])))
+                                                                   (catch Throwable _))))))))
             (step! [f & args]
               (let [[m outs] (apply f (:m @app) args)]
                 (swap! app assoc :m m)
@@ -270,8 +298,9 @@
                                      (swap! app update-in [:tags srv] dissoc id)
                                      (when tag (step! model/rex-response tag result)))
                          :event (step! model/rex-event srv (first more))
-                         :closed (do (swap! app update :conns dissoc srv)
-                                     (swap! app update :m assoc :echo (str "Rex closed: " (first more))))))
+                         :closed (when (get-in @app [:conns srv])
+                                   (swap! app update :conns dissoc srv)
+                                   (lost! srv (first more)))))
                 :sidecar (step! model/sidecar (first xs))
                 :stream-msg (let [[block msg] xs]
                               (case (:type msg)
@@ -304,26 +333,29 @@
                                     (perform! [[:clipboard text]]))
                           nil))
                 :connect (let [srv (first xs)
-                               {:keys [address] srv-label :label} (get-in @app [:m :servers srv])
-                               sock (rex/socket-path address)]
-                           ;; The local server starts on demand, as the rex CLI does, so it
-                           ;; runs with this window's environment, like Herdr's server.
-                           (when (and (nil? address) (nil? (System/getenv "REX_SERVER")) (not (fs/exists? sock)))
-                             (p/sh (or (System/getenv "REXG_REX") "rex") "server" "start"))
-                           (try
-                             (let [c (rex/connect! sock client-label (fn [msg] (put! [:rex srv msg])))]
-                               (swap! app assoc-in [:conns srv] c)
-                               (step! model/connected srv (:client-id c)))
-                             (catch Exception e
-                               (swap! app update :m assoc :echo (str srv-label ": " (ex-message e))))))
+                               {:keys [address]} (get-in @app [:m :servers srv])
+                               sock (rex/socket-path address)
+                               local? (and (nil? address) (nil? (System/getenv "REX_SERVER")))
+                               try! #(rex/connect! sock client-label (fn [msg] (put! [:rex srv msg])))]
+                           (when-not (get-in @app [:conns srv])
+                             ;; The local server starts on demand, as the rex CLI does, so it
+                             ;; runs with this window's environment, like Herdr's server. A
+                             ;; socket left by a server that died is no server: rex server
+                             ;; start is idempotent and replaces it.
+                             (when (and local? (not (fs/exists? sock)))
+                               (start-local! log))
+                             (let [c (try (try!)
+                                          (catch Exception e
+                                            (if local?
+                                              (do (start-local! log)
+                                                  (try (try!) (catch Exception e2 (ex-message e2))))
+                                              (ex-message e))))]
+                               (if (map? c)
+                                 (do (swap! app assoc-in [:conns srv] c)
+                                     (follow-events! srv)
+                                     (step! model/connected srv (:client-id c)))
+                                 (lost! srv (or c "no server"))))))
                 nil))]
-      ;; Agents' status from OSC 7501, as the rexmux sidecar follows it.
-      (doseq [srv (:servers cfg)]
-        (rexcli/events! srv (fn [ev] (.submit sc-exec ^Runnable
-                                              (fn [] (try (let [[s msgs] (sidecar/deliver (:sidecar @app) sc-io {:op :rex/event :event ev :server (:label srv)})]
-                                                            (swap! app assoc :sidecar s)
-                                                            (doseq [o msgs] (put! [:sidecar o])))
-                                                          (catch Throwable _)))))))
       (doseq [i (range (count servers))]
         (put! [:connect i]))
       ;; The sidecar says ready; the model answers hello.
@@ -333,6 +365,7 @@
           (if (= :quit (first ev))
             (do (log "quit" (second ev))
                 (doseq [[_ close] (:streams @app)] (try (close) (catch Exception _)))
+                (doseq [[_ proc] (:events @app)] (try (p/destroy proc) (catch Exception _)))
                 (try (frame! r \q (byte-array 0)) (catch Exception _))
                 (deref rproc 2000 nil)
                 (shutdown-agents)

@@ -93,6 +93,10 @@ export const escapeLeavesTinyFingers = always(() => !(v().wasHints > 0 && v().ke
 
 export const sidecarStaysUp = always(() => !v().sidecarDown);
 
+// No tab shows a shell command the client typed to start fish or a program
+// in it (T210): restored tabs get them as Rex block commands instead.
+export const noTypedExecLine = always(() => !/exec \S*fish -l/.test(v().text));
+
 const key = (k: string) => ({ TypeText: { Regexp: k.replace(/[.\[\]()?*+|^$\\]/g, (c) => "\\" + c) } });
 
 export const normal = weighted([
