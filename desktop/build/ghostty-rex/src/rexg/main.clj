@@ -210,11 +210,26 @@
                            (send-str! r \t (str req " " (first xs))))
                   :quit (put! [:quit "quit"])
                   :reload (put! [:quit "reload"])
-                  :connect (let [srv (first xs)
+                  ;; Each answer names its attempt; rexg.model drops a stale one.
+                  :connect (let [[srv gen] xs
                                  sock (rex/socket-path (get-in @app [:m :servers srv :address]))
-                                 c (try (rex/connect! sock client-label (fn [msg] (put! [:rex srv msg])))
+                                 c (try (rex/connect! sock client-label (fn [msg] (put! [:rex srv gen msg])))
                                         (catch Exception e (or (ex-message e) "no server")))]
-                             (put! (if (map? c) [:connected srv c] [:connect-failed srv c])))
+                             (put! (if (map? c) [:connected srv gen c] [:connect-failed srv gen c])))
+                  :conn/adopt (let [[srv gen] xs
+                                    c (get-in @app [:attempts [srv gen]])]
+                                (swap! app #(-> % (update :attempts dissoc [srv gen])
+                                                (assoc-in [:conns srv] (assoc c :gen gen))
+                                                (assoc-in [:tags srv] {})))
+                                (follow-events! srv))
+                  :conn/close (let [[srv gen] xs]
+                                (some-> (get-in @app [:attempts [srv gen]]) :ws ws/close!)
+                                (swap! app update :attempts dissoc [srv gen]))
+                  :conn/drop (let [[srv gen] xs
+                                   c (get-in @app [:conns srv])]
+                               (when (= gen (:gen c))
+                                 (try (ws/close! (:ws c)) (catch Exception _))
+                                 (swap! app update :conns dissoc srv)))
                   :start-local-server (start-local! log)
                   :scroll-bottom (send-str! r \s (str (first xs) " bottom"))
                   :after (let [[ms ev] xs] (future (Thread/sleep ms) (put! ev)))
@@ -307,17 +322,17 @@
                            (perform! [[:paste (:current m) (model/session-id m) (model/focused-block m) (first xs)]])))
                 :mouse (mouse! (first xs))
                 :focus nil
-                :rex (let [[srv [k & more]] xs]
+                :rex (let [[srv gen [k & more]] xs
+                           live? (= gen (get-in @app [:conns srv :gen]))]
                        (case k
                          :response (let [[id result] more
-                                         tag (get-in @app [:tags srv id])]
-                                     (swap! app update-in [:tags srv] dissoc id)
-                                     (when tag (step! model/rex-response tag result)))
-                         :event (step! model/rex-event srv (first more))
-                         :closed (when (get-in @app [:conns srv])
-                                   (swap! app update :conns dissoc srv)
-                                   (log "lost" srv (first more))
-                                   (step! model/closed srv (first more)))))
+                                         tag (when live? (get-in @app [:tags srv id]))]
+                                     (when tag
+                                       (swap! app update-in [:tags srv] dissoc id)
+                                       (step! model/rex-response tag result)))
+                         :event (when live? (step! model/rex-event srv (first more)))
+                         :closed (do (log "lost" srv gen (first more))
+                                     (step! model/closed srv gen (first more)))))
                 :sidecar (step! model/sidecar (first xs))
                 :stream-msg (let [[block msg] xs]
                               (case (:type msg)
@@ -351,15 +366,13 @@
                           nil))
                 ;; The connection is rexg.model's state machine; this only connects.
                 :connect (step! model/connect (first xs))
-                :connected (let [[srv c] xs]
-                             (if (get-in @app [:conns srv])
-                               (try (ws/close! (:ws c)) (catch Exception _))
-                               (do (swap! app assoc-in [:conns srv] c)
-                                   (follow-events! srv)
-                                   (step! model/connected srv (:client-id c)))))
-                :connect-failed (let [[srv why] xs]
-                                  (log "lost" srv why)
-                                  (step! model/connect-failed srv why))
+                ;; The model adopts the attempt or closes it ([:conn/adopt] or [:conn/close]).
+                :connected (let [[srv gen c] xs]
+                             (swap! app assoc-in [:attempts [srv gen]] c)
+                             (step! model/connected srv gen (:client-id c)))
+                :connect-failed (let [[srv gen why] xs]
+                                  (log "connect failed" srv gen why)
+                                  (step! model/connect-failed srv gen why))
                 nil))]
       (doseq [i (range (count servers))]
         (put! [:connect i]))

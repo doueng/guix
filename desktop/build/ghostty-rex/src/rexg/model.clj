@@ -423,21 +423,37 @@
   [m srv]
   (and (nil? (get-in m [:servers srv :address])) (nil? (get-in m [:env "REX_SERVER"]))))
 
-(defn connect
-  "Try SRV's control connection unless it is up. rexg.main performs
-  [:connect srv] and answers with [:connected srv client] or
-  [:connect-failed srv why]."
-  [m srv]
-  [m (if (= :up (get-in m [:servers srv :conn])) [] [[:connect srv]])])
+(defn- current?
+  "Whether GEN is SRV's current attempt and SRV is in state CONN. Every
+  answer about a connection names its attempt, so a late one, from a try
+  that lost or a connection already replaced, changes nothing."
+  [m srv gen conn]
+  (and (= gen (get-in m [:servers srv :gen])) (= conn (get-in m [:servers srv :conn]))))
 
-(defn connected [m srv client-id]
-  (let [was (get-in m [:servers srv :conn])
-        m (-> m
-              (update-in [:servers srv] assoc :client-id client-id :conn :up :attempt 0)
-              (update-in [:servers srv] dissoc :started)
-              (cond-> (= :down was) (assoc :echo (str (get-in m [:servers srv :label]) ": connected again"))))]
-    [m (into [[:rex srv "session.list" {} [:sessions srv]]]
-             (filter #(= srv (second %)) (send-keymap m)))]))
+(defn connect
+  "Try SRV's control connection unless it is up or a try is under way: a
+  new attempt GEN. rexg.main performs [:connect srv gen] and answers with
+  [:connected srv gen client], [:connect-failed srv gen why], and later
+  [:rex srv gen msg] from that connection."
+  [m srv]
+  (if (#{:up :connecting} (get-in m [:servers srv :conn]))
+    [m []]
+    (let [gen (inc (get-in m [:servers srv :gen] 0))]
+      [(update-in m [:servers srv] assoc :conn :connecting :gen gen) [[:connect srv gen]]])))
+
+(defn connected
+  "Attempt GEN of SRV connected as CLIENT-ID. The current attempt is
+  adopted ([:conn/adopt srv gen]); any other is closed ([:conn/close srv gen])."
+  [m srv gen client-id]
+  (if-not (current? m srv gen :connecting)
+    [m [[:conn/close srv gen]]]
+    (let [again? (get-in m [:servers srv :lost])
+          m (-> m
+                (update-in [:servers srv] assoc :client-id client-id :conn :up :attempt 0)
+                (update-in [:servers srv] dissoc :started :lost)
+                (cond-> again? (assoc :echo (str (get-in m [:servers srv :label]) ": connected again"))))]
+      [m (into [[:conn/adopt srv gen] [:rex srv "session.list" {} [:sessions srv]]]
+               (filter #(= srv (second %)) (send-keymap m)))])))
 
 (defn- down
   "SRV is not connected: forget its client id and view but keep its session
@@ -446,7 +462,7 @@
   (let [v (get-in m [:servers srv :view])
         cur? (= srv (:current m))
         s (get-in m [:servers srv])]
-    [(cond-> (update-in m [:servers srv] assoc :conn :down :client-id "" :view nil
+    [(cond-> (update-in m [:servers srv] assoc :conn :down :lost true :client-id "" :view nil
                         :reattach (or (:session v) (:reattach s)))
        cur? (assoc :streams {}))
      (if cur? (mapv #(vector :close-stream %) (keys (:streams m))) [])]))
@@ -470,32 +486,45 @@
   [n]
   (min 4000 (* 250 (bit-shift-left 1 (min n 4)))))
 
-(defn connect-failed
-  "SRV did not answer a connect (WHY). The local server is started, as the
-  rex CLI does, so it runs with this window's environment, and tried again
-  at once; rex server start is idempotent and replaces a socket a dead one
-  left. Otherwise SRV is down and another try comes after model/retry-ms."
+(defn- failed
+  "SRV is down after WHY. The local server is started, as the rex CLI does,
+  so it runs with this window's environment, and tried again at once; rex
+  server start is idempotent and replaces a socket a dead one left. The
+  status line says so, as it says when the next try is otherwise, after
+  model/retry-ms."
   [m srv why]
-  (cond
-    ;; A second try that lost to one that connected.
-    (= :up (get-in m [:servers srv :conn])) [m []]
-
-    (and (local-server? m srv) (not (get-in m [:servers srv :started])))
-    [(assoc-in m [:servers srv :started] true) [[:start-local-server srv] [:connect srv]]]
-
-    :else
+  (if (and (local-server? m srv) (not (get-in m [:servers srv :started])))
+    (let [[m outs] (connect (-> m
+                                (update-in [:servers srv] assoc :conn :down :started true)
+                                (assoc :echo (str (get-in m [:servers srv :label]) " not connected: " why
+                                                  "; starting the server")))
+                            srv)]
+      [m (into [[:start-local-server srv]] outs)])
     (let [ms (retry-ms (get-in m [:servers srv :attempt] 0))
           [m outs] (disconnected m srv why ms)]
       [(update-in m [:servers srv] dissoc :started) (conj outs [:after ms [:connect srv]])])))
 
+(defn connect-failed
+  "Attempt GEN of SRV did not connect (WHY): see failed. An attempt that is
+  not the one under way changes nothing."
+  [m srv gen why]
+  (if (current? m srv gen :connecting) (failed m srv why) [m []]))
+
 (defn closed
-  "SRV's control connection closed (WHY), such as when its server stopped:
-  it is down, then on the path of a failed connect, so the client always
-  reattaches."
-  [m srv why]
-  (let [[m outs] (down m srv)
-        [m more] (connect-failed m srv why)]
-    [m (into outs more)]))
+  "The connection of attempt GEN of SRV closed (WHY), such as when its
+  server stopped: it is dropped ([:conn/drop srv gen]) and SRV goes the way
+  of a failed connect, so the client always reattaches. The close of a
+  connection that is neither SRV's live one nor its try changes nothing."
+  [m srv gen why]
+  (cond
+    (current? m srv gen :up)
+    (let [[m outs] (down m srv)
+          [m more] (failed m srv why)]
+      [m (-> [[:conn/drop srv gen]] (into outs) (into more))])
+    ;; Its reader saw the close before rexg.main queued [:connected]: the
+    ;; attempt failed, and that late [:connected] is closed as stale.
+    (current? m srv gen :connecting) (failed m srv why)
+    :else [m []]))
 
 (defn rex-response [m [tk srv & more :as tag] result]
   (if (contains? result :error)

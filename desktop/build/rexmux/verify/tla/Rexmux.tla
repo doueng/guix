@@ -21,9 +21,13 @@
    Control connection (Control = TRUE). ghostty-rex's connection to Rex is
    rexg.model's state machine: connect, connect-failed, closed and connected
    in desktop/build/ghostty-rex/src/rexg/model.clj; rexg.main only performs
-   [:connect], [:start-local-server] and [:after ms ev]. The server can stop
-   or drop the connection; the client must never be left down with nothing
-   that will try again, and must attach once the server answers.
+   [:connect srv gen], [:conn/adopt|close|drop srv gen], [:start-local-server]
+   and [:after ms ev]. Each try is an attempt with an id, and every answer
+   (connected, failed, closed) names it and may arrive in any order, late, or
+   for an attempt the client no longer waits for. The server can stop or drop
+   the connection; the client must never be left down with nothing that will
+   try again, must attach once the server answers, and must leave no socket
+   open but its live one.
 
    ghostty-rex (desktop/build/ghostty-rex) runs the same sidecar in-process:
    its two pipes are a single-thread executor and the client's event queue,
@@ -33,11 +37,16 @@
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS Panes, Streams, MaxReq, MaxRestarts, MaxReports, MaxDrops,
-          Control, MaxLosses   \* model the control connection; how often it is lost
+          Control, MaxLosses,  \* model the control connection; how often it is lost
+          MaxGen, MaxLates     \* attempt ids 1..MaxGen, reused once nothing names them; late answers
 
 States == {"idle", "working", "done", "blocked", "error"}
 Wants == {"blocked", "error", "done"}
 None == "none"
+\* Attempt 0 is never the current one: it stands for every earlier attempt.
+Ids == 0..MaxGen
+NoConn == MaxGen + 1   \* no attempt has this id
+Kinds == {"connected", "failed", "closed"}
 
 VARIABLES
   toBB, toWin,          \* pipes: sequences of messages
@@ -54,12 +63,18 @@ VARIABLES
   focus, seen,
   srvUp,                \* the Rex server answers
   local,                \* local-server?: the client may start it
-  conn,                 \* :conn of the server in rexg.model: "down" or "up"
+  conn,                 \* :conn of the server in rexg.model: "down", "connecting" or "up"
   try,                  \* the out the client will perform next: "connect", "start", "after" or "none"
   started,              \* :started: this try already started the local server
-  losses
+  losses,
+  gen,                  \* :gen, the id of the model's current attempt
+  live,                 \* the attempt rexg.main adopted, or NoConn
+  inflight,             \* attempts the server has not answered yet
+  open,                 \* attempts whose socket is open in rexg.main
+  answers,              \* answers queued for the model: <<kind, attempt>>
+  lates                 \* late answers from an attempt it no longer waits for
 
-ctrl == <<srvUp, local, conn, try, started, losses>>
+ctrl == <<srvUp, local, conn, try, started, losses, gen, live, inflight, open, answers, lates>>
 link == <<toBB, toWin, winSent, bbSent, winGot, bbGot, pending, answered, nextReq, bbUp, restarts>>
 panes == <<pane, owner, sst, drops>>
 agents == <<status, reports, events, bbStatus, winAtt, focus, seen>>
@@ -86,8 +101,10 @@ Init ==
   /\ IF Control
        THEN /\ srvUp \in BOOLEAN /\ local \in BOOLEAN
             /\ conn = "down" /\ try = "connect" /\ started = FALSE
+            /\ gen = MaxGen /\ live = NoConn /\ open = {}
        ELSE /\ srvUp = TRUE /\ local = FALSE /\ conn = "up" /\ try = "none" /\ started = FALSE
-  /\ losses = 0
+            /\ gen = 1 /\ live = 1 /\ open = {1}
+  /\ losses = 0 /\ inflight = {} /\ answers = {} /\ lates = 0
 
 ---------------------------------------------------------------------------
 (* Link *)
@@ -221,53 +238,111 @@ NextBlocked ==
 ---------------------------------------------------------------------------
 (* Control connection *)
 
-\* connect-failed (and closed, after down): start the local server once per
-\* try and try again at once, else wait model/retry-ms and try again.
+\* model/failed, after connect-failed or closed: start the local server once
+\* per try and try again at once, else wait model/retry-ms and try again.
 Failed ==
   /\ conn' = "down"
   /\ IF local /\ ~started
        THEN try' = "start" /\ started' = TRUE
        ELSE try' = "after" /\ started' = FALSE
 
-\* rexg.main performs [:connect srv]: [:connected ..] or [:connect-failed ..].
-TryConnect ==
-  /\ try = "connect"
-  /\ IF srvUp
-       THEN conn' = "up" /\ try' = "none" /\ started' = FALSE
-       ELSE Failed
-  /\ UNCHANGED <<srvUp, local, losses>>
+NextId == IF gen = MaxGen THEN 1 ELSE gen + 1
+\* An id is reused only once nothing names it.
+Fresh(g) == g \notin inflight /\ g \notin open /\ g # live /\ \A k \in Kinds : <<k, g>> \notin answers
 
-\* [:start-local-server srv]: rex server start, which may fail; then [:connect srv].
+\* model/connect: a new attempt; rexg.main performs [:connect srv gen].
+TryConnect ==
+  /\ try = "connect" /\ conn = "down" /\ Fresh(NextId)
+  /\ gen' = NextId /\ conn' = "connecting" /\ try' = "none"
+  /\ inflight' = inflight \cup {NextId}
+  /\ UNCHANGED <<srvUp, local, started, losses, live, open, answers, lates>>
+
+\* The server answers attempt g: a socket and [:connected srv g c], or
+\* [:connect-failed srv g why].
+Answer(g) ==
+  /\ g \in inflight /\ inflight' = inflight \ {g}
+  /\ IF srvUp
+       THEN open' = open \cup {g} /\ answers' = answers \cup {<<"connected", g>>}
+       ELSE open' = open /\ answers' = answers \cup {<<"failed", g>>}
+  /\ UNCHANGED <<srvUp, local, conn, try, started, losses, gen, live, lates>>
+
+\* An attempt the model no longer waits for connects too: two tries
+\* succeeded, or a retry raced a slow one.
+Late ==
+  /\ srvUp /\ lates < MaxLates /\ 0 \notin open
+  /\ open' = open \cup {0} /\ answers' = answers \cup {<<"connected", 0>>}
+  /\ lates' = lates + 1
+  /\ UNCHANGED <<srvUp, local, conn, try, started, losses, gen, live, inflight>>
+
+Current(g, c) == g = gen /\ conn = c
+
+\* A socket rexg.main closes reports its own close, as a server's does.
+Close(S) == /\ open' = open \ S
+            /\ answers' = (answers \cup {<<"closed", g>> : g \in S \cap open})
+
+\* model/connected: the current attempt is adopted, any other closed.
+Connected(g) ==
+  /\ <<"connected", g>> \in answers
+  /\ IF Current(g, "connecting")
+       THEN /\ conn' = "up" /\ live' = g /\ started' = FALSE
+            /\ answers' = answers \ {<<"connected", g>>}
+            /\ UNCHANGED <<try, open>>
+       ELSE /\ open' = open \ {g}
+            /\ answers' = (answers \ {<<"connected", g>>}) \cup (IF g \in open THEN {<<"closed", g>>} ELSE {})
+            /\ UNCHANGED <<conn, try, started, live>>
+  /\ UNCHANGED <<srvUp, local, losses, gen, inflight, lates>>
+
+\* model/connect-failed: only the current attempt's counts.
+ConnectFailed(g) ==
+  /\ <<"failed", g>> \in answers /\ answers' = answers \ {<<"failed", g>>}
+  /\ IF Current(g, "connecting") THEN Failed ELSE UNCHANGED <<conn, try, started>>
+  /\ UNCHANGED <<srvUp, local, losses, gen, live, inflight, open, lates>>
+
+\* model/closed: the live connection's close drops it ([:conn/drop]); the
+\* current try's, seen before its [:connected], fails the try; any other
+\* changes nothing.
+Closed(g) ==
+  /\ <<"closed", g>> \in answers /\ answers' = answers \ {<<"closed", g>>}
+  /\ IF Current(g, "up") \/ Current(g, "connecting")
+       THEN Failed /\ live' = NoConn
+       ELSE UNCHANGED <<conn, try, started, live>>
+  /\ UNCHANGED <<srvUp, local, losses, gen, inflight, open, lates>>
+
+\* [:start-local-server srv]: rex server start, which may fail; then a try.
 StartLocal(ok) ==
   /\ try = "start"
   /\ srvUp' = (srvUp \/ ok) /\ try' = "connect"
-  /\ UNCHANGED <<local, conn, started, losses>>
+  /\ UNCHANGED <<local, conn, started, losses, gen, live, inflight, open, answers, lates>>
 
 \* [:after ms [:connect srv]] fires.
 Timer ==
   /\ try = "after" /\ try' = "connect"
-  /\ UNCHANGED <<srvUp, local, conn, started, losses>>
+  /\ UNCHANGED <<srvUp, local, conn, started, losses, gen, live, inflight, open, answers, lates>>
 
-\* The connection drops ([:rex srv [:closed why]]), the server stopping with
-\* it or not: model/closed.
+\* The network drops the live connection; the server may stop with it.
 Hangup ==
-  /\ conn = "up" /\ losses < MaxLosses
+  /\ live \in open /\ losses < MaxLosses
   /\ losses' = losses + 1
-  /\ \E dies \in BOOLEAN : srvUp' = ~dies
-  /\ Failed
-  /\ UNCHANGED local
+  /\ \E dies \in BOOLEAN :
+       /\ srvUp' = ~dies
+       /\ Close(IF dies THEN open ELSE {live})
+  /\ UNCHANGED <<local, conn, try, started, gen, live, inflight, lates>>
 
-\* The server stops while the client is down, or someone else starts it.
+\* The server stops, closing every socket it has, or someone starts it.
 ServerStops ==
-  /\ srvUp /\ conn = "down" /\ losses < MaxLosses
+  /\ srvUp /\ losses < MaxLosses
   /\ srvUp' = FALSE /\ losses' = losses + 1
-  /\ UNCHANGED <<local, conn, try, started>>
+  /\ Close(open)
+  /\ UNCHANGED <<local, conn, try, started, gen, live, inflight, lates>>
 ServerStarts ==
   /\ ~srvUp /\ srvUp' = TRUE
-  /\ UNCHANGED <<local, conn, try, started, losses>>
+  /\ UNCHANGED <<local, conn, try, started, losses, gen, live, inflight, open, answers, lates>>
+
+Deliver == \E g \in Ids : Connected(g) \/ ConnectFailed(g) \/ Closed(g)
 
 ControlNext ==
-  Control /\ (TryConnect \/ StartLocal(TRUE) \/ StartLocal(FALSE) \/ Timer \/ Hangup \/ ServerStops \/ ServerStarts)
+  Control /\ (TryConnect \/ (\E g \in Ids : Answer(g)) \/ Late \/ Deliver
+               \/ StartLocal(TRUE) \/ StartLocal(FALSE) \/ Timer \/ Hangup \/ ServerStops \/ ServerStarts)
 
 ---------------------------------------------------------------------------
 Next ==
@@ -288,6 +363,7 @@ Fairness ==
   /\ \A s \in Streams : WF_core(Welcome(s))
   /\ SF_core(NextBlocked)
   /\ WF_ctrl(TryConnect) /\ WF_ctrl(Timer) /\ WF_ctrl(StartLocal(FALSE)) /\ SF_ctrl(StartLocal(TRUE))
+  /\ WF_ctrl(\E g \in Ids : Answer(g)) /\ WF_ctrl(Deliver)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -298,6 +374,11 @@ TypeOK ==
   /\ pending \subseteq 1..MaxReq
   /\ \A s \in Streams : sst[s] \in {"idle", "connecting", "live"} /\ owner[s] \in Panes \cup {None}
   /\ \A p \in Panes : status[p] \in States /\ bbStatus[p] \in States
+  /\ srvUp \in BOOLEAN /\ local \in BOOLEAN /\ started \in BOOLEAN
+  /\ conn \in {"down", "connecting", "up"} /\ try \in {"connect", "start", "after", "none"}
+  /\ losses \in 0..MaxLosses /\ lates \in 0..MaxLates
+  /\ gen \in 1..MaxGen /\ live \in Ids \cup {NoConn}
+  /\ inflight \subseteq Ids /\ open \subseteq Ids /\ answers \subseteq Kinds \X Ids
 
 \* Never two answers to one request, and an answered request is no longer open.
 NoDuplicateReply == \A r \in 1..MaxReq : answered[r] <= 1
@@ -320,12 +401,23 @@ BlockedReachable == Settled => {p \in Panes : status[p] = "blocked"} \subseteq w
 SidecarAgrees == Settled => bbStatus = status
 
 \* The client is never down with nothing that will try again (T210: on
-\* :closed it only said so).
-NeverStranded == conn = "down" => try /= "none"
+\* :closed it only said so), and a try always has an answer coming.
+NeverStranded ==
+  /\ conn = "down" => try /= "none"
+  /\ conn = "connecting" => gen \in inflight \/ \E k \in Kinds : <<k, gen>> \in answers
+\* The model is up on exactly the attempt rexg.main adopted, whose socket
+\* is open or whose close is still coming (so it is never up on a dead one), a
+\* stale answer never changed that, and every open socket is the live one or
+\* awaits the model's verdict: no socket leaks.
+UpIsLive ==
+  /\ (conn = "up") <=> (live = gen)
+  /\ conn = "up" => live \in open \/ <<"closed", live>> \in answers
+NoLeak == \A g \in open : g = live \/ <<"connected", g>> \in answers
 \* Once the server answers, the client attaches, unless it stops again.
-ServerUpAttaches == (conn = "down" /\ srvUp) ~> (conn = "up" \/ ~srvUp)
-\* A client that may start its local server always attaches.
-LocalAttaches == (conn = "down" /\ local) ~> (conn = "up")
+ServerUpAttaches == (conn # "up" /\ srvUp) ~> (conn = "up" \/ ~srvUp)
+\* A client that may start its local server always attaches. This leans on
+\* SF_ctrl(StartLocal(TRUE)): a start that keeps being tried eventually works.
+LocalAttaches == (conn # "up" /\ local) ~> (conn = "up")
 
 \* Every request is answered.
 EveryRequestAnswered == \A r \in 1..MaxReq : (r \in pending) ~> (r \notin pending)

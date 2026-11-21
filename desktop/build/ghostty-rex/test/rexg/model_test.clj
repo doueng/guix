@@ -84,10 +84,12 @@
     (testing "the status line says so"
       (is (= [250 500 1000 2000 4000 4000] (map m/retry-ms [0 1 2 3 4 9]))))
     (testing "connected again, it attaches the session it showed, not the startup one"
-      (let [[m outs] (m/connected m 0 "client:new")
+      (let [[m [[_ _ gen]]] (m/connect m 0)
+            [m [adopt & outs]] (m/connected m 0 gen "client:new")
             [_ outs2] (m/rex-response m [:sessions 0] {:ok {:sessions [{:session_id "session:main" :label "main"}
                                                                        {:session_id "session:p" :label "project"}]}})]
         (is (= :up (get-in m [:servers 0 :conn])))
+        (is (= [:conn/adopt 0 gen] adopt))
         (is (= "t: connected again" (:echo m)))
         (is (= "session.list" (nth (first outs) 2)))
         (is (= ["session.attach" "session:p"] ((juxt #(nth % 2) #(:session_id (nth % 3))) (first outs2))))))))

@@ -150,10 +150,10 @@
           s (str " " (:label (model/server m)) " │ focus " (if focused (short focused) "-")
                  " │ agents " (count rows) " │ blocked " nb " │ attention " (count (:attention m))
                  (when-not (:sidecar-up m) " │ sidecar down")
-                 (case (:conn (model/server m))
-                   :up nil
-                   :down (str " │ " (:label (model/server m)) " not connected, reconnecting")
-                   (str " │ connecting to " (:label (model/server m)))))
+                 (let [s (model/server m)]
+                   (cond (= :up (:conn s)) nil
+                         (or (:lost s) (= :down (:conn s))) (str " │ " (:label s) " not connected, reconnecting")
+                         :else (str " │ connecting to " (:label s)))))
           down (not= :up (:conn (model/server m)))]
       (add! (span (- h 2) 0 (if (or down (pos? nb)) blocked status-fg) status 0 (pad s w))))
     ;; Help text over the panes.
