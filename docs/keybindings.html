@@ -85,6 +85,14 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <li>Anywhere: <code>Cmd+Space</code>, then type <code>on</code> or <code>incog</code>, then Enter. The row reads <b>Open Chrome incognito</b>, <code>⌘␣ o n</code>, and opens a new incognito window.</li>
 <li>In Chrome: <code>Alt+Space o n</code> sends Chrome's own Ctrl+Shift+N. The Chrome launcher list shows this as a local row, which replaces the old <code>palette.edn</code> row <i>New incognito window</i>.</li>
 </ul>
+<h3>Incognito that did nothing (T208, W273)</h3>
+<p>On the real desktop, Cmd+Space o n ran <code>chrome-unified --incognito</code> and nothing opened. The launcher did run the row, and its environment was fine. The new <code>flatpak run</code> died in bwrap before Chrome started: <code>Can't find source path /run/user/1000/doc/by-app/com.google.Chrome</code>. The launcher's output goes to /dev/null, so you saw nothing. It failed the same way with Chrome closed and with Chrome running, because the hand-off to a running Chrome happens only once Chrome has started.</p>
+<p>The mount was gone because of our own tests. ghostty-rex's e2e starts the launcher under <code>dbus-run-session</code> on the hidden display. That private bus started a second document portal on your <code>/run/user/1000/doc</code>, which took the mount over and removed it when the test ended. Your portal kept running without a mount, and no new flatpak app could start after that.</p>
+<ul>
+<li><code>test-display</code> now puts its own <code>dbus-run-session</code> on the display's PATH: a bus with every session service except the portals. <code>test-display check</code> proves a test's bus cannot start the document portal.</li>
+<li><code>chrome-unified</code> recovers a session that is already broken. With no flatpak app running, it restarts the stale portal. With Chrome running, it hands off without the portal. It sends a notification when Chrome fails to start.</li>
+<li><code>make chrome-launch-check</code> runs <code>palette run desktop:leader:o n</code> with Hyprland's launcher environment on the hidden display, with Chrome closed and then with Chrome running. Each case must open an incognito window, and in the running case the extra process must exit after the hand-off.</li>
+</ul>
 <p>Nothing else was dropped. Every old <code>leader.edn</code> sequence and every <code>bindings.edn</code> entry still has a launcher row; three entries were only relabelled (Command palette is now Launcher, Herdr leader is now Local prefix, Editor terminal is now bbh). The only Hyprland bind removed was the old Alt+Space jump to Herdr, which the local prefix replaces. <code>custom-launcher</code>'s other apps (Ghostty, Chrome, oilfm) still sit behind the <code>.</code> row, and Ghostty and Chrome also have their own rows.</p>
 
 <h2>Alt+Space: the local prefix</h2>

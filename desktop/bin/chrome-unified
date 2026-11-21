@@ -1,7 +1,19 @@
 #!/usr/bin/env bb
 
+;; Starts the flatpak Google Chrome, or hands the arguments to the one already
+;; running, which then opens the window (--incognito opens an incognito one).
+;;
+;; A new flatpak run binds the document portal's FUSE mount,
+;; $XDG_RUNTIME_DIR/doc/by-app/com.google.Chrome, into its sandbox. When that
+;; mount is gone while xdg-document-portal still runs, bwrap refuses to start
+;; and the launcher, whose output goes nowhere, shows nothing (T208). So:
+;; with a healthy mount, run as usual; with no flatpak app running, restart the
+;; stale portal so the new Chrome gets its documents; else run without the
+;; portal, which a hand-off to the running Chrome never needs.
+
 (require '[babashka.fs :as fs]
-         '[babashka.process :as p])
+         '[babashka.process :as p]
+         '[clojure.string :as str])
 
 (def home (System/getProperty "user.home"))
 (def flatpak-app "com.google.Chrome")
@@ -15,25 +27,90 @@
 (defn show-help []
   (println "Chrome Unified Launcher")
   (println "Usage:")
-  (println "  chrome-unified                    - Launch regular Chromium (Flatpak)")
-  (println "  chrome-unified --incognito        - Launch incognito mode")
+  (println "  chrome-unified                    - Launch Google Chrome (Flatpak)")
+  (println "  chrome-unified --incognito        - Open an incognito window")
   (println "  chrome-unified --help             - Show this help")
   (println "  chrome-unified [other-flags]      - Launch with custom flags")
   (println)
-  (println "Also loads ~/.var/app/com.google.Chrome/config/chromium/extensions/old-reddit-redirect when present."))
+  (println "Also loads ~/.var/app/com.google.Chrome/config/chromium/extensions/old-reddit-redirect when present.")
+  (println "CHROME_UNIFIED_ARGS adds space-separated Chrome flags, such as a test's --user-data-dir."))
+
+(defn portal-plan
+  "How to treat the document portal: :ok when bwrap will find its mount, else
+  :restart when no flatpak app would lose its documents, else :skip."
+  [{:keys [docs-mounted? instances]}]
+  (cond docs-mounted? :ok
+        (empty? instances) :restart
+        :else :skip))
+
+(defn command
+  "The flatpak argv for ARGS under PLAN, with EXTENSION and EXTRA flags."
+  [args {:keys [plan extension extra]}]
+  (let [incognito? (= "--incognito" (first args))]
+    (vec (concat ["flatpak" "run"]
+                 (when (= :skip plan) ["--no-documents-portal"])
+                 [flatpak-app]
+                 chrome-flags
+                 (when extension [(str "--load-extension=" extension)])
+                 extra
+                 (when incognito? ["--incognito"])
+                 (if incognito? (next args) args)))))
+
+(defn runtime-dir []
+  (or (System/getenv "XDG_RUNTIME_DIR")
+      (str "/run/user/" (str/trim (:out (p/sh "id" "-u"))))))
+
+(defn docs-mounted?
+  "Whether bwrap will find the document portal's directory for Chrome. A stale
+  FUSE mount fails to stat, and a missing one leaves an empty directory."
+  []
+  (fs/exists? (str (or (System/getenv "CHROME_UNIFIED_DOC_DIR") (str (runtime-dir) "/doc"))
+                   "/by-app/" flatpak-app)))
+
+(defn instances []
+  (let [{:keys [exit out]} (p/sh "flatpak" "ps" "--columns=instance")]
+    (if (zero? exit) (remove str/blank? (str/split-lines out)) [:unknown])))
+
+(defn restart-portal!
+  "Stop the stale xdg-document-portal; D-Bus starts a fresh one, which mounts
+  again, when flatpak asks for it."
+  []
+  (p/sh "pkill" "-f" "libexec/xdg-document-portal$")
+  (Thread/sleep 300)
+  (p/sh "busctl" "--user" "call" "org.freedesktop.portal.Documents" "/org/freedesktop/portal/documents"
+        "org.freedesktop.portal.Documents" "GetMountPoint"))
+
+(defn plan! []
+  (let [plan (portal-plan {:docs-mounted? (docs-mounted?) :instances (instances)})]
+    (if (= :restart plan)
+      (do (restart-portal!)
+          (if (docs-mounted?) :ok :skip))
+      plan)))
+
+(defn notify! [message]
+  (p/sh "notify-send" "-a" "Chrome" "Chrome did not start" message))
 
 (defn main [& args]
   (if (and (seq args) (#{"--help" "-h"} (first args)))
     (show-help)
-    (let [incognito? (= "--incognito" (first args))
-          mode (if incognito? ["--incognito"] [])
-          rest-args (if incognito? (next args) args)
-          extension (if (fs/directory? extension-path)
-                      [(str "--load-extension=" extension-path)]
-                      [])
-          command (into ["flatpak" "run" flatpak-app]
-                        (concat chrome-flags extension mode rest-args))
-          _ (p/exec command)]
-      nil)))
+    (let [plan (plan!)
+          argv (command args {:plan plan
+                              :extension (when (fs/directory? extension-path) extension-path)
+                              :extra (some-> (System/getenv "CHROME_UNIFIED_ARGS") str/trim not-empty (str/split #"\s+"))})
+          ;; A launcher's output goes nowhere, so stderr goes to a file the
+          ;; notification can quote. A hand-off or a failure ends within
+          ;; seconds; a new browser keeps running after this script exits.
+          log (str (fs/create-dirs (fs/path (or (System/getenv "XDG_STATE_HOME") (str home "/.local/state")) "chrome-unified"))
+                   "/" (.pid (java.lang.ProcessHandle/current)) ".log")
+          proc (p/process argv {:in :inherit :out :inherit :err :write :err-file (fs/file log)})
+          result (deref proc 8000 nil)]
+      (cond (nil? result) (System/exit 0)
+            (zero? (:exit result)) (do (fs/delete-if-exists log) (System/exit 0))
+            :else (let [err (slurp log)]
+                    (binding [*out* *err*] (print err) (flush))
+                    (notify! (or (last (remove str/blank? (str/split-lines err)))
+                                 (str "flatpak exited with " (:exit result))))
+                    (System/exit (:exit result)))))))
 
-(apply main *command-line-args*)
+(when (= *file* (System/getProperty "babashka.file"))
+  (apply main *command-line-args*))

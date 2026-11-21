@@ -72,6 +72,67 @@ Type with wtype, click with swaymsg 'seat - cursor ...', screenshot with grim.")
 (System/exit 2)
 ")
 
+(defn portal-service?
+  "Whether a D-Bus service file starts an xdg-desktop-portal. xdg-desktop-portal
+  starts the document portal, which mounts $XDG_RUNTIME_DIR/doc. A second one on
+  a test's bus takes that shared mount over and removes it when it exits, which
+  leaves the user's portal without a mount and every new flatpak app unable to
+  start (T208)."
+  [file-name]
+  (boolean (re-matches #"org\.freedesktop\.(impl\.)?portal\..*\.service" file-name)))
+
+(defn session-services
+  "The session bus's service files by name, first in XDG_DATA_DIRS winning."
+  []
+  (let [dirs (str/split (or (System/getenv "XDG_DATA_DIRS") "/usr/local/share:/usr/share") #":")]
+    (reduce (fn [m f] (let [n (str (fs/file-name f))] (if (contains? m n) m (assoc m n (str f)))))
+            (sorted-map)
+            (for [d dirs, :let [sd (fs/path d "dbus-1" "services")] :when (fs/directory? sd)
+                  f (sort (fs/list-dir sd)) :when (str/ends-with? (str f) ".service")]
+              f))))
+
+(defn bus-config [services-dir]
+  (str "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\"
+ \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">
+<busconfig>
+  <type>session</type>
+  <keep_umask/>
+  <listen>unix:tmpdir=/tmp</listen>
+  <auth>EXTERNAL</auth>
+  <servicedir>" services-dir "</servicedir>
+  <policy context=\"default\">
+    <allow send_destination=\"*\" eavesdrop=\"true\"/>
+    <allow eavesdrop=\"true\"/>
+    <allow own=\"*\"/>
+  </policy>
+</busconfig>
+"))
+
+(defn dbus-run-session-shim [real config]
+  (str "#!/usr/bin/env bb
+;; test-display's dbus-run-session: the session bus has every service but the
+;; portals, so a test never starts a second document portal (T208).
+(require '[babashka.process :as p])
+(let [args *command-line-args*]
+  (apply p/exec " (pr-str real) "
+         (if (some #(.startsWith ^String % \"--config-file\") args) args (cons " (pr-str (str "--config-file=" config)) " args))))
+"))
+
+(defn write-dbus-shim!
+  "Put a dbus-run-session in DIR/shim that runs the real one on a bus without
+  the portals, when the real one is on PATH."
+  [dir]
+  (when-let [real (fs/which "dbus-run-session")]
+    (let [services (str dir "/dbus/services")
+          config (str dir "/dbus/session.conf")]
+      (fs/delete-tree services)
+      (fs/create-dirs services)
+      (doseq [[n f] (session-services) :when (not (portal-service? n))]
+        (fs/create-sym-link (fs/path services n) f))
+      (spit config (bus-config services))
+      (spit (str dir "/shim/dbus-run-session") (dbus-run-session-shim (str real) config))
+      (fs/set-posix-file-permissions (str dir "/shim/dbus-run-session") "rwxr-xr-x"))))
+
 (defn start!
   "Start display NAME and return its state once sway has its socket."
   [{:keys [name size]}]
@@ -82,6 +143,7 @@ Type with wtype, click with swaymsg 'seat - cursor ...', screenshot with grim.")
     (fs/create-dirs (str dir "/shim"))
     (spit (str dir "/shim/ydotool") ydotool-shim)
     (fs/set-posix-file-permissions (str dir "/shim/ydotool") "rwxr-xr-x")
+    (write-dbus-shim! dir)
     (spit (str dir "/config")
           (str "xwayland disable\n"
                "output HEADLESS-1 resolution " size " position 0 0 bg #3c3c3c solid_color\n"
@@ -139,6 +201,9 @@ Type with wtype, click with swaymsg 'seat - cursor ...', screenshot with grim.")
     cmd))
 
 (defn run-in [s cmd]
+  ;; A display an older test-display started has no dbus-run-session shim yet.
+  (when (and (:dir s) (fs/directory? (str (:dir s) "/shim")) (not (fs/exists? (str (:dir s) "/shim/dbus-run-session"))))
+    (write-dbus-shim! (:dir s)))
   (let [env (child-env s)]
     (:exit @(p/process (resolve-cmd env cmd) {:env env :inherit true}))))
 
@@ -176,7 +241,7 @@ Type with wtype, click with swaymsg 'seat - cursor ...', screenshot with grim.")
                "--no-default-browser-check" "--disable-sync" url]]
     (if-let [c (some fs/which (remove nil? [(System/getenv "CHROME") "chromium"]))]
       (into [(str c)] flags)
-      (into ["flatpak" "run" "--socket=wayland" "--nosocket=x11" (str "--filesystem=" profile) "com.google.Chrome"] flags))))
+      (into ["flatpak" "run" "--no-documents-portal" "--socket=wayland" "--nosocket=x11" (str "--filesystem=" profile) "com.google.Chrome"] flags))))
 
 (defn check! [{:keys [keep]}]
   (let [out (str (if keep (fs/create-dirs keep) (fs/create-temp-dir {:prefix "test-display-check"})))
@@ -196,9 +261,16 @@ Type with wtype, click with swaymsg 'seat - cursor ...', screenshot with grim.")
         (Thread/sleep 800)
         (let [title (:name (first (sway-windows s)))]
           (ok (str/includes? (str title) "typed into the test display") (str "wtype reached the test Chrome (title: " title ")")))
-        (p/sh [(str (:bin s) "/grim") (str out "/test-display.png")] {:env (child-env s)})
+        (p/sh (resolve-cmd (child-env s) ["grim" (str out "/test-display.png")]) {:env (child-env s)})
         (ok (fs/exists? (str out "/test-display.png")) (str "grim captured the test display: " out "/test-display.png"))
         (ok (= 2 (run-in s ["ydotool" "key" "28:1" "28:0"])) "ydotool refuses inside the test display")
+        (let [ask (fn [dest path iface]
+                    (p/sh (resolve-cmd (child-env s) ["dbus-run-session" "--" "dbus-send" "--session" "--print-reply" (str "--dest=" dest) path (str iface ".GetMountPoint")])
+                          {:env (child-env s)}))
+              docs (ask "org.freedesktop.portal.Documents" "/org/freedesktop/portal/documents" "org.freedesktop.portal.Documents")]
+          (ok (str/includes? (str (:err docs) (:out docs)) "ServiceUnknown")
+              (str "a test's dbus-run-session cannot start the document portal, which would take the user's /run/user/<uid>/doc over: "
+                   (str/trim (str (:err docs))))))
         (let [after (user-view uenv)]
           (p/sh ["grim" "-o" (:monitor after) (str out "/user-output.png")] {:extra-env uenv})
           (println "user output" (:monitor after) "captured:" (str out "/user-output.png"))

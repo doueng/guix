@@ -69,6 +69,10 @@
    :paths ["desktop/configs/keybindings/palette.edn" "desktop/bin/{palette,ext-reload}"
            "desktop/build/chrome/ext-reload/**" "desktop/build/keybindings/chrome-palette-e2e.mjs"]
    :slow ["make chrome-palette-check"]}
+  {:name "chrome launch"
+   :paths ["desktop/bin/{chrome-unified,palette,keyleader}" "desktop/configs/keybindings/leader.edn"
+           "desktop/build/keybindings/chrome-launch-e2e.bb"]
+   :slow ["make chrome-launch-check"]}
   {:name "chrome fullscreen"
    :paths ["desktop/configs/hypr/**" "desktop/build/hypr/**"]
    :slow ["make chrome-fullscreen-check"]}
