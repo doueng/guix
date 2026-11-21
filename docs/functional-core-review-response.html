@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Each review finding checked against the code: fixed with its commit, with the race the reviews missed">
+<meta name="bbh-doc" content="T211">
+<title>Functional-core refactor: response to the two reviews</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Functional-core refactor: response to the two reviews</h1>
+
+<p class='sub'>Two external reviews (o2394) read the W270 diff up to xxsmzvnv. Each finding below was checked against the code. Commits are named by jj change id, which survives landing.</p>
+<nav><a href='#p1'>P1</a><a href='#p2'>P2</a><a href='#check'>Worth checking</a><a href='#nits'>Nits</a><a href='#next'>Next</a></nav>
+<div class='card'><b>Summary.</b> Both P1 findings hold and are fixed. Fixing the first one turned up a second race the reviews missed: a close could arrive before its own <code>:connected</code>. That is fixed too, and TLC checks it. All four P2 findings hold and are fixed. Of the worth-checking items, two needed changes (the message-id assert and the local reconnect status). The other three checked out: there are no stale <code>(:panes @app)</code> reads, no caller bypasses <code>perform!</code>, and there are no extra redraws. Every nit is done. Nothing is rejected or deferred.</div>
+
+<h2 id=p1>P1</h2>
+<table>
+<tr><th>Finding</th><th>Verdict</th><th>What changed</th></tr>
+<tr><td>(1) Connection attempt and close race in rexg</td><td><b>Holds. Fixed</b> in <code>yrlyptsv</code></td><td>
+Confirmed. A duplicate <code>:connected</code> was closed with <code>ws/close!</code>, its reader then put <code>[:rex srv [:closed ..]]</code>, and <code>:closed</code> dissoc'd the live connection without closing it. Now each try is an attempt <code>gen</code>, and the model has a <code>:connecting</code> state. <code>[:connect srv gen]</code>, <code>[:connected srv gen c]</code>, <code>[:connect-failed srv gen why]</code> and <code>[:rex srv gen msg]</code> all name their attempt. The model adopts, closes or drops sockets with <code>[:conn/adopt|close|drop srv gen]</code>, so main decides nothing. A stale <code>:connected</code> is closed. A stale <code>:connect-failed</code> or <code>:closed</code> changes nothing. main drops responses and events from any connection that is not live.<br>
+<b>Found while fixing it:</b> <code>connect!</code> starts its reader before main queues <code>:connected</code>, so a server that dies right after the welcome queues <code>:closed</code> first. The model ignored that close and then went up on a dead socket. Now a close of the current try fails the try.<br>
+<b>Tests.</b> <code>a-duplicate-is-closed-and-its-late-close-changes-nothing</code> covers two attempts that both succeed: one is rejected, and its close arrives after the other is live. It also covers a late close after a reconnect. The property (below, P2.3) fails on both old behaviours. <b>Rexmux.tla</b> now has attempt ids that are reused only when nothing names them, a set of answers that can arrive in any order, a <code>Late</code> action for an attempt the model stopped waiting for, and the new invariants <code>UpIsLive</code> and <code>NoLeak</code>. TLC fails <code>UpIsLive</code> when the close-before-connected fix is removed, and fails <code>UpIsLive</code> and <code>NoLeak</code> when a stale <code>:connected</code> is adopted.</td></tr>
+<tr><td>(2) <code>sidecar/perform!</code> has no error isolation</td><td><b>Holds. Fixed</b> in <code>xkyuoruq</code></td><td>
+Confirmed for both shells and for <code>:bbh/say</code>. Each local op now runs in its own try. A failure is logged with <code>(:log io)</code>: to stderr in the rexmux sidecar, and to REXG_LOG in ghostty-rex, whose stderr is the terminal. A spawn carries <code>:for</code>, its invoke's id, and that invoke's reply becomes <code>{:op :reply :id :seq :error}</code>. It keeps its <code>:seq</code>, so numbering stays contiguous, and a failed <code>bbh say</code> no longer says “Sent:”. <code>perform!</code> never throws, so the state and the messages stay in step. The new test <code>a-spawn-that-throws-answers-its-invoke-with-an-error-and-loses-nothing</code> makes <code>:spawn!</code> and <code>:notify</code> throw. It asserts that the error reply arrives, that a later ping and a Rex event still arrive, and that the messages are numbered 1..n with no gap.</td></tr>
+</table>
+
+<h2 id=p2>P2</h2>
+<table>
+<tr><th>Finding</th><th>Verdict</th><th>What changed</th></tr>
+<tr><td>(3) connection_test simulation gap</td><td><b>Holds. Fixed</b> in <code>yrlyptsv</code></td><td>Rewritten as a state-machine property over attempts with identities. Connects stay in flight until the server answers (<code>:answer</code>). The server can die and close every socket it has (<code>:die</code>), answer and then die before the <code>:connected</code> is queued (<code>:answer-die</code>), or drop the live connection (<code>:hangup</code>). An answer already handled can arrive again (<code>:replay</code>). A socket the client closes reports its own close. Per step, the property checks that the client is never stranded and that the model is up exactly on the adopted connection. At the end, the live connection is the only open socket. The unused <code>:during</code> key is gone.</td></tr>
+<tr><td>(4) voice_property_test flakiness and review drafts</td><td><b>Holds. Fixed</b> in <code>zmkxutpw</code></td><td>Asks are now numbered a1, a2, … in each generated thread, so their ids are distinct. On review drafts I decided that voice may <b>not</b> send a draft that picks a review ask. Sending it is an approval made by voice, and the module's rule is that voice never approves. <code>send-refusal</code> now refuses action and review picks, and an explicit test covers both, plus a review ask the draft does not pick.</td></tr>
+<tr><td>(5) <code>:agent/new-worktree</code> runs jj during interpretation</td><td><b>Holds. Fixed</b> in <code>qxsprzpv</code></td><td>The command returns <code>[:workspace/create {:cwd :name :command :session}]</code>. <code>perform!</code> runs jj and returns a <code>:workspace/created</code> result (or its error). The new <code>sidecar/settle!</code> delivers that result back, and the invoke is answered then, once, with the new window or the error. Both shells drive the sidecar through <code>settle!</code>. Side fix: jj's output used to reach the rexmux sidecar's stdout, which is the protocol pipe. It is now captured.</td></tr>
+<tr><td>(6) Outbox property does not inject crashes</td><td><b>Holds. Fixed</b> in <code>tvkpxyoq</code></td><td>Each round now generates a crash point, runs only that prefix of the pass, and replans. Sessions take mail as <code>take-mail!</code> does: a message the transcript already holds is deleted unread. The property checks that a row's message id never changes, that each message is delivered at most once, and that every row this run sent ends done <i>after it was read</i>, which catches a lost message. A mutation that records the send before writing the file fails the loss check.</td></tr>
+</table>
+
+<h2 id=check>Worth checking</h2>
+<ul>
+<li><b>outbox-plan message id vs perform!.</b> Added <code>(assert (= message-id (:id m)))</code> after <code>inbox/send!</code> in <code>tvkpxyoq</code>.</li>
+<li><b>Leftover <code>(:panes @app)</code> reads.</b> None. The two <code>:panes</code> reads in rexg/main.clj (<code>draw!</code>, <code>mouse!</code>) read <code>(:panes m)</code> from the model snapshot, which is right. No change.</li>
+<li><b>Callers of <code>sidecar/handle</code> or <code>deliver</code> that bypass <code>perform!</code>.</b> There were two, both in ghostty-rex, and both called <code>perform!</code>. All callers now go through <code>settle!</code> (<code>qxsprzpv</code>).</li>
+<li><b>Extra redraws.</b> None. The loop already ran <code>draw!</code> after every event batch, and <code>draw!</code> sends a layout, spans or cursor frame only when its text differs from the last one. A mode line that changes nothing on screen sends nothing. No change.</li>
+<li><b>Silent local reconnect.</b> Holds. A lost local connection now sets “local not connected: WHY; starting the server”. The status line keeps “not connected, reconnecting” while a reconnect is under way (<code>:lost</code>), instead of “connecting to”. Documented in <code>model/failed</code>'s docstring and in the doc's step 2 (<code>yrlyptsv</code>, <code>svouxkkn</code>).</li>
+<li><b>LocalAttaches and SF_ctrl(StartLocal(TRUE)).</b> Its comment now says so (<code>yrlyptsv</code>).</li>
+</ul>
+
+<h2 id=nits>Nits</h2>
+<ul>
+<li>TypeOK covers srvUp, local, conn, try, started, losses and the new gen, live, inflight, open, answers and lates (<code>yrlyptsv</code>).</li>
+<li><code>voice/target</code> is <code>resolve-target</code> (<code>zmkxutpw</code>).</li>
+<li>outbox_plan_property_test: there is no unused <code>is</code> and no <code>take</code> shadowing, the settle phase runs each pass once, and sent rows may start with their file still waiting (<code>tvkpxyoq</code>).</li>
+<li>connection_test's <code>:during</code> is gone (<code>yrlyptsv</code>).</li>
+<li>The doc: the “Not done: step 5” item is folded into item 5, each item opens with its status, and done items drop their estimates (<code>svouxkkn</code>).</li>
+<li>“panes streams” in Rexmux.connect.cfg is now “pane streams” (<code>yrlyptsv</code>).</li>
+</ul>
+
+<h2 id=next>The refactor after the fixes</h2>
+<p>Step 7 moved on (<code>ptzquxzp</code>). <code>mouse!</code> in rexg.main decided focus, mouse reports, wheel, selection, paste and copy. Now <code>model/mouse</code> decides them, and a screen-text request comes back to <code>model/text-read</code>. Only the link tags are left in rexg.main, and those are plumbing. Step 5 (<code>reconcile-plan</code>) is the next big step, and the plan says to wait until step 1 has been stable for a while. Step 1 is not live until bbh super restarts, so I stopped there.</p>
+<h2 id=checks>Checks and restarts</h2>
+<p>Every commit passed make lint, bb test in bbh (348 tests) and bb test:props, rexmux-test, ghostty-rex-test, and TLC on all four Rexmux configs. rexmux-verify passed 24 of 24, and ghostty-rex-verify passed 62 of 62 on its own hidden test display. make kanata-check (voice.clj triggers it) could not run: the kanata simulator in ~/.cache fails to load libgcc_s.so.1. That is the environment, not this change, which touches no keys. ERT was not run, since no Emacs Lisp changed. <b>Restarts:</b> the ghostty-rex changes take effect on a client reload (<code>make ghostty-rex-reload</code>), and the rexmux sidecar on a sidecar restart. The bbh changes to voice and <code>dispatch!</code> take effect when bbh super restarts. Nothing here needs it restarted now, and the running super-agent is untouched.</p>
+
+</main></body></html>
