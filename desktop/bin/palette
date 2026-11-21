@@ -1,5 +1,8 @@
 #!/usr/bin/env bb
 (ns palette
+  "The launcher (T208). Cmd+Space opens one list: the focused program's
+  commands first, then the global ones, each with its keys. Typing an old
+  Cmd+Space sequence, such as bb, ranks its row first."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
             [cheshire.core :as json]
@@ -19,20 +22,27 @@
 
 (def window-contexts
   {"com.mitchellh.ghostty.herdr" :herdr
+   "dev.engstrand.Rex" :rex
+   "rexmux" :rex
    "google-chrome" :chrome
    "jetbrains-idea" :idea})
+
+(def rex-clients
+  "The rex -C label of each Rex window class."
+  {"dev.engstrand.Rex" "ghostty-rex" "rexmux" "rexmux"})
 
 ;; Linux truncates process names to 15 chars; Guix's Emacs wrapper shows as .emacs-31.1-rea.
 (def programs
   [[:emacs #"^\.?emacs"]
    [:nvim #"^n?vim$"]
+   [:jjui #"^jjui$"]
    [:fish #"^fish$"]])
 
 (defn program-of [processes]
   (first (for [[id re] programs
                proc processes
                :when (re-find re (str/lower-case (str (:name proc))))]
-           {:id id :pid (:pid proc)})))
+           {:id id :pid (:pid proc) :name (:name proc)})))
 
 (defn herdr-focus
   "The focused Herdr pane as a keyleader target, with its foreground program."
@@ -44,14 +54,45 @@
              :program (program-of (get-in (keyleader/herdr-json "pane" "process-info" "--pane" (:pane_id pane))
                                           [:result :process_info :foreground_processes]))))))
 
+(defn rex-json [& args]
+  (some-> (apply sh-out "rex" args) (json/parse-string true)))
+
+(defn rex-focus
+  "What the Rex CLIENT shows: its session, the focused block and that block's
+  foreground program, and the actions the client declares."
+  [client]
+  (let [info (rex-json "client" "inspect" client "--json")
+        sid (first (get-in info [:client :session_ids]))
+        view (when sid (rex-json "api" "call" "-s" sid "session.view" "{}"))
+        window (some #(when (= (:active_window_id view) (:window_id %)) %) (:windows view))
+        block (:focused_block_id window)
+        fg (when block
+             (:foreground (rex-json "api" "call" "-s" sid "block.method"
+                                    (json/generate-string {:block_id block :method "process"}))))]
+    {:client client :session sid :block block :actions (:actions info)
+     :program (when fg (program-of [fg]))}))
+
+(defn rex-action
+  "The action rexmux's sidecar declares for the leader.edn binding at KEYS
+  (rexmux.registry/leader-commands)."
+  [keys]
+  (str/lower-case
+   (str "mx.leader." (str/join "_" (map #(-> (if (re-matches #"[A-Z]" %) (str "shift_" (str/lower-case %)) %)
+                                             (str/replace #"[^A-Za-z0-9_]" "_"))
+                                         keys)))))
+
+(defn active-window
+  "Hyprland's focused window. PALETTE_WINDOW, its JSON, stands in for tests
+  on a display without Hyprland."
+  []
+  (json/parse-string (or (not-empty (System/getenv "PALETTE_WINDOW")) (sh-out "hyprctl" "-j" "activewindow")) true))
+
 (defn context []
-  (let [window (json/parse-string (sh-out "hyprctl" "-j" "activewindow") true)
+  (let [window (active-window)
         kind (get window-contexts (:class window) :desktop)]
     (cond-> {:kind kind :window (:address window)}
-      (= :herdr kind) (merge (herdr-focus)))))
-
-(defn open-emacs! [pid]
-  (sh-out "emacsclient" "-s" (str "eng-" pid) "--eval" "(eng/palette-M-x)"))
+      (= :herdr kind) (merge (herdr-focus))
+      (= :rex kind) (merge (rex-focus (rex-clients (:class window)))))))
 
 (defn process-sockets
   "Paths of Unix sockets owned by PID, including explicitly named Neovim servers."
@@ -99,6 +140,17 @@
      {:label f :source "Function" :value (str "text:" f " ")})
    (for [line (fish-lines "abbr --list") :when (not (str/blank? line))]
      {:label line :source "Abbreviation" :value (str "text:" line " ")})))
+
+(defn jjui-entries []
+  (for [e (config :jjui)]
+    {:label (:label e) :keys (:type e) :source "jjui" :value (str "text:" (:type e))}))
+
+(defn chrome-leader-entries
+  "Chrome's Alt+Space map from leader.edn, run by sending each chord."
+  [grammar]
+  (for [b (keyleader/in-context grammar :chrome)]
+    {:label (:label b) :keys (str keyleader/local-prefix " " (str/join " " (:keys b)))
+     :shortcut (keyleader/shortcut (:keys b)) :source "Chrome" :value (str "chord:" (:chrome b))}))
 
 (defn chrome-entries []
   (for [[i e] (map-indexed vector (config :chrome))]
@@ -148,15 +200,60 @@
 (defn tagged [runner entries]
   (map #(update % :value (fn [v] (str runner ":" v))) entries))
 
-(defn entries [grammar {:keys [kind program]}]
+(defn rex-entries
+  "The Rex window's commands: leader.edn's, under Alt+Space, then every other
+  action the client declares (its M-x), run with rex -C CLIENT do."
+  [grammar {:keys [actions]}]
+  (let [declared (set (map :name actions))
+        leader (for [b (keyleader/in-context grammar :rex)
+                     :when (not (:nav b))
+                     :let [action (rex-action (:keys b))]
+                     :when (declared action)]
+                 {:label (:label b) :keys (str keyleader/local-prefix " " (str/join " " (:keys b)))
+                  :shortcut (keyleader/shortcut (:keys b)) :source "Rex" :value (str "rex:" action)})]
+    (concat leader
+            (for [a actions :when (not (str/starts-with? (:name a) "mx.leader."))]
+              {:label (:title a) :source "Rex" :value (str "rex:" (:name a))}))))
+
+(defn send-text! [ctx text]
+  (case (:kind ctx)
+    :herdr (keyleader/run! ["herdr" "pane" "send-text" (:pane ctx) text])
+    :rex (keyleader/run! ["rex" "send" "-s" (:session ctx) "-b" (:block ctx) text])))
+
+(defn run-entry! [grammar ctx value]
+  (let [[_ runner arg] (re-matches #"(?s)([a-z]+):(.*)" value)]
+    (case runner
+      "text" (send-text! ctx arg)
+      "herdr" (keyleader/run-herdr! grammar (keyleader/leader-keys arg) ctx)
+      "rex" (keyleader/run! ["rex" "-C" (:client ctx) "do" arg])
+      "desktop" (keyleader/run-desktop-entry! grammar arg)
+      "chord" (type-keys! {:chord arg})
+      "chrome" (type-keys! (nth (config :chrome) (parse-long arg)))
+      "idea" (do (type-keys! {:chord "esc"})
+                 (type-keys! {:type (str ":action " arg)})
+                 (type-keys! {:chord "enter"})))))
+
+(defn tagged [runner entries]
+  (map #(update % :value (fn [v] (str runner ":" v))) entries))
+
+(defn local-entries
+  "The focused program's rows: the program in the focused pane, then its window's."
+  [grammar {:keys [kind program] :as ctx}]
   (concat
+   (when (#{:herdr :rex} kind)
+     (case (:id program)
+       :fish (fish-entries)
+       :jjui (jjui-entries)
+       nil))
    (case kind
-     :chrome (chrome-entries)
+     :chrome (concat (chrome-leader-entries grammar) (chrome-entries))
      :idea (idea-entries grammar)
-     :herdr (concat (when (= :fish (:id program)) (fish-entries))
-                    (tagged "herdr" (keyleader/herdr-entries grammar)))
-     nil)
-   (tagged "desktop" (keyleader/desktop-entries grammar))))
+     :herdr (tagged "herdr" (keyleader/herdr-entries grammar))
+     :rex (rex-entries grammar ctx)
+     nil)))
+
+(defn global-entries [grammar]
+  (tagged "desktop" (keyleader/desktop-entries grammar)))
 
 (defn history-key
   "Where this context's choices are remembered, apart from keyleader's own
@@ -164,24 +261,66 @@
   [{:keys [kind program]}]
   (keyword (str "global-" (name (or (:id program) kind)))))
 
+(defn launcher-entries
+  "Local rows, then global rows, each with the recent choices first."
+  [grammar ctx]
+  (let [k (history-key ctx)]
+    (concat (dusk/by-history k (local-entries grammar ctx))
+            (dusk/by-history k (global-entries grammar)))))
+
+(defn edn-entries
+  "ENTRIES as the EDN vector Emacs appends to its M-x request. Each :value
+  starts with ext: so Emacs hands the choice back to palette run."
+  [entries]
+  (pr-str (mapv #(-> (select-keys % [:label :keys :source :value :shortcut])
+                     (update :value (fn [v] (str "ext:" v))))
+                entries)))
+
+(defn elisp-string [s]
+  (str "\"" (str/escape s {\" "\\\"" \\ "\\\\"}) "\""))
+
+(defn open-emacs!
+  "Ask the Emacs owning PROGRAM to open its M-x palette with EXTRA rows
+  after its own commands. An emacsclient talks to the default server."
+  [{:keys [pid name]} extra]
+  (let [form (str "(eng/palette-M-x nil " (elisp-string (edn-entries extra)) ")")]
+    (if (= "emacsclient" name)
+      (sh-out "emacsclient" "--eval" form)
+      (sh-out "emacsclient" "-s" (str "eng-" pid) "--eval" form))))
+
+(defn log-choice! [value entries]
+  (keylog/log! "action" "palette" "Cmd+Space"
+               (or (some #(when (= value (:value %)) (:label %)) entries) value)))
+
 (defn open! []
   (let [grammar (keyleader/load-grammar)
         ctx (context)
-        {:keys [id pid]} (:program ctx)
-        opened (case id :emacs (open-emacs! pid) :nvim (open-nvim! pid) nil)]
+        {:keys [id pid] :as program} (:program ctx)
+        es (launcher-entries grammar ctx)
+        k (history-key ctx)
+        opened (case id
+                 :emacs (open-emacs! program (remove #(str/starts-with? (:value %) "text:") es))
+                 :nvim (open-nvim! pid)
+                 nil)]
     (when-not (and (#{:emacs :nvim} id) opened)
       (when (#{:emacs :nvim} id)
-        (notify! (str (name id) " did not answer, so the palette shows Herdr and the desktop")))
-      (let [k (history-key ctx)
-            es (entries grammar ctx)]
-        (if-let [value (dusk/pick! (str/capitalize (name (or (:id (:program ctx)) (:kind ctx))))
-                                   (dusk/by-history k es))]
-          (do (dusk/remember! k value)
-              (keylog/log! "action" "palette" "Cmd+Space Space"
-                           (or (some #(when (= value (:value %)) (:label %)) es) value))
-              (binding [keylog/*silent* true]
-                (run-entry! grammar ctx value)))
-          (keylog/log! "cancel" "palette" "Cmd+Space Space" "Closed the palette"))))))
+        (notify! (str (name id) " did not answer, so the launcher shows the rest")))
+      (if-let [value (dusk/pick! (str/capitalize (name (or (:id program) (:kind ctx)))) es)]
+        (do (dusk/remember! k value)
+            (log-choice! value es)
+            (binding [keylog/*silent* true]
+              (run-entry! grammar ctx value)))
+        (keylog/log! "cancel" "palette" "Cmd+Space" "Closed the launcher")))))
+
+(defn run-value!
+  "Run the launcher row VALUE that Emacs's palette handed back."
+  [value]
+  (let [grammar (keyleader/load-grammar)
+        ctx (context)]
+    (dusk/remember! (history-key ctx) value)
+    (log-choice! value (launcher-entries grammar ctx))
+    (binding [keylog/*silent* true]
+      (run-entry! grammar ctx value))))
 
 (defn fish! []
   (when-let [value (dusk/pick! "Fish" (dusk/by-history :fish (fish-entries)))]
@@ -193,6 +332,7 @@
   (try
     (case (first *command-line-args*)
       nil (open!)
+      "run" (run-value! (second *command-line-args*))
       "fish" (fish!))
     (catch Exception e
       (binding [*out* *err*] (println "palette:" (ex-message e)))

@@ -100,9 +100,13 @@
   (let [leader {:bindings [{:keys ["w" "v"] :label "Split right" :rex ["session.new_split" {:direction "horizontal" :side "after"}]}
                            {:keys ["a"] :label "Agents" :rex :agent/pick}
                            {:keys ["f" "s"] :label "Save" :doom "save-buffer"}]}
-        cmds (reg/leader-commands leader ["ctrl+b" "space"])
-        r (reg/merge-sources api commands/all cmds)]
+        all (reg/leader-commands leader ["ctrl+b" "space"])
+        cmds (remove #(= :leader/palette (:id %)) all)
+        r (reg/merge-sources api commands/all all)]
     (is (= 2 (count cmds)))
+    (testing "the prefix and Space open M-x"
+      (is (= [[:ui/mx {}]] (:effects (reg/invoke r ctx :leader/palette {}))))
+      (is (= [["ctrl+b" "space" "space"]] (:keys (get r :leader/palette)))))
     (is (= [["ctrl+b" "space" "w" "v"]] (:keys (first cmds))))
     (testing "a direct call gets context, defaults and the schema check"
       (is (= [[:rex/call "session.new_split" {:session_id "session:1" :window_id "window:1" :direction "horizontal" :side "after"
@@ -126,6 +130,35 @@
       (is (= :agent/pick (:alias (by-keys ["ctrl+b" "space" "a"]))))
       (is (= :tab/pick (:alias (by-keys ["ctrl+b" "space" "b" "b"]))))
       (is (= :session/switch (:alias (by-keys ["ctrl+b" "space" "tab" "."])))))))
+
+(deftest alt-space-reaches-the-tab-commands
+  (let [leader (clojure.edn/read-string (slurp (str reg-repo "/desktop/configs/keybindings/leader.edn")))
+        cmds (reg/leader-commands leader ["alt+space"])
+        r (reg/merge-sources api commands/all cmds)
+        by-keys (into {} (for [c cmds k (:keys c)] [k c]))
+        run (fn [ks c] (:effects (reg/invoke r c (:id (by-keys ks)) {})))
+        four (assoc ctx :window-ids ["window:0" "window:1" "window:2" "window:3"])]
+    (is (= [] (reg/key-conflicts r)))
+    (testing "Alt+Space t n opens a tab in the focused pane's directory"
+      (is (= :tab/new (:alias (by-keys ["alt+space" "t" "n"]))))
+      (is (= "session.new_window" (second (first (run ["alt+space" "t" "n"] ctx))))))
+    (testing "next, previous, close, go to N and rename"
+      (is (= [[:rex/call "session.focus_next_window" {:session_id "session:1"}]] (run ["alt+space" "t" "l"] ctx)))
+      (is (= [[:rex/call "session.focus_previous_window" {:session_id "session:1"}]] (run ["alt+space" "t" "h"] ctx)))
+      (is (= "session.close_window" (second (first (run ["alt+space" "t" "d"] ctx)))))
+      (is (= [[:rex/call "session.focus_window" {:session_id "session:1" :window_id "window:2"}]] (run ["alt+space" "t" "3"] four)))
+      (is (= ["label"] (map (comp name :name) (:prompt (reg/invoke r ctx (:id (by-keys ["alt+space" "t" "r"])) {}))))))
+    (testing "t H and t L move the tab, and are not t h and t l"
+      (is (not= (reg/action-name (:id (by-keys ["alt+space" "t" "shift+h"])))
+                (reg/action-name (:id (by-keys ["alt+space" "t" "h"])))))
+      (is (= [[:rex/call "session.move_window" {:session_id "session:1" :window_id "window:1" :before_window_id "window:0"}]]
+             (run ["alt+space" "t" "shift+h"] four)))
+      (is (= [[:rex/call "session.move_window" {:session_id "session:1" :window_id "window:1" :before_window_id "window:3"}]]
+             (run ["alt+space" "t" "shift+l"] four)))
+      (is (= [[:rex/call "session.move_window" {:session_id "session:1" :window_id "window:2"}]]
+             (run ["alt+space" "t" "shift+l"] (assoc four :window-id "window:2")))
+          "the last but one moves to the end")
+      (is (= [[:ui/message "No room to move the tab"]] (run ["alt+space" "t" "shift+h"] (assoc four :window-id "window:0")))))))
 
 (deftest catalogue-is-plain-data-with-enabled-flags
   (let [c (reg/catalogue registry {})]

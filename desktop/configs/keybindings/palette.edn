@@ -45,4 +45,30 @@
   {:label "Refactor this" :keys "Ctrl+Alt+Shift+T" :action "Refactorings.QuickListPopupAction"}
   {:label "Project tool window" :keys "palette (Alt+1 is workspace 1)" :action "ActivateProjectToolWindow"}
   {:label "Comment line" :keys "Ctrl+/" :action "CommentByLineComment"}
-  {:label "Go to implementation" :keys "gi" :action "GotoImplementation"}]}
+  {:label "Go to implementation" :keys "gi" :action "GotoImplementation"}]
+ ;; jjui's default keys (jjui 0.10), typed into its pane.
+ :jjui
+ [{:label "New change" :type "n"}
+  {:label "Describe in editor" :type "D"}
+  {:label "Edit change" :type "e"}
+  {:label "Commit" :type "c"}
+  {:label "Abandon" :type "a"}
+  {:label "Squash" :type "S"}
+  {:label "Split" :type "s"}
+  {:label "Rebase" :type "r"}
+  {:label "Absorb" :type "A"}
+  {:label "Duplicate" :type "y"}
+  {:label "Diff" :type "d"}
+  {:label "Evolog" :type "v"}
+  {:label "Undo" :type "u"}
+  {:label "Redo" :type "U"}
+  {:label "Bookmarks" :type "b"}
+  {:label "Set bookmark" :type "B"}
+  {:label "Git: fetch or push" :type "g"}
+  {:label "Operation log" :type "o"}
+  {:label "Jump to working copy" :type "@"}
+  {:label "Search" :type "/"}
+  {:label "Run a jj command" :type ":"}
+  {:label "Toggle preview" :type "p"}
+  {:label "Edit revset" :type "L"}
+  {:label "Help" :type "?"}]}

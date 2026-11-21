@@ -56,6 +56,22 @@
     (should (string-prefix-p "{:op :request :name :palette :args {:prompt \"M-x\" :source \"Emacs\" :entries [[\"save-buffer\"" request))
     (should (string-suffix-p "]}}\n" request))))
 
+(ert-deftest palette-appends-the-launchers-rows-after-the-commands ()
+  (let ((request (eng/palette--request '("save-buffer") "[{:label \"New tab\" :value \"ext:rex:mx.leader.t_n\"}]")))
+    (should (string-match-p "\\[\\[\"save-buffer\"[^]]*\\] {:label \"New tab\" :value \"ext:rex:mx.leader.t_n\"}\\]}}\n\\'" request))))
+
+(ert-deftest palette-hands-launcher-rows-back-to-the-launcher ()
+  (let (ran started)
+    (cl-letf (((symbol-function 'make-network-process)
+               (lambda (&rest args) (setq started (plist-get args :sentinel)) 'proc))
+              ((symbol-function 'process-send-string) #'ignore)
+              ((symbol-function 'eng/palette--socket) (lambda () "/"))
+              ((symbol-function 'start-process) (lambda (&rest args) (setq ran (cdddr args))))
+              ((symbol-function 'eng/palette--choice) (lambda (_) "ext:rex:mx.leader.t_n")))
+      (eng/palette-M-x nil "[]")
+      (funcall started 'proc "finished"))
+    (should (equal '("run" "rex:mx.leader.t_n") ran))))
+
 (ert-deftest palette-reads-the-choice-or-a-cancel ()
   (should (equal "magit-status" (eng/palette--choice "{:ok true, :value \"magit-status\"}\n")))
   (should (equal "say \"hi\"" (eng/palette--choice "{:ok true, :value \"say \\\"hi\\\"\"}")))

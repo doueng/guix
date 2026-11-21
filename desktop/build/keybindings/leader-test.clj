@@ -81,7 +81,7 @@
   (is (= [["SPC" "Command palette"] ["," "Switch buffer, tab or window"]
           ["." "Find file, launch app or switch workspace"] ["d" "Close pane"]
           ["a" "Agents"] ["e" "Edit scrollback"] ["w" "Windows and panes ..."] ["b" "Buffers, tabs and windows ..."] ["s" "Search ..."]
-          ["p" "Projects ..."] ["TAB" "Workspaces ..."]]
+          ["p" "Projects ..."] ["TAB" "Workspaces ..."] ["t" "Tabs ..."]]
          (keyleader/menu grammar :herdr nil)))
   (is (= [["." "Switch workspace"] ["`" "Last workspace"]] (keyleader/menu grammar :herdr "TAB")))
   (is (= [["l" "Copy visible text by hint"]] (keyleader/menu grammar :herdr "s"))
@@ -100,28 +100,45 @@
                                      :context {:focused_pane_id "w1:p2"}}]]
            @calls))))
 
-(deftest frequent-actions-take-one-key-on-the-desktop
-  (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
-    (is (lines "hl.bind(mods .. \"period\", keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/keyleader run '.'\")))")
-        "Cmd+Space . launches an application")
-    (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ last = true }), \"Cmd+Space `\", \"Last buffer or window\"))"))
-    (is (lines "hl.bind(mods .. \"grave\", keys.leave(hl.dsp.focus({ workspace = \"previous\" }), \"Cmd+Space TAB `\", \"Last workspace\"))")))
+(deftest old-cmd-space-sequences-are-launcher-shortcuts
+  (let [es (keyleader/desktop-entries grammar)
+        by-shortcut (into {} (keep (fn [e] (when (:shortcut e) [(:shortcut e) e])) es))]
+    (is (= "Choose buffer, tab or window" (:label (by-shortcut "bb"))) "Cmd+Space b b is typed bb")
+    (is (= "Cmd+Space b b" (:keys (by-shortcut "bb"))) "the row still shows the old keys")
+    (is (= "Last workspace" (:label (by-shortcut "tab`"))) "TAB is typed tab")
+    (is (= "Find file, launch app or switch workspace" (:label (by-shortcut ".")))))
   (let [ran (atom [])]
     (with-redefs [keylog/log! (fn [& _] nil)
                   keyleader/spawn! (fn [argv] (swap! ran conj argv))]
       (keyleader/run-desktop! grammar ["."]))
-    (is (= [["~/.local/bin/custom-launcher"]] @ran))))
+    (is (= [["~/.local/bin/custom-launcher"]] @ran) "choosing the row runs what Cmd+Space . ran")))
 
-(deftest hyprland-leader-runs-dispatchers-or-the-script
-  (let [lines (set (map str/trim (str/split-lines (keyleader/hypr-config grammar))))]
-    (is (lines "hl.bind(\"SUPER + SPACE\", keys.enter(\"leader\", \"Cmd+Space\"))")
-        "Entering the leader logs a leader row")
-    (is (lines "hl.bind(mods .. \"H\", keys.leave(hl.dsp.focus({ direction = \"left\" }), \"Cmd+Space w h\", \"Focus left\"))"))
-    (is (lines "hl.bind(mods .. \"B\", keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/keyleader run b b\")))")
-        "Menus go through the script")
-    (is (lines "hl.bind(\"catchall\", keys.cancel(\"leader-w\", \"Cmd+Space w\"))"))
-    (is (lines "hl.bind(\"escape\", keys.cancel(\"leader\", \"Cmd+Space\", \"Escape\"))")
-        "Cancels log the keys pressed before them")))
+(deftest cmd-space-opens-the-launcher-and-alt-space-routes-by-class
+  (let [config (keyleader/hypr-config grammar)
+        lines (set (map str/trim (str/split-lines config)))]
+    (is (lines "hl.bind(\"SUPER + SPACE\", keys.launcher)"))
+    (is (not (str/includes? config "define_submap(\"leader")) "no desktop leader submap is left")
+    (is (str/includes? config "hl.bind(\"ALT + SPACE\", keys.alt_space({"))
+    (is (lines "[\"dev.engstrand.Rex\"] = \"pass\",") "the Rex client binds Alt+Space itself")
+    (is (lines "[\"com.mitchellh.ghostty.herdr\"] = { { mods = \"CTRL\", key = \"b\" }, { mods = \"\", key = \"space\" } },")
+        "Herdr gets Ctrl+b Space, its leader popup")
+    (is (lines "[\"google-chrome\"] = \"local-chrome\","))
+    (is (lines "hl.bind(mods .. \"T\", hl.dsp.submap(\"local-chrome-t\"))"))
+    (is (lines "hl.bind(mods .. \"N\", keys.leave_send({ mods = \"CTRL SHIFT\", key = \"y\" }, \"Alt+Space t n\", \"New tab\"))")
+        "Alt+Space t n in Chrome opens the Vomnibar in new-tab mode, as Cmd+T")
+    (is (lines "hl.bind(mods .. \"SHIFT + H\", keys.leave_send({ mods = \"CTRL SHIFT\", key = \"Page_Up\" }, \"Alt+Space t H\", \"Move tab left\"))"))
+    (is (lines "hl.bind(mods .. \"B\", keys.leave_send({ mods = \"CTRL SHIFT\", key = \"k\" }, \"Alt+Space b b\", \"Choose buffer, tab or window\"))")
+        "Alt+Space b b searches Chrome's tabs")
+    (is (lines "hl.bind(\"escape\", keys.cancel(\"local-chrome-t\", \"Alt+Space t\", \"Escape\"))"))
+    (is (not-any? #(str/includes? % "window.close") lines) "Alt+W alone closes a window"))
+  (let [expected (keyleader/expected-binds grammar)]
+    (is (every? expected [["" 64 "space"] ["" 8 "space"] ["local-chrome-t" 0 "n"] ["local-chrome-t" 8 "n"]
+                          ["local-chrome-t" 1 "h"] ["local-chrome-t" 0 "h"] ["local-chrome" 0 "catchall"]])
+        "verify-hypr expects Super+Space, Alt+Space and each Chrome key, with and without Alt held")
+    (is (not-any? #(str/starts-with? (first %) "leader") expected)))
+  (is (= {:title "Alt+Space t" :rows (keyleader/menu grammar :chrome "t")} (keyleader/submap-panel grammar "local-chrome-t")))
+  (is (some #{["n" "New tab"]} (:rows (keyleader/submap-panel grammar "local-chrome-t"))))
+  (is (nil? (keyleader/submap-panel grammar "reset"))))
 
 (defn herdr-leader-with
   "The keylog rows and herdr calls when the Herdr popup reads KEYS."
@@ -164,31 +181,51 @@
       (keyleader/term-nav! grammar "left"))
     (is (= [["forward" "herdr" "Ctrl+h" "Forwarded to emacs"]] @rows))))
 
-(defn desktop-run-with [class keys & [g]]
+(defn desktop-run-with [keys]
   (let [calls (atom [])]
-    (with-redefs [keyleader/run! (fn [argv & _] (swap! calls conj (vec argv))
-                                   (if (= "hyprctl" (first argv)) (str "{\"class\":\"" class "\"}") ""))
+    (with-redefs [keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")
                   keyleader/choose-window! (fn [] (swap! calls conj :choose-window))
                   keylog/log! (fn [& _] nil)]
-      (keyleader/run-desktop! (or g grammar) keys))
-    (remove #(and (vector? %) (= "hyprctl" (first %))) @calls)))
+      (keyleader/run-desktop! grammar keys))
+    @calls))
 
-(deftest b-b-searches-chrome-tabs-and-picks-windows-elsewhere
-  (is (= [["ydotool" "key" "29:1" "42:1" "37:1" "37:0" "42:0" "29:0"]]
-         (desktop-run-with "google-chrome" ["b" "b"])))
-  (is (= [:choose-window] (desktop-run-with "com.mitchellh.ghostty" ["b" "b"])))
+(deftest b-b-picks-a-window-from-the-launcher-and-searches-tabs-in-chrome
+  (is (= [:choose-window] (desktop-run-with ["b" "b"])))
+  (is (= "ctrl+shift+k" (:chrome (some #(when (= ["b" "b"] (:keys %)) %) (keyleader/in-context grammar :chrome)))))
   (is (re-find #"chrome must be a chord" (keyleader/binding-problem {:keys ["b" "b"] :label "x" :desktop :choose-window :chrome "ctrl+f13"})))
-  (let [chrome-only (update grammar :bindings conj {:keys ["x"] :label "Herdr thing" :herdr :edit-scrollback
-                                                     :desktop-label "Chrome thing" :chrome "ctrl+shift+e"})]
-    (is (= [["ydotool" "key" "29:1" "42:1" "18:1" "18:0" "42:0" "29:0"]]
-           (desktop-run-with "google-chrome" ["x"] chrome-only))
-        "a :chrome binding sends its chord in Chrome")
-    (is (= [] (desktop-run-with "com.mitchellh.ghostty" ["x"] chrome-only)) "a Chrome-only binding does nothing elsewhere")
-    (is (some #{["x" "Chrome thing"]} (keyleader/menu chrome-only :desktop nil)) "the desktop menu shows its own label"))
   (is (nil? (keyleader/binding-problem {:keys ["e"] :label "x" :chrome "ctrl+shift+e"})))
-  (is (not-any? #(= "e" (first %)) (keyleader/menu grammar :desktop nil)) "Alt+E, not Cmd+Space e, toggles Chrome's tab list")
-  (is (some #{["e" "Edit scrollback"]} (keyleader/menu grammar :herdr nil)))
-  (is (re-find #"never reaches keyleader" (keyleader/binding-problem {:keys ["b" "n"] :label "x" :desktop ["window.cycle_next"] :chrome "ctrl+k"}))))
+  (is (not-any? #(= "e" (first %)) (keyleader/menu grammar :desktop nil)) "Alt+E, not a leader key, toggles Chrome's tab list")
+  (is (some #{["e" "Edit scrollback"]} (keyleader/menu grammar :herdr nil))))
+
+(defn herdr-tab-run
+  "The herdr commands that the Herdr leader runs for KEYS, reading LINE when it asks."
+  [keys & [line]]
+  (let [calls (atom [])]
+    (with-redefs [keylog/log! (fn [& _] nil)
+                  keyleader/read-line! (fn [_] line)
+                  keyleader/run! (fn [argv & _]
+                                   (swap! calls conj (vec argv))
+                                   (cond (= ["herdr" "tab" "list"] (take 3 argv))
+                                         "{\"result\":{\"tabs\":[{\"tab_id\":\"w1:t1\"},{\"tab_id\":\"w1:t2\",\"focused\":true},{\"tab_id\":\"w1:t3\"}]}}"
+                                         (= ["herdr" "pane" "list"] (take 3 argv))
+                                         "{\"result\":{\"panes\":[{\"pane_id\":\"w1:p2\",\"cwd\":\"/a\",\"foreground_cwd\":\"/a/b\"}]}}"
+                                         :else ""))]
+      (keyleader/run-herdr! grammar keys {:pane "w1:p2" :tab "w1:t2" :workspace "w1"}))
+    (remove #(#{["herdr" "tab" "list"] ["herdr" "pane" "list"]} (vec (take 3 %))) @calls)))
+
+(deftest alt-space-t-runs-herdr-tab-commands
+  (is (= [["herdr" "tab" "create" "--workspace" "w1" "--focus" "--cwd" "/a/b"]] (herdr-tab-run ["t" "n"]))
+      "a new tab opens in the focused pane's directory, as Herdr's new_cwd = follow")
+  (is (= [["herdr" "tab" "focus" "w1:t3"]] (herdr-tab-run ["t" "l"])))
+  (is (= [["herdr" "tab" "focus" "w1:t1"]] (herdr-tab-run ["t" "h"])))
+  (is (= [["herdr" "tab" "focus" "w1:t3"]] (herdr-tab-run ["t" "3"])))
+  (is (= [["herdr" "tab" "close" "w1:t2"]] (herdr-tab-run ["t" "d"])))
+  (is (= [["herdr" "tab" "rename" "w1:t2" "logs"]] (herdr-tab-run ["t" "r"] "logs")))
+  (is (= [] (herdr-tab-run ["t" "r"] nil)) "an empty name renames nothing")
+  (is (not-any? #(= ["t" "H"] (:keys %)) (keyleader/in-context grammar :herdr)) "Herdr cannot move a tab")
+  (let [es (keyleader/herdr-entries grammar)]
+    (is (some #(= {:label "New tab" :keys "Alt+Space t n"} (select-keys % [:label :keys])) es))
+    (is (not-any? #(= "Rename tab" (:label %)) es) "the palette cannot ask for a name")))
 
 (deftest grammar-rejects-ambiguity
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate leader sequence"
@@ -203,10 +240,19 @@
         (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}
                                          {:keys ["w"] :label "Edit" :herdr :edit-scrollback}]})))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"differ only by case"
-        (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["c" "Code"]]
-                              :bindings [{:keys ["c" "r"] :label "Run" :desktop-command ["a"]}
-                                         {:keys ["c" "R"] :label "Restart" :desktop-command ["b"]}]})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"alt-space must be"
+        (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
+                              :apps [{:class "kitty" :alt-space :launcher}]
+                              :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}]})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate app class"
+        (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["w" "W"]]
+                              :apps [{:class "kitty" :alt-space :pass} {:class "kitty" :alt-space ["ctrl+b"]}]
+                              :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}]})))
+  (is (re-find #"either :herdr" (keyleader/binding-problem {:keys ["t" "n"] :label "x" :herdr :new-tab :rex :tab/new})))
+  (is (keyleader/validate! {:terminal {:keeps [["^nvim$" "hjkl"]]} :groups [["t" "Tabs"]]
+                            :bindings [{:keys ["t" "h"] :label "Previous" :herdr :previous-tab}
+                                       {:keys ["t" "H"] :label "Move left" :rex :tab/move-left :chrome "ctrl+shift+pageup"}]})
+      "Alt+Space submaps bind Shift, so t h and t H are different keys")
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"KEYS from hjkl"
         (keyleader/validate! {:terminal {:keeps [["^fish$" "x"]]} :groups [["w" "W"]]
                               :bindings [{:keys ["w" "h"] :label "Left" :nav "left"}]})))

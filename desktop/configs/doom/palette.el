@@ -91,10 +91,13 @@ Asking where-is-internal for every key of every command took 2.4 s."
             (seq-filter (lambda (n) (and (not (gethash n seen)) (funcall keep n)))
                         (eng/palette--catalog-names (eng/palette--cached))))))
 
-(defun eng/palette--request (names)
+(defun eng/palette--request (names &optional extra)
+  "The Dusk request for NAMES. EXTRA is an EDN vector of the launcher's rows,
+appended after the commands."
   (let ((fragments (eng/palette--catalog-fragments (eng/palette--cached))))
     (concat "{:op :request :name :palette :args {:prompt \"M-x\" :source \"Emacs\" :entries ["
             (mapconcat (lambda (n) (or (gethash n fragments) (eng/palette--fragment n nil))) names " ")
+            (if extra (concat " " (string-trim extra "\\[" "\\]")) "")
             "]}}\n")))
 
 (defun eng/palette--choice (reply)
@@ -108,9 +111,15 @@ Asking where-is-internal for every key of every command took 2.4 s."
   (let ((current-prefix-arg prefix))
     (execute-extended-command prefix name name)))
 
-(defun eng/palette-M-x (&optional prefix)
+(defun eng/palette--external (value)
+  "Hand the launcher row VALUE, chosen in this palette, back to the launcher."
+  (start-process "palette-run" nil (expand-file-name "~/.local/bin/palette") "run" value))
+
+(defun eng/palette-M-x (&optional prefix extra)
   "Choose a command in the Dusk palette and run it like M-x.
-Falls back to M-x when Dusk is not running."
+EXTRA, from the Cmd+Space launcher, is an EDN vector of its rows; their
+values start with ext: and go back to it. Falls back to M-x when Dusk is not
+running."
   (interactive "P")
   (let ((window (selected-window))
         (socket (eng/palette--socket))
@@ -123,8 +132,10 @@ Falls back to M-x when Dusk is not running."
                       :filter (lambda (_ chunk) (setq reply (concat reply chunk)))
                       :sentinel (lambda (_ _)
                                   (when-let* ((name (eng/palette--choice reply)))
-                                    (run-at-time 0 nil #'eng/palette--run window prefix name))))))
-        (process-send-string process (eng/palette--request (eng/palette--entries)))))))
+                                    (if (string-prefix-p "ext:" name)
+                                        (eng/palette--external (substring name 4))
+                                      (run-at-time 0 nil #'eng/palette--run window prefix name)))))))
+        (process-send-string process (eng/palette--request (eng/palette--entries) extra))))))
 
 (global-set-key [remap execute-extended-command] #'eng/palette-M-x)
 

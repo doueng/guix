@@ -110,7 +110,9 @@
   (cond
     nav (keyword "pane" (str "focus-" nav))
     (keyword? herdr) ({:choose-tab :tab/pick :next-tab :tab/next :previous-tab :tab/previous :close-tab :tab/close
+                       :new-tab :tab/new :rename-tab :tab/rename
                        :close-pane :pane/close :choose-workspace :session/switch :choose-agent :agent/pick} herdr)
+    (:tab herdr) (keyword "tab" (str "select-" (:tab herdr)))
     (vector? herdr) (let [[noun verb & flags] herdr
                           dir (second (drop-while #(not= "--direction" %) flags))]
                       (case [noun verb]
@@ -134,20 +136,29 @@
   With a PREFIX, such as [\"ctrl+b\" \"space\"], the leader's keys are bound
   under it; without one, keyleader reaches them through rex do."
   [leader prefix]
-  (vec (for [b (:bindings leader)
-             :let [{:keys [keys label]} b
-                   rex (or (:rex b) (herdr->rex b))]
-             :when rex]
-         (let [id (keyword "leader" (str/join "-" (map #(str/replace % #"[^A-Za-z0-9]" "_") keys)))]
-           {:id id :title (str "Leader: " label) :category "leader" :doc label
-            :keys (if prefix [(into (vec prefix) (map chord-of keys))] [])
-            :source :leader
-            :alias (when (keyword? rex) rex)
-            :run (if (keyword? rex)
-                   (fn [_ _] [[:invoke rex {}]])
-                   ;; Through the API command, so context, defaults and the
-                   ;; schema check apply as they do in M-x.
-                   (let [[m a] rex] (fn [_ _] [[:invoke (keyword "rex" m) (or a {})]])))}))))
+  (vec (concat
+        ;; The prefix and Space open M-x, as Space after every leader opens its palette.
+        (when prefix
+          [{:id :leader/palette :title "Leader: command palette (M-x)" :category "leader"
+            :doc "M-x, the list of every command" :keys [(conj (vec prefix) "space")] :source :leader
+            :run (fn [_ _] [[:ui/mx {}]])}])
+        (for [b (:bindings leader)
+              :let [{:keys [keys label]} b
+                    rex (or (:rex b) (herdr->rex b))]
+              :when rex]
+          ;; An upper-case key is shift_ and the letter, since action names are lower case (t H, t h).
+          (let [id (keyword "leader" (str/join "-" (map #(str/replace (if (re-matches #"[A-Z]" %) (str "shift_" (str/lower-case %)) %)
+                                                                      #"[^A-Za-z0-9_]" "_")
+                                                        keys)))]
+            {:id id :title (str "Leader: " label) :category "leader" :doc label
+             :keys (if prefix [(into (vec prefix) (map chord-of keys))] [])
+             :source :leader
+             :alias (when (keyword? rex) rex)
+             :run (if (keyword? rex)
+                    (fn [_ _] [[:invoke rex {}]])
+                    ;; Through the API command, so context, defaults and the
+                    ;; schema check apply as they do in M-x.
+                    (let [[m a] rex] (fn [_ _] [[:invoke (keyword "rex" m) (or a {})]])))})))))
 
 ;; ---- the registry ----
 

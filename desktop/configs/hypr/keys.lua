@@ -8,13 +8,6 @@ function M.log(keys, effect, kind)
   hl.exec_cmd("~/.local/bin/keylog add " .. (kind or "action") .. " hyprland " .. quote(keys) .. " " .. quote(effect))
 end
 
-function M.enter(submap, keys)
-  return function()
-    hl.dispatch(hl.dsp.submap(submap))
-    M.log(keys, "Desktop leader menu", "leader")
-  end
-end
-
 function M.bind(chord, dispatcher, keys, effect, opts)
   return hl.bind(chord, function()
     hl.dispatch(dispatcher)
@@ -81,15 +74,47 @@ local function send_to_herdr(chords)
   return true
 end
 
-function M.herdr_menu()
-  if send_to_herdr({ { mods = "CTRL", key = "b" }, { mods = "", key = "space" } }) then
-    M.log("Alt+Space", "Forwarded to " .. M.mux, "forward")
-  end
-end
-
 local function tap(mods, key)
   hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "down" }))
   hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "up" }))
+end
+
+-- Cmd+Space: the launcher, the focused program's commands then the global ones (T208).
+function M.launcher()
+  hl.dispatch(hl.dsp.exec_cmd("~/.local/bin/palette"))
+end
+
+-- Alt+Space, the local prefix. ROUTES maps a window class to "pass" (the
+-- window binds Alt+Space itself), a list of chords to send instead, or a local
+-- submap; leader.lua generates it from leader.edn's :apps. Other windows get
+-- the launcher, so no GTK window menu ever sees the key.
+function M.alt_space(routes)
+  return function()
+    local active = hl.get_active_window()
+    local route = active and routes[active.class]
+    if route == "pass" then
+      tap("ALT", "space")
+    elseif type(route) == "table" then
+      for _, k in ipairs(route) do
+        tap(k.mods, k.key)
+      end
+      M.log("Alt+Space", "Forwarded to " .. active.class, "forward")
+    elseif type(route) == "string" then
+      hl.dispatch(hl.dsp.submap(route))
+      M.log("Alt+Space", "Local leader menu", "leader")
+    else
+      M.launcher()
+    end
+  end
+end
+
+-- Send CHORD to the focused window and leave the submap.
+function M.leave_send(chord, keys, effect)
+  return function()
+    hl.dispatch(hl.dsp.submap("reset"))
+    tap(chord.mods, chord.key)
+    M.log(keys, effect)
+  end
 end
 
 -- In Chrome, send a vimium-cljs command's chord; every other window gets the chord unchanged.

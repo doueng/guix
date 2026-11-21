@@ -7,6 +7,9 @@
 (load-file "desktop/build/keybindings/reference.clj")
 (require '[hypr.dispatch :as hypr])
 
+;; This checkout's tables, not the ones linked into ~/.config.
+(alter-var-root #'keyleader/config-path (constantly (constantly "desktop/configs/keybindings/leader.edn")))
+(alter-var-root #'keyguide/config-path (constantly (constantly "desktop/configs/keybindings/bindings.edn")))
 (def leader-grammar (keyleader/load-grammar))
 
 (defn palette-run [answers]
@@ -35,12 +38,12 @@
                                          :catch_all (= "catchall" key)})
         loaded (map bind expected)
         unrelated {:submap "" :modmask 64 :key "Q"}]
-    (is (contains? expected ["leader-w" 64 "h"]) "keys also bind with Cmd still held")
+    (is (contains? expected ["local-chrome-t" 8 "n"]) "keys also bind with Alt still held")
     (is (nil? (keyleader/hypr-drift expected (keyleader/live-binds (cons unrelated loaded)))))
-    (is (= {:missing [["leader-w" 0 "h"]] :unexpected [["leader-w" 0 "z"]]}
+    (is (= {:missing [["local-chrome-t" 0 "n"]] :unexpected [["local-chrome-t" 0 "z"]]}
            (keyleader/hypr-drift expected
-                                 (keyleader/live-binds (cons (bind ["leader-w" 0 "z"])
-                                                             (remove #(= (bind ["leader-w" 0 "h"]) %) loaded))))))))
+                                 (keyleader/live-binds (cons (bind ["local-chrome-t" 0 "z"])
+                                                             (remove #(= (bind ["local-chrome-t" 0 "n"]) %) loaded))))))))
 
 (defn nav-calls [pane herdr]
   (let [calls (atom [])]

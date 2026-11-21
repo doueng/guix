@@ -2,6 +2,16 @@
                     ["^pi$" "jkl"]
                     ["^fzf$" "jk"]
                     ["^(fish|bash|zsh)$" "l"]]}
+ ;; Where Alt+Space, the local prefix, goes for each window class (T208).
+ ;; :pass hands the key to the window, whose own keymap binds it; a chord
+ ;; vector is sent instead; :submap enters the Hyprland submap generated from
+ ;; the :context's bindings. Every other class opens the launcher.
+ :apps [{:class "dev.engstrand.Rex" :alt-space :pass}
+        {:class "com.mitchellh.ghostty.herdr" :alt-space ["ctrl+b" "space"]}
+        {:class "rexmux" :alt-space ["ctrl+b" "space"]}
+        {:class "google-chrome" :alt-space :submap :context :chrome}
+        {:class "com.mitchellh.ghostty" :alt-space :pass}
+        {:class "emacs" :alt-space :pass}]
  :groups [["w" "Windows and panes"]
           ["b" "Buffers, tabs and windows"]
           ["f" "Files"]
@@ -9,7 +19,8 @@
           ["c" "Code"]
           ["o" "Open"]
           ["p" "Projects"]
-          ["TAB" "Workspaces"]]
+          ["TAB" "Workspaces"]
+          ["t" "Tabs"]]
  :bindings
  [{:keys [","] :label "Switch buffer, tab or window" :doom-match :exact :idea "<Action>(Switcher)"
    :nvim "<cmd>Telescope buffers sort_mru=true ignore_current_buffer=true<cr>"
@@ -61,12 +72,28 @@
    :doom "+ghostel/toggle" :nvim "<cmd>lua Snacks.terminal()<cr>" :idea "<Action>(ActivateTerminalToolWindow)"}
   {:keys ["o" "b"] :label "Browser workspace" :doom-match :analogous :desktop ["focus" {:workspace 2}]}
   {:keys ["o" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}
-  {:keys ["o" "s"] :label "Send to phone" :desktop-command ["~/.local/bin/taildrop" "send"]}
+  {:keys ["o" "s"] :label "Send to phone" :doom-match :differs :desktop-command ["~/.local/bin/taildrop" "send"]}
   {:keys ["p" "p"] :label "Switch project" :doom-match :exact :doom "projectile-switch-project"
    :idea "<Action>(ManageRecentProjects)" :herdr {:plugin "fullerzz.sesh" :action "open-picker"}}
   {:keys ["TAB" "."] :label "Switch workspace" :doom-match :exact :doom "+workspace/switch-to" :herdr :choose-workspace}
   {:keys ["TAB" "`"] :label "Last workspace" :doom-match :exact :doom "+workspace/other"
    :herdr {:plugin "fullerzz.sesh" :action "last"} :desktop ["focus" {:workspace "previous"}]}
+  {:keys ["t" "n"] :label "New tab" :doom-match :differs :herdr :new-tab :chrome "ctrl+shift+y"}
+  {:keys ["t" "l"] :label "Next tab" :doom-match :differs :herdr :next-tab :chrome "ctrl+pagedown"}
+  {:keys ["t" "h"] :label "Previous tab" :herdr :previous-tab :chrome "ctrl+pageup"}
+  {:keys ["t" "d"] :label "Close tab" :doom-match :differs :herdr :close-tab :chrome "ctrl+w"}
+  {:keys ["t" "r"] :label "Rename tab" :doom-match :differs :herdr :rename-tab}
+  {:keys ["t" "1"] :label "Tab 1" :herdr {:tab 1} :chrome "ctrl+1"}
+  {:keys ["t" "2"] :label "Tab 2" :herdr {:tab 2} :chrome "ctrl+2"}
+  {:keys ["t" "3"] :label "Tab 3" :herdr {:tab 3} :chrome "ctrl+3"}
+  {:keys ["t" "4"] :label "Tab 4" :herdr {:tab 4} :chrome "ctrl+4"}
+  {:keys ["t" "5"] :label "Tab 5" :herdr {:tab 5} :chrome "ctrl+5"}
+  {:keys ["t" "6"] :label "Tab 6" :herdr {:tab 6} :chrome "ctrl+6"}
+  {:keys ["t" "7"] :label "Tab 7" :herdr {:tab 7} :chrome "ctrl+7"}
+  {:keys ["t" "8"] :label "Tab 8" :herdr {:tab 8} :chrome "ctrl+8"}
+  {:keys ["t" "9"] :label "Tab 9" :herdr {:tab 9} :chrome "ctrl+9"}
+  {:keys ["t" "H"] :label "Move tab left" :rex :tab/move-left :chrome "ctrl+shift+pageup"}
+  {:keys ["t" "L"] :label "Move tab right" :rex :tab/move-right :chrome "ctrl+shift+pagedown"}
   {:keys ["TAB" "1"] :label "Workspace 1" :doom-match :analogous :desktop ["focus" {:workspace 1}]}
   {:keys ["TAB" "2"] :label "Workspace 2" :doom-match :analogous :desktop ["focus" {:workspace 2}]}
   {:keys ["TAB" "3"] :label "Workspace 3" :doom-match :analogous :desktop ["focus" {:workspace 3}]}

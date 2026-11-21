@@ -70,6 +70,16 @@
   (is (= ["spc mode" "Save file"]
          (mapv :text (#'config/ranked-items [{:label "Save file" :keys "SPC f s" :value 1} {:label "spc mode" :value 2}] "spc")))))
 
+(deftest a-typed-shortcut-ranks-its-entry-first
+  (let [items [{:label "Bookmarks" :value 1}
+               {:label "Choose buffer, tab or window" :keys "Cmd+Space b b" :shortcut "bb" :value 2}
+               {:label "Find references" :keys "SPC c D" :shortcut "cD" :value 3}
+               {:label "Find definition" :keys "SPC c d" :shortcut "cd" :value 4}]]
+    (is (= 2 (:value (first (#'config/ranked-items items "bb")))) "bb beats the label match Bookmarks")
+    (is (= 2 (:value (first (#'config/ranked-items items "b b")))) "spaces between the keys are ignored")
+    (is (= 3 (:value (first (#'config/ranked-items items "cD")))) "case tells c D from c d")
+    (is (= 4 (:value (first (#'config/ranked-items items "cd")))))))
+
 (deftest compact-rows-preserve-labels-keys-source-and-values
   (let [answer (atom nil)]
     ((get @core/request-handlers :palette)

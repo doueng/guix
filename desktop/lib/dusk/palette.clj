@@ -18,11 +18,12 @@
       (edn/read-string (.readLine in)))))
 
 (defn pick!
-  "Show ENTRIES, maps of :label :keys :source :value, and return the chosen
-  :value, or nil when cancelled."
+  "Show ENTRIES, maps of :label :keys :source :value and an optional
+  :shortcut, and return the chosen :value, or nil when cancelled. Typing an
+  entry's :shortcut exactly ranks it first."
   [prompt entries]
   (let [reply (request! {:op :request :name :palette
-                         :args {:prompt prompt :entries (mapv #(select-keys % [:label :keys :source :value]) entries)}})]
+                         :args {:prompt prompt :entries (mapv #(select-keys % [:label :keys :source :value :shortcut]) entries)}})]
     (when-not (:ok reply)
       (throw (ex-info (str "Dusk palette failed: " (:error reply)) reply)))
     (:value reply)))

@@ -315,6 +315,7 @@
                                [:effect])]])
                     [m []])
     "ui/message" [(assoc m :echo (if (string? arg) arg (pr-str arg))) []]
+    "ui/mx" [(assoc m :minibuffer {:mode {:kind :mx} :input "" :selected 0}) []]
     "ui/doc" [(assoc m :doc [(str (:title arg)) (str (:text arg))]) []]
     "ui/pick" [(assoc m :minibuffer {:mode {:kind :pick :title (or (:title arg) "Pick")
                                             :items (mapv (fn [i] [(str (:label i)) (:value i)]) (:items arg))

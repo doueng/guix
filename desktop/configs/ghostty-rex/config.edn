@@ -4,10 +4,11 @@
 {;; Rex servers, the first shown at start. A nil address is the local server,
  ;; which the client starts when it is not running.
  :servers [{:label "local" :address nil}]
- ;; One leader menu for Herdr and Rex: leader.edn's :herdr actions run the
- ;; matching command under Ctrl+b Space.
+ ;; One leader menu for Herdr and Rex: leader.edn's :herdr and :rex actions
+ ;; run the matching command under Alt+Space, the local prefix (T208), which
+ ;; Hyprland passes to this window; Alt+Space Space opens M-x.
  :leader-file "~/.config/keybindings/leader.edn"
- :leader-prefix ["ctrl+b" "space"]
+ :leader-prefix ["alt+space"]
  ;; Bare Ctrl+h/j/k/l through keyleader term-nav, as Herdr has them.
  :term-nav true
  ;; The shell every new block runs, as Herdr's default_shell.

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="T208 design: one launcher with global and local commands, Alt+Space as the per-app prefix, generated from leader.edn">
+<meta name="bbh-doc" content="T208">
+<title>Key bindings: Cmd+Space launcher, Alt+Space local prefix</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Key bindings: Cmd+Space launcher, Alt+Space local prefix</h1>
+
+<p class="sub">Design note for T208, written before the change. Two keys, one table.</p>
+
+<div class="card good"><b>Cmd+Space</b> opens one launcher: the focused program's commands first, then every global command, each row with its key binding. <b>Alt+Space</b> is the local prefix: the same keys do the same thing in the focused program, such as <code>Alt+Space t n</code> for a new tab. Both come from <code>desktop/configs/keybindings/leader.edn</code>.</div>
+
+<h2>One source</h2>
+<p><code>leader.edn</code> already holds one row per action with an implementation per context (<code>:doom</code>, <code>:nvim</code>, <code>:idea</code>, <code>:herdr</code>, <code>:desktop</code>, <code>:chrome</code>). The change adds:</p>
+<ul>
+<li>A <code>:rex</code> implementation, so Ghostty-plus-Rex commands that Herdr lacks (tab move) can be declared. Everything else maps from <code>:herdr</code> as today.</li>
+<li><code>:chrome</code> becomes Chrome's local map (a chord sent to Chrome), no longer an override of a desktop action.</li>
+<li>A <code>t</code> group, Tabs, with new, next, previous, close, rename, go to N and move.</li>
+<li><code>:apps</code>: which window class owns Alt+Space and how it gets there.</li>
+</ul>
+<p>From that one file come: the launcher's local and global rows (<code>desktop/bin/palette</code>), the Hyprland binds (<code>hypr/leader.lua</code>: Super+Space, Alt+Space and Chrome's Alt+Space submaps), Herdr's leader menu (<code>keyleader herdr</code>), the Rex client's keymap (the sidecar's <code>leader-commands</code> under the <code>alt+space</code> prefix), and the editor leaders as before. Desktop chords and global launch commands stay in <code>bindings.edn</code>, which the launcher also lists; power commands join it.</p>
+
+<svg viewBox="0 0 640 190" role="img" aria-label="leader.edn feeds five consumers">
+<rect x="230" y="10" width="180" height="40" rx="8" fill="#e6f0f5" stroke="#2f6f8f"/><text x="320" y="35" text-anchor="middle" font-size="14">leader.edn + bindings.edn</text>
+<g font-size="12" text-anchor="middle">
+<rect x="5" y="120" width="118" height="52" rx="6" fill="#fff" stroke="#dedad0"/><text x="64" y="142">launcher</text><text x="64" y="160">Cmd+Space</text>
+<rect x="133" y="120" width="118" height="52" rx="6" fill="#fff" stroke="#dedad0"/><text x="192" y="142">hypr/leader.lua</text><text x="192" y="160">Chrome submaps</text>
+<rect x="261" y="120" width="118" height="52" rx="6" fill="#fff" stroke="#dedad0"/><text x="320" y="142">keyleader herdr</text><text x="320" y="160">Herdr popup</text>
+<rect x="389" y="120" width="118" height="52" rx="6" fill="#fff" stroke="#dedad0"/><text x="448" y="142">Rex sidecar</text><text x="448" y="160">alt+space keymap</text>
+<rect x="517" y="120" width="118" height="52" rx="6" fill="#fff" stroke="#dedad0"/><text x="576" y="142">Doom, Neovim</text><text x="576" y="160">SPC (unchanged)</text>
+</g>
+<g stroke="#5d6678" fill="none"><path d="M320 50 L64 120"/><path d="M320 50 L192 120"/><path d="M320 50 L320 120"/><path d="M320 50 L448 120"/><path d="M320 50 L576 120"/></g>
+</svg>
+
+<h2>Cmd+Space: the launcher</h2>
+<p>Super+Space no longer enters a Hyprland submap. It runs <code>palette</code>, which reads the focused window's class from <code>hyprctl -j activewindow</code> and shows one fuzzy list:</p>
+<ol>
+<li><b>Local</b>, for the focused program: Chrome's Alt+Space map and Vimium keys; in a Herdr or Ghostty-plus-Rex window, the multiplexer's Alt+Space map, then the pane's program (fish history and functions, jjui keys); IntelliJ actions.</li>
+<li><b>Global</b>: the old desktop leader actions, applications (Ghostty, Chrome, Emacs, bbh, Herdr), workspaces, windows, power (suspend, reboot, power off, log out, each asking again) and the guide tips.</li>
+</ol>
+<p>Each row shows its keys. In Emacs, Emacs's own M-x list stays the list (it already caches thousands of commands), and the launcher appends the terminal and global rows to it, so one search still finds all three.</p>
+
+<h3>Old Cmd+Space sequences</h3>
+<p>Every old desktop sequence is a launcher shortcut. Typing its keys, with or without spaces, ranks that row first: <code>Cmd+Space b b Enter</code>, <code>Cmd+Space . Enter</code>, <code>Cmd+Space tab3 Enter</code>. The row shows them as <code>⌘␣ b b</code>. One extra Enter is the price: running on the exact keys without Enter would fire <code>o b</code> while you were typing <code>obsidian</code>.</p>
+
+<h2>Alt+Space: the local prefix</h2>
+<p>Hyprland binds Alt+Space once and routes by window class, from <code>leader.edn</code>'s <code>:apps</code>:</p>
+<div class="table"><table>
+<tr><th>Window</th><th>Alt+Space goes to</th><th>Why</th></tr>
+<tr><td>Ghostty-plus-Rex <code>dev.engstrand.Rex</code></td><td>The client itself, unchanged</td><td>Its keymap binds <code>alt+space</code> sequences natively</td></tr>
+<tr><td>Herdr <code>com.mitchellh.ghostty.herdr</code></td><td>Ctrl+b Space, Herdr's leader popup</td><td>Herdr's own keys are one key after its prefix, so two-key sequences like <code>t n</code> live in <code>keyleader herdr</code>. Hyprland no longer jumps to Herdr from other windows</td></tr>
+<tr><td>rexmux <code>rexmux</code></td><td>Ctrl+b Space</td><td>As Herdr; rexmux keeps its prefix</td></tr>
+<tr><td>Chrome</td><td>A generated Hyprland submap with a which-key panel</td><td>Chrome has no key sequences; each key sends a Chrome or vimium-cljs chord</td></tr>
+<tr><td>Plain Ghostty, Emacs GUI</td><td>The window, unchanged</td><td>Doom's <code>doom-leader-alt-key</code> is M-SPC, so there Alt+Space is the Doom leader</td></tr>
+<tr><td>Anything else</td><td>The launcher</td><td>No local map, and GTK windows never see Alt+Space</td></tr>
+</table></div>
+
+<h3>The map</h3>
+<div class="table"><table>
+<tr><th>Alt+Space then</th><th>Action</th><th>Herdr</th><th>Ghostty+Rex</th><th>Chrome</th></tr>
+<tr><td>t n</td><td>New tab</td><td>yes</td><td>yes</td><td>Vomnibar in new-tab mode, as Cmd+T</td></tr>
+<tr><td>t l, t h</td><td>Next, previous tab</td><td>yes</td><td>yes</td><td>Ctrl+PgDn, Ctrl+PgUp</td></tr>
+<tr><td>t d</td><td>Close tab</td><td>yes</td><td>yes</td><td>Ctrl+W</td></tr>
+<tr><td>t r</td><td>Rename tab</td><td>asks in the popup</td><td>asks in the minibuffer</td><td>no rename in Chrome</td></tr>
+<tr><td>t 1 … t 9</td><td>Go to tab N</td><td>yes</td><td>yes</td><td>Ctrl+1 … Ctrl+9</td></tr>
+<tr><td>t H, t L</td><td>Move tab left, right</td><td>no: Herdr has no tab move</td><td>yes</td><td>Ctrl+Shift+PgUp, PgDn</td></tr>
+<tr><td>b b</td><td>Choose tab</td><td>yes</td><td>yes</td><td>vimium-cljs tab search</td></tr>
+<tr><td>b n, b p, b d</td><td>Next, previous, close tab</td><td>yes</td><td>yes</td><td></td></tr>
+<tr><td>, . ` d a e</td><td>Switch tab, workspace picker, last, close pane, agents, edit scrollback</td><td>yes</td><td>where Rex has it</td><td></td></tr>
+<tr><td>w h j k l s v d m</td><td>Panes: focus, split, close, zoom</td><td>yes</td><td>yes</td><td></td></tr>
+<tr><td>s l, p p, TAB . , TAB `</td><td>Copy by hint, projects, workspaces</td><td>yes</td><td>where Rex has it</td><td></td></tr>
+<tr><td>Space</td><td>The local list</td><td>Herdr leader palette</td><td>M-x</td><td>the launcher</td></tr>
+</table></div>
+<p>The <code>t</code> keys follow Doom's SPC TAB workspace keys where they can (n, d, r, digits) and vim's h and l for direction, with Shift to move, as Ctrl+Alt+Shift+h/l moves windows. Ctrl+b keeps working in Herdr and Rex for their one-key natives (c, n, 1–9, f); Alt+Space covers everything the leader table names.</p>
+
+<h2>Clashes</h2>
+<div class="table"><table>
+<tr><th>Key</th><th>Who wanted it</th><th>Outcome</th></tr>
+<tr><td>Cmd+Space</td><td>The desktop leader submap</td><td>Replaced by the launcher; old sequences are launcher shortcuts</td></tr>
+<tr><td>Alt+Space</td><td>Hyprland: focus Herdr and open its leader from any window</td><td>Now local. Cmd+B and Cmd+Return still bring Herdr forward</td></tr>
+<tr><td>Alt+Space in Emacs</td><td>Doom's alt leader (M-SPC), Emacs cycle-spacing</td><td>Outside a multiplexer Emacs gets it, so it is the Doom leader. Inside Herdr or Rex the multiplexer takes it, as Ctrl+b would; use SPC there</td></tr>
+<tr><td>Alt+Space in GTK</td><td>Client-side decorations' window menu</td><td>Never reaches GTK windows: Hyprland opens the launcher</td></tr>
+<tr><td>Alt+Space in Chrome</td><td>Its window menu on some platforms</td><td>Hyprland consumes it for the Chrome submap</td></tr>
+<tr><td>SPC t in Doom</td><td>Doom's toggles group</td><td>Unchanged. The t group exists only in Herdr, Rex and Chrome</td></tr>
+<tr><td>Kanata</td><td>Alt is a held layer for Backspace and arrows only</td><td>Alt+Space passes through</td></tr>
+</table></div>
+
+<h2>Tests</h2>
+<ul>
+<li><code>make lint</code> runs the bb keybinding tests: grammar, generated Alt+Space routing and Chrome submaps, launcher entries and shortcut ranking, Herdr tab actions, Rex tab commands.</li>
+<li>Ghostty-plus-Rex live test on the hidden test display: Alt+Space t n opens a tab; the launcher opens in a Dusk on that display, filters, runs a local command (new tab) and a global one (open Ghostty).</li>
+<li><code>make hypr-nested-check</code>: Super+Space runs the launcher, Alt+Space routes by class.</li>
+</ul>
+
+</main></body></html>

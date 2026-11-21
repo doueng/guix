@@ -12,12 +12,19 @@
          '[keylog]
          '[mux])
 
+;; Cmd+Space opens the launcher (desktop/bin/palette); the old desktop leader
+;; sequences are its shortcuts. Alt+Space is the local prefix, routed by
+;; window class from leader.edn's :apps (T208).
 (def desktop-leader "Cmd+Space")
 (def desktop-leader-mod {:hypr "SUPER" :modmask 64})
+(def local-prefix "Alt+Space")
+(def local-prefix-mod {:hypr "ALT" :modmask 8})
 
 (def contexts
-  {:desktop #(or (:nav %) (:desktop %) (:desktop-command %) (:chrome %))
+  {:desktop #(or (:nav %) (:desktop %) (:desktop-command %))
    :herdr #(or (:nav %) (:herdr %))
+   :rex #(or (:nav %) (:herdr %) (:rex %))
+   :chrome :chrome
    :nvim #(or (:nav %) (:nvim %))
    :doom #(or (:nav %) (:doom %))
    :idea #(or (:nav %) (:idea %))})
@@ -30,8 +37,8 @@
 (def directions #{"left" "down" "up" "right"})
 (def action-keywords {:desktop #{:choose-window}
                       :herdr #{:choose-tab :next-tab :previous-tab :close-tab :close-pane :edit-scrollback
-                               :choose-workspace :choose-agent}})
-(def binding-fields #{:keys :label :desktop-label :nav :nvim :doom :idea :desktop :desktop-command :chrome :herdr :doom-match})
+                               :choose-workspace :choose-agent :new-tab :rename-tab}})
+(def binding-fields #{:keys :label :desktop-label :nav :nvim :doom :idea :desktop :desktop-command :chrome :herdr :rex :doom-match})
 (def doom-matches #{:exact :analogous :differs})
 
 (def keycodes
@@ -40,7 +47,8 @@
          (zipmap (map str "qwertyuiop") (range 16 26))
          (zipmap (map str "asdfghjkl") (range 30 39))
          (zipmap (map str "zxcvbnm") (range 44 51))
-         {"ctrl" 29 "shift" 42 "alt" 56 "esc" 1 "enter" 28 "/" 53}))
+         {"ctrl" 29 "shift" 42 "alt" 56 "esc" 1 "enter" 28 "/" 53
+          "tab" 15 "space" 57 "pageup" 104 "pagedown" 109}))
 
 (defn chord-events
   "ydotool key events for CHORD, such as \"ctrl+shift+t\": press in order, release in reverse."
@@ -63,7 +71,7 @@
       (not (text? (:label b))) "the label must be nonblank text"
       (and (has? :desktop-label) (not (text? (:desktop-label b)))) "the desktop label must be nonblank text"
       (and (has? :nav) (not (directions (:nav b)))) "nav must be left, down, up or right"
-      (and (has? :nav) (some has? [:nvim :doom :idea :desktop :desktop-command :chrome :herdr]))
+      (and (has? :nav) (some has? [:nvim :doom :idea :desktop :desktop-command :chrome :herdr :rex]))
       "nav already defines every context, so it takes no other action"
       (some #(and (has? %) (not (text? (get b %)))) [:nvim :doom :idea]) "editor actions must be nonblank text"
       (and (has? :desktop) (has? :desktop-command)) "use either :desktop or :desktop-command"
@@ -71,19 +79,40 @@
       "desktop must be :choose-window or a dispatcher such as [\"focus\" {:workspace 2}]"
       (and (has? :desktop-command) (not (argv? (:desktop-command b)))) "desktop-command must be an argv vector"
       (and (has? :chrome) (not (chord? (:chrome b)))) "chrome must be a chord such as \"ctrl+shift+k\""
-      (and (has? :chrome) (vector? (:desktop b)))
-      "chrome replaces a keyleader desktop action; a Hyprland dispatcher never reaches keyleader"
       (and (has? :herdr) (not (or ((action-keywords :herdr) (:herdr b))
                                   (and (argv? (:herdr b)) (= "pane" (first (:herdr b))))
                                   (and (map? (:herdr b)) (= #{:plugin :action} (set (keys (:herdr b))))
-                                       (every? text? (vals (:herdr b)))))))
+                                       (every? text? (vals (:herdr b))))
+                                  (and (map? (:herdr b)) (= #{:tab} (set (keys (:herdr b))))
+                                       (#{1 2 3 4 5 6 7 8 9} (:tab (:herdr b)))))))
       (str "herdr must be one of " (sort (action-keywords :herdr))
-           ", a herdr pane command vector, or {:plugin ID :action ID}")
+           ", a herdr pane command vector, {:plugin ID :action ID} or {:tab 1..9}")
+      (and (has? :rex) (not (or (qualified-keyword? (:rex b))
+                                (and (vector? (:rex b)) (text? (first (:rex b)))))))
+      "rex must be a rexmux command id such as :tab/new, or [METHOD ARGS]"
+      (and (has? :rex) (has? :herdr)) "use either :herdr, which Rex maps, or :rex"
       (and (has? :doom-match) (not (doom-matches (:doom-match b))))
       (str "doom-match must be one of " (sort doom-matches)))))
 
-(defn validate! [{:keys [groups bindings terminal] :as grammar}]
+(defn app-problem
+  "Why the :apps entry A cannot route Alt+Space, or nil."
+  [a]
+  (let [route (:alt-space a)]
+    (cond
+      (not (text? (:class a))) "each app needs a :class, the Hyprland window class"
+      (seq (remove #{:class :alt-space :context} (keys a))) (str "unknown fields " (vec (remove #{:class :alt-space :context} (keys a))))
+      (= :pass route) (when (:context a) ":pass takes no :context")
+      (= :submap route) (when-not (#{:chrome} (:context a)) ":submap needs :context :chrome")
+      (and (vector? route) (seq route) (every? chord? route)) nil
+      :else ":alt-space must be :pass, :submap or a vector of chords such as [\"ctrl+b\" \"space\"]")))
+
+(defn validate! [{:keys [groups bindings terminal apps] :as grammar}]
   (let [group-keys (set (map first groups))]
+    (doseq [a apps]
+      (when-let [problem (app-problem a)]
+        (throw (ex-info (str "Invalid app " (pr-str (:class a)) ": " problem) {:app a}))))
+    (when-not (= (count apps) (count (distinct (map :class apps))))
+      (throw (ex-info "Duplicate app class" {:apps (map :class apps)})))
     (when-not (and (vector? (:keeps terminal)) (seq (:keeps terminal))
                    (every? (fn [[regex ks :as rule]]
                              (and (= 2 (count rule)) (text? regex) (text? ks) (every? (set "hjkl") ks)
@@ -107,10 +136,7 @@
       (when-let [problem (binding-problem b)]
         (throw (ex-info (str "Invalid leader binding " (pr-str keys) ": " problem) {:binding b}))))
     (when-not (= (count bindings) (count (distinct (map :keys bindings))))
-      (throw (ex-info "Duplicate leader sequence" {})))
-    (let [desktop (map #(mapv str/lower-case (:keys %)) (filter (:desktop contexts) bindings))]
-      (when-not (= (count desktop) (count (distinct desktop)))
-        (throw (ex-info "Desktop leader keys differ only by case, which Hyprland submaps cannot tell apart" {})))))
+      (throw (ex-info "Duplicate leader sequence" {}))))
   grammar)
 
 (defn load-grammar [] (validate! (edn/read-string (slurp (config-path)))))
@@ -240,13 +266,14 @@
       (nav! direction keys))))
 
 (defn submap-panel
-  "The which-key panel for Hyprland submap NAME, or nil when no leader submap is active."
+  "The which-key panel for Hyprland submap NAME, local-CONTEXT or
+  local-CONTEXT-GROUP, or nil when no local submap is active."
   [grammar name]
-  (cond
-    (= "leader" name) {:title desktop-leader :rows (menu grammar :desktop nil)}
-    (str/starts-with? (str name) "leader-")
-    (let [group (subs name 7)]
-      {:title (str desktop-leader " " group) :rows (menu grammar :desktop group)})))
+  (when-let [[_ context group] (re-matches #"local-([a-z]+)(?:-(.+))?" (str name))]
+    (let [context (keyword context)]
+      (when (contexts context)
+        {:title (str/join " " (remove nil? [local-prefix group]))
+         :rows (menu grammar context group)}))))
 
 (defn show-panel! [panel]
   (run! [(str (fs/home) "/.local/bin/dusk") "msg" "call" "leader-hint"
@@ -290,12 +317,19 @@
                                                  {:label (:title c) :source (:class c) :value (:address c)}))]
       (hypr/dispatch! ["focus" {:window (str "address:" address)}]))))
 
+(defn shortcut
+  "What to type in the launcher to rank the binding at KEYS first: the keys
+  without spaces, TAB as tab. Cmd+Space b b becomes Cmd+Space bb Enter."
+  [keys]
+  (apply str (map #(if (= "TAB" %) "tab" %) keys)))
+
 (defn leader-entries
   "Palette entries for the leader bindings of CONTEXT, entered with LEADER.
   Each :value is \"leader:\" and the keys."
   [grammar context leader source]
   (for [b (in-context grammar context) :when (not (:nav b)) :let [keys (str/join " " (:keys b))]]
-    {:label (label-in context b) :keys (str leader " " keys) :source source :value (str "leader:" keys)}))
+    {:label (label-in context b) :keys (str leader " " keys) :source source :value (str "leader:" keys)
+     :shortcut (shortcut (:keys b))}))
 
 (defn leader-keys [value]
   (some-> (re-matches #"leader:(.+)" value) second (str/split #" ")))
@@ -318,11 +352,12 @@
   (if-let [keys (leader-keys value)]
     (run-desktop! grammar keys)
     (when-let [entry (some #(when (= value (get-in % [:palette :value])) %) (guide-entries))]
-      (keyguide/run-entry! entry)
-      (keylog/log! "action" "hyprland" (str desktop-leader " Space") (:label entry)))))
-
-(defn chrome-focused? []
-  (= "google-chrome" (:class (json/parse-string (run! ["hyprctl" "-j" "activewindow"]) true))))
+      (when (or (not (:confirm entry))
+                (= "yes" (palette/pick! (str (:label entry) "?")
+                                        [{:label "Cancel" :value "no"}
+                                         {:label (str "Yes: " (:label entry)) :value "yes"}])))
+        (keyguide/run-entry! entry)
+        (keylog/log! "action" "hyprland" desktop-leader (:label entry))))))
 
 (defn run-desktop! [grammar keys]
   (if (= keys ["SPC"])
@@ -332,7 +367,6 @@
       (if (:nav b)
         (move-desktop-focus! (:nav b) pressed)
         (do (cond
-              (and (:chrome b) (chrome-focused?)) (run! (into ["ydotool" "key"] (chord-events (:chrome b))))
               (:desktop-command b) (spawn! (:desktop-command b))
               (= :choose-window (:desktop b)) (choose-window!)
               (vector? (:desktop b)) (hypr/dispatch! (:desktop b)))
@@ -340,55 +374,72 @@
 
 (defn hypr-key [k]
   (get {"=" "equal" "SPC" "SPACE" "/" "slash" "," "comma" "." "period" "`" "grave" "TAB" "TAB"}
-       k (str/upper-case k)))
+       k (if (re-matches #"[A-Z]" k) (str "SHIFT + " k) (str/upper-case k))))
 
-(defn desktop-dispatcher
-  "The dispatcher that a desktop binding runs inside Hyprland, or nil when it
-  needs keyleader (menus, commands)."
-  [b]
-  (cond (:nav b) ["focus" {:direction (:nav b)}]
-        (vector? (:desktop b)) (:desktop b)))
+(defn lua-chord
+  "The Lua table keys.lua sends for CHORD, such as ctrl+shift+pageup."
+  [chord]
+  (let [parts (str/split chord #"\+")
+        key (last parts)]
+    (str "{ mods = " (hypr/lua-value (str/join " " (map str/upper-case (butlast parts))))
+         ", key = " (hypr/lua-value (get {"pageup" "Page_Up" "pagedown" "Page_Down" "tab" "Tab"} key key)) " }")))
+
+(defn local-submap [context] (str "local-" (name context)))
+
+(defn alt-space-routes
+  "The Lua table that keys.alt_space routes by window class: \"pass\", a list
+  of chords to send, or the name of a local submap."
+  [grammar]
+  (str "{\n"
+       (str/join (for [{:keys [class alt-space context]} (:apps grammar)]
+                   (str "  [" (hypr/lua-value class) "] = "
+                        (cond (= :pass alt-space) "\"pass\""
+                              (= :submap alt-space) (hypr/lua-value (local-submap context))
+                              :else (str "{ " (str/join ", " (map lua-chord alt-space)) " }"))
+                        ",\n")))
+       "}"))
 
 (defn hypr-config
-  "leader.lua: the desktop leader submaps, generated from the grammar. Each key
-  also works with the leader's modifier still held, when kanata passes it."
+  "leader.lua, generated from the grammar: Cmd+Space opens the launcher,
+  Alt+Space routes by window class, and each :submap app gets a local submap
+  whose keys send that app's chords. Each key also works with Alt still held."
   [grammar]
-  (let [bs (in-context grammar :desktop)
-        groups (filter (fn [[k]] (some #(= k (first (:keys %))) bs)) (:groups grammar))
-        q hypr/lua-value
-        submap (fn [name lines]
-                 (let [pressed (str desktop-leader (some->> (re-matches #"leader-(.+)" name) second (str " ")))]
-                   (concat [(str "hl.define_submap(" (q name) ", function()")
-                            (str "  for _, mods in ipairs({ \"\", " (q (str (:hypr desktop-leader-mod) " + ")) " }) do")]
-                           (map #(str "    " %) lines)
-                           ["  end"
-                            (str "  hl.bind(\"escape\", keys.cancel(" (q name) ", " (q pressed) ", \"Escape\"))")
-                            (str "  hl.bind(\"catchall\", keys.cancel(" (q name) ", " (q pressed) "))")
-                            "end)"])))
+  (let [q hypr/lua-value
+        submap (fn [name pressed lines]
+                 (concat [(str "hl.define_submap(" (q name) ", function()")
+                          (str "  for _, mods in ipairs({ \"\", " (q (str (:hypr local-prefix-mod) " + ")) " }) do")]
+                         (map #(str "    " %) lines)
+                         ["  end"
+                          (str "  hl.bind(\"escape\", keys.cancel(" (q name) ", " (q pressed) ", \"Escape\"))")
+                          (str "  hl.bind(\"catchall\", keys.cancel(" (q name) ", " (q pressed) "))")
+                          "end)"]))
         bind (fn [k action] (str "hl.bind(mods .. " (q (hypr-key k)) ", " action ")"))
-        shell-word #(if (re-matches #"\w+" %) % (str "'" % "'"))
-        run (fn [keys] (str "keys.leave(hl.dsp.exec_cmd(" (q (str "~/.local/bin/keyleader run " (str/join " " (map shell-word keys)))) "))"))
-        action (fn [b] (if-let [d (desktop-dispatcher b)]
-                         (str "keys.leave(" (hypr/lua d) ", "
-                              (q (str desktop-leader " " (str/join " " (:keys b)))) ", " (q (label-in :desktop b)) ")")
-                         (run (:keys b))))]
+        app-submaps
+        (fn [context]
+          (let [bs (in-context grammar context)
+                groups (filter (fn [[k]] (some #(= k (first (:keys %))) bs)) (:groups grammar))
+                top (local-submap context)
+                send (fn [b] (str "keys.leave_send(" (lua-chord (get b context)) ", "
+                                  (q (str/join " " (cons local-prefix (:keys b)))) ", " (q (label-in context b)) ")"))]
+            (concat
+             (submap top local-prefix
+                     (concat [(bind "SPC" "keys.leave(hl.dsp.exec_cmd(\"~/.local/bin/palette\"))")]
+                             (for [b bs :when (= 1 (count (:keys b)))] (bind (first (:keys b)) (send b)))
+                             (for [[k] groups] (bind k (str "hl.dsp.submap(" (q (str top "-" k)) ")")))))
+             (mapcat (fn [[g]]
+                       (submap (str top "-" g) (str local-prefix " " g)
+                               (for [b bs :when (= 2 (count (:keys b))) :when (= g (first (:keys b)))]
+                                 (bind (second (:keys b)) (send b)))))
+                     groups))))]
     (str/join
      "\n"
      (concat
       ["-- Generated by desktop/build/keybindings/generate.bb. Edit keybindings/leader.edn."
        "-- keyleader listen shows the which-key panel from Hyprland's submap events."
        "local keys = require(\"keys\")"
-       (str "hl.bind(" (q (str (:hypr desktop-leader-mod) " + SPACE")) ", keys.enter(\"leader\", " (q desktop-leader) "))")]
-      (submap "leader"
-              (concat [(bind "SPC" (run ["SPC"]))]
-                      (for [b bs :when (= 1 (count (:keys b)))] (bind (first (:keys b)) (action b)))
-                      (for [[k] groups] (bind k (str "hl.dsp.submap(" (q (str "leader-" k)) ")")))))
-      (mapcat
-       (fn [[g]]
-         (submap (str "leader-" g)
-                 (for [b bs :when (= 2 (count (:keys b))) :when (= g (first (:keys b)))]
-                   (bind (second (:keys b)) (action b)))))
-       groups)
+       (str "hl.bind(" (q (str (:hypr desktop-leader-mod) " + SPACE")) ", keys.launcher)")
+       (str "hl.bind(" (q (str (:hypr local-prefix-mod) " + SPACE")) ", keys.alt_space(" (alt-space-routes grammar) "))")]
+      (mapcat app-submaps (distinct (keep :context (:apps grammar))))
       [""]))))
 
 (defn read-key []
@@ -426,6 +477,35 @@
       (nil? i) (throw (ex-info "Herdr reported no focused tab" {:tabs (mapv :tab_id ts)}))
       :else (run! ["herdr" "tab" "focus" (:tab_id (nth ts (mod (+ i delta) (count ts))))]))))
 
+(defn pane-cwd [pane]
+  (some #(when (= pane (:pane_id %)) (or (:foreground_cwd %) (:cwd %)))
+        (get-in (herdr-json "pane" "list") [:result :panes])))
+
+(defn new-tab!
+  "A new Herdr tab in WORKSPACE, in PANE's directory as Herdr's new_cwd = follow."
+  [workspace pane]
+  (run! (cond-> ["herdr" "tab" "create" "--workspace" workspace "--focus"]
+          (and pane (pane-cwd pane)) (into ["--cwd" (pane-cwd pane)]))))
+
+(defn nth-tab! [workspace n]
+  (if-let [t (get (vec (tabs workspace)) (dec n))]
+    (run! ["herdr" "tab" "focus" (:tab_id t)])
+    (throw (ex-info (str "No tab " n) {:workspace workspace}))))
+
+(defn read-line!
+  "A line typed in the popup after PROMPT, or nil when it is blank."
+  [prompt]
+  (print (str "\u001b[2J\u001b[H" prompt))
+  (flush)
+  (some-> (read-line) str/trim not-empty))
+
+(defn rename-tab! [tab]
+  (when-let [label (read-line! "Tab name: ")]
+    (run! ["herdr" "tab" "rename" tab label])))
+
+;; Hyprland sends Ctrl+b Space for Alt+Space in the Herdr window (leader.edn :apps).
+(def herdr-leader "Ctrl+b Space")
+
 (declare herdr-palette!)
 
 (defn run-herdr!
@@ -437,7 +517,7 @@
     (let [b (some #(when (= keys (:keys %)) %) (in-context grammar :herdr))
           {:keys [pane tab workspace]} (or target (herdr-target))
           action (:herdr b)
-          pressed (str "Ctrl+b Space " (str/join " " keys))]
+          pressed (str herdr-leader " " (str/join " " keys))]
       (when-not (:nav b) (keylog/log! "action" "herdr" pressed (:label b)))
       (cond
         (:nav b) (nav! (:nav b) pressed)
@@ -446,17 +526,25 @@
         (= :edit-scrollback action) (herdr-api! "pane.edit_scrollback" {:pane_id pane})
         (= :choose-workspace action) (choose-workspace!)
         (= :choose-agent action) @(spawn! ["~/.local/bin/herdr-agent-pick"])
+        (:tab action) (nth-tab! workspace (:tab action))
         (map? action) (herdr-api! "plugin.action.invoke" {:plugin_id (:plugin action) :action_id (:action action)
                                                             :context {:focused_pane_id pane}})
         (= :close-tab action) (run! ["herdr" "tab" "close" tab])
+        (= :new-tab action) (new-tab! workspace pane)
+        (= :rename-tab action) (rename-tab! tab)
         (= :next-tab action) (step-tab! workspace 1)
         (= :previous-tab action) (step-tab! workspace -1)
         (= :choose-tab action) (choose-tab! workspace)))))
 
-(defn herdr-entries [grammar]
-  (leader-entries grammar :herdr "Ctrl+b Space" "Herdr"))
+(def tty-actions
+  "Herdr actions that ask in the popup's terminal, so no palette can run them."
+  #{:rename-tab})
 
-(def herdr-leader "Ctrl+b Space")
+(defn herdr-entries
+  "Palette rows for the Herdr leader, shown as Alt+Space, its key everywhere."
+  [grammar]
+  (remove #(tty-actions (:herdr (some (fn [b] (when (= (leader-keys (:value %)) (:keys b)) b)) (:bindings grammar))))
+          (leader-entries grammar :herdr local-prefix "Herdr")))
 
 (defn herdr-palette!
   "Choose a Herdr leader binding by name. The palette logs the choice, so the
@@ -493,24 +581,32 @@
 (defn expected-binds
   "The [submap modmask key] triples that leader.lua binds for GRAMMAR."
   [grammar]
-  (let [bs (in-context grammar :desktop)
-        groups (filter (fn [[k]] (some #(= k (first (:keys %))) bs)) (:groups grammar))
-        keyed (fn [submap ks] (concat (for [m [0 (:modmask desktop-leader-mod)] k ks] [submap m (str/lower-case (hypr-key k))])
-                                      [[submap 0 "escape"] [submap 0 "catchall"]]))]
-    (set (concat [["" (:modmask desktop-leader-mod) "space"]]
-                 (keyed "leader" (concat ["SPC"] (for [b bs :when (= 1 (count (:keys b)))] (first (:keys b)))
-                                         (map first groups)))
-                 (mapcat (fn [[g]] (keyed (str "leader-" g)
-                                          (for [b bs :when (= 2 (count (:keys b))) :when (= g (first (:keys b)))]
-                                            (second (:keys b)))))
-                         groups)))))
+  (let [alt (:modmask local-prefix-mod)
+        keyed (fn [submap ks]
+                (concat (for [m [0 alt] k ks
+                              :let [shift? (re-matches #"[A-Z]" k)]]
+                          [submap (+ m (if shift? 1 0)) (str/lower-case (if shift? k (hypr-key k)))])
+                        [[submap 0 "escape"] [submap 0 "catchall"]]))]
+    (set (concat [["" (:modmask desktop-leader-mod) "space"] ["" alt "space"]]
+                 (mapcat (fn [context]
+                           (let [bs (in-context grammar context)
+                                 groups (filter (fn [[k]] (some #(= k (first (:keys %))) bs)) (:groups grammar))
+                                 top (local-submap context)]
+                             (concat (keyed top (concat ["SPC"] (for [b bs :when (= 1 (count (:keys b)))] (first (:keys b)))
+                                                        (map first groups)))
+                                     (mapcat (fn [[g]] (keyed (str top "-" g)
+                                                              (for [b bs :when (= 2 (count (:keys b))) :when (= g (first (:keys b)))]
+                                                                (second (:keys b)))))
+                                             groups))))
+                         (distinct (keep :context (:apps grammar))))))))
 
 (defn live-binds
-  "The leader binds Hyprland reports, as [submap modmask key] triples."
+  "The launcher and local-prefix binds Hyprland reports, as [submap modmask key] triples."
   [binds]
   (set (for [b binds
-             :when (or (str/starts-with? (:submap b) "leader")
-                       (and (= "" (:submap b)) (= (:modmask desktop-leader-mod) (:modmask b)) (= "space" (str/lower-case (:key b)))))]
+             :when (or (str/starts-with? (:submap b) "local-")
+                       (and (= "" (:submap b)) (#{(:modmask desktop-leader-mod) (:modmask local-prefix-mod)} (:modmask b))
+                            (= "space" (str/lower-case (:key b)))))]
          [(:submap b) (:modmask b) (if (:catch_all b) "catchall" (str/lower-case (:key b)))])))
 
 (defn hypr-drift [expected live]
@@ -521,7 +617,7 @@
   (let [expected (expected-binds (load-grammar))
         live (live-binds (json/parse-string (run! ["hyprctl" "-j" "binds"]) true))]
     (if-let [drift (hypr-drift expected live)]
-      (throw (ex-info (str "Hyprland's loaded leader binds differ from leader.edn: " (pr-str drift)) drift))
+      (throw (ex-info (str "Hyprland's loaded launcher and Alt+Space binds differ from leader.edn: " (pr-str drift)) drift))
       (println (str "Hyprland has loaded all " (count expected) " leader binds")))))
 
 (defn report-failure! [command e]

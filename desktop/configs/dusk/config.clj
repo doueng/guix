@@ -140,9 +140,12 @@
 
 (defn- entry-score
   "Match the label first. A query that only matches the keys, such as SPC c,
-  still finds the entry, below every label match."
-  [{:keys [label keys]} query]
-  (or (score label query)
+  still finds the entry, below every label match. A query that is exactly an
+  entry's :shortcut, spaces aside and case kept, ranks it above all: the
+  launcher's old Cmd+Space sequences, such as bb (T208)."
+  [{:keys [label keys shortcut]} query]
+  (or (when (and shortcut (= shortcut (str/replace query " " ""))) 4)
+      (score label query)
       (when (and keys (str/includes? (str/lower-case keys) (str/lower-case query))) 0.5)))
 
 (defn- ranked-items [items query]

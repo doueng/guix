@@ -119,6 +119,26 @@
   (keep identity [(tested "make ghostty-rex-test" "ghostty-rex" "ghostty-rex" (filter ghostty-rex-file? files)
                           {:dir (str c/root "/desktop/build/ghostty-rex")} ["bb" "test"])]))
 
+(defn keybindings-file? [f]
+  (or (#{"desktop/bin/keyleader" "desktop/bin/palette" "desktop/bin/keyguide" "desktop/configs/dusk/config.clj"} f)
+      (re-find #"^desktop/(configs/keybindings|configs/hypr|build/keybindings|lib/dusk|lib/hypr|build/rexmux/sidecar)/" f)))
+
+(defn keybindings-problems
+  "The Cmd+Space launcher and Alt+Space tests (T208): the leader grammar and the
+  Hyprland binds generated from it, the launcher's rows and runners, and
+  Dusk's ranking of typed shortcuts. make keybindings-check runs these and more."
+  []
+  (let [own (filter keybindings-file? files)]
+    (keep identity
+          (concat
+           (for [t ["leader-test" "palette-test" "review-test"]]
+             (tested (str "desktop/build/keybindings/" t ".clj") "keybindings" t own
+                     {:dir c/root :extra-env {"KEYLOG_FILE" "/dev/null"}} ["bb" (str "desktop/build/keybindings/" t ".clj")]))
+           [(tested "bb desktop/build/keybindings/generate.bb --check" "keybindings" "generate" own
+                    {:dir c/root} ["bb" "desktop/build/keybindings/generate.bb" "--check"])
+            (tested "Dusk launcher ranking (desktop/build/dusk/runtime_test.bb)" "keybindings" "dusk-runtime" own
+                    {:dir (str c/root "/desktop/build/dusk")} ["bb" "--classpath" "runtime:../../configs/dusk" "runtime_test.bb"])]))))
+
 (defn ext-reload-problems
   "Each extension ext-reload serves must reload itself when its manifest.json changed: ext-reload's disable and
   enable keep the manifest Chrome first loaded, so without it a new command never gets its key (T197's Cmd+T)."
@@ -140,6 +160,7 @@
    ["md-view" md-view-problems]
    ["rexmux" rexmux-problems]
    ["ghostty-rex" ghostty-rex-problems]
+   ["keybindings" keybindings-problems]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
    ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))
                             (filter (fn [f] (or (str/ends-with? f ".bb") (re-find #"^#!.*\bbb\b" (first-line f)))) files))]

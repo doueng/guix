@@ -210,6 +210,20 @@ Router sees it as [routed to T12 W3 from rex]."
     (vec (concat (when (fs/directory? guix) [(str guix)])
                  (when (fs/directory? projects) (sort (map str (filter fs/directory? (fs/list-dir projects)))))))))
 
+(defn move-tab
+  "Effects that move the focused tab DELTA places, -1 left or 1 right, with
+  Rex's session.move_window, which places a window before another or last."
+  [{:keys [window-ids window-id]} delta]
+  (let [ws (vec window-ids)
+        i (.indexOf ws window-id)
+        j (+ i delta)]
+    (if (or (neg? i) (neg? j) (>= j (count ws)))
+      [[:ui/message "No room to move the tab"]]
+      [[:invoke :rex/session.move_window
+        (cond-> {:window_id window-id}
+          ;; Left: before the tab now left of it. Right: before the tab two along, or last.
+          (< j (dec (count ws))) (assoc :before_window_id (ws (if (neg? delta) j (inc j)))))]])))
+
 (def herdr-parity-commands
   "What Herdr gave besides panes and tabs (docs/rex-parity.html):
   tiny fingers, copy mode and search over the scrollback, renaming, resizing,
@@ -235,6 +249,12 @@ Router sees it as [routed to T12 W3 from rex]."
     :args [{:name :label :type "string" :required true}]
     :schema {:type "object" :properties {:label {:type "string"}} :required ["label"]}
     :run (fn [ctx {:keys [label]}] [[:invoke :rex/session.set_window_label {:window_id (:window-id ctx) :label label}]])}
+   {:id :tab/move-left :title "Tabs: move left" :category "tab" :source :local
+    :needs #{:session-id :window-id}
+    :run (fn [ctx _] (move-tab ctx -1))}
+   {:id :tab/move-right :title "Tabs: move right" :category "tab" :source :local
+    :needs #{:session-id :window-id}
+    :run (fn [ctx _] (move-tab ctx 1))}
    {:id :session/rename :title "Sessions: rename" :category "session" :source :local
     :keys [["ctrl+b" "$"]] :needs #{:session-id}
     :args [{:name :label :type "string" :required true}]

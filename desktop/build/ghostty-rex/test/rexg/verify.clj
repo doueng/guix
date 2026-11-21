@@ -44,7 +44,8 @@
 
 (defn- check! [name ok & [detail]]
   (swap! results conj {:name name :ok (boolean ok) :detail detail})
-  (println (if ok "PASS" "FAIL") name (if detail (str "- " detail) "")))
+  (println (if ok "PASS" "FAIL") name (if detail (str "- " detail) ""))
+  ok)
 
 (defn- wait-for
   "Poll F every 200 ms for up to MS; its first truthy value, else nil."
@@ -113,7 +114,9 @@
   [s file]
   (e2e/config! s (str file ".rexmux"))
   (let [shipped (edn/read-string (slurp (str (fs/path checkout "desktop" "configs" "ghostty-rex" "config.edn"))))]
+    ;; This checkout's leader.edn, not the one linked into ~/.config.
     (spit file (pr-str (assoc shipped :servers [{:label "test" :address (:address s)}]
+                              :leader-file (str (fs/path checkout "desktop" "configs" "keybindings" "leader.edn"))
                               :startup (assoc (:startup shipped) :cwd (:root s)))))
     shipped))
 
@@ -197,6 +200,110 @@
 (defn- send-bytes! [{:keys [in]} s] (.write in (.getBytes ^String s "UTF-8")) (.flush in))
 (defn- stop-tty! [{:keys [proc]}] (p/destroy-tree proc) (str (:out (deref proc 3000 {}))))
 
+(defn dusk-bin
+  "DUSK_BIN, else this checkout's build, else the one make stow links."
+  []
+  (or (System/getenv "DUSK_BIN")
+      (some #(when (fs/executable? %) (str %))
+            [(fs/path checkout "desktop" "build" "dusk" "target" "release" "dusk")
+             (fs/path (fs/parent (fs/real-path (fs/path (fs/home) ".local" "bin" "dusk"))) ".." "build" "dusk" "target" "release" "dusk")])
+      "dusk"))
+
+(defn- dusk-msg [& args]
+  (str/trim (str (:out (apply in-display (dusk-bin) "msg" args)))))
+
+(defn- start-dusk!
+  "Dusk with this checkout's config in the test display, on a D-Bus session
+  of its own so it never takes your notification name."
+  [root]
+  (let [proc (p/process {:out (str root "/dusk.log") :err (str root "/dusk.log")}
+                        "test-display" "--name" display "exec" "--" "dbus-run-session" "--"
+                        (dusk-bin) "--config" (str checkout "/desktop/configs/dusk/config.clj"))]
+    (wait-for 10000 #(str/includes? (dusk-msg "surfaces") "wallpaper"))
+    proc))
+
+(defn- launcher-matches
+  "The first N rows the open launcher shows, as [label keys source]."
+  [n]
+  (some-> (dusk-msg "eval" (str "(mapv (juxt :label :keys :source) (take " n " (:matches @config/launcher)))"))
+          not-empty edn/read-string))
+
+(defn- launch!
+  "Open the launcher (desktop/bin/palette) as Cmd+Space would with the Rex
+  window focused, type QUERY and return the rows shown, then press KEY,
+  Return to run the first or Escape to close. It runs on a D-Bus session of
+  its own, so a Ghostty it starts opens here."
+  [s root query key]
+  (let [proc (p/process {:out (str root "/palette.log") :err (str root "/palette.log")
+                         ;; Only a local command needs the test server; a Ghostty
+                         ;; given REX_SERVER would attach to it as a stray tab.
+                         :extra-env (merge (when (= "new tab" query) (select-keys (ts/env s) ["REX_SERVER"]))
+                                           {"PALETTE_WINDOW" (json/generate-string {:class "dev.engstrand.Rex"})
+                                            "KEYLEADER_CONFIG" (str checkout "/desktop/configs/keybindings/leader.edn")
+                                            "KEYGUIDE_CONFIG" (str checkout "/desktop/configs/keybindings/bindings.edn")
+                                            "XDG_STATE_HOME" (str root "/state")
+                                            "KEYLOG_FILE" (str root "/keys.tsv")})}
+                        "test-display" "--name" display "exec" "--" "dbus-run-session" "--"
+                        (str checkout "/desktop/bin/palette"))
+        opened (wait-for 10000 #(str/includes? (dusk-msg "surfaces") "launcher"))]
+    (Thread/sleep 300)
+    (keys! query)
+    (let [rows (launcher-matches 3)]
+      (keys! [:key key])
+      (deref proc 15000 nil)
+      {:opened opened :rows rows})))
+
+(defn- sway-apps []
+  (let [tree (json/parse-string (:out (in-display "swaymsg" "-t" "get_tree")) true)]
+    (keep :app_id (tree-seq map? #(concat (:nodes %) (:floating_nodes %)) tree))))
+
+(defn- alt-space! [& ks]
+  (apply in-display "wtype" "-k" "Shift_L" "-s" "150" "-M" "alt" "-k" "space" "-m" "alt"
+         (mapcat (fn [k] ["-s" "150" k]) ks))
+  (Thread/sleep 300))
+
+(defn- local-prefix-checks!
+  "T208: Alt+Space is the window's local prefix (Hyprland passes it to this
+  class), and Cmd+Space's launcher lists the window's commands first and the
+  global ones after."
+  [s sid root]
+  (let [n (count (:windows (view s sid)))]
+    (alt-space! "t" "n")
+    (check! "Alt+Space t n opens a tab" (wait-for 5000 #(= (inc n) (count (:windows (view s sid)))))
+            (count (:windows (view s sid))))
+    (let [new-id (:active_window_id (view s sid))]
+      (check! "the new tab is last and focused" (= new-id (get-in (view s sid) [:windows n :window_id])))
+      (alt-space! "t" "H")
+      (check! "Alt+Space t H moves the tab left" (wait-for 3000 #(= new-id (get-in (view s sid) [:windows (dec n) :window_id]))))
+      (alt-space! "t" "d")
+      (check! "Alt+Space t d closes it" (wait-for 5000 #(= n (count (:windows (view s sid))))))))
+  (shot! root "01b-alt-space")
+  (let [dusk (start-dusk! root)]
+    (try
+      (let [before (set (map :window_id (:windows (view s sid))))
+            n (count before)
+            {:keys [opened rows]} (launch! s root "new tab" "Return")]
+        (check! "Cmd+Space opens the launcher" opened)
+        (check! "typing filters it to the Rex window's own New tab first, with its keys"
+                (= ["New tab" "Alt+Space t n" "Rex"] (first rows)) (pr-str rows))
+        (when (check! "choosing it opens a tab (a local command)" (wait-for 5000 #(= (inc n) (count (:windows (view s sid))))))
+          (doseq [w (:windows (view s sid)) :when (not (before (:window_id w)))]
+            (api s "session.close_window" {:session_id sid :window_id (:window_id w)}))))
+      (let [{:keys [rows]} (launch! s root "bb" "Escape")]
+        (check! "an old Cmd+Space sequence, b b, is a launcher shortcut"
+                (= ["Choose buffer, tab or window" "Cmd+Space b b" "Desktop"] (first (filter #(= "Desktop" (nth % 2)) rows)))
+                (pr-str rows)))
+      (let [before (count (filter #{"com.mitchellh.ghostty"} (sway-apps)))
+            {:keys [rows]} (launch! s root "open ghostty" "Return")]
+        (check! "typing filters to the global Open Ghostty" (= "Open Ghostty" (ffirst rows)) (pr-str rows))
+        (check! "choosing it opens a Ghostty window (a global command)"
+                (wait-for 10000 #(< before (count (filter #{"com.mitchellh.ghostty"} (sway-apps)))))))
+      (shot! root "01c-launcher")
+      (finally
+        (in-display "swaymsg" "[app_id=\"^com.mitchellh.ghostty$\"] kill")
+        (dusk-msg "quit")
+        (when-not (deref dusk 3000 nil) (p/destroy-tree dusk))))))
+
 (defn e2e!
   "The window checks; returns the run directory."
   [root]
@@ -232,6 +339,7 @@
           (check! "rex -C ghostty-rex do mx.tab.select_3 (Super+D) shows the pi tab"
                   (and (zero? exit) (wait-for 3000 #(= (get-in v [:windows 2 :window_id]) (:active_window_id (view s sid)))))
                   (str exit " " err)))
+        (local-prefix-checks! s sid root)
         ;; Tiny fingers on the shell tab.
         (api s "session.focus_window" {:session_id sid :window_id (get-in v [:windows 0 :window_id])})
         (Thread/sleep 500)
