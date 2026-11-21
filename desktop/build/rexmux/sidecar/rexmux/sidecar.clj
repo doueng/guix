@@ -112,7 +112,7 @@
         res (reg/invoke (:registry state) (assoc ctx :world (world state io)) cid args)
         own? #(#{:sidecar/reload :spawn} (first %))
         reload? (some #(= :sidecar/reload (first %)) (:effects res))
-        spawns (vec (for [[kind spec] (:effects res) :when (= :spawn kind)] (assoc spec :op :spawn)))
+        spawns (vec (for [[kind spec] (:effects res) :when (= :spawn kind)] (assoc spec :op :spawn :for id)))
         res (cond-> res (some own? (:effects res)) (update :effects (fn [es] (vec (remove own? es)))))]
     {:reply (merge {:op :reply :id id} res) :reload? reload? :spawns spawns}))
 
@@ -232,14 +232,28 @@
 
 (defn perform!
   "Do the local-ops among MSGS with IO (:spawn! and :notify) and return the
-  rest, for the window, in order."
+  rest, for the window, in order. It never throws: a local op that fails,
+  such as a program that is not found, is logged with (:log io), and the
+  reply to the invoke a failed spawn came from (its :for) becomes an error,
+  keeping its :seq, so the window still gets every message, numbered
+  without a gap, and a failed command does not report success."
   [io msgs]
-  (doseq [m msgs]
-    (case (:op m)
-      :spawn ((:spawn! io) m)
-      :notify (when-let [notify (:notify io)] (notify (:summary m) (:body m)))
-      nil))
-  (vec (remove #(local-ops (:op %)) msgs)))
+  (let [failed (reduce (fn [failed m]
+                         (try
+                           (case (:op m)
+                             :spawn ((:spawn! io) m)
+                             :notify (when-let [notify (:notify io)] (notify (:summary m) (:body m)))
+                             nil)
+                           failed
+                           (catch Throwable e
+                             (let [why (str (name (:op m)) " " (or (first (:argv m)) (:summary m)) ": " (ex-message e))]
+                               (when-let [log (:log io)] (log why))
+                               (cond-> failed (and (= :spawn (:op m)) (some? (:for m))) (assoc (:for m) why))))))
+                       {} msgs)]
+    (vec (for [m msgs :when (not (local-ops (:op m)))]
+           (if-let [why (and (= :reply (:op m)) (get failed (:id m)))]
+             (-> m (select-keys [:op :id :seq]) (assoc :error why))
+             m)))))
 
 (defn make-io
   "The :io map handle gets in a live process: Rex through the rex CLI,
@@ -248,6 +262,7 @@
   sidecar in-process, both use it."
   [config app]
   {:load-help rex/help
+   :log (fn [text] (binding [*out* *err*] (println (str app " sidecar: " text))))
    :notify (fn [summary body]
              (babashka.process/process ["notify-send" (str "--app-name=" app) summary body]
                                        {:out :discard :err :discard}))

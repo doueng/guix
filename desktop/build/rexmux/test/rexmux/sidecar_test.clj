@@ -166,7 +166,7 @@
                                      [:bbh/say {:text "T12 go on"} ["bbh" "say" "--from" "rex" "T12 go on"] {}]]]
       (let [[spawns reply] (invoke-spawns command args ctx)
             spec (sc/spawn-spec config (first spawns) hypr)]
-        (is (= [{:op :spawn :server "far" :argv argv :env env}] spawns) (str command))
+        (is (= [{:op :spawn :server "far" :argv argv :env env :for 5}] spawns) (str command))
         (is (nil? (:seq (first spawns))) "a local op takes no number")
         (is (not-any? #(= :spawn (first %)) (:effects reply)))
         (is (= (into [(str stubs "/" (first argv))] (rest argv)) (:argv spec)) "found on the child's PATH, a test's stubs first")
@@ -181,3 +181,24 @@
             [spawns reply] (invoke-spawns :pane/term-nav-left {} ctx)]
         (is (= [reply] (sc/perform! {:spawn! #(swap! started conj (:argv %))} (conj spawns reply))))
         (is (= [["keyleader" "term-nav" "left"]] @started))))))
+
+(deftest a-spawn-that-throws-answers-its-invoke-with-an-error-and-loses-nothing
+  (let [logged (atom [])
+        io (assoc io :log #(swap! logged conj %)
+                  :spawn! (fn [_] (throw (java.io.IOException. "Cannot run program \"bbh\"")))
+                  :notify (fn [_ _] (throw (java.io.IOException. "Cannot run program \"notify-send\""))))
+        steps (numbered [{:op :hello :ctx ctx}
+                         {:op :commands/invoke :id 5 :command :bbh/say :args {:text "T12 go on"} :ctx ctx}
+                         {:op :ping :id 6}])
+        [state window] (reduce (fn [[s acc] m] (let [[s out] (sc/handle s io m)] [s (into acc (sc/perform! io out))]))
+                               [(sc/initial-state sc/default-config) []] steps)
+        [_ more] (sc/deliver state io {:op :rex/event :event (first events) :server "local"})
+        window (into window (sc/perform! io more))
+        reply (first (filter #(= 5 (:id %)) window))]
+    (is (= {:op :reply :id 5} (select-keys reply [:op :id])) "the invoke is answered")
+    (is (str/includes? (:error reply) "Cannot run program") "with the error, not Sent:")
+    (is (not-any? #(= [:ui/message "Sent: T12 go on"] %) (:effects reply)))
+    (is (some #(= :pong (:op %)) window) "a later message still arrives")
+    (is (= (range 1 (inc (count window))) (map :seq window)) "numbered from 1 without a gap")
+    (is (not-any? #(sc/local-ops (:op %)) window))
+    (is (some #(str/includes? % "bbh") @logged) "the failure is logged")))

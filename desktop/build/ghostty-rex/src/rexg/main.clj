@@ -116,9 +116,10 @@
                                                  :env (into {} (keep (fn [k] (when-let [v (System/getenv k)] [k v]))) ["REX_SERVER"])})
                    :conns {} :tags {} :streams {} :sizes {} :wh [80 24] :text-reqs {} :next-req 0
                    :last-draw nil :title nil :sidecar (sidecar/initial-state cfg) :tx proto/sender})
-        sc-io (sidecar/make-io cfg "ghostty-rex")
-        sc-exec (java.util.concurrent.Executors/newSingleThreadExecutor)
-        log (fn [& xs] (when-let [f (System/getenv "REXG_LOG")] (spit f (str (str/join " " xs) "\n") :append true)))]
+        log (fn [& xs] (when-let [f (System/getenv "REXG_LOG")] (spit f (str (str/join " " xs) "\n") :append true)))
+        ;; Its stderr is this terminal, so the sidecar logs to REXG_LOG.
+        sc-io (assoc (sidecar/make-io cfg "ghostty-rex") :log #(log "sidecar" %))
+        sc-exec (java.util.concurrent.Executors/newSingleThreadExecutor)]
     ;; Renderer lines: size, pane readiness and modes, text replies.
     (future
       (with-open [rd (io/reader (:err rproc))]
@@ -244,7 +245,7 @@
                                                        (fn [] (try (let [[s msgs] (sidecar/deliver (:sidecar @app) sc-io {:op :rex/event :event ev :server (get-in @app [:m :servers srv :label])})]
                                                                      (swap! app assoc :sidecar s)
                                                                      (doseq [o (sidecar/perform! sc-io msgs)] (put! [:sidecar o])))
-                                                                   (catch Throwable _))))))))
+                                                                   (catch Throwable e (log "sidecar event" (ex-message e))))))))))
             (step! [f & args]
               (let [[m outs] (apply f (:m @app) args)]
                 (swap! app assoc :m m)
