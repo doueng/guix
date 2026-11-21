@@ -114,7 +114,7 @@
         r {:in (:in rproc) :lock (Object.)}
         app (atom {:m (model/new-model servers {:startup (:startup cfg) :shell (:shell cfg) :prefer-session session
                                                  :env (into {} (keep (fn [k] (when-let [v (System/getenv k)] [k v]))) ["REX_SERVER"])})
-                   :conns {} :tags {} :streams {} :sizes {} :wh [80 24] :panes {} :text-reqs {} :next-req 0
+                   :conns {} :tags {} :streams {} :sizes {} :wh [80 24] :text-reqs {} :next-req 0
                    :last-draw nil :title nil :sidecar (sidecar/initial-state cfg) :tx proto/sender})
         sc-io (sidecar/make-io cfg "ghostty-rex")
         sc-exec (java.util.concurrent.Executors/newSingleThreadExecutor)
@@ -216,6 +216,7 @@
                                         (catch Exception e (or (ex-message e) "no server")))]
                              (put! (if (map? c) [:connected srv c] [:connect-failed srv c])))
                   :start-local-server (start-local! log)
+                  :scroll-bottom (send-str! r \s (str (first xs) " bottom"))
                   :after (let [[ms ev] xs] (future (Thread/sleep ms) (put! ev)))
                   nil)))
             (follow-events! [srv]
@@ -244,9 +245,9 @@
                     (rex-send! (:current m) "com.superlogical.terminal.resize"
                                {:session_id sid :block_id block :args {:columns c :rows rr}} [:ignore])))))
             (draw! []
-              (let [{:keys [m wh panes last-draw title]} @app
+              (let [{:keys [m wh last-draw title]} @app
                     [w h] wh
-                    {:keys [layout spans cursor] :as d} (screen/render m w h panes)
+                    {:keys [layout spans cursor] :as d} (screen/render m w h (:panes m))
                     lay (str/join "\n" (for [{:keys [block x y] tw :w th :h} layout] (str block " " x " " y " " tw " " th)))
                     sp (spans-text spans)
                     cur (str/join " " (map #(if (keyword? %) (name %) %) cursor))]
@@ -258,7 +259,8 @@
                   (swap! app assoc :title (:title d)))
                 (swap! app assoc :last-draw {:layout lay :spans sp :cursor cur})))
             (mouse! [{:keys [button x y kind]}]
-              (let [{:keys [m wh panes]} @app
+              (let [{:keys [m wh]} @app
+                    panes (:panes m)
                     [w h] wh
                     sid (model/session-id m)
                     hit (screen/pane-at m w h x y)
@@ -297,13 +299,8 @@
                                    (str/trimr (subs l (min (count l) (if (= rr r0) c0 0)) (min (count l) (if (= rr r1) (inc c1) (count l)))))))))
             (handle! [[kind & xs]]
               (case kind
-                :key (let [k (first xs) m (:m @app)]
+                :key (let [k (first xs)]
                        (log "key" (pr-str k) (keys/chord k))
-                       ;; Typing follows the output again and drops a selection.
-                       (when (and (nil? (:minibuffer m)) (nil? (:hints m)) (model/focused-block m)
-                                  (get-in @app [:panes (model/focused-block m) :scrolled]))
-                         (send-str! r \s (str (model/focused-block m) " bottom")))
-                       (swap! app update :m assoc :selection nil)
                        (step! model/key k))
                 :paste (let [m (:m @app)]
                          (when (and (model/session-id m) (model/focused-block m))
@@ -325,7 +322,7 @@
                 :stream-msg (let [[block msg] xs]
                               (case (:type msg)
                                 "resize" (send-str! r \r (str block " " (:cols msg 80) " " (:rows msg 24)))
-                                "child_exited" (swap! app assoc-in [:panes block :exited] (:exit_code msg 0))
+                                "child_exited" (step! model/child-exited block (:exit_code msg 0))
                                 nil))
                 :stream-closed (let [[block why] xs]
                                  (when (get-in @app [:streams block])
@@ -339,7 +336,7 @@
                                  "size" (do (swap! app assoc :wh [(parse-long a) (parse-long b)] :last-draw nil)
                                             (send-str! r \f ""))
                                  "mode" (let [bits (parse-long b)]
-                                          (swap! app assoc-in [:panes a] {:mouse (odd? bits) :scrolled (pos? (bit-and bits 2))}))
+                                          (step! model/renderer-mode a bits))
                                  "err" (when (get-in @app [:streams a])
                                          (swap! app update :m assoc :echo (str "pane " a ": " b)))
                                  nil))

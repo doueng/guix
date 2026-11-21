@@ -76,7 +76,7 @@
   (merge {:servers (mapv #(assoc % :client-id "" :view nil :sessions []) servers)
           :current 0 :catalogue [] :bindings [] :keymap-layer nil :keymap-actions nil
           :prefix [] :minibuffer nil :echo "" :doc nil :agents [] :attention []
-          :streams {} :sidecar-up false :hints nil :selection nil
+          :streams {} :panes {} :sidecar-up false :hints nil :selection nil
           :previous-session nil :revive-pending false :focus-first-pending false
           :next-id 0 :pending {} :invoked {} :last-ctx nil}
          opts))
@@ -665,9 +665,18 @@
         (if (#{"\r" "\t"} t) [m []] [(update m :minibuffer #(-> % (update :input str t) (assoc :selected 0))) []])
         [m []]))))
 
-(defn key
-  "One key press K."
-  [m k]
+(defn renderer-mode
+  "rexg-render's mode line for pane BLOCK: BITS 1, its program wants mouse
+  reports, and 2, it is scrolled into its history."
+  [m block bits]
+  [(assoc-in m [:panes block] {:mouse (odd? bits) :scrolled (pos? (bit-and bits 2))}) []])
+
+(defn child-exited
+  "Pane BLOCK's program exited with CODE."
+  [m block code]
+  [(assoc-in m [:panes block :exited] code) []])
+
+(defn- dispatch-key [m k]
   (let [ch (keys/chord k)]
     (cond
       (:hints m) (hint-key m k)
@@ -691,3 +700,14 @@
                                              (focused-block m) (assoc :block_id (focused-block m)))
                           [:ignore])]]
                   [m []]))))))
+
+(defn key
+  "One key press K. Typing into a pane scrolled into its history follows the
+  output again ([:scroll-bottom block] for rexg-render), and any key drops
+  the selection."
+  [m k]
+  (let [fb (focused-block m)
+        bottom (when (and (nil? (:minibuffer m)) (nil? (:hints m)) fb (get-in m [:panes fb :scrolled]))
+                 [[:scroll-bottom fb]])
+        [m outs] (dispatch-key (assoc m :selection nil) k)]
+    [m (into (vec bottom) outs)]))

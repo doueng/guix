@@ -92,6 +92,22 @@
         (is (= "session.list" (nth (first outs) 2)))
         (is (= ["session.attach" "session:p"] ((juxt #(nth % 2) #(:session_id (nth % 3))) (first outs2))))))))
 
+(deftest typing-into-a-scrolled-pane-follows-the-output-and-drops-the-selection
+  (let [model (-> (with-startup)
+                  (assoc-in [:servers 0 :view] {:session "session:p" :label "" :revision 0 :active "w1"
+                                                :windows [{:id "w1" :focused "block:a" :layout {:block {:id "block:a"}}}]})
+                  (assoc :selection ["block:a" [0 0] [3 0]]))
+        scrolled (first (m/renderer-mode model "block:a" 2))
+        [m1 outs] (m/key scrolled (keys/parse "x"))]
+    (is (= {:mouse false :scrolled true} (get-in scrolled [:panes "block:a"])))
+    (is (= [:scroll-bottom "block:a"] (first outs)) "rexg-render scrolls it back first")
+    (is (= "client.key" (nth (second outs) 2)))
+    (is (nil? (:selection m1)))
+    (is (not-any? #(= :scroll-bottom (first %)) (second (m/key model (keys/parse "x")))) "a pane at the bottom stays")
+    (is (not-any? #(= :scroll-bottom (first %)) (second (m/key (assoc scrolled :minibuffer {:mode {:kind :mx} :input "" :selected 0}) (keys/parse "x"))))
+        "keys for the minibuffer leave the pane alone")
+    (is (= 3 (get-in (first (m/child-exited scrolled "block:a" 3)) [:panes "block:a" :exited])))))
+
 (deftest a-perform-request-is-answered-under-its-call-id
   (let [[_ outs] (m/rex-event (m/new-model [{:label "t"}]) 0 {:type "client_perform_requested" :payload {:call_id "7" :action "mx.nothing"}})
         [_ _ method payload] (last outs)]
