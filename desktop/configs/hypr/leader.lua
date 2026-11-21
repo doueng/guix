@@ -14,6 +14,7 @@ hl.define_submap("local-chrome", function()
   for _, mods in ipairs({ "", "ALT + " }) do
     hl.bind(mods .. "SPACE", keys.leave(hl.dsp.exec_cmd("~/.local/bin/palette")))
     hl.bind(mods .. "B", hl.dsp.submap("local-chrome-b"))
+    hl.bind(mods .. "O", hl.dsp.submap("local-chrome-o"))
     hl.bind(mods .. "T", hl.dsp.submap("local-chrome-t"))
   end
   hl.bind("escape", keys.cancel("local-chrome", "Alt+Space", "Escape"))
@@ -25,6 +26,13 @@ hl.define_submap("local-chrome-b", function()
   end
   hl.bind("escape", keys.cancel("local-chrome-b", "Alt+Space b", "Escape"))
   hl.bind("catchall", keys.cancel("local-chrome-b", "Alt+Space b"))
+end)
+hl.define_submap("local-chrome-o", function()
+  for _, mods in ipairs({ "", "ALT + " }) do
+    hl.bind(mods .. "N", keys.leave_send({ mods = "CTRL SHIFT", key = "n" }, "Alt+Space o n", "Open Chrome incognito"))
+  end
+  hl.bind("escape", keys.cancel("local-chrome-o", "Alt+Space o", "Escape"))
+  hl.bind("catchall", keys.cancel("local-chrome-o", "Alt+Space o"))
 end)
 hl.define_submap("local-chrome-t", function()
   for _, mods in ipairs({ "", "ALT + " }) do

@@ -90,6 +90,24 @@
   (is (= [{:label "New tab" :keys "Ctrl+T" :chord "ctrl+t"}]
          (run-with (str "chrome:" (first (keep-indexed #(when (= "New tab" (:label %2)) %1) (palette/config :chrome)))) {}))))
 
+(deftest the-launcher-lists-and-runs-chrome-incognito
+  (testing "a global row everywhere, with its Cmd+Space keys"
+    (doseq [ctx [{:kind :desktop} {:kind :herdr} {:kind :chrome}]]
+      (is (some #(= {:label "Open Chrome incognito" :keys "Cmd+Space o n" :shortcut "on" :value "desktop:leader:o n"}
+                    (select-keys % [:label :keys :shortcut :value]))
+                (entries ctx))
+          (str (:kind ctx)))))
+  (testing "choosing it starts an incognito Chrome window"
+    (let [spawned (atom [])]
+      (with-redefs [keyleader/spawn! (fn [argv] (swap! spawned conj argv))
+                    keylog/log! (fn [& _] nil)]
+        (palette/run-entry! grammar {:kind :desktop} "desktop:leader:o n"))
+      (is (= [["~/.local/bin/chrome-unified" "--incognito"]] @spawned))))
+  (testing "in Chrome it is also Alt+Space o n, which sends Chrome's own Ctrl+Shift+N"
+    (let [row (some #(when (= "Alt+Space o n" (:keys %)) %) (entries {:kind :chrome}))]
+      (is (= {:label "Open Chrome incognito" :value "chord:ctrl+shift+n"} (select-keys row [:label :value])))
+      (is (= [{:chord "ctrl+shift+n"}] (run-with (:value row) {:kind :chrome}))))))
+
 (deftest power-asks-before-it-acts
   (let [ran (atom [])
         entry (some #(when (= "Power off" (get-in % [:palette :label])) %) (keyleader/guide-entries))]

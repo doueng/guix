@@ -72,6 +72,8 @@
    :doom "+ghostel/toggle" :nvim "<cmd>lua Snacks.terminal()<cr>" :idea "<Action>(ActivateTerminalToolWindow)"}
   {:keys ["o" "b"] :label "Browser workspace" :doom-match :analogous :desktop ["focus" {:workspace 2}]}
   {:keys ["o" "i"] :label "IntelliJ workspace" :desktop ["focus" {:workspace 4}]}
+  {:keys ["o" "n"] :label "Open Chrome incognito" :desktop-command ["~/.local/bin/chrome-unified" "--incognito"]
+   :chrome "ctrl+shift+n"}
   {:keys ["o" "s"] :label "Send to phone" :doom-match :differs :desktop-command ["~/.local/bin/taildrop" "send"]}
   {:keys ["p" "p"] :label "Switch project" :doom-match :exact :doom "projectile-switch-project"
    :idea "<Action>(ManageRecentProjects)" :herdr {:plugin "fullerzz.sesh" :action "open-picker"}}
