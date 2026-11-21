@@ -24,9 +24,12 @@ status line and an echo line. Ghostty's own tabs and splits are not used.
   `rexg-render` builds it on the `libghostty-vt` package, both in
   modules/engstrand/packages/ghostty.scm.
 
-Edit any `.clj` and reopen the window (Super+B), with no build step. `make
-ghostty-rex` compiles rexg-render into `target/` in under a second for work on
-the C half; `REXG_RENDER=target/rexg-render` makes the client use it.
+Edit any `.clj` or config.edn and run `make ghostty-rex-reload` (M-x Client:
+reload): the client starts anew on the same session in the same window, with
+no build step. `make ghostty-rex` compiles rexg-render into `target/` in under
+a second for work on the C half; `REXG_RENDER=target/rexg-render` makes the
+client use it. docs/ghostty-rex-dev.html covers the whole loop, logs and
+troubleshooting.
 
 ## Switching and rolling back
 

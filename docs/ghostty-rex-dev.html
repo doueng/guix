@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="How to work on MUX=ghostty-rex: the parts, the quick reload for bb changes, tests on the hidden display, logs, switching and roll back, and fixes for a disconnected window.">
+<meta name="bbh-doc" content="T210">
+<title>ghostty-rex: develop, reload, test and troubleshoot</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>ghostty-rex: develop, reload, test and troubleshoot</h1>
+
+<p class=sub>For working on MUX=ghostty-rex, the opt-in Rex window. Herdr stays the default. What the parts are, how to edit and reload each one, where the logs are, how to switch and roll back, and what to do when something breaks.</p>
+<nav><a href='#parts'>Parts</a><a href='#loop'>Edit and reload</a><a href='#tests'>Tests</a><a href='#logs'>Logs</a><a href='#switch'>Switch and roll back</a><a href='#trouble'>Troubleshooting</a></nav>
+
+<h2 id=parts>The parts</h2>
+<svg viewBox='0 0 640 170' role=img aria-label='Ghostty runs the bb client, which runs rexg-render and talks to the Rex server'>
+<rect x=10 y=20 width=150 height=60 rx=8 fill='#e6f0f5' stroke='#2f6f8f'/><text x=85 y=45 text-anchor=middle font-size=14 font-weight=700>Ghostty</text><text x=85 y=64 text-anchor=middle font-size=11>class dev.engstrand.Rex</text>
+<rect x=230 y=20 width=170 height=60 rx=8 fill='#f0e9f6' stroke='#7a4fa0'/><text x=315 y=45 text-anchor=middle font-size=14 font-weight=700>bb client</text><text x=315 y=64 text-anchor=middle font-size=11>src/rexg + sidecar, in-process</text>
+<rect x=470 y=20 width=160 height=60 rx=8 fill='#e4f3ea' stroke='#2e7d4f'/><text x=550 y=45 text-anchor=middle font-size=14 font-weight=700>Rex server</text><text x=550 y=64 text-anchor=middle font-size=11>/run/user/1000/rex/server.sock</text>
+<rect x=230 y=105 width=170 height=55 rx=8 fill='#f7efdc' stroke='#8a6a1f'/><text x=315 y=128 text-anchor=middle font-size=14 font-weight=700>rexg-render (C)</text><text x=315 y=146 text-anchor=middle font-size=11>libghostty-vt, draws panes</text>
+<line x1=160 y1=50 x2=230 y2=50 stroke='#5d6678' stroke-width=2/><line x1=400 y1=50 x2=470 y2=50 stroke='#5d6678' stroke-width=2/><line x1=315 y1=80 x2=315 y2=105 stroke='#5d6678' stroke-width=2/>
+<text x=195 y=44 text-anchor=middle font-size=10 fill='#5d6678'>pty</text><text x=435 y=44 text-anchor=middle font-size=10 fill='#5d6678'>WebSocket</text>
+</svg>
+<div class=table><table>
+<tr><th>Part</th><th>Where</th><th>Takes effect</th></tr>
+<tr><td>bb client: model, keys, screen, connection</td><td><code>desktop/build/ghostty-rex/src/rexg/</code></td><td>reload, no build</td></tr>
+<tr><td>Sidecar: M-x, leader keys, agents, notifications</td><td><code>desktop/build/rexmux/sidecar/rexmux/</code></td><td>reload</td></tr>
+<tr><td>Client config: servers, shell, startup tabs</td><td><code>desktop/configs/ghostty-rex/config.edn</code></td><td>reload</td></tr>
+<tr><td>Ghostty settings for this window</td><td><code>desktop/configs/ghostty-rex/ghostty</code></td><td>Ctrl+Shift+Alt+R in the window</td></tr>
+<tr><td>rexg-render, the C half</td><td><code>desktop/build/ghostty-rex/csrc/rexg-render.c</code></td><td><code>make home-apply</code>, then reload</td></tr>
+<tr><td>Launcher</td><td><code>desktop/bin/ghostty-rex</code></td><td>next window</td></tr>
+<tr><td>Rex server</td><td>Guix package <code>rex</code>, modules/engstrand/packages/rex.scm</td><td>a server restart, which the window rides out</td></tr>
+</table></div>
+<p>The client runs bb straight from the checkout at /home/engstrand/guix, so an edited <code>.clj</code> needs no build. Rex holds the sessions, panes and programs, so a client restart loses nothing.</p>
+
+<h2 id=loop>Edit and reload</h2>
+<div class='card good'><b>Quick reload (T210).</b> After editing bb code or config.edn, run
+<pre><code>make ghostty-rex-reload</code></pre>
+or choose <b>Client: reload its bb code and config</b> in M-x (Alt+Space Space). The client closes its Rex connection and replaces itself with a fresh <code>bb attach</code> on the same session in the same window, in about a second. Under the hood it runs <code>rex -C ghostty-rex do mx.client.reload</code>.</div>
+<h3>The C renderer</h3>
+<ol>
+<li><code>make ghostty-rex</code> compiles <code>target/rexg-render</code> in under a second. Unit tests and <code>make ghostty-rex-verify</code> use that build, and verify rebuilds it when <code>csrc/</code> is newer.</li>
+<li>The window uses the Guix <code>rexg-render</code> on PATH first. To try a checkout build, start a window from a terminal with <code>REXG_RENDER=/home/engstrand/guix/desktop/build/ghostty-rex/target/rexg-render /home/engstrand/guix/desktop/bin/ghostty-rex</code></li>
+<li>To install it for every window, run <code>make home-apply</code> (or the full <code>make switch</code>), then <code>make ghostty-rex-reload</code>.</li>
+</ol>
+<h3>Keys</h3>
+<p>Alt+Space is the local prefix, and leader.edn's <code>:rex</code> actions run under it; see /home/engstrand/guix/docs/keybindings.html. A leader.edn edit takes effect after a reload.</p>
+
+<h2 id=tests>Tests</h2>
+<div class=table><table>
+<tr><th>Command</th><th>Time</th><th>What</th></tr>
+<tr><td><code>make ghostty-rex-test</code></td><td>seconds; lint runs it</td><td>unit tests of keys, model (revive, reconnect), hints and screen</td></tr>
+<tr><td><code>make ghostty-rex-verify</code></td><td>about 6 min + Bombadil</td><td>a real Ghostty on the hidden test display against a throwaway Rex server: about 58 checks, then Bombadil over <code>tabs</code>, <code>startup</code> and <code>restored</code></td></tr>
+<tr><td><code>cd desktop/build/ghostty-rex; bb verify --no-bombadil --keep</code></td><td>about 6 min</td><td>the e2e alone, keeping screenshots and logs</td></tr>
+<tr><td><code>make affected</code></td><td>instant</td><td>the checks that cover what <code>@</code> changed</td></tr>
+</table></div>
+<p>The T210 checks in verify: after a reboot no tab shows a typed exec line; the window survives its server stopping and a server from another build taking over, with a red status while it retries, and typing works again; SIGTERM ends the client and rexg-render with no kill -9; reload brings up a new client on the same session and drops the old one; a pane that sends ESC [ ?25 l gets no cursor. Bombadil's <code>restored</code> spec runs <code>startup.ts</code> with its new <code>noTypedExecLine</code> property on a session Rex brought back as bare bash.</p>
+<div class='card warn'><b>Live tests stay off your screen and your server.</b> Everything runs in <code>test-display</code> (a headless sway) and a throwaway Rex server under /tmp. Until T210, a test's cleanup ran <code>rex server stop</code>, which ignores REX_SERVER and stopped the <em>live</em> server. The harness now names its server with <code>-S</code>.</div>
+
+<h2 id=logs>Logs</h2>
+<ul>
+<li><b>Client log.</b> Set <code>REXG_LOG</code> when starting a window from a terminal: <code>REXG_LOG=/tmp/rexg.log /home/engstrand/guix/desktop/bin/ghostty-rex</code>. It records keys, every request the client sends (<code>out</code>), <code>lost</code> and reconnects, <code>rex server start</code> results, and <code>quit</code> with its reason.</li>
+<li><b>Rex server log.</b> /home/engstrand/.local/state/rex/servers/ has one <code>&lt;hash&gt;.log</code> per server. Grep it for <code>Rex server ready</code>, <code>stopped</code> and <code>not replaying creation options on restore</code>. <code>rex server status</code> says whether a server runs and where.</li>
+<li><b>Clients.</b> <code>rex client list</code> shows who is attached; two <code>ghostty-rex</code> entries make <code>rex -C ghostty-rex</code> ambiguous.</li>
+<li><b>Test runs.</b> With <code>--keep</code>, the run directory under /tmp/ghostty-rex-e2e-* has <code>client.log</code>, <code>client.err</code>, <code>ghostty.log</code>, <code>results.edn</code> and a screenshot per step.</li>
+</ul>
+
+<h2 id=switch>Switch and roll back</h2>
+<pre><code>make mux MUX=ghostty-rex   # opt in: home-apply and a Hyprland reload
+make mux MUX=herdr         # back to the default
+guix home roll-back        # also restores the previous choice</code></pre>
+<p>Rex keeps its sessions through a switch, a <code>make switch</code> and a reboot. After a reboot or a server restart, Rex restores every tab as your login shell from /etc/passwd (bash) and drops the fish and program options. The client then opens a fresh block running fish, or the tab's program (pi gets <code>pi --continue</code>), in its place and closes the bash block. Nothing is typed, so no <code>exec fish -l</code> line appears.</p>
+
+<h2 id=trouble>Troubleshooting</h2>
+<div class=card><b>Status line red: <code>local not connected, reconnecting</code></b><br>The control connection dropped. The client retries every 0.25 s, backing off to 4 s, and runs <code>rex server start</code> for the local server when nothing answers; that command does nothing when a server is already up and replaces a dead socket. When the server is back the window reattaches to the session it showed, with no kill needed. If it stays red, check <code>rex server status</code> and the server log.</div>
+<div class=card><b>A window that won't close</b><br>SIGTERM ends both the client and rexg-render (the e2e checks it), so <code>pkill -f 'ghostty-rex/bb.edn attach'</code> without -9 is enough. Closing the Ghostty window does the same.</div>
+<div class=card><b>A tab shows bash, or a restored tab lacks its program</b><br>The client revives restored tabs only for the startup session it finds itself; a window opened with <code>--session</code> skips this. A reload keeps its session and skips this; close the window and open it again (Super+B) to go through it.</div>
+<div class=card><b><code>rexg-render is missing</code></b><br>Run <code>make home-apply</code> with MUX=ghostty-rex, or <code>make ghostty-rex</code> for the checkout build.</div>
+<div class=card><b>A fix doesn't show up</b><br>bb and config edits need a reload; C edits need <code>make home-apply</code> (or REXG_RENDER) and then a reload; a Ghostty config edit needs Ctrl+Shift+Alt+R.</div>
+<p class=cite>Sources: desktop/build/ghostty-rex/README.md, src/rexg/main.clj (connect, lost!, reload!), src/rexg/model.clj (revive, disconnected), test/rexg/verify.clj, desktop/build/rexmux/test/rexmux/testserver.clj.</p>
+
+</main></body></html>

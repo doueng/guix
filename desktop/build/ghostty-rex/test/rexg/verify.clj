@@ -308,6 +308,52 @@
 
 (declare switch-checks! term-checks!)
 
+(defn- client-ids [s]
+  (set (keep #(when (and (= "ghostty-rex" (get-in % [:info :label])) (not= "lost" (:connection_state %))) (:client_id %))
+             (:clients (api s "client.list")))))
+
+(defn- reload-checks!
+  "The quick reload (T210): rex -C ghostty-rex do mx.client.reload, which
+  make ghostty-rex-reload runs, starts the client anew in the same window on
+  the same session."
+  [s root sid]
+  (let [before (client-ids s)
+        {:keys [exit err]} (ts/rex! s "-C" "ghostty-rex" "do" "mx.client.reload")]
+    (check! "reload: rex -C ghostty-rex do mx.client.reload is accepted" (zero? exit) err)
+    (check! "reload: the client quits to reload"
+            (wait-for 8000 #(str/includes? (slurp? (str root "/client.log")) "quit reload")))
+    (check! "reload: a new client attaches to the same session in the same window"
+            (wait-for 15000 #(let [now (client-ids s)]
+                               (and (seq (remove before now))
+                                    (str/includes? (pr-str (api s "session.list_clients" {:session_id sid})) "ghostty-rex"))))
+            (pr-str (client-ids s)))
+    (check! "reload: the old client is gone, so rex -C ghostty-rex stays unambiguous"
+            (wait-for 5000 #(= 1 (count (client-ids s)))) (pr-str (client-ids s)))
+    (Thread/sleep 1500)))
+
+(defn- cursor-shown?
+  "Whether the client's last frame in OUT, its tty output, shows the text
+  cursor: rexg-render hides it at a frame's start and shows it at the end
+  only when the focused pane's own cursor is visible."
+  [out]
+  (let [i (str/last-index-of out "\u001b[?25l")]
+    (boolean (and i (str/includes? (subs out i) "\u001b[?25h")))))
+
+(defn- cursor-checks!
+  "DECTCEM (T210): a pane that hides its cursor with ESC [ ?25 l has no
+  cursor drawn; a plain one has."
+  [s root config]
+  (doseq [[label script want] [["cursor-vis" "printf 'visible here'; exec sleep 100000" true]
+                               ["cursor-hid" "printf 'hidden here'; printf '\\033[?25l'; exec sleep 100000" false]]]
+    (ts/rex! s "new" label "--keep-open" "--shell" "none" "--" "sh" "-c" script)
+    (let [sid (:session_id (session s label))
+          t (tty-client! s root config sid)]
+      (Thread/sleep 5000)
+      (let [shown (cursor-shown? (stop-tty! t))]
+        (check! (str "text cursor: " label (if want " shows its cursor" " hides its cursor (ESC [ ?25 l)"))
+                (= want shown) (str "shown " shown)))
+      (api s "session.destroy" {:session_id sid}))))
+
 (defn e2e!
   "The window checks; returns the run directory."
   [root]
@@ -344,6 +390,10 @@
                   (and (zero? exit) (wait-for 3000 #(= (get-in v [:windows 2 :window_id]) (:active_window_id (view s sid)))))
                   (str exit " " err)))
         (local-prefix-checks! s sid root)
+        ;; Before any tty client: they also call themselves ghostty-rex, and
+        ;; rex -C ghostty-rex refuses an ambiguous target.
+        (reload-checks! s root sid)
+        (cursor-checks! s root config)
         ;; Tiny fingers on the shell tab.
         (api s "session.focus_window" {:session_id sid :window_id (get-in v [:windows 0 :window_id])})
         (Thread/sleep 500)

@@ -13,7 +13,7 @@ JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))
 COMMON := -L "$(MODULES)"
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
-        home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify rexmux rexmux-test rexmux-verify rexmux-tla ghostty-rex ghostty-rex-test ghostty-rex-verify mux oilfm oilfm-test pi-sci pi-sci-test \
+        home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify rexmux rexmux-test rexmux-verify rexmux-tla ghostty-rex ghostty-rex-test ghostty-rex-verify ghostty-rex-reload mux oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test ext-reload-test chrome-e2e \
         doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check chrome-fullscreen-check test-display-check clipboard-check \
         clipboard-history-test taildrop-test parinfer-check parinfer-fix
@@ -68,6 +68,7 @@ help:
 	@echo 'ghostty-rex   build rexg-render, the C half of the ghostty-rex client, into its target/ (desktop/build/ghostty-rex)'
 	@echo 'ghostty-rex-test ghostty-rex client unit and property tests: keys, model, hints, screen (make lint runs them)'
 	@echo 'ghostty-rex-verify ghostty-rex live tests on the hidden test display and a throwaway Rex server, then Bombadil over the client'
+	@echo 'ghostty-rex-reload restart the open ghostty-rex window'\''s client on the same session, so bb and config.edn edits take effect'
 	@echo 'mux           choose the terminal multiplexer: MUX=rex builds rexmux, MUX=ghostty-rex uses Ghostty with the bb client, MUX=herdr rolls back (sets %terminal-mux, then home-apply)'
 	@echo 'oilfm         build the oilfm file manager (~/projects/oilfm)'
 	@echo 'oilfm-test    run oilfm tests, headless GPUI ones included'
@@ -268,6 +269,9 @@ ghostty-rex-test:
 
 ghostty-rex-verify:
 	cd desktop/build/ghostty-rex && "$(HOME)/.guix-home/profile/bin/bb" verify
+
+ghostty-rex-reload:
+	rex -C ghostty-rex do mx.client.reload
 
 mux:
 	@test "$(MUX)" = rex -o "$(MUX)" = ghostty-rex -o "$(MUX)" = herdr || { echo 'usage: make mux MUX=rex|ghostty-rex|herdr' >&2; exit 2; }

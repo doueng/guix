@@ -20,6 +20,7 @@
             [rexg.model :as model]
             [rexg.rex :as rex]
             [rexg.screen :as screen]
+            [rexg.ws :as ws]
             [rexmux.proto :as proto]
             [rexmux.rex :as rexcli]
             [rexmux.sidecar :as sidecar])
@@ -55,6 +56,25 @@
   (let [{:keys [exit out err]} (p/sh (or (System/getenv "REXG_REX") "rex") "server" "start")]
     (log "rex server start" exit (str/trim (str out err)))))
 
+(def reload-command
+  "M-x Client: reload, also rex -C ghostty-rex do mx.client.reload and make
+  ghostty-rex-reload: the client starts again from the checkout's bb code and
+  config on the session it showed, in the same window."
+  {:id :client/reload :title "Client: reload its bb code and config" :category "help" :source :local
+   :doc "Run the ghostty-rex client anew in this window, on this session, so an edit to its bb code or config.edn takes effect. Rex keeps the panes and their programs. rexg-render, the C half, needs make ghostty-rex or make home-apply."
+   :run (fn [_ _] [[:client/reload {}]])})
+
+(defn reload!
+  "Replace this process with a new client on SESSION: the same bb, bb.edn
+  and options, so newly edited code loads."
+  [session config render]
+  (let [bb (or (some-> (fs/which "bb") str) "bb")
+        edn (System/getProperty "babashka.config")]
+    (apply p/exec bb (concat (when edn ["--config" edn]) ["attach"]
+                             (when session ["--session" session])
+                             (when config ["--config" config])
+                             (when render ["--render" render])))))
+
 ;; ---- the renderer ----
 
 (defn- frame! [{:keys [^java.io.OutputStream in lock]} type ^bytes payload]
@@ -86,7 +106,7 @@
   [{:keys [render config label session]}]
   (let [;; The client label Rex knows us by, for rex -C LABEL do mx.tab.select_N.
         client-label label
-        cfg (load-config (or config (config-path)))
+        cfg (assoc (load-config (or config (config-path))) :extra-commands [reload-command])
         servers (mapv #(select-keys % [:label :address]) (or (seq (:servers cfg)) [{:label "local" :address nil}]))
         q (LinkedBlockingQueue.)
         put! (fn [ev] (.put q ev))
@@ -188,6 +208,7 @@
                            (swap! app #(-> % (assoc :next-req n) (assoc-in [:text-reqs req] [:hints (first xs)])))
                            (send-str! r \t (str req " " (first xs))))
                   :quit (put! [:quit "quit"])
+                  :reload (put! [:quit "reload"])
                   nil)))
             (lost! [srv why]
               ;; Not connected: the model says so on the status line, and
@@ -366,8 +387,17 @@
             (do (log "quit" (second ev))
                 (doseq [[_ close] (:streams @app)] (try (close) (catch Exception _)))
                 (doseq [[_ proc] (:events @app)] (try (p/destroy proc) (catch Exception _)))
+                ;; Close the control connections, so Rex drops this client at once:
+                ;; a reload's exec must not leave a second ghostty-rex for rex -C.
+                (doseq [[_ c] (:conns @app)] (try (ws/close! (:ws c)) (catch Exception _)))
                 (try (frame! r \q (byte-array 0)) (catch Exception _))
                 (deref rproc 2000 nil)
+                (when (= "reload" (second ev))
+                  ;; The startup session needs no --session, which would also
+                  ;; turn off reviving its tabs after a later server restart.
+                  (let [m (:m @app)]
+                    (reload! (when-not (= (:label (model/view m)) (get-in m [:startup :label])) (model/session-id m))
+                             config render)))
                 (shutdown-agents)
                 (System/exit 0))
             (do (try (handle! ev)

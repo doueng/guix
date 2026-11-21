@@ -340,6 +340,7 @@
                       [m [(rex m "session.resize_pane" (assoc p :session_id sid) [:effect])]]
                       [(assoc m :echo "No border to move that way.") []]))
     "keymap/layer" [m (send-keymap m)]
+    "client/reload" [(assoc m :echo "reloading the client") [[:reload]]]
     [(assoc m :echo (str "unknown effect " kind)) []]))
 
 (defn apply-effects [m effects]

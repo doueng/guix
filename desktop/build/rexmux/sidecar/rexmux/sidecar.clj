@@ -55,6 +55,8 @@
                                   (reg/leader-commands leader (:leader-prefix config))
                                   commands/all
                                   (when (:term-nav config) commands/term-nav-commands)
+                                  ;; A client's own commands, such as ghostty-rex's reload.
+                                  (:extra-commands config)
                                   (:cmds ext))
      :errors (:errors ext)}))
 
