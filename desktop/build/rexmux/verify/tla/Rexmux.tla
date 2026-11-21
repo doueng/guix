@@ -18,6 +18,13 @@
    in the window's list once the events have arrived, and pressing
    next-blocked must eventually reach every agent that stays blocked.
 
+   Control connection (Control = TRUE). ghostty-rex's connection to Rex is
+   rexg.model's state machine: connect, connect-failed, closed and connected
+   in desktop/build/ghostty-rex/src/rexg/model.clj; rexg.main only performs
+   [:connect], [:start-local-server] and [:after ms ev]. The server can stop
+   or drop the connection; the client must never be left down with nothing
+   that will try again, and must attach once the server answers.
+
    ghostty-rex (desktop/build/ghostty-rex) runs the same sidecar in-process:
    its two pipes are a single-thread executor and the client's event queue,
    both FIFO, and a sidecar exception answers the request with an error, so
@@ -25,7 +32,8 @@
    it too. *)
 EXTENDS Naturals, Sequences, FiniteSets
 
-CONSTANTS Panes, Streams, MaxReq, MaxRestarts, MaxReports, MaxDrops
+CONSTANTS Panes, Streams, MaxReq, MaxRestarts, MaxReports, MaxDrops,
+          Control, MaxLosses   \* model the control connection; how often it is lost
 
 States == {"idle", "working", "done", "blocked", "error"}
 Wants == {"blocked", "error", "done"}
@@ -43,12 +51,20 @@ VARIABLES
   events,               \* Rex -> sidecar event queue
   bbStatus,             \* the sidecar's fold of the events
   winAtt,               \* the attention set the window last received
-  focus, seen
+  focus, seen,
+  srvUp,                \* the Rex server answers
+  local,                \* local-server?: the client may start it
+  conn,                 \* :conn of the server in rexg.model: "down" or "up"
+  try,                  \* the out the client will perform next: "connect", "start", "after" or "none"
+  started,              \* :started: this try already started the local server
+  losses
 
+ctrl == <<srvUp, local, conn, try, started, losses>>
 link == <<toBB, toWin, winSent, bbSent, winGot, bbGot, pending, answered, nextReq, bbUp, restarts>>
 panes == <<pane, owner, sst, drops>>
 agents == <<status, reports, events, bbStatus, winAtt, focus, seen>>
-vars == <<link, panes, agents>>
+core == <<link, panes, agents>>
+vars == <<core, ctrl>>
 
 Msg(kind, n, body) == [kind |-> kind, n |-> n, body |-> body]
 
@@ -67,6 +83,11 @@ Init ==
   /\ events = <<>> /\ bbStatus = [p \in Panes |-> "idle"]
   /\ winAtt = {} /\ seen = {}
   /\ focus = (CHOOSE p \in Panes : TRUE)
+  /\ IF Control
+       THEN /\ srvUp \in BOOLEAN /\ local \in BOOLEAN
+            /\ conn = "down" /\ try = "connect" /\ started = FALSE
+       ELSE /\ srvUp = TRUE /\ local = FALSE /\ conn = "up" /\ try = "none" /\ started = FALSE
+  /\ losses = 0
 
 ---------------------------------------------------------------------------
 (* Link *)
@@ -198,19 +219,75 @@ NextBlocked ==
   /\ UNCHANGED <<link, panes, status, reports, events, bbStatus, winAtt>>
 
 ---------------------------------------------------------------------------
-Next ==
-  \/ Invoke \/ BBReceive \/ WinReceive \/ Crash \/ Restart
-  \/ \E p \in Panes, s \in Streams : Attach(p, s)
-  \/ \E s \in Streams : Welcome(s) \/ Drop(s)
-  \/ \E p \in Panes : ClosePane(p)
-  \/ \E p \in Panes, st \in States : Report(p, st)
-  \/ Fold \/ NextBlocked
+(* Control connection *)
 
+\* connect-failed (and closed, after down): start the local server once per
+\* try and try again at once, else wait model/retry-ms and try again.
+Failed ==
+  /\ conn' = "down"
+  /\ IF local /\ ~started
+       THEN try' = "start" /\ started' = TRUE
+       ELSE try' = "after" /\ started' = FALSE
+
+\* rexg.main performs [:connect srv]: [:connected ..] or [:connect-failed ..].
+TryConnect ==
+  /\ try = "connect"
+  /\ IF srvUp
+       THEN conn' = "up" /\ try' = "none" /\ started' = FALSE
+       ELSE Failed
+  /\ UNCHANGED <<srvUp, local, losses>>
+
+\* [:start-local-server srv]: rex server start, which may fail; then [:connect srv].
+StartLocal(ok) ==
+  /\ try = "start"
+  /\ srvUp' = (srvUp \/ ok) /\ try' = "connect"
+  /\ UNCHANGED <<local, conn, started, losses>>
+
+\* [:after ms [:connect srv]] fires.
+Timer ==
+  /\ try = "after" /\ try' = "connect"
+  /\ UNCHANGED <<srvUp, local, conn, started, losses>>
+
+\* The connection drops ([:rex srv [:closed why]]), the server stopping with
+\* it or not: model/closed.
+Hangup ==
+  /\ conn = "up" /\ losses < MaxLosses
+  /\ losses' = losses + 1
+  /\ \E dies \in BOOLEAN : srvUp' = ~dies
+  /\ Failed
+  /\ UNCHANGED local
+
+\* The server stops while the client is down, or someone else starts it.
+ServerStops ==
+  /\ srvUp /\ conn = "down" /\ losses < MaxLosses
+  /\ srvUp' = FALSE /\ losses' = losses + 1
+  /\ UNCHANGED <<local, conn, try, started>>
+ServerStarts ==
+  /\ ~srvUp /\ srvUp' = TRUE
+  /\ UNCHANGED <<local, conn, try, started, losses>>
+
+ControlNext ==
+  Control /\ (TryConnect \/ StartLocal(TRUE) \/ StartLocal(FALSE) \/ Timer \/ Hangup \/ ServerStops \/ ServerStarts)
+
+---------------------------------------------------------------------------
+Next ==
+  \/ /\ \/ Invoke \/ BBReceive \/ WinReceive \/ Crash \/ Restart
+        \/ \E p \in Panes, s \in Streams : Attach(p, s)
+        \/ \E s \in Streams : Welcome(s) \/ Drop(s)
+        \/ \E p \in Panes : ClosePane(p)
+        \/ \E p \in Panes, st \in States : Report(p, st)
+        \/ Fold \/ NextBlocked
+     /\ UNCHANGED ctrl
+  \/ ControlNext /\ UNCHANGED core
+
+\* Each part's actions leave the other part unchanged (Next), so each is fair
+\* over its own variables.
 Fairness ==
-  /\ WF_vars(BBReceive) /\ WF_vars(WinReceive) /\ WF_vars(Restart) /\ WF_vars(Fold)
-  /\ \A p \in Panes : WF_vars(\E s \in Streams : Attach(p, s))
-  /\ \A s \in Streams : WF_vars(Welcome(s))
-  /\ SF_vars(NextBlocked)
+  /\ WF_core(BBReceive) /\ WF_core(WinReceive) /\ WF_core(Restart) /\ WF_core(Fold)
+  /\ \A p \in Panes : WF_core(\E s \in Streams : Attach(p, s))
+  /\ \A s \in Streams : WF_core(Welcome(s))
+  /\ SF_core(NextBlocked)
+  /\ WF_ctrl(TryConnect) /\ WF_ctrl(Timer) /\ WF_ctrl(StartLocal(FALSE)) /\ SF_ctrl(StartLocal(TRUE))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -241,6 +318,14 @@ IdleStreamUnbound == \A s \in Streams : sst[s] = "idle" <=> owner[s] = None
 Settled == bbUp /\ events = <<>> /\ toWin = <<>>
 BlockedReachable == Settled => {p \in Panes : status[p] = "blocked"} \subseteq winAtt
 SidecarAgrees == Settled => bbStatus = status
+
+\* The client is never down with nothing that will try again (T210: on
+\* :closed it only said so).
+NeverStranded == conn = "down" => try /= "none"
+\* Once the server answers, the client attaches, unless it stops again.
+ServerUpAttaches == (conn = "down" /\ srvUp) ~> (conn = "up" \/ ~srvUp)
+\* A client that may start its local server always attaches.
+LocalAttaches == (conn = "down" /\ local) ~> (conn = "up")
 
 \* Every request is answered.
 EveryRequestAnswered == \A r \in 1..MaxReq : (r \in pending) ~> (r \notin pending)

@@ -112,7 +112,8 @@
         put! (fn [ev] (.put q ev))
         rproc (p/process {:in :stream :out :inherit :err :stream} render)
         r {:in (:in rproc) :lock (Object.)}
-        app (atom {:m (model/new-model servers {:startup (:startup cfg) :shell (:shell cfg) :prefer-session session})
+        app (atom {:m (model/new-model servers {:startup (:startup cfg) :shell (:shell cfg) :prefer-session session
+                                                 :env (into {} (keep (fn [k] (when-let [v (System/getenv k)] [k v]))) ["REX_SERVER"])})
                    :conns {} :tags {} :streams {} :sizes {} :wh [80 24] :panes {} :text-reqs {} :next-req 0
                    :last-draw nil :title nil :sidecar (sidecar/initial-state cfg) :tx proto/sender})
         sc-io (sidecar/make-io cfg "ghostty-rex")
@@ -209,17 +210,14 @@
                            (send-str! r \t (str req " " (first xs))))
                   :quit (put! [:quit "quit"])
                   :reload (put! [:quit "reload"])
+                  :connect (let [srv (first xs)
+                                 sock (rex/socket-path (get-in @app [:m :servers srv :address]))
+                                 c (try (rex/connect! sock client-label (fn [msg] (put! [:rex srv msg])))
+                                        (catch Exception e (or (ex-message e) "no server")))]
+                             (put! (if (map? c) [:connected srv c] [:connect-failed srv c])))
+                  :start-local-server (start-local! log)
+                  :after (let [[ms ev] xs] (future (Thread/sleep ms) (put! ev)))
                   nil)))
-            (lost! [srv why]
-              ;; Not connected: the model says so on the status line, and
-              ;; another try comes after a backoff (model/retry-ms).
-              (let [in-ms (model/retry-ms (get-in @app [:m :servers srv :attempt] 0))
-                    streams (keys (:streams @app))]
-                (log "lost" srv why)
-                (when (= srv (get-in @app [:m :current]))
-                  (doseq [b streams] (close-stream! b)))
-                (step! model/disconnected srv why in-ms)
-                (future (Thread/sleep in-ms) (put! [:connect srv]))))
             (follow-events! [srv]
               ;; Agents' status from OSC 7501, as the rexmux sidecar follows
               ;; it; started again on each connect, since it ends with the server.
@@ -321,7 +319,8 @@
                          :event (step! model/rex-event srv (first more))
                          :closed (when (get-in @app [:conns srv])
                                    (swap! app update :conns dissoc srv)
-                                   (lost! srv (first more)))))
+                                   (log "lost" srv (first more))
+                                   (step! model/closed srv (first more)))))
                 :sidecar (step! model/sidecar (first xs))
                 :stream-msg (let [[block msg] xs]
                               (case (:type msg)
@@ -353,29 +352,17 @@
                                     (swap! app update :m assoc :echo (str "Copied " (count text) " characters"))
                                     (perform! [[:clipboard text]]))
                           nil))
-                :connect (let [srv (first xs)
-                               {:keys [address]} (get-in @app [:m :servers srv])
-                               sock (rex/socket-path address)
-                               local? (and (nil? address) (nil? (System/getenv "REX_SERVER")))
-                               try! #(rex/connect! sock client-label (fn [msg] (put! [:rex srv msg])))]
-                           (when-not (get-in @app [:conns srv])
-                             ;; The local server starts on demand, as the rex CLI does, so it
-                             ;; runs with this window's environment, like Herdr's server. A
-                             ;; socket left by a server that died is no server: rex server
-                             ;; start is idempotent and replaces it.
-                             (when (and local? (not (fs/exists? sock)))
-                               (start-local! log))
-                             (let [c (try (try!)
-                                          (catch Exception e
-                                            (if local?
-                                              (do (start-local! log)
-                                                  (try (try!) (catch Exception e2 (ex-message e2))))
-                                              (ex-message e))))]
-                               (if (map? c)
-                                 (do (swap! app assoc-in [:conns srv] c)
-                                     (follow-events! srv)
-                                     (step! model/connected srv (:client-id c)))
-                                 (lost! srv (or c "no server"))))))
+                ;; The connection is rexg.model's state machine; this only connects.
+                :connect (step! model/connect (first xs))
+                :connected (let [[srv c] xs]
+                             (if (get-in @app [:conns srv])
+                               (try (ws/close! (:ws c)) (catch Exception _))
+                               (do (swap! app assoc-in [:conns srv] c)
+                                   (follow-events! srv)
+                                   (step! model/connected srv (:client-id c)))))
+                :connect-failed (let [[srv why] xs]
+                                  (log "lost" srv why)
+                                  (step! model/connect-failed srv why))
                 nil))]
       (doseq [i (range (count servers))]
         (put! [:connect i]))
