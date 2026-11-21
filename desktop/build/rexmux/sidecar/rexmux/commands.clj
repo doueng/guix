@@ -4,7 +4,9 @@
   {:agents agents-state :servers [..] :server label :registry reg :rex fns}.
   :rex holds the read-only calls a command may make itself, so tests can
   replace them. A program to start is the effect [:spawn {:server :argv :env}],
-  which sidecar/perform! starts."
+  and a jj workspace to make [:workspace/create {:cwd :name :command
+  :session}], which sidecar/perform! does; the workspace's result comes back
+  to workspace-window."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [rexmux.agents :as agents]
@@ -69,12 +71,17 @@
     :args [{:name :name :type "string" :required true} {:name :command :type "string" :required true :doc "such as pi or claude"}]
     :schema {:type "object" :properties {:name {:type "string"} :command {:type "string"}} :required ["name" "command"]}
     :run (fn [ctx {:keys [name command]}]
-           (let [dir (rex ctx :new-workspace (:cwd ctx) name)]
-             [[:rex/call "session.new_window" {:session_id (:session-id ctx) :label name
-                                                 :layout {:block {:flavor "com.superlogical.terminal.shell"
-                                                                  :label name
-                                                                  :options {:command ["sh" "-lc" command] :cwd dir}}}}]
-              [:ui/message (str "Workspace " dir)]]))}])
+           [[:workspace/create {:cwd (:cwd ctx) :name name :command command :session (:session-id ctx)}]])}])
+
+(defn workspace-window
+  "The effects that open a window running COMMAND in the jj workspace DIR
+  that [:workspace/create] made."
+  [{:keys [session name command dir]}]
+  [[:rex/call "session.new_window" {:session_id session :label name
+                                     :layout {:block {:flavor "com.superlogical.terminal.shell"
+                                                      :label name
+                                                      :options {:command ["sh" "-lc" command] :cwd dir}}}}]
+   [:ui/message (str "Workspace " dir)]])
 
 (def session-commands
   [{:id :session/switch :title "Sessions: switch" :category "session" :source :local

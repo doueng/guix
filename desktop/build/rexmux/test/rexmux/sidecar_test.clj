@@ -138,7 +138,7 @@
             io (assoc io :notify (fn [s b] (swap! sent conj s)))
             [_ out] (run (concat (numbered [{:op :hello :ctx {:session-id "s"}}])
                                  (for [e events] {:op :rex/event :event e :server "local"})))
-            window (sc/perform! io out)]
+            [window] (sc/perform! io out)]
         (is (seq (filter #(= :notify (:op %)) out)))
         (is (= (count (filter #(= :notify (:op %)) out)) (count @sent)))
         (is (not-any? #(sc/local-ops (:op %)) window))
@@ -179,7 +179,7 @@
     (testing "perform! starts each spawn and passes the rest on"
       (let [started (atom [])
             [spawns reply] (invoke-spawns :pane/term-nav-left {} ctx)]
-        (is (= [reply] (sc/perform! {:spawn! #(swap! started conj (:argv %))} (conj spawns reply))))
+        (is (= [[reply] []] (sc/perform! {:spawn! #(swap! started conj (:argv %))} (conj spawns reply))))
         (is (= [["keyleader" "term-nav" "left"]] @started))))))
 
 (deftest a-spawn-that-throws-answers-its-invoke-with-an-error-and-loses-nothing
@@ -190,10 +190,10 @@
         steps (numbered [{:op :hello :ctx ctx}
                          {:op :commands/invoke :id 5 :command :bbh/say :args {:text "T12 go on"} :ctx ctx}
                          {:op :ping :id 6}])
-        [state window] (reduce (fn [[s acc] m] (let [[s out] (sc/handle s io m)] [s (into acc (sc/perform! io out))]))
+        [state window] (reduce (fn [[s acc] m] (let [[s out] (sc/settle! io s #(sc/handle % io m))] [s (into acc out)]))
                                [(sc/initial-state sc/default-config) []] steps)
-        [_ more] (sc/deliver state io {:op :rex/event :event (first events) :server "local"})
-        window (into window (sc/perform! io more))
+        [_ more] (sc/settle! io state #(sc/deliver % io {:op :rex/event :event (first events) :server "local"}))
+        window (into window more)
         reply (first (filter #(= 5 (:id %)) window))]
     (is (= {:op :reply :id 5} (select-keys reply [:op :id])) "the invoke is answered")
     (is (str/includes? (:error reply) "Cannot run program") "with the error, not Sent:")
@@ -202,3 +202,29 @@
     (is (= (range 1 (inc (count window))) (map :seq window)) "numbered from 1 without a gap")
     (is (not-any? #(sc/local-ops (:op %)) window))
     (is (some #(str/includes? % "bbh") @logged) "the failure is logged")))
+
+(deftest a-new-worktree-is-an-effect-whose-result-answers-the-invoke
+  (let [made (atom [])
+        ctx (assoc ctx :cwd "/home/u/repo")
+        hello (fn [io] (first (sc/settle! io (sc/initial-state sc/default-config) #(sc/handle % io {:op :hello :seq 1 :ctx ctx}))))
+        invoke {:op :commands/invoke :seq 2 :id 9 :command :agent/new-worktree :args {:name "wt" :command "pi"} :ctx ctx}]
+    (testing "interpreting the command makes no workspace: it is a local op"
+      (let [[_ out] (sc/handle (hello io) io invoke)]
+        (is (= [{:op :workspace/create :for 9 :cwd "/home/u/repo" :name "wt" :command "pi" :session "session:1"}] out)
+            "and no reply yet")))
+    (testing "settle! makes it, and its result answers with the new window"
+      (let [io (assoc io :workspace! (fn [cwd n] (swap! made conj [cwd n]) (str "/home/u/" n)))
+            [_ window] (sc/settle! io (hello io) #(sc/handle % io invoke))
+            [reply :as replies] (filter #(= :reply (:op %)) window)]
+        (is (= [["/home/u/repo" "wt"]] @made))
+        (is (= 1 (count replies)) "one answer")
+        (is (= 9 (:id reply)))
+        (is (= "/home/u/wt" (get-in reply [:effects 0 2 :layout :block :options :cwd])))
+        (is (= [:ui/message "Workspace /home/u/wt"] (get-in reply [:effects 1])))
+        (is (not-any? #(sc/local-ops (:op %)) window))))
+    (testing "a jj that fails answers with its error"
+      (let [io (assoc io :workspace! (fn [_ _] (throw (ex-info "workspace exists" {}))))
+            [_ window] (sc/settle! io (hello io) #(sc/handle % io invoke))
+            reply (first (filter #(= :reply (:op %)) window))]
+        (is (= 9 (:id reply)))
+        (is (str/includes? (:error reply) "workspace exists"))))))

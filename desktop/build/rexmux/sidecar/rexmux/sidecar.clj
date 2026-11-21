@@ -72,8 +72,9 @@
 
 (def local-ops
   "Ops the sidecar's own process performs with perform!, never sent to the
-  window, so they take no number: start a program, notify the desktop."
-  #{:spawn :notify})
+  window, so they take no number: start a program, notify the desktop, make
+  a jj workspace."
+  #{:spawn :notify :workspace/create})
 
 (defn- emit
   "[state' msgs] after stamping each of MSGS for the window in order."
@@ -105,16 +106,19 @@
 
 (defn- run-command
   "{:reply :reload? :spawns} for an invoke: the reply carries the effects for
-  the window; a :sidecar/reload and the programs to start are the sidecar's."
+  the window; a :sidecar/reload and the local ops (programs to start, a
+  workspace to make) are the sidecar's. A workspace's invoke is answered
+  when its result comes back (:workspace/created), so :reply is nil then."
   [state io {:keys [id command args ctx]}]
   (let [ctx (or ctx (:ctx state))
         cid (if (keyword? command) command (keyword (str/replace (str command) #"^:" "")))
         res (reg/invoke (:registry state) (assoc ctx :world (world state io)) cid args)
-        own? #(#{:sidecar/reload :spawn} (first %))
+        own? #(#{:sidecar/reload :spawn :workspace/create} (first %))
         reload? (some #(= :sidecar/reload (first %)) (:effects res))
-        spawns (vec (for [[kind spec] (:effects res) :when (= :spawn kind)] (assoc spec :op :spawn :for id)))
+        ops (vec (for [[kind spec] (:effects res) :when (#{:spawn :workspace/create} kind)] (assoc spec :op kind :for id)))
         res (cond-> res (some own? (:effects res)) (update :effects (fn [es] (vec (remove own? es)))))]
-    {:reply (merge {:op :reply :id id} res) :reload? reload? :spawns spawns}))
+    {:reply (when-not (some #(= :workspace/create (:op %)) ops) (merge {:op :reply :id id} res))
+     :reload? reload? :spawns ops}))
 
 (defn attention-notes
   "A desktop notification, {:op :notify :summary :body}, for each agent that
@@ -159,7 +163,11 @@
                                             [(update reply :effects (fnil conj []) [:ui/message "Reloaded commands and keys."])
                                              (catalogue-msg s)]
                                             (for [e errors] {:op :log :level :error :text e}))])
-                               [state (conj spawns reply)]))
+                               [state (cond-> spawns reply (conj reply))]))
+          ;; perform!'s result of a [:workspace/create], which answers its invoke.
+          :workspace/created [state [(if (:error msg)
+                                       {:op :reply :id (:for msg) :error (:error msg)}
+                                       {:op :reply :id (:for msg) :effects (commands/workspace-window msg)})]]
           :rex/event (let [r (agents/from-event (:event msg))
                            a (:agents state)
                            a2 (cond (nil? r) a
@@ -231,29 +239,48 @@
     {:argv (resolve-argv argv env) :env env}))
 
 (defn perform!
-  "Do the local-ops among MSGS with IO (:spawn! and :notify) and return the
-  rest, for the window, in order. It never throws: a local op that fails,
-  such as a program that is not found, is logged with (:log io), and the
-  reply to the invoke a failed spawn came from (its :for) becomes an error,
-  keeping its :seq, so the window still gets every message, numbered
-  without a gap, and a failed command does not report success."
+  "Do the local-ops among MSGS with IO (:spawn!, :notify and :workspace!) and
+  return [window results]: the rest of MSGS, for the window, in order, and
+  the messages to deliver back, a :workspace/created for each workspace. It
+  never throws: a local op that fails, such as a program that is not found,
+  is logged with (:log io), and the reply to the invoke a failed spawn came
+  from (its :for) becomes an error, keeping its :seq, so the window still
+  gets every message, numbered without a gap, and a failed command does not
+  report success."
   [io msgs]
-  (let [failed (reduce (fn [failed m]
-                         (try
-                           (case (:op m)
-                             :spawn ((:spawn! io) m)
-                             :notify (when-let [notify (:notify io)] (notify (:summary m) (:body m)))
-                             nil)
-                           failed
-                           (catch Throwable e
-                             (let [why (str (name (:op m)) " " (or (first (:argv m)) (:summary m)) ": " (ex-message e))]
-                               (when-let [log (:log io)] (log why))
-                               (cond-> failed (and (= :spawn (:op m)) (some? (:for m))) (assoc (:for m) why))))))
-                       {} msgs)]
-    (vec (for [m msgs :when (not (local-ops (:op m)))]
-           (if-let [why (and (= :reply (:op m)) (get failed (:id m)))]
-             (-> m (select-keys [:op :id :seq]) (assoc :error why))
-             m)))))
+  (let [[failed results]
+        (reduce (fn [[failed results] m]
+                  (try
+                    (case (:op m)
+                      :spawn (do ((:spawn! io) m) [failed results])
+                      :notify (do (when-let [notify (:notify io)] (notify (:summary m) (:body m))) [failed results])
+                      :workspace/create [failed (conj results (-> m (dissoc :op) (assoc :op :workspace/created
+                                                                                       :dir ((:workspace! io) (:cwd m) (:name m)))))]
+                      [failed results])
+                    (catch Throwable e
+                      (let [why (str (name (:op m)) " " (or (first (:argv m)) (:summary m) (:name m)) ": " (ex-message e))]
+                        (when-let [log (:log io)] (log why))
+                        (case (:op m)
+                          :spawn [(cond-> failed (some? (:for m)) (assoc (:for m) why)) results]
+                          :workspace/create [failed (conj results {:op :workspace/created :for (:for m) :error why})]
+                          [failed results])))))
+                [{} []] msgs)]
+    [(vec (for [m msgs :when (not (local-ops (:op m)))]
+            (if-let [why (and (= :reply (:op m)) (get failed (:id m)))]
+              (-> m (select-keys [:op :id :seq]) (assoc :error why))
+              m)))
+     results]))
+
+(defn settle!
+  "[state' window-msgs] for (F STATE), a handle or deliver: its local ops
+  performed, and their results delivered back, until none is left."
+  [io state f]
+  (loop [[s msgs] (f state) acc []]
+    (let [[window results] (perform! io msgs)
+          acc (into acc window)]
+      (if (seq results)
+        (recur (reduce (fn [[s out] r] (let [[s o] (deliver s io r)] [s (into out o)])) [s []] results) acc)
+        [s acc]))))
 
 (defn make-io
   "The :io map handle gets in a live process: Rex through the rex CLI,
@@ -276,11 +303,11 @@
          :cwd (fn [session block]
                 (let [p (rex/call (first (:servers config)) "block.method" {:session_id session :block_id block :method "process"})]
                   (or (get-in p [:foreground :cwd]) (get-in p [:child :cwd]))))
-         :sessions (fn [] (rex/sessions (first (:servers config))))
-         :new-workspace (fn [cwd name]
-                          (let [dir (str (fs/path (fs/parent (or cwd ".")) name))]
-                            (babashka.process/shell {:dir cwd} "jj" "workspace" "add" "--name" name dir)
-                            dir))}})
+         :sessions (fn [] (rex/sessions (first (:servers config))))}
+   :workspace! (fn [cwd name]
+                 (let [dir (str (fs/path (fs/parent (or cwd ".")) name))]
+                   (babashka.process/shell {:dir cwd :out :string :err :string} "jj" "workspace" "add" "--name" name dir)
+                   dir))})
 
 (defn -main [& _]
   (let [config (read-config (config-path))
@@ -288,9 +315,9 @@
         io (make-io config "rexmux")
         step! (fn [f]
                 (locking lock
-                  (let [[s msgs] (f @state)]
+                  (let [[s msgs] (settle! io @state f)]
                     (reset! state s)
-                    (write! (perform! io msgs)))))]
+                    (write! msgs))))]
     (step! #(emit % [{:op :ready}]))
     (doseq [srv (:servers config)]
       (rex/events! srv (fn [ev] (step! #(deliver % io {:op :rex/event :event ev :server (:label srv)})))))
