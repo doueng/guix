@@ -50,6 +50,7 @@
       (println (str "  " (:label r) (when (:pid r) (str " (pid " (:pid r) ")"))))
       (when (:running r) (println (str "    running  " (:running r) (when (and (:current r) (not= (:current r) (:running r))) (str "  current " (:current r))))))
       (println (str "    why      " (:why r)))
+      (when (:note r) (println (str "    note     " (:note r))))
       (println (str "    fix      " (get-in r [:fix :cmd]) (if (get-in r [:fix :run]) "  (make refresh)" (str "  (manual: " (get-in r [:fix :manual]) ")")))))
     (println)
     (doseq [[group title] [[:system "system"] [:home "home"] [:session "session"]]

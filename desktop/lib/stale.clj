@@ -42,6 +42,7 @@
     :fix {:cmd "pkill -x dusk; ~/.local/bin/dusk" :manual "restart dusk"}}
    {:id "bbh" :label "bbh super-agent" :service "bbh-super" :arg #"build/bbh/bb\.edn$"
     :sources ["desktop/build/bbh/src/**" "desktop/build/bbh/bb.edn" "desktop/configs/bbh/**"]
+    :note "bbh-super restarts itself once idle; the Router and Workers keep their code until the super-agent restarts"
     :fix {:cmd "herd restart bbh-super" :manual "restart the super-agent (Router and Workers)"}}
    {:id "emacs" :label "Emacs daemons" :service "bbh-emacs" :argv0 #"^\.?emacs(-[0-9.]+-real)?$" :arg #"^--(fg-)?daemon"
     :sources ["desktop/configs/doom/**"]
@@ -194,13 +195,13 @@
         (when host
           (let [since (loaded-ms facts id (:start-ms host))
                 [path _] (newer facts id since)]
-            (row (cond-> {:id id :label label :group :session :running (when note note)}
+            (row (cond-> {:id id :label label :group :session :note note}
                    path (assoc :state :stale :why (str path " changed after it was loaded") :fix fix))))))
       :else
       (let [procs (procs-of id)
             stale (keep #(when-let [why (proc-why facts id %)] [% why]) procs)]
         (when (seq procs)
-          (row (cond-> {:id id :label label :group :session :pid (str/join "," (map :pid procs))
+          (row (cond-> {:id id :label label :group :session :pid (str/join "," (map :pid procs)) :note note
                         :running (short-name (apply first-item (mapcat #(cons (:exe %) (:argv %)) procs)))}
                  (seq stale) (assoc :state :stale :why (second (first stale))
                                     :fix (fix-for spec (ffirst stale))

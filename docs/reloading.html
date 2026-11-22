@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="make status, make refresh, what reloads itself, and the smaller Makefile (T218)">
+<meta name="bbh-doc" content="T218">
+<title>What needs reloading after a change</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>What needs reloading after a change</h1>
+
+<p><b>After a change in ~/guix, run <code>make status</code>.</b> It lists every component that runs old code or config, says why, and names the command that refreshes it. <code>make refresh</code> runs the refreshes that are safe unattended and lists the rest. <code>make switch</code> and <code>make home</code> now end with that refresh, so the summary prints after every switch.</p>
+
+<h2>How it decides</h2>
+<p>One script, <code>desktop/bin/stale</code>, reads the running system into one map of facts. A pure function in <code>desktop/lib/stale.clj</code> turns that map into rows. Four rules cover almost every component:</p>
+<ol>
+<li><b>Store rule.</b> A process is stale when its executable or an argument names a <code>/gnu/store</code> item that the current system and Home no longer hold.</li>
+<li><b>Source rule.</b> A process running code from the checkout is stale when a source file changed after it started, or after the last refresh, which leaves a stamp in <code>$XDG_RUNTIME_DIR/stale</code>.</li>
+<li><b>Boot rule.</b> When the kernel, initrd or kernel arguments of the current system differ from the booted one, the machine needs a reboot.</li>
+<li><b>Config rule.</b> When <code>modules/</code>, <code>desktop/*.scm</code>, <code>kanata.kbd</code> or <code>channels.scm</code> changed after the newest system generation, you need <code>make switch</code>.</li>
+</ol>
+<p>Status always reads the checkout that Home links to (~/guix), even when it runs from a Worker's workspace. <code>STALE_REPO</code> overrides that.</p>
+
+<h2>Components</h2>
+<table>
+<tr><th>Component</th><th>Stale when</th><th>Refresh</th><th>Who</th></tr>
+<tr><td>Kernel, initrd</td><td>current boot parameters differ from <code>/run/booted-system</code></td><td><code>sudo reboot</code></td><td>you</td></tr>
+<tr><td>System generation</td><td>active is not the newest, or the config changed after it</td><td><code>make switch</code></td><td>you (sudo)</td></tr>
+<tr><td>Home generation</td><td><code>~/.guix-home</code> is not the newest</td><td><code>make home</code></td><td>you</td></tr>
+<tr><td>Config links in Home</td><td>a repo config or script has no link yet</td><td><code>bb desktop/stow-home</code></td><td>refresh</td></tr>
+<tr><td>Each system Shepherd service</td><td>store rule on its command</td><td><code>sudo herd restart NAME</code></td><td>refresh for bluetooth, kanata, ntpd, tailscaled, upower-daemon, ydotoold; you for the rest</td></tr>
+<tr><td>Each home Shepherd service</td><td>store rule, or its checkout script changed</td><td><code>herd restart NAME</code></td><td>refresh, except bbh-super and bbh-emacs</td></tr>
+<tr><td>Shepherd itself</td><td>its own Guile or Shepherd left the generation (its first config going away does not count)</td><td>reboot, or log out and back in for Home</td><td>you</td></tr>
+<tr><td>Hyprland</td><td>store rule</td><td>log out and back in</td><td>you</td></tr>
+<tr><td>Hyprland config</td><td>its <code>.lua</code> files reload by themselves; <code>~/.config/engstrand/mux</code> changed after the last load</td><td><code>hyprctl reload</code></td><td>refresh</td></tr>
+<tr><td>kanata config</td><td><code>/etc/kanata</code> changed after kanata started or last reloaded</td><td><code>hyprkan reload</code></td><td>refresh</td></tr>
+<tr><td>hyprkan, keyleader, palette</td><td>store rule, or their script or keybinding edn changed</td><td>kill and start again with the session's Wayland env</td><td>refresh</td></tr>
+<tr><td>dusk</td><td>its binary, runtime or config changed</td><td><code>pkill -x dusk; ~/.local/bin/dusk</code></td><td>you</td></tr>
+<tr><td>Emacs daemons, bbh-emacs too</td><td>store rule, or a Doom config file changed</td><td>restart Emacs</td><td>you</td></tr>
+<tr><td>Doom packages</td><td><code>init.el</code> or <code>packages.el</code> newer than the last <code>doom sync</code></td><td><code>doom sync</code>, then restart Emacs</td><td>you</td></tr>
+<tr><td>Doom env file</td><td>it saved a session variable (Hyprland, Rex pane, terminal), names an old store path, or <code>cli.el</code> changed after it</td><td><code>doom env</code></td><td>refresh</td></tr>
+<tr><td>bbh super-agent</td><td>store rule, or <code>desktop/build/bbh</code> or <code>desktop/configs/bbh</code> changed</td><td><code>herd restart bbh-super</code></td><td>you: it restarts the Router and every Worker. bbh-super restarts itself once idle.</td></tr>
+<tr><td>Rex server</td><td>store rule</td><td><code>rex server stop</code></td><td>you: it closes every Rex session</td></tr>
+<tr><td>ghostty-rex client</td><td>its bb code or <code>config.edn</code> changed</td><td><code>rex -C ghostty-rex do mx.client.reload</code></td><td>refresh</td></tr>
+<tr><td>Herdr server and config</td><td>store rule; its config changed</td><td><code>herdr server stop</code>; <code>herdr server reload-config</code></td><td>you; refresh</td></tr>
+<tr><td>Chrome extensions</td><td>a source or manifest changed after the last build</td><td><code>ext-reload NAME</code></td><td>refresh</td></tr>
+<tr><td>Other checkout scripts that keep running</td><td>the script changed after the process started</td><td>restart it</td><td>you</td></tr>
+</table>
+
+<h2>What is automatic now</h2>
+<ul>
+<li><b>Hyprland reloads its config itself.</b> A nested Hyprland 0.55.4 test showed autoreload picks up edits to <code>hyprland.lua</code> and to files it <code>require</code>s, through the stow symlinks, and when a file is replaced by rename. So no Hyprland config step remains. <code>make mux</code> lost its <code>hyprctl reload</code>; the refresh after <code>make home</code> reloads Hyprland when the mux file changed.</li>
+<li><b>kanata reloads after every switch.</b> The <code>hyprkan reload</code> line in <code>make switch</code> is gone. The refresh at the end reloads kanata when <code>/etc/kanata</code> changed and records that.</li>
+<li><b>Shepherd services restart when their code changed.</b> After a switch or <code>make home</code>, the refresh restarts each home service and each sudo-allowed system service whose store path or script changed. Shepherd's own "replacement pending" flag is not used, since Guix sets it on every service at every reconfigure.</li>
+<li><b>The ghostty-rex client reloads when its code changed,</b> on the same session, through the existing <code>mx.client.reload</code>.</li>
+<li><b>Chrome extensions</b> already reload themselves when their <code>manifest.json</code> changes (lint enforces it, T197). The refresh rebuilds and reloads an extension whose source changed.</li>
+<li><b>Doom's env file</b> now also leaves out <code>EMACSLOADPATH</code> and Rex's pane variables. The live one had saved <code>REX_SESSION</code>, <code>REX_BLOCK</code> and <code>TERM_PROGRAM</code>, the same kind of leak as T216's signature.</li>
+</ul>
+
+<h2>What still needs you</h2>
+<p>A reboot for a new kernel or initrd. Logging out and back in for Hyprland or the home Shepherd. Restarting Emacs, and running <code>doom sync</code> first after <code>init.el</code> or <code>packages.el</code> changed. Restarting the super-agent, which runs the Router and the Workers. Stopping the Rex or Herdr server, which closes their sessions. Any system service that sudo would ask a password for. <code>make status</code> prints each of these with its command.</p>
+
+<h2>The Makefile, before and after</h2>
+<p>It had 68 targets and 374 lines. Now it has 13 workflows in 163 lines. Tests live in <code>desktop/build/checks/checks.edn</code> as commands. <code>make test</code> runs the ones covering your change, <code>ONLY=rule</code> picks rules by name prefix, and <code>make verify</code> adds the slow and live ones.</p>
+<table>
+<tr><th>Now</th><th>Replaces</th></tr>
+<tr><td><code>make status</code>, <code>make refresh</code></td><td>new; <code>ghostty-rex-reload</code>, <code>stow</code></td></tr>
+<tr><td><code>make switch</code></td><td>switch, plus <code>hyprkan reload</code> and a final refresh</td></tr>
+<tr><td><code>make home</code></td><td>home-apply, stow</td></tr>
+<tr><td><code>make build</code> [<code>NAME=</code>, <code>DRY=1</code>, <code>REPRO=1</code>]</td><td>build, check, system-facts, channels-current, dry-run, repro-build, home-build, dusk, rexmux, ghostty-rex, oilfm, pi-sci, pierre-diff-ansi, bbh-web-highlights</td></tr>
+<tr><td><code>make lint</code></td><td>lint (unchanged; still the Workers' check)</td></tr>
+<tr><td><code>make test</code> [<code>ONLY=</code>, <code>ALL=1</code>, <code>LIST=1</code>, <code>REV=</code>]</td><td>affected, verify, and every *-test and *-check: updates, md-view, ext-reload, rexmux, ghostty-rex, dusk, pi-sci, pierre-diff-ansi, skill-diet, second-brain, builder, taildrop, clipboard-history, doom-check, doom-env-test, keybindings-check, bbh-tla-check</td></tr>
+<tr><td><code>make verify</code> [same options]</td><td>verify SLOW=1, chrome-e2e, rexmux-verify, rexmux-tla, ghostty-rex-verify, dusk-verify, bombadil, clipboard-e2e and the live Chrome and Hyprland checks</td></tr>
+<tr><td><code>make pull</code>, <code>make gc</code>, <code>make prebuild</code>, <code>make mux MUX=</code></td><td>unchanged</td></tr>
+<tr><td><code>make builder ACTION=check|deploy|create</code></td><td>builder-check, builder-deploy, builder-create</td></tr>
+<tr><td>a script, named in <code>checks.edn</code> and the docs</td><td>kanata-check (<code>desktop/build/keybindings/kanata-check.bb</code>), doom-baseline (<code>desktop/build/doom/doctor.bb --accept</code>), parinfer-check and parinfer-fix (<code>desktop/build/checks/parinfer.bb</code>), reader-push and reader-status (<code>desktop/bin/reader-push</code>), second-brain-status, bbh-runs (<code>bb runs:html</code>), oilfm-test</td></tr>
+</table>
+<p>Every doc, README, skill and script that named an old target now names its replacement. <code>bbh.heavy</code> treats <code>make test</code>, <code>verify</code>, <code>build</code>, <code>switch</code>, <code>home</code> and <code>mux</code> as heavy.</p>
+
+<h2>Found along the way</h2>
+<ul>
+<li>The kanata simulator in <code>~/.cache/kanata-sim</code> fails to load <code>libgcc_s.so.1</code>, so the kanata chord tests fail before this change too.</li>
+<li><code>leader-test.clj</code> and <code>review-test.clj</code> fail in ~/guix as well, in their Herdr navigation cases.</li>
+</ul>
+
+</main></body></html>
