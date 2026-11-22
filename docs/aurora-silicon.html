@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Survey of github.com/aurora-silicon and which parts could go into the T212 Asahi kernel on the J313, ranked by value against risk.">
+<meta name="bbh-doc" content="T213">
+<title>Aurora Silicon: what fits your M1 Air kernel</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+table{display:block;overflow-x:auto;font-size:.92em}td,th{vertical-align:top}
+</style></head>
+<body><main>
+<h1>Aurora Silicon: what fits your M1 Air kernel</h1>
+<p><b>Goal.</b> You asked which parts of <a href="https://github.com/aurora-silicon">aurora-silicon</a> could go into your own kernel (T212, AsahiLinux tag <code>asahi-7.2.15-1</code> plus <code>kernel.config</code>) on this MacBook Air M1 (J313, T8103, macOS 13.5 system firmware). Investigation only: nothing was changed and nothing was rebooted.</p>
+<div class="callout"><b>Short answer.</b> Aurora's kernel is not a set of patches you can lift. It is a separate, very fast-moving fork on Linux 7.3 that has about 700k lines of Apple-specific changes against your tree, and most of its work targets M3, M4, M5 and the Neo. Five things are cheap and safe for your Air: (1) a true-peak limiter on the J313 speaker graph, (2) Wi-Fi country codes, (3) testing CPU boost, (4) the ambient light sensor plus the keyboard-backlight daemon, and (5) the camera denoiser. The big items (Touch ID, USB-C external display, Thunderbolt docks and faster GPU submission) all need the whole fork or a large port. Touch ID also writes to the Secure Enclave storage that macOS shares on your disk, so I would not try it on a dual-boot Air yet.</div>
+<h2>Ranking: value against risk</h2>
+<p>Labels: <b>measured</b> means I ran it here or read the code. <b>inferred</b> means it follows from the code or the Aurora commit text. <b>guess</b> is my judgement.</p>
+<table><tr><th>#</th><th>Item</th><th>Value</th><th>Risk</th><th>Fits as</th></tr>
+<tr><td>1</td><td>J313 speaker true-peak limiter</td><td>High</td><td>Very low</td><td>Patch to <code>asahi-audio</code> package</td></tr>
+<tr><td>2</td><td>Wi-Fi country code (DT property)</td><td>Low–med</td><td>Low</td><td>1 DT patch or overlay</td></tr>
+<tr><td>3</td><td>CPU boost on (3.2 GHz states)</td><td>Low–med, unmeasured</td><td>Low</td><td>Measure first; sysfs at boot or 1-line patch</td></tr>
+<tr><td>4</td><td>Ambient light sensor + <code>kbd-light</code></td><td>Medium</td><td>Low</td><td>Firmware file + small package and service</td></tr>
+<tr><td>5</td><td><code>camera-denoise</code></td><td>Medium (calls)</td><td>Low</td><td>Guix package + Home service</td></tr>
+<tr><td>6</td><td>Hardware video decode (AVD)</td><td>Medium</td><td>Low–med</td><td>Firmware + libva packages; no kernel change</td></tr>
+<tr><td>7</td><td>cpuidle CPU PD tuning</td><td>Low on your kernel</td><td>Low</td><td>2 clean patches, but measure first</td></tr>
+<tr><td>8</td><td>GPU G13 latency paths</td><td>Med–high</td><td>Medium</td><td>Port needed; does not apply</td></tr>
+<tr><td>9</td><td>USB-C external display (DP alt)</td><td>High</td><td>High</td><td>Not portable; wait</td></tr>
+<tr><td>10</td><td>Thunderbolt PCIe tunnels (docks)</td><td>Medium</td><td>High</td><td>Not portable; wait</td></tr>
+<tr><td>11</td><td>Touch ID (SEP, <code>apple_sep</code>)</td><td>High</td><td><b>High</b></td><td>Whole-fork kernel + about 10 userspace patches</td></tr>
+<tr><td>–</td><td>speakerguardd v2, sleep, CLPC, MCC, PMP</td><td colspan="3">Not for M1 yet: these target newer SoCs, or are alpha</td></tr>
+</table>
+<h2>What Aurora Silicon is</h2>
+<ul>
+<li><b>Young and fast.</b> The org was created on 2026-09-15 (measured, GitHub API). Its kernel repo has 599 open issues and merges dozens of PRs a day: its latest 40 commits span about two days. Much of the work is LLM-assisted, as the PRs disclose with <code>Assisted-by: LLM</code> (measured, commit messages).</li>
+<li><b>Its relationship to Asahi is a hostile fork.</b> It started from Asahi's kernel, m1n1 (as <code>aura</code>), u-boot, asahi-audio and the UCM config. Its policy says to never upstream to Asahi Linux or upstream Mesa, and Asahi names are being retired (measured: <code>agent-guidelines/policy/ip-and-tainted-data.md</code> line 52, <code>agent-guidelines/README.md</code>). So nothing will flow back into the Asahi tags that T212 tracks. Every piece you take is a patch you carry yourself.</li>
+<li><b>It has no stable kernel line.</b> <code>integration/aurora</code> is Linux 7.3.0. <code>aurora-edge</code> is 7.3 alpha, 465 commits behind integration. <code>aurora-stable</code> is 7.1.12 and was last touched on 2026-10-15, which is older than your 7.2.15. There are no release tags (measured: Makefile and GitHub compare).</li>
+<li><b>Size of the gap.</b> <code>git diff asahi-7.2.15-1 integration/aurora</code> gives +205k lines in <code>drivers/gpu/drm/asahi</code>, +94k in <code>drm/apple</code>, +82k in <code>drivers/soc/apple</code> and +105k in the Apple device trees (measured, shallow clones in <code>/home/engstrand/.cache/checkouts/github.com/aurora-silicon/linux</code>).</li>
+</ul>
+<h2>Every repo, briefly</h2>
+<p>The date is the last push. ★ marks repos that matter for your Air.</p>
+<table><tr><th>Repo</th><th>What</th><th>Licence</th><th>Last</th></tr>
+<tr><td>★ linux</td><td>Kernel fork, 7.3, branches <code>integration/aurora</code>, <code>aurora-edge</code>, <code>aurora-wip</code></td><td>GPL-2.0</td><td>11-22</td></tr>
+<tr><td>★ asahi-audio</td><td>Clone of Asahi's speaker DSP graphs; adds limiters and new Macs</td><td>MIT</td><td>11-19</td></tr>
+<tr><td>alsa-ucm-conf-asahi</td><td>Clone; new Macs only</td><td>BSD-3</td><td>11-19</td></tr>
+<tr><td>speakersafetyd</td><td>Fork of Asahi 3.0.0; adds J813/J815 only</td><td>GPL-2.0</td><td>11-21</td></tr>
+<tr><td>speakerguardd</td><td>macOS-style speaker protection v2; 1.0.0-alpha, "not for use yet"; M1 Air unit (atsp) "later"</td><td>MIT</td><td>11-22</td></tr>
+<tr><td>★ aurora-sep-userspace</td><td>Touch ID: patched libfprint and fprintd, PAM, SEP-sealed LUKS and SSH</td><td>none stated</td><td>11-21</td></tr>
+<tr><td>aurora-xart</td><td>Inspect Touch ID and xART state</td><td>MIT</td><td>11-20</td></tr>
+<tr><td>★ kbd-light</td><td>Keyboard backlight follows the ambient light sensor</td><td>MIT</td><td>11-17</td></tr>
+<tr><td>★ camera-denoise</td><td>PipeWire temporal denoise for the built-in camera</td><td>MIT</td><td>11-21</td></tr>
+<tr><td>capture-ns</td><td>Microphone noise suppression (PipeWire)</td><td>MIT</td><td>11-06</td></tr>
+<tr><td>avd-fw, libva-v4l2_request</td><td>Open video-decoder firmware mirror; VA-API driver fork</td><td>MIT / GPL-3</td><td>11-21 / 11-08</td></tr>
+<tr><td>upower</td><td>1.91.4 plus a macsmc time-to-empty fix</td><td>GPL</td><td>11-06</td></tr>
+<tr><td>aurora-diag</td><td>Read-mostly diagnostics; snapshot and diff between boots</td><td>MIT</td><td>11-21</td></tr>
+<tr><td>mesa, xserver, pipewire, FFmpeg, fex, whisper.cpp, splash</td><td>Mirrors and forks (Borealis Vulkan, gaming, ML)</td><td>various</td><td>–</td></tr>
+<tr><td>aura, m1n1, u-boot, fatfs, aurora-bless, tuxvdmtool, macvdmtool, recovery-ssh</td><td>Boot chain and tools; aura is their m1n1</td><td>MIT / GPL</td><td>–</td></tr>
+<tr><td>fedora-, alarm-, nixos-, omarchy-aurora, aurora-platform, -distributions, -installer</td><td>Distributions and the macOS installer. J313 is listed as supported.</td><td>MIT mostly</td><td>11-22</td></tr>
+<tr><td>omarchy-ane, mil-hwx-compiler, omarchy-mlx, aurora-lily</td><td>Neural Engine. Their omarchy-ane fork is 140 commits behind the upstream you already package.</td><td>MIT / Apache</td><td>–</td></tr>
+<tr><td>gpubench, aurorairc, agent-guidelines, Windows-driver-samples, mu*, steam, neo-platform-config, .github, website</td><td>Benchmarks, chat, policy, Windows port (Project Mu), misc</td><td>various</td><td>–</td></tr>
+</table>
+<h2>1. Speakers</h2>
+<p><b>Limiter on the J313 graph: do this.</b> Aurora rendered every Asahi speaker graph offline. The J313 graph clips worst of all: 556 and 586 clip events in 30 s of music, peaking at <b>+7.0 dBFS</b>, and even −12 dBFS pink noise clipped 370 times. The amps take integer samples, so anything over full scale is hard-clipped <i>before</i> speakersafetyd can act. You hear it as crackle on bass hits (inferred: commit b30c50a in <code>asahi-audio</code>). The fix adds an LSP <code>limiter_stereo</code> (threshold 0.891, which is −1 dBFS) after <code>woofer_lim</code> in <code>firs/j313/graph.json</code>. That is 20 lines on top of asahi-audio v5.0, the version you ship (measured: <code>git diff v5.0 HEAD -- firs/j313/</code>). You already provide lsp-plugins to PipeWire. Risk: it only lowers peaks. <b>Fit:</b> a <code>patches</code> entry or a <code>substitute*</code> phase on <code>asahi-audio</code> in <code>/home/engstrand/guix/modules/engstrand/asahi/sound.scm</code>. The same diff also relabels the J313 mic as MONO instead of AUX0, which helps some apps.</p>
+<p><b>speakersafetyd.</b> You run 1.1.2 (measured, <code>pgrep</code>). Upstream 3.0.0 has no J313 changes, only blackbox removal, DynamicUser and a GPL relicence, and Aurora's fork adds only M4 Macs (measured: git log). There's nothing to gain.</p>
+<p><b>speakerguardd v2</b> replays macOS's own protection unit using the Mac's tuning bundle. The M1 Air unit (atsp) is marked "later" and the project as a whole is "1.0.0-alpha, not for use yet" (measured: README). It also needs Aurora's kernel speaker interlock in <code>macaudio.c</code>. Do not use it now.</p>
+<h2>2. Touch ID (Secure Enclave)</h2>
+<p><b>It does target your Mac.</b> The M1 profile was developed on a J313 running macOS 13.5 (22G74) firmware. That is your exact model and your <code>asahi,os-fw-version</code> of 13.5 (measured: <code>tools/aurora-sep/M1-SUPPORT.md</code>, <code>/proc/device-tree/chosen</code>). It enrolled, matched, and restored after a reboot. A real desktop unlock through PAM "has not been observed".</p>
+<p><b>What it needs.</b></p><ul>
+<li>A new <code>apple_sep</code> driver: 64 files, +46k lines of Rust and C replacing Asahi's 375-line <code>sep.rs</code>. It also needs the <code>spi2</code> and <code>mesa</code> fingerprint DT nodes, an SPI chip-select timing change and a new UAPI header. Its Kconfig depends on <code>OF_DYNAMIC</code>, <code>TRUSTED_KEYS</code> and the 7.3 Rust abstractions. A patch set on 7.2.15 would be a real port (inferred: Kconfig and file list).</li>
+<li>Per-machine calibration <code>apple/mesacal-j313.bin</code>, carved from the iBootSystemContainer by <code>aurora-touchid-setup</code>.</li>
+<li>libfprint with about 7 Aurora patches, fprintd with 2 or 3, a touchid-rearm PAM module, and systemd units written for Fedora, Arch and Nix. All of that would need porting to Shepherd.</li></ul>
+<p><b>Why the risk is high on your machine.</b> You have macOS installed: a 103 GB APFS container and a 500 MB iBootSystemContainer (measured: <code>lsblk</code>).</p><ul>
+<li>The driver writes directly into the xART "gigalocker" <code>.gl</code> file inside the APFS iBootSystemContainer, which every OS on the Mac shares. These writes are now always on and have no off switch (aurora-silicon/linux#2591).</li>
+<li>On M1 the SEP cold-boots, and creating Linux's keybag <i>rewrites a session record that predates Linux</i>. The guard is therefore off by default on T8103, and the docs say to treat macOS Touch ID as unverified until you check it there. This was seen on T6000, and "T8103 untested".</li>
+<li>The enclave's anti-replay counters cannot be rolled back, so there is no backup or restore. Erasing that state is "for macOS's own tools, or a DFU restore" (inferred: <code>nixos-aurora/sep/XART-SAFETY.md</code>, <code>aurora-xart</code> README).</li></ul>
+<p><b>My call:</b> not now (guess). If you ever try it, first image the 500 MB iBootSystemContainer read-only, use the whole Aurora kernel rather than a port, and check macOS Touch ID afterwards.</p>
+<h2>3. CPU</h2>
+<p><b>Boost.</b> On your running kernel <code>/sys/devices/system/cpu/cpufreq/boost</code> is <b>0</b>. The P-cluster stops at 2988 MHz and never uses its 3096, 3144 and 3204 MHz boost states (measured). Asahi lost boost-by-default upstream in commit ddef17bb. Aurora turned it back on in f677f7c87b, then turned it off again for the M2 (2ab25489ef) because the fanless M2 Air delivered no extra clock and only ran 4 °C hotter. The M1 is unmeasured. At most it is +7% on single-thread work (3204/2988). <b>Fit:</b> measure first (as root: <code>echo 1 &gt; /sys/devices/system/cpu/cpufreq/boost</code>, then <code>perf stat -e cycles</code> on a pinned single-thread loop). If it helps, set it at boot with a Shepherd one-shot; you don't need a kernel patch. The Aurora patch does not apply to 7.2.15 as it stands (measured: <code>git apply --check</code>).</p>
+<p><b>cpuidle.</b> Aurora lowered CPU PD's target residency from 10 ms to 100 µs (9143929f0e) and raised its exit latency to 30 µs (74351910c8). On an M2 that lifted single-thread clock from about 2.6 to 3.1 GHz and cut idle P-cluster power from 0.55 to 0.30 W. Both patches apply cleanly to <code>asahi-7.2.15-1</code> (measured). <b>But your kernel uses the <code>ladder</code> governor</b>, the only one built (<code>CONFIG_CPU_IDLE_GOV_MENU</code> is not set), and ladder promotes on exit latency, not residency. Your cores already spend most idles in CPU PD: cpu0 had 74.5M PD entries against 8.2M WFI, cpu4 6.7M against 0.9M (measured: sysfs, 16 h uptime). So the residency change does nothing here, and the exit-latency change would make ladder slightly <i>less</i> eager (inferred: <code>drivers/cpuidle/governors/ladder.c</code> lines 90 to 157). Low value. Skip it unless you also switch to menu or teo and measure.</p>
+<p><b>Not for M1:</b> the CLPC, PMP, MCC, cluster-pwrgate and <code>sleep.c</code> work targets the T8132, T8140, T8142, T6040 and T6050 (measured: compatible tables).</p>
+<h2>4. GPU</h2>
+<p>Aurora has G13/G14 (M1/M2) <b>host latency paths</b>: 6a6b3716d3, ce494c700e and 471887dd7b, which add inline publication, a dedicated event worker and a CPU capacity hint on syncobj waits. On an M1 Pro, per-submission latency fell 26–47% on light compute at depth 1–2 and 27–29% on light render. GPU-bound rows did not change and glmark2 stayed flat (inferred: commit text). None of the three applies to 7.2.15: <code>asahi_core.rs</code> is missing and <code>gpu.rs</code> and <code>workqueue.rs</code> have diverged (measured). This would be a real port into the Rust GPU driver, so wait for Asahi to do something similar, or take the whole kernel. Several robustness fixes, such as per-client queue limits and mapping-collision refusal, mostly target the Neo and M4.</p>
+<h2>5. Display, USB-C and Thunderbolt</h2>
+<ul>
+<li><b>External display over USB-C (DP alt mode).</b> Aurora routes both J313 Type-C ports to <code>dcpext</code> and limits the DMA window (f6ac4a6200 and d4951cf2a8). The routing DT patch applies to 7.2.15, but the driver side (DCP fabric, <code>typec-routes</code>) exists only in Aurora's <code>drm/apple</code> (+94k lines). The J313 commit itself says "External display output … remain untested". Not portable; wait.</li>
+<li><b>Thunderbolt PCIe tunnels</b> (docks with Ethernet or USB controllers) were enumerated on T8103 and tested on the J293 MacBook Pro 13 M1 with a CalDigit TS3 Plus (57b3f3af33). This needs <code>drivers/thunderbolt</code> (+13k), <code>pci/controller</code> (+12k) and new DT. Not portable.</li>
+<li><b>Backlight:</b> nothing new for J313.</li></ul>
+<h2>6. Sensors, keyboard light, camera, video</h2>
+<ul>
+<li><b>The ambient light sensor is dead on your machine.</b> <code>aop_als</code> is loaded but <code>/sys/bus/iio/devices</code> is empty. The driver requests <code>apple/aop-als-cal.bin</code>, and your vendor firmware in <code>/run/asahi-guix/firmware/apple</code> holds only ISP files (measured). The AOP log shows the CT720 sensor itself is found. Asahi's installer collects this file from <code>ioreg</code> in macOS (<code>asahi_firmware/als.py</code>, added Dec 2025, after your install). <b>Fit:</b> boot macOS once and export <code>CalibrationData</code> from <code>ioreg -r -a -n als -l</code>, or re-run the Asahi installer's firmware step, then put the file in the vendorfw cpio. After that, <code>kbd-light</code> (MIT, libc only, reads <code>kbd_backlight</code> and <code>in_illuminance_input</code>) is a small Guix package plus a system service. It has an idle-dim mode that suits Hyprland.</li>
+<li><b>camera-denoise</b> (MIT, meson, needs libpipewire) adds a denoised camera node next to the <code>apple-isp</code> one. M1 has no board profile, so you get only the CPU temporal filter. That costs about 3 ms per 1080p frame on one core, less at the Air's 720p (inferred: README). Low risk, and it is opt-in per app.</li>
+<li><b>Hardware video decode.</b> Your kernel already has <code>VIDEO_APPLE_AVD=m</code> and <code>apple_avd</code> is loaded, but there is no <code>/dev/video</code> for it because <code>apple/avd-fw-v2-t0.bin</code> is missing (measured). The firmware is open source: AsahiLinux/avd-fw, MIT, built with clang. Add it plus Aurora's <code>libva-v4l2_request</code> <code>avd-fixes</code> branch for mpv and ffmpeg. Chrome and Firefox need more work: Aurora carries a Firefox RDD sandbox patch. No kernel change.</li></ul>
+<h2>7. Small extras</h2>
+<ul>
+<li><b>Wi-Fi country.</b> Your regulatory domain is GB and you are on DFS channel 100. Without <code>brcm,ccode-map-trivial</code> the BCM4378 firmware stays on worldwide <code>XZ</code>. Aurora's 7d9a9aedd7 names the J313 as tested, and it applies cleanly to 7.2.15 (measured). <b>Fit:</b> add the property in your existing <code>dtbs-with-ane</code> overlay step in <code>/home/engstrand/guix/modules/engstrand/packages/omarchy-ane.scm</code>, or as a kernel patch.</li>
+<li><b>aurora-diag</b> <code>snapshot</code> and <code>check --expect</code> would complement <code>check-kernel.bb</code> for the first boot of the T212 kernel. It is a development tool and not needed.</li>
+<li><b>Battery (not Aurora).</b> Yours has 830 cycles and holds 3.21 of 4.38 Ah (73%), and <code>charge_control_end_threshold</code> is 100 (measured). The running kernel already supports an 80% cap. That is the cheapest battery win available, and it needs no new code.</li></ul>
+<h2>How it would fit T212</h2>
+<ul>
+<li><b>Kernel patches</b> go in the <code>patches</code> list of <code>%source</code> in <code>/home/engstrand/guix/modules/engstrand/asahi/kernel.scm</code>. Only the Wi-Fi DT and the cpuidle pair apply as they are. Each one changes the .config-identical proof from T212, so take them after you have booted the T212 kernel once.</li>
+<li><b>Config:</b> none of the picks needs new options (<code>APPLE_SEP</code>, <code>USB4_APPLE_SOC</code>, <code>VIDEO_APPLE_AVD</code> and <code>IIO_AOP_SENSOR_ALS</code> are already <code>m</code>).</li>
+<li><b>Userspace</b> (the limiter, kbd-light, camera-denoise, avd-fw, libva) is ordinary Guix packages and services. The firmware files go through <code>asahi-firmware.scm</code>.</li>
+<li><b>Switching the whole kernel to Aurora</b> (a different <code>%source</code>) would bring Touch ID, DP alt mode, Thunderbolt and the GPU paths at once. But there is no stable branch or tag, it moves by hundreds of commits a week, and its features assume their own boot chain (<code>aura</code> copies ADT values into the DT). I wouldn't (guess).</li></ul>
+<h2>Method</h2>
+<p>Shallow clones of <code>integration/aurora</code>, <code>aurora-stable</code>, <code>aurora-wip</code> and Asahi's <code>asahi-7.2.15-1</code> in <code>/home/engstrand/.cache/checkouts/github.com/aurora-silicon/linux</code>. The small repos are in the same parent directory. Patch fit was tested with <code>git apply --cached --check</code> against a temporary index of the Asahi tag, with no checkout. Machine facts came from sysfs, <code>/proc/config.gz</code>, <code>dmesg</code> and <code>lsblk</code> on this Air. No builds were needed and nothing ran as root. Not measured: boost on M1, the limiter by ear, and Touch ID.</p>
+</main></body></html>
