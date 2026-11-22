@@ -8,6 +8,7 @@
 
 (load-file (str (fs/parent (fs/real-path *file*)) "/keyguide"))
 (require '[hypr.dispatch :as hypr]
+         '[hypr.ctl :as hyprctl]
          '[dusk.palette :as palette]
          '[keylog]
          '[mux])
@@ -312,7 +313,7 @@
         (recur)))))
 
 (defn choose-window! []
-  (let [clients (json/parse-string (run! ["hyprctl" "-j" "clients"]) true)]
+  (let [clients (hyprctl/json "clients")]
     (when-let [address (palette/pick! "Window" (for [c clients]
                                                  {:label (:title c) :source (:class c) :value (:address c)}))]
       (hypr/dispatch! ["focus" {:window (str "address:" address)}]))))
@@ -615,7 +616,7 @@
 
 (defn verify-hypr! []
   (let [expected (expected-binds (load-grammar))
-        live (live-binds (json/parse-string (run! ["hyprctl" "-j" "binds"]) true))]
+        live (live-binds (hyprctl/json "binds"))]
     (if-let [drift (hypr-drift expected live)]
       (throw (ex-info (str "Hyprland's loaded launcher and Alt+Space binds differ from leader.edn: " (pr-str drift)) drift))
       (println (str "Hyprland has loaded all " (count expected) " leader binds")))))

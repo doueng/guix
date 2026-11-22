@@ -338,6 +338,7 @@ keybindings-check: kanata-check
 	Hyprland --verify-config -c desktop/configs/hypr/hyprland.lua
 	bb desktop/build/keybindings/test.clj
 	bb desktop/build/keybindings/leader-test.clj
+	bb desktop/build/keybindings/hyprkan-test.clj
 	bb desktop/build/keybindings/review-test.clj
 	bb desktop/build/keybindings/palette-test.clj
 	bb desktop/build/keybindings/winhint-test.clj

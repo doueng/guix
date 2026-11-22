@@ -6,6 +6,12 @@
             [rexg.model :as m]
             [rexg.screen :as s]))
 
+;; Not a layout test, but this namespace already loads rexg.main.
+(deftest a-new-server-keeps-the-hyprland-signature
+  (is (= ["server" "start" "--env" "HYPRLAND_INSTANCE_SIGNATURE"]
+         (main/start-args {"HYPRLAND_INSTANCE_SIGNATURE" "abc_1_2" "OTHER" "x"})))
+  (is (= ["server" "start"] (main/start-args {}))))
+
 (deftest side-by-side-tiles-share-the-width-with-one-divider
   (let [[pw ph] [101 30]
         a (s/tile-cells [0 0 0.5 1] pw ph)

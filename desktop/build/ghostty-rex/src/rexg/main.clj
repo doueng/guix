@@ -49,11 +49,22 @@
       (get-in c [:startup :cwd]) (update-in [:startup :cwd] expand-home)
       true (assoc :shell (shell-path (or (not-empty (System/getenv "REXG_SHELL")) (:shell c)))))))
 
+(def server-env
+  "Variables a new Rex server passes on to its panes. Rex starts it from an
+  allowlist that keeps WAYLAND_DISPLAY but drops HYPRLAND_INSTANCE_SIGNATURE,
+  so hyprctl in every pane failed (T216)."
+  ["HYPRLAND_INSTANCE_SIGNATURE"])
+
+(defn start-args
+  "rex server start, passing those of server-env that ENV sets."
+  [env]
+  (into ["server" "start"] (mapcat #(when (get env %) ["--env" %])) server-env))
+
 (defn start-local!
   "Start the local Rex server, which rex server start does only when none
   answers, replacing a socket a dead one left."
   [log]
-  (let [{:keys [exit out err]} (p/sh (or (System/getenv "REXG_REX") "rex") "server" "start")]
+  (let [{:keys [exit out err]} (apply p/sh (or (System/getenv "REXG_REX") "rex") (start-args (System/getenv)))]
     (log "rex server start" exit (str/trim (str out err)))))
 
 (def reload-command

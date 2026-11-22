@@ -7,6 +7,7 @@
 
 (load-file (str (fs/parent (fs/real-path *file*)) "/palette"))
 (require '[dusk.palette :as dusk]
+         '[hypr.ctl :as hyprctl]
          '[hypr.dispatch :as hypr]
          '[keylog])
 
@@ -25,7 +26,7 @@
     {:x (+ x (* (:x rect) cw)) :y (+ y (* (:y rect) ch))
      :w (* (:width rect) cw) :h (* (:height rect) ch)}))
 
-(defn hypr-json [& args] (json/parse-string (palette/sh-out "hyprctl" "-j" (str/join " " args)) true))
+(defn hypr-json [& args] (apply hyprctl/json args))
 
 (def herdr-class "com.mitchellh.ghostty.herdr")
 
