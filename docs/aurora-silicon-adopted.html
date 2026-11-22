@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="J313 speaker limiter verified offline; AVD firmware, VA-API driver and camera-denoise packaged and wired; how to switch, test and roll back">
+<meta name="bbh-doc" content="T213">
+<title>Aurora Silicon parts adopted: speaker limiter, video decode, camera denoise</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Aurora Silicon parts adopted: speaker limiter, video decode, camera denoise</h1>
+<style>p,li{overflow-wrap:anywhere}td{white-space:nowrap}code{overflow-wrap:anywhere}</style>
+<h2>Goal</h2>
+<p>Take the two parts of aurora-silicon you picked from the survey (/home/engstrand/guix/docs/aurora-silicon.html): (1) Aurora's speaker limiter for the M1 Air, and (2) hardware video decode on the Apple Video Decoder (AVD) plus the camera denoiser. Userspace only, with no kernel change. Nothing was switched or rebooted.</p>
+
+<h2>Outcome</h2>
+<ul>
+<li><b>Speakers:</b> the J313 graph now ends with Aurora's true-peak limiter. In an offline render, peaks that reached +6 dBFS now stop at −1.00 dBFS. Quiet audio comes out <b>bit-identical</b>, only 7.6 ms later.</li>
+<li><b>Video decode:</b> the open AVD firmware, the VA-API driver Aurora ships and the wiring all build on guix-builder. The driver loads both on the host and inside the flatpak Chrome's runtime. It decodes only after the firmware loads, which needs a module reload or a reboot. It stays <b>opt-in</b>: nothing uses it until you start mpv or Chrome with the flags below.</li>
+<li><b>Camera:</b> camera-denoise runs as a Home service. A 4-second live test published a denoised “FaceTime HD Camera” node beside the raw one, without opening the camera.</li>
+<li><code>guix system build</code> (Home included) and <code>make lint</code> pass, and check-kernel.bb shows the kernel unchanged.</li>
+</ul>
+
+<h2>1. Speaker limiter</h2>
+<p>This is Aurora's asahi-audio commit b30c50a by Ryan Murray, J313 hunk only. It is MIT, the same licence and copyright holders as asahi-audio, and the patch header credits it. It adds an LSP <code>limiter_stereo</code> after <code>woofer_lim</code>, set to −1 dBFS with 5 ms lookahead, true-peak 24-bit oversampling and no gain boost. It only lowers peaks. speakersafetyd still sits after the graph, unchanged.</p>
+<p><b>Offline test, measured.</b> Each graph ran in a private PipeWire daemon with no ALSA, so no sound reached a speaker. The plugins were your running lsp-plugins 1.2.25 and bankstown. The harness is Aurora's tests/speaker-graph-clips.py, plus a quiet −30 dBFS signal. The old graph is your current asahi-audio and the new one is the patched build.</p>
+<svg viewBox='0 0 400 215' width='100%' role='img' aria-label='Peak level per test signal, old and new graph'><line x1='254' y1='10' x2='254' y2='190' stroke='#c0392b' stroke-width='1.5' stroke-dasharray='4 3'/><text x='251' y='205' font-size='11' fill='#c0392b' text-anchor='end'>0 dBFS: amp clips</text><text x='0' y='33' font-size='12'>pink −12</text><rect x='100' y='15' width='219.89' height='14' fill='#e67e22'/><text x='398' y='26' font-size='11' text-anchor='end' fill='#e67e22'>+5.99</text><rect x='100' y='31' width='143.0' height='14' fill='#2e86c1'/><text x='398' y='42' font-size='11' text-anchor='end' fill='#2e86c1'>-1.00</text><text x='0' y='78' font-size='12'>bass sweep</text><rect x='100' y='60' width='192.39' height='14' fill='#e67e22'/><text x='398' y='71' font-size='11' text-anchor='end' fill='#e67e22'>+3.49</text><rect x='100' y='76' width='143.0' height='14' fill='#2e86c1'/><text x='398' y='87' font-size='11' text-anchor='end' fill='#2e86c1'>-1.00</text><text x='0' y='123' font-size='12'>kick + bass</text><rect x='100' y='105' width='177.42999999999995' height='14' fill='#e67e22'/><text x='398' y='116' font-size='11' text-anchor='end' fill='#e67e22'>+2.13</text><rect x='100' y='121' width='143.0' height='14' fill='#2e86c1'/><text x='398' y='132' font-size='11' text-anchor='end' fill='#2e86c1'>-1.00</text><text x='0' y='168' font-size='12'>pink −30</text><rect x='100' y='150' width='24.090000000000003' height='14' fill='#e67e22'/><text x='398' y='161' font-size='11' text-anchor='end' fill='#e67e22'>-11.81</text><rect x='100' y='166' width='24.090000000000003' height='14' fill='#2e86c1'/><text x='398' y='177' font-size='11' text-anchor='end' fill='#2e86c1'>-11.81</text><text x='0' y='205' font-size='11'><tspan fill='#e67e22'>■ old</tspan> <tspan fill='#2e86c1'>■ new</tspan></text></svg>
+<div style='overflow-x:auto'><table>
+<tr><th>Signal</th><th>Peak, dBFS</th><th>Clipped</th></tr>
+<tr><td>Pink noise −12</td><td>+5.99 → −1.00</td><td>8973 → 0</td></tr>
+<tr><td>Sweep 30–300 Hz</td><td>+3.49 → −1.00</td><td>111056 → 0</td></tr>
+<tr><td>Kick + bass</td><td>+2.13 → −1.00</td><td>352 → 0</td></tr>
+<tr><td>Pink noise −30</td><td>−11.81, same</td><td>0</td></tr>
+</table></div>
+<p>The level (RMS) on the kick and bass mix stayed at −12.6 dB. On the pink noise it went from −8.3 to −9.3 dB, and on the sweep from −5.3 to −7.6 dB. The −30 dBFS signal came out identical sample by sample.The old RMS counts energy above full scale that the amps would have squared off anyway. So the louder old numbers on the sweep are distortion, not lost bass. Data: /home/engstrand/.local/state/bbh/workflows/20261122-130738-704-change/evidence/limiter-render.txt</p>
+<p><b>What to listen for after switching.</b> Use music you know with deep kicks or synth bass, at your usual loud level. You don't need to go to full volume. The crackle or pop on bass hits should be gone. Normal-level listening should sound the same. Very loud sustained bass may sound slightly less punchy, by up to about 1 dB. To check that the limiter is live, run <code>pw-dump | grep -c woofer_peak</code>, which should print 1 or more.</p>
+
+<h2>2. Video decode on the AVD</h2>
+<ul>
+<li><b>Firmware:</b> Asahi's own avd-fw 0.2 (MIT), not Aurora's fork. Aurora's fork speaks the queue ABI of Aurora's kernel and has no config block, which your asahi-7.2.15 apple_avd driver requires. The build has H.264, HEVC and VP9 enabled. Asahi turns H.264 and HEVC off by default for patent reasons, and that would leave the M1 with VP9 only. I checked the image: the <code>AVDc</code> block at 0x400 has the capability mask 1111.</li>
+<li><b>VA-API driver:</b> libva-v4l2_request 1.3.r11 (GPL-3.0+), the commit nixos-aurora pins. A link named <code>asahi_drv_video.so</code> lets libva pick it from the GPU's DRM driver name. 226 of its 228 offline tests pass. I dropped the other two: they are self-tests of its test harness and need a TSan runtime and timing the build container lacks.</li>
+<li><b>Wiring:</b> the firmware goes through firmware-service-type, and <code>LIBVA_DRIVERS_PATH</code> is set in Home. A flatpak override lets Chrome see the driver's store path and sets the same variable inside its sandbox. vainfo comes from libva-utils.</li>
+</ul>
+<p><b>Measured now:</b> on the host and inside Chrome's runtime (freedesktop 25.08, libva 2.22), libva opens the driver and finds <code>__vaDriverInit_1_22</code>. It then stops with <q>no V4L2 Request API decoder found</q>, which is expected while the firmware is missing.</p>
+<p><b>Risk, as you accepted (opt-in).</b> The stock 7.2.15 AVD driver lacks 15 fixes from iconidentify/omarchy-m1-video. They include a job-completion race that can oops the kernel and lock /dev/video until a reboot. A bad video can therefore need a reboot.</p>
+<p><b>Try it without rebooting, after the switch:</b> save your work and close any video, then run <code>sudo modprobe -r apple_avd &amp;&amp; sudo modprobe apple_avd</code>. Then check:</p>
+<ul>
+<li><code>sudo dmesg | grep -i avd</code> shows no <q>failed to load firmware</q></li>
+<li><code>ls /dev/video*</code> now shows a second node</li>
+<li><code>vainfo --display drm</code> lists the H264, HEVC and VP9 profiles</li>
+</ul>
+<p>If it fails, the reboot after the switch loads the firmware anyway.</p>
+<p><b>mpv:</b> <code>guix shell mpv -- mpv --hwdec=vaapi --gpu-api=opengl FILE</code>. mpv stays out of the profile because it propagates a lua that clashes. Look for <q>Using hardware decoding (vaapi)</q>. Vulkan output shows a ghost picture on Asahi, so use OpenGL.</p>
+<p><b>Chrome:</b> quit Chrome completely, then start it with <code>CHROME_UNIFIED_ARGS='--enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks' chrome-unified</code>. Chrome accepts only Intel and Mesa VA-API drivers unless VaapiIgnoreDriverChecks is set, so that flag is the opt-in. Two checks while a video plays:</p>
+<ul>
+<li>chrome://gpu shows Video Decode: Hardware accelerated</li>
+<li>chrome://media-internals names VaapiVideoDecoder</li>
+</ul>
+<p>If chrome://gpu still says software, add <code>--ignore-gpu-blocklist</code>. I could not run Chrome against the decoder before the firmware loads, so these flags are untested here. They come from the Chrome and omarchy-m1-video docs.</p>
+
+<h2>3. Camera denoise</h2>
+<p>Aurora's camera-denoise (MIT) is built from main at 6ae2f1d and runs as the Home Shepherd service <code>camera-denoise</code>, after PipeWire and WirePlumber. The M1 has no board data, so you get the CPU temporal filter only. Aurora reports about 3 ms per 1080p frame, less at 720p.</p>
+<ul>
+<li>Apps see <b>FaceTime HD Camera</b> (denoised) and <b>FaceTime HD Camera (V4L2)</b> (raw).</li>
+<li>Settings go in ~/.config/aurora-camera-denoise/denoise.conf; <code>mode = off</code> passes frames through unchanged.</li>
+<li>To stop it for this session, run <code>herd stop camera-denoise</code>.</li>
+</ul>
+
+<h2>Switch and roll back</h2>
+<ol>
+<li><code>make pull</code> first: the pulled Guix still lists the asahi channel that T212 dropped, so <code>make switch</code> refuses to run until then.</li>
+<li><code>make switch</code></li>
+<li>Restart the sound services so PipeWire loads the new graph: <code>herd restart wireplumber; herd restart pipewire</code>, or log out and in. Then <code>herd start camera-denoise</code>.</li>
+<li>Roll back with <code>sudo guix system roll-back</code>, or pick the previous generation in GRUB.</li>
+<li>Undo the Chrome override with <code>flatpak override --user --unset-env=LIBVA_DRIVERS_PATH com.google.Chrome</code>.</li>
+<li>If the AVD misbehaves at boot, add <code>module_blacklist=apple_avd</code> to the kernel line in GRUB.</li>
+</ol>
+
+<h2>Commits</h2>
+<ul>
+<li>asahi-audio: J313 limiter (modules/engstrand/asahi/sound.scm and files/asahi-audio-j313-limiter.patch)</li>
+<li>asahi video packages (modules/engstrand/asahi/video.scm)</li>
+<li>video feature (modules/engstrand/features/video.scm, config.scm)</li>
+<li>this document</li>
+</ul>
+
+</main></body></html>
