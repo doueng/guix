@@ -18,6 +18,13 @@
   #:use-module (guix packages)
   #:use-module (guix records))
 
+;; local-file with a relative name resolves against the working directory
+;; when the module is loaded with -L, so name the patches by absolute path.
+(define %asahi-files
+  (string-append (dirname (canonicalize-path
+                           (search-path %load-path "engstrand/asahi/sound.scm")))
+                 "/files"))
+
 (define-public asahi-alsa-ucm-conf
   (package
     (name "asahi-alsa-ucm-conf")
@@ -77,7 +84,11 @@ hardware.")
                     (commit (string-append "v" version))))
               (file-name (git-file-name name version))
               (sha256
-               (base32 "12mfl28s70zv37d44l0zqzbbasg2y9l57a0k5zvdsh5nggidmbm5"))))
+               (base32 "12mfl28s70zv37d44l0zqzbbasg2y9l57a0k5zvdsh5nggidmbm5"))
+              ;; Aurora Silicon's J313 true-peak limiter (MIT); see the patch.
+              (patches
+               (list (local-file (string-append %asahi-files
+                                                "/asahi-audio-j313-limiter.patch"))))))
     (build-system gnu-build-system)
     (arguments
      (list

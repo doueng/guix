@@ -1,0 +1,58 @@
+J313 (MacBook Air M1) speakers: end the woofer path with a true-peak limiter.
+
+The woofer_lim compressor lets transients through, so on bass-heavy material
+the graph sends samples up to +7 dBFS to the amps, which hard-clip them before
+speakersafetyd can act (crackle on bass hits).  An LSP limiter_stereo at
+-1 dBFS (th 0.891), 5 ms lookahead, no level regulation or boost, only lowers
+those peaks.
+
+Taken from Aurora Silicon's asahi-audio fork, commit
+b30c50aa0e461eaf75e7363d8cba644730d80d82 by Ryan Murray
+(https://github.com/aurora-silicon/asahi-audio), the J313 hunk only.
+Licence: MIT, same as asahi-audio (Copyright (c) 2022 The Asahi Linux
+Contributors).
+
+diff --git a/firs/j313/graph.json b/firs/j313/graph.json
+index 2803c5c..7193e92 100644
+--- a/firs/j313/graph.json
++++ b/firs/j313/graph.json
+@@ -108,6 +108,20 @@
+                     "cr": 15.0,
+                     "kn": 0.5
+                 }
++            },
++            {
++                "type": "lv2",
++                "plugin": "http://lsp-plug.in/plugins/lv2/limiter_stereo",
++                "name": "woofer_peak",
++                "control": {
++                    "th": 0.891,
++                    "lk": 5.0,
++                    "at": 1.0,
++                    "rt": 20.0,
++                    "ovs": 22,
++                    "alr": 0,
++                    "boost": 0
++                }
+             }
+         ],
+         "links": [
+@@ -119,14 +133,16 @@
+             {"output": "convR:Out", "input": "woofer_bp:in_r"},
+             {"output": "woofer_bp:out_l", "input": "woofer_lim:in_l"},
+             {"output": "woofer_bp:out_r", "input": "woofer_lim:in_r"},
++            {"output": "woofer_lim:out_l", "input": "woofer_peak:in_l"},
++            {"output": "woofer_lim:out_r", "input": "woofer_peak:in_r"},
+         ],
+         "inputs": [
+             "bassex:in_l",
+             "bassex:in_r"
+         ],
+         "outputs": [
+-            "woofer_lim:out_l",
+-            "woofer_lim:out_r",
++            "woofer_peak:out_l",
++            "woofer_peak:out_r",
+         ],
+         "capture.volumes": [
+             {
