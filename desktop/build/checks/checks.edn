@@ -7,52 +7,55 @@
   {:name "guix system"
    :paths ["modules/**" "desktop/system.scm" "desktop/system-facts.scm" "channels.scm"]
    :checks ["make lint"]
-   :slow ["make check"]}
+   :slow ["make build"]}
   {:name "guix home"
    :paths ["modules/engstrand/features/**" "desktop/home.scm"]
-   :slow ["make home-build"]}
+   :slow ["make build NAME=home"]}
   {:name "home shepherd check"
    :paths ["desktop/build/home/**"]
    :checks ["make lint" "bb desktop/build/home/check-shepherd.bb /run/current-system"]
-   :slow ["make home-build"]}
+   :slow ["make build NAME=home"]}
   {:name "remote builder"
    :paths ["modules/engstrand/system/builder.scm" "modules/engstrand/system/builder-keys.scm" "modules/engstrand/builder/**"
            "desktop/builder.scm" "desktop/bin/builder-prebuild" "desktop/build/builder/**"
            "modules/engstrand/features/builder-alert.scm" "modules/engstrand/system/reader.scm"
            "desktop/bin/reader-push"]
-   :checks ["make lint" "make builder-test"]
-   :slow ["make builder-check"]}
+   :checks ["make lint" "bb desktop/build/builder/test.bb"]
+   :slow ["make builder"]}
+  {:name "stale"
+   :paths ["desktop/bin/stale" "desktop/lib/stale.clj" "desktop/lib/stale/**" "desktop/build/stale/**"]
+   :checks ["make lint" "bb desktop/build/stale/test.bb"]}
   {:name "updates"
    :paths ["desktop/bin/updates" "desktop/build/updates/**"]
-   :checks ["make lint" "make updates-test"]}
+   :checks ["make lint" "bb desktop/build/updates/test.bb"]}
   {:name "ext-reload"
    :paths ["desktop/bin/ext-reload" "desktop/build/chrome/ext-reload/**" "modules/engstrand/features/chrome-extensions.scm"]
-   :checks ["make lint" "make ext-reload-test"]}
+   :checks ["make lint" "node desktop/build/chrome/ext-reload/test.mjs"]}
   {:name "chrome extensions"
    :paths ["desktop/build/chrome/vimium-cljs/**" "desktop/build/chrome/cookie-autoaccept/**"]
    :checks ["make lint"]
-   :slow ["make chrome-e2e"]}
+   :slow ["for d in desktop/build/chrome/*/bb.edn; do (cd \"$(dirname \"$d\")\" && bb e2e) || exit 1; done"]}
   {:name "rexmux"
    :paths ["desktop/build/rexmux/**" "modules/engstrand/packages/rex.scm"
            "desktop/bin/{mux-terminal,rexmux}" "desktop/lib/mux.clj"]
-   :checks ["make lint" "make rexmux-test"]
-   :slow ["make rexmux-tla" "make rexmux-verify"]}
+   :checks ["make lint" "cd desktop/build/rexmux && bb test"]
+   :slow ["cd desktop/build/rexmux && bb verify:tla" "cd desktop/build/rexmux && bb verify"]}
   {:name "ghostty-rex"
    :paths ["desktop/build/ghostty-rex/**" "desktop/bin/ghostty-rex" "desktop/configs/ghostty-rex/**"
            "modules/engstrand/packages/ghostty.scm" "modules/engstrand/features/terminal-mux.scm"
            "desktop/bin/{mux-terminal,workspace-or-herdr-tab}" "desktop/lib/mux.clj"
            "desktop/build/rexmux/sidecar/**"]
-   :checks ["make lint" "make ghostty-rex-test" "make rexmux-test"]
-   :slow ["make ghostty-rex-verify" "make rexmux-tla"]}
+   :checks ["make lint" "cd desktop/build/ghostty-rex && bb test" "cd desktop/build/rexmux && bb test"]
+   :slow ["cd desktop/build/ghostty-rex && bb verify" "cd desktop/build/rexmux && bb verify:tla"]}
   {:name "md-view"
    :paths ["desktop/bin/md-view" "desktop/build/md-view/**" "modules/engstrand/features/md-view.scm"]
-   :checks ["make lint" "make md-view-test"]}
+   :checks ["make lint" "bb desktop/build/md-view/test.bb"]}
   {:name "second brain"
    :paths ["modules/engstrand/system/second-brain.scm" "modules/engstrand/packages/second-brain.scm"
            "modules/engstrand/features/second-brain.scm" "desktop/bin/second-brain-push"
            "desktop/build/second-brain/**"]
-   :checks ["make lint" "make second-brain-test"]
-   :slow ["make second-brain-status"]}
+   :checks ["make lint" "bb desktop/build/second-brain/test.bb"]
+   :slow ["desktop/bin/second-brain-push status"]}
   {:name "asahi kernel and boot chain"
    :paths ["modules/engstrand/asahi/**" "modules/engstrand/build/**"
            "modules/engstrand/system/bootloader.scm" "desktop/build/asahi/**"]
@@ -67,47 +70,47 @@
    :slow ["bb desktop/build/hex/check-transcribe.bb"]}
   {:name "doom"
    :paths ["desktop/configs/doom/**" "desktop/build/doom/**"]
-   :checks ["make doom-check"]}
+   :checks ["bb desktop/build/doom/doctor.bb"]}
   {:name "doom env"
    :paths ["desktop/configs/doom/{cli,session-env}.el" "desktop/build/doom/session-env-test.el"]
-   :checks ["make doom-env-test"]}
+   :checks ["emacs --batch -l desktop/build/doom/session-env-test.el"]}
   {:name "keybindings"
    :paths ["desktop/kanata.kbd" "desktop/build/keybindings/**" "desktop/lib/**"
            "desktop/configs/{keybindings,hypr,doom,nvim,kanata,ideavim,vimium,ghostty,herdr}/**"
            "desktop/bin/{keyleader,keyguide,keylog,palette,winhint,hyprkan}"]
-   :checks ["make keybindings-check"]
-   :slow ["make hypr-nested-check"]}
+   :checks ["bb desktop/build/keybindings/check.bb"]
+   :slow ["bb desktop/build/keybindings/hypr-nested.bb"]}
   {:name "chrome launcher rows"
    :paths ["desktop/configs/keybindings/palette.edn" "desktop/bin/{palette,ext-reload}"
            "desktop/build/chrome/ext-reload/**" "desktop/build/keybindings/chrome-palette-e2e.mjs"]
-   :slow ["make chrome-palette-check"]}
+   :slow ["node desktop/build/keybindings/chrome-palette-e2e.mjs"]}
   {:name "chrome launch"
    :paths ["desktop/bin/{chrome-unified,palette,keyleader}" "desktop/configs/keybindings/leader.edn"
            "desktop/build/keybindings/chrome-launch-e2e.bb"]
-   :slow ["make chrome-launch-check"]}
+   :slow ["bb desktop/build/keybindings/chrome-launch-e2e.bb"]}
   {:name "chrome fullscreen"
    :paths ["desktop/configs/hypr/**" "desktop/build/hypr/**"]
-   :slow ["make chrome-fullscreen-check"]}
+   :slow ["bb desktop/build/hypr/chrome-fullscreen-check.bb"]}
   {:name "test display"
    :paths ["desktop/bin/test-display" "modules/engstrand/features/agent-control.scm"]
    :checks ["make lint"]
-   :slow ["make test-display-check"]}
+   :slow ["desktop/bin/test-display check"]}
   {:name "clipboard"
    :paths ["desktop/configs/doom/clipboard.el" "desktop/configs/nvim/fnl/config/options.fnl"
            "desktop/build/clipboard/**"]
-   :slow ["make clipboard-check"]}
+   :slow ["bb desktop/build/clipboard/check.bb"]}
   {:name "clipboard e2e"
    :paths ["desktop/kanata.kbd" "desktop/configs/ghostty/config" "desktop/configs/ghostty-rex/ghostty"
            "desktop/configs/nvim/fnl/config/keymaps.fnl" "desktop/configs/doom/clipboard.el"
            "desktop/build/clipboard/e2e.bb"]
-   :slow ["make clipboard-e2e"]}
+   :slow ["desktop/bin/test-display --name clipboard-e2e -- bb desktop/build/clipboard/e2e.bb"]}
   {:name "clipboard history"
    :paths ["desktop/bin/clipboard-history" "desktop/lib/session.clj" "desktop/build/clipboard/history-test.bb"]
-   :checks ["make lint" "make clipboard-history-test"]}
+   :checks ["make lint" "bb desktop/build/clipboard/history-test.bb"]}
   {:name "taildrop"
    :paths ["desktop/bin/taildrop" "desktop/lib/session.clj" "desktop/build/taildrop/**"
            "modules/engstrand/features/tailscale.scm"]
-   :checks ["make lint" "make taildrop-test"]}
+   :checks ["make lint" "bb desktop/build/taildrop/test.bb"]}
   {:name "herdr sesh picker"
    :paths ["desktop/build/herdr/sesh/**"]
    :checks ["cd desktop/build/herdr/sesh && bb tests.bb"]}
@@ -127,10 +130,10 @@
    :paths ["desktop/build/bbh/src/bbh/super/model.clj" "desktop/build/bbh/src/bbh/workflow.clj"
            "desktop/build/bbh/src/bbh/workflows/change.edn" "desktop/build/bbh/verify/**"
            ".agents/skills/verify-bbh-state-machines/**"]
-   :checks ["make bbh-tla-check"]}
+   :checks ["cd desktop/build/bbh && bb verify:tla"]}
   {:name "bbh voice shortcut"
    :paths ["desktop/build/bbh/src/bbh/super/voice.clj"]
-   :checks ["make kanata-check"]}
+   :checks ["bb desktop/build/keybindings/kanata-check.bb"]}
   {:name "bbh-transcript-scroll"
    :paths ["desktop/configs/doom/{agent-shell,bbh-super}.el" "desktop/build/bbh/test/tty-scroll-test.el"
            "desktop/build/bbh/test/tty-visit-test.el"
@@ -139,7 +142,7 @@
   {:name "bbh bombadil"
    :paths ["desktop/configs/doom/{agent-shell,bbh-super}.el" "desktop/build/bbh/test/bombadil/**"
            "desktop/build/bbh/test/bbh/bombadil.clj" "modules/engstrand/packages/bombadil.scm"]
-   :slow ["make bombadil"]}
+   :slow ["cd desktop/build/bbh && bb test:bombadil --view inbox --time 120 && bb test:bombadil --view worker --time 120"]}
   {:name "bbh inbox"
    :paths ["desktop/build/bbh/src/bbh/{inbox,main,models,repl,session,transcript}.clj"
            "desktop/build/bbh/test/bbh/inbox_*.clj" "desktop/build/bbh/test/agent-shell-test.el"
@@ -147,15 +150,15 @@
    :checks ["cd desktop/build/bbh && bb test:emacs"]}
   {:name "pi-sci"
    :paths ["desktop/build/pi-sci/**" "desktop/pi/agent/extensions/**"]
-   :checks ["make pi-sci-test"]}
+   :checks ["make build NAME=pi-sci && desktop/build/pi-sci/verify.bb"]}
   {:name "skill-diet"
    :paths ["desktop/pi/agent/skills/skill-diet/**" "desktop/build/skill-diet/**"]
-   :checks ["make skill-diet-check"]}
+   :checks ["node desktop/pi/agent/skills/skill-diet/scripts/eval.mjs check desktop/pi/agent/skills/skill-diet && bb desktop/build/skill-diet/adapter-test.bb"]}
   {:name "dusk"
    :paths ["desktop/build/dusk/**" "desktop/configs/dusk/**" "desktop/bin/dusk" "desktop/lib/dusk/**"]
-   :checks ["make dusk-test"]
-   :slow ["make dusk-verify"]}
+   :checks ["desktop/build/dusk/test.bb"]
+   :slow ["bb desktop/build/dusk/verify.bb"]}
   {:name "pierre-diff-ansi"
    :paths ["desktop/build/pierre-diff-ansi/**" "desktop/bin/{pierre-diff-ansi,jj-diff-pierre}"
            "desktop/build/bbh/src/bbh/web/highlights.js"]
-   :checks ["make pierre-diff-ansi-test"]}]}
+   :checks ["make build NAME=pierre-diff-ansi && bb desktop/build/pierre-diff-ansi/test.bb"]}]}

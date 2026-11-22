@@ -21,7 +21,7 @@ Herdr is the default. One word in `modules/engstrand/config.scm`,
 (`desktop/lib/mux.clj`).
 
 - `make mux MUX=rex` builds rexmux, sets the word to `rex`, runs
-  `make home-apply` and reloads Hyprland. Super+B then opens the rexmux window,
+  `make home` and reloads Hyprland. Super+B then opens the rexmux window,
   which starts the local Rex server and its `:startup` session from
   `desktop/configs/rexmux/config.edn` (shell, bbh, pi and jjui tabs, as in
   Herdr). docs/rex-parity.html lists what matches Herdr and how each is tested.
@@ -39,10 +39,10 @@ messages from 1; the receiver drops repeats and reports gaps. A request's
 
 | Command | What |
 | --- | --- |
-| `make rexmux-test` | sidecar unit and property tests (in `make lint`) |
-| `make rexmux-tla` | TLC on `verify/tla/Rexmux.tla`: link, streams, agents |
-| `make rexmux-verify` | live tests on a throwaway Rex server (private socket) |
-| `make rexmux` | build the window (`build.bb`, Guix profile from `manifest.scm`) |
+| `make test ONLY=rexmux` | sidecar unit and property tests (in `make lint`) |
+| `make verify ONLY=rexmux` | TLC on `verify/tla/Rexmux.tla`: link, streams, agents |
+| `make verify ONLY=rexmux` | live tests on a throwaway Rex server (private socket) |
+| `make build NAME=rexmux` | build the window (`build.bb`, Guix profile from `manifest.scm`) |
 
 Tests never touch your Rex at /run/user/UID/rex: `test/rexmux/testserver.clj`
 starts its own server with `--listen` on a temp socket and `--restore=false`.

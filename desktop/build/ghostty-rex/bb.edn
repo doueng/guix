@@ -2,7 +2,7 @@
  :tasks {attach {:doc "The client in this terminal: shows the Rex session (the window runs this). Args: [--session S] [--render PATH]."
                  :requires ([rexg.main])
                  :task (apply rexg.main/-main *command-line-args*)}
-         build {:doc "Compile rexg-render into target/ (make ghostty-rex)."
+         build {:doc "Compile rexg-render into target/ (make build NAME=ghostty-rex)."
                 :task (load-file "build.bb")}
          test {:doc "Unit and property tests of the client: keys, model, hints, screen (fast; make lint runs them)."
                :requires ([rexg.test-runner])
@@ -10,6 +10,6 @@
          switch-timing {:doc "Only ghostty-rex-verify's switch timing checks: a pi tab with a 24 MB snapshot paints within 300 ms (T210)."
                         :requires ([rexg.verify])
                         :task (rexg.verify/switch-timing-main)}
-         verify {:doc "Live tests: the client in Ghostty on the hidden test display against a throwaway Rex server, then Bombadil (make ghostty-rex-verify). Args: [--keep]."
+         verify {:doc "Live tests: the client in Ghostty on the hidden test display against a throwaway Rex server, then Bombadil (make verify ONLY=ghostty-rex). Args: [--keep]."
                  :requires ([rexg.verify])
                  :task (apply rexg.verify/-main *command-line-args*)}}}

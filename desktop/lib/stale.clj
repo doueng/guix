@@ -65,6 +65,19 @@
 (defn short-name [item]
   (some-> item (str/replace #"^/gnu/store/[0-9a-z]{32}-" "")))
 
+(defn- first-item
+  "The first store item in STRS, in order: a program's own package before its arguments."
+  [& strs]
+  (some #(first (re-seq #"/gnu/store/[0-9a-z]{32}-[^/\s\"'=:]+" (str %))) strs))
+
+(defn- package [item] (second (re-find #"^(.*?)(-[0-9][^-]*)*$" (or (short-name item) ""))))
+
+(defn- current-of
+  "What the current generation holds of the package ITEM belongs to."
+  [closure item]
+  (let [p (package item)]
+    (some->> closure (filter #(= p (package %))) sort last short-name)))
+
 (defn- by-pid [facts] (into {} (map (juxt :pid identity)) (:procs facts)))
 
 (defn- loaded-ms
@@ -161,8 +174,9 @@
       (row (cond-> {:id (str (clojure.core/name scope) ":" name)
                     :label (if (= name "root") (str "Shepherd (" (clojure.core/name scope) ")") name)
                     :group scope :pid pid
-                    :running (or (some short-name (sort (store-items (str (:exe proc) " " command)))) command)}
-             why (assoc :state :stale :why why :fix (service-fix svc)))))))
+                    :running (or (short-name (apply first-item (:exe proc) (:argv proc))) command)}
+             why (assoc :state :stale :why why :fix (service-fix svc)
+                        :current (some->> (old-items facts proc) first (current-of (:closure facts)))))))))
 
 (defn- component-procs [facts spec]
   (let [svc (some #(when (= (:name %) (:service spec)) %) (:services facts))]
@@ -187,9 +201,10 @@
             stale (keep #(when-let [why (proc-why facts id %)] [% why]) procs)]
         (when (seq procs)
           (row (cond-> {:id id :label label :group :session :pid (str/join "," (map :pid procs))
-                        :running (some short-name (mapcat #(old-items facts %) procs))}
+                        :running (short-name (apply first-item (mapcat #(cons (:exe %) (:argv %)) procs)))}
                  (seq stale) (assoc :state :stale :why (second (first stale))
-                                    :fix (fix-for spec (ffirst stale))))))))))
+                                    :fix (fix-for spec (ffirst stale))
+                                    :current (some->> (mapcat #(old-items facts %) procs) first (current-of (:closure facts)))))))))))
 
 (defn script-rows
   "Other processes running a script from the repo that changed after they started."
@@ -223,6 +238,15 @@
               why (assoc :state :stale :why why
                          :fix {:cmd "doom env, then restart Emacs" :run [:doom "env"]})))])))
 
+(defn links-row [{:keys [links]}]
+  (when links
+    (let [{:keys [missing]} links]
+      (row (cond-> {:id "links" :label "config links in Home" :group :home}
+             (seq missing)
+             (assoc :state :stale
+                    :why (str (count missing) " repo file(s) have no link, such as " (first missing))
+                    :fix {:cmd "bb desktop/stow-home" :run [:stow]}))))))
+
 (defn extension-rows [{:keys [extensions] :as facts}]
   (for [{:keys [name src built-ms]} extensions
         :let [[path t] src
@@ -240,6 +264,7 @@
         claimed (set (keep :service components))
         claimed-pids (into (set (keep :pid (:services facts))) (map :pid (apply concat (vals procs-of))))]
     (vec (concat [(boot-row facts) (system-row facts) (home-row facts)]
+                 (keep identity [(links-row facts)])
                  (service-rows facts claimed)
                  (keep #(component-row facts % procs-of) components)
                  (doom-rows facts)

@@ -12,7 +12,7 @@
 // stdin: frames from bb, each a type byte, a 4-byte big-endian length and a
 // payload (see handle()). stdout: the terminal. stderr: lines back to bb
 // (size COLS ROWS, ready ID BYTES MS when a pane's screen is in, done ID
-// BYTES MS when its whole snapshot is, mode ID BITS, text replies, pane errors). Build: make ghostty-rex, or
+// BYTES MS when its whole snapshot is, mode ID BITS, text replies, pane errors). Build: make build NAME=ghostty-rex, or
 // cc -O2 rexg-render.c $(pkg-config --cflags --libs libghostty-vt) -lpthread
 #include <ghostty/vt.h>
 #include <errno.h>

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<meta name="description" content="Bombadil drives the Router and Worker transcripts and composer in a real terminal: eight bugs found and fixed with ERT tests, scroll steps under 130 ms in 5 MB transcripts, clean 10-minute runs, make bombadil runs both views.">
+<meta name="description" content="Bombadil drives the Router and Worker transcripts and composer in a real terminal: eight bugs found and fixed with ERT tests, scroll steps under 130 ms in 5 MB transcripts, clean 10-minute runs, make verify ONLY=bbh-bombadil runs both views.">
 <meta name="bbh-doc" content="T174">
 <title>Bombadil on the bbh Worker view</title>
 <style>
@@ -32,7 +32,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <h1>Bombadil on the bbh Worker view</h1>
 <p class=sub>T174 · W192 · 2026-11-14 · Tags: <span class='tag measured'>measured</span> I ran it here; <span class='tag inferred'>inferred</span> my reading of code or logs.</p><nav><a href='#outcome'>Outcome</a><a href='#found'>Bugs</a><a href='#how'>How it runs</a><a href='#specs'>Properties</a><a href='#runs'>Runs</a><a href='#spec-lessons'>Spec lessons</a><a href='#open'>Open</a><a href='#use'>Use it</a></nav>
 <h2 id=outcome>Outcome</h2>
-<div class='card good'><b>Goal:</b> extend the Bombadil tests of the bbh Emacs UI from the Inbox to the Worker view: the Router and Worker transcripts, the composer, mailbox wakes and session state. Scrolling large transcripts gets time bounds and a hang watchdog. <b>Result:</b> <code>make bombadil</code> now runs the Inbox and then the Worker view. The Worker view drives a real Router and two Workers on a churning controller, over a 5 MB transcript made from anonymized real conversations. It found <b>eight real bugs</b>, all fixed, each with an ERT regression test that fails without its fix. Scrolling stays far under its budget: the slowest scroll step in the final 10-minute run took 121 ms against a 1 s bound, and the longest stall between commands was 795 ms. <span class='tag measured'>measured</span></div>
+<div class='card good'><b>Goal:</b> extend the Bombadil tests of the bbh Emacs UI from the Inbox to the Worker view: the Router and Worker transcripts, the composer, mailbox wakes and session state. Scrolling large transcripts gets time bounds and a hang watchdog. <b>Result:</b> <code>make verify ONLY=bbh-bombadil</code> now runs the Inbox and then the Worker view. The Worker view drives a real Router and two Workers on a churning controller, over a 5 MB transcript made from anonymized real conversations. It found <b>eight real bugs</b>, all fixed, each with an ERT regression test that fails without its fix. Scrolling stays far under its budget: the slowest scroll step in the final 10-minute run took 121 ms against a 1 s bound, and the longest stall between commands was 795 ms. <span class='tag measured'>measured</span></div>
 <div class='card warn'><b>Not fixed, by choice:</b> C-n while a restarted session is still starting says <i>Starting agent, please wait</i> and keeps the draft, so you press C-n again. The spec accepts that as a stated refusal. Queueing the draft instead would be a design change in agent-shell's send path.</div>
 
 <h2 id=found>Bugs found and fixed</h2>
@@ -78,7 +78,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <p>About 40 Worker-view runs of 1.5 to 10 minutes while building this. Each failing run named a property and a reproducible seed; each was a real bug (fixed above), a spec that read the screen too literally, or the open finding below. <span class='tag measured'>measured</span></p>
 <div class=table><table>
 <tr><th>Final runs</th><th>Result</th></tr>
-<tr><td><code>make bombadil BOMBADIL_TIME=600</code>, Inbox view</td><td>clean: 600 s, 4,159 screens, 666 sends</td></tr>
+<tr><td><code>make verify ONLY=bbh-bombadil BOMBADIL_TIME=600</code>, Inbox view</td><td>clean: 600 s, 4,159 screens, 666 sends</td></tr>
 <tr><td>Worker view, 600 s</td><td>clean: 600 s, 4,006 screens, 385 sends, 320 injected turn-end failures, seed 723134</td></tr>
 <tr><td>Worker view, 600 s, earlier code (before the last three fixes)</td><td>clean: 3,765 screens, 274 injected turn-end failures, no stall over 750 ms</td></tr>
 </table></div>
@@ -116,8 +116,8 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <div class='card warn'><b>Blank rows after re-entering the Router view.</b> Once in about 40 minutes of runs: C-c r from the Router's own composer left its 19-row transcript window on a start that fits only 11 rows, with 8 blank rows below the end. The post-command clamp should pull such a start back, and the next command did. A replay of the same keys on a small transcript in the TTY test did not reproduce it, so it stays open, not guessed at. Evidence: <code>open-finding/</code> in the wf evidence, from seed 600333. <span class='tag measured'>measured</span></div>
 
 <h2 id=use>Use it</h2>
-<pre><code>make bombadil                        # Inbox, then Worker view, 120 s each
-make bombadil VIEW=worker BOMBADIL_TIME=600
+<pre><code>make verify ONLY=bbh-bombadil                        # Inbox, then Worker view, 120 s each
+make verify ONLY=bbh-bombadil VIEW=worker BOMBADIL_TIME=600
 cd desktop/build/bbh &amp;&amp; bb test:bombadil --view worker --seed N --reproduce DIR --keep</code></pre>
 <p>A failure prints the property, the screen, and a reproduce line. With <code>--keep</code> the temp root holds steps.log (every command's time, state and buffer), checks.log, messages.log, faults.log and the trace.</p>
 

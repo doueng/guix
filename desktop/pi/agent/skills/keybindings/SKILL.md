@@ -24,7 +24,7 @@ Use `keyguide --list` for the curated discovery menu.
 5. Put desktop window and workspace actions in `desktop/configs/keybindings/bindings.edn`.
 6. Regenerate `desktop/configs/hypr/keybindings.lua` with `bb desktop/build/keybindings/generate.bb`.
 7. Keep editor, browser, shell, and multiplexer actions in their native configuration.
-8. Run `make keybindings-check` and the affected application's checks. Doom changes also require `make doom-check`.
+8. Run `make test ONLY=keybindings` and the affected application's checks. Doom changes also require `make test ONLY=doom`.
 9. Reload and verify the real application. Record blocked checks rather than calling them passes.
 
 Consistency 35. Ergonomics 25, weighted toward frequent actions. Conflict avoidance 20. Memorability 15. Portability 5.
@@ -42,7 +42,7 @@ Hard constraints override the score.
 - Bare Ctrl+h/j/k/l is window focus in every layer. Herdr forwards a key to the foreground program when `leader.edn`'s `:terminal :keeps` gives that program the key, and moves focus otherwise. Do not give Ctrl+h/j/k/l another meaning in a shell, editor or TUI without adding a `:keeps` rule for it.
 - Window focus falls through from the editor to Herdr to Hyprland through `keyleader nav`. Keep editor Ctrl+h/j/k/l and Herdr Ctrl+b h/j/k/l on that path.
 - Hyprland reads `hypr/hyprland.lua`. In a Lua session `hyprctl dispatch` takes Lua such as `hl.dsp.focus({ direction = "left" })`, not the old dispatcher names. Write dispatchers as data and run them with `desktop/lib/hypr/dispatch.clj`.
-- Generated submap actions use `keys.leave`, which runs the action and then leaves the submap. The catch-all uses `keys.cancel`, because Hyprland also runs the catch-all after a bound key. `make hypr-nested-check` exercises both.
+- Generated submap actions use `keys.leave`, which runs the action and then leaves the submap. The catch-all uses `keys.cancel`, because Hyprland also runs the catch-all after a bound key. `bb desktop/build/keybindings/hypr-nested.bb` exercises both.
 - Do not hand-edit generated files: `shared-keys.fnl`, `shared-keys.el`, `shared-keys.vim`, `hypr/leader.lua`, and `hypr/keybindings.lua`. Edit `leader.edn` and run the generator.
 - Application layers change Cmd chords only, and only by Hyprland window class. Emacs and other terminal programs share Ghostty's class, so no layer can target them. Every changed chord needs a case in `desktop/build/keybindings/kanata-test.bb`.
 - Ctrl belongs to applications. Put new Herdr actions under Ctrl+b. Its native defaults must be checked as well as custom commands. Rex has no Ctrl+b prefix: put a Rex action in `leader.edn`, with `:rex` when Herdr lacks it, and it runs under Alt+Space.

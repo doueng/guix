@@ -71,7 +71,7 @@ Conversations live in `~/.local/share/bbh/conversations/<id>/` as `messages.json
 
 ## Website
 
-The website is a page for the phone, with a tab for each live Emacs session, its whole conversation and a composer. Swiping sideways on the conversation moves between tabs. The controller, `bbh super serve` (the `bbh-super` Home service in `modules/engstrand/features/bbh-web.scm`), serves it on `127.0.0.1:8766` and publishes it with `tailscale serve` at `https://<node>.<tailnet>.ts.net:8443`. `bbh web` serves it on its own, for working on it while the controller is stopped. The page is ClojureScript run in the browser by [Scittle](https://github.com/babashka/scittle) with Replicant for rendering, so there is no build step. `src/bbh/web/` holds it, including Scittle 0.8.33's `scittle.js` and `scittle.replicant.js`, copied unchanged from its npm package. `bb test` loads the `.cljc` files there too. Code is highlighted by `@pierre/highlights`, the highlighter behind jjui's diffs. `make bbh-web-highlights` bundles it into `highlights.js`, and the page renders its tokens as hiccup. Its theme is `githubLightHighContrast`, the only light theme that measured 4.5:1 on every token against the code background.
+The website is a page for the phone, with a tab for each live Emacs session, its whole conversation and a composer. Swiping sideways on the conversation moves between tabs. The controller, `bbh super serve` (the `bbh-super` Home service in `modules/engstrand/features/bbh-web.scm`), serves it on `127.0.0.1:8766` and publishes it with `tailscale serve` at `https://<node>.<tailnet>.ts.net:8443`. `bbh web` serves it on its own, for working on it while the controller is stopped. The page is ClojureScript run in the browser by [Scittle](https://github.com/babashka/scittle) with Replicant for rendering, so there is no build step. `src/bbh/web/` holds it, including Scittle 0.8.33's `scittle.js` and `scittle.replicant.js`, copied unchanged from its npm package. `bb test` loads the `.cljc` files there too. Code is highlighted by `@pierre/highlights`, the highlighter behind jjui's diffs. `make build NAME=bbh-web-highlights` bundles it into `highlights.js`, and the page renders its tokens as hiccup. Its theme is `githubLightHighContrast`, the only light theme that measured 4.5:1 on every token against the code background.
 
 The server shares nothing with a session but files in the conversation's rollover root, so a rollover keeps the tab:
 
@@ -114,7 +114,7 @@ bb test:emacs            # composer, history, cancellation and nREPL endpoint
 bb test:doom             # installed Doom startup and Ctrl-N, in a separate terminal
 bb test:doom launcher    # installed emacs-bbh launcher, including automatic session startup
 bb try MODEL PROMPT...   # real prompts through agent-shell, printing the buffer
-bb runs:html [N] [OUT]   # HTML page of the newest N conversations with prompts, tool calls, workflow journals, evidence and reviews; `make bbh-runs` from the repo root
+bb runs:html [N] [OUT]   # HTML page of the newest N conversations with prompts, tool calls, workflow journals, evidence and reviews; `bb runs:html (in desktop/build/bbh)` from the repo root
 bb runs:metrics [ROOT...]  # latency, tokens, cache share, cost and failures per day and model
 bb stats                 # timeouts, restarts and errors per conversation, live workflow runs, review times
 bb eval:lint             # assertion hits per cohort over real and eval conversations

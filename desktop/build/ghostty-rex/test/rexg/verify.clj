@@ -104,7 +104,7 @@
 (defn- slurp? [f] (when (fs/exists? f) (slurp f)))
 
 (defn render-bin
-  "REXG_RENDER, else make ghostty-rex's build, made first when missing or
+  "REXG_RENDER, else the target/ build of make build NAME=ghostty-rex, made first when missing or
   older than csrc/."
   []
   (or (System/getenv "REXG_RENDER")
@@ -127,7 +127,7 @@
     shipped))
 
 (defn hyprland-path
-  "PATH as a window Hyprland opens has it: no ~/.local/bin, where make stow
+  "PATH as a window Hyprland opens has it: no ~/.local/bin, where make refresh
   links keyleader and bbh, and no bbh shims. The client must find its
   helpers without them (Ctrl+L failed with keyleader not found, T207)."
   [path]
@@ -207,7 +207,7 @@
 (defn- stop-tty! [{:keys [proc]}] (p/destroy-tree proc) (str (:out (deref proc 3000 {}))))
 
 (defn dusk-bin
-  "DUSK_BIN, else this checkout's build, else the one make stow links."
+  "DUSK_BIN, else this checkout's build, else the one make refresh links."
   []
   (or (System/getenv "DUSK_BIN")
       (some #(when (fs/executable? %) (str %))
@@ -318,7 +318,7 @@
 
 (defn- reload-checks!
   "The quick reload (T210): rex -C ghostty-rex do mx.client.reload, which
-  make ghostty-rex-reload runs, starts the client anew in the same window on
+  rex -C ghostty-rex do mx.client.reload runs, starts the client anew in the same window on
   the same session."
   [s root sid]
   (let [before (client-ids s)

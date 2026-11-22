@@ -45,7 +45,7 @@ pre{white-space:pre;overflow-x:auto} code{overflow-wrap:anywhere;font-size:0.95e
 
 <h2>Update</h2>
 <ul>
-<li><b>Our code:</b> <code>ext-reload cookie-autoaccept</code> rebuilds it, has Chrome reread it and reloads the open tabs it runs in. <code>bb test</code> in the folder builds it and runs its checks; <code>make lint</code> in the guix repo runs it whenever the folder changed, and <code>make chrome-e2e</code> runs the e2e suites.</li>
+<li><b>Our code:</b> <code>ext-reload cookie-autoaccept</code> rebuilds it, has Chrome reread it and reloads the open tabs it runs in. <code>bb test</code> in the folder builds it and runs its checks; <code>make lint</code> in the guix repo runs it whenever the folder changed, and <code>make verify ONLY=chrome-extensions</code> runs the e2e suites.</li>
 <li><b>autoconsent rules:</b> run <code>scripts/update-autoconsent.bb 18.6.0</code> (or whatever version you want). It is the only step that uses the network. It checks the npm sha512, copies the four files and rewrites <code>vendor/autoconsent/VERSION</code>. Then run <code>bb test &amp;&amp; bb e2e</code>, commit with jj, and reload the extension. The prehide selectors are read from the new rules at build time.</li>
 </ul>
 

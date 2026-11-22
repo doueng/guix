@@ -1,5 +1,5 @@
 (ns rexmux.verify
-  "make rexmux-verify: the live checks, each in its own process so one
+  "make verify ONLY=rexmux: the live checks, each in its own process so one
   failure does not hide the rest."
   (:require [babashka.process :as p]))
 

@@ -70,4 +70,4 @@ The output directory contains request payloads, phase samples, summaries, machin
 
 `palette-bench.el` times the Emacs phases. `desktop/build/dusk/palette-bench.bb` exercises the real runtime handlers and layout serializer without IPC. `desktop/build/dusk/edn-bench.rs` builds with `rustc -O` and times the production parser and encoder against the emitted messages.
 
-Unit tests check key hints, escaping, returned command IDs, buffer filtering, history, duplicate labels, cancellation, and reuse of search results. A live selection also preserved the Emacs prefix argument `(4)`. `make keybindings-check` and `make dusk-test` pass. `make doom-check` remains blocked by the existing environment-file PATH warning.
+Unit tests check key hints, escaping, returned command IDs, buffer filtering, history, duplicate labels, cancellation, and reuse of search results. A live selection also preserved the Emacs prefix argument `(4)`. `make test ONLY=keybindings` and `make test ONLY=dusk` pass. `make test ONLY=doom` remains blocked by the existing environment-file PATH warning.

@@ -693,7 +693,7 @@ bb eval:lint</code></pre>
   <li><strong>Provider cost semantics.</strong> Cumulative cost from Claude Code's result events was not verified against a real subscription run.</li>
   <li><strong>Live Claude restart with a new system prompt.</strong> The fake-CLI test covers the restart logic. A live restart was not checked, because real quota was deliberately not spent.</li>
   <li><strong>ACP resume.</strong> bbh does not load ACP sessions, so there is no resume in Emacs yet.</li>
-  <li><strong>The doom-check PATH warning.</strong> <code>make doom-check</code> still reports an environment PATH warning. The log chose not to hide it by changing the env file or the baseline. <span class='pill'>decisions.tsv, 2026-10-17 doom</span></li>
+  <li><strong>The doom-check PATH warning.</strong> <code>make test ONLY=doom</code> still reports an environment PATH warning. The log chose not to hide it by changing the env file or the baseline. <span class='pill'>decisions.tsv, 2026-10-17 doom</span></li>
   <li><strong>Judge trust.</strong> Two labels prove the pipeline, not alignment. The judge needs 25 to 50 labels before its verdicts can stand in for yours.</li>
   <li><strong>Persistent helpers and queued prompts.</strong> The eval contracts list these scenarios as untested.</li>
 </ul>

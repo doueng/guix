@@ -11,14 +11,14 @@ The build needs Clojure CLI and its Java runtime. Verification also needs Node.j
 Run these commands from the repository root:
 
 ```sh
-make pi-sci
-make pi-sci-test
-make stow
+make build NAME=pi-sci
+make test ONLY=pi-sci
+make refresh
 ```
 
 The first build fetches pinned Clojure dependencies and installs locked npm dependencies without lifecycle scripts when missing. The framework adapter integrates with the installed Pi. The structured file/search adapters use checked implementations from the Pi SDK version that package.json pins and their locked helper dependencies.
 
-`make stow` builds SCI before linking the extension. Restart Pi or use `/reload` after changes. Build artifacts stay in the ignored `dist/` directory. The compiler publishes the bundle with an atomic rename.
+`make refresh` builds SCI before linking the extension. Restart Pi or use `/reload` after changes. Build artifacts stay in the ignored `dist/` directory. The compiler publishes the bundle with an atomic rename.
 
 The checked runtimes are the installed Pi binary (modules/engstrand/packages/pi-coding-agent.scm) and the Pi SDK that package.json pins. Tests exercise the actual CLI, terminal UI, and Stow-style symlinks. The SDK tests use deterministic local providers. They do not send prompts, files, or credentials to a service.
 

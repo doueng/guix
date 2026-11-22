@@ -88,7 +88,7 @@ table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border-bottom:1
 <p class="src">/home/engstrand/guix/desktop/configs/hypr/hyprland.lua lines 57-92; /home/engstrand/guix/desktop/configs/keybindings/bindings.edn lines 27-28; /home/engstrand/guix/desktop/build/bbh/src/bbh/super/voice.clj lines 38-80; /home/engstrand/guix/desktop/build/bbh/README.md (Website)</p>
 
 <h2 id="clip">8. Clipboard</h2>
-<p>The kill ring and the Wayland clipboard are shared, including in the <code>bbh-super</code> daemon, which starts without <code>WAYLAND_DISPLAY</code> (T42). Emacs falls back to the <code>wayland-N</code> socket in <code>XDG_RUNTIME_DIR</code>, so evil <kbd>y</kbd> copies to the system clipboard and <kbd>p</kbd> pastes from it. Pasting over a visual selection keeps the clipboard. <code>make clipboard-check</code> tests the round trip.</p>
+<p>The kill ring and the Wayland clipboard are shared, including in the <code>bbh-super</code> daemon, which starts without <code>WAYLAND_DISPLAY</code> (T42). Emacs falls back to the <code>wayland-N</code> socket in <code>XDG_RUNTIME_DIR</code>, so evil <kbd>y</kbd> copies to the system clipboard and <kbd>p</kbd> pastes from it. Pasting over a visual selection keeps the clipboard. <code>bb desktop/build/clipboard/check.bb</code> tests the round trip.</p>
 <p class="src">/home/engstrand/guix/desktop/configs/doom/clipboard.el lines 1-58</p>
 
 <h2 id="reload">9. After a code change (T33)</h2>
@@ -109,7 +109,7 @@ table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border-bottom:1
 <dt><b>Dead Workers after a reboot</b></dt>
 <dd>They show ✖ Needs attention with “Its session ended. Resume it with u …”. Press <kbd>u</kbd> on each one, or run <code>bbh inbox resume T12</code>. They keep their wf run, and the resume tells them which jobs the reboot killed.</dd>
 <dt><b>The jjui preview pane is blank</b></dt>
-<dd>The Herdr server's PATH lacks <code>~/.local/bin</code>, where <code>pierre-diff-ansi</code> lives. <code>herdr-jjui</code> adds it, so check that the tool is installed (<code>make pierre-diff-ansi</code>) and run <code>bb desktop/build/herdr/jjui/preview-check.bb</code> to reproduce the popup's environment.</dd>
+<dd>The Herdr server's PATH lacks <code>~/.local/bin</code>, where <code>pierre-diff-ansi</code> lives. <code>herdr-jjui</code> adds it, so check that the tool is installed (<code>make build NAME=pierre-diff-ansi</code>) and run <code>bb desktop/build/herdr/jjui/preview-check.bb</code> to reproduce the popup's environment.</dd>
 <dt><b>“The Router is not running”</b> or <b>“No buffer … is its Worker running?”</b></dt>
 <dd>Run <code>bbh super start-router</code>. For a Worker, press <kbd>u</kbd> (resume).</dd>
 </dl>

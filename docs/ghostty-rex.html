@@ -222,7 +222,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <ol><li>the focused program's own entries, such as fish's or jjui's;</li>
 <li>the leader.edn rows the client offers, with their Alt+Space keys shown, so you learn them;</li>
 <li>every other M-x command;</li><li>then the desktop's global entries.</li></ol>
-<p>Picking a Rex row runs <code>rex -C ghostty-rex do ACTION</code>. Rex forwards it to the client as a perform request, the client runs the command, and it replies. This is the same remote control that Cmd+Return and E/D/G use for tabs, and that <code>make ghostty-rex-reload</code> uses (<code>mx.client.reload</code>). It is also why two ghostty-rex windows make <code>rex -C ghostty-rex</code> ambiguous.</p>
+<p>Picking a Rex row runs <code>rex -C ghostty-rex do ACTION</code>. Rex forwards it to the client as a perform request, the client runs the command, and it replies. This is the same remote control that Cmd+Return and E/D/G use for tabs, and that <code>rex -C ghostty-rex do mx.client.reload</code> uses (<code>mx.client.reload</code>). It is also why two ghostty-rex windows make <code>rex -C ghostty-rex</code> ambiguous.</p>
 
 <h2 id='guix'>Guix packaging and the MUX switch</h2>
 <div class='table'><table><tr><th>Piece</th><th>Where it comes from</th></tr>
@@ -231,9 +231,9 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td><code>rexg-render</code> 0.1.0</td><td>csrc/rexg-render.c built with gcc against libghostty-vt, in the same file; in Home only when the choice is ghostty-rex</td></tr>
 <tr><td><code>ghostty</code> 1.4.0</td><td>the window, same file</td></tr>
 <tr><td>bb client and sidecar</td><td>not packaged: run from /home/engstrand/guix/desktop/build/ghostty-rex by the launcher</td></tr>
-<tr><td>configs</td><td>desktop/configs/ghostty-rex/, which <code>make stow</code> links to ~/.config/ghostty-rex/</td></tr></table></div>
+<tr><td>configs</td><td>desktop/configs/ghostty-rex/, which <code>make refresh</code> links to ~/.config/ghostty-rex/</td></tr></table></div>
 <p><b>The switch.</b> <code>(define %terminal-mux 'ghostty-rex)</code> in modules/engstrand/config.scm is the choice (herdr, rex or ghostty-rex). feature-familiar-terminal-mux (modules/engstrand/features/terminal-mux.scm) installs the packages above and writes the one word to ~/.config/engstrand/mux. Hyprland's keys.lua, mux-terminal, workspace-or-herdr-tab, the palette, keyleader and bbh's notify all read that word, through desktop/lib/mux.clj or their own copy. A <code>MUX</code> environment variable overrides it for one command.</p>
-<pre><code>make mux MUX=ghostty-rex   # edit config.scm, make home-apply, hyprctl reload
+<pre><code>make mux MUX=ghostty-rex   # edit config.scm, make home, hyprctl reload
 make mux MUX=herdr         # back to Herdr
 guix home roll-back        # also brings back the previous word</code></pre>
 <p>Rex sessions survive a switch, because Rex keeps them and the rexmux and ghostty-rex windows both show <code>main</code>. Herdr's sessions are its own.</p>
@@ -263,19 +263,19 @@ guix home roll-back        # also brings back the previous word</code></pre>
 <div class='table'><table><tr><th>You see</th><th>What it means and what to do</th></tr>
 <tr><td>Red status line, <code>local not connected, reconnecting</code></td><td>The control connection to the Rex server dropped: the server stopped, crashed, or was replaced by a newer build. The client retries every 0.25 to 4 s and starts the server itself, then reattaches to the same session. If it stays red, run <code>rex server status</code> and read the log it names. A stuck socket is fixed by <code>rex server start</code>.</td></tr>
 <tr><td><code>connecting to local</code> that never ends</td><td>The first connection hasn't succeeded. Same checks. Also check that <code>rex</code> is on Hyprland's PATH, the Guix Home profile.</td></tr>
-<tr><td>Notification: rexg-render is missing</td><td>Run <code>make home-apply</code> with %terminal-mux set to ghostty-rex, or <code>make ghostty-rex</code> for a checkout build.</td></tr>
+<tr><td>Notification: rexg-render is missing</td><td>Run <code>make home</code> with %terminal-mux set to ghostty-rex, or <code>make build NAME=ghostty-rex</code> for a checkout build.</td></tr>
 <tr><td>A tab shows bash, or lacks its program</td><td>Revival runs only for the startup session, when a window opens. Close the window and press Cmd+B. A reload, or a window opened with <code>--session</code>, skips it.</td></tr>
-<tr><td>An edit doesn't show</td><td>bb code, config.edn and leader.edn: <code>make ghostty-rex-reload</code> (M-x <i>Client: reload</i>). C code: <code>make home-apply</code>, then reload. The Ghostty config: Ctrl+Shift+Alt+R in the window.</td></tr>
+<tr><td>An edit doesn't show</td><td>bb code, config.edn and leader.edn: <code>rex -C ghostty-rex do mx.client.reload</code> (M-x <i>Client: reload</i>). C code: <code>make home</code>, then reload. The Ghostty config: Ctrl+Shift+Alt+R in the window.</td></tr>
 <tr><td>Cmd+E, D or G or the launcher act oddly</td><td><code>rex client list</code>. Two <code>ghostty-rex</code> clients make <code>rex -C</code> ambiguous, so close one window.</td></tr>
-<tr><td>Window frozen</td><td><code>make ghostty-rex-reload</code> first. If that fails, run <code>pkill -f 'ghostty-rex/bb.edn attach'</code> (SIGTERM ends bb and rexg-render cleanly), then Cmd+Return. Your panes stay in Rex.</td></tr></table></div>
+<tr><td>Window frozen</td><td><code>rex -C ghostty-rex do mx.client.reload</code> first. If that fails, run <code>pkill -f 'ghostty-rex/bb.edn attach'</code> (SIGTERM ends bb and rexg-render cleanly), then Cmd+Return. Your panes stay in Rex.</td></tr></table></div>
 <h3>Logs</h3>
 <ul>
 <li><b>Client:</b> it logs only when <code>REXG_LOG</code> is set, so start a window from a terminal: <code>REXG_LOG=/tmp/rexg.log /home/engstrand/guix/desktop/bin/ghostty-rex</code>. The log has keys, every request (<code>out</code>), <code>lost</code> with the reason, <code>rex server start</code> results, renderer lines and <code>quit</code> with its reason.</li>
 <li><b>Server:</b> one log per server under /home/engstrand/.local/state/rex/servers/, and <code>rex server status</code> prints the current one. Look for <code>Rex server ready</code> and <code>stopped</code>.</li>
 <li><b>Bottom line:</b> errors from Rex requests and pane streams (<code>stream closed: …</code>, <code>pane ID: …</code>) appear on the echo line.</li>
 </ul>
-<h3>make switch and make home-apply</h3>
-<p><code>make switch</code> reconfigures the system and reloads kanata. It does not touch the Rex server, the window or Guix Home. <code>make home-apply</code> installs new <code>rex</code>, <code>rexg-render</code> and Ghostty builds, but running processes keep their old binaries. A new rexg-render takes effect at the next reload. A new Ghostty takes effect in a new window. A new Rex server takes effect only after the old server stops. That is when the red <code>not connected</code> line appears briefly. The client starts the new server, Rex restores the sessions, and step 9 above revives the startup tabs. Rex restores a session after any restart, clean or not, including a reboot.</p>
+<h3>make switch and make home</h3>
+<p><code>make switch</code> reconfigures the system and reloads kanata. It does not touch the Rex server, the window or Guix Home. <code>make home</code> installs new <code>rex</code>, <code>rexg-render</code> and Ghostty builds, but running processes keep their old binaries. A new rexg-render takes effect at the next reload. A new Ghostty takes effect in a new window. A new Rex server takes effect only after the old server stops. That is when the red <code>not connected</code> line appears briefly. The client starts the new server, Rex restores the sessions, and step 9 above revives the startup tabs. Rex restores a session after any restart, clean or not, including a reboot.</p>
 
 <h2 id='more'>Other Rex docs</h2>
 <ul>

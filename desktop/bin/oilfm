@@ -2,7 +2,7 @@
 (require '[babashka.fs :as fs] '[babashka.process :as p])
 (let [bin (str (fs/home) "/projects/oilfm/target/release/oilfm")]
   (when-not (fs/executable? bin)
-    (let [msg (str "oilfm is not built (" bin " is missing): run make oilfm")]
+    (let [msg (str "oilfm is not built (" bin " is missing): run make build NAME=oilfm")]
       (binding [*out* *err*] (println msg))
       (try (p/shell {:continue true :out :string :err :string} "hyprctl" "notify" "3" "10000" "0" msg)
            (catch Exception _))

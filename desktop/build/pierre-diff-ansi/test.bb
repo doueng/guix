@@ -25,6 +25,6 @@ index 1111111..2222222 100644
     (p/shell {:dir here :out :string :err :string}
              "bun" "build" "browser.ts" "--target=browser" "--format=iife" "--minify" (str "--outfile=" tmp))
     (when-not (= (slurp tmp) (slurp (str here "/../bbh/src/bbh/web/highlights.js")))
-      (fail "desktop/build/bbh/src/bbh/web/highlights.js is stale; run make bbh-web-highlights"))
+      (fail "desktop/build/bbh/src/bbh/web/highlights.js is stale; run make build NAME=bbh-web-highlights"))
     (finally (fs/delete-if-exists tmp))))
 (println "pierre-diff-ansi: highlighted diff and bundle ok")

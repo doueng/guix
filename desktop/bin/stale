@@ -14,9 +14,12 @@
          '[clojure.string :as str])
 (def here (str (fs/normalize (fs/path (fs/parent (fs/real-path *file*)) ".." ".."))))
 (classpath/add-classpath (str here "/desktop/lib"))
-;; The checkout the running processes and the last switch came from; a Worker
-;; workspace sets STALE_REPO=~/guix to look at the live one.
-(def repo (or (System/getenv "STALE_REPO") here))
+;; The checkout Home links to, which the running processes and the last switch
+;; came from, even when this script runs from a Worker's workspace.
+(def repo (or (System/getenv "STALE_REPO")
+              (some-> (try (fs/real-path (fs/path (System/getenv "HOME") ".local/bin/bbh")) (catch Exception _ nil))
+                      fs/parent fs/parent fs/parent str)
+              here))
 (require '[stale] '[stale.collect :as collect] '[session])
 
 (defn run [argv & [opts]]
@@ -76,7 +79,8 @@
     :bin (run (into [(str repo "/desktop/bin/" (first args))] (rest args)) {:extra-env env})
     :sh (run (vec args) {:extra-env env})
     :doom (run (into [(str (System/getenv "HOME") "/.config/emacs/bin/doom")] args) {:dir (System/getenv "HOME")})
-    :respawn (respawn! (first args) (second args))))
+    :respawn (respawn! (first args) (second args))
+    :stow (run ["bb" (str repo "/desktop/stow-home")])))
 
 (defn refresh! []
   (let [{:keys [auto]} (stale/summary (stale/assess (collect/facts ctx)))]

@@ -73,7 +73,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td><code>:chord</code></td><td>The Chrome or vimium-cljs shortcut, sent to the focused Chrome</td><td>Vomnibar here or in a new tab, tab selector, side panel tab list (Alt+E), reopen closed tab, find, print, zoom in, out and reset, developer tools, task manager, new tab and window, address bar</td><td>Chrome only, since it needs focus</td></tr>
 <tr><td><code>:type</code></td><td>Vimium keys typed into the page</td><td>Link hints, open a link in a new tab, scroll, history back and forward, copy the URL, and the rest of Vimium's normal mode</td><td>Chrome only</td></tr>
 </table></div>
-<p>Incognito stays a desktop row (Cmd+Space o n). <code>make chrome-palette-check</code> runs a headed Chrome on the hidden test display with the helper and a hub of its own, chooses Passwords, Extensions, Pin and Mute as the launcher does, and checks the page or the tab.</p>
+<p>Incognito stays a desktop row (Cmd+Space o n). <code>node desktop/build/keybindings/chrome-palette-e2e.mjs</code> runs a headed Chrome on the hidden test display with the helper and a hub of its own, chooses Passwords, Extensions, Pin and Mute as the launcher does, and checks the page or the tab.</p>
 <p>Each row shows its keys. In Emacs, Emacs's own M-x list stays the list (it already caches thousands of commands), and the launcher appends the terminal and global rows to it, so one search still finds all three.</p>
 
 <h3>Old Cmd+Space sequences</h3>
@@ -91,7 +91,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <ul>
 <li><code>test-display</code> now puts its own <code>dbus-run-session</code> on the display's PATH: a bus with every session service except the portals. <code>test-display check</code> proves a test's bus cannot start the document portal.</li>
 <li><code>chrome-unified</code> recovers a session that is already broken. With no flatpak app running, it restarts the stale portal. With Chrome running, it hands off without the portal. It sends a notification when Chrome fails to start.</li>
-<li><code>make chrome-launch-check</code> runs <code>palette run desktop:leader:o n</code> with Hyprland's launcher environment on the hidden display, with Chrome closed and then with Chrome running. Each case must open an incognito window, and in the running case the extra process must exit after the hand-off.</li>
+<li><code>bb desktop/build/keybindings/chrome-launch-e2e.bb</code> runs <code>palette run desktop:leader:o n</code> with Hyprland's launcher environment on the hidden display, with Chrome closed and then with Chrome running. Each case must open an incognito window, and in the running case the extra process must exit after the hand-off.</li>
 </ul>
 <p>Nothing else was dropped. Every old <code>leader.edn</code> sequence and every <code>bindings.edn</code> entry still has a launcher row; three entries were only relabelled (Command palette is now Launcher, Herdr leader is now Local prefix, Editor terminal is now bbh). The only Hyprland bind removed was the old Alt+Space jump to Herdr, which the local prefix replaces. <code>custom-launcher</code>'s other apps (Ghostty, Chrome, oilfm) still sit behind the <code>.</code> row, and Ghostty and Chrome also have their own rows.</p>
 
@@ -164,7 +164,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <li><code>make lint</code> runs the bb keybinding tests: grammar, generated Alt+Space routing and Chrome submaps, launcher entries and shortcut ranking, Herdr tab actions, Rex tab commands.</li>
 <li>Ghostty-plus-Rex live test on the hidden test display: Alt+Space t n opens a tab; the launcher opens in a Dusk on that display, filters, runs a local command (new tab) and a global one (open Ghostty). Every command Rex had under Ctrl+b runs from its Alt+Space keys, and Ctrl+b reaches fish in a pane. rexmux's e2e and Bombadil specs press the same keys, and <code>ctrlBIsNoPrefix</code> checks that Ctrl+b opens no which-key.</li>
 <li><code>palette-test.clj</code>: the launcher lists Open Chrome incognito with <code>Cmd+Space o n</code> in every context, choosing it runs <code>chrome-unified --incognito</code>, and Chrome's <code>Alt+Space o n</code> sends Ctrl+Shift+N. Live on the hidden test display, that argv opened one incognito Chrome window, and vimium-cljs keys typed with wtype worked there: <code>j</code>, <code>G</code>, <code>gg</code> scrolled and <code>f</code> showed hints.</li>
-<li><code>make hypr-nested-check</code>: Super+Space runs the launcher, Alt+Space routes by class.</li>
+<li><code>bb desktop/build/keybindings/hypr-nested.bb</code>: Super+Space runs the launcher, Alt+Space routes by class.</li>
 </ul>
 
 </main></body></html>

@@ -78,7 +78,7 @@
                                             fname (str alias "/" (clojure.core/name name))
                                             dispatch (fn [opts]
                                                        (when-not (string? operation)
-                                                         (throw (ex-info "SCI capability bindings are incompatible; run make pi-sci and /reload" {})))
+                                                         (throw (ex-info "SCI capability bindings are incompatible; run make build NAME=pi-sci and /reload" {})))
                                                        (let [opts (rename-aliases fname aliases opts)
                                                              _ (when keys (check-keys fname keys required opts))
                                                              result (.catch (invoke (assoc opts :operation operation))

@@ -34,7 +34,7 @@ Before proposing a check or operation, search for an existing one. An existing c
 Pick the strongest mechanism that works, per `~/.pi/agent/skills/pstack/principle-encode-lessons-in-structure/SKILL.md`. From strongest to weakest:
 
 1. Configuration or types that make the mistake impossible.
-2. A check wired into `make check`, a test, or the tool itself.
+2. A check wired into `make build`, a test, or the tool itself.
 3. A semantic codemode operation, repo script or Make target.
 4. A clearer error message, hint or tool description.
 5. A pointer in a skill or `AGENTS.md`.
@@ -43,7 +43,7 @@ Write prose guidance only for judgement calls.
 
 Fixes land in these places:
 
-- SCI codemode operations, errors and hints are in `~/guix/desktop/build/pi-sci/` (see its README). Verify with `make pi-sci-test`.
+- SCI codemode operations, errors and hints are in `~/guix/desktop/build/pi-sci/` (see its README). Verify with `make test ONLY=pi-sci`.
 - Global agent guidance is `~/guix/desktop/pi/agent/AGENTS.md`. Pi extensions are in `~/guix/desktop/pi/agent/extensions/`.
 - Repository guidance is the repo's `AGENTS.md` and `.agents/skills/`.
 - Guix, Pi and the vendored `pstack` skills are upstream. Propose those changes. Do not edit vendored files.

@@ -41,6 +41,9 @@
    ["a system service on a store path gone from the generation restarts when sudo allows it"
     (let [r (row (with-service base :system "tailscaled" :exe old-bb) "system:tailscaled")]
       (and (stale? r) (= [:herd :system "tailscaled"] (get-in r [:fix :run]))))]
+   ["a stale service shows the version the current generation holds"
+    (let [r (row (with-service base :system "tailscaled" :exe old-bb) "system:tailscaled")]
+      (and (= "babashka-1.0" (:running r)) (= "babashka-1.1" (:current r))))]
    ["one sudo would ask a password for is left to you"
     (let [r (row (with-service base :system "guix-daemon" :exe old-bb) "system:guix-daemon")]
       (and (stale? r) (not (auto? r))))]
@@ -103,6 +106,9 @@
   (put! (str fake "/proc/" pid "/stat") (str pid " (x y) S " (str/join " " (concat (repeat 18 "0") [ticks "0"]))))
   (fs/create-sym-link (str fake "/proc/" pid "/exe") exe))
 (put! (str repo "/desktop/bin/ext-reload") "")
+(put! (str repo "/desktop/configs/hypr/hyprland.lua") "")
+(put! (str repo "/desktop/configs/hypr/README.md") "")
+(put! (str fake "/home/me/.config/hypr/old.lua") "")
 (put! (str repo "/desktop/bin/md-view") "")
 (fs/set-last-modified-time (str repo "/desktop/bin/md-view") (java.nio.file.attribute.FileTime/fromMillis 1000500))
 (proc! 41 ["bb" "/repo/desktop/bin/ext-reload" "serve"] 100 (str new-bb "/bin/bb"))
@@ -135,6 +141,9 @@
     (not (stale? (crow "home:md-view")))]
    ["kernel threads, with no command line, are skipped"
     (not-any? #(= 44 (:pid %)) (:procs facts))]
+   ["a repo config with no link in Home is linked by refresh; stow's README is not missed"
+    (and (= ["desktop/configs/hypr/hyprland.lua"] (filter #(str/includes? % "hypr") (:missing (:links facts))))
+         (= [:stow] (get-in (crow "links") [:fix :run])))]
    ["a stamp written by refresh is read back"
     (do (collect/stamp! ctx "ext:vim") (contains? (collect/stamps ctx) "ext:vim"))]])
 

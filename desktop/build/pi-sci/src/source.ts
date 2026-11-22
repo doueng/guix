@@ -33,7 +33,7 @@ export function compileSciSource(
 	try {
 		bundle = readFileSync(new URL("../dist/sci.js", import.meta.url), "utf8");
 	} catch (error) {
-		throw new Error("SCI bundle could not be loaded. Run make pi-sci, then reload Pi.", {
+		throw new Error("SCI bundle could not be loaded. Run make build NAME=pi-sci, then reload Pi.", {
 			cause: error,
 		});
 	}

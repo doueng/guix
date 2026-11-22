@@ -5,7 +5,7 @@ description: Model-check the bbh super Worker, ask and reply lifecycles, its fin
 
 # Verify the bbh state machines
 
-`cd desktop/build/bbh && bb verify:tla` (or `make bbh-tla-check`) runs TLC on every config in `verify/tla/`, about 30 seconds. `bb verify:tla Super.asks.cfg` runs one. It uses `tlc2` from PATH, else `guix shell tla2tools`. A config `M.NAME.cfg` checks `M.tla`. When a rule breaks, the runner prints its shortest trace (each state lists only the variables that changed), drops the rule and reruns the rest, so each broken rule gets its own trace. Exit 1 means a rule broke.
+`cd desktop/build/bbh && bb verify:tla` (or `make test ONLY=bbh-state-machines`) runs TLC on every config in `verify/tla/`, about 30 seconds. `bb verify:tla Super.asks.cfg` runs one. It uses `tlc2` from PATH, else `guix shell tla2tools`. A config `M.NAME.cfg` checks `M.tla`. When a rule breaks, the runner prints its shortest trace (each state lists only the variables that changed), drops the rule and reruns the rest, so each broken rule gets its own trace. Exit 1 means a rule broke.
 
 ## What is verified
 

@@ -102,6 +102,32 @@
             :src (newest (:repo ctx) [(str rel "/src/**") (str rel "/ext/manifest.json") (str rel "/shadow-cljs.edn")])
             :built-ms (last (sort (keep mtime (fs/glob (str d "/ext") "**.js"))))}))))
 
+(def stow-ignored
+  "Files GNU Stow skips by default, so they never get a link."
+  #"(^|/)(\.git|\.gitignore|node_modules)(/|$)|~$|(^|/)\.?#|^(README|LICENSE|COPYING)[^/]*$")
+
+(def stowed
+  "[repo dir, Home dir] pairs desktop/stow-home links file by file."
+  [["desktop/bin" ".local/bin"] ["desktop/pi/agent" ".pi/agent"] ["desktop/configs/ideavim" ""]])
+
+(defn links
+  "Repo files desktop/stow-home would link that have no link in Home yet."
+  [ctx]
+  (let [repo (:repo ctx)
+        configs (fs/path repo "desktop/configs")
+        apps (for [d (when (fs/directory? configs) (fs/list-dir configs))
+                   :let [app (str (fs/file-name d))]
+                   :when (and (fs/directory? d) (not= app "ideavim"))]
+               [(str "desktop/configs/" app) (str ".config/" app)])]
+    {:missing (vec (sort (for [[src dst] (concat stowed apps)
+                               :let [dir (fs/path repo src)]
+                               :when (fs/directory? dir)
+                               f (fs/glob dir "**" {:hidden true})
+                               :let [rel (str (fs/relativize dir f))]
+                               :when (and (fs/regular-file? f) (not (re-find stow-ignored rel))
+                                          (not (fs/exists? (path ctx (:home ctx) dst rel))))]
+                           (str src "/" rel))))}))
+
 (defn stamps [ctx]
   (let [dir (:stamps ctx)]
     (into {} (for [f (when (and dir (fs/exists? dir)) (fs/list-dir dir))
@@ -142,5 +168,6 @@
                              :when hit]
                          [id hit]))
      :stamps (stamps ctx)
+     :links (links ctx)
      :doom (doom ctx)
      :extensions (extensions ctx)}))

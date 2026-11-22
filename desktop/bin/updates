@@ -607,26 +607,26 @@ that fails and go on, then throw naming the failures."
     (try (latest-bump! {:name name :form form :current current :latest latest})
          (catch Exception e (spit latest-file text) (throw e)))))
 
-(def rebuild-steps ["make prebuild" "make pull" "make home-apply" "make switch" "make doom-check"])
+(def rebuild-steps ["make prebuild" "make pull" "make home" "make switch" "make test ONLY=doom"])
 
 (def sources
   {"channel" {:items channel-items :refresh channel-refresh :apply! channel-apply!
-              :then #{"make prebuild" "make pull" "make home-apply" "make switch"}}
+              :then #{"make prebuild" "make pull" "make home" "make switch"}}
    "guix" {:items guix-items :refresh guix-refresh :apply! guix-apply!
-           :then #{"make prebuild" "make pull" "make home-apply" "make switch"}}
+           :then #{"make prebuild" "make pull" "make home" "make switch"}}
    "github" {:items github-items :refresh github-refresh :apply! github-apply!
-             :then #{"make prebuild" "make home-apply" "make switch"}}
+             :then #{"make prebuild" "make home" "make switch"}}
    "upstream" {:items upstream-items :refresh upstream-refresh :apply! upstream-apply!
-               :then #{"make prebuild" "make home-apply"}}
+               :then #{"make prebuild" "make home"}}
    "skills" {:items skills-items :refresh skills-refresh :apply! skills-apply!}
    "flatpak" {:items flatpak-items :refresh flatpak-refresh :apply! flatpak-apply!}
-   "doom" {:items doom-items :refresh doom-refresh :apply! doom-apply! :then #{"make doom-check"}}
+   "doom" {:items doom-items :refresh doom-refresh :apply! doom-apply! :then #{"make test ONLY=doom"}}
    "lazy" {:items lazy-items :refresh lazy-refresh :apply! lazy-apply!}
    "pi" {:items pi-items :refresh pi-refresh :apply! pi-apply!}
    "release" {:items release-items :refresh release-refresh :apply! release-apply! :opt-in? true
-               :then #{"make prebuild" "make home-apply" "make switch"}}
+               :then #{"make prebuild" "make home" "make switch"}}
    "latest" {:items latest-items :refresh latest-refresh :apply! latest-apply!
-              :then #{"make prebuild" "make home-apply" "make switch"}}
+              :then #{"make prebuild" "make home" "make switch"}}
    "hand" {:items hand-items :refresh hand-refresh :apply! hand-apply!}})
 
 (def source-order ["channel" "guix" "github" "latest" "hand" "release" "upstream" "skills"
@@ -792,10 +792,10 @@ old the rest of the cache is, in one line."
         :skipped)
     (do (println "Building the new tree on the builder (make prebuild)...")
         (try (run! "make" "prebuild")
-             (println "Checking that the laptop only downloads (make builder-check)...")
-             (try (run! "make" "builder-check") :ok
+             (println "Checking that the laptop only downloads (make builder)...")
+             (try (run! "make" "builder") :ok
                   (catch Exception e
-                    (warn "builder-check failed: " (failure e)
+                    (warn "make builder failed: " (failure e)
                           "; the laptop would build what is listed above, so don't pull or switch yet")
                     :failed))
              (catch Exception e
@@ -831,7 +831,7 @@ old the rest of the cache is, in one line."
         (when (seq steps)
           (println "Review the repository diff with jj diff, then run:")
           (doseq [step rebuild-steps :when (and (steps step) (not= step "make prebuild"))]
-            (println (str "  " step (when (and (= prebuild :skipped) (#{"make pull" "make home-apply" "make switch"} step))
+            (println (str "  " step (when (and (= prebuild :skipped) (#{"make pull" "make home" "make switch"} step))
                                       " JOBS=1")))))
         (seq (cond-> (map :source failed) (= prebuild :failed) (conj "prebuild")))))))
 

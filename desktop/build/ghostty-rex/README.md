@@ -27,9 +27,9 @@ status line and an echo line. Ghostty's own tabs and splits are not used.
   `rexg-render` builds it on the `libghostty-vt` package, both in
   modules/engstrand/packages/ghostty.scm.
 
-Edit any `.clj` or config.edn and run `make ghostty-rex-reload` (M-x Client:
+Edit any `.clj` or config.edn and run `rex -C ghostty-rex do mx.client.reload` (M-x Client:
 reload): the client starts anew on the same session in the same window, with
-no build step. `make ghostty-rex` compiles rexg-render into `target/` in under
+no build step. `make build NAME=ghostty-rex` compiles rexg-render into `target/` in under
 a second for work on the C half; `REXG_RENDER=target/rexg-render` makes the
 client use it. docs/ghostty-rex-dev.html covers the whole loop, logs and
 troubleshooting.
@@ -42,7 +42,7 @@ troubleshooting.
     make mux MUX=rex           # or to rexmux
 
 `make mux` edits the one line `(define %terminal-mux 'herdr)` in
-modules/engstrand/config.scm and runs `make home-apply`, which writes the word
+modules/engstrand/config.scm and runs `make home`, which writes the word
 to `~/.config/engstrand/mux`. Hyprland, `mux-terminal`, `workspace-or-herdr-tab`,
 keyleader and bbh's notifications read it (desktop/lib/mux.clj). Herdr, rexmux
 and the Rex server stay installed whatever the choice. `guix home roll-back`
@@ -61,8 +61,8 @@ reaches the client, and keeps copy, paste and font size.
 
 ## Tests
 
-- `make ghostty-rex-test`: unit tests of keys, model, hints and screen (lint runs them).
-- `make ghostty-rex-verify` (`test/rexg/verify.clj`, about 5 minutes): a real
+- `make test ONLY=ghostty-rex`: unit tests of keys, model, hints and screen (lint runs them).
+- `make verify ONLY=ghostty-rex` (`test/rexg/verify.clj`, about 5 minutes): a real
   Ghostty on the hidden test display against a throwaway Rex server, through
   the parity list in docs/rex-parity.html: startup tabs and their programs,
   `rex -C ghostty-rex do mx.tab.select_3` (Super+D), tiny fingers, mouse drag
@@ -79,6 +79,6 @@ reaches the client, and keeps copy, paste and font size.
   judges the screen after a quiet gap, not at a pane-output frame. The
   client runs with Hyprland's PATH, which lacks ~/.local/bin, as the real
   window does.
-- `make rexmux-tla` model-checks the stream, link and agent rules this client
+- `make verify ONLY=rexmux` model-checks the stream, link and agent rules this client
   shares with rexmux. The sidecar runs in-process here, so the model's Crash
   and Restart never happen, and a sidecar exception still answers its request.

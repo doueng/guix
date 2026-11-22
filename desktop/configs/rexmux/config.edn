@@ -1,4 +1,4 @@
-;; rexmux, the Rex client (desktop/build/rexmux). make stow links this file to
+;; rexmux, the Rex client (desktop/build/rexmux). make refresh links this file to
 ;; ~/.config/rexmux/config.edn; rexmux reads it at start, the sidecar on M-x
 ;; Help: reload.
 {;; Rex servers, the first shown at start. A nil address is the local server,

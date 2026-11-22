@@ -12,4 +12,4 @@ Stow links this folder into `~/.pi/agent/skills/`, where bbh's `init.clj` and Pi
 
 1. Refresh the checkout with the librarian skill, and record the new commit and version here.
 2. Copy the four upstream paths again. Then put the bbh sentence back into `references/adapter.md`.
-3. Run `make skill-diet-check`, then a live calibration: put the adapter in an eval folder that holds `sk/before/<skill>/` and run `node scripts/eval.mjs calibrate <dir>`.
+3. Run `make test ONLY=skill-diet`, then a live calibration: put the adapter in an eval folder that holds `sk/before/<skill>/` and run `node scripts/eval.mjs calibrate <dir>`.

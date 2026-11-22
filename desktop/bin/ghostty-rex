@@ -6,7 +6,7 @@
 ;;   ghostty-rex attach ARGS  the client in this terminal (--session S).
 ;; The client is bb run from this checkout, so an edit takes effect on the
 ;; next start. rexg-render, its C half, is REXG_RENDER, else the Guix
-;; package's on PATH, else make ghostty-rex's build in the checkout.
+;; package's on PATH, else the target/ build of make build NAME=ghostty-rex in the checkout.
 (require '[babashka.fs :as fs] '[babashka.process :as p])
 
 (def here (fs/parent (fs/real-path *file*)))
@@ -24,7 +24,7 @@
   (System/exit 1))
 
 (if (= "attach" (first *command-line-args*))
-  (let [r (or (render) (fail! "ghostty-rex: rexg-render is missing: make ghostty-rex, or make home-apply with MUX=ghostty-rex"))]
+  (let [r (or (render) (fail! "ghostty-rex: rexg-render is missing: make build NAME=ghostty-rex, or make home with MUX=ghostty-rex"))]
     (apply p/exec {:extra-env {"REXG_RENDER" r}}
            (or (some-> (fs/which "bb") str) "bb") "--config" (str build "/bb.edn") "attach" (rest *command-line-args*)))
   (let [conf (str (fs/path (or (System/getenv "XDG_CONFIG_HOME") (str (fs/home) "/.config")) "ghostty-rex" "ghostty"))]

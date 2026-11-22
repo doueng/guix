@@ -1,5 +1,5 @@
 #!/usr/bin/env bb
-;; make ghostty-rex: compile rexg-render into target/ against the repo's
+;; make build NAME=ghostty-rex: compile rexg-render into target/ against the repo's
 ;; libghostty-vt package, for working on the C half. The installed client
 ;; uses the rexg-render Guix package instead (modules/engstrand/packages/ghostty.scm).
 (require '[babashka.fs :as fs] '[babashka.process :as p])

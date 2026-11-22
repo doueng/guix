@@ -9,7 +9,7 @@
                         "CARGO_NET_GIT_FETCH_WITH_CLI" "true"}}
       in-profile #(apply p/shell opts "guix" "shell" "-p" profile "--" %&)]
   (when-not (fs/readable? (str profile "/etc/profile"))
-    (binding [*out* *err*] (println "dusk: build profile missing; run make dusk first"))
+    (binding [*out* *err*] (println "dusk: build profile missing; run make build NAME=dusk first"))
     (System/exit 1))
   (in-profile "bb" "--classpath" (str here "/runtime:" here "/../../configs/dusk") (str here "/runtime_test.bb"))
   (apply in-profile "cargo" "test" "--release" "--locked" "--features" "ui-tests" *command-line-args*))

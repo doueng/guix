@@ -1,4 +1,4 @@
-;; The ghostty-rex Rex client (desktop/build/ghostty-rex). make stow links
+;; The ghostty-rex Rex client (desktop/build/ghostty-rex). make refresh links
 ;; this file to ~/.config/ghostty-rex/config.edn; the client reads it at start,
 ;; the sidecar on M-x Help: reload. The same keys as rexmux's config.edn.
 {;; Rex servers, the first shown at start. A nil address is the local server,

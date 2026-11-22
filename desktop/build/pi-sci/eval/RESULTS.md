@@ -92,7 +92,7 @@ Ordered by expected payoff per hour.
 8. **Make `fs/read-json` return the parsed value directly.** Its result and `all-settled` both use `:value`, and agents unwrapped the wrong one. This changes the API that existing scripts use.
 9. **Teach `defsession` in the tool description.** Only the `sci` profile, through `AGENTS.md`, ever saved a helper. Measure helper reuse on `monthly-reports` with the hint in the description.
 10. **Name `fs/write` and `tools.write` in hints.** Agents tried `fs/write` in 7 trials. Point it at `tools/write`.
-11. **Fix the stale `verify.sh` line.** It runs `tests/pi-codemode.test.ts`, which an earlier commit deleted, so `make pi-sci-test` always fails at the end.
+11. **Fix the stale `verify.sh` line.** It runs `tests/pi-codemode.test.ts`, which an earlier commit deleted, so `make test ONLY=pi-sci` always fails at the end.
 12. **Steady the process-signal test.** `deadline escalates past ignored SIGTERM` failed once at a load average of 7.5 and passed 3 of 3 runs alone.
 13. **Run Terminal-Bench** once Docker and Harbor are installed, to test SCI on tasks outside this repository.
 14. **Clear old runs.** `~/.cache/pi-sci-eval/runs` holds 6.7 GB, including a 1.69 GB event file from the crashed scale run and 38 MB per 500k-line log workspace.

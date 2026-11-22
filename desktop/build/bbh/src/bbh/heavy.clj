@@ -7,7 +7,7 @@
 
   A command that runs inside a held slot gets BBH_HEAVY_SLOT in its
   environment, so a heavy command it starts, such as bb test under make
-  verify, runs at once instead of waiting for its own parent."
+  test, runs at once instead of waiting for its own parent."
   (:require [babashka.fs :as fs]
             [bbh.sysenv :as sysenv]
             [clojure.string :as str]))
@@ -29,7 +29,8 @@
    (str "(?x)"
         "(^|[\\s;&|(])("
         "bb\\s+(test(:[\\w-]+)?|verify:tla|eval:(replay|fork|tools|contracts|review|judge|graders|agreement))"
-        "|make\\s+(\\S+\\s+)*?(verify|check|build|dry-run|home-build|repro-build|switch|home-apply|doom-check|bbh-tla-check|pi-sci-test|dusk-test|dusk-verify|keybindings-check|hypr-nested-check)"
+        "|make\\s+(\\S+\\s+)*?(test|verify|build|switch|home|mux)"
+        "|(bb\\s+)?desktop/build/(keybindings/(check|kanata-check|hypr-nested)|doom/doctor|dusk/(test|verify))\\.bb"
         "|guix\\s+(build|system|home|pull|package|time-machine)"
         "|doom\\s+(sync|doctor|build|upgrade)"
         "|tlc|tla2tools|chrome|chromium|com\\.google\\.Chrome|playwright"

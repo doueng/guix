@@ -50,7 +50,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td>Sidecar: M-x, leader keys, agents, notifications</td><td><code>desktop/build/rexmux/sidecar/rexmux/</code></td><td>reload</td></tr>
 <tr><td>Client config: servers, shell, startup tabs</td><td><code>desktop/configs/ghostty-rex/config.edn</code></td><td>reload</td></tr>
 <tr><td>Ghostty settings for this window</td><td><code>desktop/configs/ghostty-rex/ghostty</code></td><td>Ctrl+Shift+Alt+R in the window</td></tr>
-<tr><td>rexg-render, the C half</td><td><code>desktop/build/ghostty-rex/csrc/rexg-render.c</code></td><td><code>make home-apply</code>, then reload</td></tr>
+<tr><td>rexg-render, the C half</td><td><code>desktop/build/ghostty-rex/csrc/rexg-render.c</code></td><td><code>make home</code>, then reload</td></tr>
 <tr><td>Launcher</td><td><code>desktop/bin/ghostty-rex</code></td><td>next window</td></tr>
 <tr><td>Rex server</td><td>Guix package <code>rex</code>, modules/engstrand/packages/rex.scm</td><td>a server restart, which the window rides out</td></tr>
 </table></div>
@@ -58,13 +58,13 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 
 <h2 id=loop>Edit and reload</h2>
 <div class='card good'><b>Quick reload (T210).</b> After editing bb code or config.edn, run
-<pre><code>make ghostty-rex-reload</code></pre>
+<pre><code>rex -C ghostty-rex do mx.client.reload</code></pre>
 or choose <b>Client: reload its bb code and config</b> in M-x (Alt+Space Space). The client closes its Rex connection and replaces itself with a fresh <code>bb attach</code> on the same session in the same window, in about a second. Under the hood it runs <code>rex -C ghostty-rex do mx.client.reload</code>.</div>
 <h3>The C renderer</h3>
 <ol>
-<li><code>make ghostty-rex</code> compiles <code>target/rexg-render</code> in under a second. Unit tests and <code>make ghostty-rex-verify</code> use that build, and verify rebuilds it when <code>csrc/</code> is newer.</li>
+<li><code>make build NAME=ghostty-rex</code> compiles <code>target/rexg-render</code> in under a second. Unit tests and <code>make verify ONLY=ghostty-rex</code> use that build, and verify rebuilds it when <code>csrc/</code> is newer.</li>
 <li>The window uses the Guix <code>rexg-render</code> on PATH first. To try a checkout build, start a window from a terminal with <code>REXG_RENDER=/home/engstrand/guix/desktop/build/ghostty-rex/target/rexg-render /home/engstrand/guix/desktop/bin/ghostty-rex</code></li>
-<li>To install it for every window, run <code>make home-apply</code> (or the full <code>make switch</code>), then <code>make ghostty-rex-reload</code>.</li>
+<li>To install it for every window, run <code>make home</code> (or the full <code>make switch</code>), then <code>rex -C ghostty-rex do mx.client.reload</code>.</li>
 </ol>
 <h3>Keys</h3>
 <p>Alt+Space is Rex's only prefix. Ctrl+b is no prefix in Rex, so it reaches the program in the pane: fish and readline move back a character, and Emacs gets C-b. Every prefixed key is a row of <code>desktop/configs/keybindings/leader.edn</code>: rows with <code>:herdr</code> or <code>:nav</code> map to Rex commands in <code>rexmux.registry/herdr-&gt;rex</code>, and Rex-only rows name the command with <code>:rex</code>. <code>rexmux.commands</code> holds no prefixed keys, only Ctrl+1..9, Ctrl+h/j/k/l and Ctrl+Shift+V. The Cmd+Space launcher reads the same rows, so it shows each command's Alt+Space keys. A leader.edn edit takes effect after a reload. The whole map is in /home/engstrand/guix/docs/keybindings.html</p>
@@ -85,10 +85,10 @@ or choose <b>Client: reload its bb code and config</b> in M-x (Alt+Space Space).
 <h2 id=tests>Tests</h2>
 <div class=table><table>
 <tr><th>Command</th><th>Time</th><th>What</th></tr>
-<tr><td><code>make ghostty-rex-test</code></td><td>seconds; lint runs it</td><td>unit tests of keys, model (revive, reconnect), hints and screen</td></tr>
-<tr><td><code>make ghostty-rex-verify</code></td><td>about 6 min + Bombadil</td><td>a real Ghostty on the hidden test display against a throwaway Rex server: about 58 checks, then Bombadil over <code>tabs</code>, <code>startup</code> and <code>restored</code></td></tr>
+<tr><td><code>make test ONLY=ghostty-rex</code></td><td>seconds; lint runs it</td><td>unit tests of keys, model (revive, reconnect), hints and screen</td></tr>
+<tr><td><code>make verify ONLY=ghostty-rex</code></td><td>about 6 min + Bombadil</td><td>a real Ghostty on the hidden test display against a throwaway Rex server: about 58 checks, then Bombadil over <code>tabs</code>, <code>startup</code> and <code>restored</code></td></tr>
 <tr><td><code>cd desktop/build/ghostty-rex; bb verify --no-bombadil --keep</code></td><td>about 6 min</td><td>the e2e alone, keeping screenshots and logs</td></tr>
-<tr><td><code>make affected</code></td><td>instant</td><td>the checks that cover what <code>@</code> changed</td></tr>
+<tr><td><code>make test LIST=1</code></td><td>instant</td><td>the checks that cover what <code>@</code> changed</td></tr>
 </table></div>
 <p>The key checks in verify press Alt+Space for every prefixed command and check that Ctrl+b reaches fish in a pane (echo ctrlb-ab, Ctrl+b, X prints ctrlb-aXb).</p>
 <p>The T210 checks in verify: after a reboot no tab shows a typed exec line; the window survives its server stopping and a server from another build taking over, with a red status while it retries, and typing works again; SIGTERM ends the client and rexg-render with no kill -9; reload brings up a new client on the same session and drops the old one; a pane that sends ESC [ ?25 l gets no cursor. Bombadil's <code>restored</code> spec runs <code>startup.ts</code> with its new <code>noTypedExecLine</code> property on a session Rex brought back as bare bash.</p>
@@ -112,8 +112,8 @@ guix home roll-back        # also restores the previous choice</code></pre>
 <div class=card><b>Status line red: <code>local not connected, reconnecting</code></b><br>The control connection dropped. The client retries every 0.25 s, backing off to 4 s, and runs <code>rex server start</code> for the local server when nothing answers; that command does nothing when a server is already up and replaces a dead socket. When the server is back the window reattaches to the session it showed, with no kill needed. If it stays red, check <code>rex server status</code> and the server log.</div>
 <div class=card><b>A window that won't close</b><br>SIGTERM ends both the client and rexg-render (the e2e checks it), so <code>pkill -f 'ghostty-rex/bb.edn attach'</code> without -9 is enough. Closing the Ghostty window does the same.</div>
 <div class=card><b>A tab shows bash, or a restored tab lacks its program</b><br>The client revives restored tabs only for the startup session it finds itself; a window opened with <code>--session</code> skips this. A reload keeps its session and skips this; close the window and open it again (Super+B) to go through it.</div>
-<div class=card><b><code>rexg-render is missing</code></b><br>Run <code>make home-apply</code> with MUX=ghostty-rex, or <code>make ghostty-rex</code> for the checkout build.</div>
-<div class=card><b>A fix doesn't show up</b><br>bb and config edits need a reload; C edits need <code>make home-apply</code> (or REXG_RENDER) and then a reload; a Ghostty config edit needs Ctrl+Shift+Alt+R.</div>
+<div class=card><b><code>rexg-render is missing</code></b><br>Run <code>make home</code> with MUX=ghostty-rex, or <code>make build NAME=ghostty-rex</code> for the checkout build.</div>
+<div class=card><b>A fix doesn't show up</b><br>bb and config edits need a reload; C edits need <code>make home</code> (or REXG_RENDER) and then a reload; a Ghostty config edit needs Ctrl+Shift+Alt+R.</div>
 <p class=cite>Sources: desktop/build/ghostty-rex/README.md, src/rexg/main.clj (connect, lost!, reload!), src/rexg/model.clj (revive, disconnected), test/rexg/verify.clj, desktop/build/rexmux/test/rexmux/testserver.clj.</p>
 
 </main></body></html>

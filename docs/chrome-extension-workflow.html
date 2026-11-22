@@ -83,8 +83,8 @@ ext-reload cookie-autoaccept --no-build --tabs active
 ext-reload load vimium-cljs       # the one-time Load unpacked, guided
 ext-reload list                   # each extension, whether Chrome has it, and every unpacked extension
 cd desktop/build/chrome/vimium-cljs && bb test   # build and test one; make lint runs this when it changed
-make chrome-e2e                   # each extension's e2e suite in headless Chrome
+make verify ONLY=chrome-extensions                   # each extension's e2e suite in headless Chrome
 herd status ext-reload            # the hub; log in ~/.local/state/ext-reload.log
-make ext-reload-test              # end to end in a throwaway headless Chrome</pre>
+make test ONLY=ext-reload              # end to end in a throwaway headless Chrome</pre>
 
 </main></body></html>

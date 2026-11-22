@@ -99,7 +99,7 @@
        problem))))
 
 (defn md-view-problems []
-  (keep identity [(tested "make md-view-test" "md-view" "md-view" (filter #(or (= % "desktop/bin/md-view") (str/starts-with? % "desktop/build/md-view/")) files)
+  (keep identity [(tested "bb desktop/build/md-view/test.bb" "md-view" "md-view" (filter #(or (= % "desktop/bin/md-view") (str/starts-with? % "desktop/build/md-view/")) files)
                           {:dir c/root} ["bb" "desktop/build/md-view/test.bb"])]))
 
 (defn rexmux-file? [f]
@@ -107,7 +107,7 @@
       (and (str/starts-with? f "desktop/build/rexmux/") (re-find #"\.(clj|edn|json|ndjson)$" f))))
 
 (defn rexmux-problems []
-  (keep identity [(tested "make rexmux-test" "rexmux" "rexmux" (filter rexmux-file? files)
+  (keep identity [(tested "desktop/build/rexmux: bb test" "rexmux" "rexmux" (filter rexmux-file? files)
                           {:dir (str c/root "/desktop/build/rexmux")} ["bb" "test"])]))
 
 (defn ghostty-rex-file? [f]
@@ -116,8 +116,17 @@
       (and (str/starts-with? f "desktop/build/ghostty-rex/") (re-find #"\.(clj|edn)$" f))))
 
 (defn ghostty-rex-problems []
-  (keep identity [(tested "make ghostty-rex-test" "ghostty-rex" "ghostty-rex" (filter ghostty-rex-file? files)
+  (keep identity [(tested "desktop/build/ghostty-rex: bb test" "ghostty-rex" "ghostty-rex" (filter ghostty-rex-file? files)
                           {:dir (str c/root "/desktop/build/ghostty-rex")} ["bb" "test"])]))
+
+(defn stale-problems
+  "make status's rules and collector on made-up profiles and processes (T218)."
+  []
+  (keep identity [(tested "bb desktop/build/stale/test.bb" "stale" "stale"
+                          (filter #(or (= % "desktop/bin/stale") (= % "desktop/lib/stale.clj")
+                                       (str/starts-with? % "desktop/lib/stale/") (str/starts-with? % "desktop/build/stale/"))
+                                  files)
+                          {:dir c/root} ["bb" "desktop/build/stale/test.bb"])]))
 
 (defn keybindings-file? [f]
   (or (#{"desktop/bin/keyleader" "desktop/bin/palette" "desktop/bin/keyguide" "desktop/configs/dusk/config.clj"} f)
@@ -126,7 +135,7 @@
 (defn keybindings-problems
   "The Cmd+Space launcher and Alt+Space tests (T208): the leader grammar and the
   Hyprland binds generated from it, the launcher's rows and runners, and
-  Dusk's ranking of typed shortcuts. make keybindings-check runs these and more."
+  Dusk's ranking of typed shortcuts. desktop/build/keybindings/check.bb runs these and more."
   []
   (let [own (filter keybindings-file? files)]
     (keep identity
@@ -161,6 +170,7 @@
    ["md-view" md-view-problems]
    ["rexmux" rexmux-problems]
    ["ghostty-rex" ghostty-rex-problems]
+   ["stale" stale-problems]
    ["keybindings" keybindings-problems]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
    ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))

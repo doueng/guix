@@ -1,6 +1,6 @@
 ;; Copy and paste right after a focus switch, in Chrome, terminal Emacs and Neovim,
 ;; on the hidden test display. Keys are what kanata sends: Cmd+C is Ctrl+Insert,
-;; Cmd+V Shift+Insert (desktop/kanata.kbd). Run it as make clipboard-e2e, which
+;; Cmd+V Shift+Insert (desktop/kanata.kbd). Run it as make verify ONLY=clipboard, which
 ;; wraps it in test-display; see docs/clipboard.html.
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
@@ -8,7 +8,7 @@
          '[clojure.string :as str])
 
 (when-not (System/getenv "TEST_DISPLAY")
-  (println "run inside test-display: make clipboard-e2e")
+  (println "run inside test-display: make verify ONLY=clipboard")
   (System/exit 2))
 
 (def root (str (fs/parent (fs/parent (fs/parent (fs/parent (fs/absolutize *file*)))))))

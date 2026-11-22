@@ -195,7 +195,7 @@ Router sees it as [routed to T12 W3 from rex]."
             [:ui/message (str "Sent: " text)]])}])
 
 (def bin-dir
-  "desktop/bin beside this checkout, so new helpers work before make stow links them."
+  "desktop/bin beside this checkout, so new helpers work before make refresh links them."
   (str (fs/normalize (fs/absolutize (fs/path (fs/parent *file*) ".." ".." ".." ".." "bin")))))
 
 (defn- scrollback [ctx text]

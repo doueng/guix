@@ -68,7 +68,7 @@ md-view serve [PORT]         # what the Home service runs</pre>
 <li><code>desktop/bin/md-view</code>: the command and the server</li>
 <li><code>modules/engstrand/features/md-view.scm</code>: the Guix Home shepherd service, added in <code>config.scm</code></li>
 <li><code>desktop/configs/doom/config.el</code>: <code>eng/md-view</code> and <code>SPC m v</code></li>
-<li><code>desktop/build/md-view/test.bb</code>: 6 tests, 31 assertions, run by <code>make lint</code> (cached until md-view changes) and by <code>make md-view-test</code></li>
+<li><code>desktop/build/md-view/test.bb</code>: 6 tests, 31 assertions, run by <code>make lint</code> (cached until md-view changes) and by <code>make test ONLY=md-view</code></li>
 </ul>
 <h2>Live proof</h2>
 <p>All shots come from the hidden test display, a headless sway, or from headless Chrome. Nothing ran on your screen.</p>

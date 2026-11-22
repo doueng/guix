@@ -71,7 +71,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 </ul>
 
 <h2>Check</h2>
-<p><code>make clipboard-e2e</code> opens Flatpak Chrome, terminal Emacs (in both Ghostty configs), Neovim and a shell on the hidden test display. Before each step it moves focus to another window, then sends kanata's chords. It checks a copy into and out of each app, a cut in Chrome, a copy of Ghostty's own selection, and that Ctrl+C still interrupts a program in the terminal. Before the fix 3 of its checks failed. Now all 14 pass.</p>
+<p><code>make verify ONLY=clipboard</code> opens Flatpak Chrome, terminal Emacs (in both Ghostty configs), Neovim and a shell on the hidden test display. Before each step it moves focus to another window, then sends kanata's chords. It checks a copy into and out of each app, a cut in Chrome, a copy of Ghostty's own selection, and that Ctrl+C still interrupts a program in the terminal. Before the fix 3 of its checks failed. Now all 14 pass.</p>
 
 <h2>To reload</h2>
 <ul>

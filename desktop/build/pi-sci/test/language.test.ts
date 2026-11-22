@@ -41,7 +41,7 @@ test("an unavailable SCI bundle errors instead of executing the input as JavaScr
 	try {
 		assert.throws(
 			() => compileSciSource('text("JS MUST NOT RUN");'),
-			/SCI bundle could not be loaded\. Run make pi-sci/,
+			/SCI bundle could not be loaded\. Run make build NAME=pi-sci/,
 		);
 	} finally {
 		t.mock.restoreAll();

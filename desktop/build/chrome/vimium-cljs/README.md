@@ -14,7 +14,7 @@ npm test              # cljs.test on node
 npm run e2e           # headless flatpak Chrome over test/fixtures
 npm run bombadil      # property run over the fixtures (Bombadil from the guix repo)
 bb test               # tests + release builds + no-eval check + load and guide checks (make lint runs it)
-bb e2e                # the e2e suites (make chrome-e2e runs them)
+bb e2e                # the e2e suites (make verify ONLY=chrome-extensions runs them)
 ```
 
 Layout: `src/vimium_cljs/{keys,commands,config,hints,exclusions,rank}.cljs` are pure and tested;

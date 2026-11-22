@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<meta name="description" content="Bombadil drives the bbh split Inbox in a real terminal: 12 properties, two bugs found and fixed, two clean 10-minute runs, and make bombadil to run it.">
+<meta name="description" content="Bombadil drives the bbh split Inbox in a real terminal: 12 properties, two bugs found and fixed, two clean 10-minute runs, and make verify ONLY=bbh-bombadil to run it.">
 <meta name="bbh-doc" content="T174">
 <title>Bombadil on the bbh Inbox: prototype result</title>
 <style>
@@ -35,7 +35,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <nav><a href='#outcome'>Outcome</a><a href='#how'>How it runs</a><a href='#specs'>Properties</a><a href='#runs'>Runs</a><a href='#found'>Findings</a><a href='#use'>Use it</a><a href='#limits'>Limits</a></nav>
 
 <h2 id=outcome>Outcome</h2>
-<div class='card good'><b>Goal:</b> black-box property tests of the bbh Emacs Inbox in a real terminal, per the review. <b>Result:</b> the prototype works on this Asahi machine and paid off. In its first hour it found two real bugs in the split Inbox, both now fixed with ERT regression tests. After the fixes, two 10-minute runs passed with about 4,200 screens each. It is a separate target, <code>make bombadil</code> (or <code>bb test:bombadil</code>), with a time budget. It is not part of <code>bb test</code> or <code>make verify</code>. <span class='tag measured'>measured</span></div>
+<div class='card good'><b>Goal:</b> black-box property tests of the bbh Emacs Inbox in a real terminal, per the review. <b>Result:</b> the prototype works on this Asahi machine and paid off. In its first hour it found two real bugs in the split Inbox, both now fixed with ERT regression tests. After the fixes, two 10-minute runs passed with about 4,200 screens each. It is a separate target, <code>make verify ONLY=bbh-bombadil</code> (or <code>bb test:bombadil</code>), with a time budget. It is not part of <code>bb test</code> or <code>make verify</code>. <span class='tag measured'>measured</span></div>
 <div class='card warn'><b>Reported, not fixed:</b> four smaller issues: an <code>i</code>/send race, cryptic refusal messages, “Sent” for an empty send, and a stray “Process … finished” echo. See <a href='#found'>Findings</a>.</div>
 
 <h2 id=how>How it runs</h2>
@@ -95,8 +95,8 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <div class='card'><b>Not a bug: pushed reloads wait for idleness.</b> With a key every 130 ms, the 0.5 s idle reload never ran, and the view stayed stale for many seconds (a finished Worker's asks still showed). That is the design (none runs while you type), so the test shortens the delay instead.</div>
 
 <h2 id=use>Use it</h2>
-<pre><code>make bombadil                         # 120 s, random seed
-make bombadil BOMBADIL_TIME=600 SEED=767157
+<pre><code>make verify ONLY=bbh-bombadil                         # 120 s, random seed
+make verify ONLY=bbh-bombadil BOMBADIL_TIME=600 SEED=767157
 cd desktop/build/bbh &amp;&amp; bb test:bombadil --time 60 --keep
 bb test:bombadil --seed N --reproduce /tmp/bbh-bombadil…/trace --keep</code></pre>
 <p>Every run prints the keys it sent. A failure also prints the property, the screen it judged, the seed, the trace directory, and the exact reproduce command. <code>--reproduce</code> replays the trace's keys against a fixture churned from the same seed. Replay is best effort: the fixture's timing is not replayed, but the bug above reproduced on its first try. Files: <span class=cite>/home/engstrand/guix/desktop/build/bbh/test/bbh/bombadil.clj</span> <span class=cite>/home/engstrand/guix/desktop/build/bbh/test/bombadil/inbox.el</span> <span class=cite>/home/engstrand/guix/modules/engstrand/packages/bombadil.scm</span></p>
@@ -106,7 +106,7 @@ bb test:bombadil --seed N --reproduce /tmp/bbh-bombadil…/trace --keep</code></
 <li>Emacs runs with <code>-Q</code> plus evil and the bbh code, not Doom, so Doom keymap interactions such as SPC, evil-org and corfu are not covered.</li>
 <li>This page covers the split Inbox. The Router and Worker view has its own spec, run by the same target: <a href='bombadil-worker-report.html'>bombadil-worker-report.html</a>.</li>
 <li>Bombadil's <code>shrink</code> is still experimental and unused. Traces are big, and failing roots stay in /tmp until you delete them.</li>
-<li>It is not in <code>make verify</code>. checks.edn lists it under <code>:slow</code> for the bbh Emacs files, so <code>make affected</code> suggests it.</li>
+<li>It is not in <code>make verify</code>. checks.edn lists it under <code>:slow</code> for the bbh Emacs files, so <code>make test LIST=1</code> suggests it.</li>
 </ul>
 
 </main></body></html>

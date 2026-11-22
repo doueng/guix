@@ -17,7 +17,7 @@ A change to `kanata.kbd` also needs `make switch`; the steps above do not reload
 
 1. Edit `desktop/configs/keybindings/leader.edn`. Give the entry an action for each context that should have it.
 2. Run `bb desktop/build/keybindings/generate.bb` from the repository root.
-3. Run `make keybindings-check`.
+3. Run `make test ONLY=keybindings`.
 4. Run `bb desktop/stow-home` if the change added a file, then `hyprctl reload` and `herdr server reload-config`.
 5. Restart Neovim, reload Doom with Space h r r, and reload IdeaVim with `:source ~/.ideavimrc` in IntelliJ.
 
@@ -30,7 +30,7 @@ Run `keyleader --verify-hypr` after `hyprctl reload`. It fails when Hyprland's l
 1. Edit `desktop/configs/keybindings/bindings.edn`.
 2. Run `bb desktop/build/keybindings/generate.bb` from the repository root. It rewrites `hypr/keybindings.lua`.
 
-3. Run `make keybindings-check`.
+3. Run `make test ONLY=keybindings`.
 4. Run `hyprctl reload`.
 
 Use `keyguide --list` for a terminal reference.
@@ -41,7 +41,7 @@ The existing inventory command also includes native application bindings.
 1. Focus the application and read its class from `hyprctl -j activewindow`.
 2. In `desktop/kanata.kbd`, add an empty `deflayermap` named for the application, like `intellij`. For each Cmd key whose chord differs there, add a `((base-layer <name>))` branch to that key's `switch` in the `cmd` layer, on one line. A separate Cmd layer would be chosen when Cmd goes down and would stay active after focus moves while Cmd is held.
 3. Map the class to the new layer in `desktop/configs/kanata/apps.edn`.
-4. Add a case for each changed chord to `desktop/build/keybindings/kanata-test.bb`, then run `make kanata-check`.
+4. Add a case for each changed chord to `desktop/build/keybindings/kanata-test.bb`, then run `bb desktop/build/keybindings/kanata-check.bb`.
 5. Run `make switch`. It ends with `hyprkan reload`, because kanata rereads `/etc/kanata/kanata.kbd` only then or when it restarts.
 
 `hyprkan` rereads `apps.edn` on every focus change, so a class change that reuses an existing layer needs only step 3.
@@ -65,12 +65,12 @@ Vimium cannot run on Chrome internal pages or the Chrome Web Store.
 
 ## Run verification
 
-Run `make keybindings-check` for the registry, Doom coach tests, and Neovim motion tests.
+Run `make test ONLY=keybindings` for the registry, Doom coach tests, and Neovim motion tests.
 The Neovim check uses the installed user configuration and needs its plugins installed.
-Run `make doom-check` after Doom changes.
+Run `make test ONLY=doom` after Doom changes.
 Run `ghostty +validate-config` after Ghostty changes.
 Run `bb desktop/build/keybindings/verify.bb` to exercise Ctrl+Alt+0, Cmd+Space, Cmd+/, Escape and Alt+Space through kanata on the live desktop.
 That check temporarily changes workspaces, enters the desktop leader with Cmd+Space, opens the guide with Cmd+/, sends Alt+Space to Herdr, and restores the original workspace.
-Run `make hypr-nested-check` to load `hypr/hyprland.lua` in a nested Hyprland and type the leader, Ctrl+Alt and Cmd+Space keys into it with wtype. The nested window stays on a hidden special workspace, so it does not take focus.
+Run `bb desktop/build/keybindings/hypr-nested.bb` to load `hypr/hyprland.lua` in a nested Hyprland and type the leader, Ctrl+Alt and Cmd+Space keys into it with wtype. The nested window stays on a hidden special workspace, so it does not take focus.
 
 `desktop/build/keybindings/decisions.tsv` records this implementation's decisions and verification gaps.

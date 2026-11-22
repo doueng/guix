@@ -3,7 +3,7 @@
 (let [here (fs/parent (fs/real-path *file*))
       bin (str here "/../build/dusk/target/release/dusk")]
   (when-not (fs/executable? bin)
-    (let [msg (str "dusk is not built (" (fs/normalize bin) " is missing): run make dusk")]
+    (let [msg (str "dusk is not built (" (fs/normalize bin) " is missing): run make build NAME=dusk")]
       (binding [*out* *err*] (println msg))
       (try (p/shell {:continue true :out :string :err :string} "hyprctl" "notify" "3" "30000" "0" msg)
            (catch Exception _))

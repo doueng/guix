@@ -72,7 +72,7 @@
   ghostty-rex-reload: the client starts again from the checkout's bb code and
   config on the session it showed, in the same window."
   {:id :client/reload :title "Client: reload its bb code and config" :category "help" :source :local
-   :doc "Run the ghostty-rex client anew in this window, on this session, so an edit to its bb code or config.edn takes effect. Rex keeps the panes and their programs. rexg-render, the C half, needs make ghostty-rex or make home-apply."
+   :doc "Run the ghostty-rex client anew in this window, on this session, so an edit to its bb code or config.edn takes effect. Rex keeps the panes and their programs. rexg-render, the C half, needs make build NAME=ghostty-rex or make home."
    :run (fn [_ _] [[:client/reload {}]])})
 
 (defn reload!

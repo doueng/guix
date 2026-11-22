@@ -1,7 +1,7 @@
 #!/usr/bin/env bb
 ;; make mux MUX=rex|ghostty-rex|herdr: choose the terminal multiplexer (T207). It sets
 ;; %terminal-mux in modules/engstrand/config.scm, so the choice is part of the
-;; Home configuration; the Makefile then runs make home-apply, which writes
+;; Home configuration; the Makefile then runs make home, which writes
 ;; ~/.config/engstrand/mux, and reloads Hyprland so its keys follow. Herdr and
 ;; both Rex clients stay installed: MUX=herdr is the rollback, and so is
 ;; guix home roll-back.

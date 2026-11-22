@@ -197,11 +197,11 @@
       (finally (fs/delete-if-exists f)))))
 
 (deftest heavy-commands-are-recognized
-  (doseq [cmd ["bb test" "cd desktop/build/bbh && bb test:emacs" "make verify SLOW=1" "make doom-check" "guix build -f x.scm"
+  (doseq [cmd ["bb test" "cd desktop/build/bbh && bb test:emacs" "make verify" "make test ONLY=doom" "bb desktop/build/doom/doctor.bb" "make home" "guix build -f x.scm"
                "guix system reconfigure c.scm" "bb verify:tla" "bb eval:replay run1" "flatpak run com.google.Chrome --headless" "tlc Super.tla"
                "emacs-throwaway --batch -- -Q -l t.el" "desktop/bin/emacs-throwaway --daemon bench"]]
     (is (heavy/heavy? cmd) cmd))
-  (doseq [cmd ["make lint" "jj log" "bb lint" "guix describe" "bb testing" "make affected" "wf status"]]
+  (doseq [cmd ["make lint" "jj log" "bb lint" "guix describe" "bb testing" "make status" "make refresh" "wf status"]]
     (is (not (heavy/heavy? cmd)) cmd)))
 
 (deftest one-heavy-command-runs-at-a-time-and-a-waiter-says-who-holds-the-slot

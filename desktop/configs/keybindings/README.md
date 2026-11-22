@@ -42,7 +42,7 @@ Emacs runs inside Ghostty and Herdr, so Hyprland sees only the terminal's class.
 `herdr-terminal` starts Herdr in a Ghostty window with its own class. Alt+Space, Cmd+Y, Cmd+Return and Cmd+B find Herdr by that class, so they never type into another Ghostty window.
 `hyprkan layer` prints kanata's active layer. After a system switch, `hyprkan reload` makes kanata reread `/etc/kanata/kanata.kbd` without root.
 Hold Left Ctrl, Space and Escape together to stop kanata if a change breaks typing.
-`make kanata-check` replays chords through kanata's simulator and checks that every layer in `apps.edn` exists.
+`bb desktop/build/keybindings/kanata-check.bb` replays chords through kanata's simulator and checks that every layer in `apps.edn` exists.
 
 ## One leader grammar
 
@@ -93,7 +93,7 @@ Single keys after the leader carry the most frequent actions, as in Doom. Groups
 `keyleader --check` also rejects desktop sequences that differ only by case, because Hyprland submaps cannot tell `c r` from `c R`.
 `reference.html` maps every binding against Doom Emacs; see [Reference](#reference).
 
-Run `keyleader --check` to validate the table. `make keybindings-check` also fails when a generated file is stale.
+Run `keyleader --check` to validate the table. `make test ONLY=keybindings` also fails when a generated file is stale.
 
 ### Focus falls through to the next layer
 
@@ -221,5 +221,5 @@ Cmd+n still sends a bbh composer message. This existing local override is not a 
 Hyprland reads `hypr/hyprland.lua`. Dispatchers are data such as `["focus" {:direction "left"}]`, and `desktop/lib/hypr/dispatch.clj` renders them for the Lua config and for `hyprctl dispatch`.
 `bindings.edn` owns the direct Ctrl+Alt bindings and the Cmd+/ guide entries.
 Application-specific keymaps remain native configuration. Guide entries do not claim to be an exhaustive inventory.
-`make keybindings-check` compares every generated file with its source. Its `test.clj` also fails when `hyprland.lua` binds a Cmd chord that `bindings.edn` does not list.
+`make test ONLY=keybindings` compares every generated file with its source. Its `test.clj` also fails when `hyprland.lua` binds a Cmd chord that `bindings.edn` does not list.
 See [the installation instructions](install.md) to regenerate bindings or install Vimium aliases.
