@@ -32,9 +32,10 @@
     :inputs ["/etc/kanata"]
     :fix {:cmd "hyprkan reload" :run [:bin "hyprkan" "reload"]}}
    {:id "hyprkan" :label "hyprkan follower" :arg #"/hyprkan$" :argv-count 2
-    :sources ["desktop/bin/hyprkan"] :fix {:respawn true}}
+    :sources ["desktop/bin/hyprkan"] :fix {:respawn true} :start ["bb" "~/.local/bin/hyprkan"]}
    {:id "keyleader" :label "keyleader" :arg #"/keyleader$"
-    :sources ["desktop/bin/keyleader" "desktop/lib/**" "desktop/configs/keybindings/*.edn"] :fix {:respawn true}}
+    :sources ["desktop/bin/keyleader" "desktop/lib/**" "desktop/configs/keybindings/*.edn"] :fix {:respawn true}
+    :start ["bb" "~/.local/bin/keyleader" "listen"]}
    {:id "palette" :label "Cmd+Space palette" :arg #"/palette$"
     :sources ["desktop/bin/palette" "desktop/lib/**" "desktop/configs/keybindings/*.edn"] :fix {:respawn true}}
    {:id "dusk" :label "dusk shell" :arg #"build/dusk/target/release/dusk$|^dusk\.runtime$"
@@ -200,7 +201,11 @@
       :else
       (let [procs (procs-of id)
             stale (keep #(when-let [why (proc-why facts id %)] [% why]) procs)]
-        (when (seq procs)
+        (cond
+          (and (empty? procs) (:start spec) (seq (procs-of "hyprland")))
+          (row {:id id :label label :group :session :state :down :why "not running in this Hyprland session"
+                :fix {:cmd (str/join " " (:start spec)) :run [:respawn nil (:start spec)]}})
+          (seq procs)
           (row (cond-> {:id id :label label :group :session :pid (str/join "," (map :pid procs)) :note note
                         :running (short-name (apply first-item (mapcat #(cons (:exe %) (:argv %)) procs)))}
                  (seq stale) (assoc :state :stale :why (second (first stale))
@@ -237,7 +242,7 @@
                      :fix {:cmd "doom sync, then restart Emacs" :manual "doom sync and an Emacs restart"})))
        (row (cond-> {:id "doom-env" :label "Doom env file" :group :home}
               why (assoc :state :stale :why why
-                         :fix {:cmd "doom env, then restart Emacs" :run [:doom "env"]})))])))
+                         :fix {:cmd "doom sync, then restart Emacs" :manual "doom sync writes it, an Emacs restart loads it"})))])))
 
 (defn links-row [{:keys [links]}]
   (when links
@@ -275,7 +280,7 @@
 (defn summary
   "Counts and the stale rows split by whether refresh can fix them."
   [rows]
-  (let [stale (filter #(= :stale (:state %)) rows)]
+  (let [stale (filter #(#{:stale :down} (:state %)) rows)]
     {:total (count rows) :stale (count stale)
      :auto (filter #(get-in % [:fix :run]) stale)
      :manual (remove #(get-in % [:fix :run]) stale)}))

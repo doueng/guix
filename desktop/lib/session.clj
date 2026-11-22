@@ -1,5 +1,6 @@
 (ns session
-  (:require [babashka.fs :as fs]))
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]))
 
 (defn runtime-dir []
   (or (not-empty (System/getenv "XDG_RUNTIME_DIR"))
@@ -15,7 +16,12 @@
   []
   (let [dir (runtime-dir)
         live-display? #(and % (fs/exists? (fs/path dir %)))
-        live-hypr? #(and % (fs/exists? (fs/path dir "hypr" % ".socket.sock")))
+        ;; A crashed or nested Hyprland leaves its socket behind; its lock names the pid.
+        lock-pid #(try (some-> (slurp (java.io.FileReader. (str (fs/path dir "hypr" % "hyprland.lock"))))
+                               str/split-lines first str/trim not-empty)
+                       (catch Exception _ nil))
+        live-hypr? #(and % (fs/exists? (fs/path dir "hypr" % ".socket.sock"))
+                         (some-> (lock-pid %) (->> (str "/proc/")) fs/exists?))
         display (some #(when (live-display? %) %)
                       [(not-empty (System/getenv "WAYLAND_DISPLAY"))
                        (newest (remove #(re-find #"\.lock$" (str %))

@@ -56,11 +56,11 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td>Hyprland</td><td>store rule</td><td>log out and back in</td><td>you</td></tr>
 <tr><td>Hyprland config</td><td>its <code>.lua</code> files reload by themselves; <code>~/.config/engstrand/mux</code> changed after the last load</td><td><code>hyprctl reload</code></td><td>refresh</td></tr>
 <tr><td>kanata config</td><td><code>/etc/kanata</code> changed after kanata started or last reloaded</td><td><code>hyprkan reload</code></td><td>refresh</td></tr>
-<tr><td>hyprkan, keyleader, palette</td><td>store rule, or their script or keybinding edn changed</td><td>kill and start again with the session's Wayland env</td><td>refresh</td></tr>
+<tr><td>hyprkan, keyleader, palette</td><td>store rule, or their script or keybinding edn changed</td><td>kill and start again with the session's Wayland env; hyprkan and keyleader are also started when missing</td><td>refresh</td></tr>
 <tr><td>dusk</td><td>its binary, runtime or config changed</td><td><code>pkill -x dusk; ~/.local/bin/dusk</code></td><td>you</td></tr>
 <tr><td>Emacs daemons, bbh-emacs too</td><td>store rule, or a Doom config file changed</td><td>restart Emacs</td><td>you</td></tr>
 <tr><td>Doom packages</td><td><code>init.el</code> or <code>packages.el</code> newer than the last <code>doom sync</code></td><td><code>doom sync</code>, then restart Emacs</td><td>you</td></tr>
-<tr><td>Doom env file</td><td>it saved a session variable (Hyprland, Rex pane, terminal), names an old store path, or <code>cli.el</code> changed after it</td><td><code>doom env</code></td><td>refresh</td></tr>
+<tr><td>Doom env file</td><td>it saved a session variable (Hyprland, Rex pane, terminal), names an old store path, or <code>cli.el</code> changed after it</td><td><code>doom sync</code>, then restart Emacs</td><td>you</td></tr>
 <tr><td>bbh super-agent</td><td>store rule, or <code>desktop/build/bbh</code> or <code>desktop/configs/bbh</code> changed</td><td><code>herd restart bbh-super</code></td><td>you: it restarts the Router and every Worker. bbh-super restarts itself once idle.</td></tr>
 <tr><td>Rex server</td><td>store rule</td><td><code>rex server stop</code></td><td>you: it closes every Rex session</td></tr>
 <tr><td>ghostty-rex client</td><td>its bb code or <code>config.edn</code> changed</td><td><code>rex -C ghostty-rex do mx.client.reload</code></td><td>refresh</td></tr>
@@ -80,7 +80,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 </ul>
 
 <h2>What still needs you</h2>
-<p>A reboot for a new kernel or initrd. Logging out and back in for Hyprland or the home Shepherd. Restarting Emacs, and running <code>doom sync</code> first after <code>init.el</code> or <code>packages.el</code> changed. Restarting the super-agent, which runs the Router and the Workers. Stopping the Rex or Herdr server, which closes their sessions. Any system service that sudo would ask a password for. <code>make status</code> prints each of these with its command.</p>
+<p>A reboot for a new kernel or initrd. Logging out and back in for Hyprland or the home Shepherd. Restarting Emacs, and running <code>doom sync</code> first after <code>init.el</code>, <code>packages.el</code> or <code>cli.el</code> changed (Doom 3 writes its env file in <code>doom sync</code>; <code>doom env</code> no longer does). Restarting the super-agent, which runs the Router and the Workers. Stopping the Rex or Herdr server, which closes their sessions. Any system service that sudo would ask a password for. <code>make status</code> prints each of these with its command.</p>
 
 <h2>The Makefile, before and after</h2>
 <p>It had 68 targets and 374 lines. Now it has 13 workflows in 163 lines. Tests live in <code>desktop/build/checks/checks.edn</code> as commands. <code>make test</code> runs the ones covering your change, <code>ONLY=rule</code> picks rules by name prefix, and <code>make verify</code> adds the slow and live ones.</p>
@@ -103,6 +103,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <ul>
 <li>The kanata simulator in <code>~/.cache/kanata-sim</code> fails to load <code>libgcc_s.so.1</code>, so the kanata chord tests fail before this change too.</li>
 <li><code>leader-test.clj</code> and <code>review-test.clj</code> fail in ~/guix as well, in their Herdr navigation cases.</li>
+<li>A nested or crashed Hyprland leaves its sockets in <code>$XDG_RUNTIME_DIR/hypr</code>. <code>session/wayland-env</code> picked such a dead one, so a respawned hyprkan exited at once. It now requires the pid in <code>hyprland.lock</code> to be alive.</li>
 </ul>
 
 </main></body></html>

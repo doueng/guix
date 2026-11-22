@@ -12,7 +12,10 @@
 
 (defn- real [p] (try (str (fs/real-path p)) (catch Exception _ nil)))
 
-(defn- slurp-or [p dflt] (try (slurp p) (catch Exception _ dflt)))
+(defn- slurp-or
+  "P's text, or DFLT. A FileReader, since slurp of a path fails on /proc/stat."
+  [p dflt]
+  (try (slurp (java.io.FileReader. (str p))) (catch Exception _ dflt)))
 
 (defn- expand [ctx p] (str/replace-first p #"^~(?=/)" (:home ctx)))
 

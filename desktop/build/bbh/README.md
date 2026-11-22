@@ -114,7 +114,7 @@ bb test:emacs            # composer, history, cancellation and nREPL endpoint
 bb test:doom             # installed Doom startup and Ctrl-N, in a separate terminal
 bb test:doom launcher    # installed emacs-bbh launcher, including automatic session startup
 bb try MODEL PROMPT...   # real prompts through agent-shell, printing the buffer
-bb runs:html [N] [OUT]   # HTML page of the newest N conversations with prompts, tool calls, workflow journals, evidence and reviews; `bb runs:html (in desktop/build/bbh)` from the repo root
+bb runs:html [N] [OUT]   # HTML page of the newest N conversations with prompts, tool calls, workflow journals, evidence and reviews
 bb runs:metrics [ROOT...]  # latency, tokens, cache share, cost and failures per day and model
 bb stats                 # timeouts, restarts and errors per conversation, live workflow runs, review times
 bb eval:lint             # assertion hits per cohort over real and eval conversations

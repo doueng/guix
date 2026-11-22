@@ -74,15 +74,21 @@
     (let [f (update base :procs conj {:pid 9 :start-ms 1 :exe (str old-bb "/bin/claude")
                                       :argv ["claude" "--system-prompt" "Hyprland rex server emacs --daemon herdr"]})]
       (every? nil? (map #(row f %) ["hyprland" "rex-server" "emacs" "herdr-server"])))]
+   ["a missing hyprkan follower in a running Hyprland is down, and refresh starts it"
+    (let [hypr {:pid 5 :start-ms 1 :exe (str new-bb "/bin/Hyprland") :argv ["Hyprland"]}
+          r (row (update base :procs conj hypr) "hyprkan")]
+      (and (= :down (:state r)) (= [:respawn nil ["bb" "~/.local/bin/hyprkan"]] (get-in r [:fix :run]))
+           (= 1 (:stale (stale/summary [r])))
+           (nil? (row base "hyprkan"))))]
    ["an Emacs daemon on an old Emacs needs a restart by hand"
     (let [f (update base :procs conj {:pid 11 :start-ms 1 :exe (str (item "emacs-30") "/bin/emacs")
                                        :argv ["emacs" "--fg-daemon=x"]})
           r (row f "emacs")]
       (and (stale? r) (not (auto? r)) (str/includes? (:why r) "emacs-30")))]
-   ["a Doom env file naming one Hyprland login is rewritten by refresh"
+   ["a Doom env file naming one Hyprland login asks for doom sync, which writes it in Doom 3"
     (let [r (row (assoc base :doom {:env-vars #{"PATH" "HYPRLAND_INSTANCE_SIGNATURE"} :env-text ""}) "doom-env")]
-      (and (stale? r) (auto? r)))]
-   ["a Doom env file naming an old store path is rewritten too"
+      (and (stale? r) (not (auto? r)) (str/starts-with? (get-in r [:fix :cmd]) "doom sync")))]
+   ["a Doom env file naming an old store path is stale too"
     (stale? (row (assoc base :doom {:env-vars #{"EMACSLOADPATH"} :env-text (str "EMACSLOADPATH=" (item "emacs-30") "/lisp")}) "doom-env"))]
    ["packages.el newer than the last doom sync needs doom sync by hand"
     (let [r (row (assoc base :doom {:synced-ms 1 :sources "packages.el" :sources-ms 2 :env-vars #{}}) "doom-sync")]

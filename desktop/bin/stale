@@ -64,11 +64,23 @@
     (println (format "%-6s %-30s %-34s %s" (name (:state r)) (shown (:label r) 30) (shown (:running r) 34)
                      (or (get-in r [:fix :cmd]) "")))))
 
-(defn respawn! [pid argv]
-  (run ["kill" (str pid)])
-  (loop [n 0] (when (and (< n 30) (fs/exists? (str "/proc/" pid))) (Thread/sleep 100) (recur (inc n))))
-  (p/process (into ["setsid" "-f"] argv) {:extra-env env :out :discard :err :discard :in ""})
-  {:exit 0})
+(defn respawn!
+  "Stop PID, if any, and start ARGV detached in the Hyprland session; fail unless
+  it still runs two seconds later."
+  [pid argv]
+  (let [argv (mapv #(str/replace-first % #"^~/" (str (System/getenv "HOME") "/")) argv)
+        running #(set (str/split-lines (:out (run ["pgrep" "-fx" (str/join " " argv)]))))
+        before (running)]
+    (when pid
+      (run ["kill" (str pid)])
+      (loop [n 0] (when (and (< n 30) (fs/exists? (str "/proc/" pid))) (Thread/sleep 100) (recur (inc n)))))
+    (if-not (get env "HYPRLAND_INSTANCE_SIGNATURE")
+      {:exit 1 :err "no live Hyprland session to start it in"}
+      (do @(p/process (into ["setsid" "-f"] argv) {:extra-env env :out :discard :err :discard :in ""})
+          (Thread/sleep 2000)
+          (if (seq (remove (disj before (str pid)) (running)))
+            {:exit 0}
+            {:exit 1 :err (str "it exited at once: " (str/join " " argv))})))))
 
 (defn perform!
   "Run one fix's :run; return {:exit :out :err}."
@@ -79,7 +91,6 @@
     :hyprctl (run (into ["hyprctl"] args) {:extra-env env})
     :bin (run (into [(str repo "/desktop/bin/" (first args))] (rest args)) {:extra-env env})
     :sh (run (vec args) {:extra-env env})
-    :doom (run (into [(str (System/getenv "HOME") "/.config/emacs/bin/doom")] args) {:dir (System/getenv "HOME")})
     :respawn (respawn! (first args) (second args))
     :stow (run ["bb" (str repo "/desktop/stow-home")])))
 
