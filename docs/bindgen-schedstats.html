@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Aurora&#39;s bindgen sched_statistics layout bug: measured on your kernel (task_struct.mm is correct with bindgen 0.71.1), other reports, and the fix with build-time layout assertions.">
+<meta name="bbh-doc" content="T215">
+<title>bindgen, CONFIG_SCHEDSTATS and Rust struct layouts in your Asahi kernel</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>bindgen, CONFIG_SCHEDSTATS and Rust struct layouts in your Asahi kernel</h1>
+
+<p class=sub>T215, W278, 2026-11-22. Kernel: linux-asahi 7.2.15-1 from /home/engstrand/guix/modules/engstrand/asahi/kernel.scm</p>
+
+<div class='card good'><b>Verdict.</b> Your running kernel does <b>not</b> misread <code>task_struct.mm</code>. It was built with bindgen 0.71.1, which pads <code>task_struct</code> explicitly, so every field offset matches C <span class='tag measured'>measured</span>. The bug Aurora hit needs bindgen 0.73.2. Your kernel still has a smaller version of the same bug class: 13 Rust types disagree with C, and the kernel's <code>--no-layout-tests</code> hid them. The fix makes those types opaque and turns the layout assertions back on, so any future mismatch fails the build.</div>
+
+<h2>What Aurora reported</h2>
+<p>Aurora's <code>Documentation/rust/bindgen-layout-checks.rst</code> on <code>integration/aurora</code> says the following. With <code>CONFIG_SCHEDSTATS=n</code>, <code>struct sched_statistics</code> is empty but <code>____cacheline_aligned</code>. Stock bindgen drops the alignment of an empty struct, so <code>task_struct</code> fields after <code>stats</code>, including <code>mm</code>, moved 40 bytes in Rust on their defconfig plus Asahi config. Rust passed a wrong pointer as the current mm, and the Asahi GPU driver's RSS charge faulted in <code>percpu_counter_add_batch</code>.</p>
+<p>Their fix has three parts. They keep bindgen's layout assertions in every build, they add <code>--opaque-type sched_statistics</code> to <code>rust/bindgen_parameters</code>, and they ship a patched bindgen 0.73.2 in <code>tools/aurora-bindgen</code>.</p>
+<ul>
+<li>https://github.com/aurora-silicon/linux/pull/607 keeps layout checks in every build. It describes the <code>percpu_counter_add_batch</code> fault.</li>
+<li>https://github.com/aurora-silicon/linux/pull/992 makes <code>sched_statistics</code> opaque. With bindgen 0.73.2, Rust had <code>stats</code> at 792 and C had it at 832.</li>
+<li>https://github.com/aurora-silicon/linux/pull/726 adds a warning when the selected bindgen has the alignment bug.</li>
+<li>https://github.com/aurora-silicon/linux/blob/integration/aurora/Documentation/rust/bindgen-layout-checks.rst</li>
+<li>https://github.com/aurora-silicon/linux/tree/integration/aurora/tools/aurora-bindgen has the bindgen patches <code>0001-empty-alignment.patch</code> and <code>0002-anonymous-tag-members.patch</code>.</li>
+</ul>
+
+<h2>Others who hit it</h2>
+<ul>
+<li><b>Rust for Linux #1269</b> (Jules Mercier, 2026-11-13, open). On a OnePlus 6T, arm64, bindgen 0.73.2 put <code>task_struct</code> fields 48 bytes early. As a result, Rust Binder called <code>mmgrab</code> on a bogus <code>mm</code>, every binder <code>mmap</code> failed with EINVAL, and Waydroid would not start. Miguel Ojeda wants bindgen fixed before the next minimum-version bump, and the layout tests enabled. https://github.com/Rust-for-Linux/linux/issues/1269</li>
+<li><b>Kernel patch</b>, “rust: bindgen: Preserve sched_statistics alignment” (Peder Bergan, 2026-11-19, v1 under review). It adds <code>--opaque-type sched_statistics</code>, and Jules Mercier sent a Tested-by. With 0.73.2, <code>mm</code> was at 1168 in Rust and 1208 in C. Ojeda says the misplacement appears only with bindgen 0.73.2, because earlier versions add explicit padding. He accepts the patch as a temporary workaround, and a v2 is expected. https://lore.kernel.org/rust-for-linux/20261119-fix-schedstats-bindgen-layout-v1-1-0599dd230ffd@gmail.com/</li>
+<li><b>bindgen #3549</b>, “Empty struct with <code>__attribute__((aligned(N)))</code> is emitted without <code>#[repr(align(N))]</code>” (open), has a standalone reproducer. https://github.com/rust-lang/rust-bindgen/issues/3549 The duplicate #3552 is closed. https://github.com/rust-lang/rust-bindgen/issues/3552</li>
+<li><b>bindgen PR #3555</b>, “Add repr(align) to over-aligned empty structs” (open, not merged). It is the root-cause fix, and Peder Bergan checked that it puts <code>mm</code> back at 1208. https://github.com/rust-lang/rust-bindgen/pull/3555</li>
+<li><b>gaokun-android PR #138</b> turns <code>SCHEDSTATS</code> on for Linux 7.4 because Rust Binder reads the wrong <code>mm</code> otherwise. https://github.com/vahiru/gaokun-android/pull/138</li>
+<li>Why the kernel has no check: Rust for Linux PR #820 (2022) stopped generating layout tests, since they were never run. https://github.com/Rust-for-Linux/linux/pull/820</li>
+<li>Searched with no hits: the AsahiLinux GitHub org (issues and PRs for sched_statistics, percpu_counter_add_batch, bindgen alignment). I did not search the Asahi Matrix logs or the Fedora Asahi trackers.</li>
+</ul>
+<p>bindgen has <b>no released fix</b>. 0.73.2 is the latest release, and PR #3555 is open. No minimum bindgen version avoids the bug.</p>
+
+<h2>Measured on guix-builder</h2>
+<p>Your config is from /proc/config.gz: bindgen 0.71.1, rustc 1.93.0, gcc 14.3.0 for C, clang 19 for bindgen, and <code>CONFIG_SCHEDSTATS</code> not set. The repro builds <code>rust/bindings.o</code> and <code>rust/uapi.o</code> for exactly this package with the layout assertions on. It also compiles a small asm-offsets file with gcc to get the C offsets.</p>
+<div class=table><table>
+<tr><th>task_struct field</th><th>C (gcc offsetof)</th><th>bindgen (clang)</th><th>Rust offset_of! assertion</th></tr>
+<tr><td>se</td><td>192</td><td>192</td><td>passes</td></tr>
+<tr><td>stats</td><td>896</td><td>896</td><td>passes</td></tr>
+<tr><td>mm</td><td>1272</td><td>1272</td><td>passes</td></tr>
+<tr><td>active_mm</td><td>1280</td><td>1280</td><td>passes</td></tr>
+<tr><td>pid</td><td>1400</td><td>1400</td><td>passes</td></tr>
+<tr><td>comm</td><td>1936</td><td>1936</td><td>passes</td></tr>
+<tr><td>sizeof</td><td>4224</td><td>4224</td><td>passes</td></tr>
+</table></div>
+<p>bindgen 0.71.1 emits <code>pub __bindgen_padding_1: [u64; 5usize]</code> before <code>stats</code>. Those 40 bytes are the gap the lost alignment would otherwise leave, so <code>mm</code> stays correct <span class='tag measured'>measured</span>. With the assertions on, the unpatched source still fails with 13 E0080 errors across bindings and uapi:</p>
+<ul>
+<li><code>sched_statistics</code> alignment is 1 in Rust and 64 in C. This is the bug in bindgen #3549. It is harmless with 0.71.1, but it would move <code>mm</code> as soon as Guix ships bindgen 0.73.2.</li>
+<li><code>ns_common</code> is 128 bytes in Rust and 256 in C. bindgen drops the anonymous <code>struct ns_tree;</code> member, which the kernel's <code>-fms-extensions</code> allows. That makes <code>pid_namespace</code>, <code>user_namespace</code> and <code>cgroup_namespace</code> too small, and fields after their <code>ns</code> member sit 128 bytes early in Rust. No Rust code in this tree reads those fields <span class='tag inferred'>inferred from grep</span>. Aurora's patch 0002 fixes this in bindgen.</li>
+<li><code>efi_signature_data_t</code> alignment is 1 in Rust and 4 in C, because bindgen drops the <code>__aligned</code> on the <code>efi_guid_t</code> typedef.</li>
+</ul>
+
+<h2>The fix</h2>
+<p>/home/engstrand/guix/modules/engstrand/asahi/patches/linux-asahi-bindgen-layout.patch is applied to the kernel source:</p>
+<ul>
+<li><code>rust/bindgen_parameters</code> gains <code>--opaque-type</code> for <code>sched_statistics</code> (the same line as the upstream patch), <code>efi_guid_t</code>, <code>ns_common</code> and its inner anonymous types. An opaque type takes its size and alignment from clang. Rust gets <code>#[repr(align(64))] sched_statistics</code>, and no Rust code reads these fields.</li>
+<li><code>rust/Makefile</code> drops <code>--no-layout-tests</code>. bindgen then emits const assertions for the size, alignment and every field offset of each type it generates, and rustc fails the kernel build if any of them differs from C. This is the build-time check. It covers <code>task_struct</code>, <code>sched_entity</code> and every other emitted type, for any future bindgen or config change.</li>
+</ul>
+<p>After the patch, the repro finds 0 assertion failures, and the C, clang and Rust offsets above still agree <span class='tag measured'>measured</span>.</p>
+<p><b>Rejected options.</b> Turning on <code>CONFIG_SCHEDSTATS</code> only hides this one type, as Aurora's doc also says. The cost is small: it adds a few hundred bytes to every task, and the accounting code sits behind a static key that is off by default. But it would not fix <code>ns_common</code> or <code>efi_guid_t</code>, and it would leave the next mismatch unchecked. Patching Guix's bindgen with PR #3555 would be the real root-cause fix, but the PR is unmerged and unreviewed, 0.71.1 already gets <code>task_struct</code> right, and the assertions would catch a regression. Revisit it when bindgen releases the fix.</p>
+
+<h2>What to run</h2>
+<pre><code>cd /home/engstrand/guix
+make build     # optional: guix system build, already passed on guix-builder
+make switch    # reconfigure, then reboot into the new kernel</code></pre>
+<p>Nothing was reconfigured or rebooted. The kernel changes only in its Rust bindings (layout-neutral for <code>task_struct</code>), so the risk is the same as any kernel update. Your previous generation stays in GRUB.</p>
+
+<h2>Evidence</h2>
+<p class=cite>/home/engstrand/.local/state/bbh/workflows/20261122-142400-798-bug-fix/evidence has repro.bb, repro.scm, repro-before.txt, repro-before-rust.log, repro-after.txt, mechanism.md, lore-patch.mbox and lore-thread.atom.</p>
+
+</main></body></html>

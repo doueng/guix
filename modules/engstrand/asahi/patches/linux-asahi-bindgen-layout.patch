@@ -1,0 +1,43 @@
+diff -ru a/rust/bindgen_parameters b/rust/bindgen_parameters
+--- a/rust/bindgen_parameters
++++ b/rust/bindgen_parameters
+@@ -32,6 +32,22 @@
+ # warning. We don't need to peek into it anyway.
+ --opaque-type spinlock
+ 
++# Bindgen drops the alignment of empty structs. Keep the cache-line alignment
++# of sched_statistics when CONFIG_SCHEDSTATS is disabled; bindgen 0.73.2 also
++# misplaces the task_struct fields after it, including mm.
++# https://github.com/rust-lang/rust-bindgen/issues/3549
++# https://lore.kernel.org/rust-for-linux/20261119-fix-schedstats-bindgen-layout-v1-1-0599dd230ffd@gmail.com/
++--opaque-type sched_statistics
++
++# Bindgen drops the alignment attribute of this typedef (4 in C, 1 in Rust).
++--opaque-type efi_guid_t
++
++# Bindgen omits the anonymous `struct ns_tree;` member (-fms-extensions), so the
++# Rust ns_common, its inner union, and every namespace that embeds it, are too
++# small.
++--opaque-type ns_common
++--opaque-type ns_common__bindgen_ty_.*
++
+ # enums that appear in indirect function calls should specify a cfi type
+ --newtype-enum lru_status
+ --with-attribute-custom-enum=lru_status='#[cfi_encoding="10lru_status"]'
+diff -ru a/rust/Makefile b/rust/Makefile
+--- a/rust/Makefile
++++ b/rust/Makefile
+@@ -502,10 +502,12 @@
+ bindgen_c_flags_final = $(bindgen_c_flags_lto) -fno-builtin -D__BINDGEN__
+ 
+ # `--rust-target` points to our minimum supported Rust version.
++# Layout tests stay on: they are const assertions that fail the build when
++# the Rust and C size, alignment or field offsets of a type differ.
+ quiet_cmd_bindgen = BINDGEN $@
+       cmd_bindgen = \
+ 	$(BINDGEN) $< $(bindgen_target_flags) --rust-target 1.85 \
+-		--use-core --with-derive-default --ctypes-prefix ffi --no-layout-tests \
++		--use-core --with-derive-default --ctypes-prefix ffi \
+ 		--no-debug '.*' --enable-function-attribute-detection \
+ 		-o $@ -- $(bindgen_c_flags_final) -DMODULE \
+ 		$(bindgen_target_cflags) $(bindgen_target_extra)

@@ -39,7 +39,13 @@
             (commit tag)))
       (file-name (git-file-name "linux-source" tag))
       (sha256 (base32 %hash))
-      (patches (search-patches "linux-libre-fix-arm64-bin-sh.patch")))))
+      ;; The second patch keeps bindgen's layout assertions, so the build fails
+      ;; when a Rust binding's size, alignment or field offsets differ from C,
+      ;; and makes the types bindgen gets wrong opaque.  See
+      ;; docs/bindgen-schedstats.html.
+      (patches
+       (list (search-patch "linux-libre-fix-arm64-bin-sh.patch")
+             (local-file "patches/linux-asahi-bindgen-layout.patch"))))))
 
 (define linux-asahi
   (let ((base (customize-linux
