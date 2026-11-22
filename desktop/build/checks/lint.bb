@@ -133,7 +133,8 @@
           (concat
            (for [t ["leader-test" "palette-test" "review-test"]]
              (tested (str "desktop/build/keybindings/" t ".clj") "keybindings" t own
-                     {:dir c/root :extra-env {"KEYLOG_FILE" "/dev/null"}} ["bb" (str "desktop/build/keybindings/" t ".clj")]))
+                     ;; A shell inside Rex sets TERM_PROGRAM=rex, which sends keyleader down its Rex path.
+                     {:dir c/root :extra-env {"KEYLOG_FILE" "/dev/null" "TERM_PROGRAM" ""}} ["bb" (str "desktop/build/keybindings/" t ".clj")]))
            [(tested "bb desktop/build/keybindings/generate.bb --check" "keybindings" "generate" own
                     {:dir c/root} ["bb" "desktop/build/keybindings/generate.bb" "--check"])
             (tested "Dusk launcher ranking (desktop/build/dusk/runtime_test.bb)" "keybindings" "dusk-runtime" own

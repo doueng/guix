@@ -96,6 +96,11 @@
    :paths ["desktop/configs/doom/clipboard.el" "desktop/configs/nvim/fnl/config/options.fnl"
            "desktop/build/clipboard/**"]
    :slow ["make clipboard-check"]}
+  {:name "clipboard e2e"
+   :paths ["desktop/kanata.kbd" "desktop/configs/ghostty/config" "desktop/configs/ghostty-rex/ghostty"
+           "desktop/configs/nvim/fnl/config/keymaps.fnl" "desktop/configs/doom/clipboard.el"
+           "desktop/build/clipboard/e2e.bb"]
+   :slow ["make clipboard-e2e"]}
   {:name "clipboard history"
    :paths ["desktop/bin/clipboard-history" "desktop/lib/session.clj" "desktop/build/clipboard/history-test.bb"]
    :checks ["make lint" "make clipboard-history-test"]}

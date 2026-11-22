@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="T217: the Cmd/Ctrl clipboard path through kanata, Ghostty, Emacs, Neovim and Chrome, the cause of the silent failed copies, and the one rule now.">
+<meta name="bbh-doc" content="T217">
+<title>Copy and paste: why Cmd+C sometimes did nothing</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Copy and paste: why Cmd+C sometimes did nothing</h1>
+
+<h2>In short</h2>
+<p>Copies from Emacs or Neovim in the terminal failed without a word, so the clipboard kept its old text and the next paste, in Chrome or anywhere else, gave the old text. Chrome was never at fault. Two terminal settings caused it, and both are fixed. The rule now: <b>Cmd is the clipboard key everywhere, and Ctrl keeps each app's own meaning.</b></p>
+
+<h2>The old path</h2>
+<svg viewBox='0 0 360 190' width='100%' role='img' aria-label='Cmd+C path'>
+<style>text{font:11px sans-serif;fill:currentColor}.b{fill:none;stroke:currentColor;stroke-width:1}.x{stroke:#e5534b;stroke-width:2}</style>
+<rect class='b' x='5' y='5' width='90' height='30' rx='5'/><text x='14' y='24'>Cmd+C pressed</text>
+<rect class='b' x='130' y='5' width='100' height='30' rx='5'/><text x='138' y='19'>kanata cmd layer</text><text x='138' y='31'>sends Ctrl+Insert</text>
+<line class='b' x1='95' y1='20' x2='130' y2='20'/>
+<rect class='b' x='5' y='70' width='90' height='30' rx='5'/><text x='14' y='89'>Chrome: copies</text>
+<rect class='b' x='130' y='70' width='100' height='30' rx='5'/><text x='138' y='84'>Ghostty: eats it</text><text x='138' y='96'>with no selection</text>
+<rect class='b' x='255' y='70' width='100' height='30' rx='5'/><text x='262' y='84'>Neovim: copies on</text><text x='262' y='96'>Ctrl+C, not this</text>
+<line class='b' x1='180' y1='35' x2='50' y2='70'/><line class='b' x1='180' y1='35' x2='180' y2='70'/><line class='b' x1='180' y1='35' x2='305' y2='70'/>
+<rect class='b' x='130' y='135' width='100' height='30' rx='5'/><text x='138' y='149'>Emacs in terminal</text><text x='138' y='161'>never sees the key</text>
+<line class='x' x1='180' y1='100' x2='180' y2='135'/>
+<text x='255' y='130'>clipboard keeps</text><text x='255' y='144'>the old text</text>
+</svg>
+<p>kanata sends one chord for each clipboard key, whatever window has focus: Cmd+C is Ctrl+Insert, Cmd+V is Shift+Insert and Cmd+X is Shift+Delete. These chords mean copy, paste and cut in every GTK, Chrome, Emacs and JetBrains window, and they never collide with a terminal's Ctrl+C. The per-app layers that hyprkan switches don't touch them, so a late layer switch can't break copy. Hyprland binds none of these chords, and vimium-cljs passes them to the page.</p>
+
+<h2>The cause</h2>
+<ul>
+<li><b>Ghostty</b> binds Ctrl+Insert to its own copy by default. Herdr and the editors handle the mouse, so Ghostty usually has no selection. It then copied nothing and still swallowed the key, so Emacs never saw C-&lt;insert&gt;.</li>
+<li><b>Neovim</b> copied and cut on Ctrl+C and Ctrl+X, but Cmd+C sends Ctrl+Insert, so Cmd+C did nothing there in any terminal. Caps+C worked, which is why both chords seemed to work only some of the time.</li>
+</ul>
+<p>What was ruled out, on the hidden test display: Flatpak Chrome copies, pastes and cuts on kanata's chords every time, including 20 of 20 pastes straight after a focus switch. kanata's layer switching, Hyprland binds, vimium-cljs, the cliphist watcher and Emacs's Wayland clipboard functions all checked out.</p>
+
+<h2>The new design</h2>
+<table>
+<tr><th>Key</th><th>Sends</th><th>Meaning</th></tr>
+<tr><td>Cmd+C / V / X</td><td>Ctrl+Insert, Shift+Insert, Shift+Delete</td><td>Copy, paste, cut in every app</td></tr>
+<tr><td>Ctrl (Caps) + C / V / X</td><td>Unchanged</td><td>The app's own: SIGINT in terminals, block visual in Vim, copy in Chrome</td></tr>
+<tr><td>Cmd+Caps+V</td><td>Super+Ctrl+V</td><td>Clipboard history</td></tr>
+</table>
+<ul>
+<li>Ghostty (Herdr's window and the ghostty-rex window) unbinds its default and rebinds Ctrl+Insert with <code>performable:</code>. Cmd+C now copies Ghostty's own selection (Shift+drag) when there is one, and otherwise passes the key to the program.</li>
+<li>Neovim copies and cuts on &lt;C-Insert&gt; and &lt;S-Del&gt;. Its Ctrl+C, Ctrl+X and Ctrl+V clipboard maps are gone, so Ctrl keeps Vim's meaning. Cmd+V reaches it as Ghostty's paste.</li>
+<li>Emacs needed no change: C-&lt;insert&gt;, S-&lt;insert&gt; and S-&lt;delete&gt; are its built-in copy, paste and cut.</li>
+</ul>
+
+<h2>Check</h2>
+<p><code>make clipboard-e2e</code> opens Flatpak Chrome, terminal Emacs (in both Ghostty configs), Neovim and a shell on the hidden test display. Before each step it moves focus to another window, then sends kanata's chords. It checks a copy into and out of each app, a cut in Chrome, a copy of Ghostty's own selection, and that Ctrl+C still interrupts a program in the terminal. Before the fix 3 of its checks failed. Now all 14 pass.</p>
+
+<h2>To reload</h2>
+<ul>
+<li>Ghostty: the configs are stowed, so press Ctrl+Shift+Alt+R in Herdr's window and in the Rex window, or open a new window.</li>
+<li>Neovim: restart open sessions.</li>
+<li>Nothing for kanata, Hyprland, Chrome or Emacs.</li>
+</ul>
+
+</main></body></html>

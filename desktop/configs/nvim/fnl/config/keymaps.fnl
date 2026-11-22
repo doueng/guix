@@ -30,14 +30,12 @@
 (vim.keymap.set :n "<A-,>" :<cmd>BufferLineCyclePrev<cr> {:desc "Previous buffer"})
 (vim.keymap.set :n :<A-.> :<cmd>BufferLineCycleNext<cr> {:desc "Next buffer"})
 
-(vim.keymap.set :n :<C-v> "\"+p" {:desc "Paste from clipboard"})
-(vim.keymap.set :x :<C-v> "\"+P" {:desc "Paste from clipboard"})
 (vim.keymap.set :x :p :P {:desc "Paste without yanking the selection"})
-(vim.keymap.set :i :<C-v> :<C-r>+ {:desc "Paste from clipboard"})
-(vim.keymap.set :c :<C-v> :<C-r>+
-                {:desc "Paste from clipboard in command mode"})
 
-(vim.keymap.set [:n :v] :<C-c> "\"+y" {:desc "Copy to clipboard"})
-(vim.keymap.set [:n :v] :<C-x> "\"+d" {:desc "Cut to clipboard"})
+;; Cmd is the clipboard key and Ctrl keeps Vim's meaning (docs/clipboard.html).
+;; kanata sends Ctrl+Insert for Cmd+C and Shift+Delete for Cmd+X; Ghostty
+;; pastes Cmd+V (Shift+Insert) itself.
+(vim.keymap.set :x :<C-Insert> "\"+y" {:desc "Copy to clipboard"})
+(vim.keymap.set :x :<S-Del> "\"+d" {:desc "Cut to clipboard"})
 
 (require :config.shared-keys)

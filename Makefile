@@ -17,7 +17,7 @@ CHECK_SHEPHERD := bb desktop/build/home/check-shepherd.bb
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify rexmux rexmux-test rexmux-verify rexmux-tla ghostty-rex ghostty-rex-test ghostty-rex-verify ghostty-rex-reload mux oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test ext-reload-test chrome-e2e \
-        doom-check doom-env-test doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check chrome-palette-check chrome-launch-check chrome-fullscreen-check test-display-check clipboard-check \
+        doom-check doom-env-test doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check chrome-palette-check chrome-launch-check chrome-fullscreen-check test-display-check clipboard-check clipboard-e2e \
         clipboard-history-test taildrop-test parinfer-check parinfer-fix
 
 help:
@@ -85,6 +85,7 @@ help:
 	@echo 'chrome-fullscreen-check press F on a video in a throwaway Chrome in nested Hyprland: fills the screen, Esc back to the tile'
 	@echo 'test-display-check open a headed Chrome in the headless test display and prove the user'\''s screen and focus stay untouched'
 	@echo 'clipboard-check yank and paste between Emacs, Neovim and the Wayland clipboard (uses the live clipboard)'
+	@echo 'clipboard-e2e Cmd+C and Cmd+V right after a focus switch in Chrome, terminal Emacs and Neovim, on the hidden test display'
 	@echo 'clipboard-history-test check what clipboard-history stores and skips, in a throwaway cliphist db'
 	@echo 'taildrop-test unit checks for the Taildrop send and receive script'
 
@@ -323,6 +324,9 @@ clipboard-check:
 
 doom-env-test:
 	emacs --batch -l desktop/build/doom/session-env-test.el
+
+clipboard-e2e:
+	test-display --name clipboard-e2e -- bb desktop/build/clipboard/e2e.bb
 
 clipboard-history-test:
 	bb desktop/build/clipboard/history-test.bb

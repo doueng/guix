@@ -32,6 +32,11 @@ confirm-close-surface = false
 gtk-titlebar = false
 gtk-single-instance = desktop
 
+# kanata sends Ctrl+Insert for Cmd+C. Copy Ghostty's own selection; with none,
+# performable: hands the key to the program, so Emacs and Neovim copy theirs.
+# Ghostty 1.4 keeps the default's consuming binding unless it is unbound first.
+keybind = ctrl+insert=unbind
+keybind = performable:ctrl+insert=copy_to_clipboard
 keybind = shift+insert=paste_from_clipboard
 keybind = ctrl+enter=unbind
 keybind = shift+ctrl+alt+r=reload_config
