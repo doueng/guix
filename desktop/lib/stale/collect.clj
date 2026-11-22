@@ -1,0 +1,146 @@
+;; The facts desktop/lib/stale.clj judges, read from the running system. Every
+;; path hangs off (:root ctx) and every command goes through ctx, so a test can
+;; point it at a made-up /proc, profiles and herd.
+(ns stale.collect
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
+            [stale]))
+
+(defn- path [ctx & parts] (str (apply fs/path (:root ctx "/") (map #(str/replace % #"^/" "") parts))))
+
+(defn- mtime [p] (try (.toMillis (fs/last-modified-time p {:nofollow-links true})) (catch Exception _ nil)))
+
+(defn- real [p] (try (str (fs/real-path p)) (catch Exception _ nil)))
+
+(defn- slurp-or [p dflt] (try (slurp p) (catch Exception _ dflt)))
+
+(defn- expand [ctx p] (str/replace-first p #"^~(?=/)" (:home ctx)))
+
+(defn newest
+  "[path ms] of the newest regular file the repo GLOBS match, or nil."
+  [repo globs]
+  (->> globs
+       (mapcat (fn [g] (if (str/includes? g "*") (fs/glob repo g) (let [p (fs/path repo g)] (when (fs/exists? p) [p])))))
+       (filter fs/regular-file?)
+       (map (fn [p] [(str (fs/relativize repo p)) (mtime p)]))
+       (sort-by second)
+       last))
+
+(defn- boot-params [ctx which]
+  (let [s (slurp-or (path ctx "run" which "parameters") "")]
+    {:kernel (second (re-find #"\(kernel \"([^\"]+)\"\)" s))
+     :initrd (second (re-find #"\(initrd \"([^\"]+)\"\)" s))
+     :args (second (re-find #"\(kernel-arguments \(([^)]*)\)\)" s))}))
+
+(defn- start-ms
+  "When PID started, from field 22 of /proc/PID/stat in clock ticks after boot."
+  [ctx btime pid]
+  (let [stat (slurp-or (path ctx "proc" (str pid) "stat") nil)
+        fields (some-> stat (subs (inc (str/last-index-of stat ")"))) str/trim (str/split #" "))]
+    (when (and btime (> (count fields) 19))
+      (+ (* 1000 btime) (* 10 (parse-long (nth fields 19)))))))
+
+(def interpreters #{"bb" "guile" "python3" "node" "bash"})
+
+(defn- repo-files
+  "{realpath ms} of the program ARGV runs when it lives in the repo: argv0, or the
+  script an interpreter runs. A script given as an argument, as to wl-paste
+  --watch, runs anew each time, so it does not count."
+  [ctx argv]
+  (into {} (for [a (if (interpreters (str/replace (first argv) #".*/" "")) (take 1 (rest argv)) (take 1 argv))
+                 :when (str/starts-with? a "/")
+                 :let [r (real (path ctx a))]
+                 :when (and r (str/starts-with? r (str (:repo ctx) "/")) (fs/regular-file? r)
+                            (not (str/ends-with? r "bb.edn")))]
+             [(str (fs/relativize (:repo ctx) r)) (mtime r)])))
+
+(defn procs [ctx]
+  (let [btime (some->> (slurp-or (path ctx "proc" "stat") "") (re-find #"(?m)^btime (\d+)") second parse-long)]
+    (vec (for [d (fs/list-dir (path ctx "proc"))
+               :let [pid (parse-long (str (fs/file-name d)))]
+               :when pid
+               :let [argv (remove str/blank? (str/split (slurp-or (str d "/cmdline") "") #"\x00"))]
+               :when (seq argv)
+               :let [exe (try (str (fs/read-link (str d "/exe"))) (catch Exception _ nil))]]
+           (cond-> {:pid pid :argv (vec argv) :start-ms (start-ms ctx btime pid) :files (repo-files ctx argv)}
+             exe (assoc :exe (str/replace exe #" \(deleted\)$" ""))
+             (and exe (str/ends-with? exe " (deleted)")) (assoc :deleted? true))))))
+
+(defn services
+  "Running Shepherd services with a process: [{:scope :name :pid :command}]."
+  [ctx]
+  (vec (for [scope [:system :home]
+             :let [herd (fn [& args] (apply (:herd ctx) scope args))
+                   started (some->> (herd "status") (re-find #"(?s)Started:\n(.*?)(\n\S|$)") second
+                                    (re-seq #"(?m)^ \+ (\S+)") (map second))]
+             name started
+             :let [out (herd "status" name "-n" "0")
+                   pid (some->> out (re-find #"Main PID: (\d+)") second parse-long)]
+             :when pid]
+         {:scope scope :name name :pid pid :command (some->> out (re-find #"Command: (.*)") second)})))
+
+(defn doom [ctx]
+  (let [etc (path ctx (:home ctx) ".config/emacs/.local/etc/@")
+        env (str etc "/init.d/05-doom-env.load.el")
+        synced (last (sort (keep mtime (fs/glob etc "init.*.el"))))
+        [src src-ms] (newest (:repo ctx) ["desktop/configs/doom/init.el" "desktop/configs/doom/packages.el"])
+        text (slurp-or env nil)]
+    (when (or synced text)
+      {:synced-ms synced :sources src :sources-ms src-ms
+       :env-ms (mtime env) :env-text text
+       :env-vars (set (map second (re-seq #"\"([A-Za-z_][A-Za-z0-9_]*)=" (or text ""))))
+       :deny-ms (second (newest (:repo ctx) ["desktop/configs/doom/cli.el"]))})))
+
+(defn extensions
+  "The Chrome extensions ext-reload serves: newest source change and newest build output."
+  [ctx]
+  (let [root (fs/path (:repo ctx) "desktop/build/chrome")]
+    (vec (for [d (when (fs/exists? root) (sort (fs/list-dir root)))
+               :when (and (fs/exists? (fs/path d "bb.edn")) (fs/exists? (fs/path d "ext/manifest.json")))
+               :let [rel (str (fs/relativize (:repo ctx) d))]]
+           {:name (str (fs/file-name d))
+            :src (newest (:repo ctx) [(str rel "/src/**") (str rel "/ext/manifest.json") (str rel "/shadow-cljs.edn")])
+            :built-ms (last (sort (keep mtime (fs/glob (str d "/ext") "**.js"))))}))))
+
+(defn stamps [ctx]
+  (let [dir (:stamps ctx)]
+    (into {} (for [f (when (and dir (fs/exists? dir)) (fs/list-dir dir))
+                   :when (fs/regular-file? f)]
+               [(str/replace (str (fs/file-name f)) "__" ":") (mtime f)]))))
+
+(defn stamp! [ctx id]
+  (fs/create-dirs (:stamps ctx))
+  (spit (str (fs/path (:stamps ctx) (str/replace id ":" "__"))) (str (System/currentTimeMillis) "\n")))
+
+(def config-globs
+  "What make switch builds into the system and Home."
+  ["modules/**" "desktop/system.scm" "desktop/home.scm" "desktop/kanata.kbd" "channels.scm"])
+
+(defn facts [ctx]
+  (let [system-link (path ctx "var/guix/profiles/system")
+        gen (try (str (fs/read-link system-link)) (catch Exception _ nil))
+        current (real (path ctx "run/current-system"))
+        home-active (real (path ctx (:home ctx) ".guix-home"))
+        procs (future (procs ctx))
+        services (future (services ctx))
+        closure (future (into #{} (mapcat (:requisites ctx)) (remove nil? [current home-active])))]
+    {:now-ms (System/currentTimeMillis)
+     :boot {:current (boot-params ctx "current-system") :booted (boot-params ctx "booted-system")}
+     :system {:current current :latest (real system-link)
+              :generation-ms (when gen (mtime (str (fs/path (fs/parent system-link) gen))))}
+     :config (newest (:repo ctx) config-globs)
+     :home {:active home-active
+            :latest (real (path ctx "var/guix/profiles/per-user" (:user ctx) "guix-home"))}
+     :closure @closure
+     :services @services
+     :procs @procs
+     :sources (into {} (for [{:keys [id sources inputs]} stale/components
+                             :let [hit (or (when sources (newest (:repo ctx) sources))
+                                           (last (sort-by second (keep (fn [p] (let [p (path ctx (expand ctx p))]
+                                                                                 (some->> (mtime p) (vector p))))
+                                                                       inputs))))]
+                             :when hit]
+                         [id hit]))
+     :stamps (stamps ctx)
+     :doom (doom ctx)
+     :extensions (extensions ctx)}))

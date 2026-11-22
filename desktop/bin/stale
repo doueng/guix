@@ -1,0 +1,98 @@
+#!/usr/bin/env bb
+;; stale: what runs old code or config after a change in ~/guix, and the command
+;; that refreshes it (T218). make status and make refresh call it; make switch
+;; and make home end with a refresh.
+;;
+;;   stale            the stale components, with why and the fix, then the fresh ones
+;;   stale --all      every component in a table
+;;   stale refresh    run every fix that is safe unattended, then list what needs you
+;;   stale --edn      the facts and rows, for debugging
+(require '[babashka.classpath :as classpath]
+         '[babashka.fs :as fs]
+         '[babashka.process :as p]
+         '[clojure.pprint :as pprint]
+         '[clojure.string :as str])
+(def here (str (fs/normalize (fs/path (fs/parent (fs/real-path *file*)) ".." ".."))))
+(classpath/add-classpath (str here "/desktop/lib"))
+;; The checkout the running processes and the last switch came from; a Worker
+;; workspace sets STALE_REPO=~/guix to look at the live one.
+(def repo (or (System/getenv "STALE_REPO") here))
+(require '[stale] '[stale.collect :as collect] '[session])
+
+(defn run [argv & [opts]]
+  (try (apply p/sh (merge {:continue true :in ""} opts) argv)
+       (catch Exception e {:exit 127 :out "" :err (ex-message e)})))
+
+(def herd-bin "/run/current-system/profile/bin/herd")
+
+(def ctx
+  {:root "/" :repo repo :home (System/getenv "HOME")
+   :user (or (System/getenv "USER") (System/getProperty "user.name"))
+   :stamps (str (session/runtime-dir) "/stale")
+   :herd (fn [scope & args]
+           (let [{:keys [exit out]} (run (if (= scope :system) (into ["sudo" "-n" herd-bin] args) (into ["herd"] args)))]
+             (when (zero? exit) out)))
+   :requisites (fn [item] (str/split-lines (:out (run ["guix" "gc" "-R" item]))))})
+
+(def env (or (session/wayland-env) {}))
+
+(defn shown [s n] (let [s (str s)] (if (> (count s) n) (str (subs s 0 (dec n)) "…") s)))
+
+(defn print-stale [rows]
+  (let [{:keys [total stale auto manual]} (stale/summary rows)]
+    (println (str total " components, " stale " stale"
+                  (when (pos? stale) (str ": make refresh fixes " (count auto) ", " (count manual) " need you"))))
+    (doseq [r (concat auto manual)]
+      (println)
+      (println (str "  " (:label r) (when (:pid r) (str " (pid " (:pid r) ")"))))
+      (when (:running r) (println (str "    running  " (:running r) (when (and (:current r) (not= (:current r) (:running r))) (str "  current " (:current r))))))
+      (println (str "    why      " (:why r)))
+      (println (str "    fix      " (get-in r [:fix :cmd]) (if (get-in r [:fix :run]) "  (make refresh)" (str "  (manual: " (get-in r [:fix :manual]) ")")))))
+    (println)
+    (doseq [[group title] [[:system "system"] [:home "home"] [:session "session"]]
+            :let [fresh (filter #(and (= :fresh (:state %)) (= group (:group %))) rows)]
+            :when (seq fresh)]
+      (println (str "fresh " title ": " (str/join ", " (map :label fresh)))))))
+
+(defn print-all [rows]
+  (println (format "%-6s %-30s %-34s %s" "STATE" "COMPONENT" "RUNNING" "FIX"))
+  (doseq [r rows]
+    (println (format "%-6s %-30s %-34s %s" (name (:state r)) (shown (:label r) 30) (shown (:running r) 34)
+                     (or (get-in r [:fix :cmd]) "")))))
+
+(defn respawn! [pid argv]
+  (run ["kill" (str pid)])
+  (loop [n 0] (when (and (< n 30) (fs/exists? (str "/proc/" pid))) (Thread/sleep 100) (recur (inc n))))
+  (p/process (into ["setsid" "-f"] argv) {:extra-env env :out :discard :err :discard :in ""})
+  {:exit 0})
+
+(defn perform!
+  "Run one fix's :run; return {:exit :out :err}."
+  [[op & args]]
+  (case op
+    :herd (let [[scope name] args]
+            (run (if (= scope :system) ["sudo" "-n" herd-bin "restart" name] ["herd" "restart" name])))
+    :hyprctl (run (into ["hyprctl"] args) {:extra-env env})
+    :bin (run (into [(str repo "/desktop/bin/" (first args))] (rest args)) {:extra-env env})
+    :sh (run (vec args) {:extra-env env})
+    :doom (run (into [(str (System/getenv "HOME") "/.config/emacs/bin/doom")] args) {:dir (System/getenv "HOME")})
+    :respawn (respawn! (first args) (second args))))
+
+(defn refresh! []
+  (let [{:keys [auto]} (stale/summary (stale/assess (collect/facts ctx)))]
+    (doseq [r auto]
+      (print (str "refresh: " (:label r) ": " (get-in r [:fix :cmd]) " ... "))
+      (flush)
+      (let [{:keys [exit out err]} (perform! (get-in r [:fix :run]))]
+        (if (zero? exit)
+          (do (collect/stamp! ctx (or (get-in r [:fix :stamp]) (:id r))) (println "ok"))
+          (println (str "failed: " (str/trim (str err out)))))))
+    (when (seq auto) (println))
+    (print-stale (stale/assess (collect/facts ctx)))))
+
+(case (first *command-line-args*)
+  nil (print-stale (stale/assess (collect/facts ctx)))
+  "--all" (print-all (stale/assess (collect/facts ctx)))
+  "--edn" (let [f (collect/facts ctx)] (pprint/pprint {:facts (dissoc f :closure :procs) :rows (stale/assess f)}))
+  "refresh" (refresh!)
+  (do (binding [*out* *err*] (println "usage: stale [--all|--edn|refresh]")) (System/exit 2)))
