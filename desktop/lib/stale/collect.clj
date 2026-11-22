@@ -141,6 +141,14 @@
   (fs/create-dirs (:stamps ctx))
   (spit (str (fs/path (:stamps ctx) (str/replace id ":" "__"))) (str (System/currentTimeMillis) "\n")))
 
+(defn restartable
+  "System services sudo restarts without a password: %restartable-services in
+  modules/engstrand/features/agent-control.scm."
+  [repo]
+  (some->> (slurp-or (str repo "/modules/engstrand/features/agent-control.scm") nil)
+           (re-find #"(?s)\(define %restartable-services\s+'\(([^)]*)\)") second
+           (re-seq #"\"([^\"]+)\"") (map second) set))
+
 (def config-globs
   "What make switch builds into the system and Home."
   ["modules/**" "desktop/system.scm" "desktop/home.scm" "desktop/kanata.kbd" "channels.scm"])
@@ -172,5 +180,6 @@
                          [id hit]))
      :stamps (stamps ctx)
      :links (links ctx)
+     :restartable (restartable (:repo ctx))
      :doom (doom ctx)
      :extensions (extensions ctx)}))

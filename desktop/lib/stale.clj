@@ -5,11 +5,6 @@
 (ns stale
   (:require [clojure.string :as str]))
 
-(def restartable-system-services
-  "Services the user may restart with sudo and no password, as
-  modules/engstrand/features/agent-control.scm lists them."
-  #{"bluetooth" "kanata" "ntpd" "tailscaled" "upower-daemon" "ydotoold"})
-
 (def manual-home-services
   "Home services a refresh leaves alone: restarting bbh-super restarts the Router
   and every Worker, bbh-emacs is the Emacs they draw in."
@@ -153,13 +148,13 @@
            (assoc :state :stale :why "~/.guix-home is not the newest Home generation"
                   :fix {:cmd "make home" :manual "make home"})))))
 
-(defn- service-fix [{:keys [scope name]}]
+(defn- service-fix [restartable {:keys [scope name]}]
   (cond (and (= name "root") (= scope :system)) {:cmd "sudo reboot" :manual "reboot"}
         (= name "root") {:cmd "log out and back in" :manual "re-login: the home Shepherd runs every home service"}
         (and (= scope :home) (manual-home-services name))
         {:cmd (str "herd restart " name) :manual (manual-home-services name)}
         (= scope :home) {:cmd (str "herd restart " name) :run [:herd :home name]}
-        (restartable-system-services name) {:cmd (str "sudo herd restart " name) :run [:herd :system name]}
+        (restartable name) {:cmd (str "sudo herd restart " name) :run [:herd :system name]}
         :else {:cmd (str "sudo herd restart " name " (or reboot)") :manual "needs your sudo password"}))
 
 (defn service-rows
@@ -177,7 +172,7 @@
                     :label (if (= name "root") (str "Shepherd (" (clojure.core/name scope) ")") name)
                     :group scope :pid pid
                     :running (or (short-name (apply first-item (:exe proc) (:argv proc))) command)}
-             why (assoc :state :stale :why why :fix (service-fix svc)
+             why (assoc :state :stale :why why :fix (service-fix (set (:restartable facts)) svc)
                         :current (some->> (old-items facts proc) first (current-of (:closure facts)))))))))
 
 (defn- component-procs [facts spec]
@@ -186,7 +181,7 @@
                       (filter #(matches? spec %) (:procs facts))))))
 
 (defn component-row [facts spec procs-of]
-  (let [{:keys [id label of of-service inputs fix note]} spec]
+  (let [{:keys [id label of of-service fix note]} spec]
     (cond
       ;; Config a running process reads: stale when an input changed after it last loaded.
       (or of of-service)

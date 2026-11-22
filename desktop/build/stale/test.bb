@@ -17,7 +17,7 @@
    :config ["modules/a.scm" 4000]
    :home {:active (item "home") :latest (item "home")}
    :closure #{new-bb (item "kanata-1.11") (item "emacs-31")}
-   :services [] :procs [] :sources {} :stamps {}})
+   :services [] :procs [] :sources {} :stamps {} :restartable #{"tailscaled" "kanata"}})
 
 (defn row [facts id] (some #(when (= id (:id %)) %) (stale/assess facts)))
 (defn stale? [r] (= :stale (:state r)))
@@ -147,6 +147,8 @@
     (not (stale? (crow "home:md-view")))]
    ["kernel threads, with no command line, are skipped"
     (not-any? #(= 44 (:pid %)) (:procs facts))]
+   ["the services sudo may restart come from agent-control.scm"
+    (contains? (collect/restartable root) "kanata")]
    ["a repo config with no link in Home is linked by refresh; stow's README is not missed"
     (and (= ["desktop/configs/hypr/hyprland.lua"] (filter #(str/includes? % "hypr") (:missing (:links facts))))
          (= [:stow] (get-in (crow "links") [:fix :run])))]
