@@ -44,6 +44,9 @@
     (list (shepherd-service
            (provision '(camera-denoise))
            (requirement '(pipewire wireplumber))
+           ;; %user-log-dir lives in (shepherd support); without it the whole
+           ;; user shepherd.conf fails to load and no session service starts.
+           (modules '((shepherd support)))
            (documentation "Denoise the built-in camera through PipeWire.")
            (respawn? #t)
            (respawn-limit #~'(5 . 60))

@@ -11,6 +11,10 @@
   {:name "guix home"
    :paths ["modules/engstrand/features/**" "desktop/home.scm"]
    :slow ["make home-build"]}
+  {:name "home shepherd check"
+   :paths ["desktop/build/home/**"]
+   :checks ["make lint" "bb desktop/build/home/check-shepherd.bb /run/current-system"]
+   :slow ["make home-build"]}
   {:name "remote builder"
    :paths ["modules/engstrand/system/builder.scm" "modules/engstrand/system/builder-keys.scm" "modules/engstrand/builder/**"
            "desktop/builder.scm" "desktop/bin/builder-prebuild" "desktop/build/builder/**"

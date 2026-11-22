@@ -11,6 +11,8 @@ GUIX := $(HOME)/.config/guix/current/bin/guix
 JOBS ?=
 JOBS_FLAG = $(if $(JOBS),--max-jobs=$(JOBS))
 COMMON := -L "$(MODULES)"
+# Fails when a built Home's user shepherd.conf would not load at login (T216).
+CHECK_SHEPHERD := bb desktop/build/home/check-shepherd.bb
 
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify rexmux rexmux-test rexmux-verify rexmux-tla ghostty-rex ghostty-rex-test ghostty-rex-verify ghostty-rex-reload mux oilfm oilfm-test pi-sci pi-sci-test \
@@ -29,9 +31,9 @@ help:
 	@echo 'check         check system facts, then build system and Home without activating'
 	@echo 'system-facts  print folded daemon, sysctl, Shepherd and mount config; lint mounts'
 	@echo 'dry-run       show what system build would fetch or build'
-	@echo 'build         build $(CONFIG) without activating it'
+	@echo 'build         build $(CONFIG) without activating it; fail if its Home user Shepherd config would not load'
 	@echo 'repro-build   build system using the pinned channels via time-machine'
-	@echo 'switch        check system facts, build and activate system (sudo; writes ESP)'
+	@echo 'switch        check system facts, build and check, then activate system (sudo; writes ESP)'
 	@echo 'gc            delete generations older than $(GC_AGE), then collect garbage'
 	@echo 'builder-create once: create the Hetzner builder from desktop/builder.scm (spends money)'
 	@echo 'builder-deploy reconfigure the builder over the tailnet'
@@ -46,8 +48,8 @@ help:
 	@echo 'md-view-test  test the markdown-to-Chrome renderer'
 	@echo 'ext-reload-test build, reload and retab a test extension through the ext-reload hub in a headless Chrome'
 	@echo 'chrome-e2e    run the e2e suite of each Chrome extension (bb e2e in desktop/build/chrome/*) in headless Chrome'
-	@echo 'home-build    build Home without activating it'
-	@echo 'home-apply    activate Home, then stow live configs'
+	@echo 'home-build    build Home without activating it; fail if its user Shepherd config would not load'
+	@echo 'home-apply    home-build, activate Home, then stow live configs'
 	@echo 'stow          build SCI and install live config links using GNU Stow'
 	@echo 'pi-sci        compile the pinned SCI codemode runtime'
 	@echo 'pi-sci-test   build and verify SCI codemode with the installed Pi'
@@ -118,15 +120,16 @@ dry-run: channels-current
 	"$(GUIX)" system build --dry-run $(COMMON) "$(CONFIG)"
 
 build: channels-current
-	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
-	  "$(GUIX)" system build $(JOBS_FLAG) $(COMMON) "$(CONFIG)"
+	out=$$(GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
+	  "$(GUIX)" system build $(JOBS_FLAG) $(COMMON) "$(CONFIG)") && echo "$$out" && \
+	  $(CHECK_SHEPHERD) "$$out"
 
 repro-build:
 	GC_FREE_SPACE_DIVISOR=$${GC_FREE_SPACE_DIVISOR:-1} \
 	  "$(GUIX)" time-machine -C "$(CHANNELS)" -- \
 	  system build $(COMMON) "$(CONFIG)"
 
-switch: channels-current system-facts
+switch: channels-current system-facts build
 	sudo rm -f \
 	  /boot/efi/m1n1/boot.bin.old \
 	  /boot/efi/m1n1/boot.bin.new
@@ -144,7 +147,8 @@ gc:
 	"$(GUIX)" gc
 
 home-build: channels-current
-	"$(GUIX)" home build $(JOBS_FLAG) $(COMMON) "$(HOME_CONFIG)"
+	out=$$("$(GUIX)" home build $(JOBS_FLAG) $(COMMON) "$(HOME_CONFIG)") && echo "$$out" && \
+	  $(CHECK_SHEPHERD) "$$out"
 
 BUILDER_TOKEN ?= $(HOME)/.config/guix-builder/hcloud-token
 
@@ -238,7 +242,7 @@ bbh-web-highlights: $(PIERRE_DIFF)/node_modules
 stow: pi-sci pierre-diff-ansi
 	"$(HOME)/.guix-home/profile/bin/bb" desktop/stow-home
 
-home-apply: channels-current
+home-apply: channels-current home-build
 	"$(GUIX)" home reconfigure $(JOBS_FLAG) $(COMMON) "$(HOME_CONFIG)"
 	$(MAKE) stow
 
