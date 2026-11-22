@@ -1,19 +1,13 @@
 #!/usr/bin/env bb
 (ns hyprkan
-  (:require [babashka.classpath :as classpath]
-            [babashka.fs :as fs]
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
-(require '[hypr.ctl :as hyprctl] '[session])
-
-;; HYPRKAN_KANATA, host:port, points tests at a fake kanata.
-(def kanata-address
-  (let [[host port] (str/split (or (not-empty (System/getenv "HYPRKAN_KANATA")) "127.0.0.1:7333") #":")]
-    [host (parse-long port)]))
+(def kanata-address ["127.0.0.1" 7333])
 
 (defn apps-path []
   (str (or (System/getenv "XDG_CONFIG_HOME") (str (fs/home) "/.config")) "/kanata/apps.edn"))
@@ -52,15 +46,16 @@
        (catch Exception e (warn "cannot reach kanata:" (ex-message e)))))
 
 (defn active-class
-  "The focused window's class, or nil with a warning when no Hyprland answers."
+  "The focused window's class, or nil with a one-line warning when hyprctl fails."
   []
-  (try (:class (hyprctl/json "activewindow"))
-       (catch Exception e (warn "cannot read the focused window:" (ex-message e)) nil)))
+  (let [{:keys [exit out err]} (p/sh {:continue true} "hyprctl" "-j" "activewindow")]
+    (if (zero? exit)
+      (:class (json/parse-string out true))
+      (warn "hyprctl failed:" (str/trim (str out err))))))
 
 (defn follow-focus! []
-  (let [sig (or (session/hypr-signature)
-                (do (warn "no running Hyprland to follow") (System/exit 1)))
-        socket (str (session/runtime-dir) "/hypr/" sig "/.socket2.sock")]
+  (let [socket (str (System/getenv "XDG_RUNTIME_DIR") "/hypr/"
+                    (System/getenv "HYPRLAND_INSTANCE_SIGNATURE") "/.socket2.sock")]
     (focus! (active-class))
     (with-open [channel (java.nio.channels.SocketChannel/open
                          (java.net.UnixDomainSocketAddress/of socket))
@@ -84,10 +79,6 @@
 (case (first *command-line-args*)
   nil (do (name-process! "hyprkan") (follow-focus!))
   "layer" (println (:name (send! {:RequestCurrentLayerName {}} (reply :CurrentLayerName))))
-  "reload" (do (try (send! {:ReloadFile {:path "/etc/kanata/kanata.kbd"}} reset-after-reload)
-                    (catch Exception e
-                      (warn "cannot reload kanata:" (ex-message e))
-                      (System/exit 1)))
-               ;; Without a focused window kanata stays on base until the next focus change.
-               (when-let [class (active-class)] (focus! class)))
+  "reload" (do (send! {:ReloadFile {:path "/etc/kanata/kanata.kbd"}} reset-after-reload)
+               (some-> (active-class) focus!))
   (do (warn "usage: hyprkan [layer|reload]") (System/exit 2)))

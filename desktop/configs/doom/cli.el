@@ -1,7 +1,10 @@
 ;;; cli.el -*- lexical-binding: t; -*-
 
-;; `doom env' saves the shell's variables for every Emacs to load, the bbh-super
-;; daemon among them. Hyprland's signature names one compositor run, so a saved
-;; copy points hyprctl, in every shell Emacs starts, at a dead instance after the
-;; next login. Doom already leaves out WAYLAND_DISPLAY for the same reason.
-(add-to-list 'doom-env-deny "^HYPRLAND_INSTANCE_SIGNATURE$")
+;; `doom sync' rewrites the envvar file from the shell it runs in, and every
+;; Emacs loads that file over the environment it inherited. Doom already leaves
+;; out WAYLAND_DISPLAY, XDG_SESSION_* and *SOCK. Leave out the rest of what names
+;; one Hyprland login or one terminal pane too, or a saved copy points hyprctl,
+;; herdr and Ghostty at sessions that are gone (T216).
+(dolist (re '("^HYPRLAND_" "^HL_" "^HERDR_" "^GHOSTTY_" "^TERM_PROGRAM" "^TERMINFO$"
+              "^DESKTOP_SESSION$" "^XDG_SEAT" "^fish_"))
+  (add-to-list 'doom-env-deny re))

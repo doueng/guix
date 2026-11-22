@@ -5,8 +5,8 @@
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
 
 (require '[babashka.process :as p]
+         '[cheshire.core :as json]
          '[herdr.client :as herdr]
-         '[hypr.ctl :as hyprctl]
          '[hypr.dispatch :as hypr]
          '[mux])
 
@@ -14,6 +14,13 @@
 ;; (~/.config/engstrand/mux).
 (def backend (mux/backend))
 (def mux-class (mux/window-class backend))
+
+(defn hyprctl [& args]
+  (let [result @(p/process (into ["hyprctl"] args)
+                           {:out :string :err :string})]
+    (if (zero? (:exit result))
+      (json/parse-string (:out result) true)
+      (throw (ex-info "hyprctl failed" {:args args :result result})))))
 
 (defn focus-tab! [tab]
   (case backend
@@ -28,8 +35,8 @@
   (if-let [tab (and (= 1 (count args))
                     (some-> (parse-long (first args)) #{1 2 3 4 5 6 7 8 9}))]
     (let [target (some #(when (= mux-class (:class %)) (:address %))
-                       (hyprctl/json "clients"))
-          active (:address (hyprctl/json "activewindow"))]
+                       (hyprctl "clients" "-j"))
+          active (:address (hyprctl "activewindow" "-j"))]
       (cond
         (nil? target)
         (hypr/dispatch! ["exec_cmd" "~/.local/bin/mux-terminal"])

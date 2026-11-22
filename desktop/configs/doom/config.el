@@ -11,6 +11,7 @@
 (let ((interactive-shell (or (executable-find "fish") shell-file-name)))
   (setq-default explicit-shell-file-name interactive-shell))
 
+
 (defvar eng/doom-config-dir
   (file-name-directory
    (or (and (boundp 'load-file-name) load-file-name)
@@ -163,6 +164,7 @@ This is a lightweight way to apply config changes without restarting Emacs."
 
 (remove-hook 'doom-first-input-hook #'evil-snipe-mode)
 
+(load (expand-file-name "session-env.el" eng/doom-config-dir) nil 'nomessage)
 (load (expand-file-name "clipboard.el" eng/doom-config-dir) nil 'nomessage)
 
 (setq-default search-upper-case t)

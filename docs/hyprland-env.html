@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Why shells started from Emacs had a stale HYPRLAND_INSTANCE_SIGNATURE, and the simple fix">
+<meta name="bbh-doc" content="T216">
+<title>Hyprland signature in Emacs shells</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Hyprland signature in Emacs shells</h1>
+
+<h2>Choice</h2>
+<p><b>Keep hyprctl calls plain and stop Emacs handing out a saved Hyprland signature.</b> Two small Doom config changes, plus a one-line warning in hyprkan. The instance-discovery code from W280 (hypr.ctl, session/hypr-signature and its callers, and the 120-line hyprkan test) is reverted.</p>
+
+<h2>Root cause</h2>
+<p>Doom's envvar file (<code>~/.config/emacs/.local/etc/@/init.d/05-doom-env.load.el</code>, dated 2026-11-12) is a snapshot of the shell that ran <code>doom sync</code>. Every Emacs loads it over the environment it inherited. Shells started from Emacs (vterm, compile, make switch) then got that login's <code>HYPRLAND_INSTANCE_SIGNATURE</code>. The file also held <code>HERDR_PANE_ID</code>, <code>GHOSTTY_*</code>, <code>HL_INITIAL_WORKSPACE_TOKEN</code> and <code>TERM_PROGRAM</code> from the herdr pane it ran in. Doom's own deny list already leaves out <code>WAYLAND_DISPLAY</code>, <code>XDG_SESSION_*</code> and <code>*SOCK</code> for this reason, but it does not cover Hyprland's variables.</p>
+
+<h2>The fix</h2>
+<ol>
+<li><b>desktop/configs/doom/cli.el</b> adds <code>^HYPRLAND_ ^HL_ ^HERDR_ ^GHOSTTY_ ^TERM_PROGRAM ^TERMINFO$ ^DESKTOP_SESSION$ ^XDG_SEAT ^fish_</code> to <code>doom-env-deny</code>. This is Doom's documented setting for this, and <code>bin/doom</code> loads cli.el.</li>
+<li><b>desktop/configs/doom/session-env.el</b> covers the bbh-super daemon. The home Shepherd starts it outside Hyprland, so it has no signature of its own. emacsclient passes its environment to each new frame, but Emacs subprocesses read only <code>process-environment</code>, never the frame's (callproc.c copies only DISPLAY from the frame). An <code>after-make-frame-functions</code> hook copies <code>HYPRLAND_INSTANCE_SIGNATURE</code> and <code>WAYLAND_DISPLAY</code> from the client as the frame is made, before the client's --eval runs. bbh super opens its frame with <code>emacsclient -t --eval</code>, and <code>server-after-make-frame-hook</code> would run only after that eval. Each new frame carries the current login's values.</li>
+<li><b>hyprkan</b> checks hyprctl's exit status and prints one line, such as <code>hyprkan: hyprctl failed: Couldn't connect to …</code>, instead of a JSON stack trace. The kanata reload still runs.</li>
+<li>W280's rexg change stays (<code>rex server start --env HYPRLAND_INSTANCE_SIGNATURE</code>). That was a separate cause: Rex's env allowlist dropped the variable. It is a plain pass-through, not discovery.</li>
+</ol>
+
+<h2>Options considered</h2>
+<ul>
+<li><b>Drop doom env</b> (<code>doom sync --no-env</code>). This is the most Guix-like option, since the snapshot also pins <code>/gnu/store</code> paths such as glibc-locales and emacs-31.1's lisp dir, which go stale after upgrades. But Hyprland's PATH lacks <code>~/.local/bin</code> and <code>~/.config/emacs/bin</code>, which Emacs gets only from the snapshot today. Doing this first needs those directories added through a Guix Home environment-variables service. It is worth a follow-up, but it is larger than this bug.</li>
+<li><b>Find the live instance in every caller</b> (W280). This works, but every hyprctl caller has to route through it, and it treats the symptom.</li>
+<li><b>systemd / uwsm import-environment.</b> Hyprland pushes its variables into the systemd and D-Bus activation environments, and uwsm manages that for whole sessions. Shepherd has no equivalent, which is why the frame hook is needed here.</li>
+</ul>
+
+<h2>What you run</h2>
+<ol>
+<li>After this lands, run <code>doom sync</code> from any shell. It rewrites the envvar file with the new deny list, and the shell's own Hyprland variables are left out.</li>
+<li>Restart Emacs: the GUI Emacs and <code>herd restart bbh-emacs</code>. Running Emacsen keep the stale value in <code>process-environment</code>, and shells already open in them keep it until reopened.</li>
+</ol>
+
+<h2>Test</h2>
+<p><code>make doom-env-test</code> runs desktop/build/doom/session-env-test.el in batch Emacs. It checks that the deny list covers the session variables but not PATH or SHELL, that a client frame's signature replaces a stale one for subprocesses, and that a frame with no client changes nothing.</p>
+
+<h2>Sources</h2>
+<ul>
+<li>Doom <code>doom-env-deny</code> and its defaults: <a href="https://github.com/doomemacs/core/blob/master/bin/doom-env">https://github.com/doomemacs/core/blob/master/bin/doom-env</a></li>
+<li>Doom FAQ, when an envvar file is needed: <a href="https://github.com/doomemacs/doomemacs/blob/master/docs/faq.org">https://github.com/doomemacs/doomemacs/blob/master/docs/faq.org</a></li>
+<li>Hyprland IPC and the instance signature: <a href="https://wiki.hypr.land/ipc/">https://wiki.hypr.land/ipc/</a></li>
+<li>Hyprland environment variables, including HYPRLAND_NO_SD_VARS: <a href="https://wiki.hypr.land/configuring/core/environment-variables/">https://wiki.hypr.land/configuring/core/environment-variables/</a></li>
+<li>Using hyprctl: <a href="https://wiki.hypr.land/configuring/core/advanced-configuration/using-hyprctl/">https://wiki.hypr.land/configuring/core/advanced-configuration/using-hyprctl/</a></li>
+<li>uwsm: <a href="https://wiki.hypr.land/useful-utilities/uwsm/">https://wiki.hypr.land/useful-utilities/uwsm/</a> and <a href="https://github.com/Vladimir-csp/uwsm">https://github.com/Vladimir-csp/uwsm</a></li>
+<li>Emacs process-environment: <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/System-Environment.html">https://www.gnu.org/software/emacs/manual/html_node/elisp/System-Environment.html</a></li>
+<li>Guix Home Shepherd services: <a href="https://guix.gnu.org/manual/en/html_node/Shepherd-Home-Service.html">https://guix.gnu.org/manual/en/html_node/Shepherd-Home-Service.html</a></li>
+</ul>
+
+</main></body></html>

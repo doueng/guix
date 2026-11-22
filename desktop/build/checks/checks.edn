@@ -68,6 +68,9 @@
   {:name "doom"
    :paths ["desktop/configs/doom/**" "desktop/build/doom/**"]
    :checks ["make doom-check"]}
+  {:name "doom env"
+   :paths ["desktop/configs/doom/{cli,session-env}.el" "desktop/build/doom/session-env-test.el"]
+   :checks ["make doom-env-test"]}
   {:name "keybindings"
    :paths ["desktop/kanata.kbd" "desktop/build/keybindings/**" "desktop/lib/**"
            "desktop/configs/{keybindings,hypr,doom,nvim,kanata,ideavim,vimium,ghostty,herdr}/**"

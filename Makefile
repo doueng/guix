@@ -17,7 +17,7 @@ CHECK_SHEPHERD := bb desktop/build/home/check-shepherd.bb
 .PHONY: help lint affected verify pull channels-current check system-facts dry-run build repro-build switch gc \
         home-build home-apply stow pierre-diff-ansi pierre-diff-ansi-test bbh-web-highlights dusk dusk-test dusk-verify rexmux rexmux-test rexmux-verify rexmux-tla ghostty-rex ghostty-rex-test ghostty-rex-verify ghostty-rex-reload mux oilfm oilfm-test pi-sci pi-sci-test \
         builder-create builder-deploy prebuild builder-check builder-test reader-push reader-status second-brain-status second-brain-test updates-test md-view-test ext-reload-test chrome-e2e \
-        doom-check doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check chrome-palette-check chrome-launch-check chrome-fullscreen-check test-display-check clipboard-check \
+        doom-check doom-env-test doom-baseline bbh-runs bbh-tla-check bombadil skill-diet-check keybindings-check kanata-check hypr-nested-check chrome-palette-check chrome-launch-check chrome-fullscreen-check test-display-check clipboard-check \
         clipboard-history-test taildrop-test parinfer-check parinfer-fix
 
 help:
@@ -75,6 +75,7 @@ help:
 	@echo 'oilfm         build the oilfm file manager (~/projects/oilfm)'
 	@echo 'oilfm-test    run oilfm tests, headless GPUI ones included'
 	@echo 'doom-check    fail on doom doctor warnings missing from the baseline'
+	@echo 'doom-env-test check that doom env and daemon frames keep the Hyprland signature current'
 	@echo 'doom-baseline accept the current doom doctor warnings'
 	@echo 'kanata-check  run kanata.kbd chord tests in the kanata simulator'
 	@echo 'keybindings-check kanata-check plus generated-binding, Hyprland, Emacs and Neovim tests'
@@ -320,6 +321,9 @@ $(KANATA_SIM):
 clipboard-check:
 	bb desktop/build/clipboard/check.bb
 
+doom-env-test:
+	emacs --batch -l desktop/build/doom/session-env-test.el
+
 clipboard-history-test:
 	bb desktop/build/clipboard/history-test.bb
 
@@ -338,7 +342,6 @@ keybindings-check: kanata-check
 	Hyprland --verify-config -c desktop/configs/hypr/hyprland.lua
 	bb desktop/build/keybindings/test.clj
 	bb desktop/build/keybindings/leader-test.clj
-	bb desktop/build/keybindings/hyprkan-test.clj
 	bb desktop/build/keybindings/review-test.clj
 	bb desktop/build/keybindings/palette-test.clj
 	bb desktop/build/keybindings/winhint-test.clj

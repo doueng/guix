@@ -2,9 +2,10 @@
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs]
          '[babashka.process :as p]
+         '[cheshire.core :as json]
          '[clojure.string :as str])
 (classpath/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) "../lib")))
-(require '[dusk.palette :as dusk] '[hypr.ctl :as hyprctl] '[session])
+(require '[dusk.palette :as dusk] '[session])
 
 (def max-items 200)
 (def max-bytes (* 5 1024 1024))
@@ -30,10 +31,11 @@
       (recur))))
 
 (defn secret-window? []
-  (let [w (try (hyprctl/json "activewindow") (catch Exception _ nil))]
+  (let [r (p/sh {:continue true} "hyprctl" "-j" "activewindow")
+        w (when (zero? (:exit r)) (try (json/parse-string (:out r)) (catch Exception _ nil)))]
     (boolean (and (map? w)
-                  (or (re-find secret-class-re (str (:class w) " " (:initialClass w)))
-                      (re-find secret-title-re (str (:title w))))))))
+                  (or (re-find secret-class-re (str (get w "class") " " (get w "initialClass")))
+                      (re-find secret-title-re (str (get w "title"))))))))
 
 (defn read-capped
   "Bytes from IN, or nil when there are more than LIMIT."
@@ -53,7 +55,7 @@
               (log "skipped an entry over" max-bytes "bytes")))))
 
 (defn launcher-closed? []
-  (not (str/includes? (:out (hyprctl/run "layers")) "dusk-launcher")))
+  (not (str/includes? (:out (p/sh {:continue true} "hyprctl" "layers")) "dusk-launcher")))
 
 (defn paste! []
   ;; Dusk replies before the compositor unmaps its launcher, so wait until the

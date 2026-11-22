@@ -2,8 +2,8 @@
   "Hyprland dispatchers as data, e.g. [\"focus\" {:direction \"left\"}] or
   [\"window.close\"]. The same value renders into the Lua config and into
   `hyprctl dispatch`."
-  (:require [clojure.string :as str]
-            [hypr.ctl :as ctl]))
+  (:require [babashka.process :as p]
+            [clojure.string :as str]))
 
 (defn lua-value [v]
   (cond
@@ -26,7 +26,7 @@
        (try (lua d) true (catch Exception _ false))))
 
 (defn- hyprctl-dispatch [args]
-  (let [{:keys [out err]} (apply ctl/run "dispatch" args)]
+  (let [{:keys [out err]} @(p/process (into ["hyprctl" "dispatch"] args) {:out :string :err :string})]
     (str/trim (str out err))))
 
 (defn dispatch!

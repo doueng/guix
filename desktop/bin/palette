@@ -13,7 +13,6 @@
 (load-file (str (fs/parent (fs/real-path *file*)) "/keyleader"))
 (cp/add-classpath (str (fs/path (fs/parent (fs/real-path *file*)) ".." "build" "rexmux" "sidecar")))
 (require '[dusk.palette :as dusk]
-         '[hypr.ctl :as hyprctl]
          '[keylog]
          '[rexmux.registry :as rexmux])
 
@@ -86,10 +85,7 @@
   "Hyprland's focused window. PALETTE_WINDOW, its JSON, stands in for tests
   on a display without Hyprland."
   []
-  (if-let [window (not-empty (System/getenv "PALETTE_WINDOW"))]
-    (json/parse-string window true)
-    (try (hyprctl/json "activewindow")
-         (catch Exception e (binding [*out* *err*] (println "palette:" (ex-message e))) nil))))
+  (json/parse-string (or (not-empty (System/getenv "PALETTE_WINDOW")) (sh-out "hyprctl" "-j" "activewindow")) true))
 
 (defn context []
   (let [window (active-window)
@@ -176,7 +172,7 @@
 
 (defn launcher-closed?
   []
-  (not (str/includes? (str (:out (hyprctl/run "layers"))) "dusk-launcher")))
+  (not (str/includes? (str (sh-out "hyprctl" "layers")) "dusk-launcher")))
 
 (defn await-keyboard!
   "Wait until Dusk's launcher layer is gone, so the window has the keyboard
