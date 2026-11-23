@@ -10,7 +10,7 @@
   [:quit]. A [:read-text] answer comes back to text-read with WHAT.
   Tags: [:view s] [:effect] [:created s] [:ticket s block] [:sessions s]
   [:revive s block window] [:replaced s block focus?] [:project s label cwd]
-  [:ignore]."
+  [:reload-after] [:ignore]."
   (:require [clojure.string :as str]
             [rexg.hints :as hints]
             [rexg.keys :as keys]))
@@ -221,8 +221,13 @@
                []]))
 
           :else
-          (let [[m outs] (apply-effects (update m :invoked dissoc id) (:effects msg))]
-            [m (cond-> outs origin (conj (perform-reply (first origin) (second origin) {:ok {}})))]))))))
+          (let [[m outs] (apply-effects (update m :invoked dissoc id) (:effects msg))
+                answer (when origin (perform-reply (first origin) (second origin) {:ok {}}))]
+            (if (and answer (some #{[:reload]} outs))
+              ;; The reload's exec drops the connection, and with it a caller's
+              ;; answer still in flight, as for make refresh: reload once Rex has it.
+              [m (conj (vec (remove #{[:reload]} outs)) (assoc answer 4 [:reload-after]))]
+              [m (cond-> outs answer (conj answer))])))))))
 
 (defn sidecar
   "One message from the sidecar."
@@ -528,13 +533,16 @@
     :else [m []]))
 
 (defn rex-response [m [tk srv & more :as tag] result]
-  (if (contains? result :error)
+  (cond
+    (= tk :reload-after) [m [[:reload]]]
+    (contains? result :error)
     ;; A late request for a block a revive replaced is no news.
     (let [stale (some #(str/includes? (str (:error result)) %) (:replaced m))]
       [(cond-> m
          (not stale) (assoc :echo (:error result))
          (= tk :ticket) (update :streams dissoc (first more)))
        []])
+    :else
     (let [v (:ok result)]
       (case tk
         :view (set-view m srv (view-of v))

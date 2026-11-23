@@ -85,14 +85,55 @@
                                        :argv ["emacs" "--fg-daemon=x"]})
           r (row f "emacs")]
       (and (stale? r) (not (auto? r)) (str/includes? (:why r) "emacs-30")))]
-   ["a Doom env file naming one Hyprland login asks for doom sync, which writes it in Doom 3"
-    (let [r (row (assoc base :doom {:env-vars #{"PATH" "HYPRLAND_INSTANCE_SIGNATURE"} :env-text ""}) "doom-env")]
-      (and (stale? r) (not (auto? r)) (str/starts-with? (get-in r [:fix :cmd]) "doom sync")))]
+   ["a daemon's server name comes from its --daemon flag"
+    (= ["bbh-super" "server" "y" nil]
+       (map stale/daemon-name [["emacs" "--fg-daemon=bbh-super"] ["emacs" "--daemon"] ["emacs" "--bg-daemon=y"] ["emacs" "-nw"]]))]
+   ["Doom config edited after a daemon started reloads live through emacsclient, and its stamp ends that"
+    (let [f (-> base
+                (update :procs conj {:pid 11 :start-ms 100 :exe (str (item "emacs-31") "/bin/emacs") :argv ["emacs" "--fg-daemon=bbh-super"]})
+                (assoc :doom-config {"desktop/configs/doom/config.el" 200 "desktop/configs/doom/init.el" 50}))
+          r (row f "emacs-config:bbh-super")]
+      (and (stale? r) (= [:emacs "bbh-super" :config] (get-in r [:fix :run])) (str/includes? (:why r) "config.el")
+           (not (stale? (row f "emacs")))
+           (not (stale? (row (assoc-in f [:stamps "emacs-config:bbh-super"] 300) "emacs-config:bbh-super")))))]
+   ["init.el or packages.el edited after a daemon started needs doom sync and a restart"
+    (let [f (-> base
+                (update :procs conj {:pid 11 :start-ms 100 :exe (str (item "emacs-31") "/bin/emacs") :argv ["emacs" "--daemon"]})
+                (assoc :doom-config {"desktop/configs/doom/config.el" 200 "desktop/configs/doom/packages.el" 200}))
+          r (row f "emacs-config:server")]
+      (and (stale? r) (not (auto? r)) (str/includes? (:why r) "packages.el")))]
+   ["a daemon started before the env file was rewritten loads it again, once the file is fresh"
+    (let [f (-> base
+                (update :procs conj {:pid 11 :start-ms 100 :exe (str (item "emacs-31") "/bin/emacs") :argv ["emacs" "--fg-daemon=x"]})
+                (assoc :doom {:env-file "/e.el" :env-ms 200 :env-vars #{"PATH"} :env-text ""}))
+          r (row f "emacs-env:x")]
+      (and (stale? r) (= [:emacs "x" :env "/e.el"] (get-in r [:fix :run]))
+           (not (stale? (row (assoc-in f [:doom :env-vars] #{"PATH" "REX_BLOCK"}) "emacs-env:x")))
+           (not (stale? (row (assoc-in f [:stamps "emacs-env:x"] 300) "emacs-env:x")))))]
+   ["a Doom env file naming one Hyprland login, pane or Worker is rewritten by doom env"
+    (every? (fn [v] (let [r (row (assoc base :doom {:env-file "/e.el" :env-vars #{"PATH" v} :env-text ""}) "doom-env")]
+                      (and (stale? r) (= [:doom-env "/e.el"] (get-in r [:fix :run])))))
+            ["HYPRLAND_INSTANCE_SIGNATURE" "REX_BLOCK" "REX_SERVER" "TERM_PROGRAM_VERSION" "HERDR_PANE_ID" "BBH_SUPER_TOKEN" "WF_RUN"])]
    ["a Doom env file naming an old store path is stale too"
     (stale? (row (assoc base :doom {:env-vars #{"EMACSLOADPATH"} :env-text (str "EMACSLOADPATH=" (item "emacs-30") "/lisp")}) "doom-env"))]
    ["packages.el newer than the last doom sync needs doom sync by hand"
     (let [r (row (assoc base :doom {:synced-ms 1 :sources "packages.el" :sources-ms 2 :env-vars #{}}) "doom-sync")]
       (and (stale? r) (not (auto? r))))]
+   ["a Ghostty whose config changed after it started reloads on SIGUSR2, and its stamp ends that"
+    (let [g {:pid 30 :start-ms 100 :class "dev.engstrand.Rex" :usr2? true :files {"/h/.config/ghostty/config" 200} :text "a = 1"}
+          f (assoc base :ghostty [g])
+          r (row f "ghostty:30")]
+      (and (stale? r) (= :ghostty-reload (first (get-in r [:fix :run]))) (str/includes? (:label r) "Rex")
+           (not (stale? (row (assoc-in f [:stamps "ghostty:30"] 300) "ghostty:30")))
+           (not (auto? (row (assoc base :ghostty [(assoc g :usr2? false)]) "ghostty:30")))))]
+   ["a reload that changes command or window-padding-x keeps that Ghostty listed until it restarts"
+    (let [g {:pid 30 :start-ms 100 :usr2? true :files {"/c" 200}
+             :snapshot "command = fish\nfont-size = 9\n" :text "command = bash\nfont-size = 10\nwindow-padding-x = 4\n"}
+          r (row (assoc base :ghostty [g]) "ghostty:30")
+          after (row (assoc base :ghostty [(assoc g :files {"/c" 50} :pending (last (get-in r [:fix :run])))]) "ghostty:30")]
+      (and (= ["command" "window-padding-x"] (last (get-in r [:fix :run])))
+           (stale? after) (not (auto? after)) (str/includes? (:why after) "command")
+           (not (stale? (row (assoc base :ghostty [(dissoc g :snapshot)]) "ghostty:31")))))]
    ["an extension edited after its build rebuilds, and its stamp ends that"
     (let [f (assoc base :extensions [{:name "vim" :src ["src/a.cljs" 300] :built-ms 200}])]
       (and (= [:bin "ext-reload" "vim"] (get-in (row f "ext:vim") [:fix :run]))
@@ -116,11 +157,18 @@
 (put! (str repo "/desktop/configs/hypr/README.md") "")
 (put! (str fake "/home/me/.config/hypr/old.lua") "")
 (put! (str repo "/desktop/bin/md-view") "")
+(put! (str repo "/desktop/configs/doom/config.el") "")
+(put! (str repo "/desktop/configs/doom/cli.el") "")
 (fs/set-last-modified-time (str repo "/desktop/bin/md-view") (java.nio.file.attribute.FileTime/fromMillis 1000500))
 (proc! 41 ["bb" "/repo/desktop/bin/ext-reload" "serve"] 100 (str new-bb "/bin/bb"))
 (proc! 42 ["bb" "/repo/desktop/bin/md-view" "serve"] 100 (str new-bb "/bin/bb"))
 (proc! 43 [(str old-bb "/bin/bb") "--version"] 100 (str old-bb "/bin/bb"))
 (proc! 44 [] 1 "/nonexistent")
+(put! (str fake "/home/me/.config/ghostty/config") "font-size = 9\n")
+(put! (str fake "/home/me/.config/rex.ghostty") "shell-integration = none\n")
+(proc! 45 ["/gnu/bin/ghostty" "--class=dev.engstrand.Rex" "--config-file=/home/me/.config/rex.ghostty"] 100 "/gnu/bin/ghostty")
+(put! (str fake "/proc/45/status") "Name:\tghostty\nSigCgt:\t0000000180014a07\n")
+(proc! 46 ["ghostty" "+show-config"] 100 "/gnu/bin/ghostty")
 (fs/create-dirs (str fake "/gnu/store/sys-1"))
 (fs/create-dirs (str fake "/run"))
 (fs/create-sym-link (str fake "/run/current-system") (str fake "/gnu/store/sys-1"))
@@ -152,6 +200,17 @@
    ["a repo config with no link in Home is linked by refresh; stow's README is not missed"
     (and (= ["desktop/configs/hypr/hyprland.lua"] (filter #(str/includes? % "hypr") (:missing (:links facts))))
          (= [:stow] (get-in (crow "links") [:fix :run])))]
+   ["cli.el is no Doom config a running Emacs loads"
+    (= ["desktop/configs/doom/config.el"] (keys (:doom-config facts)))]
+   ["a Ghostty window reads the default config and its --config-file; ghostty +actions are no window"
+    (let [[g & more] (:ghostty facts)]
+      (and (empty? more) (= 45 (:pid g)) (:usr2? g) (= "dev.engstrand.Rex" (:class g))
+           (= #{"/home/me/.config/ghostty/config" "/home/me/.config/rex.ghostty"} (set (keys (:files g))))
+           (str/includes? (:text g) "shell-integration = none")))]
+   ["what refresh saves for a reloaded Ghostty comes back as its snapshot"
+    (do (collect/ghostty-reloaded! ctx 45 1001000 "font-size = 9" ["command"])
+        (let [g (first (collect/ghostty ctx (:procs facts)))]
+          (and (= "font-size = 9" (:snapshot g)) (= ["command"] (:pending g)))))]
    ["a stamp written by refresh is read back"
     (do (collect/stamp! ctx "ext:vim") (contains? (collect/stamps ctx) "ext:vim"))]])
 

@@ -116,6 +116,17 @@
     (is (= "client.reply" method))
     (is (= "7" (:call_id payload)))))
 
+(deftest a-reload-asked-through-rex-answers-before-it-reloads
+  (let [model (assoc (m/new-model [{:label "t"}]) :pending {1 [0 "7"]} :invoked {1 "client/reload"})
+        [_ outs] (m/sidecar model {:op :reply :id 1 :effects [[:client/reload {}]]})
+        [_ _ method payload tag] (last outs)]
+    (is (not-any? #{[:reload]} outs) "an exec now would drop the answer")
+    (is (= ["client.reply" "7" [:reload-after]] [method (:call_id payload) tag]))
+    (is (= [[:reload]] (second (m/rex-response model tag {:ok {}}))) "Rex has the answer: reload")
+    (is (= [[:reload]] (second (m/rex-response model tag {:error "gone"}))) "or refused it: reload all the same"))
+  (let [[_ outs] (m/sidecar (m/new-model [{:label "t"}]) {:op :effects :effects [[:client/reload {}]]})]
+    (is (= [[:reload]] outs) "M-x Client: reload has no caller to answer")))
+
 (deftest resizing-moves-the-nearest-border-of-the-right-kind
   (let [layout {:split {:direction "horizontal" :ratio 0.5
                         :before {:block_id "block:a"}

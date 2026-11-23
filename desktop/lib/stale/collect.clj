@@ -90,9 +90,73 @@
         text (slurp-or env nil)]
     (when (or synced text)
       {:synced-ms synced :sources src :sources-ms src-ms
-       :env-ms (mtime env) :env-text text
+       :env-file (when text env) :env-ms (mtime env) :env-text text
        :env-vars (set (map second (re-seq #"\"([A-Za-z_][A-Za-z0-9_]*)=" (or text ""))))
        :deny-ms (second (newest (:repo ctx) ["desktop/configs/doom/cli.el"]))})))
+
+(defn doom-config
+  "{repo path ms} of the Doom config a running Emacs loads: every file in
+  desktop/configs/doom but cli.el, which only the doom CLI reads."
+  [ctx]
+  (into {} (for [f (fs/glob (:repo ctx) "desktop/configs/doom/**")
+                 :when (fs/regular-file? f)
+                 :let [rel (str (fs/relativize (:repo ctx) f))]
+                 :when (not= rel "desktop/configs/doom/cli.el")]
+             [rel (mtime f)])))
+
+(defn- ghostty? [{:keys [argv]}]
+  (and (re-find #"^\.?ghostty(-real)?$" (str/replace (str (first argv)) #".*/" ""))
+       (not-any? #(str/starts-with? % "+") (rest argv))))
+
+(defn- catches-usr2?
+  "Whether PID handles SIGUSR2, bit 12 of SigCgt: Ghostty reloads its config on
+  it, and a process that does not would die of it."
+  [ctx pid]
+  (boolean (some-> (slurp-or (path ctx "proc" (str pid) "status") "")
+                   (->> (re-find #"SigCgt:\s*([0-9a-fA-F]+)")) second (BigInteger. 16) (.testBit 11))))
+
+(defn- ghostty-snapshot-file [ctx pid start-ms ext]
+  (str (fs/path (:stamps ctx) "ghostty" (str pid "-" start-ms "." ext))))
+
+(defn ghostty
+  "Each Ghostty process: its config files with the time each last changed, the
+  link followed to the repo, their text, and what make refresh saved when it last
+  reloaded it."
+  [ctx procs]
+  (vec (for [{:keys [pid argv start-ms] :as p} procs
+             :when (ghostty? p)
+             :let [opt (fn [k] (some #(second (re-find (re-pattern (str "^--" k "=(.*)$")) %)) argv))
+                   default? (not= "false" (opt "config-default-files"))
+                   home-cfg (str (:home ctx) "/.config/ghostty")
+                   paths (concat (when default? (cons (str home-cfg "/config")
+                                                      (map str (fs/glob (path ctx home-cfg "themes") "*"))))
+                                 (keep #(second (re-find #"^--config-file=(.*)$" %)) argv))
+                   files (for [f (distinct paths)
+                               :let [f (expand ctx f)
+                                     p (if (str/starts-with? f (:root ctx "/")) f (path ctx f))]
+                               :when (fs/exists? p)]
+                           [f (mtime (real p))])
+                   snap (ghostty-snapshot-file ctx pid start-ms "conf")]]
+         {:pid pid :start-ms start-ms :class (opt "class") :usr2? (catches-usr2? ctx pid)
+          :files (into {} files)
+          :text (str/join "\n" (keep (fn [[f _]] (slurp-or (if (str/starts-with? f (:root ctx "/")) f (path ctx f)) nil)) files))
+          :snapshot (slurp-or snap nil)
+          :pending (some-> (slurp-or (ghostty-snapshot-file ctx pid start-ms "pending") nil) str/split-lines (->> (remove str/blank?)) vec)})))
+
+(defn ghostty-reloaded!
+  "Record that Ghostty PID took TEXT now, with PENDING the settings its open
+  windows still lack."
+  [ctx pid start-ms text pending]
+  (fs/create-dirs (fs/path (:stamps ctx) "ghostty"))
+  (spit (ghostty-snapshot-file ctx pid start-ms "conf") text)
+  (spit (ghostty-snapshot-file ctx pid start-ms "pending") (str/join "\n" pending)))
+
+(defn ghostty-seed!
+  "Save what each fresh Ghostty without a snapshot runs, so a later reload can
+  tell which settings changed."
+  [ctx ghosts]
+  (doseq [{:keys [pid start-ms text snapshot]} ghosts :when (nil? snapshot)]
+    (ghostty-reloaded! ctx pid start-ms text [])))
 
 (defn extensions
   "The Chrome extensions ext-reload serves: newest source change and newest build output."
@@ -137,9 +201,14 @@
                    :when (fs/regular-file? f)]
                [(str/replace (str (fs/file-name f)) "__" ":") (mtime f)]))))
 
-(defn stamp! [ctx id]
+(defn stamp!
+  "Record that ID took its sources at MS, by default now: the file's mtime. A
+  refresh passes the time it started, so a change made while it ran stays newer."
+  [ctx id & [ms]]
   (fs/create-dirs (:stamps ctx))
-  (spit (str (fs/path (:stamps ctx) (str/replace id ":" "__"))) (str (System/currentTimeMillis) "\n")))
+  (let [f (str (fs/path (:stamps ctx) (str/replace id ":" "__")))]
+    (spit f (str (or ms (System/currentTimeMillis)) "\n"))
+    (when ms (fs/set-last-modified-time f (java.nio.file.attribute.FileTime/fromMillis ms)))))
 
 (defn restartable
   "System services sudo restarts without a password: %restartable-services in
@@ -171,6 +240,7 @@
      :closure @closure
      :services @services
      :procs @procs
+     :ghostty (ghostty ctx @procs)
      :sources (into {} (for [{:keys [id sources inputs]} stale/components
                              :let [hit (or (when sources (newest (:repo ctx) sources))
                                            (last (sort-by second (keep (fn [p] (let [p (path ctx (expand ctx p))]
@@ -182,4 +252,5 @@
      :links (links ctx)
      :restartable (restartable (:repo ctx))
      :doom (doom ctx)
+     :doom-config (doom-config ctx)
      :extensions (extensions ctx)}))

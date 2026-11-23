@@ -316,16 +316,16 @@
   (set (keep #(when (and (= "ghostty-rex" (get-in % [:info :label])) (not= "lost" (:connection_state %))) (:client_id %))
              (:clients (api s "client.list")))))
 
-(defn- reload-checks!
-  "The quick reload (T210): rex -C ghostty-rex do mx.client.reload, which
-  rex -C ghostty-rex do mx.client.reload runs, starts the client anew in the same window on
-  the same session."
-  [s root sid]
+(defn- reload-round!
+  "One reload. The caller hears the answer before the exec, as make refresh
+  needs to count it done (T218)."
+  [s root sid round]
   (let [before (client-ids s)
+        quits #(count (re-seq #"quit reload" (slurp? (str root "/client.log"))))
         {:keys [exit err]} (ts/rex! s "-C" "ghostty-rex" "do" "mx.client.reload")]
-    (check! "reload: rex -C ghostty-rex do mx.client.reload is accepted" (zero? exit) err)
+    (check! (str "reload " (inc round) ": rex -C ghostty-rex do mx.client.reload answers ok") (zero? exit) err)
     (check! "reload: the client quits to reload"
-            (wait-for 8000 #(str/includes? (slurp? (str root "/client.log")) "quit reload")))
+            (wait-for 8000 #(> (quits) round)))
     (check! "reload: a new client attaches to the same session in the same window"
             (wait-for 15000 #(let [now (client-ids s)]
                                (and (seq (remove before now))
@@ -334,6 +334,14 @@
     (check! "reload: the old client is gone, so rex -C ghostty-rex stays unambiguous"
             (wait-for 5000 #(= 1 (count (client-ids s)))) (pr-str (client-ids s)))
     (Thread/sleep 1500)))
+
+(defn- reload-checks!
+  "The quick reload (T210): rex -C ghostty-rex do mx.client.reload, which
+  make refresh runs, starts the client anew in the same window on the same
+  session; twice, since the second runs the reloaded client."
+  [s root sid]
+  (dotimes [round 2]
+    (reload-round! s root sid round)))
 
 (defn- cursor-shown?
   "Whether the client's last frame in OUT, its tty output, shows the text

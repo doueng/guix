@@ -10,6 +10,7 @@
 (require '[babashka.classpath :as classpath]
          '[babashka.fs :as fs]
          '[babashka.process :as p]
+         '[cheshire.core :as json]
          '[clojure.pprint :as pprint]
          '[clojure.string :as str])
 (def here (str (fs/normalize (fs/path (fs/parent (fs/real-path *file*)) ".." ".."))))
@@ -82,29 +83,90 @@
             {:exit 0}
             {:exit 1 :err (str "it exited at once: " (str/join " " argv))})))))
 
+(defn emacs-eval
+  "Have the Emacs daemon SERVER run the form FORM, a string, and answer t. The
+  timeout keeps a daemon stuck in a prompt from stalling the refresh."
+  [server form]
+  (run ["timeout" "60" "emacsclient" "-s" server "--eval" (str "(progn " form " t)")]))
+
+(def reload-env-form
+  "Load the env file in a daemon, first loading session-env.el when the daemon
+  predates eng/reload-env-file."
+  "(unless (fboundp 'eng/reload-env-file) (load (expand-file-name \"session-env.el\" eng/doom-config-dir) nil t)) (eng/reload-env-file %s)")
+
+(defn rex-clients
+  "IDs of the ghostty-rex clients connected to Rex."
+  []
+  (let [{:keys [exit out]} (run ["rex" "client" "ls" "--json"])]
+    (if-not (zero? exit)
+      #{}
+      (set (keep #(when (and (= "ghostty-rex" (get-in % ["info" "label"])) (= "connected" (get % "connection_state")))
+                    (get % "client_id"))
+                 (get (json/parse-string out) "clients"))))))
+
+(defn rex-client-reload!
+  "Reload the ghostty-rex client. One that predates T218 execs before Rex passes
+  on its answer, so the caller hears a lost connection: count that as done once a
+  new client has attached."
+  []
+  (let [before (rex-clients)
+        r (run ["rex" "-C" "ghostty-rex" "do" "mx.client.reload"] {:extra-env env})]
+    (if (or (zero? (:exit r)) (not (str/includes? (str (:err r) (:out r)) "lost its connection")))
+      r
+      (loop [n 0]
+        (cond (seq (remove before (rex-clients))) {:exit 0}
+              (< n 30) (do (Thread/sleep 500) (recur (inc n)))
+              :else r)))))
+
 (defn perform!
   "Run one fix's :run; return {:exit :out :err}."
   [[op & args]]
   (case op
+    :emacs (let [[server what file] args]
+             (emacs-eval server (case what
+                                  :config "(eng/reload-config)"
+                                  :env (format reload-env-form (pr-str file)))))
+    :doom-env (run [(str (System/getenv "HOME") "/.config/emacs/bin/doom") "env" "-r" (first args)])
     :herd (let [[scope name] args]
             (run (if (= scope :system) ["sudo" "-n" herd-bin "restart" name] ["herd" "restart" name])))
     :hyprctl (run (into ["hyprctl"] args) {:extra-env env})
     :bin (run (into [(str repo "/desktop/bin/" (first args))] (rest args)) {:extra-env env})
     :sh (run (vec args) {:extra-env env})
     :respawn (respawn! (first args) (second args))
+    :rex-client-reload (rex-client-reload!)
+    :ghostty-reload (let [[pid start-ms text pending] args
+                          r (run ["kill" "-USR2" (str pid)])]
+                      (when (zero? (:exit r)) (collect/ghostty-reloaded! ctx pid start-ms text pending))
+                      r)
     :stow (run ["bb" (str repo "/desktop/stow-home")])))
 
-(defn refresh! []
+(defn refresh-pass!
+  "Run the fix of each auto row not in TRIED, stamping the ones that work; return
+  the ids it ran."
+  [tried]
   (let [{:keys [auto]} (stale/summary (stale/assess (collect/facts ctx)))]
-    (doseq [r auto]
-      (print (str "refresh: " (:label r) ": " (get-in r [:fix :cmd]) " ... "))
-      (flush)
-      (let [{:keys [exit out err]} (perform! (get-in r [:fix :run]))]
-        (if (zero? exit)
-          (do (collect/stamp! ctx (or (get-in r [:fix :stamp]) (:id r))) (println "ok"))
-          (println (str "failed: " (str/trim (str err out)))))))
-    (when (seq auto) (println))
-    (print-stale (stale/assess (collect/facts ctx)))))
+    (doall
+     (for [r auto :when (not (tried (:id r)))]
+       (let [t0 (System/currentTimeMillis)
+             _ (do (print (str "refresh: " (:label r) ": " (get-in r [:fix :cmd]) " ... ")) (flush))
+             {:keys [exit out err]} (perform! (get-in r [:fix :run]))]
+         (if (zero? exit)
+           (do (collect/stamp! ctx (or (get-in r [:fix :stamp]) (:id r)) t0) (println "ok"))
+           (println (str "failed: " (str/trim (str err out)))))
+         (:id r))))))
+
+(defn refresh!
+  "Two passes, since one fix can stale another row: doom env rewrites the env file
+  the Emacs daemons then load. Then recheck everything."
+  []
+  (let [first-ids (set (refresh-pass! #{}))
+        ids (into first-ids (refresh-pass! first-ids))
+        facts (collect/facts ctx)
+        rows (stale/assess facts)
+        fresh (set (keep #(when (= :fresh (:state %)) (:id %)) rows))]
+    (collect/ghostty-seed! ctx (filter #(fresh (str "ghostty:" (:pid %))) (:ghostty facts)))
+    (when (seq ids) (println))
+    (print-stale rows)))
 
 (case (first *command-line-args*)
   nil (print-stale (stale/assess (collect/facts ctx)))

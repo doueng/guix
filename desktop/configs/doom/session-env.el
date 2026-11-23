@@ -12,3 +12,23 @@ the client's --eval."
       (setenv var value))))
 
 (add-hook 'after-make-frame-functions #'eng/adopt-session-env-h)
+
+(defun eng/reload-env-file (file)
+  "Load the Doom envvar FILE as this Emacs would at startup, and return FILE.
+Start again from the environment the daemon inherited, which Doom recorded, so a
+variable the old file set and the new one leaves out goes too. Keep the session
+variables frames brought in, the shell config.el picked and what it added to
+`exec-path'. make refresh runs this in each daemon through emacsclient after doom
+env rewrites FILE (T218)."
+  (let* ((path (split-string (or (getenv "PATH") "") path-separator t))
+         (added (seq-remove (lambda (d) (member d path)) exec-path))
+         (shell shell-file-name)
+         (session (delq nil (mapcar (lambda (var) (when-let* ((v (getenv var))) (cons var v)))
+                                    '("HYPRLAND_INSTANCE_SIGNATURE" "WAYLAND_DISPLAY")))))
+    (setq process-environment (copy-sequence (or (get 'process-environment 'initial-value)
+                                                 process-environment)))
+    (load file nil 'nomessage)
+    (setq exec-path (delete-dups (append exec-path added))
+          shell-file-name shell)
+    (pcase-dolist (`(,var . ,value) session) (setenv var value))
+    file))

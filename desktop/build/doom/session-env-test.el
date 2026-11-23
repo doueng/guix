@@ -12,10 +12,38 @@
 
 (ert-deftest doom-env-leaves-out-session-variables ()
   (dolist (var '("HYPRLAND_INSTANCE_SIGNATURE" "HYPRLAND_CMD" "HERDR_PANE_ID"
-                 "GHOSTTY_SURFACE_ID" "TERM_PROGRAM" "HL_INITIAL_WORKSPACE_TOKEN"))
+                 "GHOSTTY_SURFACE_ID" "TERM_PROGRAM" "TERM_PROGRAM_VERSION" "HL_INITIAL_WORKSPACE_TOKEN"
+                 "REX_BLOCK" "REX_SESSION" "REX_SERVER" "REX_BIN_DIR" "BBH_SUPER_TOKEN" "WF_RUN"
+                 "COLORTERM" "EMACSLOADPATH"))
     (should (session-env-test--denied-p var)))
   (dolist (var '("PATH" "SHELL" "GUIX_LOCPATH" "EDITOR"))
     (should-not (session-env-test--denied-p var))))
+
+(ert-deftest doom-env-saves-path-without-store-or-shim-directories ()
+  (should (equal '("PATH=/home/me/.local/bin:/run/current-system/profile/bin" "SHELL=/bin/fish")
+                 (eng/env-path-without-store
+                  '("PATH=/home/me/guix/desktop/build/bbh/shims:/home/me/.local/bin:/gnu/store/abc-ghostty-1.4/bin:/run/current-system/profile/bin"
+                    "SHELL=/bin/fish")))))
+
+(ert-deftest reloading-the-env-file-drops-what-it-no-longer-sets ()
+  (let* ((file (make-temp-file "doom-env" nil ".el"
+                               ";; -*- lexical-binding: t; -*-\n(setq process-environment (append '(\"PATH=/new/bin\" \"SHELL=/bin/fish\") (default-value 'process-environment)) exec-path (split-string (getenv \"PATH\") \":\" t) shell-file-name (getenv \"SHELL\"))"))
+         (old-initial (get 'process-environment 'initial-value))
+         (process-environment '("PATH=/old/bin" "REX_BLOCK=gone" "HYPRLAND_INSTANCE_SIGNATURE=live" "HOME=/h"))
+         (exec-path '("/old/bin" "/added/by/config"))
+         (shell-file-name "/bin/bash"))
+    (unwind-protect
+        (progn
+          (put 'process-environment 'initial-value '("HOME=/h"))
+          (should (equal file (eng/reload-env-file file)))
+          (should (equal "/new/bin" (getenv "PATH")))
+          (should-not (getenv "REX_BLOCK"))
+          (should (equal "live" (getenv "HYPRLAND_INSTANCE_SIGNATURE")))
+          (should (equal "/h" (getenv "HOME")))
+          (should (equal '("/new/bin" "/added/by/config") exec-path))
+          (should (equal "/bin/bash" shell-file-name)))
+      (put 'process-environment 'initial-value old-initial)
+      (delete-file file))))
 
 (ert-deftest a-client-frame-replaces-a-stale-signature ()
   (let ((process-environment (cons "HYPRLAND_INSTANCE_SIGNATURE=stale" process-environment))
