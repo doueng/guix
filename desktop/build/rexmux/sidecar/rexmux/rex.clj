@@ -32,7 +32,7 @@
   "Every OSC 7501 record Rex holds on SERVER, as agent reports
   [{:session :block :id :record}]. A sidecar that starts, or restarts after a
   crash, folds these first, so it agrees with Rex before the window hears
-  from it (verify/tla, SidecarAgrees)."
+  from it (verify/quint/rexmux.qnt, sidecarAgrees)."
   [server]
   (vec (for [{:keys [session_id]} (sessions server)
              {:keys [block_id creator_name]} (:blocks (call server "session.list_blocks" {:session_id session_id}))

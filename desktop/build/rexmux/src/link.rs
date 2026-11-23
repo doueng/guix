@@ -1,7 +1,7 @@
 //! The link to the bb sidecar: a child process speaking one EDN map per line
 //! (sidecar/rexmux/proto.clj). This side numbers what it sends from 1 and
 //! accepts what it receives only in order: a repeat is dropped and a gap is
-//! reported, never hidden (verify/tla/Rexmux.tla, InOrder).
+//! reported, never hidden (verify/quint/rexmux.qnt, inOrder).
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;

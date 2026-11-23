@@ -3,8 +3,8 @@
   Rex server that dies, comes back, answers attempts late and drops
   connections. Each attempt has an identity, as in rexg.main: every answer
   names its attempt, so a late answer or a close from an old connection must
-  change nothing. Rexmux.tla's NeverStranded, ServerUpAttaches and
-  StaleIgnored say the same: a client is never left disconnected with
+  change nothing. rexmux.qnt's neverStranded, serverUpAttaches and
+  noLeak say the same: a client is never left disconnected with
   nothing that will try again, once the server answers it attaches again,
   and it leaks no connection."
   (:require [clojure.string :as str]

@@ -174,7 +174,7 @@
                              (catch Throwable e
                                (log "sidecar" (ex-message e))
                                (put! [:sidecar {:op :log :text (str "sidecar: " (ex-message e))}])
-                               ;; A request still ends with one answer (Rexmux.tla's link rule).
+                               ;; A request still ends with one answer (rexmux.qnt's link rule).
                                (when (:id m) (put! [:sidecar {:op :reply :id (:id m) :error (str "sidecar: " (ex-message e))}]))))))))
             (rex-send! [srv method payload tag]
               (if-let [c (get-in @app [:conns srv])]

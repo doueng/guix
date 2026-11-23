@@ -292,10 +292,10 @@
   the first broken rule, so it runs again without it until none breaks.
   Returns [{:rule :kind :ok? :states :trace :out}], :states the distinct
   states TLC found, :trace the shortest counterexample as data and :out its
-  text."
-  [file main {:keys [invariants properties]}]
+  text. :tla is the module compile-tla made, to skip compiling again."
+  [file main {:keys [invariants properties tla]}]
   (let [rules (concat (map vector (repeat :invariant) invariants) (map vector (repeat :property) properties))
-        tla (compile-tla file main (concat invariants properties))
+        tla (or tla (compile-tla file main (concat invariants properties)))
         named (into {} (for [[_ r] rules] [r (tla-name tla r)]))
         prefix (let [[r n] (first named)] (subs n 0 (- (count n) (count r))))]
     (loop [left rules acc []]

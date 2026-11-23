@@ -1,4 +1,4 @@
-{:paths ["src" "test" "eval" "verify"]
+{:paths ["src" "test" "eval" "../quint/src"]
  :tasks {eval:compare {:doc "Live Pi, Pi/SCI and bbh comparison. Spends OpenRouter credits. Args: OUTPUT-DIR REPETITIONS."
                        :requires ([bbh.compare])
                        :task (apply bbh.compare/-main *command-line-args*)}
@@ -41,9 +41,10 @@
          stats {:doc "Harness health: timeouts, restarts and errors per conversation, plus workflow runs. Args: [--since ID] [--until ID] [ROOT...]."
                 :requires ([bbh.stats])
                 :task (apply bbh.stats/-main *command-line-args*)}
-         verify:tla {:doc "Model-check the TLA+ models in verify/tla with TLC, one rule per run. Args: [MODEL...]. Needs tla2tools on PATH or Guix."
-                     :requires ([bbh.tla])
-                     :task (apply bbh.tla/-main *command-line-args*)}
+         verify:quint {:doc "The Quint models in verify/quint: typecheck, run tests, a seeded simulation, then TLC over every state, one rule per run (checks.edn). Args: [MAIN...] [--quick | --mc]."
+                       :requires ([babashka.fs :as fs] [quint.checks])
+                       :task (apply quint.checks/-main (str (fs/path (fs/parent (System/getProperty "babashka.config")) "verify" "quint"))
+                                    *command-line-args*)}
          test:workflow {:doc "Run the workflow engine tests, including the route check against the Jev extension."
                         :requires ([clojure.test :as t] [bbh.workflow-test])
                         :task (let [{:keys [fail error]} (t/run-tests 'bbh.workflow-test)]

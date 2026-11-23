@@ -42,7 +42,6 @@
                 "lua"
                 "pandoc"
                 "sqlite"
-                "tla2tools"
                 "xxd"
                 "unzip"
                 "zip"

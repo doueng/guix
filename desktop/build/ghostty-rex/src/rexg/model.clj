@@ -1,7 +1,7 @@
 (ns rexg.model
   "The ghostty-rex client's state and rules, with no I/O: keys, sidecar
   messages and Rex results go in, outs come back for rexg.main to perform. A
-  port of rexmux's model.rs, so the Bombadil specs and the TLA+ model written
+  port of rexmux's model.rs, so the Bombadil specs and the Quint model written
   for rexmux's window check the same rules here.
 
   Outs: [:sidecar msg] [:rex server method payload tag] [:open-stream server
@@ -261,7 +261,7 @@
 
 (defn refresh-streams
   "Open a stream for each visible pane that has none and close the rest, so a
-  pane never has two streams (verify/tla, OneStreamPerPane)."
+  pane never has two streams (verify/quint/rexmux.qnt, oneStreamPerPane)."
   [m]
   (if-let [v (view m)]
     (let [vis (set (map :block (visible v)))

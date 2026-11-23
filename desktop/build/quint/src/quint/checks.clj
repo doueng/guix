@@ -58,8 +58,12 @@
   "TLC over every state of MODELS, each rule checked and its state count
   compared with :states: [{:check :model-check ...}]."
   [models]
-  (for [{:keys [path main states] :as m} models
-        r (quint/model-check path main m)
+  (for [[{:keys [path main states] :as m} tla]
+        ;; Each compile starts an Apalache JVM, so they run in parallel.
+        (map vector models (mapv deref (mapv (fn [{:keys [path main invariants properties]}]
+                                               (future (quint/compile-tla path main (concat invariants properties))))
+                                             models)))
+        r (quint/model-check path main (assoc m :tla tla))
         :let [counted? (or (nil? states) (= states (:states r)))
               ok? (and (:ok? r) counted?)]]
     (assoc r :check :model-check :path path :main main :ok? ok?

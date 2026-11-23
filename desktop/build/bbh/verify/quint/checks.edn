@@ -1,0 +1,25 @@
+;; bb verify:quint checks each model with TLC over every state. :states is the
+;; number of distinct states it has, the same TLC found on the TLA+ spec each
+;; was ported from (T220); update it when you change a model's state space.
+[{:file "workflow.qnt" :main "serial" :states 3212
+  :invariants ["visitsWithinCap"] :properties ["settled" "followsWorkflow" "visitsGrow"]}
+ {:file "workflow.qnt" :main "change" :states 315676
+  :invariants ["visitsWithinCap"] :properties ["settled" "followsWorkflow" "visitsGrow"]}
+ {:file "effects.qnt" :main "finish" :states 3120
+  :invariants ["changedOnce" "recordedWasPerformed" "triesWithinCap" "inOrder"]
+  :properties ["recordsGrow" "stuckIsLeftAlone"]}
+ {:file "super.qnt" :main "asks" :states 1352748
+  :invariants ["oneWorkerPerThread" "openAskHasWorker" "stoppedAskWaits" "answeredAfterTaken"
+               "noReplyWaitsOnFinished" "cancelledAfterTold"]}
+ {:file "super.qnt" :main "cancel" :states 2394
+  :invariants ["capRespected" "oneWorkerPerThread" "cancelledAfterTold" "cancelledNotHeld"]
+  :properties ["cancelEnds"]}
+ {:file "super.qnt" :main "chat" :states 87756
+  :invariants ["openAskHasWorker" "stoppedAskWaits" "answeredAfterTaken" "noReplyWaitsOnFinished"
+               "typedAnswerCloses"]}
+ {:file "super.qnt" :main "timers" :states 28888
+  :invariants ["capRespected" "oneWorkerPerThread" "overdueStartingLaunched"]
+  :properties ["timerKillsNothing"]}
+ {:file "super.qnt" :main "workers" :states 852884
+  :invariants ["capRespected" "oneWorkerPerThread" "cancelledAfterTold"]
+  :properties ["noLaunchOnArchived"]}]

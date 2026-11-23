@@ -1,0 +1,17 @@
+;; bb verify:quint (make test) typechecks, tests and simulates these models;
+;; bb verify:quint-mc (make verify) checks each with TLC over every state.
+;; :states is the number of distinct states it has, the same TLC found on
+;; Rexmux.tla, which these were ported from (T220); update it when you change
+;; a model's state space.
+[{:file "rexmux.qnt" :main "link" :states 615
+  :invariants ["typeOK" "noDuplicateReply" "answeredNotPending" "inOrder"]
+  :properties ["everyRequestAnswered"]}
+ {:file "rexmux.qnt" :main "streams" :states 2644
+  :invariants ["typeOK" "oneStreamPerPane" "closedPaneNoStream" "idleStreamUnbound"]
+  :properties ["panesStream"]}
+ {:file "rexmux.qnt" :main "agents" :states 100961
+  :invariants ["typeOK" "blockedReachable" "sidecarAgrees"]
+  :properties ["blockedEventuallyFocused"]}
+ {:file "rexmux.qnt" :main "connect" :states 3034
+  :invariants ["typeOK" "neverStranded" "upIsLive" "noLeak"]
+  :properties ["serverUpAttaches" "localAttaches"]}]

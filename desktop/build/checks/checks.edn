@@ -36,17 +36,17 @@
    :checks ["make lint"]
    :slow ["for d in desktop/build/chrome/*/bb.edn; do (cd \"$(dirname \"$d\")\" && bb e2e) || exit 1; done"]}
   {:name "rexmux"
-   :paths ["desktop/build/rexmux/**" "modules/engstrand/packages/rex.scm" "modules/engstrand/packages/quint.scm"
+   :paths ["desktop/build/rexmux/**" "modules/engstrand/packages/rex.scm" "modules/engstrand/packages/quint.scm" "desktop/build/quint/src/**"
            "desktop/bin/{mux-terminal,rexmux}" "desktop/lib/mux.clj"]
    :checks ["make lint" "cd desktop/build/rexmux && bb test" "cd desktop/build/rexmux && bb verify:quint"]
-   :slow ["cd desktop/build/rexmux && bb verify:tla" "cd desktop/build/rexmux && bb verify:quint-mc" "cd desktop/build/rexmux && bb verify"]}
+   :slow ["cd desktop/build/rexmux && bb verify:quint-mc" "cd desktop/build/rexmux && bb verify"]}
   {:name "ghostty-rex"
    :paths ["desktop/build/ghostty-rex/**" "desktop/bin/ghostty-rex" "desktop/configs/ghostty-rex/**"
            "modules/engstrand/packages/ghostty.scm" "modules/engstrand/features/terminal-mux.scm"
            "desktop/bin/{mux-terminal,workspace-or-herdr-tab}" "desktop/lib/mux.clj"
            "desktop/build/rexmux/sidecar/**"]
    :checks ["make lint" "cd desktop/build/ghostty-rex && bb test" "cd desktop/build/rexmux && bb test"]
-   :slow ["cd desktop/build/ghostty-rex && bb verify" "cd desktop/build/rexmux && bb verify:tla"]}
+   :slow ["cd desktop/build/ghostty-rex && bb verify" "cd desktop/build/rexmux && bb verify:quint-mc"]}
   {:name "md-view"
    :paths ["desktop/bin/md-view" "desktop/build/md-view/**" "modules/engstrand/features/md-view.scm"]
    :checks ["make lint" "bb desktop/build/md-view/test.bb"]}
@@ -128,9 +128,9 @@
    :slow ["cd desktop/build/bbh && bb test:props"]}
   {:name "bbh state machines"
    :paths ["desktop/build/bbh/src/bbh/super/model.clj" "desktop/build/bbh/src/bbh/workflow.clj"
-           "desktop/build/bbh/src/bbh/workflows/change.edn" "desktop/build/bbh/verify/**"
-           ".agents/skills/verify-bbh-state-machines/**"]
-   :checks ["cd desktop/build/bbh && bb verify:tla"]}
+            "desktop/build/bbh/src/bbh/workflows/change.edn" "desktop/build/bbh/verify/**"
+            ".agents/skills/verify-bbh-state-machines/**" "desktop/build/quint/src/**"]
+   :checks ["cd desktop/build/bbh && bb verify:quint"]}
   {:name "quint"
    :paths ["desktop/build/quint/**" "modules/engstrand/packages/quint.scm"]
    :checks ["cd desktop/build/quint && bb test"]}

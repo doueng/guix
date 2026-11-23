@@ -1,6 +1,6 @@
 (ns bbh.super-property-test
   "Random command sequences on the controller's state machine, committed through
-  the store as the controller does. After every step the rules of Super.tla and
+  the store as the controller does. After every step the rules of super.qnt and
   the per-command postconditions below must hold, and at the end the event log
   must replay to the stored state. It stands in for the socket tests that only
   checked these rules; super_test.clj keeps those that need files, processes,
@@ -166,8 +166,8 @@
       :repeat nil)))
 
 (defn- violations
-  "What STATE breaks of Super.tla's invariants and the record rules. LAUNCHED
-  holds the Workers that ever started; as in Super.tla, a queued Worker that is
+  "What STATE breaks of super.qnt's invariants and the record rules. LAUNCHED
+  holds the Workers that ever started; as in super.qnt, a queued Worker that is
   cancelled never launches, so it counts against no cap."
   [state cap launched]
   (let [workers (vals (:workers state))

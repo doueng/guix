@@ -590,7 +590,7 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
     (str (fs/path (fs/temp-dir) "bbh-jobs"))))
 
 (defn- heavy-command
-  "CMD wrapped in bbh's machine-wide heavy-job slot when it is heavy (a test suite, a build, TLC, a browser, an eval
+  "CMD wrapped in bbh's machine-wide heavy-job slot when it is heavy (a test suite, a build, a model check, a browser, an eval
   replay), so one runs at a time across Workers. CMD itself without bbh.heavy on the classpath."
   [cmd & opts]
   (if-let [command (try (requiring-resolve 'bbh.heavy/command) (catch Exception _ nil))]

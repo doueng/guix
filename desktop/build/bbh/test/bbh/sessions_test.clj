@@ -198,7 +198,7 @@
 
 (deftest heavy-commands-are-recognized
   (doseq [cmd ["bb test" "cd desktop/build/bbh && bb test:emacs" "make verify" "make test ONLY=doom" "bb desktop/build/doom/doctor.bb" "make home" "guix build -f x.scm"
-               "guix system reconfigure c.scm" "bb verify:tla" "bb eval:replay run1" "flatpak run com.google.Chrome --headless" "tlc Super.tla"
+               "guix system reconfigure c.scm" "bb verify:quint" "bb eval:replay run1" "flatpak run com.google.Chrome --headless" "quint verify super.qnt"
                "emacs-throwaway --batch -- -Q -l t.el" "desktop/bin/emacs-throwaway --daemon bench"]]
     (is (heavy/heavy? cmd) cmd))
   (doseq [cmd ["make lint" "jj log" "bb lint" "guix describe" "bb testing" "make status" "make refresh" "wf status"]]

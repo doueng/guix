@@ -1,5 +1,5 @@
 (ns bbh.heavy
-  "The machine-wide heavy-job slot. Test suites, guix builds, TLC, browsers
+  "The machine-wide heavy-job slot. Test suites, guix builds, model checks, browsers
   and eval replays each take a few hundred MB to a few GB, and several at once
   froze the laptop (T108). A heavy command runs under flock(1) on one lock
   file, so the next waits, printing who holds the slot, and gives up after a
@@ -28,18 +28,18 @@
   (re-pattern
    (str "(?x)"
         "(^|[\\s;&|(])("
-        "bb\\s+(test(:[\\w-]+)?|verify:tla|eval:(replay|fork|tools|contracts|review|judge|graders|agreement))"
+        "bb\\s+(test(:[\\w-]+)?|verify:quint(-mc)?|eval:(replay|fork|tools|contracts|review|judge|graders|agreement))"
         "|make\\s+(\\S+\\s+)*?(test|verify|build|switch|home|mux)"
         "|(bb\\s+)?desktop/build/(keybindings/(check|kanata-check|hypr-nested)|doom/doctor|dusk/(test|verify))\\.bb"
         "|guix\\s+(build|system|home|pull|package|time-machine)"
         "|doom\\s+(sync|doctor|build|upgrade)"
-        "|tlc|tla2tools|chrome|chromium|com\\.google\\.Chrome|playwright"
+        "|quint\\s+(verify|run|test)|apalache-mc|chrome|chromium|com\\.google\\.Chrome|playwright"
         "|(\\S*/)?emacs-throwaway"
         ")(?=$|[\\s;&|)])")))
 
 (defn heavy?
   "Whether shell command CMD runs something heavy: a test suite, a guix or
-  make build, TLC, a browser or an eval replay."
+  make build, a model check, a browser or an eval replay."
   [cmd]
   (boolean (and (string? cmd) (re-find heavy-re cmd))))
 

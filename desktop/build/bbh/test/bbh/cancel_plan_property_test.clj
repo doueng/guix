@@ -6,7 +6,7 @@
   completes while a job nobody can identify holds it, every plan's commands are
   accepted, a pass that does nothing names why, and once the session took the
   cancel, every stop works and the person abandoned the blocking jobs, the
-  Worker ends cancelled. Super.tla's CancelEnds is the same rule."
+  Worker ends cancelled. cancelEnds in verify/quint/super.qnt is the same rule."
   (:require [bbh.props :as props]
             [bbh.super.model :as model]
             [clojure.test :refer [deftest is]]

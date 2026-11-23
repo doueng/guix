@@ -1001,7 +1001,7 @@ impl Model {
     }
 
     /// Open a stream for each visible pane that has none, and close the rest,
-    /// so a pane never has two streams (verify/tla, OneStreamPerPane).
+    /// so a pane never has two streams (verify/quint/rexmux.qnt, oneStreamPerPane).
     pub fn refresh_streams(&mut self) -> Vec<Out> {
         let Some(view) = self.view().cloned() else { return vec![] };
         let visible: Vec<String> = view.visible().into_iter().map(|t| t.block).collect();
