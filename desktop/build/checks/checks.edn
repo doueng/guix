@@ -131,6 +131,9 @@
            "desktop/build/bbh/src/bbh/workflows/change.edn" "desktop/build/bbh/verify/**"
            ".agents/skills/verify-bbh-state-machines/**"]
    :checks ["cd desktop/build/bbh && bb verify:tla"]}
+  {:name "quint"
+   :paths ["desktop/build/quint/**" "modules/engstrand/packages/quint.scm"]
+   :checks ["cd desktop/build/quint && bb test"]}
   {:name "bbh voice shortcut"
    :paths ["desktop/build/bbh/src/bbh/super/voice.clj"]
    :checks ["bb desktop/build/keybindings/kanata-check.bb"]}
