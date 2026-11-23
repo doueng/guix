@@ -138,6 +138,17 @@
     (let [f (assoc base :extensions [{:name "vim" :src ["src/a.cljs" 300] :built-ms 200}])]
       (and (= [:bin "ext-reload" "vim"] (get-in (row f "ext:vim") [:fix :run]))
            (not (stale? (row (assoc-in f [:stamps "ext:vim"] 400) "ext:vim")))))]
+   ["a Rex server without SSL_CERT_FILE is stale and names how to fix it; with it, fresh"
+    (let [r (row (assoc base :ca-env [{:label "Rex server" :pid 7 :ok? false} {:label "Emacs daemon" :pid 8 :ok? true}]) "ca-env")]
+      (and (stale? r) (not (auto? r)) (str/includes? (:why r) "Rex server 7")
+           (str/includes? (get-in r [:fix :cmd]) "rex server restart")
+           (not (stale? (row (assoc base :ca-env [{:label "Rex server" :pid 7 :ok? true}]) "ca-env")))))]
+   ["the parents of panes, buffers and services are told apart by argv"
+    (= ["Rex server" "Emacs daemon" "Home Shepherd" nil]
+       (map stale/env-holder [["/gnu/store/x-rex/bin/rex" "server" "run" "--listen" "u"]
+                              ["/h/.guix-home/profile/bin/emacs" "--fg-daemon=bbh-super"]
+                              ["guile" "/gnu/store/x-shepherd-for-home-1.0.9/bin/shepherd" "--silent"]
+                              ["rex" "ls"]]))]
    ["summary splits what refresh fixes from what needs you"
     (let [s (stale/summary (stale/assess (-> (with-service base :home "md-view" :exe old-bb)
                                              (assoc-in [:boot :current :kernel] "k2"))))]
@@ -169,6 +180,10 @@
 (proc! 45 ["/gnu/bin/ghostty" "--class=dev.engstrand.Rex" "--config-file=/home/me/.config/rex.ghostty"] 100 "/gnu/bin/ghostty")
 (put! (str fake "/proc/45/status") "Name:\tghostty\nSigCgt:\t0000000180014a07\n")
 (proc! 46 ["ghostty" "+show-config"] 100 "/gnu/bin/ghostty")
+(proc! 47 ["/gnu/store/x-rex/bin/rex" "server" "run"] 100 "/nonexistent")
+(put! (str fake "/proc/47/environ") "HOME=/home/me\u0000PATH=/bin\u0000")
+(proc! 48 ["/bin/emacs" "--fg-daemon=x"] 100 "/nonexistent")
+(put! (str fake "/proc/48/environ") "HOME=/home/me\u0000SSL_CERT_FILE=/c.crt\u0000")
 (fs/create-dirs (str fake "/gnu/store/sys-1"))
 (fs/create-dirs (str fake "/run"))
 (fs/create-sym-link (str fake "/run/current-system") (str fake "/gnu/store/sys-1"))
@@ -211,6 +226,9 @@
     (do (collect/ghostty-reloaded! ctx 45 1001000 "font-size = 9" ["command"])
         (let [g (first (collect/ghostty ctx (:procs facts)))]
           (and (= "font-size = 9" (:snapshot g)) (= ["command"] (:pending g)))))]
+   ["a pane parent's environ without SSL_CERT_FILE makes the ca-env row stale"
+    (and (= #{[47 false] [48 true]} (set (map (juxt :pid :ok?) (:ca-env facts))))
+         (stale? (crow "ca-env")))]
    ["a stamp written by refresh is read back"
     (do (collect/stamp! ctx "ext:vim") (contains? (collect/stamps ctx) "ext:vim"))]])
 

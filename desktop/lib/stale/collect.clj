@@ -69,6 +69,17 @@
              exe (assoc :exe (str/replace exe #" \(deleted\)$" ""))
              (and exe (str/ends-with? exe " (deleted)")) (assoc :deleted? true))))))
 
+(defn ca-env
+  "For each process stale/env-holder names whose environ we may read, whether it
+  holds SSL_CERT_FILE."
+  [ctx procs]
+  (vec (for [{:keys [pid argv]} procs
+             :let [label (stale/env-holder argv)]
+             :when label
+             :let [env (slurp-or (path ctx "proc" (str pid) "environ") nil)]
+             :when env]
+         {:label label :pid pid :ok? (boolean (re-find #"(^|\x00)SSL_CERT_FILE=" env))})))
+
 (defn services
   "Running Shepherd services with a process: [{:scope :name :pid :command}]."
   [ctx]
@@ -241,6 +252,7 @@
      :services @services
      :procs @procs
      :ghostty (ghostty ctx @procs)
+     :ca-env (ca-env ctx @procs)
      :sources (into {} (for [{:keys [id sources inputs]} stale/components
                              :let [hit (or (when sources (newest (:repo ctx) sources))
                                            (last (sort-by second (keep (fn [p] (let [p (path ctx (expand ctx p))]

@@ -331,6 +331,37 @@
                   :fix {:cmd "open new windows; existing ones keep the old value until this Ghostty restarts"
                         :manual "new windows, or quit this Ghostty"})))))
 
+(defn env-holder
+  "Which long-lived parent of panes, buffers or services ARGV is, or nil."
+  [argv]
+  (let [base (str/replace (str (first argv)) #".*/" "")
+        s (str/join " " argv)]
+    (cond (and (= base "rex") (str/includes? s "server run")) "Rex server"
+          (and (str/starts-with? base "emacs") (re-find #"--(fg-|bg-)?daemon" s)) "Emacs daemon"
+          (str/includes? s "shepherd-for-home") "Home Shepherd"
+          (= base "Hyprland") "Hyprland")))
+
+(def ca-fix
+  {"Rex server" "rex server restart, which ends its panes; meanwhile a new fish pane loads them itself"
+   "Emacs daemon" "restart Emacs from a shell that has them"
+   "Home Shepherd" "log out and in"
+   "Hyprland" "log out and in"})
+
+(defn ca-env-row
+  "Whether the processes everything else starts from hold SSL_CERT_FILE: without
+  it git, jj, curl and guix in their children fail certificate checks (T219)."
+  [{:keys [ca-env]}]
+  (when (seq ca-env)
+    (let [bad (remove :ok? ca-env)]
+      (row (cond-> {:id "ca-env" :label "CA certificates in the session env" :group :session
+                    :running (str (count (filter :ok? ca-env)) "/" (count ca-env) " have SSL_CERT_FILE")}
+             (seq bad)
+             (assoc :state :stale
+                    :why (str (str/join ", " (map #(str (:label %) " " (:pid %)) bad))
+                              (if (next bad) " lack" " lacks") " SSL_CERT_FILE, so git and jj in their children fail certificate checks")
+                    :fix {:cmd (str/join "; " (distinct (map #(str (:label %) ": " (ca-fix (:label %))) bad)))
+                          :manual "restart them from the Guix session env"}))))))
+
 (defn links-row [{:keys [links]}]
   (when links
     (let [{:keys [missing]} links]
@@ -357,7 +388,7 @@
         claimed (set (keep :service components))
         claimed-pids (into (set (keep :pid (:services facts))) (map :pid (apply concat (vals procs-of))))]
     (vec (concat [(boot-row facts) (system-row facts) (home-row facts)]
-                 (keep identity [(links-row facts)])
+                 (keep identity [(links-row facts) (ca-env-row facts)])
                  (service-rows facts claimed)
                  (keep #(component-row facts % procs-of) components)
                  (doom-rows facts)

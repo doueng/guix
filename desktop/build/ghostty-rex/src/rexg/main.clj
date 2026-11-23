@@ -49,16 +49,22 @@
       (get-in c [:startup :cwd]) (update-in [:startup :cwd] expand-home)
       true (assoc :shell (shell-path (or (not-empty (System/getenv "REXG_SHELL")) (:shell c)))))))
 
-(def server-env
-  "Variables a new Rex server passes on to its panes. Rex starts it from an
-  allowlist that keeps WAYLAND_DISPLAY but drops HYPRLAND_INSTANCE_SIGNATURE,
-  so hyprctl in every pane failed (T216)."
-  ["HYPRLAND_INSTANCE_SIGNATURE"])
+(defn server-env?
+  "Whether a new Rex server should get variable K from the session. Rex
+  starts its server from an allowlist that keeps WAYLAND_DISPLAY but drops
+  the rest of the Guix session env: HYPRLAND_INSTANCE_SIGNATURE, so hyprctl
+  in every pane failed (T216), and SSL_CERT_FILE, GIT_SSL_CAINFO and
+  GUIX_LOCPATH, so jj git push failed certificate checks (T219). So pass
+  everything but what describes this terminal or process."
+  [k]
+  (not (or (#{"TERM" "TERMINFO" "TERM_PROGRAM" "TERM_PROGRAM_VERSION" "PWD" "OLDPWD"
+              "SHLVL" "_" "INSIDE_EMACS"} k)
+           (re-find #"^(REX_|REXG_|GHOSTTY_)" k))))
 
 (defn start-args
-  "rex server start, passing those of server-env that ENV sets."
+  "rex server start, passing the variables of ENV that server-env? keeps."
   [env]
-  (into ["server" "start"] (mapcat #(when (get env %) ["--env" %])) server-env))
+  (into ["server" "start"] (mapcat #(when (server-env? %) ["--env" %])) (sort (keys env))))
 
 (defn start-local!
   "Start the local Rex server, which rex server start does only when none

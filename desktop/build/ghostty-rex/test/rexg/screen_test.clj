@@ -7,9 +7,12 @@
             [rexg.screen :as s]))
 
 ;; Not a layout test, but this namespace already loads rexg.main.
-(deftest a-new-server-keeps-the-hyprland-signature
-  (is (= ["server" "start" "--env" "HYPRLAND_INSTANCE_SIGNATURE"]
-         (main/start-args {"HYPRLAND_INSTANCE_SIGNATURE" "abc_1_2" "OTHER" "x"})))
+(deftest a-new-server-keeps-the-session-env
+  (is (= ["server" "start" "--env" "GIT_SSL_CAINFO" "--env" "HYPRLAND_INSTANCE_SIGNATURE"
+          "--env" "SSL_CERT_FILE"]
+         (main/start-args {"HYPRLAND_INSTANCE_SIGNATURE" "abc_1_2" "SSL_CERT_FILE" "/c.crt"
+                           "GIT_SSL_CAINFO" "/c.crt" "TERM" "xterm-ghostty" "PWD" "/"
+                           "REX_SERVER" "unix:///s" "REXG_LOG" "/l" "GHOSTTY_RESOURCES_DIR" "/g"})))
   (is (= ["server" "start"] (main/start-args {}))))
 
 (deftest side-by-side-tiles-share-the-width-with-one-divider
