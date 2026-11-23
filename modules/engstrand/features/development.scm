@@ -18,7 +18,7 @@
   #:export (feature-familiar-development))
 
 (define %development-home-packages
-  (cons* babashka bombadil bun github-cli pi-coding-agent quint
+  (cons* babashka bombadil bun github-cli pi-coding-agent quint quint-language-server
          dasel hyperfine shellcheck shfmt tree-sitter ty typst uv
          (map specification->package
               '("clojure-tools"

@@ -8,7 +8,11 @@
   #:use-module (gnu packages elf)
   #:use-module (gnu packages gcc)
   #:use-module (gnu packages java)
+  #:use-module (gnu packages node)
+  #:use-module (engstrand packages quint-language-server)
+  #:use-module (guix base32)
   #:use-module (guix build-system copy)
+  #:use-module (guix build-system trivial)
   #:use-module (guix download)
   #:use-module (guix gexp)
   #:use-module (guix packages)
@@ -132,4 +136,54 @@ Apalache (quint verify).  This package installs the upstream ARM64 executable
 with the Rust evaluator and Apalache in place, so nothing is downloaded at run
 time.")
     (home-page "https://quint-lang.org")
+    (license license:asl2.0)))
+
+(define-public quint-language-server
+  (package
+    (name "quint-language-server")
+    (version quint-language-server-version)
+    (source #f)
+    (build-system trivial-build-system)
+    (native-inputs (list coreutils gzip tar))
+    (inputs (list bash-minimal node))
+    (arguments
+     (list
+      #:modules '((guix build utils))
+      #:builder
+      #~(begin
+          (use-modules (guix build utils))
+          (let ((lib (string-append #$output "/lib"))
+                (wrapper (string-append #$output "/bin/quint-language-server")))
+            (setenv "PATH" (string-append #$(this-package-native-input "gzip") "/bin:"
+                                           #$(this-package-native-input "coreutils") "/bin"))
+            ;; Each npm tarball unpacks to its lock path, as npm would.
+            (for-each (lambda (entry)
+                        (let ((dir (string-append lib "/" (car entry))))
+                          (mkdir-p dir)
+                          (invoke #$(file-append (this-package-native-input "tar") "/bin/tar")
+                                  "xzf" (cdr entry) "-C" dir "--strip-components=1")))
+                      (list #$@(map (lambda (module)
+                                      (let ((path (car module)) (url (cadr module)) (hash (caddr module)))
+                                        #~(cons #$path
+                                                #$(origin
+                                                    (method url-fetch)
+                                                    (uri url)
+                                                    (hash (content-hash (nix-base32-string->bytevector hash)
+                                                                        sha512))))))
+                                    quint-language-server-modules)))
+            (invoke "chmod" "-R" "u+rwX,go+rX" lib)
+            (mkdir-p (dirname wrapper))
+            (call-with-output-file wrapper
+              (lambda (port)
+                (format port "#!~a~%exec ~a ~a \"$@\"~%"
+                        #$(file-append bash-minimal "/bin/sh")
+                        #$(file-append node "/bin/node")
+                        (string-append lib "/node_modules/@informalsystems/quint-language-server/out/src/server.js"))))
+            (chmod wrapper #o555)))))
+    (synopsis "Language server for Quint")
+    (description "The Quint language server gives an editor diagnostics from the
+parser and type checker, hover with types and docs, go-to-definition,
+completion and renaming for Quint specifications.  This package installs the
+npm release with its dependencies, each pinned by the hash npm records.")
+    (home-page "https://github.com/informalsystems/quint")
     (license license:asl2.0)))

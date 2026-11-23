@@ -400,6 +400,7 @@ With PHONE, the prefix argument, send a snapshot to the phone's bbh Docs list."
 
 (load (expand-file-name "keybindings.el" eng/doom-config-dir) t 'nomessage)
 (load (expand-file-name "clojure.el" eng/doom-config-dir) t 'nomessage)
+(load (expand-file-name "quint.el" eng/doom-config-dir) t 'nomessage)
 (load (expand-file-name "agent-shell.el" eng/doom-config-dir) nil 'nomessage)
 
 (let ((parinfer-rust-cli (executable-find "parinfer-rust")))

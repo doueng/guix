@@ -132,8 +132,12 @@
             ".agents/skills/verify-bbh-state-machines/**" "desktop/build/quint/src/**"]
    :checks ["cd desktop/build/bbh && bb verify:quint"]}
   {:name "quint"
-   :paths ["desktop/build/quint/**" "modules/engstrand/packages/quint.scm"]
-   :checks ["cd desktop/build/quint && bb test"]}
+   :paths ["desktop/build/quint/**" "modules/engstrand/packages/{quint,quint-language-server}.scm"]
+   :checks ["cd desktop/build/quint && bb test"]
+   :slow ["bb desktop/build/quint/lsp/test.bb"]}
+  {:name "quint-mode"
+   :paths ["desktop/configs/doom/quint.el" "desktop/build/doom/quint-mode-test.el" "desktop/build/**/*.qnt"]
+   :checks ["emacs --batch -l desktop/build/doom/quint-mode-test.el"]}
   {:name "bbh voice shortcut"
    :paths ["desktop/build/bbh/src/bbh/super/voice.clj"]
    :checks ["bb desktop/build/keybindings/kanata-check.bb"]}
