@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<meta name="description" content="Quint and Apalache packaged for Guix on Asahi, the rexmux control connection ported from TLA+, and whether to keep TLA+, switch, or use both">
+<meta name="description" content="All TLA+ specs ported to Quint with the same state counts and rule results, the Quint language server in Doom, and Quint from Babashka">
 <meta name="bbh-doc" content="T220">
-<title>Quint on the guix repo</title>
+<title>Quint replaces TLA+ in this repo</title>
 <style>
 :root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
 *{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
@@ -29,51 +29,54 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 @media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
 </style></head>
 <body><main>
-<h1>Quint on the guix repo</h1>
+<h1>Quint replaces TLA+ in this repo</h1>
 
-<p class=lead><b>Recommendation: use both.</b> Keep the TLA+ specs and TLC as they are. Write new state-machine specs in Quint when you want types and scripted <code>run</code> tests, and check them with <code>quint verify --backend tlc</code>, which is exhaustive and takes seconds. Treat Apalache as an extra bounded check, not the main one.</p>
+<p class=lead><b>Done: every TLA+ spec in the repo is now Quint, and TLA+ and tla2tools are gone.</b> The four specs (bbh's Workflow, Effects and Super, and Rexmux) and their 12 TLC configs became four <code>.qnt</code> files with one instance module per old cfg. Each instance has the same distinct-state count under TLC as the TLA+ had, and every rule gives the same result. The Quint language server runs in Doom, and Babashka gets Quint the way it already gets TLC, Bombadil and Rex: a library that runs the CLI and returns EDN.</p>
 
-<h2>Setup</h2>
+<h2>1. The migration</h2>
+<p>Files: <code>desktop/build/bbh/verify/quint/{workflow,effects,super}.qnt</code> and <code>desktop/build/rexmux/verify/quint/rexmux.qnt</code>, which replaces the earlier partial <code>connect.qnt</code>. Each project's <code>verify/quint/checks.edn</code> replaces the cfg files: per model, its invariants, its temporal properties and its state count. The count is checked on every run, so the equivalence keeps being checked and a change to a model's state space shows up as a failure.</p>
+<h3>Same states, same results</h3>
+<table><tr><th>TLA+ spec and cfg</th><th>Quint module</th><th>Distinct states, TLC on TLA+ and on Quint</th><th>Rules, all hold on both</th></tr><tr><td>Workflow.serial.cfg</td><td>workflow.qnt::serial</td><td>3,212 = 3,212</td><td>visitsWithinCap; settled, followsWorkflow, visitsGrow</td></tr><tr><td>Workflow.change.cfg</td><td>workflow.qnt::change</td><td>315,676 = 315,676</td><td>visitsWithinCap; settled, followsWorkflow, visitsGrow</td></tr><tr><td>Effects.finish.cfg</td><td>effects.qnt::finish</td><td>3,120 = 3,120</td><td>changedOnce, recordedWasPerformed, triesWithinCap, inOrder; recordsGrow, stuckIsLeftAlone</td></tr><tr><td>Super.asks.cfg</td><td>super.qnt::asks</td><td>1,352,748 = 1,352,748</td><td>6 invariants; none</td></tr><tr><td>Super.cancel.cfg</td><td>super.qnt::cancel</td><td>2,394 = 2,394</td><td>4 invariants; cancelEnds (liveness)</td></tr><tr><td>Super.chat.cfg</td><td>super.qnt::chat</td><td>87,756 = 87,756</td><td>5 invariants; none</td></tr><tr><td>Super.timers.cfg</td><td>super.qnt::timers</td><td>28,888 = 28,888</td><td>3 invariants; timerKillsNothing</td></tr><tr><td>Super.workers.cfg</td><td>super.qnt::workers</td><td>852,884 = 852,884</td><td>3 invariants; noLaunchOnArchived</td></tr><tr><td>Rexmux.link.cfg</td><td>rexmux.qnt::link</td><td>615 = 615</td><td>4 invariants; everyRequestAnswered (liveness)</td></tr><tr><td>Rexmux.streams.cfg</td><td>rexmux.qnt::streams</td><td>2,644 = 2,644</td><td>4 invariants; panesStream (liveness)</td></tr><tr><td>Rexmux.agents.cfg</td><td>rexmux.qnt::agents</td><td>100,961 = 100,961</td><td>3 invariants; blockedEventuallyFocused (liveness)</td></tr><tr><td>Rexmux.connect.cfg</td><td>rexmux.qnt::connect</td><td>3,034 = 3,034</td><td>4 invariants; serverUpAttaches, localAttaches (liveness)</td></tr></table>
+<p>The TLC baseline is saved in the wf evidence as tlc-baseline.txt. <code>bb verify:quint</code> in bbh (about 2 min, in <code>make test</code>) and <code>bb verify:quint-mc</code> in rexmux (about 1 min, in <code>make verify</code>) re-run all 66 rules over every state today and get the same counts.</p>
+<h3>Same bugs found</h3>
+<p>I broke each model in 11 ways, each one a real bug that could happen or a fairness assumption removed, and ran both checkers. All 11 agree on which rules break and which hold:</p>
+<table><tr><th>Mutant</th><th>TLC on TLA+</th><th>Quint</th></tr><tr><td>Workflow: endAttest ignores that the run moved</td><td>FollowsWorkflow breaks, 5-state trace, VisitsGrow breaks, 7-state trace</td><td>followsWorkflow breaks, 5-state trace, visitsGrow breaks, 7-state trace</td></tr><tr><td>Effects: a crash forgets what was recorded</td><td>RecordsGrow breaks, 4-state trace</td><td>recordsGrow breaks, 4-state trace</td></tr><tr><td>Super: a cancel completes while a lost job holds it</td><td>CancelledNotHeld breaks, 6-state trace</td><td>cancelledNotHeld breaks, 6-state trace</td></tr><tr><td>Super: no fairness for the session taking the cancel</td><td>TLC breaks, 5-state trace</td><td>cancelEnds breaks, 12-state trace</td></tr><tr><td>Super: a timer also moves the Worker to failed</td><td>TimerKillsNothing breaks, 3-state trace</td><td>timerKillsNothing breaks, 3-state trace</td></tr><tr><td>Rexmux: no fairness for the watchdog restart</td><td>TLC breaks, 10-state trace</td><td>everyRequestAnswered breaks, 9-state trace</td></tr><tr><td>Rexmux: a restart keeps the requests waiting (no answer)</td><td>TLC breaks, 14-state trace</td><td>everyRequestAnswered breaks, 12-state trace</td></tr><tr><td>Rexmux: next-blocked only weakly fair</td><td>all rules hold</td><td>all rules hold</td></tr><tr><td>Rexmux: no fairness for attaching a stream</td><td>TLC breaks, 8-state trace</td><td>panesStream breaks, 8-state trace</td></tr><tr><td>Rexmux: T210, the live close only says so</td><td>UpIsLive breaks, 6-state trace</td><td>upIsLive breaks, 6-state trace</td></tr><tr><td>Rexmux: a local start is only weakly fair</td><td>TLC breaks, 20-state trace</td><td>localAttaches breaks, 17-state trace, loops to 9</td></tr></table>
+<p>Apalache also checks the Quint (not the TLA+). A bounded <code>quint verify</code> to 6 steps holds for one invariant of each spec (connect, link, finish, serial, cancel), taking 11 to 27 s each. It is too slow to be the gate here: these specs interleave many small steps, which is where TLC is strongest.</p>
+
+<h2>How liveness checking differs from TLC</h2>
 <ul>
-<li><code>modules/engstrand/packages/quint.scm</code> has two packages. <b>quint 0.34.0</b> is the upstream single-file arm64 binary with its interpreter patched; its RPATH is left alone, as with Bun and Pi. <b>apalache 0.62.4</b> is the upstream JVM tarball with <code>exec java</code> pinned to Guix's OpenJDK 25.</li>
-<li>Normally Quint downloads its Rust evaluator and Apalache into <code>~/.quint</code> the first time you use them. The wrapper instead sets <code>QUINT_HOME</code> to a store directory that holds <code>rust-evaluator-v0.8.0</code> and <code>apalache-dist-0.62.4</code>, the exact versions this Quint looks for. Nothing downloads at run time. You can still override it by setting <code>QUINT_HOME</code> yourself.</li>
-<li>Home installs <code>quint</code> through <code>features/development.scm</code>, and apalache comes with it, so after <code>make home</code> you have <code>quint</code> and <code>apalache-mc</code>. Until then, the checks run Quint through <code>guix shell -L modules</code>.</li>
-<li><b>Editor:</b> not added. <code>quint-language-server</code> 0.19 is an npm app with npm dependencies, pinned to quint ^0.31, and has no standalone binary. <code>quint-mode.el</code> and <code>lsp-quint.el</code> live in the quint repo, not on MELPA. Packaging them is possible but more work than one spec justifies.</li>
+<li><b>Same engine, so the same verdicts.</b> Exhaustive checking, liveness included, still uses TLC: the TLC that ships inside the Apalache jar that Quint already carries, run on the TLA+ that <code>quint compile</code> generates. <code>quint verify</code> with Apalache refuses temporal properties, and <code>quint run</code> only samples traces against invariants. So liveness is proved by TLC alone, as before.</li>
+<li><b>Fairness is written inside the property.</b> TLA+ had <code>Spec == Init /\ [][Next]_vars /\ Fairness</code>. Quint has no Spec formula, so each property reads <code>fairness implies ...</code>, where <code>fairness</code> is a conjunction of <code>weakFair(A, vars)</code> and <code>strongFair(A, vars)</code>. The mutants above that drop or weaken fairness break the same rules in both.</li>
+<li><b>Named, and with loops.</b> The old runner reported a broken liveness rule only as <q>TLC</q>. The new one names the rule, and returns the counterexample as data: <code>{:states [...] :loop i}</code>, a lasso back to state i. Lasso lengths differ from the old runs (for example 17 against 20 states), because TLC's liveness traces are not shortest and depend on how the spec is encoded. Safety traces have exactly the same length.</li>
+<li><b>Action properties need a fix.</b> A rule about one step is <code>always(orKeep(P, vars))</code>. Quint prints this as <code>[]([P]_vars)</code>, which TLC refuses, so the runner rewrites it to <code>[][P]_vars</code> before running TLC.</li>
 </ul>
 
-<h2>What I specified</h2>
-<p>I ported the control connection of ghostty-rex to Rex, the Control part of <code>Rexmux.tla</code> as checked by <code>Rexmux.connect.cfg</code>, to <code>desktop/build/rexmux/verify/quint/connect.qnt</code>. The state is a single typed record. <code>Conn</code>, <code>Try</code> and <code>Kind</code> are sum types. Every action is written <code>s' = { ...s, field: v }</code>. It has the same four safety rules, NeverStranded, UpIsLive, NoLeak and the ranges of TypeOK, plus both liveness rules under the same weak and strong fairness. Three <code>run</code> tests script known paths: a local start, the T210 close-then-retry, and a late connect being closed.</p>
-<p><b>The port is faithful.</b> TLC on the TLA+ that Quint generates finds exactly what it finds on <code>Rexmux.tla</code>: 10300 states generated, 3034 distinct, depth 30.</p>
-
-<h2>What it found</h2>
-<p>No new bug: the current model holds. To test the tools, I put the T210 bug back in, so that a close of the live connection goes down without scheduling a retry:</p>
-<table>
-<tr><th>Tool</th><th>Clean spec</th><th>T210 mutant</th></tr>
-<tr><td>TLC on Rexmux.tla</td><td>all 3034 states, safety and liveness, 1.6 s</td><td>NeverStranded, 6-state trace, 1 s</td></tr>
-<tr><td>quint verify --backend tlc</td><td>the same states, safety and liveness, 8 s (JVM starts)</td><td>caught. I removed strong fairness to check the liveness side too: a lasso trace that names Quint's actions</td></tr>
-<tr><td>quint run (seed 0x1)</td><td>3000 random traces, 0.6 s</td><td>caught in 20 ms, but with a 13-state trace, not the shortest</td></tr>
-<tr><td>quint test</td><td>3 tests, 1 s</td><td>closeRetriesTest fails</td></tr>
-<tr><td>quint verify (Apalache)</td><td>8 steps in 2 min. Step 9 took 4 min and step 10 had not finished after 20 min, while the graph is 30 deep</td><td>shortest 6-state trace, 12 s</td></tr>
-</table>
-<p>Quint will not check temporal properties with Apalache. It suggests <code>--backend tlc</code>, which runs the TLC inside the Apalache jar.</p>
-
-<h2>Experience compared</h2>
+<h2>What Quint cannot express</h2>
 <ul>
-<li><b>Readability.</b> Quint has no UNCHANGED (the TLA+ control part has 15 such lines), it has real types and enums instead of strings, and it has named helpers like <code>take</code> and <code>close</code>. It is about 125 lines against roughly 110 for TLA+, because the types and commas take space. It reads like code, and the frame bugs TLA+ invites go away.</li>
-<li><b>quint run.</b> Very fast, and good for a smoke test with a fixed seed, but it is random. Its traces are long, and it proves nothing.</li>
-<li><b>quint test.</b> This is the new thing. Scripted scenarios (<code>init.then(a).then(b).expect(p)</code>) pin regressions like T210 by name. TLC has no counterpart.</li>
-<li><b>quint verify.</b> Apalache's symbolic search grows exponentially here, because this spec is a long interleaving of small steps, which is where TLC is at its best. Use it for shortest traces at shallow depth or for specs with large data, not as the gate.</li>
-<li><b>REPL.</b> <code>quint repl -r connect.qnt::connect3</code> lets you step through actions by hand and shows each state change as old =&gt; new. It is handy for exploring a design; TLA+ has nothing so direct.</li>
-<li><b>Cost.</b> Every verify or compile starts an Apalache JVM (about 3 s), and the binary is 129 MB plus a 190 MB jar. TLC through <code>bbh.tla</code> already gives the shortest counterexample for each rule.</li>
+<li><b>No CHOOSE.</b> Rexmux picked <q>some pane</q> with CHOOSE and Super picked the least ready Worker. Panes, streams and Workers are now ints, and the choice is the least by fold. This only renames things, so the state counts still match exactly.</li>
+<li><b>No ENABLED</b> in an invariant. None of these specs used it.</li>
+<li><b>No Spec formula and no model values or symmetry sets in a cfg.</b> Constants come from instance modules (<code>import rexmux(NPanes = 2, ...).*</code>). None of these specs used symmetry.</li>
+<li><code>next(s).field</code> is refused by Quint's effect checker. Write <code>next(s.field)</code> instead.</li>
+<li>Nothing else blocked a port, and no rule was weakened.</li>
+</ul>
+<p>Removed: the TLA+ and cfg files, <code>bbh.tla</code> and <code>rexmux.tla</code>, the <code>verify:tla</code> tasks, tla2tools in Home, and the checks.edn rules that used them. The verify-bbh-state-machines skill, both READMEs, <code>desktop/build/bbh/doc/super-state-machine.html</code>, the Rust and Clojure comments that named the TLA+ actions, and the property tests now point at the Quint. Older dated audits in <code>docs/</code> still mention TLA+ as it was then, and I left them as they are.</p>
+
+<h2>2. Language server in Doom</h2>
+<ul>
+<li><code>modules/engstrand/packages/quint-language-server.scm</code> packages <code>@informalsystems/quint-language-server</code> from a pinned npm lockfile (<code>desktop/build/quint/lsp/</code>). <code>bb lsp/update.bb</code> regenerates it. It is in Home next to <code>quint</code>.</li>
+<li><code>desktop/configs/doom/quint.el</code> adds a <code>quint-mode</code> for <code>.qnt</code> files, with highlighting for keywords, types, constructors and definitions, comment syntax and indentation, and starts the server with lsp-mode.</li>
+<li>Checked: <code>bb desktop/build/quint/lsp/test.bb</code> drives the server over stdio and gets a diagnostic for an undefined name, the type on hover, and go-to-definition to the def line. <code>desktop/build/doom/quint-mode-test.el</code> checks the mode's faces and indentation in batch Emacs, and <code>make test ONLY=doom</code> passes with no new doctor warnings. Restart Emacs after <code>make switch</code> for it to load.</li>
+</ul>
+
+<h2>3. Quint in Babashka</h2>
+<p>Here <q>like the other languages</q> means this: the repo has no pods. External tools are wrapped as babashka.process calls that return EDN, as bbh.tla did for TLC. So Quint got the same treatment: <code>desktop/build/quint</code>, a library on bbh's classpath, available as <code>quint</code> in every Worker REPL.</p>
+<ul>
+<li><code>(quint/typecheck f)</code>, <code>(quint/test f opts)</code>, <code>(quint/run f opts)</code>, <code>(quint/verify f opts)</code> and <code>(quint/model-check f main {:invariants .. :properties ..})</code> each return EDN. A trace is a vector of <code>{var value}</code> maps: sets as sets, maps as maps, records as keyword maps, and sum types as <code>:Idle</code> or <code>[:Busy 2]</code>.</li>
+<li><code>(quint/repl f main)</code>, <code>(quint/repl-eval r "step")</code> and <code>(quint/repl-stop r)</code> keep a live <code>quint repl</code> open, so an agent can step a model by hand.</li>
+<li><code>quint.checks</code> runs a checks.edn and powers <code>bb verify:quint</code> in both projects.</li>
 </ul>
 
 <h2>Checks</h2>
-<ul>
-<li><code>make test</code> (rexmux rule) runs <code>bb verify:quint</code>: typecheck, <code>quint test</code> and <code>quint run --seed 0x1</code>, about 4 s.</li>
-<li><code>make verify</code> adds <code>bb verify:quint-mc</code>: TLC through Quint over every state with liveness, then Apalache to 8 steps, about 2.5 min.</li>
-</ul>
-
-<h2>Recommendation</h2>
-<p><b>Keep TLA+, add Quint for new specs, and do not port the rest.</b> The existing <code>Rexmux.tla</code> and bbh specs are compact and already checked exhaustively in seconds, so porting them gains little. For the next model, such as the super-agent cancel path or make refresh's graceful restart, Quint's types, <code>run</code> tests and REPL make it the better place to write it, and <code>--backend tlc</code> keeps TLC's guarantees. If Quint becomes the default, the follow-ups are the language server and a bbh runner for Quint, like <code>bbh.tla</code>.</p>
+<p><code>make test</code> passes except for one bbh Emacs test, <code>bbh-inbox-jjui-three-times-leaves-no-buffers-or-processes</code>. It fails the same way in the main checkout without these changes, so this work did not cause it. <code>bb verify:quint-mc</code> in rexmux passes, and so does <code>quint.core</code>'s own test suite (7 tests, 31 assertions).</p>
 
 </main></body></html>
