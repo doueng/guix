@@ -20,7 +20,7 @@
 (def helper-reference
   "# Helpers
 
-`fs`, `p` and `str` are aliased.
+`fs`, `p` and `str` are aliased, and `quint` names quint.core, which typechecks, tests, simulates and model-checks Quint specs and returns EDN (desktop/build/quint/README.md).
 
 - (sh \"cmd string\") runs the string with bash, so it needs no `bash -c` wrapper, and returns {:exit :out :err}. A nonzero exit is data. If the command outlasts the evaluation's budget it keeps running and sh returns {:timeout true :job id}. (sh \"cmd\" \"arg\" ...) runs one argv, each word quoted. ($ \"cmd\") prints stdout, stderr and a nonzero exit, and returns nil; use it when you only want to see the result. Both throw on a command that only reads, searches or lists files, naming the helper call to use instead; end the command with `# confirm` when the shell is really needed, such as for a flag no helper has.
 - (grep pattern & paths) prints `path:line:text` hits for an rg regex (smart case, alternation a|b), skipping gitignored and binary files. Paths are files, directories or shell-style globs (`*` stays in one directory, `**` recurses). End with {:context n}, {:files true}, {:fixed true} or {:max n}. (ls & paths) prints a directory's entries, a glob's files or a file, with line counts.
@@ -334,7 +334,8 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
             [babashka.process :as p]
             [bbh.env :refer [jev-classify-task delegate]]
             [bbh.explainer :as explainer]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [quint.core :as quint]))
 
 (def ^:private binary-extensions
   #{"zip" "tar" "gz" "tgz" "bz2" "xz" "7z" "rar" "exe" "dll" "so" "dylib" "class" "jar" "war" "wasm"

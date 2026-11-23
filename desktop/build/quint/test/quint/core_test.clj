@@ -57,3 +57,13 @@
     (testing "a broken liveness rule, found though TLC does not name it, with its lasso"
       (is (false? (:ok? (rs "reachesMax"))))
       (is (some? (:loop (:trace (rs "reachesMax"))))))))
+
+(deftest repl-steps-through-actions
+  (let [r (quint/repl counter "counter3")]
+    (try
+      (is (:ok? (quint/repl-eval r "init")))
+      (is (re-find #"n: 0 => 1" (:out (quint/repl-eval r "inc"))))
+      (is (= {:ok? true :out "1"} (quint/repl-eval r "n")))
+      (is (false? (:ok? (quint/repl-eval r "n +"))))
+      (is (= "2" (:out (quint/repl-eval r "n + 1"))) "a session survives an error")
+      (finally (quint/repl-stop r)))))

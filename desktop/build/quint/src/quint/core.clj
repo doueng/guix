@@ -325,3 +325,52 @@
                 (str/includes? text "No error has been found")
                 (into acc (for [[k r] left] {:rule r :kind k :ok? true :states (states-of text)}))
                 :else (conj acc {:rule "TLC" :ok? false :out text})))))))
+
+;; quint repl
+
+(defn- read-to-prompt
+  "What the REPL printed up to its next >>> prompt, or nil after TIMEOUT-MS."
+  [^java.io.Reader in timeout-ms]
+  (let [read (future (let [sb (StringBuilder.)]
+                       (loop []
+                         (let [c (.read in)]
+                           (when-not (neg? c)
+                             (.append sb (char c))
+                             (let [s (str sb)]
+                               (if (and (str/ends-with? s ">>> ")
+                                        (or (= 4 (count s)) (= \newline (.charAt s (- (count s) 5)))))
+                                 (subs s 0 (- (count s) 4))
+                                 (recur))))))))]
+    (deref read timeout-ms nil)))
+
+(defn repl
+  "A quint repl session with module MAIN of FILE loaded, or an empty one
+  without FILE. Evaluate with repl-eval and end it with repl-stop."
+  ([] (repl nil nil))
+  ([file main]
+   (let [proc (p/process (cond-> [(:quint @tools) "repl"]
+                           file (into ["-r" (str (fs/absolutize file) "::" main)]))
+                         {:err :out :dir (str (fs/create-temp-dir {:prefix "quint-repl-"}))})
+         in (java.io.InputStreamReader. ^java.io.InputStream (:out proc) "UTF-8")
+         banner (read-to-prompt in 60000)]
+     (when-not banner
+       (p/destroy-tree proc)
+       (throw (ex-info "quint repl did not start" {:file file :main main})))
+     {:proc proc :in in :banner banner})))
+
+(defn repl-eval
+  "Evaluate Quint INPUT, an expression, definition, action or .command, in
+  session R: {:ok? :out}, :out what the REPL printed. Running an action shows
+  the state change as old => new. INPUT goes in as one line."
+  [{:keys [proc in]} input & {:keys [timeout-ms] :or {timeout-ms 60000}}]
+  (doto ^java.io.OutputStream (:in proc)
+    (.write (.getBytes (str (str/replace input #"\s*\n\s*" " ") "\n") "UTF-8"))
+    (.flush))
+  (if-let [out (read-to-prompt in timeout-ms)]
+    (let [out (str/trim out)]
+      {:ok? (not (re-find #"(?m)^(?:syntax |static analysis |runtime )?error|Error \[QNT" out)) :out out})
+    {:ok? false :out "no prompt within the timeout"}))
+
+(defn repl-stop [{:keys [proc]}]
+  (p/destroy-tree proc)
+  nil)

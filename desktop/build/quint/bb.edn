@@ -1,5 +1,5 @@
 {:paths ["src" "test"]
- :tasks {test {:doc "quint.core against a fixture spec: typecheck, test, run and TLC, about 30 s."
+ :tasks {test {:doc "quint.core against a fixture spec: typecheck, test, run and TLC, about 40 s."
                :task (let [{:keys [fail error]} (do (require 'clojure.test 'quint.core-test)
                                                     (clojure.test/run-tests 'quint.core-test))]
                        (System/exit (if (zero? (+ fail error)) 0 1)))}}}
