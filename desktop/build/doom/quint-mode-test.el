@@ -41,6 +41,7 @@
       (should (memq (face "note") '(font-lock-comment-face)))
       (should (eq 'font-lock-type-face (face "A |")))
       (should (eq 'font-lock-variable-name-face (face "x:")))
+      (should (eq 'font-lock-type-face (face "int")))
       (should (eq 'font-lock-function-name-face (face "step")))
       (should (eq 'font-lock-constant-face (face "1\n"))))))
 

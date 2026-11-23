@@ -23,6 +23,8 @@
 
 (defconst quint--constants '("true" "false" "Bool" "Int" "Nat"))
 
+(defconst quint--builtin-types '("int" "bool" "str"))
+
 (defvar quint-mode-syntax-table
   (let ((table (make-syntax-table)))
     (modify-syntax-entry ?/ ". 124b" table)
@@ -38,6 +40,7 @@
   `((,(regexp-opt quint--declarations 'symbols) . font-lock-keyword-face)
     (,(regexp-opt quint--keywords 'symbols) . font-lock-keyword-face)
     (,(regexp-opt quint--constants 'symbols) . font-lock-constant-face)
+    (,(regexp-opt quint--builtin-types 'symbols) . font-lock-type-face)
     (,(rx symbol-start (or "def" "val" "action" "temporal" "run") (+ space)
           (group (+ (or word (syntax symbol)))))
      1 font-lock-function-name-face)
