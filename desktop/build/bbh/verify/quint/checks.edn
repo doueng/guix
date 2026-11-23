@@ -1,6 +1,6 @@
 ;; bb verify:quint checks each model with TLC over every state. :states is the
-;; number of distinct states it has, the same TLC found on the TLA+ spec each
-;; was ported from (T220); update it when you change a model's state space.
+;; number of distinct states TLC finds in the model; update it when you change
+;; a model's state space.
 [{:file "workflow.qnt" :main "serial" :states 3212
   :invariants ["visitsWithinCap"] :properties ["settled" "followsWorkflow" "visitsGrow"]}
  {:file "workflow.qnt" :main "change" :states 315676
