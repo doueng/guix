@@ -5,6 +5,7 @@
   #:use-module (engstrand packages bun)
   #:use-module (engstrand packages github-cli)
   #:use-module (engstrand packages pi-coding-agent)
+  #:use-module (engstrand packages quint)
   #:use-module (engstrand packages dasel)
   #:use-module (engstrand packages hyperfine)
   #:use-module (engstrand packages shellcheck)
@@ -17,7 +18,7 @@
   #:export (feature-familiar-development))
 
 (define %development-home-packages
-  (cons* babashka bombadil bun github-cli pi-coding-agent
+  (cons* babashka bombadil bun github-cli pi-coding-agent quint
          dasel hyperfine shellcheck shfmt tree-sitter ty typst uv
          (map specification->package
               '("clojure-tools"

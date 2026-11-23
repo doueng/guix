@@ -36,10 +36,10 @@
    :checks ["make lint"]
    :slow ["for d in desktop/build/chrome/*/bb.edn; do (cd \"$(dirname \"$d\")\" && bb e2e) || exit 1; done"]}
   {:name "rexmux"
-   :paths ["desktop/build/rexmux/**" "modules/engstrand/packages/rex.scm"
+   :paths ["desktop/build/rexmux/**" "modules/engstrand/packages/rex.scm" "modules/engstrand/packages/quint.scm"
            "desktop/bin/{mux-terminal,rexmux}" "desktop/lib/mux.clj"]
-   :checks ["make lint" "cd desktop/build/rexmux && bb test"]
-   :slow ["cd desktop/build/rexmux && bb verify:tla" "cd desktop/build/rexmux && bb verify"]}
+   :checks ["make lint" "cd desktop/build/rexmux && bb test" "cd desktop/build/rexmux && bb verify:quint"]
+   :slow ["cd desktop/build/rexmux && bb verify:tla" "cd desktop/build/rexmux && bb verify:quint-mc" "cd desktop/build/rexmux && bb verify"]}
   {:name "ghostty-rex"
    :paths ["desktop/build/ghostty-rex/**" "desktop/bin/ghostty-rex" "desktop/configs/ghostty-rex/**"
            "modules/engstrand/packages/ghostty.scm" "modules/engstrand/features/terminal-mux.scm"

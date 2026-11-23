@@ -19,4 +19,10 @@
                  :task (apply rexmux.verify/-main *command-line-args*)}
          verify:tla {:doc "Model-check verify/tla with TLC. Args: [CONFIG...]."
                      :requires ([rexmux.tla])
-                     :task (apply rexmux.tla/-main *command-line-args*)}}}
+                     :task (apply rexmux.tla/-main *command-line-args*)}
+         verify:quint {:doc "The Quint port of the control connection: typecheck, run tests, fixed-seed simulation (seconds; make test)."
+                       :requires ([rexmux.quint])
+                       :task (rexmux.quint/check)}
+         verify:quint-mc {:doc "Model-check verify/quint/connect.qnt: TLC over every state with liveness, then Apalache to STEPS (minutes; make verify). Args: [STEPS]."
+                          :requires ([rexmux.quint])
+                          :task (apply rexmux.quint/model-check *command-line-args*)}}}

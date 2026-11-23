@@ -40,7 +40,9 @@ messages from 1; the receiver drops repeats and reports gaps. A request's
 | Command | What |
 | --- | --- |
 | `make test ONLY=rexmux` | sidecar unit and property tests (in `make lint`) |
+| `make test ONLY=rexmux` | `bb verify:quint`: typecheck, `quint test` and a fixed-seed `quint run` of `verify/quint/connect.qnt` |
 | `make verify ONLY=rexmux` | TLC on `verify/tla/Rexmux.tla`: link, streams, agents |
+| `make verify ONLY=rexmux` | `bb verify:quint-mc`: TLC (via Quint) and Apalache on `verify/quint/connect.qnt`; docs/quint.html |
 | `make verify ONLY=rexmux` | live tests on a throwaway Rex server (private socket) |
 | `make build NAME=rexmux` | build the window (`build.bb`, Guix profile from `manifest.scm`) |
 

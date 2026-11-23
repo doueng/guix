@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Quint and Apalache packaged for Guix on Asahi, the rexmux control connection ported from TLA+, and whether to keep TLA+, switch, or use both">
+<meta name="bbh-doc" content="T220">
+<title>Quint on the guix repo</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Quint on the guix repo</h1>
+
+<p class=lead><b>Recommendation: use both.</b> Keep the TLA+ specs and TLC as they are. Write new state-machine specs in Quint when you want types and scripted <code>run</code> tests, and check them with <code>quint verify --backend tlc</code>, which is exhaustive and takes seconds. Treat Apalache as an extra bounded check, not the main one.</p>
+
+<h2>Setup</h2>
+<ul>
+<li><code>modules/engstrand/packages/quint.scm</code> has two packages. <b>quint 0.34.0</b> is the upstream single-file arm64 binary with its interpreter patched; its RPATH is left alone, as with Bun and Pi. <b>apalache 0.62.4</b> is the upstream JVM tarball with <code>exec java</code> pinned to Guix's OpenJDK 25.</li>
+<li>Normally Quint downloads its Rust evaluator and Apalache into <code>~/.quint</code> the first time you use them. The wrapper instead sets <code>QUINT_HOME</code> to a store directory that holds <code>rust-evaluator-v0.8.0</code> and <code>apalache-dist-0.62.4</code>, the exact versions this Quint looks for. Nothing downloads at run time. You can still override it by setting <code>QUINT_HOME</code> yourself.</li>
+<li>Home installs <code>quint</code> through <code>features/development.scm</code>, and apalache comes with it, so after <code>make home</code> you have <code>quint</code> and <code>apalache-mc</code>. Until then, the checks run Quint through <code>guix shell -L modules</code>.</li>
+<li><b>Editor:</b> not added. <code>quint-language-server</code> 0.19 is an npm app with npm dependencies, pinned to quint ^0.31, and has no standalone binary. <code>quint-mode.el</code> and <code>lsp-quint.el</code> live in the quint repo, not on MELPA. Packaging them is possible but more work than one spec justifies.</li>
+</ul>
+
+<h2>What I specified</h2>
+<p>I ported the control connection of ghostty-rex to Rex, the Control part of <code>Rexmux.tla</code> as checked by <code>Rexmux.connect.cfg</code>, to <code>desktop/build/rexmux/verify/quint/connect.qnt</code>. The state is a single typed record. <code>Conn</code>, <code>Try</code> and <code>Kind</code> are sum types. Every action is written <code>s' = { ...s, field: v }</code>. It has the same four safety rules, NeverStranded, UpIsLive, NoLeak and the ranges of TypeOK, plus both liveness rules under the same weak and strong fairness. Three <code>run</code> tests script known paths: a local start, the T210 close-then-retry, and a late connect being closed.</p>
+<p><b>The port is faithful.</b> TLC on the TLA+ that Quint generates finds exactly what it finds on <code>Rexmux.tla</code>: 10300 states generated, 3034 distinct, depth 30.</p>
+
+<h2>What it found</h2>
+<p>No new bug: the current model holds. To test the tools, I put the T210 bug back in, so that a close of the live connection goes down without scheduling a retry:</p>
+<table>
+<tr><th>Tool</th><th>Clean spec</th><th>T210 mutant</th></tr>
+<tr><td>TLC on Rexmux.tla</td><td>all 3034 states, safety and liveness, 1.6 s</td><td>NeverStranded, 6-state trace, 1 s</td></tr>
+<tr><td>quint verify --backend tlc</td><td>the same states, safety and liveness, 8 s (JVM starts)</td><td>caught. I removed strong fairness to check the liveness side too: a lasso trace that names Quint's actions</td></tr>
+<tr><td>quint run (seed 0x1)</td><td>3000 random traces, 0.6 s</td><td>caught in 20 ms, but with a 13-state trace, not the shortest</td></tr>
+<tr><td>quint test</td><td>3 tests, 1 s</td><td>closeRetriesTest fails</td></tr>
+<tr><td>quint verify (Apalache)</td><td>8 steps in 2 min. Step 9 took 4 min and step 10 had not finished after 20 min, while the graph is 30 deep</td><td>shortest 6-state trace, 12 s</td></tr>
+</table>
+<p>Quint will not check temporal properties with Apalache. It suggests <code>--backend tlc</code>, which runs the TLC inside the Apalache jar.</p>
+
+<h2>Experience compared</h2>
+<ul>
+<li><b>Readability.</b> Quint has no UNCHANGED (the TLA+ control part has 15 such lines), it has real types and enums instead of strings, and it has named helpers like <code>take</code> and <code>close</code>. It is about 125 lines against roughly 110 for TLA+, because the types and commas take space. It reads like code, and the frame bugs TLA+ invites go away.</li>
+<li><b>quint run.</b> Very fast, and good for a smoke test with a fixed seed, but it is random. Its traces are long, and it proves nothing.</li>
+<li><b>quint test.</b> This is the new thing. Scripted scenarios (<code>init.then(a).then(b).expect(p)</code>) pin regressions like T210 by name. TLC has no counterpart.</li>
+<li><b>quint verify.</b> Apalache's symbolic search grows exponentially here, because this spec is a long interleaving of small steps, which is where TLC is at its best. Use it for shortest traces at shallow depth or for specs with large data, not as the gate.</li>
+<li><b>REPL.</b> <code>quint repl -r connect.qnt::connect3</code> lets you step through actions by hand and shows each state change as old =&gt; new. It is handy for exploring a design; TLA+ has nothing so direct.</li>
+<li><b>Cost.</b> Every verify or compile starts an Apalache JVM (about 3 s), and the binary is 129 MB plus a 190 MB jar. TLC through <code>bbh.tla</code> already gives the shortest counterexample for each rule.</li>
+</ul>
+
+<h2>Checks</h2>
+<ul>
+<li><code>make test</code> (rexmux rule) runs <code>bb verify:quint</code>: typecheck, <code>quint test</code> and <code>quint run --seed 0x1</code>, about 4 s.</li>
+<li><code>make verify</code> adds <code>bb verify:quint-mc</code>: TLC through Quint over every state with liveness, then Apalache to 8 steps, about 2.5 min.</li>
+</ul>
+
+<h2>Recommendation</h2>
+<p><b>Keep TLA+, add Quint for new specs, and do not port the rest.</b> The existing <code>Rexmux.tla</code> and bbh specs are compact and already checked exhaustively in seconds, so porting them gains little. For the next model, such as the super-agent cancel path or make refresh's graceful restart, Quint's types, <code>run</code> tests and REPL make it the better place to write it, and <code>--backend tlc</code> keeps TLC's guarantees. If Quint becomes the default, the follow-ups are the language server and a bbh runner for Quint, like <code>bbh.tla</code>.</p>
+
+</main></body></html>
