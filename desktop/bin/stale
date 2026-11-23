@@ -8,6 +8,7 @@
 ;;   stale refresh    run every fix that is safe unattended, then list what needs you
 ;;   stale --edn      the facts and rows, for debugging
 (require '[babashka.classpath :as classpath]
+         '[bencode.core :as bencode]
          '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[cheshire.core :as json]
@@ -33,6 +34,7 @@
   {:root "/" :repo repo :home (System/getenv "HOME")
    :user (or (System/getenv "USER") (System/getProperty "user.name"))
    :stamps (str (session/runtime-dir) "/stale")
+   :super-dir (str (or (System/getenv "XDG_DATA_HOME") (str (System/getenv "HOME") "/.local/share")) "/bbh/super")
    :herd (fn [scope & args]
            (let [{:keys [exit out]} (run (if (= scope :system) (into ["sudo" "-n" herd-bin] args) (into ["herd"] args)))]
              (when (zero? exit) out)))
@@ -43,16 +45,20 @@
 (defn shown [s n] (let [s (str s)] (if (> (count s) n) (str (subs s 0 (dec n)) "…") s)))
 
 (defn print-stale [rows]
-  (let [{:keys [total stale auto manual]} (stale/summary rows)]
+  (let [{:keys [total stale auto manual pending]} (stale/summary rows)]
     (println (str total " components, " stale " stale"
-                  (when (pos? stale) (str ": make refresh fixes " (count auto) ", " (count manual) " need you"))))
-    (doseq [r (concat auto manual)]
+                  (when (pos? stale) (str ": make refresh fixes " (count auto) ", " (count manual) " need you"))
+                  (when (seq pending) (str "; " (count pending) " pending"))))
+    (doseq [r (concat auto manual pending)]
       (println)
       (println (str "  " (:label r) (when (:pid r) (str " (pid " (:pid r) ")"))))
       (when (:running r) (println (str "    running  " (:running r) (when (and (:current r) (not= (:current r) (:running r))) (str "  current " (:current r))))))
       (println (str "    why      " (:why r)))
       (when (:note r) (println (str "    note     " (:note r))))
-      (println (str "    fix      " (get-in r [:fix :cmd]) (if (get-in r [:fix :run]) "  (make refresh)" (str "  (manual: " (get-in r [:fix :manual]) ")")))))
+      (if-let [p (get-in r [:fix :pending])]
+        (do (println (str "    fix      " p))
+            (println (str "    how      " (get-in r [:fix :cmd]))))
+        (println (str "    fix      " (get-in r [:fix :cmd]) (if (get-in r [:fix :run]) "  (make refresh)" (str "  (manual: " (get-in r [:fix :manual]) ")"))))))
     (println)
     (doseq [[group title] [[:system "system"] [:home "home"] [:session "session"]]
             :let [fresh (filter #(and (= :fresh (:state %)) (= group (:group %))) rows)]
@@ -118,8 +124,52 @@
               (< n 30) (do (Thread/sleep 500) (recur (inc n)))
               :else r)))))
 
+(defn nrepl-eval
+  "Evaluate CODE in the nREPL server whose port PORT-FILE holds, as a request
+  of its own beside any eval the session's agent runs. Returns {:exit :out :err}."
+  [port-file code]
+  (try
+    (with-open [sock (doto (java.net.Socket. "127.0.0.1" (parse-long (str/trim (slurp port-file)))) (.setSoTimeout 60000))]
+      (let [out (java.io.PushbackInputStream. (.getInputStream sock))
+            in (.getOutputStream sock)
+            text #(if (bytes? %) (String. ^bytes % "UTF-8") (str %))]
+        (bencode/write-bencode in {"op" "eval" "code" code "id" "stale"})
+        (.flush in)
+        (loop [acc {:exit 0 :out "" :err ""}]
+          (let [m (bencode/read-bencode out)
+                acc (cond-> acc
+                      (get m "err") (update :err str (text (get m "err")))
+                      (get m "ex") (assoc :exit 1))
+                status (set (map text (get m "status")))]
+            (if (status "done") acc (recur acc))))))
+    (catch Exception e {:exit 1 :out "" :err (str "nREPL at " port-file ": " (ex-message e))})))
+
+(defn reload-form
+  "Reload each namespace in NSS that the REPL has loaded, in order, and nothing
+  it depends on."
+  [nss]
+  (str "(doseq [n '" (pr-str (vec nss)) "] (when (find-ns n) (require n :reload)))"))
+
+(defn request-router-restart!
+  "Ask the controller to restart the Router once it is idle: it watches this
+  file, drains the Router and reopens it on its conversation."
+  [why]
+  (let [f (str (:super-dir ctx) "/restart-router")]
+    (if-not (fs/exists? (:super-dir ctx))
+      {:exit 1 :err (str "no super-agent directory " (:super-dir ctx))}
+      (do (spit f (pr-str {:requested-at (System/currentTimeMillis) :by "make refresh" :why why}))
+          {:exit 0 :scheduled "scheduled: the controller restarts the Router once it is idle"}))))
+
+(defn kill-leftover!
+  "TERM PID if it is still the process that started at START-MS."
+  [pid start-ms]
+  (if (not= start-ms (:start-ms (some #(when (= pid (:pid %)) %) (collect/procs ctx))))
+    {:exit 0}
+    (run ["kill" (str pid)])))
+
 (defn perform!
-  "Run one fix's :run; return {:exit :out :err}."
+  "Run one fix's :run; return {:exit :out :err}, with :scheduled when it only
+  asked something else to do the work later."
   [[op & args]]
   (case op
     :emacs (let [[server what file] args]
@@ -138,7 +188,10 @@
                           r (run ["kill" "-USR2" (str pid)])]
                       (when (zero? (:exit r)) (collect/ghostty-reloaded! ctx pid start-ms text pending))
                       r)
-    :stow (run ["bb" (str repo "/desktop/stow-home")])))
+    :stow (run ["bb" (str repo "/desktop/stow-home")])
+    :nrepl-reload (let [[port-file nss] args] (nrepl-eval port-file (reload-form nss)))
+    :router-restart (request-router-restart! (first args))
+    :kill (apply kill-leftover! args)))
 
 (defn refresh-pass!
   "Run the fix of each auto row not in TRIED, stamping the ones that work; return
@@ -149,10 +202,10 @@
      (for [r auto :when (not (tried (:id r)))]
        (let [t0 (System/currentTimeMillis)
              _ (do (print (str "refresh: " (:label r) ": " (get-in r [:fix :cmd]) " ... ")) (flush))
-             {:keys [exit out err]} (perform! (get-in r [:fix :run]))]
-         (if (zero? exit)
-           (do (collect/stamp! ctx (or (get-in r [:fix :stamp]) (:id r)) t0) (println "ok"))
-           (println (str "failed: " (str/trim (str err out)))))
+             {:keys [exit out err scheduled]} (perform! (get-in r [:fix :run]))]
+         (cond (not (zero? exit)) (println (str "failed: " (str/trim (str err out))))
+               scheduled (println scheduled)
+               :else (do (collect/stamp! ctx (or (get-in r [:fix :stamp]) (:id r)) t0) (println "ok")))
          (:id r))))))
 
 (defn refresh!

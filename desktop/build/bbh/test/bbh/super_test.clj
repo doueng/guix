@@ -1022,6 +1022,46 @@
       (is (= :unauthorized (:error (call dir {:token (second (first @opened)) :command :threads}))) "and the old token is revoked")
       (finally (some-> @session bbh.inbox/stop!) (super/stop! c)))))
 
+(deftest the-controller-restarts-the-router-on-request-only-once-it-is-idle
+  (let [dir (str (fs/create-temp-dir {:prefix "bbh-super-rr"}))
+        conversations (str (fs/create-temp-dir {:prefix "bbh-super-rrconv"}))
+        opened (atom [])
+        session (atom nil)
+        root (str (fs/path conversations "router"))
+        request (fs/path dir super/router-restart-file)
+        c (super/start! {:dir dir :conversations conversations :scan-ms 10 :restart-grace-ms -1 :router-idle-ms 50 :manage-router true
+                         :sessions {:sweep! (fn [_] {:shells-ended 0 :timers-swept 0 :mail-timers 0})}
+                         :launch {:emacs-up? (constantly true)
+                                  :open-router! (fn [{:keys [conversation token]}]
+                                                  (some-> @session bbh.inbox/stop!)
+                                                  (swap! opened conj [conversation token])
+                                                  (reset! session (bbh.inbox/start! {:root (str (fs/path conversations conversation)) :deliver (fn [_])})))}})]
+    (try
+      (is (wait-for #(pos? @(:last-health c))) "the dispatcher's first pass is done")
+      (super/reconcile! c)
+      (is (= 1 (count @opened)))
+      (bbh.inbox/announce! {:root root} true)
+      (spit (str request) "{:by \"make refresh\"}")
+      (Thread/sleep 300)
+      (is (= 1 (count @opened)) "a Router in a turn is not restarted")
+      (is (fs/exists? request) "and the request waits")
+      (bbh.inbox/announce! {:root root} false)
+      (let [m (bbh.inbox/send! root "a reply" nil {})]
+        (Thread/sleep 300)
+        (is (= 1 (count @opened)) "nor one with mail it has not taken")
+        (bbh.inbox/ack! {:root root} (:id m)))
+      (is (wait-for #(= 2 (count @opened))) "an idle Router is reopened on its conversation")
+      (is (= "router" (first (second @opened))))
+      (is (wait-for #(not (fs/exists? request))) "and the request is done")
+      (is (= :unauthorized (:error (call dir {:token (second (first @opened)) :command :threads}))) "the old session's token is revoked")
+      (is (= {:ok []} (call dir {:token (second (second @opened)) :command :threads})) "the new one holds the Router's")
+      (bbh.inbox/stop! @session)
+      (reset! session nil)
+      (spit (str request) "{}")
+      (is (wait-for #(not (fs/exists? request))) "with no Router running the request is dropped")
+      (is (= 2 (count @opened)) "without opening one; ensure-router! starts it on the current code")
+      (finally (some-> @session bbh.inbox/stop!) (super/stop! c)))))
+
 (deftest surviving-workers-are-observed-not-restarted-and-cancel-waits-for-the-session
   (with-workers
     (fn [c dir repo launches]

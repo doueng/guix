@@ -735,6 +735,47 @@ still running (T163)."
           (run! c :controller {:id (new-id) :command :register-router! :token-hash (sha256 t) :args {:conversation conversation}})
           ((:open-router! launch) {:conversation conversation :token t}))))))
 
+(def router-restart-file
+  "The file in the super directory that asks the controller to restart the
+  Router on new code once it is idle. make refresh writes it."
+  "restart-router")
+
+(defn restart-router-when-idle!
+  "With :manage-router, act on <dir>/restart-router: once the Router has been
+  idle on two looks at least :router-idle-ms (5 s) apart, with no turn running, an empty
+  mailbox and no prompt typed in the last minute, drop the request and open the
+  Router again. That replaces its session with one on the current code that
+  resumes the same conversation, as a new Router token does. With no Router
+  running the request is dropped, since ensure-router! starts one on the
+  current code. A reopen waits out the restart grace since the last one.
+  Returns :restarted, :dropped, :waiting or nil."
+  [{:keys [dir state launch] :as c}]
+  (let [f (fs/path dir router-restart-file)
+        idle-ms (or (:router-idle-ms c) 5000)
+        quiet-ms 60000]
+    (when (and (:manage-router c) (fs/exists? f))
+      (let [conversation (or (get-in @state [:router :router :conversation]) "router")
+            root (conversation-root c conversation)
+            a (inbox/agent root)
+            now (System/currentTimeMillis)
+            idle? (and a (not (:busy a)) (empty? (inbox/pending root))
+                       (> (- now (or (:prompted-at a) 0)) quiet-ms))
+            since @(:router-idle-since c)]
+        (cond (nil? a) (do (fs/delete-if-exists f) (reset! (:router-idle-since c) nil) :dropped)
+              (not idle?) (do (reset! (:router-idle-since c) nil) :waiting)
+              (nil? since) (do (reset! (:router-idle-since c) now) :waiting)
+              (< (- now since) idle-ms) :waiting
+              ;; A failed reopen keeps the request and tries again after the restart grace.
+              (< (- now @(:router-tried c)) (or (:restart-grace-ms c) 30000)) :waiting
+              :else (let [t (new-token)]
+                      (reset! (:router-idle-since c) nil)
+                      (reset! (:router-tried c) now)
+                      (println "bbh super: restarting the idle Router on the current code")
+                      (run! c :controller {:id (new-id) :command :register-router! :token-hash (sha256 t) :args {:conversation conversation}})
+                      ((:open-router! launch) {:conversation conversation :token t})
+                      (fs/delete-if-exists f)
+                      :restarted))))))
+
 (defn dispatch!
   "One pass: read which sent rows' mailbox files are still there, then perform
   model/outbox-plan, which sends, acks and drops outbox rows."
@@ -774,7 +815,7 @@ still running (T163)."
   and run the dispatcher every SCAN-MS. Returns the controller; `stop!` ends it.
   The controller is the store's only writer, so a second start on the same
   directory is refused while <dir>/lock is held."
-  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms wf-root manage-router web sessions reap-grace-ms notify now] :or {scan-ms 500 health-ms 120000 now #(System/currentTimeMillis)}}]
+  [{:keys [dir conversations scan-ms launch policy health-ms restart-grace-ms router-idle-ms wf-root manage-router web sessions reap-grace-ms notify now] :or {scan-ms 500 health-ms 120000 now #(System/currentTimeMillis)}}]
   (fs/create-dirs dir)
   (let [channel (java.nio.channels.FileChannel/open (fs/path dir "lock")
                                                     (into-array java.nio.file.OpenOption
@@ -795,7 +836,7 @@ still running (T163)."
            :sessions (merge session-io sessions) :machine (atom nil) :stale-since (atom {}) :was-active (atom #{}) :last-machine (atom 0) :reap-grace-ms reap-grace-ms
            :boot-at (System/currentTimeMillis) :now now :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
            :db db :state (atom (store/replay db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
-           :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :web (atom nil)
+           :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :router-idle-since (atom nil) :router-idle-ms router-idle-ms :web (atom nil)
            :notifier (some-> notify (notify/new-notifier (fs/path dir "notifications.edn") (- (now) notify/replay-grace-ms)))}]
     (ensure-owner-token! c)
     (some-> (:notifier c) (notify/resume! @(:state c) (now)))
@@ -822,6 +863,8 @@ still running (T163)."
                                (catch Exception e (binding [*out* *err*] (println "bbh super: observing sessions failed:" (ex-message e))))))
                         (observe-jobs! c) (dispatch! c) (watch-ended! c)
                         (fire-timers! c)
+                        (try (restart-router-when-idle! c)
+                             (catch Exception e (binding [*out* *err*] (println "bbh super: restarting the Router failed:" (ex-message e)))))
                         (catch Exception e (binding [*out* *err*] (println "bbh super dispatch:" (ex-message e)))))
                       (Thread/sleep (long scan-ms))))
       (.setDaemon true) (.start)))

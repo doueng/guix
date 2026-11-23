@@ -6,10 +6,9 @@
   (:require [clojure.string :as str]))
 
 (def manual-home-services
-  "Home services a refresh leaves alone: restarting bbh-super restarts the Router
-  and every Worker, bbh-emacs is the Emacs they draw in."
-  {"bbh-super" "restarts the super-agent: the Router and every Worker"
-   "bbh-emacs" "restarts the Emacs the super-agent draws in"})
+  "Home services a refresh leaves alone: bbh-emacs is the Emacs the super-agent's
+  Router and Workers run in. bbh-super, its controller, has bbh-rows."
+  {"bbh-emacs" "restarts the Emacs the super-agent draws in"})
 
 (def components
   "Processes outside Shepherd, or more than one process per component. :argv0
@@ -36,10 +35,6 @@
    {:id "dusk" :label "dusk shell" :arg #"build/dusk/target/release/dusk$|^dusk\.runtime$"
     :sources ["desktop/build/dusk/target/release/dusk" "desktop/build/dusk/runtime/**" "desktop/configs/dusk/**" "desktop/lib/dusk/**"]
     :fix {:cmd "pkill -x dusk; ~/.local/bin/dusk" :manual "restart dusk"}}
-   {:id "bbh" :label "bbh super-agent" :service "bbh-super" :arg #"build/bbh/bb\.edn$"
-    :sources ["desktop/build/bbh/src/**" "desktop/build/bbh/bb.edn" "desktop/configs/bbh/**"]
-    :note "bbh-super restarts itself once idle; the Router and Workers keep their code until the super-agent restarts"
-    :fix {:cmd "herd restart bbh-super" :manual "restart the super-agent (Router and Workers)"}}
    ;; Only a new Emacs binary needs a restart here; emacs-rows reloads its config live.
    {:id "emacs" :label "Emacs daemons" :service "bbh-emacs" :argv0 #"^\.?emacs(-[0-9.]+-real)?$" :arg #"^--(fg-|bg-)?daemon"
     :fix {:cmd "restart Emacs (herd restart bbh-emacs for the super-agent's)" :manual "restart Emacs"}}
@@ -380,13 +375,111 @@
            (assoc :state :stale :why (str path " changed after the last build")
                   :fix {:cmd (str "ext-reload " name) :run [:bin "ext-reload" name] :stamp (str "ext:" name)})))))
 
+(defn bbh-role
+  "What a process running bbh code (an argument ending in build/bbh/bb.edn) is:
+  :controller (bbh super serve), :acp (a session, hosted by an Emacs), :repl (the
+  session's nREPL child), :mcp (the MCP server its claude starts) or :other."
+  [argv]
+  (when (some #(re-find #"build/bbh/bb\.edn$" %) argv)
+    (let [after (fn [x] (second (drop-while #(not= x %) argv)))]
+      (cond (and (= "bbh.main" (after "-m")) (= "super" (after "bbh.main")) (= "serve" (after "super"))) :controller
+            (and (= "bbh.main" (after "-m")) (= "acp" (after "bbh.main"))) :acp
+            (= "bbh.mcp" (after "-m")) :mcp
+            (some #(str/includes? % "babashka.nrepl.server") argv) :repl
+            :else :other))))
+
+(defn- session-id [argv]
+  (let [after (fn [x] (second (drop-while #(not= x %) argv)))]
+    (or (after "--id") (after "--resume"))))
+
+(defn- reload-order
+  "FILES' namespaces, each after the ones among them it requires (NS-DEPS file
+  to namespaces), so a reload sees its dependencies' new code."
+  [files ns-of deps]
+  (loop [out [] todo (set files)]
+    (if (empty? todo)
+      (mapv ns-of out)
+      (let [ready (or (seq (sort (filter (fn [f] (not-any? #(and (todo %) (not= f %)) (get deps f #{}))) todo)))
+                      (sort todo))]
+        (recur (into out ready) (reduce disj todo ready))))))
+
+(defn bbh-rows
+  "Rows for the processes running bbh code: the controller, which restarts
+  itself once idle, and each session (the Router, a Worker, or one of yours) with
+  its acp, REPL and MCP server. A session whose only changed code is namespaces its
+  REPL loads that hold no state is hot-reloaded there; otherwise the Router
+  restarts through the controller once idle, a Worker keeps its code until it
+  ends, and your own sessions are yours to restart. A session process whose
+  parent died is a leftover, which refresh kills."
+  [{:keys [bbh procs stamps] :as facts}]
+  (let [{:keys [src loads reloadable ports router-request] ns-of :ns deps :deps} bbh
+        pids (into {} (map (juxt :pid identity)) procs)
+        mine (keep #(when-let [r (bbh-role (:argv %))] (assoc % :role r)) procs)
+        ;; Shepherd runs as guile with the shepherd script as an argument.
+        shepherd? (fn [p] (or (= 1 (:ppid p)) (some #(re-find #"(^|/)shepherd$" %) (take 3 (get-in pids [(:ppid p) :argv])))))
+        acp-of (fn [p] (loop [q p n 0] (cond (nil? q) nil (= :acp (:role q)) q (> n 3) nil
+                                               :else (recur (some-> (pids (:ppid q)) (#(assoc % :role (bbh-role (:argv %))))) (inc n)))))
+        changed (fn [p since] (sort (filter #(> (get src % 0) since) (get loads (:role p)))))
+        since (fn [p] (max (or (:start-ms p) 0) (get stamps (str "bbh-repl:" (:pid p)) 0)))
+        why-of (fn [p] (or (when-let [old (seq (sort (remove (:closure facts) (store-items (:exe p)))))]
+                             (str "runs " (str/join ", " (map short-name old)) ", gone from the current generation"))
+                           (when-let [f (first (changed p (since p)))] (str f " changed after it started"))))
+        pending (fn [m text cmd] (assoc m :state :pending :fix {:pending text :cmd cmd}))
+        leftover? (fn [p] (and (#{:acp :repl :mcp} (:role p)) (:ppid p) (or (nil? (pids (:ppid p))) (shepherd? p))))
+        sessions (group-by #(when-let [a (acp-of %)] (or (session-id (:argv a)) (str "pid " (:pid a))))
+                           (filter #(and (#{:acp :repl :mcp} (:role %)) (not (leftover? %))) mine))]
+    (concat
+     (for [p mine :when (= :controller (:role p)) :let [why (why-of p)]]
+       (row (cond-> {:id "bbh:controller" :label "bbh controller (bbh-super)" :group :home :pid (:pid p)}
+              why (-> (assoc :why why :note "herd restart bbh-super restarts only the controller; sessions run in the bbh-super Emacs")
+                      (pending (if (str/starts-with? why "runs ") "herd restart bbh-super when no Worker is mid-call" "restart pending until idle")
+                               "nothing: it exits once its source changed and no request is in flight, and Shepherd respawns it")))))
+     (for [[conv ps] (sort-by key (dissoc sessions nil))
+           :let [router? (= "router" conv)
+                 worker? (str/starts-with? conv "super-W")
+                 stale (keep #(when-let [w (why-of %)] [% w]) ps)
+                 repl (some #(when (= :repl (:role %)) %) ps)
+                 hot (when (and repl (= [repl] (map first stale)) (ports (:pid repl)))
+                       (let [fs (changed repl (since repl))]
+                         (when (and (seq fs) (every? #(and (reloadable %) (ns-of %)) fs)
+                                    (not (str/starts-with? (second (first stale)) "runs ")))
+                           fs)))
+                 [p why] (first stale)
+                 base {:id (str "bbh:" conv) :group :session :pid (str/join "," (sort (map :pid ps)))
+                       :label (cond router? "bbh Router session" worker? (str "bbh Worker session " (subs conv 6)) :else (str "bbh session " conv))}]]
+       (row (cond
+              (empty? stale) base
+              hot (let [nss (reload-order hot ns-of deps)]
+                    (assoc base :state :stale :why (str why " (its REPL)")
+                           :fix {:cmd (str "reload " (str/join " " nss) " in its REPL")
+                                 :run [:nrepl-reload (ports (:pid repl)) nss] :stamp (str "bbh-repl:" (:pid repl))}))
+              (and router? router-request)
+              (pending (assoc base :why (str why " (its " (name (:role p)) ")")) "restart pending until idle"
+                       "the controller reopens the Router on its conversation once no turn runs and its mailbox is empty")
+              router?
+              (assoc base :state :stale :why (str why " (its " (name (:role p)) ")")
+                     :fix {:cmd "restart the Router once idle: the controller drains it and resumes its conversation"
+                           :run [:router-restart why]})
+              worker?
+              (pending (assoc base :why (str why " (its " (name (:role p)) ")")) "takes the new code when this Worker ends"
+                       "nothing: a running Worker keeps its session; its next session, or the next Worker, runs the new code")
+              :else
+              (assoc base :state :stale :why (str why " (its " (name (:role p)) ")")
+                     :fix {:cmd (str "restart it; bbh --resume " conv " continues the conversation") :manual "restart this bbh session"}))))
+     (for [p mine :when (leftover? p)]
+       (row {:id (str "bbh:leftover:" (:pid p)) :label (str "leftover bbh " (name (:role p))) :group :session :pid (:pid p)
+             :state :stale :why (str "its session is gone: its parent " (if (pids (:ppid p)) "is Shepherd" "exited"))
+             :fix {:cmd (str "kill " (:pid p)) :run [:kill (:pid p) (:start-ms p)]}})))))
+
 (defn assess
   "Rows for every component FACTS describe, in display order."
   [facts]
   (let [specs (remove #(or (:of %) (:of-service %)) components)
         procs-of (into {} (for [s specs] [(:id s) (component-procs facts s)]))
-        claimed (set (keep :service components))
-        claimed-pids (into (set (keep :pid (:services facts))) (map :pid (apply concat (vals procs-of))))]
+        claimed (conj (set (keep :service components)) "bbh-super")
+        claimed-pids (-> (set (keep :pid (:services facts)))
+                         (into (map :pid (apply concat (vals procs-of))))
+                         (into (keep #(when (bbh-role (:argv %)) (:pid %)) (:procs facts))))]
     (vec (concat [(boot-row facts) (system-row facts) (home-row facts)]
                  (keep identity [(links-row facts) (ca-env-row facts)])
                  (service-rows facts claimed)
@@ -395,12 +488,16 @@
                  (emacs-rows facts (get procs-of "emacs"))
                  (ghostty-rows facts)
                  (extension-rows facts)
+                 (bbh-rows facts)
                  (script-rows facts claimed-pids)))))
 
 (defn summary
-  "Counts and the stale rows split by whether refresh can fix them."
+  "Counts and the stale rows split by whether refresh can fix them. Pending rows
+  run old code that something already scheduled to replace, such as the bbh
+  controller's restart once idle: they need neither refresh nor you."
   [rows]
   (let [stale (filter #(#{:stale :down} (:state %)) rows)]
     {:total (count rows) :stale (count stale)
      :auto (filter #(get-in % [:fix :run]) stale)
-     :manual (remove #(get-in % [:fix :run]) stale)}))
+     :manual (remove #(get-in % [:fix :run]) stale)
+     :pending (filter #(= :pending (:state %)) rows)}))

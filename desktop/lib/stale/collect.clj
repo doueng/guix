@@ -64,8 +64,9 @@
                :when pid
                :let [argv (remove str/blank? (str/split (slurp-or (str d "/cmdline") "") #"\x00"))]
                :when (seq argv)
-               :let [exe (try (str (fs/read-link (str d "/exe"))) (catch Exception _ nil))]]
-           (cond-> {:pid pid :argv (vec argv) :start-ms (start-ms ctx btime pid) :files (repo-files ctx argv)}
+               :let [exe (try (str (fs/read-link (str d "/exe"))) (catch Exception _ nil))
+                     ppid (some->> (slurp-or (str d "/status") "") (re-find #"(?m)^PPid:\s+(\d+)") second parse-long)]]
+           (cond-> {:pid pid :ppid ppid :argv (vec argv) :start-ms (start-ms ctx btime pid) :files (repo-files ctx argv)}
              exe (assoc :exe (str/replace exe #" \(deleted\)$" ""))
              (and exe (str/ends-with? exe " (deleted)")) (assoc :deleted? true))))))
 
@@ -229,6 +230,68 @@
            (re-find #"(?s)\(define %restartable-services\s+'\(([^)]*)\)") second
            (re-seq #"\"([^\"]+)\"") (map second) set))
 
+(def bbh-unsafe
+  "Text that marks a bbh namespace as holding state or types a reload would
+  replace under the code that uses them: such a namespace is never hot-reloaded."
+  #"\(defonce|\(atom[\s)]|\(volatile!|\(defrecord|\(deftype|\(defprotocol|\(defmulti|\(Thread\.|\(future[\s)]|\(promise\)|\(agent |\(ref |\(Object\.\)|\(start[\w-]*!")
+
+(defn- file-ns [rel]
+  (some-> (re-find #"src/(.+)\.clj$" rel) second (str/replace "/" ".") (str/replace "_" "-") symbol))
+
+(defn- ns-deps
+  "The bbh namespaces TEXT requires: those in its ns form and any it quotes, as
+  requiring-resolve does, or names first in a vector, as a require spread over
+  lines does."
+  [text known]
+  (let [form (try (read-string text) (catch Exception _ nil))
+        listed (when (and (seq? form) (= 'ns (first form)))
+                 (for [clause (rest form) :when (and (seq? clause) (= :require (first clause)))
+                       spec (rest clause)]
+                   (if (vector? spec) (first spec) spec)))
+        quoted (map (comp symbol second) (re-seq #"['\[](bbh(?:\.[\w-]+)+)" text))]
+    (set (filter known (concat listed quoted)))))
+
+(defn bbh
+  "What bbh code each kind of bbh process loads, read from the source:
+  {:src {file ms} :ns {file ns} :reloadable #{file} :loads {role #{file}}
+  :ports {pid port-file} :router-request {...}}. The controller and every
+  session's acp run bbh.main, the MCP server bbh.mcp, and a session's REPL
+  loads init.clj and what it requires."
+  [ctx procs]
+  (let [root (str (:repo ctx) "/desktop/build/bbh")
+        rel #(str (fs/relativize (:repo ctx) %))
+        srcs (filter fs/regular-file? (fs/glob root "src/**.clj"))
+        texts (into {} (map (fn [f] [(rel f) (slurp (str f))])) srcs)
+        by-ns (into {} (keep (fn [f] (some->> (file-ns f) (vector f)))) (keys texts))
+        file-of (into {} (map (fn [[f n]] [n f])) by-ns)
+        known (set (keys file-of))
+        deps (into {} (map (fn [[f t]] [f (ns-deps t known)])) texts)
+        closure (fn [roots]
+                  (loop [seen #{} todo (vec (keep file-of roots))]
+                    (if-let [f (peek todo)]
+                      (recur (conj seen f) (into (pop todo) (remove seen (keep file-of (deps f)))))
+                      seen)))
+        bb-edn (rel (fs/path root "bb.edn"))
+        configs (map rel (filter fs/regular-file? (fs/glob (fs/path (:repo ctx) "desktop/configs/bbh") "**")))
+        init (str (:repo ctx) "/desktop/configs/bbh/init.clj")
+        with-edn #(conj % bb-edn)]
+    {:src (into {} (map (fn [f] [f (mtime (str (fs/path (:repo ctx) f)))])) (concat (keys texts) [bb-edn] configs))
+     :ns by-ns
+     :deps (into {} (map (fn [[f ns]] [f (set (keep file-of ns))])) deps)
+     :reloadable (set (remove #(re-find bbh-unsafe (texts %)) (keys texts)))
+     :loads {:controller (with-edn (closure ['bbh.main]))
+             :acp (with-edn (closure ['bbh.main]))
+             :mcp (with-edn (closure ['bbh.mcp]))
+             :repl (-> (closure (ns-deps (slurp-or init "") known)) with-edn (into configs))}
+     :ports (into {} (for [{:keys [pid argv]} procs
+                           :when (some #(str/includes? % "babashka.nrepl.server") argv)
+                           :let [env (slurp-or (path ctx "proc" (str pid) "environ") "")
+                                 port-file (some->> (re-find #"(?:^|\x00)BBH_PORT_FILE=([^\x00]+)" env) second)]
+                           :when port-file]
+                       [pid port-file]))
+     :router-request (some-> (:super-dir ctx) (fs/path "restart-router") str (slurp-or nil)
+                             (#(try (read-string %) (catch Exception _ {}))))}))
+
 (def config-globs
   "What make switch builds into the system and Home."
   ["modules/**" "desktop/system.scm" "desktop/home.scm" "desktop/kanata.kbd" "channels.scm"])
@@ -265,4 +328,5 @@
      :restartable (restartable (:repo ctx))
      :doom (doom ctx)
      :doom-config (doom-config ctx)
-     :extensions (extensions ctx)}))
+     :extensions (extensions ctx)
+     :bbh (bbh ctx @procs)}))

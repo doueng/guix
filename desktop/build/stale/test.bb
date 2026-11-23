@@ -29,6 +29,37 @@
         (update :services conj {:scope scope :name name :pid pid :command (str exe "/bin/x")})
         (update :procs conj {:pid pid :start-ms start :argv [(str exe "/bin/x")] :exe (str exe "/bin/x") :files (or files {})}))))
 
+(def bbh-edn "/r/desktop/build/bbh/bb.edn")
+(defn bbh-proc [pid ppid & args] {:pid pid :ppid ppid :start-ms 1000 :exe (str new-bb "/bin/bb") :files {} :argv (into ["bb" "--config" bbh-edn] args)})
+
+(defn bbh-facts
+  "A super-agent: the controller under Shepherd, the Router and Worker W9 in an
+  Emacs, each an acp, its REPL, a claude and its MCP server, and an MCP server
+  whose claude died. CHANGED maps source files to when they changed; every
+  process started at 1000."
+  [changed]
+  (-> base
+      (update :services conj {:scope :home :name "bbh-super" :pid 200 :command "bb bbh super serve"})
+      (assoc :procs [{:pid 150 :ppid 1 :argv ["/gnu/bin/guile" "--no-auto-compile" "/gnu/bin/shepherd" "--config" "c.scm"] :start-ms 10}
+                     {:pid 250 :ppid 150 :argv ["emacs" "--fg-daemon=bbh-super"] :start-ms 10 :exe (str (item "emacs-31") "/bin/emacs")}
+                     (bbh-proc 200 150 "-m" "bbh.main" "super" "serve")
+                     (bbh-proc 300 250 "-m" "bbh.main" "acp" "--id" "router")
+                     (bbh-proc 301 300 "-e" "(require '[babashka.nrepl.server :as srv])")
+                     {:pid 302 :ppid 300 :argv ["claude" "--mcp-config" (str "{\"args\":[\"" bbh-edn "\"]}")] :start-ms 1000}
+                     (bbh-proc 303 302 "-m" "bbh.mcp")
+                     (bbh-proc 400 250 "-m" "bbh.main" "acp" "--id" "super-W9")
+                     (bbh-proc 401 400 "-e" "(require '[babashka.nrepl.server :as srv])")
+                     {:pid 402 :ppid 400 :argv ["claude"] :start-ms 1000}
+                     (bbh-proc 403 402 "-m" "bbh.mcp")
+                     (bbh-proc 500 1 "-m" "bbh.mcp")
+                     (bbh-proc 501 150 "-m" "bbh.mcp")])
+      (assoc :bbh {:src (merge {"heavy.clj" 500 "acp.clj" 500 "bb.edn" 100} changed)
+                   :ns {"heavy.clj" 'bbh.heavy "acp.clj" 'bbh.acp} :deps {}
+                   :reloadable #{"heavy.clj"}
+                   :loads {:controller #{"acp.clj" "bb.edn"} :acp #{"acp.clj" "bb.edn"} :mcp #{"bb.edn"}
+                           :repl #{"heavy.clj" "acp.clj" "bb.edn"}}
+                   :ports {301 "/c/router/repl.port" 401 "/c/super-W9/repl.port"}})))
+
 (def results
   [["a fresh system has no stale row"
     (not-any? stale? (stale/assess base))]
@@ -54,11 +85,39 @@
           r (row f "home:ext-reload")]
       (and (stale? r) (= [:herd :home "ext-reload"] (get-in r [:fix :run]))
            (not (stale? (row (with-service base :home "ext-reload" :files {"desktop/bin/ext-reload" 9000}) "home:ext-reload")))))]
-   ["the super-agent is never restarted by refresh"
-    (let [f (-> (with-service base :home "bbh-super")
-                (assoc :sources {"bbh" ["desktop/build/bbh/src/bbh/super.clj" 20000]}))
-          r (row f "bbh")]
-      (and (stale? r) (not (auto? r)) (nil? (row f "home:bbh-super"))))]
+   ["a REPL-only namespace that holds no state is hot-reloaded in each session's REPL, and its stamp ends that"
+    (let [f (bbh-facts {"heavy.clj" 2000})
+          r (row f "bbh:router") w (row f "bbh:super-W9")]
+      (and (stale? r) (= [:nrepl-reload "/c/router/repl.port" ['bbh.heavy]] (get-in r [:fix :run]))
+           (= "300,301,303" (:pid r)) (= "bbh Router session" (:label r))
+           (= [:nrepl-reload "/c/super-W9/repl.port" ['bbh.heavy]] (get-in w [:fix :run]))
+           (not (stale? (row f "bbh:controller")))
+           (not (stale? (row (assoc-in f [:stamps (get-in r [:fix :stamp])] 3000) "bbh:router")))))]
+   ["a namespace with state is never hot-reloaded: the Router restarts through the controller instead"
+    (let [r (row (update-in (bbh-facts {"heavy.clj" 2000}) [:bbh :reloadable] disj "heavy.clj") "bbh:router")]
+      (and (stale? r) (= :router-restart (first (get-in r [:fix :run])))))]
+   ["session code the acp loads: the controller restarts itself, the Router is drained and reopened, a Worker keeps its code"
+    (let [f (bbh-facts {"acp.clj" 2000})
+          c (row f "bbh:controller") r (row f "bbh:router") w (row f "bbh:super-W9")
+          s (stale/summary (stale/assess f))]
+      (and (= :pending (:state c)) (= "restart pending until idle" (get-in c [:fix :pending]))
+           (stale? r) (= :router-restart (first (get-in r [:fix :run]))) (str/includes? (:why r) "acp.clj")
+           (= :pending (:state w)) (not (auto? w))
+           (= #{"bbh:controller" "bbh:super-W9"} (set (map :id (:pending s))))
+           (not-any? #(str/starts-with? (:id %) "bbh:") (:manual s))))]
+   ["once refresh asked for it, the Router shows its restart pending until idle"
+    (let [r (row (assoc-in (bbh-facts {"acp.clj" 2000}) [:bbh :router-request] {:by "make refresh"}) "bbh:router")]
+      (and (= :pending (:state r)) (= "restart pending until idle" (get-in r [:fix :pending])) (not (auto? r))))]
+   ["a session process whose parent died is a leftover refresh kills; live sessions' are not"
+    (let [f (bbh-facts {})
+          rows (filter #(str/starts-with? (:id %) "bbh:leftover:") (stale/assess f))]
+      (and (= ["bbh:leftover:500" "bbh:leftover:501"] (map :id rows)) (= [:kill 500 1000] (get-in (first rows) [:fix :run]))))]
+   ["a fresh super-agent has no stale bbh row, and bbh-super is no plain service row"
+    (let [f (bbh-facts {})]
+      (and (not-any? #(and (str/starts-with? (:id %) "bbh:") (not (str/starts-with? (:id %) "bbh:leftover:")) (not= :fresh (:state %)))
+                     (stale/assess f))
+           (nil? (row f "home:bbh-super"))
+           (not-any? #(str/starts-with? (:id %) "script:") (stale/assess f))))]
    ["the home Shepherd keeps running when only its first config is gone"
     (let [f (-> base
                 (update :services conj {:scope :home :name "root" :pid 7 :command (str new-bb "/bin/shepherd --config " (item "shepherd.conf"))})
@@ -184,6 +243,17 @@
 (put! (str fake "/proc/47/environ") "HOME=/home/me\u0000PATH=/bin\u0000")
 (proc! 48 ["/bin/emacs" "--fg-daemon=x"] 100 "/nonexistent")
 (put! (str fake "/proc/48/environ") "HOME=/home/me\u0000SSL_CERT_FILE=/c.crt\u0000")
+(put! (str repo "/desktop/build/bbh/bb.edn") "{:paths [\"src\"]}")
+(put! (str repo "/desktop/build/bbh/src/bbh/main.clj") "(ns bbh.main (:require [bbh.acp :as acp]))\n(defn web [] ((requiring-resolve 'bbh.lazy/f)))")
+(put! (str repo "/desktop/build/bbh/src/bbh/acp.clj") "(ns bbh.acp \"Not bbh.heavy.\")\n(def sessions (atom {}))")
+(put! (str repo "/desktop/build/bbh/src/bbh/lazy.clj") "(ns bbh.lazy)\n(defn f [] 1)")
+(put! (str repo "/desktop/build/bbh/src/bbh/mcp.clj") "(ns bbh.mcp)")
+(put! (str repo "/desktop/build/bbh/src/bbh/heavy.clj") "(ns bbh.heavy)\n(defn command [c] c)")
+(put! (str repo "/desktop/configs/bbh/init.clj") "(ns bbh.env (:require [bbh.mcp]))\n(require '[clojure.string :as str]\n         [bbh.lazy :as lazy])\n(def run (requiring-resolve 'bbh.heavy/command))")
+(proc! 49 ["bb" "--config" (str repo "/desktop/build/bbh/bb.edn") "-e" "(require '[babashka.nrepl.server :as srv])"] 100 (str new-bb "/bin/bb"))
+(put! (str fake "/proc/49/environ") "HOME=/home/me\u0000BBH_PORT_FILE=/home/me/.local/share/bbh/conversations/router/repl.port\u0000")
+(put! (str fake "/proc/49/status") "Name:\tbb\nPPid:\t46\n")
+(put! (str fake "/super/restart-router") "{:by \"make refresh\"}")
 (fs/create-dirs (str fake "/gnu/store/sys-1"))
 (fs/create-dirs (str fake "/run"))
 (fs/create-sym-link (str fake "/run/current-system") (str fake "/gnu/store/sys-1"))
@@ -192,7 +262,7 @@
           ["status" "ext-reload" "-n" "0"] "  Main PID: 41\n  Command: bb ext-reload serve\n"
           ["status" "md-view" "-n" "0"] "  Main PID: 42\n  Command: bb md-view serve\n"
           ["status" "root" "-n" "0"] "  It is started.\n"}})
-(def ctx {:root fake :repo repo :home "/home/me" :user "me" :stamps (str fake "/stamps")
+(def ctx {:root fake :repo repo :home "/home/me" :user "me" :stamps (str fake "/stamps") :super-dir (str fake "/super")
           :herd (fn [scope & args] (get-in herd [scope (vec args)]))
           :requisites (fn [_] [new-bb])})
 (def facts (collect/facts ctx))
@@ -229,6 +299,20 @@
    ["a pane parent's environ without SSL_CERT_FILE makes the ca-env row stale"
     (and (= #{[47 false] [48 true]} (set (map (juxt :pid :ok?) (:ca-env facts))))
          (stale? (crow "ca-env")))]
+   ["bbh code is mapped to what loads it: requires, requiring-resolve and init.clj's requires"
+    (let [{:keys [loads]} (:bbh facts)
+          f #(str "desktop/build/bbh/src/bbh/" % ".clj")]
+      (and (= #{(f "main") (f "acp") (f "lazy") "desktop/build/bbh/bb.edn"} (:acp loads) (:controller loads))
+           (= #{(f "mcp") "desktop/build/bbh/bb.edn"} (:mcp loads))
+           (= #{(f "mcp") (f "lazy") (f "heavy") "desktop/build/bbh/bb.edn" "desktop/configs/bbh/init.clj"} (:repl loads))))]
+   ["a namespace that keeps an atom is not reloadable; one of plain functions is"
+    (let [{:keys [reloadable]} (:bbh facts)]
+      (and (reloadable "desktop/build/bbh/src/bbh/heavy.clj") (not (reloadable "desktop/build/bbh/src/bbh/acp.clj"))))]
+   ["a REPL's port file comes from its environment, a process's parent from its status"
+    (and (= {49 "/home/me/.local/share/bbh/conversations/router/repl.port"} (:ports (:bbh facts)))
+         (= 46 (:ppid (some #(when (= 49 (:pid %)) %) (:procs facts)))))]
+   ["a Router restart that refresh asked for is read back"
+    (= {:by "make refresh"} (:router-request (:bbh facts)))]
    ["a stamp written by refresh is read back"
     (do (collect/stamp! ctx "ext:vim") (contains? (collect/stamps ctx) "ext:vim"))]])
 

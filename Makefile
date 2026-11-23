@@ -22,7 +22,7 @@ REV ?= @
 
 help:
 	@echo 'status        what runs stale after a change, why, and the command that refreshes it; ALL=1 lists every component'
-	@echo 'refresh       run every refresh that is safe unattended, then list what needs you (reboot, re-login, super-agent)'
+	@echo 'refresh       run every refresh that is safe unattended, then list what needs you (reboot, re-login) and what is pending'
 	@echo 'switch        check system facts, build and check, activate system and Home (sudo; writes ESP), then refresh'
 	@echo 'home          build and activate Home only, link live configs, then refresh'
 	@echo 'build         build without activating: the system, or NAME=home|dusk|rexmux|ghostty-rex|oilfm|pi-sci|pierre-diff-ansi|bbh-web-highlights; DRY=1 shows what it would fetch, REPRO=1 uses the pinned channels'
