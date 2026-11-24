@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Guix explained bottom up in plain English, using this MacBook: the store, hashes, recipes, sealed builds, substitutes, packages, profiles, rollback (T216), gc, System and Home, Shepherd and channels.">
+<meta name="bbh-doc" content="T221">
+<title>Guix, from the ground up</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+.so{background:#e4f3ea;border-left:5px solid #2e7d4f;border-radius:6px;padding:8px 12px;margin:12px 0;font-size:15px}
+svg{max-width:520px;margin:10px auto;display:block}
+svg .mono{font-family:ui-monospace,Menlo,monospace}
+pre{font-size:12px}pre code{white-space:pre-wrap;overflow-wrap:anywhere}.sub{overflow-wrap:anywhere}
+</style></head>
+<body><main>
+<h1>Guix, from the ground up</h1>
+
+<p class=sub>Fifteen short steps. Each one uses only the steps before it. Every example is from your own MacBook, and every command is safe to type: they only look.</p>
+
+<h2 id=s1>1. A program is a file that needs other files</h2>
+<p>A program is a file. But it almost never works alone. It needs other files: libraries with shared code, data, other programs.</p>
+<p>Take <code>jq</code>. Ask it what it needs:</p>
+<pre><code>ldd $(readlink -f $(which jq))</code></pre>
+<p>You get (trimmed):</p>
+<pre><code>libonig.so.5 =&gt; /gnu/store/3sgrw…-oniguruma-6.9.10/lib/libonig.so.5
+libc.so.6    =&gt; /gnu/store/0mcy4…-glibc-2.41/lib/libc.so.6</code></pre>
+<p>So jq needs a regex library (oniguruma) and the C library (glibc). Without them, jq does not start. Ignore the odd <code>/gnu/store/…</code> folders for now. We will get there.</p>
+<div class=so><b>So:</b> every program is a file plus a list of other files it needs.</div>
+
+<h2 id=s2>2. Why installing things usually breaks</h2>
+<p>On a normal Linux, everybody's files go into the same few shared folders. Libraries go in <code>/usr/lib</code>. There is exactly one <code>/usr/lib/libonig.so.5</code>.</p>
+<p>Now picture two programs. App A wants oniguruma 6.9. App B wants a newer one. There is one slot with that name. Installing the new one for B <i>overwrites</i> the file A was using. A breaks.</p>
+<svg viewBox='0 0 340 150' role=img aria-label='Two apps share one slot in /usr/lib'>
+<rect x=10 y=10 width=90 height=34 rx=6 fill='#e6f0f5' stroke='#2f6f8f'/><text x=55 y=32 text-anchor=middle font-size=13>App A</text>
+<rect x=240 y=10 width=90 height=34 rx=6 fill='#e6f0f5' stroke='#2f6f8f'/><text x=285 y=32 text-anchor=middle font-size=13>App B</text>
+<rect x=85 y=96 width=170 height=40 rx=6 fill='#f8e3e0' stroke='#b3382c'/><text x=170 y=114 text-anchor=middle font-size=12 class=mono>/usr/lib/libonig.so.5</text><text x=170 y=129 text-anchor=middle font-size=11 fill='#b3382c'>one name, one slot</text>
+<path d='M55 44 L130 96' stroke='#5d6678' stroke-width=2 fill='none'/><path d='M285 44 L210 96' stroke='#5d6678' stroke-width=2 fill='none'/>
+<text x=14 y=76 font-size=11 fill='#5d6678'>wants 6.9</text><text x=262 y=76 font-size=11 fill='#5d6678'>wants 7.0</text>
+</svg>
+<p>It gets worse. An upgrade copies hundreds of files one by one. If the power dies halfway, you have half an old system and half a new one. And there is no undo: the old files are gone, overwritten.</p>
+<div class=so><b>So:</b> the trouble is one shared shelf where each name has room for only one thing, and changes happen in place.</div>
+
+<h2 id=s3>3. The store: a folder where nothing ever changes</h2>
+<p>Guix fixes this with one rule. Everything goes into <code>/gnu/store</code>, each thing in its own folder, and <b>once a folder is written, it never changes again</b>. Not edited, not overwritten. Only, much later, maybe deleted.</p>
+<p>Look at your store:</p>
+<pre><code>ls /gnu/store | grep -- '-jq-1.8.2$'</code></pre>
+<pre><code>0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2
+dngb583q608v3acma2xd9smls2cyghpp-jq-1.8.2
+x8g0a13kma26kca8f5a1w6f0n54jyp65-jq-1.8.2</code></pre>
+<p>Three copies of jq 1.8.2, side by side, and none of them is in anybody's way. Each name starts with a 32-character code. That code is what keeps them apart.</p>
+<p>And remember the <code>ldd</code> output from step 1? jq does not look in <code>/usr/lib</code>. It points at one exact folder: <code>/gnu/store/3sgrw…-oniguruma-6.9.10</code>. Nobody can swap that file under it, because that folder never changes.</p>
+<div class=so><b>So:</b> every version of everything gets its own folder that never changes, and programs point at those folders by full name.</div>
+
+<h2 id=s4>4. Where the code in the name comes from</h2>
+<p>Before Guix builds anything, it writes down a <b>recipe</b>. Guix calls it a <i>derivation</i>, and stores it as a <code>.drv</code> file. The recipe says, in full:</p>
+<ul>
+<li>every input, named by its full store path (the compiler, the source code, oniguruma, glibc…),</li>
+<li>the build script to run,</li>
+<li>the settings it runs with.</li>
+</ul>
+<p>See jq's recipe:</p>
+<pre><code>guix build -d jq
+/gnu/store/yvn0aghzmw7l7b75byrkcmqxghvdx2vf-jq-1.8.2.drv
+
+head -c 400 /gnu/store/yvn0aghzmw7l7b75byrkcmqxghvdx2vf-jq-1.8.2.drv
+Derive([("out","/gnu/store/0cs828z5…-jq-1.8.2",…)],
+       [("/gnu/store/1sfgckrz…-diffutils-3.12.drv",["out"]),
+        ("/gnu/store/9qy0azyn…-oniguruma-6.9.10.drv",["out"]),
+        ("/gnu/store/b6qd9vr6…-gcc-14.3.0.drv",["out"]), …</code></pre>
+<p>Now the key trick. The code at the front of <code>0cs828z5…-jq-1.8.2</code> is a <b>hash of that recipe</b>: a short fingerprint computed from all of it. Change one byte of the recipe and the fingerprint is completely different.</p>
+<p>The recipe lists its inputs by <i>their</i> names, which contain <i>their</i> fingerprints, which came from <i>their</i> recipes. So the fingerprint covers everything, all the way down:</p>
+<svg viewBox='0 0 340 190' role=img aria-label='Hashes chain up through inputs'>
+<rect x=110 y=8 width=120 height=36 rx=6 fill='#f8e3e0' stroke='#b3382c'/><text x=170 y=30 text-anchor=middle font-size=12 class=mono>0cs8…-jq</text>
+<rect x=10 y=80 width=140 height=36 rx=6 fill='#f0e9f6' stroke='#7a4fa0'/><text x=80 y=102 text-anchor=middle font-size=12 class=mono>3sgr…-oniguruma</text>
+<rect x=190 y=80 width=140 height=36 rx=6 fill='#f8e3e0' stroke='#b3382c'/><text x=260 y=102 text-anchor=middle font-size=12 class=mono>0mcy…-glibc</text>
+<rect x=190 y=150 width=140 height=34 rx=6 fill='#f8e3e0' stroke='#b3382c'/><text x=260 y=171 text-anchor=middle font-size=11>one patch changed</text>
+<path d='M80 80 L150 44 M260 80 L190 44 M260 150 L260 116' stroke='#5d6678' stroke-width=2 fill='none'/>
+<text x=10 y=150 font-size=11 fill='#5d6678'>change anything low down…</text><text x=10 y=166 font-size=11 fill='#5d6678'>…and every name above it</text><text x=10 y=182 font-size=11 fill='#5d6678'>changes too (red).</text>
+</svg>
+<p>You can see this on your disk. Ask each jq copy what it points at:</p>
+<pre><code>guix gc --references /gnu/store/0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2
+guix gc --references /gnu/store/x8g0a13kma26kca8f5a1w6f0n54jyp65-jq-1.8.2</code></pre>
+<p>The first points at <code>0mcy4…-glibc-2.41</code>. The second points at <code>nhphq…-glibc-2.44-57</code>. Same jq, same version, built against a different glibc, so a different recipe, so a different name. The third copy, <code>dngb5…</code>, uses glibc 2.41 too, but a <i>different build</i> of it (<code>b34sh…</code>). Something deep below changed, and the name noticed.</p>
+<div class=so><b>So:</b> the name is a fingerprint of the full recipe, so two different recipes can never land in the same folder.</div>
+
+<h2 id=s5>5. Building: running the recipe in a sealed room</h2>
+<p>A recipe only means something if it is <i>really</i> complete. If the build script could quietly use <code>/usr/lib</code> or download something, the recipe would be lying.</p>
+<p>So a background program, the <b>Guix daemon</b>, runs every build in a sealed room:</p>
+<ul>
+<li>the only files it can see are the inputs the recipe lists,</li>
+<li>no network (except to download source whose exact hash is already written in the recipe),</li>
+<li>no home folder, a throwaway user, and file dates reset to 1970.</li>
+</ul>
+<svg viewBox='0 0 340 130' role=img aria-label='The sealed build room'>
+<defs><marker id='ab' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0 0L10 5L0 10z' fill='#2f6f8f'/></marker></defs><defs><marker id='ag' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0 0L10 5L0 10z' fill='#2e7d4f'/></marker></defs><rect x=90 y=10 width=160 height=110 rx=10 fill='#fff' stroke='#1c2230' stroke-width='3'/>
+<text x=170 y=30 text-anchor=middle font-size=12 font-weight=700>sealed room</text>
+<text x=170 y=52 text-anchor=middle font-size=11>only the listed inputs</text>
+<text x=170 y=68 text-anchor=middle font-size=11>run the build script</text>
+<text x=170 y=84 text-anchor=middle font-size=11>no network, no /usr</text>
+<text x=6 y=58 font-size=11>recipe</text><text x=6 y=72 font-size=11>(.drv)</text><path d='M48 66 L90 66' stroke='#2f6f8f' stroke-width='2.5' marker-end='url(#ab)'/>
+<path d='M252 66 L290 66' stroke='#2e7d4f' stroke-width='2.5' marker-end='url(#ag)'/><text x=294 y=58 font-size=11>new</text><text x=294 y=72 font-size=11>store</text><text x=294 y=86 font-size=11>folder</text>
+</svg>
+<p>The script writes its result to the folder whose name was already worked out from the recipe. When it finishes, the folder is made read-only. Then Guix scans the result for other store names written inside it. That is how it knows, without being told, that jq needs glibc. It is exactly what <code>guix gc --references</code> printed above.</p>
+<div class=so><b>So:</b> the room holds only what the recipe lists, so the recipe really is everything that went in.</div>
+
+<h2 id=s6>6. Same recipe, same result: so you can skip the build</h2>
+<p>The room is sealed, so the result depends only on the recipe. Run the same recipe on another computer and you get the same thing, nearly always bit for bit. (<code>guix challenge</code> checks that claim.)</p>
+<p>And here is the payoff. The name of the result is known <i>before</i> building, because it comes from the recipe. So before building, your daemon can ask a server: <i>"Do you already have <code>0cs828z5…-jq-1.8.2</code>?"</i> If yes, it downloads the finished folder, checks the server's signature, and puts it in the store. That download is called a <b>substitute</b>. A server that hands them out is a <b>binary cache</b>.</p>
+<p>Your daemon asks these, in this order (from its command line, <code>ps -o args= -C guix-daemon</code>):</p>
+<ol>
+<li><code>http://guix-builder.tailbf68ad.ts.net:8080</code>, your own Hetzner build machine on Tailscale,</li>
+<li><code>https://bordeaux.guix.gnu.org</code>, the Guix project's cache,</li>
+<li><code>https://substitutes.asahi-guix.org</code> and <code>https://ci.guix.gnu.org</code>.</li>
+</ol>
+<p>Try it:</p>
+<pre><code>guix weather jq</code></pre>
+<p>It says both guix-builder and bordeaux have jq: <i>100.0% substitutes available</i>.</p>
+<p>Some things nobody else has built. Your kernel uses your own config, so its recipe is yours alone and no public cache has its name. For those, the laptop <b>offloads</b>: it sends the recipe to guix-builder over SSH (listed in <code>/etc/guix/machines.scm</code>), which builds it in its own sealed room and sends back the result. The comment at the top of <code>modules/engstrand/asahi/kernel.scm</code> says just that: bump the version and build on guix-builder. <code>make prebuild</code> asks guix-builder to build your whole system ahead of time, so your next switch just downloads.</p>
+<div class=so><b>So:</b> a result is decided by its name, so anyone who already built that name can just hand it to you.</div>
+
+<h2 id=s7>7. Packages: recipes written for humans</h2>
+<p>A <code>.drv</code> lists hundreds of store paths. Nobody writes those by hand. You write a <b>package</b> instead: a short description in Scheme, the language Guix is written in. Guix turns it into the <code>.drv</code> for you.</p>
+<p>Your own kernel from T212, trimmed, in <code>/home/engstrand/guix/modules/engstrand/asahi/kernel.scm</code>:</p>
+<pre><code>(define %version "7.2.15")
+(define %revision "1")
+(define %hash "0w1kb68ki0fcdg7h9x6qqmbgmw2n2yq8wj1hcicp5gb8dipkk9g3")
+
+(origin                              ; where the source comes from
+  (method git-fetch)
+  (uri (git-reference
+        (url "https://github.com/AsahiLinux/linux")
+        (commit "asahi-7.2.15-1")))
+  (sha256 (base32 %hash)))           ; what the download must hash to
+
+(package
+  (inherit base)                     ; start from Guix's kernel package
+  (native-inputs … clang-19 rust rust-bindgen-cli …)
+  (synopsis "Linux for Apple Silicon Macs"))</code></pre>
+<p>A package says what any recipe says, just in friendly words: the source (with its hash, so the download is checked), the inputs (by variable name, like <code>rust</code>, not by store path), and how to build. Each input is itself a package, so Guix walks down the whole tree and writes a <code>.drv</code> for each one.</p>
+<p>Now step 4 tells you what a version bump does. Change <code>%version</code>: the recipe changes, so the name changes, so the new kernel goes into a <i>new</i> folder. The old kernel folder is still there, untouched.</p>
+<p>One more piece of that file: the part starting with <code>#~(</code>. That is code that is <i>not</i> run now. It is saved into the recipe and runs later, inside the sealed room. Inside it, <code>#$</code> drops in something from outside, such as a store path. Guix calls this a <b>G-expression</b>. You only need to know: <code>#~</code> means "run this in the build room".</p>
+<div class=so><b>So:</b> a package is a recipe written for people; Guix turns it into the exact <code>.drv</code> that the daemon builds.</div>
+
+<h2 id=s8>8. Profiles: making store folders feel like a normal system</h2>
+<p>So far everything sits in folders with unreadable names. But you just type <code>jq</code>. How does that find <code>0cs828z5…-jq-1.8.2</code>?</p>
+<p>Through a <b>profile</b>: a folder full of links (shortcuts) that point into store folders. Your shell's <code>PATH</code> includes <code>~/.guix-home/profile/bin</code>. Look at what is in it:</p>
+<pre><code>ls -l ~/.guix-home/profile/bin/jq
+… jq -&gt; /gnu/store/0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2/bin/jq</code></pre>
+<p>That folder has 283 such links: one for each command your Home gives you. To you it looks like one normal <code>bin</code> folder. Underneath, each entry points at a different store folder.</p>
+<p>The profile is built by a recipe too, so it is a store folder itself (<code>/gnu/store/plq4q…-profile</code>), and it never changes either.</p>
+<div class=so><b>So:</b> a profile is one folder of links that makes many store folders look like one ordinary system.</div>
+
+<h2 id=s9>9. Generations and rollback: moving one arrow</h2>
+<p>If a profile never changes, how do you install or upgrade anything? You don't change it. You build a <b>new</b> profile next to the old one, and then move one link to point at the new one. Each saved version is a <b>generation</b>.</p>
+<p>Your whole machine works this way. Follow the links:</p>
+<pre><code>readlink /run/current-system
+/var/guix/profiles/system-109-link
+
+readlink /var/guix/profiles/system-109-link
+/gnu/store/ybz6s7a8wwbr7mm909c2mfzcchlsdnqa-system</code></pre>
+<svg viewBox='0 0 340 225' role=img aria-label='Generation links point into the store'><defs><marker id='gy' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0 0L10 5L0 10z' fill='#f2b705'/></marker></defs><text x='222' y='50' font-size='11' fill='#5d6678'>/gnu/store</text>
+<text x='80' y='50' font-size='11' fill='#5d6678'>generation links</text>
+<g font-size='11' class='mono' text-anchor='middle'>
+<rect x='80' y='60' width='118' height='26' rx='5' fill='#fff' stroke='#dedad0'/><text x='139' y='78'>system-105-link</text>
+<rect x='80' y='96' width='118' height='26' rx='5' fill='#fff' stroke='#dedad0'/><text x='139' y='114'>system-107-link</text>
+<rect x='80' y='132' width='118' height='26' rx='5' fill='#fff' stroke='#dedad0'/><text x='139' y='150'>system-108-link</text>
+<rect x='80' y='168' width='118' height='26' rx='5' fill='#e4f3ea' stroke='#2e7d4f' stroke-width='2'/><text x='139' y='186'>system-109-link</text>
+<rect x='222' y='60' width='114' height='26' rx='5' fill='#f0e9f6' stroke='#7a4fa0'/><text x='279' y='78'>dzh4…-system</text>
+<rect x='222' y='96' width='114' height='26' rx='5' fill='#f0e9f6' stroke='#7a4fa0'/><text x='279' y='114'>5fip…-system</text>
+<rect x='222' y='132' width='114' height='26' rx='5' fill='#f0e9f6' stroke='#7a4fa0'/><text x='279' y='150'>ha0r…-system</text>
+<rect x='222' y='168' width='114' height='26' rx='5' fill='#f0e9f6' stroke='#7a4fa0'/><text x='279' y='186'>ybz6…-system</text>
+<rect x='4' y='166' width='58' height='30' rx='6' fill='#fff8de' stroke='#f2b705' stroke-width='2'/><text x='33' y='185'>system</text>
+</g>
+<path d='M198 73 H222 M198 109 H222 M198 145 H222 M198 181 H222' stroke='#5d6678' stroke-width='1.5'/>
+<path d='M62 181 H78' stroke='#f2b705' stroke-width='3' marker-end='url(#gy)'/>
+<text x='4' y='216' font-size='12' fill='#1c2230'>The yellow arrow is the only thing that ever moves.</text>
+</svg>
+<p>Upgrading is: build the new system folder, add <code>system-110-link</code>, then flip <code>system</code> to point at it. Flipping one link happens all at once. There is no half-upgraded moment.</p>
+<p><b>Rollback</b> is: flip the arrow back. Nothing is copied or repaired, because the old folder was never touched. <code>sudo guix system roll-back</code> does it, and so does the boot menu, which lists your old generations.</p>
+<div class=so><b>So:</b> upgrading builds the new beside the old and moves one arrow; rolling back moves the arrow back.</div>
+
+<h2 id=s10>10. The day this saved you (T216)</h2>
+<p>Generation 107, built on 22 November, was the first with your own kernel from T212 (<code>linux-asahi</code>). It also carried a broken startup file for your Home: the <code>camera-denoise</code> service forgot one import. After you typed your password, nothing started. The login just hung.</p>
+<p>The fix was not to repair anything. At boot you picked an older entry in the menu. You are still running it right now:</p>
+<pre><code>cat /proc/cmdline
+BOOT_IMAGE=/gnu/store/6awkj…-asahi-linux-keyd-7.2.15-1/Image …
+  gnu.system=/var/guix/profiles/system-105-link …
+
+readlink -f /run/booted-system /run/current-system
+/gnu/store/dzh4wh4z4xysgf5c1hdlacf54f0xbv9f-system     ← 105, what you booted
+/gnu/store/ybz6s7a8wwbr7mm909c2mfzcchlsdnqa-system     ← 109, the newest</code></pre>
+<p>Read that slowly. You booted generation 105, with the old <code>asahi-linux-keyd</code> kernel. Since then, <code>make switch</code> built 108 and 109 and moved the arrow to 109. Your programs and services already come from 109. But a kernel can only change at boot, so the T212 kernel starts at your next reboot. <code>guix system list-generations</code> shows the whole list with labels.</p>
+<div class=so><b>So:</b> a broken generation costs you one reboot, because the old one is still there, whole and untouched.</div>
+
+<h2 id=s11>11. Garbage collection: deleting what no arrow reaches</h2>
+<p>Nothing in the store is ever overwritten, so the store only grows. Yours holds 41,963 items, about 67 GB.</p>
+<p>Cleaning up follows the arrows. Some links are <b>roots</b>: each generation link, <code>/run/current-system</code>, <code>/run/booted-system</code>, and a few more. Anything a root points at is kept. So is everything <i>that</i> points at, all the way down (step 5's references). Everything else can go.</p>
+<pre><code>guix gc --list-roots | wc -l      # you have 125 roots
+guix gc --requisites /gnu/store/0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2
+                                  # jq plus everything it needs</code></pre>
+<p><code>make gc</code> first deletes old generation links, then runs <code>guix gc</code>. So deleting a generation is the moment you give up rolling back to it. Generation 105 is safe for now: you booted it, so <code>/run/booted-system</code> keeps it alive.</p>
+<div class=so><b>So:</b> delete the arrows you no longer want, and the collector sweeps away whatever no arrow reaches.</div>
+
+<h2 id=s12>12. Guix System and Guix Home: one recipe for the whole machine</h2>
+<p>Now the big step, which is really a small one. If one program is a recipe, why not the whole computer?</p>
+<p>That is <b>Guix System</b>. You describe the machine: kernel, bootloader, disks, users, what runs at startup. Guix turns all of it into one recipe and builds one store folder. Look inside the one you are on:</p>
+<pre><code>ls /run/current-system
+activate  boot  channels.scm  configuration.scm  etc  initrd
+kernel  locale  parameters  profile  provenance</code></pre>
+<p>The kernel, the startup disk image (<code>initrd</code>), all of <code>/etc</code>, the program profile: all inside one folder with one name. <b>Guix Home</b> is the same idea for your home folder. <code>~/.guix-home</code> points at <code>/gnu/store/znnhl…-home</code>, which holds your profile, your config files and the script that starts things when you log in.</p>
+<p>Your descriptions are tiny. <code>/home/engstrand/guix/desktop/system.scm</code> and <code>desktop/home.scm</code> are four lines each. Both use <code>%familiar-config</code> in <code>modules/engstrand/config.scm</code>, a list of rde <i>features</i> (desktop, shell, editor, kanata…). One feature list makes both the system and the home.</p>
+<p>And <code>make switch</code> is just steps 4 to 9 for the whole machine:</p>
+<ol>
+<li><code>guix system build</code>: turn the description into recipes and build them (or download them, or offload them),</li>
+<li><code>sudo guix system reconfigure</code>: add the next <code>system-N-link</code>, move the arrow, run <code>activate</code>, add the new boot menu entry.</li>
+</ol>
+<div class=so><b>So:</b> your whole computer is one recipe and one store folder, and <code>make switch</code> is build-then-move-the-arrow.</div>
+
+<h2 id=s13>13. Services and Shepherd: what keeps running</h2>
+<p>A machine is not just files. Some programs must keep running: audio, networking, your bbh daemons. In Guix's description, each such piece is a <b>service</b>. A service adds things to the build: a config file, a user account, or a program to keep running.</p>
+<p>The ones that run are handed to <b>Shepherd</b>, Guix's service manager. One Shepherd runs the system as process 1. Guix Home starts another one just for you. Ask yours:</p>
+<pre><code>herd status
+Started:
+ + bbh-super
+ + camera-denoise
+ + pipewire
+ + …</code></pre>
+<p>Shepherd's list of services is a file built by a recipe, so it lives in the store like everything else. That is exactly what broke in T216: generation 107's Home Shepherd file crashed while loading, so your login waited forever for it. Since then, <code>desktop/build/home/check-shepherd.bb</code> loads that file after every build, before you switch.</p>
+<div class=so><b>So:</b> services say what should run, Shepherd runs it, and its config is just another store folder.</div>
+
+<h2 id=s14>14. Channels: where the recipes come from</h2>
+<p>Last question: where do packages like <code>jq</code> and <code>rust</code> come from? From <b>channels</b>: Git repositories full of package files. Yours are pinned in <code>/home/engstrand/guix/channels.scm</code>:</p>
+<pre><code>guix describe        # trimmed
+  guix 704ad8c   https://codeberg.org/guix/guix
+  rde  9300ace   https://git.sr.ht/~abcdw/rde</code></pre>
+<p>Plus your own <code>modules/</code>, which <code>make</code> adds with <code>-L</code>. Since T212 your kernel lives there, and the asahi-guix channel is gone.</p>
+<p><code>make pull</code> runs <code>guix pull</code> with that file. It fetches those exact commits, checks they are signed by the right people (the <code>introduction</code> lines), and builds a new <code>guix</code> command from them. That command is a profile with generations too: <code>~/.config/guix/current</code> leads, link by link, to <code>current-guix-9-link</code>, your ninth pull.</p>
+<p>Now see why <b>pinning</b> matters, from the bottom up. The commits fix the package files. The package files fix the recipes. The recipes fix every name. So the commits fix your entire system, down to the last byte. That is why guix-builder can build your system ahead of time and get exactly the names your laptop will ask for. Each system generation even records its channels: <code>cat /run/current-system/channels.scm</code>.</p>
+<div class=so><b>So:</b> two commit IDs plus your repo decide every recipe, every name, and so your whole machine.</div>
+
+<h2 id=s15>15. The whole picture</h2>
+<svg viewBox='0 0 340 300' role=img aria-label='The whole chain'>
+<g font-size=12 text-anchor=middle>
+<rect x=50 y=6 width=240 height=32 rx=6 fill='#f7efdc' stroke='#8a6a1f'/><text x=170 y=27>channels.scm + your repo</text>
+<rect x=50 y=56 width=240 height=32 rx=6 fill='#e6f0f5' stroke='#2f6f8f'/><text x=170 y=77>packages + system description</text>
+<rect x=50 y=106 width=240 height=32 rx=6 fill='#f0e9f6' stroke='#7a4fa0'/><text x=170 y=127>recipes (.drv), names = hashes</text>
+<rect x=50 y=156 width=240 height=32 rx=6 fill='#fff' stroke='#1c2230' stroke-width='2'/><text x=170 y=177>sealed build, or download, or offload</text>
+<rect x=50 y=206 width=240 height=32 rx=6 fill='#f0e9f6' stroke='#7a4fa0'/><text x=170 y=227>/gnu/store, never changes</text>
+<rect x=50 y=256 width=240 height=32 rx=6 fill='#e4f3ea' stroke='#2e7d4f'/><text x=170 y=277>generation links: move = switch</text>
+</g>
+<path d='M170 38 V56 M170 88 V106 M170 138 V156 M170 188 V206 M170 238 V256' stroke='#5d6678' stroke-width='2'/>
+</svg>
+<p>Programs need files (1). Sharing one folder breaks things (2). So every build gets its own folder that never changes (3), named by a fingerprint of its full recipe (4). The recipe is built in a sealed room, so it is honest (5). Honest recipes give the same result anywhere, so you can download instead of build (6). Packages are how people write recipes (7). Profiles make store folders feel normal (8). New versions sit beside old ones, and one arrow picks which is live (9), which is why T216 cost you only a reboot (10). Cleanup deletes what no arrow reaches (11). Your whole machine and home are one recipe (12), services and Shepherd keep the running parts (13), and the pinned channels decide all of it (14).</p>
+<p class=sub>Want to build this yourself? The course in <code>/home/engstrand/projects/build-your-own-guix</code> walks the same steps in code: store paths, derivations, the sealed build, profiles, rollback, garbage collection and substitutes. Deeper reading: <code>/home/engstrand/guix/docs/guix-in-depth.html</code> and the Guix manual, https://guix.gnu.org/manual/en/html_node/Features.html</p>
+
+</main></body></html>
