@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<meta name="description" content="Guix explained bottom up in plain English, using this MacBook: the store, hashes, recipes, sealed builds, substitutes, packages, profiles, rollback (T216), gc, System and Home, Shepherd and channels.">
+<meta name="description" content="Guix explained bottom up in plain English, using this MacBook: the store, hashes, recipes, sealed builds, substitutes, packages, grafts, profiles, rollback (T216), gc, System and Home, Shepherd and channels.">
 <meta name="bbh-doc" content="T221">
 <title>Guix, from the ground up</title>
 <style>
@@ -35,7 +35,7 @@ pre{font-size:12px}pre code{white-space:pre-wrap;overflow-wrap:anywhere}.sub{ove
 <body><main>
 <h1>Guix, from the ground up</h1>
 
-<p class=sub>Fifteen short steps. Each one uses only the steps before it. Every example is from your own MacBook, and every command is safe to type: they only look.</p>
+<p class=sub>Sixteen short steps. Each one uses only the steps before it. Every example is from your own MacBook, and every command is safe to type: they only look.</p>
 
 <h2 id=s1>1. A program is a file that needs other files</h2>
 <p>A program is a file. But it almost never works alone. It needs other files: libraries with shared code, data, other programs.</p>
@@ -161,7 +161,78 @@ guix gc --references /gnu/store/x8g0a13kma26kca8f5a1w6f0n54jyp65-jq-1.8.2</code>
 <p>One more piece of that file: the part starting with <code>#~(</code>. That is code that is <i>not</i> run now. It is saved into the recipe and runs later, inside the sealed room. Inside it, <code>#$</code> drops in something from outside, such as a store path. Guix calls this a <b>G-expression</b>. You only need to know: <code>#~</code> means "run this in the build room".</p>
 <div class=so><b>So:</b> a package is a recipe written for people; Guix turns it into the exact <code>.drv</code> that the daemon builds.</div>
 
-<h2 id=s8>8. Profiles: making store folders feel like a normal system</h2>
+<h2 id=s8>8. Grafts: a quick patch without rebuilding everything</h2>
+<p>Steps 4 and 7 have a cost. Change one thing low down, and every name above it changes. Every name that changes means a new build.</p>
+<p>Most days that is fine. Now picture a security hole in openssl, the library that does encryption for almost every program that talks to the network. Ask Guix how much sits on top of it:</p>
+<pre><code>guix refresh -l openssl
+Building the following 7653 packages would ensure 27385 dependent packages are rebuilt</code></pre>
+<p>27,385 packages. The build farms need days for that, and the fix should reach you today. For glibc, which nearly every program uses, it would be the whole distribution.</p>
+<h3>The trick</h3>
+<p>Guix builds only the fixed library. Then, for each package that points at the old one, it makes a <b>copy</b> of the finished package and swaps the old library's store path for the new one, wherever that path is written inside. It does not compile anything. It is find-and-replace on bytes. Guix calls this a <b>graft</b>.</p>
+<svg viewBox='0 0 340 190' role=img aria-label='A graft copies a package and swaps one store path'>
+<g font-size=11 class=mono text-anchor=middle>
+<rect x=8 y=8 width=150 height=60 rx=6 fill='#f0e9f6' stroke='#7a4fa0'/><text x=83 y=26>lbbq…-mit-krb5</text><text x=83 y=44 font-size=10>…/4xfdc…-openssl-3.5.7/lib</text><text x=83 y=60 font-size=10 fill='#5d6678'>built normally</text>
+<rect x=182 y=8 width=150 height=60 rx=6 fill='#e4f3ea' stroke='#2e7d4f' stroke-width='2'/><text x=257 y=26>3znk…-mit-krb5</text><text x=257 y=44 font-size=10>…/xfzy3…-openssl-3.5.9/lib</text><text x=257 y=60 font-size=10 fill='#5d6678'>the grafted copy</text>
+<rect x=8 y=120 width=150 height=34 rx=6 fill='#f8e3e0' stroke='#b3382c'/><text x=83 y=141>4xfdc…-openssl-3.5.7</text>
+<rect x=182 y=120 width=150 height=34 rx=6 fill='#e4f3ea' stroke='#2e7d4f'/><text x=257 y=141>xfzy3…-openssl-3.5.9</text>
+</g>
+<path d='M83 68 V120 M257 68 V120' stroke='#5d6678' stroke-width='2'/>
+<path d='M158 38 H182' stroke='#f2b705' stroke-width='3'/><text x=170 y=88 text-anchor=middle font-size=11 fill='#5d6678'>copy and</text><text x=170 y=101 text-anchor=middle font-size=11 fill='#5d6678'>swap the path</text>
+<text x=170 y=180 text-anchor=middle font-size=11 fill='#5d6678'>Nothing is compiled again. Only the names inside change.</text>
+</svg>
+<p>Remember step 5: Guix finds what a package needs by scanning it for store names. A graft uses the same fact the other way round. It scans the copy for the old name and writes the new one in its place.</p>
+<p>Because it swaps bytes in place, the new name must be <b>exactly as long</b> as the old one. Move anything in a compiled program and it breaks. The code at the front is always 32 characters, so the rest must match too. <code>openssl-3.5.7</code> and <code>openssl-3.5.9</code> are both 13 characters, so that works.</p>
+<h3>One is live on your laptop right now</h3>
+<p>Your pinned Guix has this in <code>gnu/packages/tls.scm</code> (trimmed):</p>
+<pre><code>(define-public openssl-3.5
+  (package
+    (name "openssl")
+    (version "3.5.7")
+    (replacement openssl-3.5/fixed) ; graft
+    …))
+
+(define-public openssl-3.5/fixed
+  (hidden-package
+   (package
+     (inherit openssl-3.5)
+     (version "3.5.9") …)))</code></pre>
+<p>The <code>replacement</code> field is the whole switch. Every package still says it was built with openssl 3.5.7. Guix grafts 3.5.9 in its place. You can read the file at <code>~/.config/guix/current/share/guile/site/3.0/gnu/packages/tls.scm</code>.</p>
+<p>Ask for both versions of a package that uses openssl. <code>--dry-run</code> only prints, and <code>--no-grafts</code> turns grafting off:</p>
+<pre><code>guix build --dry-run --no-grafts mit-krb5     # as built
+/gnu/store/lbbq1g41dr994hh8yq95p7bc0p5qqdkw-mit-krb5-1.21
+
+guix build --dry-run mit-krb5                 # grafted copy
+/gnu/store/3znk1rfg7qiqg0wkcxn3zinrc8ww5l8y-mit-krb5-1.21</code></pre>
+<p>Both are in your store. Ask each what it points at:</p>
+<pre><code>guix gc --references /gnu/store/lbbq1g41dr994hh8yq95p7bc0p5qqdkw-mit-krb5-1.21 | grep openssl
+/gnu/store/4xfdcm3ca7s72dcy59vg43v5ifpx0b1g-openssl-3.5.7
+
+guix gc --references /gnu/store/3znk1rfg7qiqg0wkcxn3zinrc8ww5l8y-mit-krb5-1.21 | grep openssl
+/gnu/store/xfzy3rq2lyi4h9jj342az01mc73mjc6y-openssl-3.5.9</code></pre>
+<p>Now look inside one file, the TLS plugin <code>lib/krb5/plugins/tls/k5tls.so</code>. Both copies are 199,120 bytes. <code>cmp -l</code> finds 64 bytes that differ, and all of them sit inside two names: openssl's, and mit-krb5's own, since the copy has a new name too.</p>
+<p>Grafts climb. curl does not use openssl directly, but it uses mit-krb5. So curl gets a grafted copy too (<code>x9b7p…-curl-8.21.0</code>), which points at the grafted mit-krb5. Even your own T212 kernel got one: it keeps a reference to rust, rust leads down to openssl, so <code>mb9wq…-linux-asahi-7.2.15-1</code> is a grafted copy. Of the 1,471 items your system and Home need, 274 are grafted copies.</p>
+<p>When a graft still has to be made, <code>guix build</code> says so. Try a package you do not have yet:</p>
+<pre><code>guix build --dry-run socat
+The following graft would be made:
+   /gnu/store/dpx6b83arq6z5s8an0nd79qiwn57hrsn-socat-1.7.4.4.drv</code></pre>
+<p>A real build then prints <code>applying 1 graft for …socat-1.7.4.4.drv …</code> while it works.</p>
+<h3>What happened to “same recipe, same result”?</h3>
+<p>It still holds, one level up. A graft is a recipe like any other. That <code>.drv</code> for socat lists two inputs: the socat that was built normally, and the fixed openssl. Its job is “copy this and swap these names”. Its name is a fingerprint of that recipe, and the same swap gives the same bytes every time.</p>
+<p>What changes is the meaning. The grafted mit-krb5 was compiled against openssl 3.5.7, and no one ever compiled it against 3.5.9. That is only safe because 3.5.9 is a bug-fix release that keeps the same library interface (the manual says the two must be binary-compatible, with the same <code>SONAME</code>). Choosing grafts is the Guix developers' job, and they use them only for small fixes like this.</p>
+<p>Two more things follow. The caches hold only the builds made without grafts; Guix never downloads a grafted copy and always makes it on your laptop (<code>guix/grafts.scm</code> marks graft recipes <code>#:local-build? #t</code> and <code>#:substitutable? #f</code>). And tools that care about the real build look past grafts: <code>guix size</code> measures the ungrafted package, and <code>guix shell -C --no-grafts</code> recreates a build environment exactly.</p>
+<h3>What grafts cost, and where they cannot reach</h3>
+<ul>
+<li><b>Time at install.</b> Every grafted copy is a full copy, made and scanned on your laptop. The manual says usually under a minute for an average package. This is why a <code>make switch</code> after <code>make pull</code> can keep printing <code>applying … graft</code> lines after the downloads finish, even when guix-builder built everything ahead of time. The old, ungrafted copies stay in the store too, until garbage collection.</li>
+<li><b>Only Guix-built things are fixed.</b> A graft fixes what Guix built and knows about. Anything that got onto your disk some other way still has whatever openssl it brought: a binary you built with <code>cargo build</code> in your home folder, a pip or npm package, something installed with Nix.</li>
+<li><b>Copied code is not a path.</b> A program linked against <code>openssl-3.5.7-static</code> contains openssl's code itself, not a path to it. There is nothing to swap, so it keeps the old code.</li>
+<li><b>Names must be written plainly.</b> The scan finds names written as plain text (and in the wide forms some programs use). A name packed inside a compressed file would be missed.</li>
+<li><b>You can turn it off.</b> Anything built with <code>--no-grafts</code> skips the fix. That is right for debugging and wrong for daily use.</li>
+</ul>
+<h3>When grafts go away</h3>
+<p>A graft is a stopgap. The proper fix still lands. Changes that would rebuild more than 300 packages go to a separate branch first (it used to be called <code>core-updates</code>), where the build farm rebuilds everything on top. There, openssl becomes 3.5.9 for real and the <code>replacement</code> line is deleted. Once the branch is merged into master, your next <code>make pull</code> and <code>make switch</code> download normally built packages that were compiled against the fixed openssl. No copies, no swaps. The 274 grafted copies become ordinary garbage for step 12 to collect.</p>
+<div class=so><b>So:</b> a graft gets a fix out today by copying each package and swapping one store name for another of the same length; the full rebuild follows later and replaces it.</div>
+
+<h2 id=s9>9. Profiles: making store folders feel like a normal system</h2>
 <p>So far everything sits in folders with unreadable names. But you just type <code>jq</code>. How does that find <code>0cs828z5…-jq-1.8.2</code>?</p>
 <p>Through a <b>profile</b>: a folder full of links (shortcuts) that point into store folders. Your shell's <code>PATH</code> includes <code>~/.guix-home/profile/bin</code>. Look at what is in it:</p>
 <pre><code>ls -l ~/.guix-home/profile/bin/jq
@@ -170,7 +241,7 @@ guix gc --references /gnu/store/x8g0a13kma26kca8f5a1w6f0n54jyp65-jq-1.8.2</code>
 <p>The profile is built by a recipe too, so it is a store folder itself (<code>/gnu/store/plq4q…-profile</code>), and it never changes either.</p>
 <div class=so><b>So:</b> a profile is one folder of links that makes many store folders look like one ordinary system.</div>
 
-<h2 id=s9>9. Generations and rollback: moving one arrow</h2>
+<h2 id=s10>10. Generations and rollback: moving one arrow</h2>
 <p>If a profile never changes, how do you install or upgrade anything? You don't change it. You build a <b>new</b> profile next to the old one, and then move one link to point at the new one. Each saved version is a <b>generation</b>.</p>
 <p>Your whole machine works this way. Follow the links:</p>
 <pre><code>readlink /run/current-system
@@ -199,7 +270,7 @@ readlink /var/guix/profiles/system-109-link
 <p><b>Rollback</b> is: flip the arrow back. Nothing is copied or repaired, because the old folder was never touched. <code>sudo guix system roll-back</code> does it, and so does the boot menu, which lists your old generations.</p>
 <div class=so><b>So:</b> upgrading builds the new beside the old and moves one arrow; rolling back moves the arrow back.</div>
 
-<h2 id=s10>10. The day this saved you (T216)</h2>
+<h2 id=s11>11. The day this saved you (T216)</h2>
 <p>Generation 107, built on 22 November, was the first with your own kernel from T212 (<code>linux-asahi</code>). It also carried a broken startup file for your Home: the <code>camera-denoise</code> service forgot one import. After you typed your password, nothing started. The login just hung.</p>
 <p>The fix was not to repair anything. At boot you picked an older entry in the menu. You are still running it right now:</p>
 <pre><code>cat /proc/cmdline
@@ -212,7 +283,7 @@ readlink -f /run/booted-system /run/current-system
 <p>Read that slowly. You booted generation 105, with the old <code>asahi-linux-keyd</code> kernel. Since then, <code>make switch</code> built 108 and 109 and moved the arrow to 109. Your programs and services already come from 109. But a kernel can only change at boot, so the T212 kernel starts at your next reboot. <code>guix system list-generations</code> shows the whole list with labels.</p>
 <div class=so><b>So:</b> a broken generation costs you one reboot, because the old one is still there, whole and untouched.</div>
 
-<h2 id=s11>11. Garbage collection: deleting what no arrow reaches</h2>
+<h2 id=s12>12. Garbage collection: deleting what no arrow reaches</h2>
 <p>Nothing in the store is ever overwritten, so the store only grows. Yours holds 41,963 items, about 67 GB.</p>
 <p>Cleaning up follows the arrows. Some links are <b>roots</b>: each generation link, <code>/run/current-system</code>, <code>/run/booted-system</code>, and a few more. Anything a root points at is kept. So is everything <i>that</i> points at, all the way down (step 5's references). Everything else can go.</p>
 <pre><code>guix gc --list-roots | wc -l      # you have 125 roots
@@ -221,7 +292,7 @@ guix gc --requisites /gnu/store/0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2
 <p><code>make gc</code> first deletes old generation links, then runs <code>guix gc</code>. So deleting a generation is the moment you give up rolling back to it. Generation 105 is safe for now: you booted it, so <code>/run/booted-system</code> keeps it alive.</p>
 <div class=so><b>So:</b> delete the arrows you no longer want, and the collector sweeps away whatever no arrow reaches.</div>
 
-<h2 id=s12>12. Guix System and Guix Home: one recipe for the whole machine</h2>
+<h2 id=s13>13. Guix System and Guix Home: one recipe for the whole machine</h2>
 <p>Now the big step, which is really a small one. If one program is a recipe, why not the whole computer?</p>
 <p>That is <b>Guix System</b>. You describe the machine: kernel, bootloader, disks, users, what runs at startup. Guix turns all of it into one recipe and builds one store folder. Look inside the one you are on:</p>
 <pre><code>ls /run/current-system
@@ -229,14 +300,14 @@ activate  boot  channels.scm  configuration.scm  etc  initrd
 kernel  locale  parameters  profile  provenance</code></pre>
 <p>The kernel, the startup disk image (<code>initrd</code>), all of <code>/etc</code>, the program profile: all inside one folder with one name. <b>Guix Home</b> is the same idea for your home folder. <code>~/.guix-home</code> points at <code>/gnu/store/znnhl…-home</code>, which holds your profile, your config files and the script that starts things when you log in.</p>
 <p>Your descriptions are tiny. <code>/home/engstrand/guix/desktop/system.scm</code> and <code>desktop/home.scm</code> are four lines each. Both use <code>%familiar-config</code> in <code>modules/engstrand/config.scm</code>, a list of rde <i>features</i> (desktop, shell, editor, kanata…). One feature list makes both the system and the home.</p>
-<p>And <code>make switch</code> is just steps 4 to 9 for the whole machine:</p>
+<p>And <code>make switch</code> is just steps 4 to 10 for the whole machine:</p>
 <ol>
 <li><code>guix system build</code>: turn the description into recipes and build them (or download them, or offload them),</li>
 <li><code>sudo guix system reconfigure</code>: add the next <code>system-N-link</code>, move the arrow, run <code>activate</code>, add the new boot menu entry.</li>
 </ol>
 <div class=so><b>So:</b> your whole computer is one recipe and one store folder, and <code>make switch</code> is build-then-move-the-arrow.</div>
 
-<h2 id=s13>13. Services and Shepherd: what keeps running</h2>
+<h2 id=s14>14. Services and Shepherd: what keeps running</h2>
 <p>A machine is not just files. Some programs must keep running: audio, networking, your bbh daemons. In Guix's description, each such piece is a <b>service</b>. A service adds things to the build: a config file, a user account, or a program to keep running.</p>
 <p>The ones that run are handed to <b>Shepherd</b>, Guix's service manager. One Shepherd runs the system as process 1. Guix Home starts another one just for you. Ask yours:</p>
 <pre><code>herd status
@@ -248,7 +319,7 @@ Started:
 <p>Shepherd's list of services is a file built by a recipe, so it lives in the store like everything else. That is exactly what broke in T216: generation 107's Home Shepherd file crashed while loading, so your login waited forever for it. Since then, <code>desktop/build/home/check-shepherd.bb</code> loads that file after every build, before you switch.</p>
 <div class=so><b>So:</b> services say what should run, Shepherd runs it, and its config is just another store folder.</div>
 
-<h2 id=s14>14. Channels: where the recipes come from</h2>
+<h2 id=s15>15. Channels: where the recipes come from</h2>
 <p>Last question: where do packages like <code>jq</code> and <code>rust</code> come from? From <b>channels</b>: Git repositories full of package files. Yours are pinned in <code>/home/engstrand/guix/channels.scm</code>:</p>
 <pre><code>guix describe        # trimmed
   guix 704ad8c   https://codeberg.org/guix/guix
@@ -258,7 +329,7 @@ Started:
 <p>Now see why <b>pinning</b> matters, from the bottom up. The commits fix the package files. The package files fix the recipes. The recipes fix every name. So the commits fix your entire system, down to the last byte. That is why guix-builder can build your system ahead of time and get exactly the names your laptop will ask for. Each system generation even records its channels: <code>cat /run/current-system/channels.scm</code>.</p>
 <div class=so><b>So:</b> two commit IDs plus your repo decide every recipe, every name, and so your whole machine.</div>
 
-<h2 id=s15>15. The whole picture</h2>
+<h2 id=s16>16. The whole picture</h2>
 <svg viewBox='0 0 340 300' role=img aria-label='The whole chain'>
 <g font-size=12 text-anchor=middle>
 <rect x=50 y=6 width=240 height=32 rx=6 fill='#f7efdc' stroke='#8a6a1f'/><text x=170 y=27>channels.scm + your repo</text>
@@ -270,7 +341,7 @@ Started:
 </g>
 <path d='M170 38 V56 M170 88 V106 M170 138 V156 M170 188 V206 M170 238 V256' stroke='#5d6678' stroke-width='2'/>
 </svg>
-<p>Programs need files (1). Sharing one folder breaks things (2). So every build gets its own folder that never changes (3), named by a fingerprint of its full recipe (4). The recipe is built in a sealed room, so it is honest (5). Honest recipes give the same result anywhere, so you can download instead of build (6). Packages are how people write recipes (7). Profiles make store folders feel normal (8). New versions sit beside old ones, and one arrow picks which is live (9), which is why T216 cost you only a reboot (10). Cleanup deletes what no arrow reaches (11). Your whole machine and home are one recipe (12), services and Shepherd keep the running parts (13), and the pinned channels decide all of it (14).</p>
+<p>Programs need files (1). Sharing one folder breaks things (2). So every build gets its own folder that never changes (3), named by a fingerprint of its full recipe (4). The recipe is built in a sealed room, so it is honest (5). Honest recipes give the same result anywhere, so you can download instead of build (6). Packages are how people write recipes (7). A graft patches a low-level fix in fast by swapping store names, until the full rebuild arrives (8). Profiles make store folders feel normal (9). New versions sit beside old ones, and one arrow picks which is live (10), which is why T216 cost you only a reboot (11). Cleanup deletes what no arrow reaches (12). Your whole machine and home are one recipe (13), services and Shepherd keep the running parts (14), and the pinned channels decide all of it (15).</p>
 <p class=sub>Want to build this yourself? The course in <code>/home/engstrand/projects/build-your-own-guix</code> walks the same steps in code: store paths, derivations, the sealed build, profiles, rollback, garbage collection and substitutes. Deeper reading: <code>/home/engstrand/guix/docs/guix-in-depth.html</code> and the Guix manual, https://guix.gnu.org/manual/en/html_node/Features.html</p>
 <p class=sub>Companion piece, in the same style: <a href='quint-explained.html'>Quint, from the ground up</a>, /home/engstrand/guix/docs/quint-explained.html</p>
 
