@@ -39,6 +39,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <li>The one way to reach two without writing a renderer is option (a): give each Rex pane its own Ghostty window and copy the pane's bytes into it untouched. I built that as a 63-line spike and it works. <span class='tag measured'>measured</span></li>
 <li>It is not faster in any way you would feel (3.7 ms against 5.4 ms per keystroke). <span class='tag measured'>measured</span> What it buys is less code and a whole class of bugs gone (the cursor ones), plus pictures in panes.</li>
 <li>It costs the one-window look: the tab bar, status line and overlays must move to Hyprland and keyleader. Ghostty's own splits cannot be driven from outside on Linux. <span class='tag measured'>measured</span></li>
+<li>The macOS Rex app runs two parsers per pane: Rex's server, and a Ghostty terminal per pane that a Ghostty GPU renderer draws directly. That is option (b), with a renderer library Linux does not have. See <a href='#macos'>section 5</a>. <span class='tag inferred'>inferred</span></li>
 <li><b>My pick:</b> option (a) with a window per pane tiled by Hyprland, in three stages, each useful alone and each with a stop point. If you want to keep the one-window look, stop after stage 1.</li>
 </ul></div>
 
@@ -143,6 +144,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td>Today</td><td>3</td><td>about 3,100 bb + 704 C</td><td>possible</td><td>one window, own bar</td><td>known</td></tr>
 <tr><td>(a) window per pane</td><td>2</td><td>about 1,000 fewer <span class='tag guess'>guess</span></td><td>gone</td><td>Hyprland windows, no own bar; pictures work</td><td>medium: reply filter, first paint, new layout glue</td></tr>
 <tr><td>(b) rexmux-style</td><td>2</td><td>back to 3,300 Rust</td><td>possible</td><td>one window, own fonts</td><td>high</td></tr>
+<tr><td>macOS Rex app (for reference)</td><td>2</td><td>closed source</td><td>none: no hand-off</td><td>one window, own bar, pictures</td><td>its renderer is Mac-only and not public</td></tr>
 <tr><td>(c) cells from Rex</td><td>2</td><td>—</td><td>—</td><td>—</td><td>not offered by Rex</td></tr>
 <tr><td>(d) thin the middle</td><td>3</td><td>about 50 fewer <span class='tag guess'>guess</span></td><td>fixed one by one</td><td>unchanged</td><td>low</td></tr>
 </table></div>
@@ -174,9 +176,81 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <li><b>Work lost.</b> Stage 3 retires code and checks written in T207 to T223. That is why it is last and optional.</li>
 </ul>
 
-<h2>5. How this was checked</h2>
+
+<h2 id='macos'>5. How the macOS app does it</h2>
+<p>I took apart Rex.app from /home/engstrand/Downloads/Rex.dmg (Rex 0.1.0-preview.21, the same server version as yours). I unpacked it into its own folder and only read it: nothing in it was run. One correction first: <b>rea</b> ( https://github.com/morluto/rea ) is not Rex's source code. It is a reverse-engineering tool, so I used its method by hand: list the libraries, read the symbol and file names, read the strings. <span class='tag measured'>measured</span></p>
+
+<div class='card good'><b>In one line.</b> The Mac app runs <b>two</b> parsers per pane, not three: Rex's server, and one Ghostty terminal per pane inside the app, which a Ghostty GPU renderer draws straight to the screen. There is no outer terminal re-reading escape codes. That is option (b), done with a renderer library Linux does not have. <span class='tag inferred'>inferred</span></div>
+
+<svg viewBox='0 0 340 170' width='100%' style='max-width:520px' role='img' aria-label='Mac app: server parser, then one Ghostty terminal per pane drawn by a Metal renderer'>
+<style>text{font-size:10.5px}</style>
+<rect x='6' y='10' width='100' height='60' rx='8' fill='#e4f3ea' stroke='#2e7d4f'/>
+<text x='56' y='32' text-anchor='middle' font-weight='700'>Rex server (Go)</text>
+<text x='56' y='47' text-anchor='middle'>parser 1:</text>
+<text x='56' y='60' text-anchor='middle'>libghostty-vt</text>
+<line x1='106' y1='40' x2='132' y2='40' stroke='#5d6678' stroke-width='1.5' marker-end='url(#ma)'/>
+<text x='119' y='86' text-anchor='middle' fill='#5d6678'>snapshot,</text>
+<text x='119' y='98' text-anchor='middle' fill='#5d6678'>then raw bytes</text>
+<rect x='134' y='10' width='200' height='150' rx='8' fill='#e6f0f5' stroke='#2f6f8f'/>
+<text x='234' y='26' text-anchor='middle' font-weight='700'>Rex.app (Swift), one window</text>
+<rect x='144' y='34' width='85' height='60' rx='6' fill='#fff' stroke='#2f6f8f'/>
+<text x='186' y='52' text-anchor='middle'>pane view</text>
+<text x='186' y='66' text-anchor='middle'>parser 2: GhosttyVT</text>
+<text x='186' y='80' text-anchor='middle'>Metal renderer</text>
+<rect x='239' y='34' width='85' height='60' rx='6' fill='#fff' stroke='#2f6f8f'/>
+<text x='281' y='52' text-anchor='middle'>pane view</text>
+<text x='281' y='66' text-anchor='middle'>parser 2: GhosttyVT</text>
+<text x='281' y='80' text-anchor='middle'>Metal renderer</text>
+<text x='234' y='114' text-anchor='middle'>own split view, tab bar, sidebar,</text>
+<text x='234' y='128' text-anchor='middle'>palette (AppKit and SwiftUI)</text>
+<text x='234' y='148' text-anchor='middle' fill='#5d6678'>no third parser: cells go to the GPU</text>
+<defs><marker id='ma' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0,0L10,5L0,10z' fill='#5d6678'/></marker></defs>
+</svg>
+
+<h3>What is inside</h3>
+<ul>
+<li><b>No web view, no SwiftTerm, no xterm.js.</b> The app is native Swift. It links AppKit, SwiftUI and Metal, and only one outside framework, Sparkle, for updates. <span class='tag measured'>measured</span> <span class='cite'>llvm-objdump --dylibs-used, saved as app.dylibs in the evidence folder</span></li>
+<li><b>Ghostty is built in.</b> Three Ghostty modules are compiled into the app: <code>GhosttyVT</code> (libghostty-vt 1.0.1, the parser), <code>GhosttyRender</code> (a Metal renderer, with its own shader file and a Nerd Font) and <code>GhosttyTerminal</code> (an AppKit <code>SurfaceView</code>). The bundle id <code>com.superlogical.swift-ghostty</code> says it is Superlogical's copy of a Swift package for Ghostty. <span class='tag measured'>measured</span> <span class='cite'>strings; Resources/swift-ghostty_GhosttyRender.bundle</span></li>
+<li><b>The server</b> is a separate Go program that uses <code>go.mitchellh.com/libghostty</code>, Mitchell Hashimoto's Go bindings for libghostty-vt. It links no graphics at all. <span class='tag measured'>measured</span></li>
+</ul>
+
+<h3>The answers</h3>
+<div class='table'><table>
+<tr><th>Question</th><th>What the Mac app does</th></tr>
+<tr><td>How many parsers, where</td><td>Two per pane. One on the server, one in the app (a <code>GhosttyVT.Terminal</code> per pane). <span class='tag inferred'>inferred</span> from <code>RenderState</code>, <code>vt_write</code> and Ghostty's own terminal error strings in the app binary <span class='tag measured'>measured</span></td></tr>
+<tr><td>Cells from Rex, or raw bytes?</td><td>Raw bytes. It opens <code>data.connect</code> with <code>rex.data.terminal.v1</code>, decodes the <code>GHOSTSNP</code> snapshot into its local terminal, then feeds the live bytes. Same stream your client uses. <span class='tag measured'>measured</span> (both strings, plus <code>SnapshotDecoder</code>, <code>LimitedSnapshotByteSource</code>)</td></tr>
+<tr><td>Drawing</td><td>Ghostty's renderer reads the local terminal's <code>RenderState</code> (rows, cells, cursor, pictures) and draws it with Metal. No escape codes are written back out. <span class='tag inferred'>inferred</span></td></tr>
+<tr><td>Panes and tabs</td><td>One window. Each pane is its own native view (<code>NativeTerminalView</code>, <code>PaneView</code>) with its own Metal surface, placed by Superlogical's own split view (<code>SuperSplit</code>). Tabs, the sidebar, the command palette and the status chrome are its own AppKit and SwiftUI views. Panes can also float (<code>FloatingPaneWindow</code>) or be torn off into a new window. <span class='tag measured'>measured</span> (file names) <span class='tag inferred'>inferred</span> (how they fit together)</td></tr>
+<tr><td>Snapshot and replay</td><td>On attach it reads the server's snapshot, with a size cap, and logs “snapshot restored with history”. So scrollback comes in the snapshot, not by replaying old output. It also pre-opens data streams before you need them (<code>ServerEngine+DataWarming</code>, tickets from <code>session.bootstrap</code>) and times “snapshot to first surface”. <span class='tag measured'>measured</span> (strings) <span class='tag inferred'>inferred</span> (meaning)</td></tr>
+<tr><td>Cursor</td><td>Read straight from the local terminal and drawn by the renderer, with optional shader effects. There is no hand-off, so no T223-style cursor bugs. <span class='tag inferred'>inferred</span></td></tr>
+<tr><td>Scrollback, find, copy mode</td><td>Done in the app against the local terminal: Ghostty's scrollback (it even compresses it), search, and a copy mode of its own. <span class='tag measured'>measured</span> (<code>com.mitchellh.swift-ghostty.scrollback-compression</code>, <code>terminal-search</code>, <code>WorkspaceModel+CopyMode</code>)</td></tr>
+<tr><td>Program queries</td><td>The local terminal's answers are thrown away; the server answers. A type named <code>NoWritePty</code> points that way. <span class='tag inferred'>inferred</span> Your rexg-render sets no write-back callback, so its answers are dropped too (rexg-render.c has no write_pty).</td></tr>
+<tr><td>Attach and reconnect</td><td>A reconnecting hub (<code>ReconnectableHub</code>) with retries and a reconnect token; it shows “The terminal stream was interrupted. Reconnecting automatically.” and then takes a fresh snapshot. <span class='tag inferred'>inferred</span></td></tr>
+<tr><td>Rex protocol used</td><td><code>data.connect</code> with <code>rex.data.terminal.v1</code> for panes; the control API for sessions, layout and events. <code>rex.data.bytes.v1</code> appears only for port tunnels. I found no sign that it calls the screen-state API (<code>terminal.format</code>); it has no need to, since it keeps its own copy. <span class='tag inferred'>inferred</span></td></tr>
+</table></div>
+
+<h3>Next to each option</h3>
+<ul>
+<li><b>(a) a Ghostty window per pane.</b> The Mac app does not do this. It keeps one window and draws every pane itself. So it neither proves nor rules out (a). What it does show is that Superlogical, with Ghostty's own people nearby, chose <b>not</b> to pipe bytes into a stock terminal. <span class='tag inferred'>inferred</span></li>
+<li><b>(b) libghostty-vt per pane, drawn ourselves.</b> This is exactly the Mac app. It proves (b) works well, and gives one window, two parsers, pictures and no cursor hand-off. <span class='tag inferred'>inferred</span> But its renderer is Metal and AppKit, it is not published ( https://github.com/mitchellh/swift-ghostty and the ghostty-org copy both say “Repository not found” <span class='tag measured'>measured</span> ), and Linux has no such library: your Guix package is the parser alone. On Linux, (b) still means writing or reviving a renderer, which is what rexmux was. <span class='tag inferred'>inferred</span></li>
+<li><b>(c) cells from Rex.</b> The Mac app does not use it either. Even Superlogical's own client takes the snapshot and raw bytes. That makes it likely that a cell stream will not come soon. <span class='tag guess'>guess</span></li>
+<li><b>(d) thin the middle.</b> Today's rexg-render already does the Mac app's first half: a libghostty-vt terminal per pane, fed snapshot then bytes, replies dropped. The only thing it does differently is the end: it turns cells back into escape codes for Ghostty instead of drawing them. That last step is the whole third parser. <span class='tag inferred'>inferred</span></li>
+</ul>
+
+<div class='card warn'><b>Does this change my pick?</b> No, not yet. The Mac app is the best way to do it, and it is option (b). But on Linux (b) needs a GPU renderer you would own, and you left rexmux to avoid that. Until a renderer exists that you do not have to write, (a) is still the cheapest way to two parsers, and (d) the way to keep one window. What changes is the long view: if Ghostty ever ships its renderer as a library on Linux (a GTK or OpenGL version of <code>GhosttyRender</code>), switch to (b) like the Mac app. rexg-render would keep its terminals and draw them itself, and the bar, tabs and one-window look would all stay. <span class='tag guess'>guess</span></div>
+
+<h3>Ideas worth copying, and their licences</h3>
+<ul>
+<li><b>Pre-open data streams</b> with tickets from <code>session.bootstrap</code>, so a project switch does not wait on a new connection. An idea from a closed-source app; nothing to copy but the idea. Useful for stage 2's 300 ms budget. <span class='tag inferred'>inferred</span></li>
+<li><b>Cap the snapshot size</b> and show progress while a large one loads (<code>LimitedSnapshotByteSource</code>, <code>HistoryProgress</code>). Idea only. <span class='tag inferred'>inferred</span></li>
+<li><b>go-libghostty</b> ( https://github.com/mitchellh/go-libghostty ), MIT. The bindings Rex's server uses; handy if you ever need a server-side check in Go. <span class='tag measured'>measured</span></li>
+<li><b>Ghostty</b> itself is MIT; <b>rea</b> is MIT; Rex.app and its Swift Ghostty package are closed. Do not copy code out of the app. <span class='tag measured'>measured</span></li>
+</ul>
+
+<h2>6. How this was checked</h2>
 <ul>
 <li>Read rexg-render.c, rexg's bb sources, rexmux's gui.rs, and W293's unlanded T223 work. W291's T210 work is on main (commit “tabs name themselves”), and this doc is based on it.</li>
+<li>Section 5: Rex.dmg unpacked with 7z into /tmp/W297-rexdmg, never run; read with strings, llvm-nm and llvm-objdump. File lists and library lists: /home/engstrand/.local/state/bbh/workflows/20261124-182419-940-investigation/evidence</li>
 <li>Rex 0.1.0-preview.21, throwaway server with its own socket; your live server was only asked for its status and API list.</li>
 <li>Ghostty 1.4.0 actions from <code>ghostty +list-actions</code> and <code>busctl --user call com.mitchellh.ghostty /com/mitchellh/ghostty org.gtk.Actions List</code>.</li>
 <li>Numbers and raw results: /home/engstrand/.local/state/bbh/workflows/20261124-180329-007-investigation/evidence/measurements.edn </li>
