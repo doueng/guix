@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Where pane output is parsed today (three places), the options for fewer, a measured spike of one Ghostty window per pane, and a staged plan.">
+<meta name="bbh-doc" content="T225">
+<title>Ghostty plus Rex with fewer parsers</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Ghostty plus Rex with fewer parsers</h1>
+<p class='sub'>T225, 2026-11-24. An investigation: nothing on main changed. Every claim is marked <span class='tag measured'>measured</span>, <span class='tag inferred'>inferred</span> or <span class='tag guess'>guess</span>.</p>
+
+<div class='card good'><b>Short answer.</b>
+<ul>
+<li>Today each pane's output is parsed <b>three</b> times: by Rex's server, by rexg-render, and by Ghostty. <span class='tag measured'>measured</span></li>
+<li>You cannot get to one while you use Rex. Rex's server always parses, because that is how it keeps your screen while no window is open. The floor is <b>two</b>. <span class='tag inferred'>inferred</span></li>
+<li>The one way to reach two without writing a renderer is option (a): give each Rex pane its own Ghostty window and copy the pane's bytes into it untouched. I built that as a 63-line spike and it works. <span class='tag measured'>measured</span></li>
+<li>It is not faster in any way you would feel (3.7 ms against 5.4 ms per keystroke). <span class='tag measured'>measured</span> What it buys is less code and a whole class of bugs gone (the cursor ones), plus pictures in panes.</li>
+<li>It costs the one-window look: the tab bar, status line and overlays must move to Hyprland and keyleader. Ghostty's own splits cannot be driven from outside on Linux. <span class='tag measured'>measured</span></li>
+<li><b>My pick:</b> option (a) with a window per pane tiled by Hyprland, in three stages, each useful alone and each with a stop point. If you want to keep the one-window look, stop after stage 1.</li>
+</ul></div>
+
+<h2>1. Where escape codes are read today</h2>
+<svg viewBox='0 0 340 300' width='100%' style='max-width:520px' role='img' aria-label='Today three parsers, proposed two'>
+<style>text{font:10.5px system-ui,sans-serif;fill:#222}.b{fill:#fff;stroke:#999}.p{fill:#fde9d9;stroke:#c7682a}.h{font-weight:700}</style>
+<text x='10' y='16' class='h'>Today: 3 parsers</text><text x='190' y='16' class='h'>Option (a): 2 parsers</text>
+<rect class='b' x='10' y='26' width='140' height='28' rx='5'/><text x='20' y='44'>program (fish, pi)</text>
+<rect class='p' x='10' y='70' width='140' height='40' rx='5'/><text x='20' y='87'>Rex server</text><text x='20' y='102'>parser 1, keeps state</text>
+<rect class='b' x='10' y='126' width='140' height='28' rx='5'/><text x='20' y='144'>bb client, no parser</text>
+<rect class='p' x='10' y='170' width='140' height='40' rx='5'/><text x='20' y='187'>rexg-render</text><text x='20' y='202'>parser 2, repaints</text>
+<rect class='p' x='10' y='226' width='140' height='40' rx='5'/><text x='20' y='243'>Ghostty</text><text x='20' y='258'>parser 3, pixels</text>
+<path d='M80 54v16M80 110v16M80 154v16M80 210v16' stroke='#555' fill='none'/>
+<rect class='b' x='190' y='26' width='140' height='28' rx='5'/><text x='200' y='44'>program (fish, pi)</text>
+<rect class='p' x='190' y='70' width='140' height='40' rx='5'/><text x='200' y='87'>Rex server</text><text x='200' y='102'>parser 1 (keeps state)</text>
+<rect class='b' x='190' y='126' width='140' height='40' rx='5'/><text x='200' y='143'>relay (copies bytes,</text><text x='200' y='158'>no parsing)</text>
+<rect class='p' x='190' y='226' width='140' height='40' rx='5'/><text x='200' y='243'>Ghostty, one window</text><text x='200' y='258'>per pane: parser 2</text>
+<path d='M260 54v16M260 110v16M260 166v60' stroke='#555' fill='none'/>
+<text x='10' y='290' style='fill:#666'>Orange boxes read escape codes.</text></svg>
+<p>A <i>parser</i> here means code that reads escape codes and keeps a grid of cells. There are three, and two small scanners that are not parsers.</p>
+<div class='table'><table>
+<tr><th>Where</th><th>What it does</th><th>Evidence</th></tr>
+<tr><td><b>1. Rex server</b></td><td>Keeps every pane's screen, scrollback and pictures. Answers a program's questions (cursor position, colours, device type). Reads titles, directories (OSC 7) and agent status (OSC 7501) and sends them as events. Makes the snapshot a new client starts from.</td><td>The stream starts with the bytes GHOSTSNP, Ghostty's snapshot format, so Rex runs Ghostty's terminal core inside. <span class='tag measured'>measured</span> <code>rex api describe com.superlogical.terminal.format</code> returns the screen as text, HTML or escape codes. <span class='tag measured'>measured</span></td></tr>
+<tr><td><b>2. rexg-render</b></td><td>One libghostty-vt terminal per pane. Decodes the snapshot, then feeds live bytes. Reads cells back out and paints the visible panes plus the bar into one grid.</td><td>/home/engstrand/guix/desktop/build/ghostty-rex/csrc/rexg-render.c lines 187 to 244 (decode, then <code>ghostty_terminal_vt_write</code>), lines 312 to 394 (read cells). <span class='tag measured'>measured</span></td></tr>
+<tr><td><b>3. Ghostty</b></td><td>Reads the escape codes rexg-render writes (move, colour, text, cursor shape) and draws pixels. It never sees a pane's own bytes.</td><td>Same file, lines 429 to 475: <code>frame()</code> writes <code>ESC[row;colH</code>, colours and <code>ESC[N q</code>. <span class='tag measured'>measured</span></td></tr>
+<tr><td>bb: Rex message splitter</td><td>Cuts Rex's own messages (<code>ESC _ rex1;…</code>) out of the byte stream. A string search, not a parser.</td><td>/home/engstrand/guix/desktop/build/ghostty-rex/src/rexg/rex.clj lines 67 to 95. <span class='tag measured'>measured</span></td></tr>
+<tr><td>bb: key reader</td><td>Reads the keys Ghostty sends (input, not output).</td><td>/home/engstrand/guix/desktop/build/ghostty-rex/src/rexg/keys.clj lines 140 to 170. <span class='tag measured'>measured</span></td></tr>
+</table></div>
+<p>So the brief's guess was close but not exact: the bb client does <b>not</b> parse pane output. Only rexg-render does, on the client side.</p>
+
+<h3>Who does which job</h3>
+<div class='table'><table>
+<tr><th>Job</th><th>Done by</th></tr>
+<tr><td>Keep the screen while no window is open; snapshot</td><td>Rex server (1)</td></tr>
+<tr><td>Answer program queries</td><td>Rex server (1). That is why pane bytes are kept away from Ghostty.</td></tr>
+<tr><td>Titles, directory, agent status</td><td>Rex server (1), as events to bb</td></tr>
+<tr><td>Which tabs and panes exist, and their split tree</td><td>Rex (<code>session.view</code>); bb turns it into rectangles; rexg-render places cells</td></tr>
+<tr><td>Cells of each pane</td><td>rexg-render (2)</td></tr>
+<tr><td>Cursor place and shape</td><td>rexg-render (2) reads it, writes it again as escape codes, Ghostty (3) draws it. Two hand-offs.</td></tr>
+<tr><td>Scrollback view, copy mode, tiny fingers text</td><td>rexg-render (2): <code>scroll_viewport</code> and <code>text_reply</code>, lines 543 to 578 and 604 to 617</td></tr>
+<tr><td>Does the program want the mouse?</td><td>rexg-render (2), line 386, told to bb</td></tr>
+<tr><td>Tab bar, status line, which-key, minibuffer</td><td>bb (<code>screen.clj</code>) sends text spans; rexg-render lays them over the grid</td></tr>
+<tr><td>Fonts, pixels, clipboard, window title</td><td>Ghostty (3)</td></tr>
+</table></div>
+
+<h3>Why three is the awkward number</h3>
+<p>tmux and Herdr have two: the server parses and also paints the whole window, and the terminal draws it. <span class='tag inferred'>inferred</span> Rex's server does not paint. It sends each pane's raw bytes. So something on your side must turn many byte streams into one picture, and that something needs its own parser. That is rexg-render. Parser 3 is the least risky of the three: it only reads our own simple paint commands, so it cannot disagree with a program. The fragile part is parser 2 and the glue around it.</p>
+
+<h2>2. The recent bugs, by parser</h2>
+<div class='table'><table>
+<tr><th>Bug</th><th>Where it lived</th><th>Parser's fault?</th></tr>
+<tr><td>T223 cursor: missing, stale, wrong shape</td><td>rexg-render glue. W293's fix (not landed yet, in /home/engstrand/.local/share/bbh/super/workspaces/T223-1 ) shows three causes: the cursor was read with a lock that could fail, a pane shown again kept an old cursor, and layout and cursor arrived as separate messages. <span class='tag measured'>measured</span></td><td>Yes, of having parser 2 and re-sending its cursor to parser 3.</td></tr>
+<tr><td>T210 slow project switch (10 s)</td><td>rexg-render read the 51 MB snapshot one byte per system call and drew nothing until done. Fixed on 11-21. Today a 25 MB pane paints in 47 ms and is whole in 614 ms. <span class='tag measured'>measured</span></td><td>Yes: the cost of copying parser 1's state into parser 2. Already fixed.</td></tr>
+<tr><td>Reconnect issues</td><td>The control connection in bb (T210, T211).</td><td>No. No option below changes them.</td></tr>
+</table></div>
+
+<h2>3. The options</h2>
+
+<h3>(a) Ghostty is the only parser on your side</h3>
+<p>A tiny relay runs inside a Ghostty surface. It copies the pane's bytes to the screen and your keys back. No libghostty-vt, no compositor.</p>
+<p><b>Spike.</b> /home/engstrand/.local/state/bbh/workflows/20261124-180329-007-investigation/evidence/spike/rex-pane.bb , 63 lines of bb. It skips the snapshot without decoding it (the format is a list of length-prefixed records, 10 lines to walk), asks Rex to print the screen once as escape codes (<code>terminal.format</code>, 2 ms), then copies bytes. I ran it in a real Ghostty on the hidden test display against a throwaway Rex server: colours, scrollback and typing worked. <span class='tag measured'>measured</span></p>
+<div class='table'><table>
+<tr><th>Measure</th><th>Today</th><th>Relay</th></tr>
+<tr><td>Type a letter, see it echoed (median of 240)</td><td>5.4 ms</td><td>3.7 ms</td></tr>
+<tr><td>Same, 90th percentile</td><td>7.8 ms</td><td>5.3 ms</td></tr>
+<tr><td>First paint of a pane holding a 25 MB picture</td><td>47 ms</td><td>about 120 to 150 ms (it must still receive the snapshot to skip it), no picture</td></tr>
+<tr><td>Client code for drawing</td><td>704 lines C + 204 lines screen.clj</td><td>63 lines</td></tr>
+</table></div>
+<p>The echo numbers are the time from writing one letter into the client to that letter showing in the client's output, with bash in the pane. <span class='tag measured'>measured</span> A screen frame at 60 Hz is 16.7 ms, so both are under one frame. The 1.7 ms difference is real but you will not feel it. Most of it is rexg-render's limit of one frame per 8 ms (line 676). <span class='tag inferred'>inferred</span></p>
+<p><b>What it removes.</b> rexg-render (704 lines), the libghostty-vt and rexg-render Guix packages, the snapshot decode, the cursor hand-off (all of T223), copy mode, scroll and mouse routing in model.clj (Ghostty does these itself), most of screen.clj. Pictures in panes start to work, since Ghostty sees the real bytes. <span class='tag inferred'>inferred</span></p>
+<p><b>What it costs.</b> Two problems showed up in the spike, both real:</p>
+<ul>
+<li><b>Double answers.</b> A program asks “what terminal are you?”. Rex answers, and now Ghostty answers too. I typed <code>printf '\033[c'</code> and bash got <code>^[[?62;22c^[[?62;22;52c</code>: two replies, the second as junk on the prompt. <span class='tag measured'>measured</span> The relay must drop Ghostty's replies from the input. That is a small filter on a known list of reply shapes, but it is one more thing that reads escape codes.</li>
+<li><b>First paint can be wrong.</b> My first screenshot had two lines out of place, because the pane was resized while Rex printed it. <span class='tag measured'>measured</span> The fix is to resize, wait for Rex's resize message, then print. Simple, but it must be right.</li>
+</ul>
+<p>And one design cost: <b>where the layout lives.</b></p>
+<ul>
+<li><b>Ghostty splits: no.</b> On Linux, Ghostty 1.4.0 offers nine actions to other programs over D-Bus: new-window, new-tab, new-window-command, present-surface, reload-config and four others. None makes, moves or focuses a split. <span class='tag measured'>measured</span> <code>new_split</code> and <code>goto_split</code> exist only as key bindings, so we would have to fake key presses, could not say which pane a new split shows, and could not read the layout back. <span class='tag inferred'>inferred</span> This is not about your habits; it is that Ghostty cannot be told.</li>
+<li><b>A window per pane, tiled by Hyprland: yes.</b> <code>new-window-command</code> opens a window that runs the relay, with no new Ghostty process. <code>hyprctl</code> can place, move and focus windows. Hyprland becomes the layout, and Rex only holds the programs. Your four startup tabs each hold one pane already. <span class='tag measured'>measured</span> (config.edn)</li>
+</ul>
+<p>The tab bar, status line, which-key, minibuffer, tiny fingers and the floating layers then need new homes: Hyprland workspaces or groups for tabs, keyleader and Cmd+Space (which already exist outside the window) for menus, a bar for agent attention. Tiny fingers cannot draw labels over a window it does not paint; it would become a picker over text from <code>terminal.format</code>. <span class='tag inferred'>inferred</span></p>
+<p><b>On the bugs.</b> T223: gone, Ghostty draws the program's real cursor. T210: no decode at all, but no faster than today's fixed path. Reconnect: same, and each window now has its own stream to bring back, so the relay must stay a dumb pipe to one bb process that owns the connections. <span class='tag inferred'>inferred</span></p>
+
+<h3>(b) Keep libghostty-vt per pane, but skip the outer parser</h3>
+<ul>
+<li><b>A non-parsed protocol into Ghostty does not exist.</b> The only way to put cells in a Ghostty window is to write escape codes to it. <span class='tag inferred'>inferred</span> (no such action or option in <code>ghostty +list-actions</code> or D-Bus <span class='tag measured'>measured</span>)</li>
+<li><b>Hand our libghostty state to Ghostty to draw: not on Linux.</b> The packaged library is libghostty-vt, the parser alone, with no renderer. <span class='tag measured'>measured</span> (modules/engstrand/packages/ghostty.scm line 258)</li>
+<li><b>Draw it ourselves: that is rexmux.</b> /home/engstrand/guix/desktop/build/rexmux/src/gui.rs is a GPUI window that draws the cells with no outer terminal. Two parsers. It is about 3,300 lines of Rust and you left it in T207 to have no Rust and to get Ghostty's fonts. <span class='tag measured'>measured</span></li>
+</ul>
+<p>What it removes: parser 3 only, the harmless one. What it keeps: parser 2 and all its glue, so T223-style bugs stay. Verdict: no.</p>
+
+<h3>(c) Rex's server state as the only source</h3>
+<p>Rex does not offer it. A data stream has one format, <code>rex.data.terminal.v1</code>: a snapshot, then raw bytes. <span class='tag measured'>measured</span> (<code>rex api describe data.connect</code>) There is no stream of cells. The nearest thing is <code>terminal.format</code>, which returns the whole screen on request in about 2 ms. <span class='tag measured'>measured</span> Polling it per pane per frame would work badly for scrollback, cursor shape and speed. <span class='tag inferred'>inferred</span></p>
+<p>One small piece is worth taking: read the text for tiny fingers and copy from <code>terminal.format</code> instead of from rexg-render. That removes <code>text_reply</code> and its request plumbing (about 40 lines of C and 15 of bb <span class='tag guess'>guess</span>) and makes Rex the one source for “what does the pane say”. A full version of (c) needs Superlogical to add a cell stream; worth asking, not worth waiting for.</p>
+
+<h3>(d) Keep three, thin the middle</h3>
+<p>Accept the three parsers and cut what makes them hurt: land W293's cursor fix, take the small piece of (c), and nothing else. Removes almost no code. Keeps the one-window look and all 35 parity checks. This is the fallback if (a) fails its gates.</p>
+
+<h3>Side by side</h3>
+<div class='table'><table>
+<tr><th></th><th>Parsers</th><th>Code</th><th>Cursor bugs</th><th>Look and feel</th><th>Risk</th></tr>
+<tr><td>Today</td><td>3</td><td>about 3,100 bb + 704 C</td><td>possible</td><td>one window, own bar</td><td>known</td></tr>
+<tr><td>(a) window per pane</td><td>2</td><td>about 1,000 fewer <span class='tag guess'>guess</span></td><td>gone</td><td>Hyprland windows, no own bar; pictures work</td><td>medium: reply filter, first paint, new layout glue</td></tr>
+<tr><td>(b) rexmux-style</td><td>2</td><td>back to 3,300 Rust</td><td>possible</td><td>one window, own fonts</td><td>high</td></tr>
+<tr><td>(c) cells from Rex</td><td>2</td><td>—</td><td>—</td><td>—</td><td>not offered by Rex</td></tr>
+<tr><td>(d) thin the middle</td><td>3</td><td>about 50 fewer <span class='tag guess'>guess</span></td><td>fixed one by one</td><td>unchanged</td><td>low</td></tr>
+</table></div>
+<p>The “1,000 fewer” is my estimate: minus rexg-render.c (704), most of screen.clj (204), about 250 of model.clj's 890 lines for copy mode, scroll, mouse and rectangles, and two Guix packages; plus about 150 for a real relay, 60 for the reply filter and 200 for Hyprland layout glue.</p>
+
+<h2>4. My pick and the plan</h2>
+<p><b>Option (a), a window per pane tiled by Hyprland.</b> It is the only one that reaches two parsers without a renderer of your own, it deletes the most code, and it removes the hand-off that caused T223. It does not make anything faster, and it changes how the thing looks, so it goes in stages you can stop at.</p>
+
+<div class='card'><b>Stage 1. Pop out a pane</b> (about a day <span class='tag guess'>guess</span>)
+<p>Turn the spike into a real <code>ghostty-rex pane BLOCK</code>, and an M-x command “Pane: pop out” that opens the focused pane in its own Ghostty window through <code>new-window-command</code>. Add the reply filter, the resize-then-print first paint, and reconnect. Nothing is removed; the current client keeps running beside it.</p>
+<p><b>You get:</b> pictures and Ghostty's own scrollback, selection and search for any pane you pop out, today.</p>
+<p><b>Gate:</b> a week of use with pi and Neovim in popped-out panes, no junk on the prompt, no misplaced first paint. If the reply filter cannot be made reliable, stop here and go to (d).</p></div>
+
+<div class='card'><b>Stage 2. A second mode beside the first</b> (several days <span class='tag guess'>guess</span>)
+<p>A new <code>MUX=</code> choice next to ghostty-rex. One bb process holds the Rex connections; each pane is a Ghostty window; Hyprland tiles them; tabs become Hyprland workspaces or groups; menus stay with keyleader and Cmd+Space; agent attention goes to a bar or notification. <code>make mux</code> switches back in one command, as it does now.</p>
+<p><b>Gate:</b> the parts of the parity list that still apply pass (startup tabs, project switch within 300 ms, rename, split, reboot restore, bbh routing), and you prefer it after a week.</p></div>
+
+<div class='card'><b>Stage 3. Delete</b>
+<p>Only if stage 2 becomes your daily mode: remove rexg-render, screen.clj, the copy-mode, scroll and mouse code, and the two Guix packages. Until then both modes share rex.clj, names.clj, model's connection machine and the sidecar.</p></div>
+
+<div class='card warn'><b>If you want to keep the one-window look</b>, do stage 1 and (d), and stop. You keep three parsers, with a way out for any pane that needs pictures or misbehaves.</div>
+
+<h3>Risks</h3>
+<ul>
+<li><b>Reply filter misses a reply shape.</b> Junk appears on a prompt. Limited to the popped-out pane; found fast. <span class='tag inferred'>inferred</span></li>
+<li><b>Ghostty and Rex disagree</b> about a pane after a resize or a reconnect, because Ghostty's copy is rebuilt from a print-out, not a snapshot. Fix: reprint on resize and reconnect. Scrollback is printed too, pictures are not. <span class='tag inferred'>inferred</span></li>
+<li><b>Many windows.</b> A project switch must repoint or reopen several windows. The spike's attach took about 120 to 150 ms for a 25 MB pane and a few ms for a normal one, but opening Ghostty windows was not timed. <span class='tag guess'>guess</span> that it stays under your 300 ms budget; stage 2 must measure it.</li>
+<li><b>Rex itself.</b> The stream format and API moved from revision 14 to 18 in three days (T224's doc). The snapshot framing I skip is Ghostty's published format, so that part is stable. <span class='tag inferred'>inferred</span></li>
+<li><b>Work lost.</b> Stage 3 retires code and checks written in T207 to T223. That is why it is last and optional.</li>
+</ul>
+
+<h2>5. How this was checked</h2>
+<ul>
+<li>Read rexg-render.c, rexg's bb sources, rexmux's gui.rs, and W293's unlanded T223 work. W291's T210 work is on main (commit “tabs name themselves”), and this doc is based on it.</li>
+<li>Rex 0.1.0-preview.21, throwaway server with its own socket; your live server was only asked for its status and API list.</li>
+<li>Ghostty 1.4.0 actions from <code>ghostty +list-actions</code> and <code>busctl --user call com.mitchellh.ghostty /com/mitchellh/ghostty org.gtk.Actions List</code>.</li>
+<li>Numbers and raw results: /home/engstrand/.local/state/bbh/workflows/20261124-180329-007-investigation/evidence/measurements.edn </li>
+<li>Screenshots of the spike in Ghostty: /home/engstrand/.local/state/bbh/workflows/20261124-180329-007-investigation/evidence/spike/shot1.png </li>
+<li>Not tested: Neovim, pi or mouse programs through the relay; opening many Ghostty windows; Hyprland layout glue. Echo timing was in a pty, not through Ghostty's renderer, so it leaves out the time Ghostty takes to draw, which is the same for both.</li>
+</ul>
+<p>Related: /home/engstrand/guix/docs/ghostty-rex.html , /home/engstrand/guix/docs/ghostty-rex-explained.html , /home/engstrand/guix/docs/rex-client-languages.html </p>
+</main></body></html>
