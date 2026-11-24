@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<meta name="description" content="All TLA+ specs ported to Quint with the same state counts and rule results, the Quint language server in Doom, and Quint from Babashka">
+<meta name="description" content="All TLA+ specs ported to Quint with the same state counts and rule results, the Quint language server in Doom, and Quint from Babashka, and why not to move them to Choreo">
 <meta name="bbh-doc" content="T220">
 <title>Quint replaces TLA+ in this repo</title>
 <style>
@@ -31,7 +31,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <body><main>
 <h1>Quint replaces TLA+ in this repo</h1>
 
-<p class=lead><b>Done: every TLA+ spec in the repo is now Quint, and TLA+ and tla2tools are gone.</b> The four specs (bbh's Workflow, Effects and Super, and Rexmux) and their 12 TLC configs became four <code>.qnt</code> files with one instance module per old cfg. Each instance has the same distinct-state count under TLC as the TLA+ had, and every rule gives the same result. The Quint language server runs in Doom, and Babashka gets Quint the way it already gets TLC, Bombadil and Rex: a library that runs the CLI and returns EDN.</p>
+<p class=lead><b>Done: every TLA+ spec in the repo is now Quint, and TLA+ and tla2tools are gone.</b> The four specs (bbh's Workflow, Effects and Super, and Rexmux) and their 12 TLC configs became four <code>.qnt</code> files with one instance module per old cfg. Each instance has the same distinct-state count under TLC as the TLA+ had, and every rule gives the same result. The Quint language server runs in Doom, and Babashka gets Quint the way it already gets TLC, Bombadil and Rex: a library that runs the CLI and returns EDN. <a href='#choreo'>Section 4</a> asks whether to move these specs to Choreo next. The answer is no.</p>
 
 <h2>1. The migration</h2>
 <p>Files: <code>desktop/build/bbh/verify/quint/{workflow,effects,super}.qnt</code> and <code>desktop/build/rexmux/verify/quint/rexmux.qnt</code>, which replaces the earlier partial <code>connect.qnt</code>. Each project's <code>verify/quint/checks.edn</code> replaces the cfg files: per model, its invariants, its temporal properties and its state count. The count is checked on every run, so the equivalence keeps being checked and a change to a model's state space shows up as a failure.</p>
@@ -78,5 +78,205 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 
 <h2>Checks</h2>
 <p><code>make test</code> passes except for one bbh Emacs test, <code>bbh-inbox-jjui-three-times-leaves-no-buffers-or-processes</code>. It fails the same way in the main checkout without these changes, so this work did not cause it. <code>bb verify:quint-mc</code> in rexmux passes, and so does <code>quint.core</code>'s own test suite (7 tests, 31 assertions).</p>
+
+<h2 id=choreo>4. Should these specs move to Choreo?</h2>
+<div class='card good'><b>Recommendation: migrate none of them.</b> Choreo is built for N similar nodes that broadcast votes into an ever-growing pool of messages, as in consensus protocols. Only one of these specs passes messages between processes. I ported that one: it checks the same states, but it came out a third longer, it splits one atomic step across a process and a framework hook, and Apalache cannot check it. The other specs are a single store or a single controller, and Choreo has no place for them. Revisit Choreo for a new spec of several peer processes exchanging messages.</div>
+
+<h3>What Choreo is</h3>
+<ul>
+<li><span class='tag measured'>measured</span> A single file of Quint, <code>choreo.qnt</code> (291 lines) plus Quint's <code>spells</code> helper library, that you copy next to your spec and import as <code>import choreo(processes = NODES) as choreo</code>. It is not on npm and has no releases or tags. Its <a href='https://github.com/informalsystems/choreo'>repository</a> has 134 commits since June 2025, the last on 2026-06-23. It has five examples, four of them consensus or commit protocols (Tendermint, MonadBFT, Alpenglow, two-phase commit) plus an ATM distributed lock. Its CI only runs <code>quint test</code> and <code>quint run --max-samples 20</code>, so nothing there model-checks.</li>
+<li><span class='tag measured'>measured</span> Model: one state variable <code>s</code> holding each process's local state, a set of messages per process, events (for timeouts), and shared <code>extensions</code>. A process is a function from its local context to a set of transitions, each a new local state plus effects: <code>Broadcast</code>, <code>Send</code>, <code>TriggerEvent</code> or a <code>CustomEffect</code> you apply to the whole state yourself. <code>choreo::step</code> picks a process and one of its transitions. Messages are a pool that a process receives from but never removes, which is cheap and correct for quorums of votes. The <code>cue</code> pattern pairs a listen function with an act function and gives tests like <code>"p1".with_cue(listen, msg).perform(act)</code>.</li>
+<li><span class='tag measured'>measured</span> Quint version: none is stated. Everything works on our Quint 0.34.0: typecheck, <code>quint test</code>, <code>quint run</code>, and TLC through <code>quint.core/model-check</code>, including fairness and liveness. TLC checks Choreo's two-phase-commit example in 99 states.</li>
+<li><span class='tag measured'>measured</span> Apalache does not work. With Quint 0.34.0 and Apalache 0.62.4, <code>quint verify</code> stops with <q>A typed declaration …choreo::s was transformed to an untyped expression</q>. This happens on Choreo's own two-phase-commit example, on my port, and on the port with Choreo's unused <code>display</code> variable removed. The original link model passes the same check.</li>
+</ul>
+
+<h3>Which spec fits</h3>
+<div class=table><table><tr><th>Spec</th><th>Shape</th><th>Fit</th></tr>
+<tr><td>rexmux <code>link</code></td><td>Window and sidecar exchange numbered messages over two FIFO pipes, the sidecar crashes, and the watchdog restarts it.</td><td>The best fit, so I ported it (below).</td></tr>
+<tr><td>rexmux <code>connect</code></td><td>The client's attempts and the server's answers, with attempt ids reused once nothing names them, late answers, and a server stop that closes every socket at once.</td><td><span class='tag inferred'>inferred</span> Poor. Before reusing an id, the client must check that the server has nothing in flight for it, which is the server's state, not the client's. A reused id needs old answers deleted, but Choreo never removes messages. And a server stop changes both sides in one step. All three need a <code>CustomEffect</code> that edits the global state, which bypasses Choreo's model.</td></tr>
+<tr><td>rexmux <code>streams</code>, <code>agents</code></td><td>Pane, stream and agent bookkeeping, and an event queue folded in order.</td><td><span class='tag inferred'>inferred</span> Poor: the event queue has to stay in order, while Choreo's messages are an unordered pool. Most of it is not message passing at all.</td></tr>
+<tr><td>bbh <code>super</code></td><td>One event-sourced store: each command checks and folds in one transaction.</td><td><span class='tag inferred'>inferred</span> None: it is one process. The outbox is a row in the store, not a message.</td></tr>
+<tr><td>bbh <code>effects</code></td><td>One controller performs, records and can crash between the two.</td><td><span class='tag inferred'>inferred</span> None: one process, no messages.</td></tr>
+<tr><td>bbh <code>workflow</code></td><td>Concurrent <code>wf attest</code> calls read and append to one journal under a lock.</td><td><span class='tag inferred'>inferred</span> None: this is shared memory. In Choreo the journal would have to sit in <code>extensions</code>, which every process can read, and that undoes the point of using Choreo.</td></tr>
+</table></div>
+
+<h3>The port: rexmux link in Choreo</h3>
+<p><span class='tag measured'>measured</span> The port is a throwaway file and is not in the repo: <code>/home/engstrand/.local/state/bbh/workflows/20261124-162545-694-investigation/evidence/choreo-port/link_choreo.qnt</code>, with the raw numbers in <code>measurements.edn</code> next to it. It passes the same four invariants, the liveness property <code>everyRequestAnswered</code> under the same fairness, and the crash test.</p>
+<div class=table><table><tr><th></th><th>Current (link part of rexmux.qnt)</th><th>Choreo port</th></tr>
+<tr><td>Code lines, without comments or blanks</td><td>86</td><td>115, of which 27 are Choreo's type aliases</td></tr>
+<tr><td>Distinct states, TLC, MaxReq 3 and MaxRestarts 2</td><td>205 (615 in the <code>link</code> instance, explained below)</td><td>205</td></tr>
+<tr><td>Same, MaxReq 6 and MaxRestarts 4</td><td>2,226</td><td>2,226</td></tr>
+<tr><td>Same, MaxReq 14 and MaxRestarts 8, one invariant</td><td>57,460 in 8.4 s</td><td>57,460 in 7.4 s</td></tr>
+<tr><td>All five rules, small bound, wall time</td><td>7.5 s</td><td>6.7 s</td></tr>
+<tr><td><code>quint run</code>, 5,000 samples, 40 steps</td><td>3.2 s</td><td>4.8 s (twice, same result)</td></tr>
+<tr><td>Apalache, <code>quint verify</code></td><td>passes</td><td>internal error</td></tr>
+</table></div>
+<p><span class='tag measured'>measured</span> Same behaviour, not just the same count. I dumped every state TLC reaches in both models and mapped each to the same view: counters, open requests, answers, whether the sidecar is up, and the undelivered messages of each pipe in number order. The two sets are equal, with 205 states and nothing in one but not the other. The current <code>link</code> instance reports 615 because it has <code>NStreams = 1</code>, so a pane stream can be idle, connecting or live alongside the link, and 3 × 205 = 615. With <code>NStreams = 0</code> it is 205.</p>
+<p><span class='tag inferred'>inferred</span> State space: the message pool adds no states here. Each pipe numbers its messages, so the delivered messages left in the pool follow from the counters, and the crash has to clear the pool anyway because numbering starts again. TLC's time is about the same; startup dominates at these sizes. Simulation is about 1.5 times slower, from the extra layers of functions and records.</p>
+<p><span class='tag inferred'>inferred</span> Readability. Choreo helps in one way: each step is a pure function from one process's view to its next state and messages, and the tests read <code>step_with(BB, crash)</code>. Four things are worse.</p>
+<ul>
+<li>The window's <code>invoke</code> needs to know whether the sidecar is up, and the watchdog's restart has to reset the sidecar's counters. A process can neither read nor write another's state, so <code>bbUp</code> moves into the shared <code>extensions</code>, and restart becomes a <code>CustomEffect</code> that edits the sidecar from outside. The rule that a restart happens in one step is now split across a transition and an effect handler.</li>
+<li>A FIFO pipe becomes a pool filtered by <code>n == got + 1</code>. Pool contents stay after delivery, so the invariant about pipe order must first drop what was already delivered.</li>
+<li>Both roles share one state record, and every transition starts with <code>process_id == WIN</code> or <code>BB</code>.</li>
+<li>Fairness is stated per listener with <code>weakFair(step_with(BB, bb_receive), choreo::s)</code>, which is fine, but every variable is the one <code>s</code>. TLC traces print all of it as a single nested value.</li>
+</ul>
+<details><summary>The port's source</summary><pre><code>// The rexmux sidecar link (rexmux.qnt, module link) ported to Choreo.
+// Two processes: the window and the sidecar. Each numbers its messages from
+// 1 and a receiver delivers the next number only. The sidecar can crash; the
+// window's watchdog restarts it, which empties both pipes, starts both
+// numberings again and fails every waiting request.
+module link_choreo {
+  import basicSpells.* from "spells/basicSpells"
+  import choreo(processes = NODES) as choreo from "./choreo"
+
+  const MaxReq: int
+  const MaxRestarts: int
+
+  type Node = str
+  pure val WIN = "win"
+  pure val BB = "bb"
+  pure val NODES = Set(WIN, BB)
+
+  // A request id, or the attention set.
+  type Body = Req(int) | Att(Set[int])
+  type Message = { n: int, body: Body }
+
+  // One record for both roles; each uses its own fields.
+  type StateFields = {
+    sent: int, got: int,     // last number sent, last number delivered
+    pending: Set[int],       // window: open requests
+    answered: int -&gt; int,    // window: answers per request
+    nextReq: int,            // window
+    winAtt: Set[int],        // window: the attention set it last received
+    crashes: int,            // sidecar
+  }
+  // Both sides see whether the sidecar runs: the window by its watchdog.
+  type Extensions = { bbUp: bool }
+  type CustomEffects = Crash | Restart
+  type Event = ()
+
+  /* Boilerplate */
+  type LocalState = choreo::LocalState[Node, StateFields]
+  type LocalContext = choreo::LocalContext[Node, StateFields, Message, Event, Extensions]
+  type Transition = choreo::Transition[Node, StateFields, Message, Event, CustomEffects]
+  type GlobalContext = choreo::GlobalContext[Node, StateFields, Message, Event, Extensions]
+  /* End of boilerplate */
+
+  val reqIds = 1.to(MaxReq)
+
+  // The window asks the sidecar to run a command.
+  pure def invoke(ctx: LocalContext): Set[Transition] = {
+    val s = ctx.state
+    if (s.process_id == WIN and ctx.extensions.bbUp and s.nextReq &lt;= MaxReq)
+      Set({ post_state: { ...s, sent: s.sent + 1, pending: s.pending.setAdd(s.nextReq), nextReq: s.nextReq + 1 },
+            effects: Set(choreo::Send({ to: BB, message: { n: s.sent + 1, body: Req(s.nextReq) } })) })
+    else Set()
+  }
+
+  // The next message in this process's pipe.
+  pure def listen_next(ctx: LocalContext): Set[Message] =
+    ctx.messages.filter(m =&gt; m.n == ctx.state.got + 1)
+
+  // The sidecar takes the next message and replies.
+  pure def bb_reply(ctx: LocalContext, m: Message): Transition = {
+    val s = ctx.state
+    { post_state: { ...s, got: m.n, sent: s.sent + 1 },
+      effects: Set(choreo::Send({ to: WIN, message: { n: s.sent + 1, body: m.body } })) }
+  }
+  pure def bb_receive(ctx: LocalContext): Set[Transition] =
+    if (ctx.state.process_id == BB and ctx.extensions.bbUp) choreo::cue(ctx, listen_next, bb_reply) else Set()
+
+  // The window takes the next message from the sidecar.
+  pure def win_take(ctx: LocalContext, m: Message): Transition = {
+    val s = { ...ctx.state, got: m.n }
+    match m.body {
+      | Req(r) =&gt; { post_state: { ...s, answered: s.answered.setBy(r, k =&gt; k + 1), pending: s.pending.exclude(Set(r)) },
+                    effects: Set() }
+      | Att(a) =&gt; { post_state: { ...s, winAtt: a }, effects: Set() }
+    }
+  }
+  pure def win_receive(ctx: LocalContext): Set[Transition] =
+    if (ctx.state.process_id == WIN) choreo::cue(ctx, listen_next, win_take) else Set()
+
+  // The sidecar dies; nothing in the pipes survives.
+  pure def crash(ctx: LocalContext): Set[Transition] = {
+    val s = ctx.state
+    if (s.process_id == BB and ctx.extensions.bbUp and s.crashes &lt; MaxRestarts)
+      Set({ post_state: { ...s, crashes: s.crashes + 1 }, effects: Set(choreo::CustomEffect(Crash)) })
+    else Set()
+  }
+
+  // The watchdog restarts it: both numberings start again, the window fails
+  // every waiting request, and the sidecar first sends its attention set.
+  pure def restart(ctx: LocalContext): Set[Transition] = {
+    val s = ctx.state
+    if (s.process_id == WIN and not(ctx.extensions.bbUp))
+      Set({ post_state: { ...s, sent: 0, got: 0, pending: Set(),
+                          answered: s.answered.keys().mapBy(r =&gt; if (s.pending.contains(r)) s.answered.get(r) + 1 else s.answered.get(r)) },
+            effects: Set(choreo::CustomEffect(Restart),
+                         choreo::Send({ to: WIN, message: { n: 1, body: Att(Set()) } })) })
+    else Set()
+  }
+
+  pure def apply_custom_effect(env: GlobalContext, e: CustomEffects): GlobalContext = match e {
+    | Crash =&gt; { ...env, extensions: { bbUp: false }, messages: env.messages.transformValues(_ =&gt; Set()) }
+    | Restart =&gt; { ...env, extensions: { bbUp: true },
+                   system: env.system.setBy(BB, b =&gt; { ...b, sent: 1, got: 0 }) }
+  }
+
+  pure def main_listener(ctx: LocalContext): Set[Transition] =
+    Set(invoke(ctx), bb_receive(ctx), win_receive(ctx), crash(ctx), restart(ctx)).flatten()
+
+  pure def initialize(n: Node): LocalState =
+    { process_id: n, sent: 0, got: 0, pending: Set(), answered: reqIds.mapBy(_ =&gt; 0), nextReq: 1,
+      winAtt: Set(), crashes: 0 }
+
+  action init = choreo::init({
+    system: NODES.mapBy(n =&gt; initialize(n)),
+    messages: NODES.mapBy(_ =&gt; Set()),
+    events: NODES.mapBy(_ =&gt; Set()),
+    extensions: { bbUp: true },
+  })
+
+  action step = choreo::step(main_listener, apply_custom_effect)
+  action step_with(v: Node, l: LocalContext =&gt; Set[Transition]): bool = choreo::step_with(v, l, apply_custom_effect)
+
+  temporal fairness = and {
+    weakFair(step_with(BB, bb_receive), choreo::s),
+    weakFair(step_with(WIN, win_receive), choreo::s),
+    weakFair(step_with(WIN, restart), choreo::s),
+  }
+
+  // Rules
+  def win = choreo::s.system.get(WIN)
+  def bb = choreo::s.system.get(BB)
+  // What a process has not delivered yet is numbered in order after what it has.
+  def inOrderAt(v: Node): bool = {
+    val left = choreo::s.messages.get(v).filter(m =&gt; m.n &gt; choreo::s.system.get(v).got).map(m =&gt; m.n)
+    left == (choreo::s.system.get(v).got + 1).to(choreo::s.system.get(v).got + left.size())
+      and choreo::s.messages.get(v).filter(m =&gt; m.n &gt; choreo::s.system.get(v).got).size() == left.size()
+  }
+
+  val typeOK = win.pending.subseteq(reqIds)
+  val noDuplicateReply = reqIds.forall(r =&gt; win.answered.get(r) &lt;= 1)
+  val answeredNotPending = win.pending.forall(r =&gt; win.answered.get(r) == 0)
+  val inOrder = inOrderAt(BB) and inOrderAt(WIN)
+
+  temporal everyRequestAnswered = fairness implies
+    reqIds.forall(r =&gt; always(win.pending.contains(r) implies eventually(not(win.pending.contains(r)))))
+}
+
+module link {
+  import link_choreo(MaxReq = 3, MaxRestarts = 2).*
+
+  // A crash fails the waiting request once, and its late reply never comes.
+  run crashAnswersOnceTest =
+    init
+      .then(step_with(WIN, invoke)).then(step_with(BB, bb_receive))
+      .then(step_with(BB, crash)).then(step_with(WIN, restart))
+      .expect(win.answered.get(1) == 1 and win.pending == Set())
+}
+</code></pre></details>
+<p class=cite>Sources: Choreo at commit 000cf4e, <a href='https://github.com/informalsystems/choreo'>github.com/informalsystems/choreo</a>; the <a href='https://quint.sh/docs/choreo'>Choreo docs</a>, read from the Quint repo's docs/content/choreo at commit 95141d4 ; Quint's own guide at skills/quint-lang/guidelines/choreo.md in that repo.</p>
 
 </main></body></html>
