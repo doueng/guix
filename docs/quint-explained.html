@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="Quint explained bottom up in plain English: why tests miss races, state and actions, behaviours, invariants, quint run vs quint verify, counterexamples, liveness and fairness, tests, the REPL and TLA+, with your Rexmux connection spec and the stale-close race as the example.">
+<meta name="bbh-doc" content="T222">
+<title>Quint, from the ground up</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+.so{background:#e4f3ea;border-left:5px solid #2e7d4f;border-radius:6px;padding:8px 12px;margin:12px 0;font-size:15px}
+svg{max-width:520px;margin:10px auto;display:block}
+svg .mono{font-family:ui-monospace,Menlo,monospace}
+pre{font-size:12px}pre code{white-space:pre-wrap;overflow-wrap:anywhere}pre.q code{white-space:pre;overflow-wrap:normal}main p,main li{overflow-wrap:anywhere}.sub{overflow-wrap:anywhere}
+
+.tr{font:12px ui-monospace,Menlo,monospace}.tr td{white-space:normal}.tr td:last-child{min-width:8em}.tr .hl{background:#f8e3e0;font-weight:700}.tr .ok{background:#e4f3ea}
+</style></head>
+<body><main>
+<h1>Quint, from the ground up</h1>
+<p class=sub>Sixteen short steps. Each one uses only the steps before it. The small example is a file in your repo, /home/engstrand/guix/docs/quint-explained/race.qnt, and the big one is your own Rexmux spec. Every command shown was run on this machine, and the output is real. Companion piece: <a href='guix-explained.html'>Guix, from the ground up</a>.</p>
+
+<nav><details><summary>Contents</summary><ol>
+<li><a href=#s1>The bug that tests miss</a></li>
+<li><a href=#s2>A system is a state plus actions</a></li>
+<li><a href=#s3>A behaviour is a list of states</a></li>
+<li><a href=#s4>Writing it down in Quint</a></li>
+<li><a href=#s5>Choice: any and nondet</a></li>
+<li><a href=#s6>Invariants: true in every state</a></li>
+<li><a href=#s7>quint run: try lots of random paths</a></li>
+<li><a href=#s8>Reading a counterexample</a></li>
+<li><a href=#s9>quint verify: try every path</a></li>
+<li><a href=#s10>quint test and the REPL</a></li>
+<li><a href=#s11>The real thing: Rexmux's connection</a></li>
+<li><a href=#s12>The bug the review found, caught again</a></li>
+<li><a href=#s13>Eventually: properties about the future</a></li>
+<li><a href=#s14>Fairness: things that can happen, do</a></li>
+<li><a href=#s15>Quint and TLA+</a></li>
+<li><a href=#s16>The whole picture, and what to type</a></li>
+</ol></details></nav>
+
+<h2 id=s1>1. The bug that tests miss</h2>
+<p>Two workers share a counter that starts at 0. Each one adds 1. The answer should be 2.</p>
+<p>But a computer adds in two steps. First the worker <b>reads</b> the counter into its own memory. Then it <b>writes</b> back what it read, plus 1.</p>
+<p>Now let both workers run at once. One possible order:</p>
+<svg viewBox='0 0 340 150' role=img aria-label='Lost update'>
+<g font-size=12>
+<text x=60 y=16 text-anchor=middle font-weight=700>Worker A</text><text x=280 y=16 text-anchor=middle font-weight=700>Worker B</text><text x=170 y=16 text-anchor=middle font-weight=700>counter</text>
+<rect x=10 y=26 width=100 height=24 rx=5 fill='#e6f0f5' stroke='#2f6f8f'/><text x=60 y=42 text-anchor=middle>reads 0</text>
+<rect x=230 y=56 width=100 height=24 rx=5 fill='#e6f0f5' stroke='#2f6f8f'/><text x=280 y=72 text-anchor=middle>reads 0</text>
+<rect x=10 y=86 width=100 height=24 rx=5 fill='#f0e9f6' stroke='#7a4fa0'/><text x=60 y=102 text-anchor=middle>writes 0+1</text>
+<rect x=230 y=116 width=100 height=24 rx=5 fill='#f0e9f6' stroke='#7a4fa0'/><text x=280 y=132 text-anchor=middle>writes 0+1</text>
+<text x=170 y=42 text-anchor=middle class=mono>0</text><text x=170 y=72 text-anchor=middle class=mono>0</text><text x=170 y=102 text-anchor=middle class=mono>1</text>
+<text x=170 y=132 text-anchor=middle class=mono fill='#b3382c' font-weight=700>1  (not 2!)</text>
+</g></svg>
+<p>Both read 0 before either wrote. One update is lost.</p>
+<p>Why does a test not catch this? Because a read and a write take a few nanoseconds. Almost every time you run the test, A finishes before B starts, and you get 2. The bad order needs B to slip into a tiny gap. It happens once in a million runs, on a busy day, in production.</p>
+<p>And it gets worse fast. Count the possible orders (programmers say <i>interleavings</i>):</p>
+<div class=table><table>
+<tr><th>Workers</th><th>Steps each</th><th>Possible orders</th></tr>
+<tr><td>2</td><td>2</td><td>6</td></tr>
+<tr><td>2</td><td>5</td><td>252</td></tr>
+<tr><td>3</td><td>5</td><td>756,756</td></tr>
+<tr><td>4</td><td>5</td><td>11,732,745,024</td></tr>
+</table></div>
+<p>A test runs one of them. The machine picks which, and it nearly always picks the same easy one. Code that talks over a network is the same story: messages arrive late, twice, or in a different order, and a server can die between any two steps.</p>
+<div class=so><b>So:</b> concurrent code has far more possible orders than any test will ever see, and the bugs hide in the rare ones.</div>
+
+<h2 id=s2>2. A system is a state plus actions</h2>
+<p>To check every order, we first need a simple way to describe the system. Two ideas are enough.</p>
+<p><b>The state</b> is a handful of variables: everything you need to know about the system right now. For our counter, three things:</p>
+<ul>
+<li><code>x</code>, the counter,</li>
+<li><code>pc</code>, where each worker is: about to <code>Read</code>, about to <code>Write</code>, or <code>Done</code>,</li>
+<li><code>tmp</code>, what each worker read.</li>
+</ul>
+<p><b>An action</b> is one thing that can happen, as one step. It has two parts:</p>
+<ul>
+<li>a <b>condition</b>: when it is allowed. A can only write if A has read.</li>
+<li>an <b>effect</b>: the new values of the variables after the step.</li>
+</ul>
+<p>Our actions: <code>read(A)</code>, <code>write(A)</code>, <code>read(B)</code>, <code>write(B)</code>. That is the whole system.</p>
+<svg viewBox='0 0 340 110' role=img aria-label='A state and an action'>
+<g font-size=12>
+<rect x=6 y=20 width=130 height=70 rx=8 fill='#fff' stroke='#1c2230'/><text x=71 y=40 text-anchor=middle class=mono>x = 0</text><text x=71 y=58 text-anchor=middle class=mono>pc A = Read</text><text x=71 y=76 text-anchor=middle class=mono>tmp A = 0</text>
+<rect x=204 y=20 width=130 height=70 rx=8 fill='#fff' stroke='#1c2230'/><text x=269 y=40 text-anchor=middle class=mono>x = 0</text><text x=269 y=58 text-anchor=middle class=mono fill='#7a4fa0' font-weight=700>pc A = Write</text><text x=269 y=76 text-anchor=middle class=mono>tmp A = 0</text>
+<path d='M140 55 H198' stroke='#2f6f8f' stroke-width=2.5 marker-end='url(#ar)'/><text x=170 y=48 text-anchor=middle fill='#2f6f8f' font-weight=700>read(A)</text>
+<text x=71 y=106 text-anchor=middle fill='#5d6678' font-size=11>a state</text><text x=269 y=106 text-anchor=middle fill='#5d6678' font-size=11>the next state</text>
+</g>
+<defs><marker id=ar viewBox='0 0 10 10' refX=9 refY=5 markerWidth=6 markerHeight=6 orient=auto><path d='M0 0 L10 5 L0 10 z' fill='#2f6f8f'/></marker></defs>
+</svg>
+<p>Notice what we left out: the CPU, threads, memory, timing. We keep only what matters for the question we ask. That is called a <b>model</b>.</p>
+<div class=so><b>So:</b> a model is a few variables (the state) and a few actions, each with a condition for when it can happen and an effect on the variables.</div>
+
+<h2 id=s3>3. A behaviour is a list of states</h2>
+<p>Start in the first state. Pick any action whose condition holds. Apply it. You get a new state. Repeat.</p>
+<p>The list of states you walk through is one <b>behaviour</b>: one possible history of the system. The lost update from step 1 is this behaviour:</p>
+<svg viewBox='0 0 340 80' role=img aria-label='A behaviour'>
+<g font-size=11 class=mono>
+<rect x=2 y=20 width=56 height=36 rx=6 fill='#fff' stroke='#1c2230'/><text x=30 y=42 text-anchor=middle>x=0</text>
+<rect x=72 y=20 width=56 height=36 rx=6 fill='#fff' stroke='#1c2230'/><text x=100 y=42 text-anchor=middle>x=0</text>
+<rect x=142 y=20 width=56 height=36 rx=6 fill='#fff' stroke='#1c2230'/><text x=170 y=42 text-anchor=middle>x=0</text>
+<rect x=212 y=20 width=56 height=36 rx=6 fill='#fff' stroke='#1c2230'/><text x=240 y=42 text-anchor=middle>x=1</text>
+<rect x=282 y=20 width=56 height=36 rx=6 fill='#f8e3e0' stroke='#b3382c'/><text x=310 y=42 text-anchor=middle>x=1</text>
+</g>
+<g font-size=10 fill='#2f6f8f' text-anchor=middle><text x=65 y=14>read A</text><text x=135 y=14>read B</text><text x=205 y=14>write A</text><text x=275 y=14>write B</text></g>
+<path d='M58 38 H72 M128 38 H142 M198 38 H212 M268 38 H282' stroke='#2f6f8f' stroke-width='2'/>
+<text x=170 y=74 text-anchor=middle font-size=11 fill='#5d6678'>state 0 → 1 → 2 → 3 → 4</text>
+</svg>
+<p>Different choices give different behaviours. All of them together are <i>everything the system can ever do</i>. Every order from the table in step 1 is one behaviour.</p>
+<div class=so><b>So:</b> run the model by picking allowed actions one after another; each path you can take is a behaviour, and the set of all paths is everything that can happen.</div>
+
+<h2 id=s4>4. Writing it down in Quint</h2>
+<p>Quint is a language for writing exactly this: variables and actions. It looks like a programming language, but nothing in it runs on your computer as a program. It is a description that tools can explore.</p>
+<p>Here is the counter, from /home/engstrand/guix/docs/quint-explained/race.qnt (trimmed):</p>
+<pre class=q><code>module race {
+  type Pc = Read | Write | Done
+
+  var x: int            // the shared counter
+  var pc: str -&gt; Pc     // where each worker is
+  var tmp: str -&gt; int   // what each worker read
+
+  val workers = Set("A", "B")
+
+  action init = all {
+    x' = 0,
+    pc' = workers.mapBy(w =&gt; Read),
+    tmp' = workers.mapBy(w =&gt; 0),
+  }
+
+  action read(w: str): bool = all {
+    pc.get(w) == Read,          // condition
+    tmp' = tmp.set(w, x),       // effect
+    pc' = pc.set(w, Write),
+    x' = x,
+  }
+
+  action write(w: str): bool = all {
+    pc.get(w) == Write,
+    x' = tmp.get(w) + 1,
+    pc' = pc.set(w, Done),
+    tmp' = tmp,
+  }
+}</code></pre>
+<p>Read it slowly. The small stuff first: <code>type Pc = Read | Write | Done</code> makes a type with three possible values, <code>val</code> gives a name to a value, <code>w =&gt; Read</code> is a tiny function, and <code>mapBy</code>, <code>get</code> and <code>set</code> build, read and update a map. Then five new things that matter:</p>
+<ul>
+<li><code>var</code> declares a state variable and its type. <code>str -&gt; Pc</code> is a map: from a worker's name to where it is.</li>
+<li><code>x'</code> (x with a tick, said “x prime”) means <b>x in the next state</b>. So <code>x' = x</code> means “x stays the same”, and <code>x' = tmp.get(w) + 1</code> means “next, x is what w read, plus 1”.</li>
+<li><code>all { … }</code> means <b>all of these together, in one step</b>.</li>
+<li>A line with no tick, like <code>pc.get(w) == Read</code>, is the <b>condition</b>. If it is false, the whole action cannot happen right now.</li>
+<li><code>init</code> is the action that makes the first state. It has no condition; it just sets every variable.</li>
+</ul>
+<p>One rule to remember: every action must say the next value of <b>every</b> variable, even the ones it leaves alone. That is why <code>read</code> says <code>x' = x</code>. Check this by eye: the type checker only notices a missing one when two branches of an <code>any</code> (step 5) disagree.</p>
+<pre><code>quint typecheck docs/quint-explained/race.qnt</code></pre>
+<p>No output means it is fine.</p>
+<div class=so><b>So:</b> in Quint, <code>var</code> is a piece of state, <code>x'</code> is its next value, and an action is an <code>all { }</code> of a condition and the next value of every variable.</div>
+
+<h2 id=s5>5. Choice: any and nondet</h2>
+<p>We have actions. Now we must say <b>which one happens next</b>. The honest answer is: we do not know. Either worker might go. That is the whole point.</p>
+<p>Quint says “one of these, we don't know which” with two words:</p>
+<ul>
+<li><code>any { a, b, c }</code>: <b>one</b> of these actions happens, any one whose condition holds.</li>
+<li><code>nondet w = workers.oneOf()</code>: pick <b>some</b> value from a set, any one, and call it <code>w</code>.</li>
+</ul>
+<p>Together they make the action called <code>step</code>, which is every possible next move:</p>
+<pre class=q><code>  action step = any {
+    { nondet w = workers.oneOf() any { read(w), write(w) } },
+    finished,
+  }</code></pre>
+<p>In words: pick a worker, any worker, and let it read or write, if it may. Or, if both are done, <code>finished</code> (it changes nothing; step 9 says why it is there).</p>
+<p>“Nondeterministic” is just the long word for this: the model does not decide. The tools do. A simulator flips a coin. A model checker tries <i>every</i> option. That is how one short <code>step</code> stands for every order in the table from step 1.</p>
+<svg viewBox='0 0 340 150' role=img aria-label='A tree of choices'>
+<g font-size=10 class=mono text-anchor=middle>
+<rect x=140 y=4 width=60 height=22 rx=5 fill='#fff' stroke='#1c2230'/><text x=170 y=19>start</text>
+<rect x=60 y=56 width=70 height=22 rx=5 fill='#e6f0f5' stroke='#2f6f8f'/><text x=95 y=71>A read</text>
+<rect x=210 y=56 width=70 height=22 rx=5 fill='#e6f0f5' stroke='#2f6f8f'/><text x=245 y=71>B read</text>
+<rect x=4 y=110 width=70 height=22 rx=5 fill='#fff' stroke='#1c2230'/><text x=39 y=125>A write</text>
+<rect x=96 y=110 width=66 height=22 rx=5 fill='#f8e3e0' stroke='#b3382c'/><text x=129 y=125>B read</text>
+<rect x=178 y=110 width=66 height=22 rx=5 fill='#f8e3e0' stroke='#b3382c'/><text x=211 y=125>A read</text>
+<rect x=266 y=110 width=70 height=22 rx=5 fill='#fff' stroke='#1c2230'/><text x=301 y=125>B write</text>
+</g>
+<path d='M160 26 L100 56 M180 26 L240 56 M85 78 L45 110 M105 78 L125 110 M235 78 L215 110 M255 78 L295 110' stroke='#5d6678' stroke-width=1.5 fill='none'/>
+<text x=170 y=147 text-anchor=middle font-size=11 fill='#b3382c'>red: both have read, so one update will be lost</text>
+</svg>
+<div class=so><b>So:</b> <code>step</code> lists every move that could come next, with <code>any</code> and <code>nondet</code>, and leaves the choice open; the tools then explore the choices for you.</div>
+
+<h2 id=s6>6. Invariants: true in every state</h2>
+<p>Now say what “correct” means. The simplest kind of rule is an <b>invariant</b>: something that must be true in <b>every state the system can reach</b>, no matter which path led there.</p>
+<pre class=q><code>  // When both are done, the counter is 2.
+  val bothCounted = workers.forall(w =&gt; pc.get(w) == Done) implies x == 2</code></pre>
+<p><code>val</code> names a value computed from the current state. <code>A implies B</code> means “if A, then B” (when A is false, there is nothing to check).</p>
+<p><b>Reachable</b> matters. A state like “x = 7” is allowed by the types, but no path gets there, so nobody cares about it. We only ask about states you can actually walk to from <code>init</code> by taking steps.</p>
+<p>And one bad state is enough. If even one reachable state breaks the rule, the rule is broken, and the path that leads there is the proof.</p>
+<div class=so><b>So:</b> an invariant is a yes/no question about one state, and it must say yes in every state some path can reach.</div>
+
+<h2 id=s7>7. quint run: try lots of random paths</h2>
+<p>The first tool is a <b>simulator</b>. It does what step 3 described, by flipping coins: start at <code>init</code>, pick a random allowed move from <code>step</code>, check the invariant, repeat. By default it walks 20 steps per path and tries up to 10,000 paths. It stops at the first state that breaks the rule.</p>
+<pre><code>cd /home/engstrand/guix
+quint run docs/quint-explained/race.qnt --invariant=bothCounted</code></pre>
+<pre><code>An example execution:
+
+[State 0]
+{ pc: Map("A" -&gt; Read, "B" -&gt; Read), tmp: Map("A" -&gt; 0, "B" -&gt; 0), x: 0 }
+
+[State 1]
+{ pc: Map("A" -&gt; Read, "B" -&gt; Write), tmp: Map("A" -&gt; 0, "B" -&gt; 0), x: 0 }
+
+[State 2]
+{ pc: Map("A" -&gt; Write, "B" -&gt; Write), tmp: Map("A" -&gt; 0, "B" -&gt; 0), x: 0 }
+
+[State 3]
+{ pc: Map("A" -&gt; Write, "B" -&gt; Done), tmp: Map("A" -&gt; 0, "B" -&gt; 0), x: 1 }
+
+[State 4]
+{ pc: Map("A" -&gt; Done, "B" -&gt; Done), tmp: Map("A" -&gt; 0, "B" -&gt; 0), x: 1 }
+
+[violation] Found an issue (12ms at 2000 traces/second).
+  ❌ bothCounted
+Use --seed=0x918485aa67f7b133 --backend=rust to reproduce.
+error: Invariant violated</code></pre>
+<p>Twelve milliseconds. The race that a real test would hit once in a million runs, the simulator found at once, because it does not care how small the gap is: “B goes now” is just another coin flip.</p>
+<p>The <code>--seed</code> line is the coin's starting point. Pass it back and you get the same paths again, so a failure is never a ghost you cannot repeat.</p>
+<p>But notice the limit. If no random path hits the bad state, <code>quint run</code> says <code>[ok] No violation found</code>, and that only means <i>it did not find one</i>. It is a very good test, not a proof.</p>
+<div class=so><b>So:</b> <code>quint run</code> walks thousands of random paths in seconds and is great at finding bugs, but “ok” from it means “not found”, not “not there”.</div>
+
+<h2 id=s8>8. Reading a counterexample</h2>
+<p>The output above is a <b>counterexample</b> (also called a <i>trace</i>): a real path from the start to a state that breaks the rule. Read it as a story, one state at a time, and ask “what changed?”:</p>
+<div class='table'><table class=tr>
+<tr><th>State</th><th>pc A</th><th>pc B</th><th>x</th><th>What happened</th></tr>
+<tr><td>0</td><td>Read</td><td>Read</td><td>0</td><td>start</td></tr>
+<tr><td>1</td><td>Read</td><td>Write</td><td>0</td><td>B read 0</td></tr>
+<tr><td>2</td><td class=hl>Write</td><td>Write</td><td>0</td><td>A read 0 too: now it is too late</td></tr>
+<tr><td>3</td><td>Write</td><td>Done</td><td>1</td><td>B wrote 0+1</td></tr>
+<tr><td>4</td><td>Done</td><td>Done</td><td class=hl>1</td><td>A wrote 0+1 over it</td></tr>
+</table></div>
+<p>The trace never names the action; you see it from what changed. (The REPL in step 10 shows the changes with arrows.) Three tips:</p>
+<ul>
+<li>Look at the <b>last</b> state first: that is what is wrong. Then walk back to find the first state where it was already doomed (here, state 2).</li>
+<li>Bugs in a model usually need only a few steps, so the story is usually five to twenty lines, not a thousand. A model checker gives the shortest one; a random run's can be longer.</li>
+<li>Each line is a real situation your code can be in. To fix the bug, change the model so that the doomed step can no longer happen, and run again.</li>
+</ul>
+<div class=so><b>So:</b> a counterexample is a step-by-step story of how the bug happens; read the last state, then find where it went wrong.</div>
+
+<h2 id=s9>9. quint verify: try every path</h2>
+<p>Here is the surprising part. You do not need to walk every <i>path</i> to check every <i>state</i>. Many paths lead to the same state: “A reads, then B reads” and “B reads, then A reads” end in the same place. So eleven billion orders can shrink to a few thousand states. A <b>model checker</b> is a tool that uses tricks like this to cover <i>all</i> of them, instead of a random sample.</p>
+<p>Our counter has 13 reachable states in total. A model checker visits all 13 and checks the rule in each. If it says ok, the rule holds <b>everywhere</b>. That is a proof, for this model.</p>
+<p>Quint comes with two model checkers:</p>
+<ul>
+<li><b>Apalache</b>, the default for <code>quint verify</code>. It does not list states. It turns “is there a path of at most N steps that breaks the rule?” into one big logic puzzle and hands it to a solver. That makes it <b>bounded</b>: it checks paths up to <code>--max-steps</code> (default 10), not longer.</li>
+<li><b>TLC</b>, the classic one from TLA+ (step 15). It keeps a list of the states it has seen, never explores one twice, and so visits every reachable state, with no bound on path length. It needs a model small enough to list, and it can also check the “eventually” rules of step 13.</li>
+</ul>
+<pre><code>quint verify docs/quint-explained/race.qnt --invariant=bothCounted</code></pre>
+<p>It starts Apalache (a Java program), which prints a page of log lines. The answer is at the bottom: the same story as in step 8, then</p>
+<pre><code>[violation] Found an issue (3630ms).
+  ❌ bothCounted
+error: found a counterexample</code></pre>
+<p>Now fix the bug. The file has a second step, <code>stepFixed</code>, where a worker reads and writes in one action (<code>add</code>), so nobody can come in between. That is what a lock, or an atomic add, gives you in real code:</p>
+<pre><code>quint verify docs/quint-explained/race.qnt --step=stepFixed --invariant=bothCounted</code></pre>
+<pre><code>[ok] No violation found (3461ms).
+You may increase --max-steps.</code></pre>
+<p>Read “You may increase --max-steps” honestly: Apalache checked every path of up to 10 steps. For this model that is everything (after two adds both workers are done and nothing changes), but in general it is a bound.</p>
+<p>About <code>finished</code> from step 5. A model checker also complains when the system gets <b>stuck</b>: a state where no action is allowed, called a <i>deadlock</i>. Without <code>finished</code>, “both done” is such a state, and <code>quint verify</code> answers <code>error: reached a deadlock</code>. In a real system a deadlock is often a bug, so that complaint is a feature. Here being done is fine, so <code>finished</code> says so.</p>
+<div class=so><b>So:</b> a model checker covers every case instead of a sample, so “ok” really means ok: Apalache every path up to a length, TLC every reachable state with no limit.</div>
+
+<h2 id=s10>10. quint test and the REPL</h2>
+<p>Two smaller tools help while you write a spec.</p>
+<p><b>quint test</b> runs paths you write down by hand. A <code>run</code> chains actions with <code>.then</code> and checks with <code>.expect</code>. If an action is not allowed at that point, the test fails. This one replays the bad order on purpose:</p>
+<pre class=q><code>  run lostUpdateTest =
+    init
+      .then(read("A")).then(read("B"))
+      .then(write("A")).then(write("B"))
+      .expect(x == 1)</code></pre>
+<pre><code>quint test docs/quint-explained/race.qnt
+
+  race
+    ok lostUpdateTest passed 1 test(s)
+
+  1 passing (12ms)</code></pre>
+<p>Tests are how you check that the model does what you <i>think</i> it does, before you trust the model checker's “ok”.</p>
+<p><b>The REPL</b> lets you take steps by hand and look around. Load the module, then type actions and expressions (output trimmed):</p>
+<pre><code>quint -r docs/quint-explained/race.qnt::race</code></pre>
+<pre><code>&gt;&gt;&gt; init
+true
+{ pc: Map("A" -&gt; Read, "B" -&gt; Read), tmp: Map("A" -&gt; 0, "B" -&gt; 0), x: 0 }
+&gt;&gt;&gt; read("A")
+true
+{ pc: Map("A" -&gt; Read =&gt; Write, "B" -&gt; Read), tmp: Map("A" -&gt; 0, "B" -&gt; 0), x: 0 }
+&gt;&gt;&gt; read("B")
+true
+&gt;&gt;&gt; write("A")
+true
+{ …, x: 0 =&gt; 1 }
+&gt;&gt;&gt; write("B")
+true
+&gt;&gt;&gt; bothCounted
+false
+&gt;&gt;&gt; write("A")
+false</code></pre>
+<p><code>true</code> means the action happened, and <code>Read =&gt; Write</code> shows what it changed. The last <code>false</code> means <code>write("A")</code> is not allowed now (A is already done), so nothing changed. Type <code>.exit</code> to leave.</p>
+<div class=so><b>So:</b> <code>quint test</code> checks paths you choose; the REPL lets you take steps by hand and look at any value.</div>
+
+<h2 id=s11>11. The real thing: Rexmux's connection</h2>
+<p>Now the same ideas on a spec that guards real code: /home/engstrand/guix/desktop/build/rexmux/verify/quint/rexmux.qnt</p>
+<p>The story it models. ghostty-rex (your terminal window) keeps a connection to the Rex server. That sounds simple. It is not, because:</p>
+<ul>
+<li>the server can be down, can stop, and can drop the connection at any moment;</li>
+<li>the client retries, and may start a local server itself;</li>
+<li>each try is an <b>attempt</b> with a number, and every answer (connected, failed, closed) names its attempt, but answers arrive in any order, late, or for an attempt the client gave up on.</li>
+</ul>
+<p>That is step 1's problem again, with more workers and more steps. The state (trimmed):</p>
+<pre class=q><code>  type Conn = Down | Connecting | Up
+  type Kind = Connected | Failed | Closed
+  type Ctrl = {
+    srvUp: bool,               // the Rex server answers
+    conn: Conn,                // what the client thinks
+    gen: int,                  // the attempt it is waiting for
+    live: int,                 // the attempt it adopted
+    inflight: Set[int],        // attempts the server has not answered yet
+    open: Set[int],            // attempts whose socket is open
+    answers: Set[(Kind, int)], // answers queued for the client
+    …
+  }</code></pre>
+<p>The actions are the things that can happen: <code>tryConnect</code> (start attempt <code>gen</code>), <code>answer(g)</code> (the server answers attempt g), <code>late</code> (an attempt the client stopped waiting for connects anyway), <code>connected(g)</code>, <code>connectFailed(g)</code> and <code>closed(g)</code> (the client handles an answer), <code>timer</code> (the retry timer fires), <code>startLocal</code>, <code>hangup</code>, <code>serverStops</code>, <code>serverStarts</code>. <code>step</code> is <code>any</code> of them, with <code>nondet g = ids.oneOf()</code> choosing which attempt an answer is for.</p>
+<p>Notice that <code>answers</code> is a <b>set</b>, not a queue. Any answer in it can be handled next. That one choice of data type is what says “answers come in any order”.</p>
+<p>The rules, as invariants, in plain words:</p>
+<div class='table'><table>
+<tr><th>Name</th><th>Means</th></tr>
+<tr><td><code>neverStranded</code></td><td>When down, something will try again. When connecting, an answer is coming.</td></tr>
+<tr><td><code>upIsLive</code></td><td>The client says Up exactly when it adopted the attempt it waits for, and that socket is open (or its close is on the way).</td></tr>
+<tr><td><code>noLeak</code></td><td>Every open socket is the live one, or still waiting for the client's verdict. No socket is forgotten.</td></tr>
+</table></div>
+<p>A spec needs limits so a checker can finish: here the connection is lost at most 3 times (<code>MaxLosses</code>), attempt numbers go up to 2 and are reused (<code>MaxGen</code>), and one late answer may happen (<code>MaxLates</code>). The module <code>connect</code> at the bottom of the file sets them. Bugs almost always show up with small numbers, so small limits catch them.</p>
+<p>T220 moved this spec from TLA+ (<code>Rexmux.tla</code>) to Quint. The proof that nothing was lost in the move: both versions have exactly <b>3034</b> reachable states. Your bb tasks run it (W288 wrote the Babashka side, /home/engstrand/guix/desktop/build/quint/README.md):</p>
+<pre><code>cd /home/engstrand/guix/desktop/build/rexmux
+bb verify:quint            # typecheck, quint test, quint run: about 7 s
+ok   typecheck rexmux.qnt
+ok   test rexmux.qnt connect (3 passed)
+ok   run rexmux.qnt connect ok
+…
+bb verify:quint-mc connect # TLC over every state: about 8 s
+ok   rexmux.qnt connect typeOK  (3034 states)
+ok   rexmux.qnt connect neverStranded  (3034 states)
+ok   rexmux.qnt connect upIsLive  (3034 states)
+ok   rexmux.qnt connect noLeak  (3034 states)
+ok   rexmux.qnt connect serverUpAttaches  (3034 states)
+ok   rexmux.qnt connect localAttaches  (3034 states)</code></pre>
+<p>The first is the quick check that <code>make test</code> runs when Rexmux changes: steps 7 and 10. The second is the full model check (step 9), which <code>make verify</code> runs. Each rule is checked in a separate TLC run, so a broken rule gets its own shortest counterexample. The 3034 is pinned in /home/engstrand/guix/desktop/build/rexmux/verify/quint/checks.edn, so a change that grows or shrinks the state space shows up.</p>
+<div class=so><b>So:</b> the real spec is the counter again, bigger: a record of state, a dozen actions, answers in a set so any order is possible, and three invariants checked in all 3034 states.</div>
+
+<h2 id=s12>12. The bug the review found, caught again</h2>
+<p>Before T211, a code review found this race in ghostty-rex. Two attempts both connected. The client kept one and closed the extra one, which is right. But closing a socket produces a <code>:closed</code> answer, and when that stale <code>:closed</code> came back, the client treated it as “my connection closed”. It dropped its live connection and forgot it, while that socket stayed open.</p>
+<p>The fix was the attempt number: <code>closed(g)</code> only counts if <code>g</code> is the attempt the client is on. In the spec it is this line:</p>
+<pre class=q><code>    control(if (current(ctrl, g, Up) or current(ctrl, g, Connecting)) { ...failed(c), live: noConn } else c),</code></pre>
+<p>Take the fix out and ask Quint. Copy the spec and make <code>closed</code> ignore which attempt the close is for:</p>
+<pre><code>cd /home/engstrand/guix
+cp desktop/build/rexmux/verify/quint/rexmux.qnt /tmp/broken.qnt
+chmod u+w /tmp/broken.qnt
+sed -i 's/current(ctrl, g, Up) or current(ctrl, g, Connecting)/ctrl.conn == Up or ctrl.conn == Connecting/' /tmp/broken.qnt
+quint run /tmp/broken.qnt --main=connect --invariant=noLeak</code></pre>
+<pre><code>[violation] Found an issue (65ms at 1323 traces/second).
+  ❌ noLeak
+error: Invariant violated</code></pre>
+<p>Under a tenth of a second. The full model checker gives the shortest story. In a bbh REPL, where <code>quint</code> names that Babashka runner, <code>(quint/model-check "/tmp/broken.qnt" "connect" {:invariants ["noLeak"]})</code> returns it as data; here it is as a table:</p>
+<div class='table'><table class=tr>
+<tr><th>#</th><th>conn</th><th>live</th><th>open</th><th>answers</th><th>What happened</th></tr>
+<tr><td>0</td><td>Down</td><td>none</td><td>{}</td><td>{}</td><td>start, server up</td></tr>
+<tr><td>1</td><td>Connecting</td><td>none</td><td>{}</td><td>{}</td><td>tryConnect: attempt 1</td></tr>
+<tr><td>2</td><td>Connecting</td><td>none</td><td>{1}</td><td>(Connected, 1)</td><td>server accepts 1</td></tr>
+<tr><td>3</td><td class=ok>Up</td><td class=ok>1</td><td>{1}</td><td>{}</td><td>client adopts 1</td></tr>
+<tr><td>4</td><td>Up</td><td>1</td><td>{0, 1}</td><td>(Connected, 0)</td><td>an old attempt connects late</td></tr>
+<tr><td>5</td><td>Up</td><td>1</td><td>{1}</td><td>(Closed, 0)</td><td>client closes the extra one: right</td></tr>
+<tr><td>6</td><td class=hl>Down</td><td class=hl>none</td><td class=hl>{1}</td><td>{}</td><td>the stale close drops the live one</td></tr>
+</table></div>
+<p>Read the last row first (step 8): socket 1 is open, but the client is Down and has no live attempt. Nobody will ever close socket 1. That is the leak. Walk back: row 5 was fine, and row 6 is the doomed step, a close for attempt 0 acted on as if it were for attempt 1. That is exactly the review's finding, rebuilt in six steps from a one-line change.</p>
+<p>Put the line back and the same checks say ok in all 3034 states. That is the deal Quint offers: <b>the review found this bug once, by luck and skill; the spec now finds it every time anyone brings it back.</b></p>
+<div class=so><b>So:</b> remove one guard from the real spec and Quint rebuilds the review's stale-close race as a six-step story in under a second.</div>
+
+<h2 id=s13>13. Eventually: properties about the future</h2>
+<p>Invariants say “nothing bad ever happens”. That is called <b>safety</b>. But a client that never connects at all breaks no invariant: being Down forever is safe. We also want “something good <i>eventually</i> happens”. That is called <b>liveness</b>.</p>
+<p>For that, Quint has two words that talk about a whole behaviour (step 3), not one state:</p>
+<ul>
+<li><code>always(P)</code>: P is true in every state of the behaviour, from here on. An invariant is just <code>always</code> of a state rule.</li>
+<li><code>eventually(P)</code>: P is true in some state, now or later.</li>
+</ul>
+<svg viewBox='0 0 340 96' role=img aria-label='always and eventually'>
+<g font-size=11>
+<text x=4 y=24>always(P)</text>
+<g fill='#e4f3ea' stroke='#2e7d4f'><circle cx=110 cy=20 r='9'/><circle cx=150 cy=20 r='9'/><circle cx=190 cy=20 r='9'/><circle cx=230 cy=20 r='9'/><circle cx=270 cy=20 r='9'/></g>
+<text x=4 y=64>eventually(P)</text>
+<g fill='#fff' stroke='#5d6678'><circle cx=110 cy=60 r='9'/><circle cx=150 cy=60 r='9'/><circle cx=190 cy=60 r='9'/></g><circle cx=230 cy=60 r=9 fill='#e4f3ea' stroke='#2e7d4f'/><circle cx=270 cy=60 r=9 fill='#fff' stroke='#5d6678'/>
+<text x=170 y=90 text-anchor=middle fill='#5d6678'>green: a state where P holds</text>
+</g></svg>
+<p>Put together, they say a lot. From the Rexmux spec:</p>
+<pre class=q><code>  temporal serverUpAttaches = fairness implies
+    always((ctrl.conn != Up and ctrl.srvUp) implies eventually(ctrl.conn == Up or not(ctrl.srvUp)))</code></pre>
+<p>In words: <b>at any moment</b> when the client is not connected but the server is up, <b>sooner or later</b> the client is connected, or the server went down again. Ignore <code>fairness implies</code> for one more step.</p>
+<p>A liveness counterexample looks different. A safety bug is a finite story ending in a bad state. A liveness bug is a story that goes on <b>forever</b> without the good thing: either it ends in a loop that comes back around, or it ends in a state where the system just sits still forever.</p>
+<svg viewBox='0 0 340 110' role=img aria-label='A lasso'>
+<defs><marker id='lar' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='7' markerHeight='7' orient='auto'><path d='M0 0 L10 5 L0 10 z' fill='#2f6f8f'/></marker></defs>
+<g stroke='#2f6f8f' stroke-width='2' fill='none' marker-end='url(#lar)'>
+<path d='M42 50 H76'/><path d='M102 50 H136'/><path d='M162 46 L216 24'/><path d='M242 22 L280 42'/><path d='M280 58 L242 78'/><path d='M218 76 L164 56'/>
+</g>
+<text x='261' y='54' font-size='16' text-anchor='middle' fill='#2f6f8f'>↻</text>
+<g fill='#fff' stroke='#1c2230'><circle cx='30' cy='50' r='12'/><circle cx='90' cy='50' r='12'/><circle cx='150' cy='50' r='12'/><circle cx='230' cy='18' r='12'/><circle cx='292' cy='50' r='12'/><circle cx='230' cy='82' r='12'/></g>
+<text x='170' y='106' font-size='11' text-anchor='middle' fill='#5d6678'>a lasso: round and round, never connected</text>
+</svg>
+<p>Which tools can check these? <code>quint run</code> cannot: a random walk of 20 steps cannot show “forever”. Apalache has only partial support. TLC can, because it has the whole map of states and can look for loops in it. That is why your repo runs liveness with TLC, in <code>bb verify:quint-mc</code>.</p>
+<div class=so><b>So:</b> safety is “nothing bad, ever” (<code>always</code>); liveness is “something good, eventually” (<code>eventually</code>), and its counterexample is an endless path, a loop or a stop, that never gets there.</div>
+
+<h2 id=s14>14. Fairness: things that can happen, do</h2>
+<p>There is a catch. In a model, “nothing happens” is always allowed: the system can just pause forever, even while actions are allowed. This is called <b>stuttering</b>. It is not a deadlock (step 9), where nothing <i>can</i> happen; here something could, but nothing does. Then every <code>eventually</code> fails, for a silly reason: the timer is set, but the model never lets it fire.</p>
+<p><b>Fairness</b> rules out these silly paths. It is an assumption you add, in plain words: “this action does not wait forever”.</p>
+<ul>
+<li><code>weakFair(A, vars)</code>: if A <b>stays</b> allowed, it eventually happens. A retry timer that is set does fire.</li>
+<li><code>strongFair(A, vars)</code>: if A is allowed <b>again and again</b>, even with gaps, it eventually happens. Used for <code>startLocal(true)</code>: if starting the local server keeps being tried, one try eventually works.</li>
+</ul>
+<p>The spec lists these assumptions in <code>temporal fairness</code>, and each liveness rule starts with <code>fairness implies</code>: “assuming nothing waits forever, …”.</p>
+<p>See what one missing line does. Take <code>weakFair(timer, ctrl)</code> out of the list and check <code>serverUpAttaches</code> again with TLC. It fails, after all 3034 states, with this story (trimmed):</p>
+<div class='table'><table class=tr>
+<tr><th>#</th><th>srvUp</th><th>conn</th><th>try</th><th>What happened</th></tr>
+<tr><td>0</td><td>false</td><td>Down</td><td>ToConnect</td><td>start, server down</td></tr>
+<tr><td>1</td><td>false</td><td>Connecting</td><td>Nothing</td><td>attempt 1</td></tr>
+<tr><td>2</td><td>false</td><td>Connecting</td><td>Nothing</td><td>it fails</td></tr>
+<tr><td>3</td><td class=ok>true</td><td>Connecting</td><td>Nothing</td><td>the server starts</td></tr>
+<tr><td>4–5</td><td>true</td><td>Connecting</td><td>Nothing</td><td>a late attempt connects and is closed</td></tr>
+<tr><td>6</td><td>true</td><td class=hl>Down</td><td class=hl>ToAfter</td><td>the failure is handled: wait for the timer</td></tr>
+<tr><td>7</td><td>true</td><td>Down</td><td>ToAfter</td><td>the stale close is ignored, as it should be</td></tr>
+<tr><td>8</td><td colspan=4 class=hl>Stuttering: nothing happens, forever</td></tr>
+</table></div>
+<p>The server is up, the client is down and waiting for its timer, and the timer never fires. TLC even prints a warning that this kind of answer usually means a missing fairness rule. Put the line back: ok.</p>
+<p>Fairness is a promise about the world, so only promise what is true. A real timer fires; that is fair to assume. “The network never drops” is not, and the spec does not assume it.</p>
+<div class=so><b>So:</b> fairness says which actions cannot wait forever; without it, “nothing ever happens” breaks every liveness rule.</div>
+
+<h2 id=s15>15. Quint and TLA+</h2>
+<p>Everything above comes from <b>TLA+</b>, the language Leslie Lamport built on his Temporal Logic of Actions. Quint uses the same logic, so it can say and check the same things. What changes is how it reads:</p>
+<div class='table'><table>
+<tr><th>Idea</th><th>Quint</th><th>TLA+</th></tr>
+<tr><td>state variable</td><td><code>var x: int</code></td><td><code>VARIABLE x</code></td></tr>
+<tr><td>next value</td><td><code>x' = x + 1</code></td><td><code>x' = x + 1</code></td></tr>
+<tr><td>all at once</td><td><code>all { a, b }</code></td><td><code>a /\ b</code></td></tr>
+<tr><td>one of</td><td><code>any { a, b }</code></td><td><code>a \/ b</code></td></tr>
+<tr><td>pick a value</td><td><code>nondet v = S.oneOf()</code></td><td><code>\E v \in S:</code></td></tr>
+<tr><td>always, eventually</td><td><code>always(P)</code>, <code>eventually(P)</code></td><td><code>[]P</code>, <code>&lt;&gt;P</code></td></tr>
+<tr><td>fairness</td><td><code>weakFair(A, v)</code></td><td><code>WF_v(A)</code></td></tr>
+</table></div>
+<p>Beyond looks, Quint builds in types, a type checker, tests, a REPL and a fast simulator; for TLA+ these are separate or optional tools, or missing. It drops a few rarely used TLA+ features; for example there is no <code>CHOOSE</code>, which is why <code>rexmux.qnt</code> picks the least element of a set with <code>fold</code>. And <code>quint compile</code> turns a Quint spec into TLA+, which is how the TLC checks here run at all.</p>
+<p>For you, T220 was this move: Rexmux, bbh super and the wf runs went from TLA+ to Quint, with the same state counts as proof. Details are in <a href='quint.html'>/home/engstrand/guix/docs/quint.html</a></p>
+<div class=so><b>So:</b> Quint is TLA+'s logic with programmer syntax, types, tests and a REPL, and it compiles to TLA+ when a TLA+ tool is needed.</div>
+
+<h2 id=s16>16. The whole picture, and what to type</h2>
+<svg viewBox='0 0 340 268' role=img aria-label='The whole chain'>
+<g font-size=12 text-anchor=middle>
+<rect x=40 y=6 width=260 height=32 rx=6 fill='#f8e3e0' stroke='#b3382c'/><text x=170 y=27>too many orders for tests (1)</text>
+<rect x=40 y=56 width=260 height=32 rx=6 fill='#e6f0f5' stroke='#2f6f8f'/><text x=170 y=77>state + actions + choice (2–5)</text>
+<rect x=40 y=106 width=260 height=32 rx=6 fill='#f7efdc' stroke='#8a6a1f'/><text x=170 y=127>rules: invariants, eventually (6, 13, 14)</text>
+<rect x=40 y=156 width=125 height=48 rx=6 fill='#f0e9f6' stroke='#7a4fa0'/><text x=102 y=176>quint run</text><text x=102 y=194 font-size=10>random paths (7)</text>
+<rect x=175 y=156 width=125 height=48 rx=6 fill='#f0e9f6' stroke='#7a4fa0'/><text x=237 y=176>verify / TLC</text><text x=237 y=194 font-size=10>every state (9)</text>
+<rect x=40 y=222 width=260 height=36 rx=6 fill='#e4f3ea' stroke='#2e7d4f'/><text x=170 y=245>ok, or a story of the bug (8)</text>
+</g>
+<path d='M170 38 V56 M170 88 V106 M110 138 V156 M230 138 V156 M102 204 V222 M237 204 V222' stroke='#5d6678' stroke-width='2'/>
+</svg>
+<p>Tests see only the orders the machine happens to pick (1). So describe the system as a state and actions (2), where each path is a behaviour (3), write it in Quint (4) and leave the choices open with <code>any</code> and <code>nondet</code> (5). Say what must always hold (6). <code>quint run</code> tries random paths fast (7) and hands you a story when it finds a bug (8); a model checker visits every state, so its ok is a proof for the model (9). Tests and the REPL check that the model means what you think (10). Your Rexmux spec does all of this in 3034 states (11), and rebuilds the review's stale-close race from a one-line change (12). <code>eventually</code> adds liveness (13), fairness keeps it honest (14), and all of it is TLA+'s logic in friendlier clothes (15).</p>
+<div class='table'><table>
+<tr><th>To see</th><th>Type (from /home/engstrand/guix)</th></tr>
+<tr><td>a bug found by simulation</td><td><code>quint run docs/quint-explained/race.qnt --invariant=bothCounted</code></td></tr>
+<tr><td>the same, by Apalache</td><td><code>quint verify docs/quint-explained/race.qnt --invariant=bothCounted</code></td></tr>
+<tr><td>the fix, checked</td><td><code>quint verify docs/quint-explained/race.qnt --step=stepFixed --invariant=bothCounted</code></td></tr>
+<tr><td>a hand-written path</td><td><code>quint test docs/quint-explained/race.qnt</code></td></tr>
+<tr><td>steps by hand</td><td><code>quint -r docs/quint-explained/race.qnt::race</code></td></tr>
+<tr><td>Rexmux, quick</td><td><code>cd desktop/build/rexmux &amp;&amp; bb verify:quint</code></td></tr>
+<tr><td>Rexmux, every state</td><td><code>cd desktop/build/rexmux &amp;&amp; bb verify:quint-mc connect</code></td></tr>
+<tr><td>Rexmux's quick checks and unit tests</td><td><code>make test ONLY=rexmux</code></td></tr>
+</table></div>
+<p class=sub>Further reading: the Quint docs at https://quint.sh/docs/why and the model checkers page https://quint.sh/docs/model-checkers ; the Babashka runner in /home/engstrand/guix/desktop/build/quint/README.md ; the migration report in /home/engstrand/guix/docs/quint.html ; and the companion piece <a href='guix-explained.html'>Guix, from the ground up</a>.</p>
+
+</main></body></html>
