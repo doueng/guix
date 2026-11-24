@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="No cursor in insert mode, an underscore in normal mode, in every modal editor and through Ghostty, Herdr and Rex">
+<meta name="bbh-doc" content="T223">
+<title>Cursor by editing mode (T223)</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+</style></head>
+<body><main>
+<h1>Cursor by editing mode (T223)</h1>
+
+<p><b>Goal.</b> Wherever you edit modally, insert mode shows no cursor and normal mode shows an underscore. Visual, replace and operator-pending also show an underscore, since they act like normal mode. You asked for an invisible cursor in insert mode, and every place below follows that request.</p>
+
+<h2>Where it applies</h2>
+<div class='table'><table><tr><th>Place</th><th>Insert</th><th>Normal and others</th><th>How</th></tr>
+<tr><td>Doom Emacs, GUI</td><td>none</td><td>underscore</td><td><code>evil-*-state-cursor</code> in desktop/configs/doom/config.el. Emacs here is emacs-no-x, so this only matters if a GUI build comes back.</td></tr>
+<tr><td>Doom Emacs in a terminal (Ghostty, Herdr, Rex)</td><td>none</td><td>underscore</td><td>evil-terminal-cursor-changer sends the shape. A new advice also sends show and hide (DECTCEM) to match <code>cursor-type</code>, because etcc does not send them for a nil cursor.</td></tr>
+<tr><td>fish vi bindings</td><td>none</td><td>underscore</td><td>desktop/configs/fish/functions/fish_vi_cursor.fish hides the cursor with <code>ESC[?25l</code> and shows an underscore with <code>ESC[4 q</code>. A running command gets Ghostty's own cursor.</td></tr>
+<tr><td>Neovim</td><td>none</td><td>underscore</td><td><code>guicursor a:hor20,i-ci:ver25-HiddenCursor</code>. Also fixed: the colorscheme had been clearing HiddenCursor.</td></tr>
+<tr><td>IdeaVim</td><td>1 px bar</td><td>underscore</td><td>IdeaVim cannot hide the caret, so a 1 px bar is the closest it gets.</td></tr>
+<tr><td>Chrome (vimium-cljs)</td><td>none (<code>caret-color: transparent</code>)</td><td>the normal caret, and the mode badge's dot becomes an underscore</td><td>The extension sets <code>data-vimium-cljs-insert</code> on the page root. This works in inputs, textareas, contenteditable and shadow DOM, and an e2e test checks each of them.</td></tr>
+<tr><td>bb REPL, Pi input, jjui</td><td colspan='3'>None of them has modal editing in this config: no vi mode in readline or the REPLs, and Pi and jjui have no insert and normal modes. Nothing to change.</td></tr>
+</table></div>
+
+<h2>The terminal stack</h2>
+<ul>
+<li><b>Ghostty</b> already had <code>cursor-style = underline</code>, and shell integration's cursor feature is off (<code>no-cursor</code>), so shapes that programs request win. No change.</li>
+<li><b>Herdr</b> passes both the shape and the visibility through. I checked this with screenshots on the hidden display. No change.</li>
+<li><b>ghostty-rex</b> (rexg-render) handled the underscore and DECTCEM, but the Quint model and the Bombadil spec found five cursor bugs, now fixed. They included a frame that mixed an old cursor with a new overlay, a cursor that vanished until the pane printed something, and a stale cursor after a tab switch. See /home/engstrand/guix/docs/ghostty-rex.html, section The cursor.</li>
+</ul>
+
+<h2>Where you will not see where you type</h2>
+<p>Insert mode now has no cursor anywhere. You can't see where text will land after you move with arrows or the mouse in insert mode, or in a long fish command line, or after you click into a Chrome field before you type. Press Escape to see the underscore again. This is what you asked for, so I did not soften it.</p>
+
+<h2>Checks</h2>
+<ul>
+<li>A Quint model of the cursor across programs, panes, tabs, replays and overlays: desktop/build/ghostty-rex/verify/quint/cursor.qnt. It runs in make test, and make verify model-checks it.</li>
+<li>A Bombadil spec drives a real ghostty-rex with modal panes and fish switching modes, and judges every frame: desktop/build/ghostty-rex/test/bombadil/cursor.ts. It runs in make verify, or alone with bb bombadil:cursor.</li>
+<li>Screenshots of both modes for Doom in a terminal and in the GUI, fish, Neovim, Herdr and Rex are in the run's evidence directory:<br> /home/engstrand/.local/state/bbh/workflows/20261124-162923-828-change/evidence/shots </li>
+<li>make lint passes. make test passes except the keybindings check, which also fails on the main checkout: the kanata simulator cannot load libgcc_s.so.1.</li>
+</ul>
+
+<h2>What to reload</h2>
+<ul>
+<li><b>rexg-render</b> is a Guix package, so it needs <code>make home</code> (no sudo). After that, <code>make refresh</code> restarts the ghostty-rex client.</li>
+<li><b>Doom</b>: reload the config (M-x <code>eng/reload-config</code>) or restart Emacs. <b>Neovim</b>: restart it.</li>
+<li><b>fish</b>: new shells pick it up. In an open shell, run <code>exec fish</code>.</li>
+<li><b>vimium-cljs</b>: <code>make refresh</code> reloads the extension. Pages that are already open need a reload.</li>
+<li><b>IdeaVim</b>: <code>:source ~/.ideavimrc</code> or restart the IDE.</li>
+</ul>
+
+</main></body></html>

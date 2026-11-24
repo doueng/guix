@@ -192,10 +192,22 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 </g></svg>
 <ul>
 <li>Output from panes is never queued behind keys. Each stream's reader thread writes its bytes straight to rexg-render, tagged with the pane ID. Only Rex's own messages, a resize or a program exiting, go through bb's queue.</li>
-<li>rexg-render does not choose where a pane goes. bb sends it the layout (<code>l</code>: pane, x, y, width, height), the chrome (<code>v</code>: tab bar, titles, status line, menus), and the cursor (<code>c</code>: in the focused pane, at a point, or hidden). It sends each only when it changed.</li>
+<li>rexg-render does not choose where a pane goes. bb sends it the layout (<code>l</code>: pane, x, y, width, height), the chrome (<code>v</code>: tab bar, titles, status line, menus), and the cursor (<code>c</code>: in the focused pane, at a point, or hidden). It sends each only when it changed, all of one view in one write ended by <code>k</code>, and rexg-render draws no frame while a view is half read.</li>
 <li>rexg-render reports back on stderr: the window size, each pane's mouse and scroll mode, errors, and the text of a pane for tiny fingers and mouse copies.</li>
 <li>A pane that hides its cursor (<code>ESC [ ?25 l</code>) shows none, and a pane scrolled into history says <code>↑ history (type to return)</code> in its title.</li>
 </ul>
+
+<h2 id='cursor'>The cursor, and the bugs T223 found in it</h2>
+<p>Each frame hides Ghostty's cursor, draws, then shows the focused pane's cursor where and as its program asked: <code>ESC [ 4 SP q</code> for an underscore, <code>ESC [ 6 SP q</code> for a bar, and <code>ESC [ 0 SP q</code>, Ghostty's own <code>cursor-style</code> (an underscore here), for a block or the default, since libghostty-vt reports both as a block. The M-x minibuffer gets that default cursor at its end; which-key, tiny fingers and help show none.</p>
+<p>A Quint model of the cursor across programs, panes, tabs, snapshot replays and overlays (desktop/build/ghostty-rex/verify/quint/cursor.qnt) and a Bombadil spec that drives a real client (desktop/build/ghostty-rex/test/bombadil/cursor.ts) found these, all fixed in csrc/rexg-render.c and src/rexg/main.clj:</p>
+<div class='table'><table><tr><th>Bug</th><th>What you would see</th><th>Found by</th></tr>
+<tr><td>A frame could draw half of a view: the new overlay with the old cursor, or the reverse. bb flushed each message, and a large view reaches the pipe in pieces anyway.</td><td>A cursor blinking under which-key or M-x as it opens or closes.</td><td>Quint (before.mixedFrameTest); Bombadil reproduced it on the old renderer, and again on the first fix, which only drained the pipe</td></tr>
+<tr><td>frame() read the cursor with a second trylock after the cells; a pane thread taking the lock in between hid it, and the bytes after a snapshot asked for no redraw.</td><td>A cursor that vanished until the pane printed something.</td><td>Quint (before.lostCursorTest)</td></tr>
+<tr><td>A pane shown again drew its last cursor until Rex's new snapshot was in.</td><td>The old mode's cursor on returning to a tab whose program changed mode meanwhile.</td><td>Quint (before.staleCursorTest)</td></tr>
+<tr><td>A pane whose lock was busy copied its cells from the screen buffer, which a resize or full redraw has just blanked.</td><td>A pane flashing empty under its cursor on a resize.</td><td>Reading the code for the Quint model</td></tr>
+<tr><td>Panes drew in slot order, not layout order.</td><td>An older floating pane drawn over a newer one.</td><td>Bombadil (floats it opened)</td></tr>
+</table></div>
+<p><code>REXG_TRACE=/tmp/rexg.trace</code> makes rexg-render keep a copy of everything it writes, which is how the last Bombadil failure was read frame by frame. <code>cd desktop/build/ghostty-rex && bb bombadil:cursor --time 240</code> runs the spec alone; <code>bb verify:quint</code> and <code>bb verify:quint-mc</code> check the model.</p>
 
 <h2 id='screen'>Reading the screen</h2>
 <p>A sketch of the window with two panes. The lines are as wide as the real ones, so on a phone it scrolls sideways.</p>

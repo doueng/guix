@@ -3,6 +3,9 @@ Plug 'justinmk/vim-sneak'
 source ~/.config/ideavim/idea-doom-emacs/init.vim
 source ~/.config/ideavim/idea-doom-emacs/subword-mode.vim
 set norelativenumber
+" T223: an underscore in normal, visual and the other modes; insert mode gets
+" the thinnest bar IdeaVim draws, since it cannot hide the caret.
+set guicursor=n-v-c-o-r-cr-sm-ve:hor20,i-ci:ver1
 
 map <leader>e :action SelectInProjectView<CR>
 " Ctrl+h moves focus left, as in the other editors (keybindings README).

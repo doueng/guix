@@ -94,15 +94,23 @@
 
 ;; ---- the renderer ----
 
-(defn- frame! [{:keys [^java.io.OutputStream in lock]} type ^bytes payload]
-  (locking lock
-    (let [n (alength payload)]
-      (.write in (byte-array [(unchecked-byte (int type)) (unchecked-byte (bit-shift-right n 24)) (unchecked-byte (bit-shift-right n 16))
-                              (unchecked-byte (bit-shift-right n 8)) (unchecked-byte n)]))
-      (.write in payload)
+(defn- frames!
+  "Writes MSGS, [type payload-bytes] pairs, in one write."
+  [{:keys [^java.io.OutputStream in lock]} msgs]
+  (let [buf (java.io.ByteArrayOutputStream.)]
+    (doseq [[type ^bytes payload] msgs]
+      (let [n (alength payload)]
+        (.write buf (byte-array [(unchecked-byte (int type)) (unchecked-byte (bit-shift-right n 24)) (unchecked-byte (bit-shift-right n 16))
+                                 (unchecked-byte (bit-shift-right n 8)) (unchecked-byte n)]))
+        (.write buf payload)))
+    (locking lock
+      (.write in (.toByteArray buf))
       (.flush in))))
 
-(defn- send-str! [r type s] (frame! r type (.getBytes (str s) "UTF-8")))
+(defn- frame! [r type ^bytes payload] (frames! r [[type payload]]))
+
+(defn- str-msg [type s] [type (.getBytes (str s) "UTF-8")])
+(defn- send-str! [r type s] (frames! r [(str-msg type s)]))
 
 (defn- clean [s] (str/replace (str s) #"[\t\n\r\u0000-\u001f]" " "))
 
@@ -288,9 +296,14 @@
                     lay (str/join "\n" (for [{:keys [block x y] tw :w th :h} layout] (str block " " x " " y " " tw " " th)))
                     sp (spans-text spans)
                     cur (str/join " " (map #(if (keyword? %) (name %) %) cursor))]
-                (when (not= lay (:layout last-draw)) (send-str! r \l lay))
-                (when (not= sp (:spans last-draw)) (send-str! r \v sp))
-                (when (not= cur (:cursor last-draw)) (send-str! r \c cur))
+                ;; One view, ended by k: rexg-render draws none of it before
+                ;; it has all of it (T223). A large view reaches the pipe in
+                ;; pieces, so reading what is there is not enough.
+                (let [msgs (cond-> []
+                             (not= lay (:layout last-draw)) (conj (str-msg \l lay))
+                             (not= sp (:spans last-draw)) (conj (str-msg \v sp))
+                             (not= cur (:cursor last-draw)) (conj (str-msg \c cur)))]
+                  (when (seq msgs) (frames! r (conj msgs (str-msg \k "")))))
                 (when (not= (:title d) title)
                   (send-str! r \w (str "\u001b]2;" (clean (:title d)) "\u0007"))
                   (swap! app assoc :title (:title d)))

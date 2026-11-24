@@ -1,3 +1,5 @@
 ::highlight(vimium-cljs-find) { background-color: #fff27a; color: #000; }
 ::highlight(vimium-cljs-find-current) { background-color: #ff9632; color: #000; }
 vimium-cljs-ui { all: initial; }
+/* Insert mode shows no caret (T223); refresh-indicator! sets the attribute. */
+:root[data-vimium-cljs-insert], :root[data-vimium-cljs-insert] * { caret-color: transparent !important; }

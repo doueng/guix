@@ -83,5 +83,7 @@
         ms (models dir (remove #(str/starts-with? % "--") args))
         report! (fn [results] (doseq [r results l (:report r)] (println l)) results)
         results (concat (when-not (flags "--mc") (report! (quick ms)))
-                        (when-not (flags "--quick") (doall (map #(first (report! [%])) (model-check ms)))))]
+                        ;; An entry with no rules is there for its tests only.
+                        (when-not (flags "--quick")
+                          (doall (map #(first (report! [%])) (model-check (filter #(seq (concat (:invariants %) (:properties %))) ms))))))]
     (System/exit (if (every? :ok? results) 0 1))))

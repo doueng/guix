@@ -123,6 +123,22 @@ test('keys typed in inputs, textareas, contenteditable and shadow inputs reach t
   assert.ok((await facts()).scrollY > y0, 'j scrolls after Escape');
 });
 
+test('insert mode shows no caret in any field; Escape gives it back (T223)', T, async () => {
+  await open();
+  const caret = (sel) => evaluate(b.cdp, page, `getComputedStyle(${sel}).caretColor`);
+  const clear = 'rgba(0, 0, 0, 0)';
+  for (const sel of ['document.getElementById("text")', 'document.getElementById("area")',
+                     'document.getElementById("editable")',
+                     'document.getElementById("host").shadowRoot.getElementById("shadowinput")']) {
+    assert.notEqual(await caret(sel), clear, 'a caret in normal mode: ' + sel);
+    await clickOn(sel);
+    await sleep(150);
+    assert.equal(await caret(sel), clear, 'no caret while typing: ' + sel);
+    await keys('<esc>', 200);
+    assert.notEqual(await caret(sel), clear, 'the caret is back after Escape: ' + sel);
+  }
+});
+
 test('scrolling: j k d u G gg', T, async () => {
   await open();
   await keys('gg', 300);

@@ -57,4 +57,8 @@
             (vim.api.nvim_set_hl 0 "@keyword" {:fg mauve :bold true})
             (vim.api.nvim_set_hl 0 "@string" {:fg green})
             (vim.api.nvim_set_hl 0 "@type" {:fg yellow})
-            (vim.api.nvim_set_hl 0 "@constant" {:fg peach}))}})
+            (vim.api.nvim_set_hl 0 "@constant" {:fg peach})
+            ;; A function colorscheme fires no ColorScheme event, and the
+            ;; highlight clear above dropped what those autocmds set, such as
+            ;; HiddenCursor, insert mode's invisible cursor (T223).
+            (vim.api.nvim_exec_autocmds :ColorScheme {}))}})

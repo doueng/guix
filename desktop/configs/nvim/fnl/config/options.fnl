@@ -62,7 +62,9 @@
                                                                   {:clear true})
                               :callback apply-hidden-cursor-highlight})
 
-(set vim.opt.guicursor "n-v-c-sm:block,i-ci-ve:ver25-HiddenCursor,r-cr-o:hor20")
+;; T223: no cursor in insert, an underscore everywhere else (normal, visual,
+;; replace, operator-pending, the command line).
+(set vim.opt.guicursor "a:hor20,i-ci:ver25-HiddenCursor")
 (set vim.opt.signcolumn :yes)
 (set vim.opt.updatetime 250)
 (set vim.opt.timeoutlen 600)

@@ -83,6 +83,12 @@ reaches the client, and keeps copy, paste and font size.
   judges the screen after a quiet gap, not at a pane-output frame. The
   client runs with Hyprland's PATH, which lacks ~/.local/bin, as the real
   window does.
+- Cursor (T223): `bb verify:quint` (make test) and `bb verify:quint-mc` (make verify) check
+  `verify/quint/cursor.qnt`, a model of the cursor across programs, panes, tabs, snapshot
+  replays and overlays, whose `before` module keeps the traces that broke the old renderer.
+  `bb verify` also runs Bombadil's `test/bombadil/cursor.ts` over modal panes
+  (`test/rexg/modal.bb`) and fish with the shipped vi cursor, judging every synchronized frame;
+  `bb bombadil:cursor` runs only that. `REXG_TRACE=FILE` keeps a copy of rexg-render's output.
 - `make verify ONLY=rexmux` model-checks the stream, link and agent rules this client
   shares with rexmux. The sidecar runs in-process here, so the model's Crash
   and Restart never happen, and a sidecar exception still answers its request.

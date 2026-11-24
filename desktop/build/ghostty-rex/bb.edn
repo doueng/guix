@@ -1,4 +1,4 @@
-{:paths ["src" "../rexmux/sidecar" "test" "../rexmux/test" "../rexmux/verify"]
+{:paths ["src" "../rexmux/sidecar" "test" "../rexmux/test" "../rexmux/verify" "../quint/src"]
  :tasks {attach {:doc "The client in this terminal: shows the Rex session (the window runs this). Args: [--session S] [--render PATH]."
                  :requires ([rexg.main])
                  :task (apply rexg.main/-main *command-line-args*)}
@@ -10,6 +10,17 @@
          switch-timing {:doc "Only ghostty-rex-verify's switch timing checks: a pi tab with a 24 MB snapshot paints within 300 ms (T210)."
                         :requires ([rexg.verify])
                         :task (rexg.verify/switch-timing-main)}
+         verify:quint {:doc "The cursor model in verify/quint/cursor.qnt: typecheck, run tests and a seeded simulation (seconds; make test). Args: [MAIN...]."
+                       :requires ([babashka.fs :as fs] [quint.checks])
+                       :task (apply quint.checks/-main (str (fs/path (fs/parent (System/getProperty "babashka.config")) "verify" "quint"))
+                                    "--quick" *command-line-args*)}
+         verify:quint-mc {:doc "Model-check verify/quint/cursor.qnt with TLC over every state (a few minutes; make verify). Args: [MAIN...]."
+                          :requires ([babashka.fs :as fs] [quint.checks])
+                          :task (apply quint.checks/-main (str (fs/path (fs/parent (System/getProperty "babashka.config")) "verify" "quint"))
+                                       "--mc" *command-line-args*)}
+         bombadil:cursor {:doc "Only bb verify's cursor spec (test/bombadil/cursor.ts, T223): Bombadil switches modes, tabs, overlays and sizes and checks the drawn cursor. Args: [--time N] [--keep]."
+                          :requires ([rexg.verify])
+                          :task (apply rexg.verify/cursor-main *command-line-args*)}
          verify {:doc "Live tests: the client in Ghostty on the hidden test display against a throwaway Rex server, then Bombadil (make verify ONLY=ghostty-rex). Args: [--keep]."
                  :requires ([rexg.verify])
                  :task (apply rexg.verify/-main *command-line-args*)}}}

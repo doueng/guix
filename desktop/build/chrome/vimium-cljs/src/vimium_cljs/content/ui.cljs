@@ -27,6 +27,7 @@ iframe.help { left: 50%; top: 4vh; width: 90vw; max-width: 1000px; height: 92vh;
 .mode::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
   background: currentColor; margin-right: 5px; vertical-align: 1px; }
 .mode.normal { opacity: .8; }
+.mode.normal::before { width: 8px; height: 2px; border-radius: 0; vertical-align: 0; }
 .mode.insert { --c: #188038; } .mode.hints { --c: #b06000; } .mode.visual, .mode.visual-line { --c: #8430ce; }
 .mode.vomnibar { --c: #1a66d6; } .mode.pass, .mode.mark { --c: #c5221f; }
 .mode.off, .mode.find { display: none; }

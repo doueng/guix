@@ -146,7 +146,9 @@
           "KEYLEADER_CONFIG" (str (fs/path checkout "desktop" "configs" "keybindings" "leader.edn"))
           "REXG_CONFIG" config "REXMUX_CONFIG" config "REXG_RENDER" (render-bin)
           "REXG_LOG" (str root "/client.log")
-          "REXG_CLIPBOARD_FILE" (str root "/clipboard") "REXG_OPEN_FILE" (str root "/opened")}))
+          "REXG_CLIPBOARD_FILE" (str root "/clipboard") "REXG_OPEN_FILE" (str root "/opened")}
+         ;; REXG_TRACE=FILE keeps what rexg-render wrote, to read a failure's frames.
+         (some->> (System/getenv "REXG_TRACE") (hash-map "REXG_TRACE"))))
 
 (defn attach-script!
   "A script that runs `bb attach` in CLIENT-ENV; Ghostty runs it, so the
@@ -757,11 +759,41 @@
                :layout {:block {:flavor "com.superlogical.terminal.shell"
                                 :options {:command ["sh" "-c" (str "printf '\\033]7501;state=" state ":app=" app "\\033\\\\'; exec sleep 100000")]}}}}))))
 
+(defn- cursor-fixture!
+  "cursor.ts's session: modal.bb in tabs 1 and 2, fish with the shipped vi
+  cursor and a mode prompt in tab 3."
+  [s]
+  (let [modal [(str (fs/which "bb")) (str (fs/path here "test" "rexg" "modal.bb"))]
+        fish [(str (fs/which "fish")) "--no-config" "-C"
+              (str "source " (fs/path checkout "desktop" "configs" "fish" "functions" "fish_vi_cursor.fish")
+                   "; function fish_mode_prompt; echo -n \"[$fish_bind_mode] \"; end"
+                   "; function fish_prompt; echo -n '> '; end"
+                   ;; Setting fish_key_bindings under -C comes too early to take.
+                   "; fish_vi_key_bindings; fish_vi_cursor")]]
+    (apply ts/rex! s "new" "cur" "--keep-open" "--shell" "none" "--" modal)
+    (doseq [[label cmd] [["modal2" modal] ["fish" fish]]]
+      (ts/rex! s "api" "call" "-s" "cur" "session.new_window"
+               (json/generate-string
+                {:label label :focus false
+                 :layout {:block {:flavor "com.superlogical.terminal.shell" :options {:command cmd}}}})))))
+
 (def ^:private specs
   "rexmux's Bombadil specs, which read the screen model this client shares
   (tabs on row 0, ▶ on the focused pane's title, the status line, the echo
   or minibuffer line). Each: the spec file, its setup, the session to show."
-  {"tabs" {:file "rexmux.ts"
+  {;; T223: the drawn cursor against each program's mode (ghostty-rex's own spec).
+   "cursor" {:file "cursor.ts"
+             :dir (str (fs/path here "test" "bombadil"))
+             ;; Synchronized frames: Bombadil judges every frame rexg-render
+             ;; draws, so a frame that mixes two views is caught.
+             :sync true
+             :setup (fn [s config]
+                      (cursor-fixture! s)
+                      (spit config (pr-str {:servers [{:label "test" :address (:address s)}]
+                                            :leader-file (str (fs/path checkout "desktop" "configs" "keybindings" "leader.edn"))
+                                            :leader-prefix ["alt+space"]}))
+                      "cur")}
+   "tabs" {:file "rexmux.ts"
            ;; Alt+Space, Rex's only prefix, comes from leader.edn.
            :setup (fn [s config]
                     (fixture! s)
@@ -813,7 +845,7 @@
   "Bombadil types into the client on a throwaway server for TIME seconds and
   checks SPEC on every screen; true when no property broke."
   [root spec time]
-  (let [{:keys [file setup restore dir] :or {dir (str (fs/path checkout "desktop" "build" "rexmux" "test" "bombadil"))}} (specs spec)
+  (let [{:keys [file setup restore sync dir] :or {dir (str (fs/path checkout "desktop" "build" "rexmux" "test" "bombadil"))}} (specs spec)
         spec-file (str (fs/path dir file))
         dir (str root "/bombadil-" spec)
         s (ts/start! {:root (str dir "/srv") :restore (boolean restore) :path-prepend (e2e/stubs! (str dir "/stubs"))})
@@ -828,7 +860,7 @@
             ;; Unsynchronized frames: Bombadil 0.8 samples at each finished
             ;; synchronized frame, and the renderer draws pane output on its own
             ;; clock, so a frame can predate bb handling the key.
-            env (assoc (client-env s dir config) "REXG_SYNC" "0")
+            env (assoc (client-env s dir config) "REXG_SYNC" (if sync "1" "0"))
             cmd [(bombadil-bin) "terminal" "test"
                  "--specification" spec-file
                  "--time-limit" (str time "s") "--exit-on-violation"
@@ -841,6 +873,16 @@
         (zero? exit))
       (finally (try (ts/stop! (or @restarted s)) (catch Exception _))))))
 
+(defn cursor-main
+  "bb bombadil:cursor [--time N] [--keep]: only the cursor spec."
+  [& args]
+  (let [time (or (some-> (second (drop-while #(not= "--time" %) args)) parse-long) 60)
+        root (str (fs/create-temp-dir {:prefix "ghostty-rex-cursor-"}))
+        ok (try (bombadil! root "cursor" time) (catch Throwable e (check! "bombadil cursor" false (ex-message e))))]
+    (println "run in" root)
+    (when (and ok (not (some #{"--keep"} args))) (fs/delete-tree root))
+    (System/exit (if ok 0 1))))
+
 (defn -main [& args]
   (let [keep? (some #{"--keep"} args)
         time (or (some-> (second (drop-while #(not= "--time" %) args)) parse-long) 60)
@@ -849,7 +891,7 @@
     (e2e! root)
     (try (switch-timing! root) (catch Throwable e (check! "switch timing" false (ex-message e))))
     (when-not (some #{"--no-bombadil"} args)
-      (doseq [spec (or (seq (keep #(second (re-matches #"--spec=(.+)" %)) args)) ["tabs" "startup" "restored" "names"])]
+      (doseq [spec (or (seq (keep #(second (re-matches #"--spec=(.+)" %)) args)) ["cursor" "tabs" "startup" "restored" "names"])]
         (try (bombadil! root spec time)
              (catch Throwable e (check! (str "bombadil " spec) false (ex-message e))))))
     (let [failed (remove :ok @results)]

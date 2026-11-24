@@ -66,9 +66,25 @@ typedef struct {
   GhosttyRenderStateRowCells cells;
   int x, y, w, h, shown;
   int mouse;  // the program asked for mouse reports (last told to bb)
+  // The cursor as the cells last drawn have it, read under mu with them: a
+  // separate read could miss the lock and drop the cursor with nothing left
+  // to redraw it (T223). Screen cells; cur_ok 0 when hidden or out of view.
+  int cur_ok, cur_x, cur_y, cur_style;  // cur_x, cur_y in the pane
+  // The cells the pane last drew, CW x CH: a frame that finds mu held draws
+  // these. It took them from the screen's front buffer, which a resize or a
+  // full redraw blanks, so the pane flashed empty under its cursor (T223).
+  Cell *cache; int cw, ch;
+  // The terminal is from the current stream's snapshot. A pane shown again
+  // keeps its last screen until then, but not its last cursor, which can be
+  // stale: the program may have changed mode meanwhile (T223).
+  int fresh;
 } Pane;
 
 static Pane panes[MAXP];
+// The shown panes in bb's layout order, bottom to top: a floating pane
+// comes after the tiled ones it covers. Drawing in slot order put an older
+// float over a newer one (T223).
+static Pane *order[MAXP]; static int norder;
 static long now_ms(void);
 static int W = 80, H = 24;
 static Cell *front, *back;
@@ -76,6 +92,9 @@ static int wake[2], winch[2];
 static FILE *ctl;
 static pthread_mutex_t ctl_mu = PTHREAD_MUTEX_INITIALIZER;
 static volatile int dirty = 1, full = 1;
+// bb has sent part of a view (layout, overlay, cursor) and not yet its end
+// ('k'): no frame until it has, so none draws half of one (T223).
+static int view_open;
 // Synchronized output (CSI ?2026) around each frame; REXG_SYNC=0 drops it, so
 // Bombadil 0.8, which samples at each finished synchronized frame, waits for a
 // quiet gap instead and judges the screen once bb has handled the key.
@@ -100,6 +119,9 @@ static void poke(void) { char b = 1; ssize_t r = write(wake[1], &b, 1); (void)r;
 
 // ---- output buffer ----
 static char *ob; static size_t on, ocap;
+// REXG_TRACE=FILE: a copy of everything written to the terminal, to see the
+// exact frames (cursor escapes included) a bug report's screen came from.
+static int trace_fd = -1;
 static void oput(const char *s, size_t n) {
   if (on + n > ocap) { ocap = (on + n) * 2 + 65536; ob = realloc(ob, ocap); }
   memcpy(ob + on, s, n); on += n;
@@ -112,6 +134,7 @@ static void ofmt(const char *fmt, ...) {
 static void oflush(void) {
   size_t off = 0;
   while (off < on) { ssize_t n = write(1, ob + off, on - off); if (n <= 0) { if (errno == EINTR || errno == EAGAIN) continue; break; } off += (size_t)n; }
+  if (trace_fd >= 0) { ssize_t r = write(trace_fd, ob, on); (void)r; }
   on = 0;
 }
 static void outf8(uint32_t c) {
@@ -203,7 +226,7 @@ static void *pane_thread(void *arg) {
   ghostty_render_state_new(NULL, &p->rs);
   ghostty_render_state_row_iterator_new(NULL, &p->rows);
   ghostty_render_state_row_cells_new(NULL, &p->cells);
-  p->ready = 1;
+  p->ready = 1; p->fresh = 1;
   apply_pending(p);
   pthread_mutex_unlock(&p->mu);
   // How long the screen took, and later the whole snapshot: REXG_LOG has
@@ -233,6 +256,7 @@ static void *pane_thread(void *arg) {
   pthread_mutex_lock(&p->mu);
   if (r.len > off) ghostty_terminal_vt_write(p->term, r.fed + off, r.len - off);
   pthread_mutex_unlock(&p->mu);
+  dirty = 1; poke();  // these bytes, and a frame that found the lock held
   say("done %s %zu %ld\n", p->id, off, now_ms() - p->opened_at);
   ghostty_snapshot_decoder_free(dec);
   free(r.fed);
@@ -253,7 +277,7 @@ static void pane_free(Pane *p) {
   if (p->rows) ghostty_render_state_row_iterator_free(p->rows);
   if (p->rs) ghostty_render_state_free(p->rs);
   if (p->term) ghostty_terminal_free(p->term);
-  free(p->q);
+  free(p->q); free(p->cache);
   pthread_mutex_destroy(&p->mu); pthread_mutex_destroy(&p->qmu); pthread_cond_destroy(&p->qcv);
   p->used = 0;
   full = 1;
@@ -291,6 +315,8 @@ static void pane_open(const char *id) {
     p->used = 1;
   }
   p->open = 1; p->failed = 0; p->got = 0; p->qclosed = 0; p->qoff = p->qn = 0; p->opened_at = now_ms();
+  // Its thread is not running yet, so mu is free.
+  pthread_mutex_lock(&p->mu); p->fresh = 0; p->cur_ok = 0; pthread_mutex_unlock(&p->mu);
   pthread_create(&p->th, NULL, pane_thread, p);
 }
 
@@ -313,14 +339,22 @@ static void draw_pane(Pane *p) {
   // The pane's thread holds mu while it decodes a piece of the snapshot:
   // keep what the pane showed, and try again next frame.
   if (pthread_mutex_trylock(&p->mu) != 0) {
-    for (int y = p->y; y < p->y + p->h && y < H; y++)
-      for (int x = p->x; x < p->x + p->w && x < W; x++)
-        if (y >= 0 && x >= 0) back[y * W + x] = front[y * W + x];
+    for (int y = 0; y < p->h && y < p->ch; y++)
+      for (int x = 0; x < p->w && x < p->cw; x++) {
+        int sx = p->x + x, sy = p->y + y;
+        if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
+        Cell c = p->cache[y * p->cw + x];
+        if (c.wide == 1 && x + 1 >= p->w) blank(&c);  // its tail is cut off
+        back[sy * W + sx] = c;
+      }
+    // The cursor was where the program had it in a pane of that size.
+    if (p->cw != p->w || p->ch != p->h) p->cur_ok = 0;
     dirty = 1;
     return;
   }
   if (!p->ready || !p->term) {
     int failed = p->failed;
+    p->cur_ok = 0;
     pthread_mutex_unlock(&p->mu);
     // Until the first snapshot is in, say so instead of a blank pane.
     char msg[96];
@@ -382,6 +416,10 @@ static void draw_pane(Pane *p) {
     y++;
   }
   ghostty_render_state_clean(p->rs);
+  GhosttyRenderStateCursor cu = GHOSTTY_INIT_SIZED(GhosttyRenderStateCursor);
+  p->cur_ok = p->fresh && ghostty_render_state_get(p->rs, GHOSTTY_RENDER_STATE_DATA_CURSOR, &cu) == GHOSTTY_SUCCESS &&
+              cu.viewport_has_value && cu.visible && cu.viewport_x < p->w && cu.viewport_y < p->h;
+  if (p->cur_ok) { p->cur_x = cu.viewport_x; p->cur_y = cu.viewport_y; p->cur_style = (int)cu.visual_style; }
   bool mouse = false;
   ghostty_terminal_get(p->term, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &mouse);
   bool active = true;
@@ -391,20 +429,14 @@ static void draw_pane(Pane *p) {
   // bb routes clicks and the wheel by whether the program wants them, and
   // marks a pane scrolled into its history.
   if (m != p->mouse) { p->mouse = m; say("mode %s %d\n", p->id, m); }
-}
-
-static void pane_cursor(Pane *p, int *ok, int *x, int *y, int *style) {
-  *ok = 0;
-  if (pthread_mutex_trylock(&p->mu) != 0) return;
-  if (p->ready && p->term) {
-    GhosttyRenderStateCursor cu = GHOSTTY_INIT_SIZED(GhosttyRenderStateCursor);
-    if (ghostty_render_state_get(p->rs, GHOSTTY_RENDER_STATE_DATA_CURSOR, &cu) == GHOSTTY_SUCCESS &&
-        cu.viewport_has_value && cu.visible && cu.viewport_x < p->w && cu.viewport_y < p->h) {
-      *ok = 1; *x = p->x + cu.viewport_x; *y = p->y + cu.viewport_y;
-      *style = (int)cu.visual_style;
+  if (p->cw * p->ch < p->w * p->h) p->cache = realloc(p->cache, (size_t)(p->w * p->h) * sizeof(Cell));
+  p->cw = p->w; p->ch = p->h;
+  for (int y = 0; y < p->h; y++)
+    for (int x = 0; x < p->w; x++) {
+      int sx = p->x + x, sy = p->y + y;
+      if (sx < 0 || sy < 0 || sx >= W || sy >= H) blank(&p->cache[y * p->w + x]);
+      else p->cache[y * p->w + x] = back[sy * W + sx];
     }
-  }
-  pthread_mutex_unlock(&p->mu);
 }
 
 static int same(const Cell *a, const Cell *b) { return !memcmp(a, b, sizeof *a); }
@@ -428,7 +460,7 @@ static int same_style(const Cell *a, const Cell *b) {
 
 static void frame(void) {
   for (int i = 0; i < W * H; i++) blank(&back[i]);
-  for (int i = 0; i < MAXP; i++) if (panes[i].used && panes[i].shown) draw_pane(&panes[i]);
+  for (int i = 0; i < norder; i++) if (order[i]->used && order[i]->shown) draw_pane(order[i]);
   for (size_t i = 0; i < nspans; i++) {
     Span *s = &spans[i];
     if (s->row < 0 || s->row >= H || s->col < 0 || s->col >= W) continue;
@@ -460,7 +492,10 @@ static void frame(void) {
   ostr("\x1b[0m");
   full = 0;
   int ok = 0, x = 0, y = 0, cs = 1;
-  if (cur_mode == 1) { Pane *p = find(cur_pane); if (p && p->shown) pane_cursor(p, &ok, &x, &y, &cs); }
+  if (cur_mode == 1) {
+    Pane *p = find(cur_pane);
+    if (p && p->shown && p->cur_ok) { ok = 1; x = p->x + p->cur_x; y = p->y + p->cur_y; cs = p->cur_style; }
+  }
   else if (cur_mode == 2) { ok = 1; x = cx; y = cy; cs = 1; }
   if (ok) {
     // libghostty's cursor styles: 0 bar, 1 block, 2 underline, 3 hollow
@@ -528,13 +563,14 @@ static void set_spans(char *payload, size_t len) {
 
 static void set_layout(char *payload, size_t len) {
   for (int i = 0; i < MAXP; i++) panes[i].shown = 0;
+  norder = 0;
   char *line = payload, *end = payload + len;
   while (line < end) {
     char *nl = memchr(line, '\n', (size_t)(end - line)); if (!nl) nl = end; *nl = 0;
     char id[128]; int x, y, w, h;
     if (sscanf(line, "%127s %d %d %d %d", id, &x, &y, &w, &h) == 5) {
       Pane *p = find(id);
-      if (p) { p->x = x; p->y = y; p->w = w; p->h = h; p->shown = 1; }
+      if (p && !p->shown && norder < MAXP) { p->x = x; p->y = y; p->w = w; p->h = h; p->shown = 1; order[norder++] = p; }
     }
     line = nl + 1;
   }
@@ -616,8 +652,9 @@ static void handle(int type, char *pl, size_t len) {
       break;
     }
     case 'x': { Pane *p = find(pl); if (p) pane_close(p); dirty = 1; break; }
-    case 'l': set_layout(pl, len); dirty = 1; break;
-    case 'v': set_spans(pl, len); dirty = 1; break;
+    case 'l': set_layout(pl, len); view_open = 1; dirty = 1; break;
+    case 'v': set_spans(pl, len); view_open = 1; dirty = 1; break;
+    case 'k': view_open = 0; dirty = 1; break;
     case 'c': {  // focus ID | at X Y | hide
       char how[16], a[128]; int y;
       if (sscanf(pl, "%15s %127s %d", how, a, &y) >= 1) {
@@ -625,6 +662,7 @@ static void handle(int type, char *pl, size_t len) {
         else if (!strcmp(how, "at")) { cur_mode = 2; cx = atoi(a); cy = y; }
         else cur_mode = 0;
       }
+      view_open = 1;
       dirty = 1;
       break;
     }
@@ -655,6 +693,8 @@ int main(void) {
   ctl = stderr;
   const char *sync_env = getenv("REXG_SYNC");
   if (sync_env && !strcmp(sync_env, "0")) sync_out = 0;
+  const char *trace = getenv("REXG_TRACE");
+  if (trace && *trace) trace_fd = open(trace, O_WRONLY | O_CREAT | O_APPEND, 0600);
   if (pipe(wake) < 0 || pipe(winch) < 0) return 1;
   fcntl(wake[0], F_SETFL, O_NONBLOCK); fcntl(winch[0], F_SETFL, O_NONBLOCK);
   if (tcgetattr(1, &saved) == 0) {
@@ -670,7 +710,7 @@ int main(void) {
   resize_screen();
   uint8_t hdr[5]; size_t hn = 0; char *pl = NULL; size_t plen = 0, pn = 0, pcap = 0;
   uint8_t inbuf[65536];
-  long last = 0;
+  long last = 0, held_since = 0;
   for (;;) {
     // At most one frame every 8 ms: a burst of output costs one redraw.
     long wait = dirty ? 8 - (now_ms() - last) : -1;
@@ -697,6 +737,15 @@ int main(void) {
         }
       }
     }
+    // bb sends a view as a layout, overlay and cursor message and then 'k':
+    // draw once the view is whole and what is already written has been read,
+    // so no frame shows a new layout or overlay with the old cursor (T223),
+    // but at least every 50 ms.
+    if (dirty && (hn || view_open || poll(fds, 1, 0) > 0)) {
+      if (!held_since) held_since = now_ms();
+      if (now_ms() - held_since < 50) continue;
+    }
+    held_since = 0;
     if (dirty && now_ms() - last >= 8) { dirty = 0; last = now_ms(); frame(); }
   }
   restore();

@@ -484,6 +484,8 @@
      (let [{m :name line :line} @mode
            v (dispatch/indicator {:mode m :line line :suspended @typing-suspended :focus (focus-kind nil)
                                   :hints? @hints-requested :enabled (:enabled (rule))})]
+       ;; insert mode has no caret, as in the person's editors (T223; content.css)
+       (.toggleAttribute (.-documentElement js/document) "data-vimium-cljs-insert" (= v "insert"))
        ;; the top frame draws the badge child frames report to, so it always redraws it
        (cond top? (show-indicator! v)
              (or force (not= v @reported)) (do (reset! reported v) (send! {:type "indicator" :mode v})))))))

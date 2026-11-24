@@ -45,8 +45,10 @@
            "modules/engstrand/packages/ghostty.scm" "modules/engstrand/features/terminal-mux.scm"
            "desktop/bin/{mux-terminal,workspace-or-herdr-tab}" "desktop/lib/mux.clj"
            "desktop/build/rexmux/sidecar/**"]
-   :checks ["make lint" "cd desktop/build/ghostty-rex && bb test" "cd desktop/build/rexmux && bb test"]
-   :slow ["cd desktop/build/ghostty-rex && bb verify" "cd desktop/build/rexmux && bb verify:quint-mc"]}
+   :checks ["make lint" "cd desktop/build/ghostty-rex && bb test" "cd desktop/build/rexmux && bb test"
+            "cd desktop/build/ghostty-rex && bb verify:quint"]
+   :slow ["cd desktop/build/ghostty-rex && bb verify" "cd desktop/build/ghostty-rex && bb verify:quint-mc"
+          "cd desktop/build/rexmux && bb verify:quint-mc"]}
   {:name "view"
    :paths ["desktop/bin/view" "desktop/build/view/**" "modules/engstrand/features/view.scm"]
    :checks ["make lint" "bb desktop/build/view/test.bb"]}
