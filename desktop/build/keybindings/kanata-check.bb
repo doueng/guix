@@ -19,4 +19,13 @@
   (p/shell "git" "clone" "--quiet" "--depth" "1" "--branch" (str "v" version) "https://github.com/jtroo/kanata" src)
   (p/shell {:dir src} guix "shell" "rust" "rust:cargo" "gcc-toolchain" "--" "cargo" "build" "--release" "--quiet" "-p" "kanata-sim"))
 
-(System/exit (:exit (p/shell {:continue true} "bb" "desktop/build/keybindings/kanata-test.bb" sim)))
+;; Cargo under guix shell links libgcc_s without a runpath, so the simulator
+;; finds it through gcc-toolchain's lib, looked up on each run since that
+;; profile is not a GC root.
+(def libgcc-dir
+  (let [{:keys [exit out]} (p/sh guix "shell" "gcc-toolchain" "--" "gcc" "-print-file-name=libgcc_s.so.1")]
+    (when-not (zero? exit) (die "guix shell gcc-toolchain failed: cannot find libgcc_s for the simulator"))
+    (str (fs/parent (fs/canonicalize (str/trim out))))))
+
+(System/exit (:exit (p/shell {:continue true :extra-env {"LD_LIBRARY_PATH" libgcc-dir}}
+                             "bb" "desktop/build/keybindings/kanata-test.bb" sim)))

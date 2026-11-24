@@ -3,7 +3,11 @@
 // the focused pane's program asked for. Tabs 1 and 2 run test/rexg/modal.bb,
 // whose first row says its mode (MODE=normal, insert or bar, ALT on the
 // alternate screen); tab 3 runs fish with desktop/configs/fish's vi cursor and
-// a mode prompt ([default], [insert], [visual], ...). The person's cursors:
+// a mode prompt ([default], [insert], [visual], ...); tab 4 runs terminal
+// Emacs with evil and desktop/configs/doom/cursor.el (test/rexg/emacs-cursor.el),
+// whose mode line says MODE=<evil state> and which redisplays at the end of
+// each command, as the person's Doom did when o left the cursor visible in
+// insert state until the next key. The person's cursors:
 // none in insert mode, an underscore otherwise; a bar on modal.bb's alternate
 // screen. verify/quint/cursor.qnt models the same rules.
 import { always, eventually, now } from "@antithesishq/bombadil";
@@ -20,6 +24,7 @@ type View = {
   focusTop: number; // the focused pane's title row, -1 without one
   focusBottom: number;
   mode: string | null;
+  emacs: boolean; // the focused pane runs Emacs
   minibuffer: boolean;
   prefix: boolean;
   hints: boolean;
@@ -38,30 +43,42 @@ const view = extract((s): View => {
   const lines: string[] = [];
   for (let i = 0; i < n; i++) lines.push(s.grid.rowText(i));
   const last = (lines[n - 1] ?? "").trimEnd();
-  const top = lines.findIndex((l, i) => i > 0 && i < n - 2 && /▶ [0-9a-f]{6}/.test(l));
+  // Pane titles say the program and directory (T210), as ▶ bb ~ ───, or
+  // ┌▶ … on a floating pane.
+  const title = (l: string, mark: string) => new RegExp(`(^|[│┌])${mark} [^─│ ]`).test(l);
+  const top = lines.findIndex((l, i) => i > 0 && i < n - 2 && title(l, "▶"));
   let bottom = n - 3;
   let mode: string | null = null;
   if (top >= 0) {
+    // A floating pane's mode is inside its box, not in the panes under it.
+    const left = lines[top].indexOf("┌▶"), right = lines[top].lastIndexOf("┐");
     for (let i = top + 1; i < n - 2; i++) {
-      if (/[▶─] [0-9a-f]{6}/.test(lines[i])) { bottom = i - 1; break; }
-      const m = lines[i].match(/MODE=(\w+)/) ?? lines[i].match(/\[(default|insert|visual|replace|replace_one)\]/);
+      if (left >= 0 && lines[i][left] === "└") { bottom = i - 1; break; }
+      if (left < 0 && title(lines[i], "[▶─]")) { bottom = i - 1; break; }
+      const text = left >= 0 ? lines[i].slice(left + 1, right) : lines[i];
+      const m = text.match(/MODE=(\w+)/) ?? text.match(/\[(default|insert|visual|replace|replace_one)\]/);
       // The lowest: fish's earlier prompts keep the mode they had.
       if (m) mode = m[1];
     }
   }
+  const emacs = top >= 0 && /▶ \S*emacs/.test(lines[top]);
   return {
     rows: n,
     focusTop: top,
     focusBottom: bottom,
     mode,
-    minibuffer: s.cursor.position.row === n - 1 && /^M-x( |$)/.test(last),
+    emacs,
+    // Rex's M-x, or Emacs's own minibuffer (ESC then x is M-x there) on the
+    // pane's last row.
+    minibuffer: (s.cursor.position.row === n - 1 && /^M-x( |$)/.test(last)) ||
+      (emacs && s.cursor.position.row === bottom && (lines[bottom] ?? "").trim() !== ""),
     prefix: /^alt\+space( \S+)*-$/.test(last),
     hints: /^\d+ hints: type one/.test(last),
     visible: s.cursor.visible,
     style: s.cursor.visualStyle,
     row: s.cursor.position.row,
     col: s.cursor.position.column,
-    whole: /^ \S+ │/.test(lines[0] ?? "") && /│ focus /.test(lines[n - 2] ?? ""),
+    whole: /^ \S+ │/.test(lines[0] ?? "") && /│ agents \d+ │ blocked /.test(lines[n - 2] ?? ""),
   };
 });
 
@@ -75,6 +92,7 @@ function want(x: View): Want {
     case "insert": return { visible: false, style: null };
     case "bar": return { visible: true, style: "Bar" };
     case "normal": case "default": case "visual": case "replace": case "replace_one":
+    case "operator": case "motion":
       return { visible: true, style: "Underline" };
     default: return null;
   }
@@ -88,6 +106,15 @@ const matches = () => {
 // minibuffer asked for: a mode switch, a tab switch, an overlay closing or a
 // resize gives it back within a second.
 export const cursorFollowsTheMode = always(now(() => !matches()).implies(eventually(matches).within(1, "seconds")));
+
+// Emacs sends DECTCEM as a state starts, before it draws anything, so no
+// frame shows its insert state with a cursor. Before, a redisplay inside the
+// command left the cursor visible until the next key, which the rule above
+// misses: Bombadil always types again within the second.
+export const emacsInsertHasNoCursor = always(() => {
+  const x = v();
+  return !(x.emacs && x.whole && !x.minibuffer && x.mode === "insert" && x.visible);
+});
 
 // The fixture runs: the focused pane shows its mode, so the rules above are
 // not met by default.
@@ -109,7 +136,9 @@ const key = (k: string) => ({ TypeText: { Regexp: k.replace(/[.\[\]()?*+|^$\\]/g
 
 export const inPane = weighted([
   [6, actions(() => [key("i"), key(ESC), key("a"), key("q"), key("v"), key("x")])],
-  [4, actions(() => [key(AS + "t1"), key(AS + "t2"), key(AS + "t3")])],
+  // Every way into insert state in Emacs (fish and modal.bb take some too).
+  [5, actions(() => [key("o"), key("O"), key("A"), key("I"), key("cc"), key("C"), key("s"), key("gi"), key("cw")])],
+  [4, actions(() => [key(AS + "t1"), key(AS + "t2"), key(AS + "t3"), key(AS + "t4")])],
   [2, actions(() => [key(MX)])],
   [2, actions(() => [key(AS)])],
   [1, actions(() => [key(AS + "sl")])],

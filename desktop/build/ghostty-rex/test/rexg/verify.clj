@@ -759,9 +759,27 @@
                :layout {:block {:flavor "com.superlogical.terminal.shell"
                                 :options {:command ["sh" "-c" (str "printf '\\033]7501;state=" state ":app=" app "\\033\\\\'; exec sleep 100000")]}}}}))))
 
+(defn emacs-cursor-cmd
+  "Terminal Emacs for cursor.ts: evil and evil-terminal-cursor-changer from
+  Doom's straight build for this Emacs (the newest when none matches), then
+  the checkout's cursor.el."
+  []
+  ;; The profile's Emacs itself: ~/.local/bin/emacs is a bb script, and a
+  ;; pane's PATH has no bb.
+  (let [profile (fs/path (System/getProperty "user.home") ".guix-home" "profile" "bin" "emacs")
+        emacs (str (fs/canonicalize (if (fs/exists? profile) profile (fs/which "emacs"))))
+        version (str/trim (:out (p/sh emacs "--batch" "--eval" "(princ emacs-version)")))
+        straight (fs/path (System/getProperty "user.home") ".config" "emacs" ".local" "straight")
+        build (or (first (filter fs/exists? [(fs/path straight (str "build-" version))]))
+                  (last (sort (map str (fs/glob straight "build-*")))))]
+    (when-not build (throw (ex-info (str "no Doom straight build under " straight) {})))
+    [emacs "-nw" "-Q" "--eval" (str "(setq emacs-cursor-straight \"" build "\")")
+     "-l" (str (fs/path here "test" "rexg" "emacs-cursor.el"))]))
+
 (defn- cursor-fixture!
   "cursor.ts's session: modal.bb in tabs 1 and 2, fish with the shipped vi
-  cursor and a mode prompt in tab 3."
+  cursor and a mode prompt in tab 3, and in tab 4 terminal Emacs with evil and
+  the person's cursor.el (test/rexg/emacs-cursor.el)."
   [s]
   (let [modal [(str (fs/which "bb")) (str (fs/path here "test" "rexg" "modal.bb"))]
         fish [(str (fs/which "fish")) "--no-config" "-C"
@@ -771,7 +789,7 @@
                    ;; Setting fish_key_bindings under -C comes too early to take.
                    "; fish_vi_key_bindings; fish_vi_cursor")]]
     (apply ts/rex! s "new" "cur" "--keep-open" "--shell" "none" "--" modal)
-    (doseq [[label cmd] [["modal2" modal] ["fish" fish]]]
+    (doseq [[label cmd] [["modal2" modal] ["fish" fish] ["emacs" (emacs-cursor-cmd)]]]
       (ts/rex! s "api" "call" "-s" "cur" "session.new_window"
                (json/generate-string
                 {:label label :focus false

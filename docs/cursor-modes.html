@@ -35,8 +35,8 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 
 <h2>Where it applies</h2>
 <div class='table'><table><tr><th>Place</th><th>Insert</th><th>Normal and others</th><th>How</th></tr>
-<tr><td>Doom Emacs, GUI</td><td>none</td><td>underscore</td><td><code>evil-*-state-cursor</code> in desktop/configs/doom/config.el. Emacs here is emacs-no-x, so this only matters if a GUI build comes back.</td></tr>
-<tr><td>Doom Emacs in a terminal (Ghostty, Herdr, Rex)</td><td>none</td><td>underscore</td><td>evil-terminal-cursor-changer sends the shape. A new advice also sends show and hide (DECTCEM) to match <code>cursor-type</code>, because etcc does not send them for a nil cursor.</td></tr>
+<tr><td>Doom Emacs, GUI</td><td>none</td><td>underscore</td><td><code>evil-*-state-cursor</code> in desktop/configs/doom/cursor.el. Emacs here is emacs-no-x, so this only matters if a GUI build comes back.</td></tr>
+<tr><td>Doom Emacs in a terminal (Ghostty, Herdr, Rex)</td><td>none</td><td>underscore</td><td>evil-terminal-cursor-changer sends the shape. desktop/configs/doom/cursor.el sends show and hide (DECTCEM) itself, because etcc does not send them for a nil cursor. It hides as soon as a state starts, from evil's entry hook, and it shows after the redisplay. See the o bug below.</td></tr>
 <tr><td>fish vi bindings</td><td>none</td><td>underscore</td><td>desktop/configs/fish/functions/fish_vi_cursor.fish hides the cursor with <code>ESC[?25l</code> and shows an underscore with <code>ESC[4 q</code>. A running command gets Ghostty's own cursor.</td></tr>
 <tr><td>Neovim</td><td>none</td><td>underscore</td><td><code>guicursor a:hor20,i-ci:ver25-HiddenCursor</code>. Also fixed: the colorscheme had been clearing HiddenCursor.</td></tr>
 <tr><td>IdeaVim</td><td>1 px bar</td><td>underscore</td><td>IdeaVim cannot hide the caret, so a 1 px bar is the closest it gets.</td></tr>
@@ -51,6 +51,9 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <li><b>ghostty-rex</b> (rexg-render) handled the underscore and DECTCEM, but the Quint model and the Bombadil spec found five cursor bugs, now fixed. They included a frame that mixed an old cursor with a new overlay, a cursor that vanished until the pane printed something, and a stale cursor after a tab switch. See /home/engstrand/guix/docs/ghostty-rex.html, section The cursor.</li>
 </ul>
 
+<h2>The o bug (W301)</h2>
+<p>In the bbh Router's composer, o left the cursor visible on the new line until you typed. Terminal Emacs hides its cursor only as a side effect of drawing text, and ends each terminal update by showing it unless the window's cursor is off. The old fix turned the window's cursor off in post-command-hook, which runs after the command. But evil's -- INSERT -- echo updates the terminal at once, inside the command, and that update ended by showing the cursor. In the composer the redisplay after the command had nothing to draw, so nothing hid the cursor again. In a file buffer the line numbers or mode line usually redraw, which hid it by luck. Any way into insert state could hit it: o, O, a, A, i, I, gi, c, cc, C, s and S. Now cursor.el hides the cursor, and sends the hide itself, as soon as insert state starts, before anything can redisplay. On Escape it shows the cursor after the redisplay, so no frame shows the cursor next to the old -- INSERT -- mode line. The bug was in Emacs, not in Ghostty, Herdr or Rex, so the Quint model did not change. This Emacs is emacs-no-x, so GUI frames do not apply; a GUI Emacs draws <code>cursor-type</code> itself.</p>
+
 <h2>Where you will not see where you type</h2>
 <p>Insert mode now has no cursor anywhere. You can't see where text will land after you move with arrows or the mouse in insert mode, or in a long fish command line, or after you click into a Chrome field before you type. Press Escape to see the underscore again. This is what you asked for, so I did not soften it.</p>
 
@@ -58,8 +61,10 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <ul>
 <li>A Quint model of the cursor across programs, panes, tabs, replays and overlays: desktop/build/ghostty-rex/verify/quint/cursor.qnt. It runs in make test, and make verify model-checks it.</li>
 <li>A Bombadil spec drives a real ghostty-rex with modal panes and fish switching modes, and judges every frame: desktop/build/ghostty-rex/test/bombadil/cursor.ts. It runs in make verify, or alone with bb bombadil:cursor.</li>
+<li>An ERT test, desktop/build/doom/cursor-test.el, runs cursor.el with Doom's evil and checks that each way into insert state hides the cursor without post-command-hook, and that Escape shows it again (make test, rule doom cursor).</li>
+<li>The Bombadil spec has a fourth tab with terminal Emacs, evil and cursor.el (desktop/build/ghostty-rex/test/rexg/emacs-cursor.el). It redisplays inside each command, and a strict rule says no frame shows Emacs's insert state with a cursor. It fails within seconds on the old code. The spec's title and status-line patterns had gone stale after T210, so before W301 it saw no mode and its frame rules never applied. They match the screen again.</li>
 <li>Screenshots of both modes for Doom in a terminal and in the GUI, fish, Neovim, Herdr and Rex are in the run's evidence directory:<br> /home/engstrand/.local/state/bbh/workflows/20261124-162923-828-change/evidence/shots </li>
-<li>make lint passes. make test passes except the keybindings check, which also fails on the main checkout: the kanata simulator cannot load libgcc_s.so.1.</li>
+<li>make lint and make test pass. The keybindings check failed because the kanata simulator, built under guix shell, has no runpath to libgcc_s.so.1. desktop/build/keybindings/kanata-check.bb now runs it with gcc-toolchain's lib (W301).</li>
 </ul>
 
 <h2>What to reload</h2>

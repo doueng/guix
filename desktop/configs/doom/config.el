@@ -52,52 +52,8 @@ This is a lightweight way to apply config changes without restarting Emacs."
 (dolist (hook '(tty-setup-hook window-setup-hook))
   (add-hook hook #'eng/enable-tty-mouse))
 
-(defvar eng/etcc--cursor-state (make-hash-table :test #'eq :weakness 'key))
-
-(defun eng/etcc--set-cursor-when-changed (fn &rest args)
-  "Call FN only when the selected frame's terminal cursor state changed,
-and keep the selected window's tty cursor shown or hidden as `cursor-type'."
-  (let* ((frame (selected-frame))
-         (blink (and etcc-use-blink (bound-and-true-p blink-cursor-mode)))
-         (color (and etcc-use-color (frame-parameter frame 'cursor-color)))
-         (cached (gethash frame eng/etcc--cursor-state)))
-    (unless (and cached
-                 (equal cursor-type (nth 0 cached))
-                 (eq blink (nth 1 cached))
-                 (equal color (nth 2 cached)))
-      (puthash frame (list (copy-tree cursor-type) blink color)
-               eng/etcc--cursor-state)
-      (apply fn args)))
-  (eng/etcc--set-visibility))
-
-;; T223: no cursor in insert, an underscore in the other modal states.
-;; Emacs state, which is not modal, keeps Doom's colored box.
-(after! evil
-  (setq evil-insert-state-cursor '(nil)
-        evil-normal-state-cursor 'hbar
-        evil-visual-state-cursor 'hbar
-        evil-replace-state-cursor 'hbar
-        evil-operator-state-cursor 'hbar
-        evil-motion-state-cursor 'hbar))
-
-(defun eng/etcc--set-visibility ()
-  "Hide the tty cursor for a nil `cursor-type'. evil-terminal-cursor-changer
-sends only a shape, and a tty redisplay ends by showing the cursor unless
-the selected window's cursor is off, which DECTCEM from Lisp cannot undo."
-  (unless (display-graphic-p)
-    (let ((show (and cursor-type t)))
-      (unless (eq show (internal-show-cursor-p))
-        (internal-show-cursor nil show)))))
-
-(after! evil-terminal-cursor-changer
-  ;; Rex panes say TERM_PROGRAM=rex, which etcc does not know, and an
-  ;; undetected terminal gets no shape at all. Every terminal here (Ghostty,
-  ;; Herdr, Rex) takes DECSCUSR.
-  (setq etcc-term-type-override 'ghostty)
-  (advice-remove #'etcc--set-cursor #'eng/etcc--set-cursor-when-changed)
-  (clrhash eng/etcc--cursor-state)
-  (advice-add #'etcc--set-cursor :around #'eng/etcc--set-cursor-when-changed)
-  (etcc--set-cursor))
+;; T223: no cursor in insert state, an underscore in the other modal states.
+(load (expand-file-name "cursor.el" eng/doom-config-dir) nil 'nomessage)
 
 (setq doom-theme 'doom-one)
 

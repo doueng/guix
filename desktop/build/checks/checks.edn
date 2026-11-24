@@ -73,6 +73,10 @@
   {:name "doom"
    :paths ["desktop/configs/doom/**" "desktop/build/doom/**"]
    :checks ["bb desktop/build/doom/doctor.bb"]}
+  {:name "doom cursor"
+   :paths ["desktop/configs/doom/cursor.el" "desktop/build/doom/cursor-test.el"]
+   :checks ["emacs --batch -l desktop/build/doom/cursor-test.el"]
+   :slow ["cd desktop/build/ghostty-rex && bb bombadil:cursor --time 120"]}
   {:name "doom env"
    :paths ["desktop/configs/doom/{cli,session-env}.el" "desktop/build/doom/session-env-test.el"]
    :checks ["emacs --batch -l desktop/build/doom/session-env-test.el"]}
