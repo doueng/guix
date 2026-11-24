@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name='description' content='Your Ghostty plus Rex terminal explained from the ground up in plain English: terminals, ptys, multiplexers, Herdr, Rex and each ghostty-rex piece, with pros and cons against plain Ghostty and Ghostty plus Herdr.'>
+<meta name='bbh-doc' content='T224'>
+<title>Ghostty plus Rex, from the ground up</title>
+<style>
+:root{--fg:#1c2230;--mut:#5d6678;--bg:#f7f6f2;--card:#fff;--line:#dedad0;--lap:#2f6f8f;--lapbg:#e6f0f5;--bld:#7a4fa0;--bldbg:#f0e9f6;--net:#2e7d4f;--netbg:#e4f3ea;--ext:#8a6a1f;--extbg:#f7efdc;--bad:#b3382c;--badbg:#f8e3e0;--hi:#f2b705}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:22px 16px 64px}
+h1{font-size:25px;line-height:1.25;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}h3{font-size:16.5px;margin:22px 0 6px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:14px}
+nav{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+nav a{color:var(--lap);text-decoration:none;margin-right:14px;font-weight:600}
+nav summary{cursor:pointer;color:var(--lap);font-weight:600}nav ol{margin:6px 0}nav li a{margin:0;font-weight:500}
+ul,ol{padding-left:22px}li{margin:3px 0}
+a{color:var(--lap);overflow-wrap:break-word}
+code{white-space:nowrap;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ece9e1;padding:1px 4px;border-radius:3px;overflow-wrap:break-word}
+pre{background:#ece9e1;border-radius:6px;padding:10px 12px;overflow-x:auto}pre code{background:none;padding:0}
+.cite{font:11.5px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.card.good{border-left:6px solid var(--net)}.card.warn{border-left:6px solid var(--ext)}.card.bad{border-left:6px solid var(--bad)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;border:1px solid var(--line);background:#faf9f5;vertical-align:1px}
+.tag.measured{background:var(--netbg);color:var(--net)}.tag.inferred{background:var(--lapbg);color:var(--lap)}.tag.guess{background:var(--extbg);color:var(--ext)}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#efece4}
+svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.split{grid-template-columns:1fr}}
+@media(max-width:480px){body{font-size:14.5px}main{padding:14px 12px 48px}h1{font-size:22px}}
+.so{background:#e4f3ea;border-left:5px solid #2e7d4f;border-radius:6px;padding:8px 12px;margin:12px 0;font-size:15px}
+svg{max-width:520px;margin:10px auto;display:block}
+svg .mono{font-family:ui-monospace,Menlo,monospace}
+pre{font-size:12px}pre code{white-space:pre-wrap;overflow-wrap:anywhere}.sub{overflow-wrap:anywhere}
+</style>
+</head>
+<body><main>
+<h1>Ghostty plus Rex, from the ground up</h1>
+<p class=sub>Twelve short steps, then a table and a verdict. Each step uses only the steps before it. Every command shown is safe: it only looks. Facts were checked against the code and this machine on 2026-11-24. Companion pieces: <a href='guix-explained.html'>Guix, from the ground up</a> and <a href='quint-explained.html'>Quint, from the ground up</a>.</p>
+
+<div class='card warn'><b>One correction first.</b> The brief called Ghostty plus Herdr your day-to-day default. On this machine the switch says <b>ghostty-rex</b>: <code>(define %terminal-mux 'ghostty-rex)</code> in /home/engstrand/guix/modules/engstrand/config.scm line 33, and <code>cat ~/.config/engstrand/mux</code> prints <code>ghostty-rex</code>. A ghostty-rex window has been running for almost two days. <span class='tag measured'>measured</span> Herdr 0.9.5 is still installed, one <code>make mux MUX=herdr</code> away. So below, Herdr is the setup you used until about T207 and can go back to.</div>
+
+<nav><details><summary>Contents</summary><ol>
+<li><a href=#s1>A terminal draws a grid of letters</a></li>
+<li><a href=#s2>The shell sits on the other end of a pty</a></li>
+<li><a href=#s3>Ghostty, alone</a></li>
+<li><a href=#s4>A multiplexer moves the shells out of the window</a></li>
+<li><a href=#s5>Why you want that</a></li>
+<li><a href=#s6>How Herdr does it</a></li>
+<li><a href=#s7>How Rex does it</a></li>
+<li><a href=#s8>Your ghostty-rex, piece by piece</a></li>
+<li><a href=#s9>A keypress, start to finish</a></li>
+<li><a href=#s10>Output, start to finish</a></li>
+<li><a href=#s11>See every piece yourself</a></li>
+<li><a href=#s12>The recent bugs, now easy to explain</a></li>
+<li><a href=#pc>Pros and cons, all three</a></li>
+<li><a href=#pick>When to pick which</a></li>
+</ol></details></nav>
+
+<h2 id=s1>1. A terminal draws a grid of letters</h2>
+<p>A terminal is just a program with a window. The window shows a grid: say 50 rows by 120 columns. Each square holds one letter, with a colour. That is all the terminal shows. No buttons, no pictures (mostly).</p>
+<p>Someone has to tell it what to put in the squares. That someone sends it a stream of bytes. Most bytes are plain letters: <code>h</code>, <code>i</code>. The terminal puts each one in the next square and moves the cursor on.</p>
+<p>Some bytes are orders instead. They start with the Escape byte. <code>ESC [ 31 m</code> means “red from now on”. <code>ESC [ 5 ; 10 H</code> means “jump to row 5, column 10”. <code>ESC [ ?25 l</code> means “hide the cursor”. These orders are called <b>escape codes</b>. The part of a terminal that reads them and updates the grid is called the <b>VT parser</b> (VT after old DEC terminals).</p>
+<div class=so><b>So:</b> a terminal turns a stream of bytes, letters plus escape codes, into a grid of coloured letters.</div>
+
+<h2 id=s2>2. The shell sits on the other end of a pty</h2>
+<p>Where do the bytes come from? From a program, like fish, Vim or pi. The terminal and the program are two separate programs. They talk through a <b>pty</b>, a “pseudo-terminal”. Think of it as a two-way pipe the kernel provides.</p>
+<ul><li>The program writes bytes into its end. The terminal reads them and draws.</li>
+<li>You press a key. The terminal turns it into bytes (<code>a</code>, or <code>ESC [ A</code> for Up) and writes them into its end. The program reads them.</li></ul>
+<svg viewBox='0 0 340 92' role=img aria-label='terminal, pty, program'>
+<rect x=8 y=22 width=100 height=48 rx=6 fill='#e6f0f5' stroke='#2f6f8f'/><text x=58 y=42 text-anchor=middle font-size=13>terminal</text><text x=58 y=59 text-anchor=middle font-size=10 fill='#5d6678'>draws the grid</text>
+<rect x=135 y=30 width=70 height=32 rx=6 fill='#f7efdc' stroke='#8a6a1f'/><text x=170 y=50 text-anchor=middle font-size=13>pty</text>
+<rect x=232 y=22 width=100 height=48 rx=6 fill='#e4f3ea' stroke='#2e7d4f'/><text x=282 y=42 text-anchor=middle font-size=13>fish, pi, vim</text><text x=282 y=59 text-anchor=middle font-size=10 fill='#5d6678'>does the work</text>
+<path d='M108 38 H135 M205 38 H232' stroke='#2f6f8f' stroke-width=2/><text x=170 y=18 text-anchor=middle font-size=10 fill='#2f6f8f'>keys →</text>
+<path d='M108 56 H135 M205 56 H232' stroke='#2e7d4f' stroke-width=2/><text x=170 y=84 text-anchor=middle font-size=10 fill='#2e7d4f'>← output</text>
+</svg>
+<p>The key fact: <b>whoever holds the terminal end of the pty keeps the program alive</b>. If that holder quits, the kernel tells the program “your terminal hung up”, and the program usually exits.</p>
+<p>Try it. In any shell, <code>tty</code> prints your pty, like <code>/dev/pts/7</code>.</p>
+<div class=so><b>So:</b> the terminal and the program are two programs joined by a pty, and the program lives only as long as someone holds the other end.</div>
+
+<h2 id=s3>3. Ghostty, alone</h2>
+<p>Ghostty is a terminal (step 1) that is fast and accurate. It draws with the graphics card, it understands nearly every escape code, and it has extras such as the Kitty keyboard protocol (keys like Ctrl+Enter arrive whole) and pictures in the terminal.</p>
+<p>Ghostty also has its own <b>tabs and splits</b>. Each tab or split opens its own pty and starts its own shell. Ghostty holds every one of those ptys.</p>
+<p>That is “plain Ghostty”. It is simple: one program, nothing in between. A key goes from Ghostty straight into the pty.</p>
+<p>The catch follows from step 2. Ghostty holds the ptys, so <b>when the window closes, every shell in it hangs up</b>. Ghostty crashes, you quit it, you log out, a new Ghostty build wants a restart: your pi session, your long test run and your Emacs frames all go. Nothing can reattach later, because nothing kept them.</p>
+<div class=so><b>So:</b> plain Ghostty is the shortest path from key to program, but the window and the programs live and die together.</div>
+
+<h2 id=s4>4. A multiplexer moves the shells out of the window</h2>
+<p>A <b>multiplexer</b> fixes that with one idea. Let a <i>different</i> program hold the ptys. A quiet background program, a <b>server</b>, that no window owns.</p>
+<p>The window is now just a <b>viewer</b>, called a <b>client</b>. It connects to the server, shows what the programs print, and passes your keys on. Leaving a server like this is called <b>detaching</b>. Connecting again is <b>attaching</b>.</p>
+<svg viewBox='0 0 340 132' role=img aria-label='client, server, many ptys'>
+<rect x=8 y=40 width=92 height=48 rx=6 fill='#e6f0f5' stroke='#2f6f8f'/><text x=54 y=60 text-anchor=middle font-size=13>window</text><text x=54 y=77 text-anchor=middle font-size=10 fill='#5d6678'>client: views</text>
+<rect x=126 y=30 width=92 height=68 rx=6 fill='#f0e9f6' stroke='#7a4fa0'/><text x=172 y=58 text-anchor=middle font-size=13>server</text><text x=172 y=75 text-anchor=middle font-size=10 fill='#5d6678'>holds the ptys</text>
+<path d='M100 64 H126' stroke='#5d6678' stroke-width=2 stroke-dasharray='4 3'/><text x=113 y=110 text-anchor=middle font-size=10 fill='#5d6678'>link can drop</text>
+<g font-size=11 text-anchor=middle><rect x=250 y=6 width=82 height=26 rx=5 fill='#e4f3ea' stroke='#2e7d4f'/><text x=291 y=23>fish</text>
+<rect x=250 y=38 width=82 height=26 rx=5 fill='#e4f3ea' stroke='#2e7d4f'/><text x=291 y=55>pi</text>
+<rect x=250 y=70 width=82 height=26 rx=5 fill='#e4f3ea' stroke='#2e7d4f'/><text x=291 y=87>emacs-bbh</text>
+<rect x=250 y=102 width=82 height=26 rx=5 fill='#e4f3ea' stroke='#2e7d4f'/><text x=291 y=119>jjui</text></g>
+<path d='M218 50 L250 19 M218 58 L250 51 M218 70 L250 83 M218 78 L250 115' stroke='#7a4fa0' stroke-width=1.5/>
+</svg>
+<p>Four things fall out of that one idea:</p>
+<ol><li><b>Sessions outlive the window.</b> Close the window. The server still holds the ptys, so nothing hangs up.</li>
+<li><b>Reattach.</b> Open a new window, connect, and everything is where you left it.</li>
+<li><b>Panes and tabs drawn inside one terminal.</b> The client can draw several programs side by side in one grid, with a tab bar and borders made of letters. The terminal does not need its own tabs at all.</li>
+<li><b>Remote.</b> The server can run on another machine. You connect over the network, and your work there survives a dropped Wi-Fi link.</li></ol>
+<p>tmux and screen are old multiplexers. Herdr and Rex are newer ones, built with coding agents in mind.</p>
+<div class=so><b>So:</b> a multiplexer splits “holding the programs” (server) from “showing them” (client), so the window becomes disposable.</div>
+
+<h2 id=s5>5. Why you want that</h2>
+<ul><li><b>Agents run for hours.</b> pi and the bbh agent shells work while you do other things. A window crash must not kill them.</li>
+<li><b>bbh lives in a tab.</b> The bbh tab runs <code>emacs-bbh</code>, a terminal frame of the bbh-super Emacs, where Workers report and you answer.</li>
+<li><b>You need to know who is waiting.</b> With ten agents, you want a list: blocked, failed, done. Only something that sees every pane can make it.</li>
+<li><b>Upgrades.</b> <code>make home</code> brings new builds. You want to restart the viewer to pick up its new code, without restarting your work.</li>
+<li><b>The phone.</b> Honest note: today the phone reaches your agents through bbh web (/home/engstrand/guix/desktop/build/bbh/src/bbh/web.clj), not through any multiplexer. <span class='tag measured'>measured</span> A multiplexer would matter for the phone only if you wanted to see the actual panes from it.</li></ul>
+<div class=so><b>So:</b> long-lived agents and a status list are the real reasons; the window must be cheap to lose.</div>
+
+<h2 id=s6>6. How Herdr does it</h2>
+<p>Herdr is one program, <code>herdr</code>, from the herdrdev project (Apache-2.0). We install their ready-built release, 0.9.5. <span class='tag measured'>measured</span></p>
+<ul><li>The first <code>herdr</code> you run starts a <b>server</b> in the background. It holds every pane's pty (step 4).</li>
+<li>The same <code>herdr</code>, running inside a Ghostty window, is the <b>client</b>. It draws everything as letters in Ghostty's grid: the tab bar, the borders, each pane, the popups.</li>
+<li>To draw a pane, Herdr must understand that pane's escape codes. So Herdr has its own VT parser per pane (step 1), and Ghostty only shows the finished, combined grid.</li></ul>
+<p>Herdr knows about agents by itself. It sees pi or Claude in a pane, tracks idle, working, blocked and done, and can resume them after a restart. Your Emacs tells it about bbh with <code>herdr pane report-agent</code>. It also does <b>remote</b> out of the box: <code>herdr --remote HOST</code> or <code>herdr machine add</code> over SSH.</p>
+<p>Your additions are on the outside: a <code>Ctrl+b</code> prefix in /home/engstrand/guix/desktop/configs/herdr/config.toml, Hyprland sending Alt+Space as <code>Ctrl+b Space</code>, and three small Babashka plugins (sesh, tiny-fingers, jjui) packaged in /home/engstrand/guix/modules/engstrand/packages/herdr.scm</p>
+<div class=so><b>So:</b> Herdr is a ready-made server plus a text-drawing client; you configure it and add plugins, but its core is someone else's compiled program.</div>
+
+<h2 id=s7>7. How Rex does it</h2>
+<p>Rex is a multiplexer from Superlogical. It is one program, <code>rex</code>, a Go binary. It is a preview build (0.1.0-preview.21) with no published license, so it is for private use. <span class='tag measured'>measured</span></p>
+<p>Rex uses its own words for the same things:</p>
+<div class=table><table><tr><th>Rex says</th><th>Herdr says</th><th>Means</th></tr>
+<tr><td>session</td><td>workspace</td><td>a set of tabs, like your <code>main</code></td></tr>
+<tr><td>window</td><td>tab</td><td>one screenful of panes</td></tr>
+<tr><td>block</td><td>pane</td><td>one pty with one program</td></tr></table></div>
+<p>The server, <code>rex server run</code>, holds every block. It does one extra thing: it keeps its <b>own copy of each block's screen</b>, with its own VT parser. That copy lets it do two useful things:</p>
+<ul><li><b>Answer programs.</b> Some programs ask the terminal “where is the cursor?” or “what colour is the background?”. Rex answers, so the answer never depends on which window is open.</li>
+<li><b>Snapshots.</b> When a client connects to a block, Rex first sends a <i>picture</i> of the current screen, then the live bytes. So attaching is instant: no blank pane, no replay of hours of output.</li></ul>
+<p>Clients talk to the server through a socket file, <code>/run/user/1000/rex/server.sock</code>, in two kinds of connection:</p>
+<ul><li>One <b>control</b> connection: requests (“split this block”, “rename this tab”), replies, and events (“a block's program exited”, “pi is now blocked”).</li>
+<li>One <b>data stream</b> per visible block: the snapshot, then the program's output bytes.</li></ul>
+<p>Agents report their state by printing a special escape code, OSC 7501, into their own pane, for example <code>state=working:app=bbh</code>. Rex stores it on the block and announces it as an event.</p>
+<p>The catch: Rex's main client is a macOS app. Its Linux client is not public. <span class='tag measured'>measured</span> So on Linux, Rex is a server with no screen. You have to bring the viewer. That is what ghostty-rex is.</p>
+<p>Try: <code>rex server status</code> (version, pid, log), <code>rex session list</code> (you have <code>main</code>, <code>personal-site</code>, <code>quiet-tundra</code>), <code>rex api list</code> (about 99 methods you can call).</p>
+<div class=so><b>So:</b> Rex is a server that keeps a live copy of every screen and speaks a clean API, but on Linux it ships no viewer, so you wrote one.</div>
+
+<h2 id=s8>8. Your ghostty-rex, piece by piece</h2>
+<p>Now the viewer you built. It has six pieces. Here is the trick that makes it click: <b>inside the Ghostty window, the “program” is not a shell. It is your client.</b> Ghostty's pty connects to a Babashka program, and that program connects to Rex.</p>
+<h3>a. The Ghostty window</h3>
+<p>A normal Ghostty, started with its own class, <code>dev.engstrand.Rex</code>, and an extra config, /home/engstrand/guix/desktop/configs/ghostty-rex/ghostty, whose <code>keybind = clear</code> removes Ghostty's tab and split keys. It keeps only copy, paste, font size and config reload. Every other key goes through to the client. Ghostty's job here is to show a grid and send keys. Nothing more.</p>
+<h3>b. bb attach, the brain</h3>
+<p><code>desktop/bin/ghostty-rex attach</code> starts <code>bb … attach</code> from /home/engstrand/guix/desktop/build/ghostty-rex/src/rexg/ (about 1,900 lines of Clojure). It runs straight from the checkout, so an edit needs no build. It reads your keys, talks to Rex over the control connection, opens a data stream per visible pane, and decides the layout, the tab bar, the status line and where the cursor goes. It does not draw.</p>
+<h3>c. rexg-render, the painter</h3>
+<p>A small C program, /home/engstrand/guix/desktop/build/ghostty-rex/csrc/rexg-render.c (about 700 lines). It uses <b>libghostty-vt</b>, the VT parser from inside Ghostty, packaged on its own. It keeps one little terminal per visible pane, feeds each one that pane's bytes, then glues them into one big grid with the borders and bars bb asked for. It writes <i>only the squares that changed</i> to Ghostty.</p>
+<p>Why C and not Clojure? Parsing every byte of every pane is the hot loop. Babashka has no way to call a C library, so the parser runs in its own process and bb sends it short text lines. <span class='tag inferred'>inferred</span> from /home/engstrand/guix/docs/rex-client-languages.html</p>
+<h3>d. The sidecar, the command layer</h3>
+<p>Loaded into the same bb process from /home/engstrand/guix/desktop/build/rexmux/sidecar/ (about 1,200 lines). It owns M-x, the leader keys, the agent list and the bbh commands. It runs one child, <code>rex events --all --json</code>, to hear every agent report, ranks them (blocked first, then error, then unseen done), and sends desktop notifications such as “bbh needs you”.</p>
+<h3>e. The Alt+Space keys</h3>
+<p>Alt+Space is your one prefix. Hyprland checks /home/engstrand/guix/desktop/configs/keybindings/leader.edn: for the class <code>dev.engstrand.Rex</code> it says <code>:pass</code>, so the key goes to the window. bb then reads the next keys from the same file: <code>w v</code> splits right, <code>t r</code> renames the tab, <code>u</code> jumps to the next blocked agent, <code>i</code> floats the bbh inbox. A menu shows what can follow. Ctrl+b is free again for fish and Emacs.</p>
+<h3>f. The Cmd+Space launcher</h3>
+<p>Cmd+Space runs <code>~/.local/bin/palette</code>. When the Rex window has focus, it asks Rex what the client offers and what program runs in the focused pane, then lists that program's entries, the leader rows (with their Alt+Space keys, so you learn them), and every M-x command. Picking one runs <code>rex -C ghostty-rex do ACTION</code>: Rex passes it to your client, which does it. Cmd+Return, E, D and G switch tabs the same way.</p>
+<div class=so><b>So:</b> Ghostty shows, bb decides, rexg-render paints, the sidecar runs commands and watches agents, and Rex holds the programs.</div>
+
+<h2 id=s9>9. A keypress, start to finish</h2>
+<svg viewBox='0 0 360 304' role=img aria-label='The ghostty-rex pieces and the flow of keys and output' style='max-width:560px'>
+<defs><marker id=ab viewBox='0 0 10 10' refX=9 refY=5 markerWidth=6 markerHeight=6 orient=auto-start-reverse><path d='M0 0 L10 5 L0 10 z' fill='#2f6f8f'/></marker>
+<marker id=ag viewBox='0 0 10 10' refX=9 refY=5 markerWidth=6 markerHeight=6 orient=auto-start-reverse><path d='M0 0 L10 5 L0 10 z' fill='#2e7d4f'/></marker></defs>
+<g font-size=12 text-anchor=middle>
+<rect x=60 y=6 width=240 height=36 rx=6 fill='#e6f0f5' stroke='#2f6f8f'/><text x=180 y=22>Ghostty window</text><text x=180 y=36 font-size=10 fill='#5d6678'>dev.engstrand.Rex: shows, sends keys</text>
+<rect x=8 y=96 width=160 height=50 rx=6 fill='#f7efdc' stroke='#8a6a1f'/><text x=88 y=114>bb attach + sidecar</text><text x=88 y=129 font-size=10 fill='#5d6678'>decides layout, keys, M-x</text><text x=88 y=141 font-size=10 fill='#5d6678'>Clojure, no build</text>
+<rect x=192 y=96 width=160 height=50 rx=6 fill='#f0e9f6' stroke='#7a4fa0'/><text x=272 y=114>rexg-render</text><text x=272 y=129 font-size=10 fill='#5d6678'>libghostty-vt per pane</text><text x=272 y=141 font-size=10 fill='#5d6678'>paints changed cells, C</text>
+<rect x=60 y=192 width=240 height=40 rx=6 fill='#f8e3e0' stroke='#b3382c'/><text x=180 y=209>Rex server</text><text x=180 y=224 font-size=10 fill='#5d6678'>holds ptys, keeps a screen copy</text>
+<rect x=60 y=266 width=240 height=32 rx=6 fill='#e4f3ea' stroke='#2e7d4f'/><text x=180 y=287>fish, pi, emacs-bbh, jjui</text>
+</g>
+<g font-size=10>
+<path d='M120 42 L100 96' stroke='#2f6f8f' stroke-width=2 marker-end='url(#ab)'/><text x=8 y=66 fill='#2f6f8f'>1 key bytes</text>
+<path d='M100 146 L120 192' stroke='#2f6f8f' stroke-width=2 marker-end='url(#ab)'/><text x=8 y=174 fill='#2f6f8f'>2 client.key</text>
+<path d='M130 232 L130 266' stroke='#2f6f8f' stroke-width=2 marker-end='url(#ab)'/><text x=122 y=253 fill='#2f6f8f' text-anchor=end>3 into pty</text>
+<path d='M230 266 L230 232' stroke='#2e7d4f' stroke-width=2 marker-end='url(#ag)'/><text x=238 y=253 fill='#2e7d4f'>4 output</text>
+<path d='M240 192 L260 146' stroke='#2e7d4f' stroke-width=2 marker-end='url(#ag)'/><text x=268 y=174 fill='#2e7d4f'>5 data stream</text>
+<path d='M260 96 L240 42' stroke='#2e7d4f' stroke-width=2 marker-end='url(#ag)'/><text x=268 y=66 fill='#2e7d4f'>6 changed cells</text>
+<path d='M168 121 H192' stroke='#8a6a1f' stroke-width=2 stroke-dasharray='4 3' marker-end='url(#ab)'/><text x=180 y=166 fill='#8a6a1f' text-anchor=middle>layout,</text><text x=180 y=178 fill='#8a6a1f' text-anchor=middle>bars, cursor</text>
+</g>
+</svg>
+<p class=sub>Blue: your key going down. Green: the program's output coming back up. Dashed: bb telling rexg-render what to draw around the panes. Step 5 physically passes through a reader thread in the bb process, which hands the bytes straight to rexg-render without looking at them.</p>
+<p>You type <code>l</code> in the fish pane:</p>
+<ol><li><b>Hyprland</b> has nothing bound to it, so the key goes to the focused window.</li>
+<li><b>Ghostty</b> turns it into bytes (Kitty keyboard protocol) and writes them into <i>its</i> pty. On the other end sits bb.</li>
+<li><b>bb</b> decodes the key. Is it Alt+Space, the start of a leader sequence? Ctrl+h/j/k/l to move between panes? No. So it sends <code>client.key</code> for the focused block over the control connection.</li>
+<li><b>Rex</b> turns the key into the bytes that program expects and writes them into fish's pty.</li>
+<li><b>fish</b> reads <code>l</code>.</li></ol>
+<p>If you had typed Alt+Space w v instead, step 3 would find the leader sequence, and the sidecar would ask Rex to split the pane. Rex does it and sends an event. bb learns the new layout and tells rexg-render.</p>
+<div class=so><b>So:</b> a key makes three hops (Ghostty, bb, Rex) before the program gets it; plain Ghostty makes one.</div>
+
+<h2 id=s10>10. Output, start to finish</h2>
+<ol><li><b>fish</b> prints <code>l</code> (its echo) into its pty.</li>
+<li><b>Rex</b> reads it, updates its own copy of the screen, and sends it on that block's data stream.</li>
+<li><b>bb</b>'s reader thread for that stream passes the bytes straight to rexg-render, tagged with the pane ID. Output never waits behind keys.</li>
+<li><b>rexg-render</b> feeds them to that pane's libghostty-vt terminal, works out which squares of the big grid changed, and writes just those as escape codes to Ghostty.</li>
+<li><b>Ghostty</b> parses those escape codes and draws.</li></ol>
+<p>Count the VT parsers one byte meets. Plain Ghostty: one (Ghostty). Herdr: two (Herdr's, then Ghostty's). ghostty-rex: three (Rex's copy, rexg-render's, then Ghostty's). Each is fast, but each is also a place where two parsers can disagree about something small, like where the cursor is.</p>
+<div class=so><b>So:</b> output climbs back the same chain, parsed three times, and bb only steers; it never touches the bytes.</div>
+
+<h2 id=s11>11. See every piece yourself</h2>
+<div class=table><table><tr><th>To see</th><th>Type</th></tr>
+<tr><td>the chain of processes</td><td><code>ps -eo pid,ppid,rss,args | rg 'dev.engstrand|ghostty-rex|rexg-render|rex '</code></td></tr>
+<tr><td>the server: version, pid, log</td><td><code>rex server status</code></td></tr>
+<tr><td>who is attached (one ghostty-rex per window)</td><td><code>rex client list</code></td></tr>
+<tr><td>your sessions</td><td><code>rex session list</code></td></tr>
+<tr><td>what you can ask Rex</td><td><code>rex api list</code></td></tr>
+<tr><td>a pane's screen, as text</td><td><code>rex capture -s main -b ID</code> (ID from a pane's title row)</td></tr>
+<tr><td>what runs old code after an upgrade</td><td><code>make status</code></td></tr>
+<tr><td>which setup is chosen</td><td><code>cat ~/.config/engstrand/mux</code></td></tr>
+<tr><td>reload the client, same session</td><td><code>rex -C ghostty-rex do mx.client.reload</code></td></tr></table></div>
+<p>On this machine just now, the first line showed <span class='tag measured'>measured</span>:</p>
+<pre><code>1585     1  47 MB  rex server run --listen unix:///run/user/1000/rex/server.sock …
+3253  1220  35 MB  ghostty --class=dev.engstrand.Rex … -e …/ghostty-rex attach
+3280  3253 100 MB    bb --config …/ghostty-rex/bb.edn attach --render …/rexg-render
+21619 3280  10 MB      rexg-render
+21626 3280  32 MB      rex --autostart=false events --all --json</code></pre>
+<p>Read it as the diagram: Ghostty is the parent of bb (bb is its “shell”), bb is the parent of rexg-render and the events follower, and the Rex server's parent is PID 1. It belongs to no window, which is exactly why closing the window loses nothing.</p>
+<div class=so><b>So:</b> five processes, one tree per window plus one server, and each is a command away.</div>
+
+<h2 id=s12>12. The recent bugs, now easy to explain</h2>
+<p>Every bug of the last week lands on one of the pieces above. That is the payoff of knowing them.</p>
+<div class='card bad'><b>Red “local not connected”.</b> The control connection (step 7) is bb's lifeline to Rex. When the server stops, for example when a new <code>rex</code> replaces it after <code>make home</code>, the line drops. The client shows the red line, tries again after 0.25 s, doubling up to every 4 s, starts the server if needed, and reattaches the same session. That part is by design. The bug was different: two tries could both succeed. The client kept one and closed the other, but the “closed” notice from the spare one was taken to mean the <i>live</i> one had closed, so the client dropped a working connection. T211 gave each try an id so stale notices change nothing, and T220 model-checked it: /home/engstrand/guix/docs/quint-explained.html rebuilds this exact race in step 12.</div>
+<div class='card bad'><b>Stale processes after make switch or make home.</b> Guix puts new builds in new folders, and a running process keeps the old one (see <a href='guix-explained.html'>Guix, from the ground up</a>). ghostty-rex has five long-running processes instead of one, so there is more that can be stale. <code>make status</code> names each one, and <code>make refresh</code> reloads the bb client in place, on the same session, through <code>mx.client.reload</code> (T218). The Rex server is yours to restart, since stopping it ends its programs. Rex then brings each tab back as bare bash, and the client starts fish or the tab's program again, such as <code>pi --continue</code> (T210). A related one, T219: a server the client started got a trimmed environment without <code>SSL_CERT_FILE</code>, so git and curl in panes failed. It now gets the whole session environment, and <code>make status</code> flags a server without it.</div>
+<div class='card bad'><b>Cursor weirdness.</b> In plain Ghostty, the program moves Ghostty's cursor directly. In ghostty-rex, <i>bb decides</i> where the one visible cursor goes (in the focused pane, in the M-x prompt, or hidden) and tells rexg-render. So every cursor case is your code, and three parsers must agree (step 10). One fixed case: a pane that hid its cursor with <code>ESC [ ?25 l</code> still showed one. T210 fixed it and added an end-to-end check.</div>
+<div class='card bad'><b>Slow project switch.</b> Switching to the pi tab took about 10 seconds. The cause was the snapshot (step 7): pi's screen history held 51 MB of inline images, and rexg-render read it <i>one byte per system call</i>, 46 million calls, drawing nothing until it was done. Now it reads in large chunks without blocking, paints the visible screen first, and fills in history after. A test requires a pi tab with a 24 MB image to paint within 300 ms (T210). <span class='tag measured'>measured</span> by the commit and its test</div>
+<p>Notice the pattern. None of these could happen in plain Ghostty, which has no connection, one process, one parser and no snapshots. Herdr has the same <i>kinds</i> of parts, but they are inside a program someone else has run for longer, so you see its bugs less and fix them never.</p>
+<div class=so><b>So:</b> the bugs come from the extra parts and from the code being one week old; each was fixed with a test, but more of that kind will come.</div>
+
+<h2 id=pc>Pros and cons, all three</h2>
+<p class=sub>Tags: <span class='tag measured'>measured</span> read in code or run here, <span class='tag inferred'>inferred</span> reasoned from that, <span class='tag guess'>guess</span> an estimate. Green cells are where a setup is best.</p>
+<div class=table><table>
+<tr><th></th><th>Plain Ghostty</th><th>Ghostty + Herdr</th><th>ghostty-rex</th></tr>
+<tr><th>Key path</th><td style='background:#e4f3ea'>Ghostty → pty. One hop, one parser.</td><td>Ghostty → herdr → pty. Two parsers.</td><td>Ghostty → bb → Rex → pty. Three parsers. <span class='tag inferred'>inferred</span></td></tr>
+<tr><th>Latency</th><td style='background:#e4f3ea'>As fast as a terminal gets.</td><td>Not measured here; feels instant. <span class='tag guess'>guess</span></td><td>Not measured end to end. A simpler Ghostty-to-Rex spike took 0.8–2.4 ms from key to pty <span class='tag measured'>measured</span> (rex-client-languages.html); the real client adds the bb step. Feels instant. <span class='tag guess'>guess</span></td></tr>
+<tr><th>Memory</th><td style='background:#e4f3ea'>One Ghostty.</td><td>Window 15 MB + herdr 26 MB (PSS, W258). <span class='tag measured'>measured</span></td><td>About 180 MB per window (Ghostty 35, bb 100, rexg-render 10, events 32) plus the 47 MB server (RSS, today). <span class='tag measured'>measured</span></td></tr>
+<tr><th>Big tab switch</th><td>n/a</td><td>No known problem.</td><td>Was 10 s, now under 300 ms by test. <span class='tag measured'>measured</span></td></tr>
+<tr><th>Reliability</th><td style='background:#e4f3ea'>Fewest parts. But a crash or quit loses everything.</td><td>Mature released program; few bugs of yours. Upstream bugs wait for upstream.</td><td>Newest code: four bug classes in a week (above), each fixed with a test; Rex itself is a preview. <span class='tag measured'>measured</span></td></tr>
+<tr><th>After make switch / home</th><td>Restart the window and lose the shells.</td><td>Window and herdr server; stopping the server ends programs, Herdr resumes agents.</td><td>Five processes to keep fresh; <code>make status</code> and <code>make refresh</code> handle the client; the server restart revives tabs (T210).</td></tr>
+<tr><th>Persistence</th><td>None.</td><td style='background:#e4f3ea'>Yes; resumes agents after restart.</td><td style='background:#e4f3ea'>Yes; revives startup tabs and <code>pi --continue</code> after a reboot.</td></tr>
+<tr><th>Agents</th><td>None; bells only.</td><td>Built in: detects pi and Claude, states, picker.</td><td style='background:#e4f3ea'>OSC 7501 from Rex, ranked list, status line, Alt+Space u, notifications, bbh inbox and say. Your rules, your code.</td></tr>
+<tr><th>Remote</th><td>ssh in a tab; dies with the tab.</td><td style='background:#e4f3ea'>Built in over SSH: <code>herdr --remote</code>, <code>herdr machine add</code>.</td><td>Rex can listen over SSH or Tailscale, but your client only knows the local server today. <span class='tag measured'>measured</span> (config.edn)</td></tr>
+<tr><th>Tiny fingers (hint copy)</th><td>No. <span class='tag inferred'>inferred</span></td><td>Yes, bb plugin.</td><td>Yes, built in (hints.clj).</td></tr>
+<tr><th>Tab naming</th><td>Titles come from the program; nothing keeps them. <span class='tag inferred'>inferred</span></td><td>Rename, kept by the server.</td><td>Alt+Space t r, kept by Rex.</td></tr>
+<tr><th>Pictures in panes</th><td style='background:#e4f3ea'>Yes, full Kitty graphics.</td><td>Depends on Herdr's support. <span class='tag guess'>guess</span></td><td>No: Kitty graphics inside panes are not shown. <span class='tag measured'>measured</span> (ghostty-rex.html)</td></tr>
+<tr><th>Cmd+Space knows the pane</th><td>No.</td><td>Partly, through pickers.</td><td style='background:#e4f3ea'>Yes: the focused program's entries, leader rows with their keys, all M-x.</td></tr>
+<tr><th>Hackability</th><td>Config only. Ghostty itself is Zig.</td><td>Config and bb plugins. The core is upstream's compiled release; changing it means a fork.</td><td style='background:#e4f3ea'>About 3,100 lines of bb run from the checkout: edit, reload, same session, no compile. Only the 700-line C painter needs <code>make home</code>.</td></tr>
+<tr><th>Maintenance cost</th><td style='background:#e4f3ea'>Nearly zero.</td><td>Low: bump the release, keep three plugins.</td><td>High: about 3,800 lines of yours, end-to-end, Bombadil and Quint checks, and a server whose API moved from revision 14 to 18 between 11-16 and 11-19. <span class='tag measured'>measured</span></td></tr>
+<tr><th>Who owns the code</th><td>The Ghostty project, open source.</td><td>herdrdev, Apache-2.0; your plugins and config.</td><td>You own the client. Superlogical owns the server: preview only, no published license, private use. <span class='tag measured'>measured</span> (rex.scm)</td></tr>
+</table></div>
+<div class=so><b>So:</b> plain Ghostty wins on simplicity and speed, Herdr on maturity and remote, ghostty-rex on fitting you exactly and being easy to change, paid for in new bugs and upkeep.</div>
+
+<h2 id=pick>When to pick which</h2>
+<div class='card good'><b>Plain Ghostty</b> when nothing in the window must outlive it: a quick throwaway terminal, or debugging the multiplexer itself. You already have this: a plain <code>ghostty</code> runs beside the Rex window, and Alt+Space passes straight to it.</div>
+<div class='card good'><b>Ghostty + Herdr</b> when you want it to just work and do not want to own a terminal client: a busy week, a trip where you need SSH remote sessions, or whenever ghostty-rex breaks in a way you do not want to fix now. <code>make mux MUX=herdr</code> switches; Rex keeps its sessions meanwhile.</div>
+<div class='card good'><b>ghostty-rex</b> when the agent workflow is the point: the attention list, bbh in the window, Cmd+Space that knows the pane, and changing behaviour in Clojure the same afternoon. It is what you run now, and it is the right default as long as you are willing to fix what breaks. <span class='tag inferred'>inferred</span></div>
+<p>The honest risk is Rex, not your code. Your client is small, tested and yours. The server is a preview with no license and a moving API, and you cannot fix it. If Rex stalls or changes its terms, Herdr is the fallback, and it is still installed.</p>
+<div class=so><b>So:</b> keep ghostty-rex as the daily driver, keep Herdr one command away, and treat a red line or a stale process as something step 7 or step 12 already explains.</div>
+
+<h2>The whole thing in one breath</h2>
+<p>A terminal draws a grid from bytes (1) that a program sends through a pty (2). Plain Ghostty holds those ptys, so they die with the window (3). A multiplexer's server holds them instead, and the window becomes a viewer that can come and go (4), which long-running agents need (5). Herdr is a ready-made server and viewer (6). Rex is a server with a live screen copy, snapshots and a clean API, but no Linux viewer (7). So you built one: Ghostty shows, bb decides, rexg-render paints, the sidecar runs commands and watches agents (8). Keys go down three hops (9), output comes back up through three parsers (10), every piece shows in <code>ps</code> and <code>rex</code> (11), and each recent bug sits on one of those pieces (12).</p>
+<p class=sub>Deeper docs: /home/engstrand/guix/docs/ghostty-rex.html (how it works in detail), /home/engstrand/guix/docs/ghostty-rex-dev.html (changing it), /home/engstrand/guix/docs/rex-vs-herdr.html, /home/engstrand/guix/docs/rex-client-languages.html, /home/engstrand/guix/docs/rex-parity.html, /home/engstrand/guix/docs/reloading.html. Companions: <a href='guix-explained.html'>Guix, from the ground up</a>, <a href='quint-explained.html'>Quint, from the ground up</a>.</p>
+<p class=sub>Sources: modules/engstrand/config.scm, packages/{herdr,rex,ghostty}.scm; desktop/configs/ghostty-rex/ghostty, keybindings/leader.edn, herdr/config.toml; desktop/build/ghostty-rex/src/rexg/*.clj and csrc/rexg-render.c; desktop/build/rexmux/sidecar/rexmux/*.clj; jj log for T207 to T222; live ps, rex server status, rex client list, rex session list, rex api list and herdr --help on 2026-11-24.</p>
+</main></body></html>
