@@ -60,13 +60,13 @@ MimeType=inode/directory;
 StartupWMClass=oilfm
 ")))
 
-(define %md-view-desktop-file
-  (plain-file "md-view.desktop"
+(define %view-desktop-file
+  (plain-file "view.desktop"
               (string-append "[Desktop Entry]
 Type=Application
 Name=Markdown Viewer
 Comment=Render markdown and open it in Chrome with live reload
-Exec=/home/engstrand/.local/bin/md-view %U
+Exec=/home/engstrand/.local/bin/view %U
 Icon=text-x-generic
 Terminal=false
 NoDisplay=true
@@ -77,7 +77,7 @@ MimeType=text/markdown;text/x-markdown;
 (define %home-desktop-entries
   (simple-service 'familiar-desktop-entries home-xdg-data-files-service-type
                   `(("applications/oilfm.desktop" ,%oilfm-desktop-file)
-                    ("applications/md-view.desktop" ,%md-view-desktop-file))))
+                    ("applications/view.desktop" ,%view-desktop-file))))
 
 ;; Delete once ~/.local/share/applications holds no X-Familiar-Flatpak-Copy entry.
 ;; Activation snippets run inside a let*, so use-modules can import procedures but not macros such as cut.
@@ -128,8 +128,8 @@ MimeType=text/markdown;text/x-markdown;
                  ("x-scheme-handler/https" . "com.google.Chrome.desktop")
                  ("text/html" . "com.google.Chrome.desktop")
                  ("inode/directory" . "oilfm.desktop")
-                 ("text/markdown" . "md-view.desktop")
-                 ("text/x-markdown" . "md-view.desktop")
+                 ("text/markdown" . "view.desktop")
+                 ("text/x-markdown" . "view.desktop")
                  ("image/jpeg" . "imv.desktop")
                  ("image/png" . "imv.desktop")
                  ("image/webp" . "imv.desktop"))))))

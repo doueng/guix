@@ -98,9 +98,9 @@
            :when problem]
        problem))))
 
-(defn md-view-problems []
-  (keep identity [(tested "bb desktop/build/md-view/test.bb" "md-view" "md-view" (filter #(or (= % "desktop/bin/md-view") (str/starts-with? % "desktop/build/md-view/")) files)
-                          {:dir c/root} ["bb" "desktop/build/md-view/test.bb"])]))
+(defn view-problems []
+  (keep identity [(tested "bb desktop/build/view/test.bb" "view" "view" (filter #(or (= % "desktop/bin/view") (str/starts-with? % "desktop/build/view/")) files)
+                          {:dir c/root} ["bb" "desktop/build/view/test.bb"])]))
 
 (defn rexmux-file? [f]
   (or (#{"desktop/bin/mux-terminal" "desktop/bin/rexmux" "desktop/lib/mux.clj"} f)
@@ -167,7 +167,7 @@
   [["scheme" scheme-problems]
    ["chrome" chrome-problems]
    ["ext-reload" ext-reload-problems]
-   ["md-view" md-view-problems]
+   ["view" view-problems]
    ["rexmux" rexmux-problems]
    ["ghostty-rex" ghostty-rex-problems]
    ["stale" stale-problems]

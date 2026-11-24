@@ -2,12 +2,12 @@
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.string :as str]
          '[clojure.test :refer [deftest is run-tests]] '[org.httpkit.client :as http])
 
-(def script (str (fs/canonicalize (fs/path (fs/parent *file*) "../../bin/md-view"))))
+(def script (str (fs/canonicalize (fs/path (fs/parent *file*) "../../bin/view"))))
 (def port (+ 20000 (rand-int 20000)))
 (def origin (str "http://127.0.0.1:" port))
 
-(defn md-view [env & args]
-  (apply p/shell {:out :string :err :string :continue true :extra-env (merge {"MD_VIEW_PORT" (str port)} env)}
+(defn run [env & args]
+  (apply p/shell {:out :string :err :string :continue true :extra-env (merge {"VIEW_PORT" (str port)} env)}
          script args))
 
 (defn GET
@@ -30,7 +30,7 @@
 (deftest serves-gfm-and-org-with-links-that-stay-in-the-viewer
   (fs/with-temp-dir [d {}]
     (let [dir (fixture d)
-          {:keys [out exit]} (md-view {} "--no-open" (str (fs/path dir "README.md")))]
+          {:keys [out exit]} (run {} "--no-open" (str (fs/path dir "README.md")))]
       (is (zero? exit))
       (is (= (view (fs/path dir "README.md")) (str/trim out)) "prints the page URL and starts the server")
       (let [html (:body (GET (str/trim out)))]
@@ -53,7 +53,7 @@
   (fs/with-temp-dir [d {}]
     (let [src (fs/path (fixture d) "README.md")
           stamp-url (str origin "/stamp?path=" (java.net.URLEncoder/encode (str src) "UTF-8"))]
-      (md-view {} "--no-open" (str src))
+      (run {} "--no-open" (str src))
       (let [before (:body (GET stamp-url))]
         (Thread/sleep 20)
         (spit (str src) "# Two\n")
@@ -63,14 +63,14 @@
 (deftest refuses-other-files-and-foreign-hosts
   (fs/with-temp-dir [d {}]
     (let [dir (fixture d)]
-      (md-view {} "--no-open" (str (fs/path dir "README.md")))
+      (run {} "--no-open" (str (fs/path dir "README.md")))
       (is (= 404 (:status (GET (view (fs/path dir "pic.png"))))))
       (is (= 404 (:status (GET (view "/etc/passwd")))))
       (is (= 403 (:status (GET (view (fs/path dir "README.md")) {"Host" (str "evil.example:" port)})))))))
 
 (deftest term-prints-plain-text-when-piped
   (fs/with-temp-dir [d {}]
-    (let [{:keys [out exit]} (md-view {} "-t" (str (fs/path (fixture d) "sub" "notes.org")))]
+    (let [{:keys [out exit]} (run {} "-t" (str (fs/path (fixture d) "sub" "notes.org")))]
       (is (zero? exit))
       (is (str/includes? out "Plans"))
       (is (str/includes? out "slanted"))
@@ -80,10 +80,10 @@
 (deftest phone-writes-a-doc-the-bbh-docs-list-shows
   (fs/with-temp-dir [d {}]
     (let [dir (fixture d)
-          {:keys [out exit]} (md-view {"MD_VIEW_PHONE_DIR" (str dir)} "--phone" (str (fs/path dir "README.md")))
+          {:keys [out exit]} (run {"VIEW_PHONE_DIR" (str dir)} "--phone" (str (fs/path dir "README.md")))
           html (slurp (str/trim out))]
       (is (zero? exit))
-      (is (str/starts-with? (str/trim out) (str dir "/md-view-README-")))
+      (is (str/starts-with? (str/trim out) (str dir "/view-README-")))
       (is (str/includes? html "<meta name=\"bbh-doc\""))
       (is (str/includes? html "src=\"data:image/png;base64,"))
       (is (not (str/includes? html "<script>")) "a snapshot, no poller"))))
@@ -103,13 +103,13 @@
   (fs/with-temp-dir [d {}]
     (let [dir (html-fixture d)
           src (fs/path dir "doc.html")
-          {:keys [out exit]} (md-view {} "--no-open" (str src))]
+          {:keys [out exit]} (run {} "--no-open" (str src))]
       (is (zero? exit))
       (is (= (view src) (str/trim out)))
       (let [html (:body (GET (view src)))]
         (is (str/starts-with? html "<!doctype html><html><head><meta charset=utf-8><title>Doc</title>") "the file itself, not pandoc's rendering")
         (is (str/includes? html "<style>.own{color:red}</style>"))
-        (is (not (str/includes? html "prefers-color-scheme")) "no md-view style")
+        (is (not (str/includes? html "prefers-color-scheme")) "no view style")
         (is (re-find #"<script>\(\(\)=>.*</script></BODY></html>" (str/replace html "\n" " ")) "poller before </body>")
         (is (str/includes? html "src=\"data:image/png;base64,"))
         (is (str/includes? html (str "href=\"" (subs (view (fs/path dir "README.md")) (count origin)) "\"")))
@@ -126,9 +126,9 @@
 
 (deftest term-shows-html-as-text-without-pandoc
   (fs/with-temp-dir [d {}]
-    (let [{:keys [out exit]} (md-view {} "-t" (str (fs/path (html-fixture d) "doc.html")))]
+    (let [{:keys [out exit]} (run {} "-t" (str (fs/path (html-fixture d) "doc.html")))]
       (is (zero? exit))
-      (is (str/includes? out "# Own Doc") "md-view's own text, not pandoc's")
+      (is (str/includes? out "# Own Doc") "view's own text, not pandoc's")
       (is (str/includes? out "Some bold & plain text."))
       (is (str/includes? out "- one\n- two"))
       (is (str/includes? out "(defn f []\n  1)") "pre keeps its lines")
@@ -141,10 +141,10 @@
     (let [dir (html-fixture d)
           own (fs/path dir "own.html")
           _ (spit (str own) "<html><head><meta name=\"bbh-doc\" content=\"T9\"><meta name=\"description\" content=\"Mine\"></head><body>x</body></html>")
-          phone #(slurp (str/trim (:out (md-view {"MD_VIEW_PHONE_DIR" (str dir)} "--phone" (str %)))))
+          phone #(slurp (str/trim (:out (run {"VIEW_PHONE_DIR" (str dir)} "--phone" (str %)))))
           html (phone (fs/path dir "doc.html"))
           kept (phone own)]
-      (is (str/includes? html "<meta name=\"bbh-doc\" content=\"md-view\"><meta name=\"description\""))
+      (is (str/includes? html "<meta name=\"bbh-doc\" content=\"view\"><meta name=\"description\""))
       (is (str/includes? html "<style>.own{color:red}</style>"))
       (is (str/includes? html "src=\"data:image/png;base64,"))
       (is (not (str/includes? html "<script>(()=>")) "a snapshot, no poller")
@@ -152,21 +152,21 @@
       (is (str/includes? kept "content=\"Mine\""))
       (is (= 1 (count (re-seq #"name=\"description\"" kept)))))))
 
-(deftest replaces-a-server-left-running-from-an-older-md-view
+(deftest replaces-a-server-left-running-from-an-older-view
   (fs/with-temp-dir [d {}]
     (let [stale-port (+ 40000 (rand-int 20000))
           stale-origin (str "http://127.0.0.1:" stale-port)
-          ;; The server md-view 1 left behind: healthy, but no HTML.
+          ;; The server view 1 left behind: healthy, but no HTML.
           stale (p/process {:out :string :err :string} "bb" "-e"
                            (str "(require '[org.httpkit.server :as s])"
-                                "(s/run-server (fn [{:keys [uri]}] (if (= uri \"/health\") {:status 200 :body \"md-view\"}"
+                                "(s/run-server (fn [{:keys [uri]}] (if (= uri \"/health\") {:status 200 :body \"view\"}"
                                 " {:status 404 :body \"not a Markdown or Org file\"})) {:ip \"127.0.0.1\" :port " stale-port "})"
                                 "@(promise)"))
           src (fs/path (html-fixture d) "doc.html")]
       (try
         (loop [n 0] (when (and (< n 100) (not= 200 (:status (GET (str stale-origin "/health"))))) (Thread/sleep 100) (recur (inc n))))
         (is (= 404 (:status (GET (str stale-origin "/view?path=" (java.net.URLEncoder/encode (str src) "UTF-8"))))))
-        (let [{:keys [out exit]} (md-view {"MD_VIEW_PORT" (str stale-port)} "--no-open" (str src))
+        (let [{:keys [out exit]} (run {"VIEW_PORT" (str stale-port)} "--no-open" (str src))
               page (GET (str/trim out))]
           (is (zero? exit))
           (is (= 200 (:status page)) "the stale server is gone and a current one serves HTML")
@@ -180,7 +180,7 @@
 (deftest rejects-files-it-cannot-render
   (fs/with-temp-dir [d {}]
     (spit (str (fs/path d "x.txt")) "x")
-    (is (= 2 (:exit (md-view {} "--no-open" (str (fs/path d "x.txt"))))))))
+    (is (= 2 (:exit (run {} "--no-open" (str (fs/path d "x.txt"))))))))
 
 (let [{:keys [fail error]} (try (run-tests)
                                 (finally (some-> (p/shell {:out :string :continue true} "pgrep" "-f" (str script " serve " port))

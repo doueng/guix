@@ -47,9 +47,9 @@
            "desktop/build/rexmux/sidecar/**"]
    :checks ["make lint" "cd desktop/build/ghostty-rex && bb test" "cd desktop/build/rexmux && bb test"]
    :slow ["cd desktop/build/ghostty-rex && bb verify" "cd desktop/build/rexmux && bb verify:quint-mc"]}
-  {:name "md-view"
-   :paths ["desktop/bin/md-view" "desktop/build/md-view/**" "modules/engstrand/features/md-view.scm"]
-   :checks ["make lint" "bb desktop/build/md-view/test.bb"]}
+  {:name "view"
+   :paths ["desktop/bin/view" "desktop/build/view/**" "modules/engstrand/features/view.scm"]
+   :checks ["make lint" "bb desktop/build/view/test.bb"]}
   {:name "second brain"
    :paths ["modules/engstrand/system/second-brain.scm" "modules/engstrand/packages/second-brain.scm"
            "modules/engstrand/features/second-brain.scm" "desktop/bin/second-brain-push"

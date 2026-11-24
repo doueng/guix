@@ -376,27 +376,28 @@ ultimately to plain `find-file' when the current directory is not a project."
    (t
     (call-interactively #'find-file))))
 
-(defun eng/md-view (&optional phone)
-  "Save, then show this Markdown, Org or HTML file in Chrome with md-view's live reload.
+(defun eng/view (&optional phone)
+  "Save, then show this Markdown, Org or HTML file in Chrome with live reload, through ~/.local/bin/view.
+nvi's view also sits on PATH, so this names ours by its full path.
 With PHONE, the prefix argument, send a snapshot to the phone's bbh Docs list."
   (interactive "P")
-  (unless buffer-file-name (user-error "md-view needs a file"))
+  (unless buffer-file-name (user-error "view needs a file"))
   (save-buffer)
-  (let ((md-view (or (executable-find "md-view") (expand-file-name "~/.local/bin/md-view"))))
+  (let ((view (expand-file-name "~/.local/bin/view")))
     (if phone
-        (message "md-view: %s" (string-trim (with-output-to-string
-                                               (call-process md-view nil standard-output nil
-                                                             "--phone" buffer-file-name))))
-      (call-process md-view nil 0 nil buffer-file-name))))
+        (message "view: %s" (string-trim (with-output-to-string
+                                            (call-process view nil standard-output nil
+                                                          "--phone" buffer-file-name))))
+      (call-process view nil 0 nil buffer-file-name))))
 
 (map! :after markdown-mode :map (markdown-mode-map gfm-mode-map)
-      :localleader :desc "View in md-view" "v" #'eng/md-view)
+      :localleader :desc "View in Chrome" "v" #'eng/view)
 (map! :after org :map org-mode-map
-      :localleader :desc "View in md-view" "v" #'eng/md-view)
+      :localleader :desc "View in Chrome" "v" #'eng/view)
 (map! :after sgml-mode :map html-mode-map
-      :localleader :desc "View in md-view" "v" #'eng/md-view)
+      :localleader :desc "View in Chrome" "v" #'eng/view)
 (map! :after mhtml-mode :map mhtml-mode-map
-      :localleader :desc "View in md-view" "v" #'eng/md-view)
+      :localleader :desc "View in Chrome" "v" #'eng/view)
 
 (load (expand-file-name "keybindings.el" eng/doom-config-dir) t 'nomessage)
 (load (expand-file-name "clojure.el" eng/doom-config-dir) t 'nomessage)

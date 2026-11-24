@@ -209,9 +209,9 @@
                               ["guile" "/gnu/store/x-shepherd-for-home-1.0.9/bin/shepherd" "--silent"]
                               ["rex" "ls"]]))]
    ["summary splits what refresh fixes from what needs you"
-    (let [s (stale/summary (stale/assess (-> (with-service base :home "md-view" :exe old-bb)
+    (let [s (stale/summary (stale/assess (-> (with-service base :home "view" :exe old-bb)
                                              (assoc-in [:boot :current :kernel] "k2"))))]
-      (and (= 2 (:stale s)) (= ["home:md-view"] (map :id (:auto s))) (= ["boot"] (map :id (:manual s)))))]])
+      (and (= 2 (:stale s)) (= ["home:view"] (map :id (:auto s))) (= ["boot"] (map :id (:manual s)))))]])
 
 ;; The collector on a made-up root; argv paths are relative to it, as /proc shows them.
 (def fake (str (fs/create-temp-dir {:prefix "stale-test"})))
@@ -226,12 +226,12 @@
 (put! (str repo "/desktop/configs/hypr/hyprland.lua") "")
 (put! (str repo "/desktop/configs/hypr/README.md") "")
 (put! (str fake "/home/me/.config/hypr/old.lua") "")
-(put! (str repo "/desktop/bin/md-view") "")
+(put! (str repo "/desktop/bin/view") "")
 (put! (str repo "/desktop/configs/doom/config.el") "")
 (put! (str repo "/desktop/configs/doom/cli.el") "")
-(fs/set-last-modified-time (str repo "/desktop/bin/md-view") (java.nio.file.attribute.FileTime/fromMillis 1000500))
+(fs/set-last-modified-time (str repo "/desktop/bin/view") (java.nio.file.attribute.FileTime/fromMillis 1000500))
 (proc! 41 ["bb" "/repo/desktop/bin/ext-reload" "serve"] 100 (str new-bb "/bin/bb"))
-(proc! 42 ["bb" "/repo/desktop/bin/md-view" "serve"] 100 (str new-bb "/bin/bb"))
+(proc! 42 ["bb" "/repo/desktop/bin/view" "serve"] 100 (str new-bb "/bin/bb"))
 (proc! 43 [(str old-bb "/bin/bb") "--version"] 100 (str old-bb "/bin/bb"))
 (proc! 44 [] 1 "/nonexistent")
 (put! (str fake "/home/me/.config/ghostty/config") "font-size = 9\n")
@@ -258,9 +258,9 @@
 (fs/create-dirs (str fake "/run"))
 (fs/create-sym-link (str fake "/run/current-system") (str fake "/gnu/store/sys-1"))
 (def herd
-  {:home {["status"] "Started:\n + ext-reload\n + md-view\n + root\nStopped:\n - x\n"
+  {:home {["status"] "Started:\n + ext-reload\n + view\n + root\nStopped:\n - x\n"
           ["status" "ext-reload" "-n" "0"] "  Main PID: 41\n  Command: bb ext-reload serve\n"
-          ["status" "md-view" "-n" "0"] "  Main PID: 42\n  Command: bb md-view serve\n"
+          ["status" "view" "-n" "0"] "  Main PID: 42\n  Command: bb view serve\n"
           ["status" "root" "-n" "0"] "  It is started.\n"}})
 (def ctx {:root fake :repo repo :home "/home/me" :user "me" :stamps (str fake "/stamps") :super-dir (str fake "/super")
           :herd (fn [scope & args] (get-in herd [scope (vec args)]))
@@ -273,11 +273,11 @@
   [["a process's start time comes from /proc/PID/stat and the boot time"
     (= 1001000 (:start-ms (some #(when (= 41 (:pid %)) %) (:procs facts))))]
    ["Shepherd services with a process are found, the rest are not"
-    (= #{"ext-reload" "md-view"} (set (map :name (:services facts))))]
+    (= #{"ext-reload" "view"} (set (map :name (:services facts))))]
    ["a service whose script changed after it started is stale"
     (and (stale? (crow "home:ext-reload")) (str/includes? (:why (crow "home:ext-reload")) "desktop/bin/ext-reload"))]
    ["a service whose script is older than the process is fresh"
-    (not (stale? (crow "home:md-view")))]
+    (not (stale? (crow "home:view")))]
    ["kernel threads, with no command line, are skipped"
     (not-any? #(= 44 (:pid %)) (:procs facts))]
    ["the services sudo may restart come from agent-control.scm"

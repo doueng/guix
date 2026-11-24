@@ -1,5 +1,5 @@
 #!/usr/bin/env bb
-(ns md-view
+(ns view
   "Render Markdown or Org with pandoc, or take an HTML file as it is, and show it in
   Chrome with live reload, in a terminal pane, or in the phone's bbh Docs list."
   (:require [babashka.fs :as fs]
@@ -13,7 +13,7 @@
 
 (def home (System/getProperty "user.home"))
 (def port (parse-long (or (second (drop-while #(not= "serve" %) *command-line-args*))
-                          (System/getenv "MD_VIEW_PORT") "7341")))
+                          (System/getenv "VIEW_PORT") "7341")))
 (def origin (str "http://127.0.0.1:" port))
 (def pandoc (str (or (fs/which "pandoc") (fs/path home ".guix-home/profile/bin/pandoc"))))
 (def script (str (fs/real-path *file*)))
@@ -23,7 +23,7 @@
 
 (def version
   "The script's own source, hashed, so a client can tell a server still running an
-  older md-view from one running this file."
+  older view from one running this file."
   (delay (subs (sha1 (slurp script)) 0 12)))
 
 (def css "
@@ -55,7 +55,7 @@ code span.op,code span.ot,code span.pp{color:inherit}
 ")
 
 (def live-js
-  "(()=>{const k='md-view'+location.search,y=sessionStorage.getItem(k);
+  "(()=>{const k='view'+location.search,y=sessionStorage.getItem(k);
 if(y!==null){scrollTo(0,+y);sessionStorage.removeItem(k)}let s=null;
 setInterval(async()=>{try{const t=await (await fetch('/stamp'+location.search,{cache:'no-store'})).text();
 if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catch(e){}},400)})()")
@@ -77,7 +77,7 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
   (fs/canonicalize (if (str/starts-with? arg "file:") (fs/path (URI. arg)) arg)))
 
 (def body-template
-  (delay (let [f (fs/create-temp-file {:prefix "md-view-" :suffix ".html"})]
+  (delay (let [f (fs/create-temp-file {:prefix "view-" :suffix ".html"})]
            (fs/delete-on-exit f)
            (spit (str f) "$if(title)$<h1 class=title>$title$</h1>\n$endif$$body$\n")
            (str f))))
@@ -169,7 +169,7 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
         text (fn [status body] {:status status :headers {"content-type" "text/plain; charset=utf-8"} :body body})]
     (cond
       (not (#{(str "127.0.0.1:" port) (str "localhost:" port)} (get headers "host"))) (text 403 "forbidden host")
-      (= uri "/health") (text 200 (str "md-view " @version))
+      (= uri "/health") (text 200 (str "view " @version))
       (not (#{"/view" "/stamp"} uri)) (text 404 "not found")
       (not (doc? path)) (text 404 "not a Markdown, Org or HTML file")
       (= uri "/stamp") (assoc-in (text 200 (stamp path)) [:headers "cache-control"] "no-store")
@@ -179,16 +179,16 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
 
 (defn serve! []
   (server/run-server handler {:ip "127.0.0.1" :port port})
-  (println "md-view serving" origin)
+  (println "view serving" origin)
   @(promise))
 
 (defn health
-  "The running server's /health body, as \"md-view VERSION\", or nil when none answers."
+  "The running server's /health body, as \"view VERSION\", or nil when none answers."
   []
   (let [{:keys [status body]} @(client/get (str origin "/health") {:timeout 300 :as :text})]
     (when (= 200 status) (str body))))
 
-(defn current? [] (= (str "md-view " @version) (health)))
+(defn current? [] (= (str "view " @version) (health)))
 
 (defn listener-pid
   "The pid of this user's process listening on the port, from ss."
@@ -211,10 +211,10 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
   "Stop a server that runs another version of this script, such as one started
   before the script changed: through the Home service when it owns it, else by pid."
   []
-  (when (some-> (health) (str/starts-with? "md-view"))
+  (when (some-> (health) (str/starts-with? "view"))
     (if (and (= origin "http://127.0.0.1:7341")
-             (some->> (herd "status" "md-view") :out (re-find #"It is running")))
-      (herd "restart" "md-view")
+             (some->> (herd "status" "view") :out (re-find #"It is running")))
+      (herd "restart" "view")
       (when-let [pid (listener-pid)]
         (p/shell {:continue true :err :string} "kill" pid)
         (wait-until #(nil? (health)))))))
@@ -227,11 +227,11 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
   (when-not (current?)
     (when (health) (stop-stale!))
     (when (and (not (current?)) (= origin "http://127.0.0.1:7341"))
-      (herd "enable" "md-view")
-      (herd "start" "md-view")
+      (herd "enable" "view")
+      (herd "start" "view")
       (wait-until #(some? (health))))
     (when-not (health)
-      (let [log (fs/path home ".local/state/md-view.log")]
+      (let [log (fs/path home ".local/state/view.log")]
         (fs/create-dirs (fs/parent log))
         (p/process {:out :append :err :append :out-file (fs/file log) :err-file (fs/file log)}
                    "setsid" "-f" script "serve" (str port))
@@ -240,11 +240,11 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
 (defn phone!
   "Write SRC where the bbh Docs list finds it and return the path."
   [src]
-  (let [out (fs/path (or (System/getenv "MD_VIEW_PHONE_DIR") "/tmp")
-                     (str "md-view-" (str/replace (fs/strip-ext (fs/file-name src)) #"[^\w.-]" "_")
+  (let [out (fs/path (or (System/getenv "VIEW_PHONE_DIR") "/tmp")
+                     (str "view-" (str/replace (fs/strip-ext (fs/file-name src)) #"[^\w.-]" "_")
                           "-" (subs (sha1 src) 0 8) ".html"))]
     (spit (str out) (page src {:head (let [has? #(and (html? src) (re-find (re-pattern (str "(?i)<meta[^>]+name=\"?" % "\"?[\\s>/]")) (slurp (str src))))]
-                                      (str (when-not (has? "bbh-doc") "<meta name=\"bbh-doc\" content=\"md-view\">")
+                                      (str (when-not (has? "bbh-doc") "<meta name=\"bbh-doc\" content=\"view\">")
                                            (when-not (has? "description") (str "<meta name=\"description\" content=\"" (escape src) "\">"))))}))
     (str out)))
 
@@ -322,7 +322,7 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
   (if-not (System/console)
     (print (as-text src 100 false))
     (let [cols (min 100 (- (columns) 2))
-          out (fs/create-temp-file {:prefix "md-view-" :suffix ".txt"})
+          out (fs/create-temp-file {:prefix "view-" :suffix ".txt"})
           render! #(spit (str out) (as-text src cols true))
           watcher (future (loop [seen (stamp src)]
                             (Thread/sleep 300)
@@ -330,7 +330,7 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
                               (when (not= now seen) (try (render!) (catch Exception _)))
                               (recur now))))]
       (render!)
-      (try (p/shell {:continue true} "less" "-R" "-Psmd-view ?e(END) .R reloads, q quits" (str out))
+      (try (p/shell {:continue true} "less" "-R" "-Psview ?e(END) .R reloads, q quits" (str out))
            (finally (future-cancel watcher) (fs/delete-if-exists out))))))
 
 (defn -main [args]
@@ -341,8 +341,8 @@ if(s!==null&&t!==s){sessionStorage.setItem(k,scrollY);location.reload()}s=t}catc
       (= "serve" (first args)) (serve!)
       (or (empty? files) (seq (remove #{"--term" "-t" "--phone" "--no-open"} flags)) (not-every? doc? files))
       (do (binding [*out* *err*]
-            (println "usage: md-view [-t|--term|--phone|--no-open] FILE.md|FILE.org|FILE.html|file://URI ...")
-            (println "       md-view serve [PORT]"))
+            (println "usage: view [-t|--term|--phone|--no-open] FILE.md|FILE.org|FILE.html|file://URI ...")
+            (println "       view serve [PORT]"))
           (System/exit 2))
       (#{"-t" "--term"} mode) (run! term! files)
       (= "--phone" mode) (run! (comp println phone!) files)
