@@ -1,0 +1,110 @@
+<!doctype html>
+<!-- Template from the explain skill. Copy it, keep the style block as it is, replace the body.
+     Parts: newthought opener, sidenote (numbered), marginnote (unnumbered), figure with
+     margin caption, small multiples, command + output, table, the so: line, the closing picture. -->
+<html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<meta name="description" content="ONE LINE: what this explains and which running example it uses">
+<meta name="bbh-doc" content="T000">
+<title>X, from the ground up</title>
+<style>
+:root{--ink:#111;--soft:#666;--rule:#ccc;--accent:#a00000;--paper:#fffff8;
+ --serif:'ET Book','ETBembo',Palatino,'Palatino Linotype','TeX Gyre Pagella','Book Antiqua',Georgia,serif;
+ --mono:'JetBrains Mono',Consolas,Menlo,'Liberation Mono',monospace}
+*{box-sizing:border-box}
+html{font-size:15px;-webkit-text-size-adjust:100%}
+body{margin:0 auto;max-width:1400px;width:87.5%;padding:0 0 4rem 12.5%;background:var(--paper);color:var(--ink);
+ font-family:var(--serif);counter-reset:sn;font-variant-numeric:oldstyle-nums}
+h1{font-weight:400;font-size:3.2rem;line-height:1;margin:4rem 0 1rem}
+h2{font-weight:400;font-style:italic;font-size:2rem;line-height:1.1;margin:3rem 0 .6rem}
+h3{font-weight:400;font-style:italic;font-size:1.5rem;margin:2rem 0 .4rem}
+h1,h2,h3{text-wrap:balance}
+.subtitle{font-style:italic;font-size:1.6rem;line-height:1.2;margin:0 0 2rem;width:55%}
+p,ul,ol,dl,.so,.multiples,figure{width:55%}
+p,li,dd,.so{font-size:1.3rem;line-height:1.75}
+p{margin:1.1rem 0}ul,ol{padding-left:1.4rem}li{margin:.25rem 0}
+a{color:inherit;text-underline-offset:.12em;text-decoration-thickness:.05em}
+.newthought{font-variant:small-caps;letter-spacing:.03em;font-size:1.1em}
+b,strong{font-weight:600}
+/* Sidenotes: numbered notes in the right margin on wide screens, inline blocks on a phone. */
+.sn{counter-increment:sn}
+.sn::after{content:counter(sn);font-size:.75rem;vertical-align:super;line-height:0;margin-left:.1rem;font-variant-numeric:lining-nums}
+.sidenote::before{content:counter(sn) ' ';font-size:.8rem;vertical-align:super;line-height:0;font-variant-numeric:lining-nums}
+.sidenote,.marginnote{float:right;clear:right;margin-right:-60%;width:50%;margin-top:.3rem;font-size:1.05rem;line-height:1.4;position:relative;color:var(--ink)}
+.sidenote code,.marginnote code{font-size:.85rem}
+/* Code is set off by a hairline, not a box. Output is grey. */
+code{font-family:var(--mono);font-size:.85em;overflow-wrap:break-word}
+pre{font-family:var(--mono);font-size:1rem;line-height:1.45;margin:1rem 0;padding:.1rem 0 .1rem 1rem;border-left:1px solid var(--ink);overflow-x:auto;max-width:80%}
+pre code{font-size:inherit}
+pre.out{color:#444;border-left-color:var(--rule)}
+.so{margin:1rem 0 .4rem;padding-top:.5rem;border-top:1px solid var(--rule);font-style:italic}
+.so b{font-style:normal;font-variant:small-caps;font-weight:400;letter-spacing:.05em;font-size:1.05em}
+figure{margin:1.5rem 0;padding:0}
+figure svg{display:block;width:100%;height:auto;max-width:560px;overflow:visible}
+figcaption{float:right;clear:right;margin-right:-60%;width:50%;font-size:1.05rem;line-height:1.4}
+svg text{font-family:var(--serif);fill:var(--ink)}
+svg .mono{font-family:var(--mono)}
+/* Small multiples: the same little picture repeated, one change each. */
+.multiples{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:1rem 1.4rem;margin:1.5rem 0}
+.multiples figure{width:auto;margin:0}
+.multiples svg{max-width:none}
+.multiples figcaption{float:none;margin:.2rem 0 0;padding:0;border:0;width:auto;font-size:1rem}
+table{border-collapse:collapse;font-size:1.1rem;line-height:1.45;margin:1.2rem 0;max-width:55%}
+th{font-weight:400;font-style:italic;text-align:left;border-bottom:1px solid var(--ink);padding:.2rem 1rem .2rem 0}
+td{padding:.2rem 1rem .2rem 0;vertical-align:top;border-bottom:1px solid #eee}
+td.r,th.r{text-align:right;font-variant-numeric:lining-nums tabular-nums}
+.contents{font-size:1.05rem;line-height:1.5}
+.contents ol{width:auto;padding-left:1.2rem;margin:.3rem 0}.contents li{font-size:1.05rem;margin:0}
+.dim{color:var(--soft)}.red{color:var(--accent)}
+@media (max-width:760px){
+ html{font-size:14px}
+ body{width:100%;padding:0 1.1rem 3rem}
+ h1{font-size:2.1rem;margin-top:2rem}h2{font-size:1.6rem}
+ .subtitle,p,ul,ol,dl,.so,.multiples,figure{width:100%}
+ table{max-width:100%}
+ p,li,dd,.so{font-size:1.2rem;line-height:1.6}
+ .sidenote,.marginnote,figcaption{display:block;float:none;width:auto;margin:.6rem 0 .6rem 1rem;padding-left:.7rem;border-left:1px solid var(--rule)}
+ figure{display:flex;flex-direction:column}figure figcaption{order:2}
+ .multiples{grid-template-columns:repeat(auto-fit,minmax(6rem,1fr))}
+ .multiples figcaption{margin:.2rem 0 0;padding:0;border:0}
+ pre{font-size:.85rem;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
+ table{display:block;overflow-x:auto}
+}
+</style></head>
+<body><article>
+<h1>X, from the ground up</h1>
+<p class=subtitle>N short steps. Each uses only the steps before it. Every example is from your own machine, and every command only looks.</p>
+
+<section id=s1>
+<h2>1. The smallest true thing about X</h2>
+<p><span class=newthought>Start with something you already know.</span> One short sentence per idea. A new word appears in <b>bold</b> the first time, right where it is defined.<span class=sn></span><span class=sidenote>A sidenote holds an aside that would break the flow: a caveat, a number, a source path such as /home/engstrand/guix/Makefile line 12</span></p>
+<p>Show it on this machine:</p>
+<pre><code>a-command-that-only-looks --flag</code></pre>
+<pre class=out><code>its real output, trimmed to the lines that matter</code></pre>
+<p class=so><b>So:</b> one line the reader could repeat to a friend.</p>
+</section>
+
+<section id=s2>
+<h2>2. The next idea, built on step 1</h2>
+<p>A picture belongs next to the words that use it.<span class=marginnote>A margin note has no number. Use it for a label on a nearby picture or a one-word gloss.</span> Its caption sits in the margin beside it.</p>
+<figure>
+<figcaption>What the picture shows, in one sentence. Name each mark once, here or on the picture, never in a legend box.</figcaption>
+<svg viewBox='0 0 560 60' role=img aria-label='A thing becoming another thing'>
+<defs><marker id=ah viewBox='0 0 8 8' refX=7 refY=4 markerWidth=7 markerHeight=7 orient=auto><path d='M0,1 L7,4 L0,7' fill=none stroke='#111'/></marker></defs>
+<text x=0 y=35 font-size=17>before</text><line x1=60 y1=30 x2=300 y2=30 stroke='#111' marker-end='url(#ah)'/><text x=310 y=35 font-size=17>after</text>
+</svg>
+</figure>
+<p>Small multiples: the same picture, one thing changed each time, read left to right.</p>
+<div class=multiples>
+<figure><svg viewBox='0 0 100 40'><rect x=1 y=10 width=20 height=20 fill=none stroke='#111'/></svg><figcaption>one</figcaption></figure>
+<figure><svg viewBox='0 0 100 40'><rect x=1 y=10 width=20 height=20 fill=none stroke='#111'/><rect x=40 y=10 width=20 height=20 fill=none stroke='#111'/></svg><figcaption>two</figcaption></figure>
+<figure><svg viewBox='0 0 100 40'><rect x=1 y=10 width=20 height=20 fill=none stroke='#111'/><rect x=40 y=10 width=20 height=20 fill=none stroke='#111'/><rect x=70 y=10 width=20 height=20 fill='#a00000'/></svg><figcaption>three, new in red</figcaption></figure>
+</div>
+<table><tr><th>thing</th><th class=r>size</th></tr><tr><td>a</td><td class=r>12</td></tr><tr><td>b</td><td class=r>340</td></tr></table>
+<p class=so><b>So:</b> the takeaway of step 2, which leans on step 1.</p>
+</section>
+
+<section id=whole>
+<h2>The whole picture</h2>
+<p>Every step again in one paragraph, or one picture with every part named. A reader who skipped to here should still get it.</p>
+</section>
+</article></body></html>

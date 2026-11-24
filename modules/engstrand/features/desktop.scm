@@ -39,6 +39,7 @@
           "slurp"
           "libnotify"
           "font-dejavu"
+          "font-et-book"
           "font-jetbrains-mono"
           "font-google-noto-emoji"
           "adwaita-icon-theme"))))

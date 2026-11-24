@@ -20,6 +20,9 @@
 (stow-package! (str repo "/configs") home "ideavim")
 (stow-package! repo (str home "/.local/bin") "bin")
 (stow-package! (str repo "/pi") (str home "/.pi/agent") "agent")
+;; Claude Code reads ~/.claude/skills; Pi and bbh already see every skill above.
+(doseq [skill ["explain"]]
+  (stow-package! (str repo "/pi/agent/skills") (str home "/.claude/skills/" skill) skill))
 
 (defn dangling-repo-link? [path]
   (and (fs/sym-link? path)
@@ -46,4 +49,5 @@
 (prune! (str home "/.config") true)
 (prune! (str home "/.local/bin") true)
 (prune! (str home "/.pi/agent") true)
+(prune! (str home "/.claude/skills") true)
 (prune! home false)

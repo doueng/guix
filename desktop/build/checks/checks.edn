@@ -163,6 +163,9 @@
   {:name "skill-diet"
    :paths ["desktop/pi/agent/skills/skill-diet/**" "desktop/build/skill-diet/**"]
    :checks ["node desktop/pi/agent/skills/skill-diet/scripts/eval.mjs check desktop/pi/agent/skills/skill-diet && bb desktop/build/skill-diet/adapter-test.bb"]}
+  {:name "explain"
+   :paths ["desktop/pi/agent/skills/explain/**"]
+   :checks ["node desktop/pi/agent/skills/skill-diet/scripts/eval.mjs check desktop/pi/agent/skills/explain"]}
   {:name "dusk"
    :paths ["desktop/build/dusk/**" "desktop/configs/dusk/**" "desktop/bin/dusk" "desktop/lib/dusk/**"]
    :checks ["desktop/build/dusk/test.bb"]
