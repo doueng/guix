@@ -25,6 +25,8 @@
     record notify-send and bbh);
   - persistence: after the server dies with its programs, as in a reboot,
     a new client brings each startup tab's program back (pi --continue);
+  - tab names (Bombadil, test/bombadil/names.ts): cd, a program and Alt+Space
+    t r rename a tab, a cleared name hands it back, and no Rex ID shows (T210);
   - switch timing (switch-timing!, also bb switch-timing): a pi tab whose
     pane holds a 24 MB image paints within 300 ms of a project switch.
   Copies and opened URLs go to files (REXG_CLIPBOARD_FILE, REXG_OPEN_FILE),
@@ -796,13 +798,23 @@
                                     (wait-for 10000 #(every? #{"bash"} (fgs))) (pr-str (fgs)))
                             ;; No --session: the client finds main as its startup
                             ;; session, which is what revives its tabs.
-                            {:session nil :server s2})))}})
+                            {:session nil :server s2})))}
+   ;; names.ts (T210): two tabs Rex made without labels, each fish in the
+   ;; test HOME, where cd, a program and Alt+Space t r rename them.
+   "names" {:file "names.ts"
+            :dir (str (fs/path here "test" "bombadil"))
+            :setup (fn [s config]
+                     (let [shipped (config! s config)]
+                       (api s "session.create" (model/startup-request {:label "names" :cwd (:root s) :windows [{} {}]}
+                                                                      (str (fs/which (:shell shipped)))))
+                       "names"))}})
 
 (defn bombadil!
   "Bombadil types into the client on a throwaway server for TIME seconds and
   checks SPEC on every screen; true when no property broke."
   [root spec time]
-  (let [{:keys [file setup restore]} (specs spec)
+  (let [{:keys [file setup restore dir] :or {dir (str (fs/path checkout "desktop" "build" "rexmux" "test" "bombadil"))}} (specs spec)
+        spec-file (str (fs/path dir file))
         dir (str root "/bombadil-" spec)
         s (ts/start! {:root (str dir "/srv") :restore (boolean restore) :path-prepend (e2e/stubs! (str dir "/stubs"))})
         config (str dir "/ghostty-rex.edn")
@@ -818,7 +830,7 @@
             ;; clock, so a frame can predate bb handling the key.
             env (assoc (client-env s dir config) "REXG_SYNC" "0")
             cmd [(bombadil-bin) "terminal" "test"
-                 "--specification" (str (fs/path checkout "desktop" "build" "rexmux" "test" "bombadil" file))
+                 "--specification" spec-file
                  "--time-limit" (str time "s") "--exit-on-violation"
                  "--columns" "110" "--rows" "30" "--quiescence-timeout-ms" "150"
                  "--output-path" trace "--output-path-overwrite"
@@ -837,7 +849,7 @@
     (e2e! root)
     (try (switch-timing! root) (catch Throwable e (check! "switch timing" false (ex-message e))))
     (when-not (some #{"--no-bombadil"} args)
-      (doseq [spec ["tabs" "startup" "restored"]]
+      (doseq [spec (or (seq (keep #(second (re-matches #"--spec=(.+)" %)) args)) ["tabs" "startup" "restored" "names"])]
         (try (bombadil! root spec time)
              (catch Throwable e (check! (str "bombadil " spec) false (ex-message e))))))
     (let [failed (remove :ok @results)]

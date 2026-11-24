@@ -13,8 +13,6 @@
    :status "181825" :status-fg "a6adc8" :blocked "f38ba8" :hint-fg "000000" :hint "f5c211"
    :menu "262a36" :menu-fg "d8dee9" :sel "45475a"})
 
-(defn short [id] (let [s (str id)] (subs s (max 0 (- (count s) 6)))))
-
 (defn pane-area [w h] [w (max 1 (- h 3))])
 
 (defn tile-cells
@@ -102,11 +100,12 @@
     (add! (span 0 0 bar-fg bar 0 (pad "" w)))
     (if v
       (loop [ws (map-indexed vector (:windows v))
-             col (let [lbl (str " " (if (str/blank? (:label v)) (short (:session v)) (:label v)) " │")]
+             col (let [lbl (str " " (model/session-label m) " │")]
                    (add! (span 0 0 bar-fg bar 1 lbl)) (count lbl))]
         (when-let [[i win] (first ws)]
           (let [active (or (= (:id win) (:active v)) (and (nil? (:active v)) (zero? i)))
-                nm (if (str/blank? (:label win)) (str (inc i)) (str (inc i) " " (:label win)))
+                lbl (model/tab-label m win)
+                nm (if (str/blank? lbl) (str (inc i)) (str (inc i) " " lbl))
                 txt (if active (str " [" nm "]") (str "  " nm " "))]
             (when (< col w) (add! (span 0 col (if active tab-fg bar-fg) (if active tab bar) (if active 1 0) (fit txt (- w col)))))
             (recur (rest ws) (+ col (count txt))))))
@@ -120,12 +119,13 @@
               f? (= block focused)
               st (when agent (str " " (model/icon (:state agent)) " " (:app agent)))
               hist (when (get-in panes [block :scrolled]) " ↑ history (type to return)")
-              ttl (str (if f? "▶" "─") " " (short block) st hist " ")
+              nm (or (model/pane-title m block) "…")
+              ttl (str (if f? "▶" "─") " " nm st hist " ")
               own (cond-> []
                     (pos? x) (into (for [yy (range y last)] (span yy (dec x) title nil 0 "│")))
                     true (conj (span y x (if f? focus title) nil (if f? 1 0) (str (fit ttl tw) (apply str (repeat (max 0 (- tw (count ttl))) "─")))))
                     (and agent (= "blocked" (:state agent)))
-                    (conj (span y (+ x 2 (count (short block))) blocked nil 1 (fit (str " " (model/icon "blocked")) (max 0 (- tw 8)))))
+                    (conj (span y (+ x 2 (count nm)) blocked nil 1 (fit (str " " (model/icon "blocked")) (max 0 (- tw 8)))))
                     floating (into (for [yy (range (inc y) (dec last))] (span yy (+ x tw -1) title nil 0 "│")))
                     floating (conj (span (dec last) (if (pos? x) (dec x) x) title nil 0
                                          (str (when (pos? x) "└") (apply str (repeat (dec tw) "─")) "┘"))
@@ -147,7 +147,10 @@
     ;; Status line: server, session, attention.
     (let [rows (:agents m)
           nb (count (filter #(= "blocked" (:state %)) rows))
-          s (str " " (:label (model/server m)) " │ focus " (if focused (short focused) "-")
+          ;; The server only when there is a choice of them; the focused pane
+          ;; by what runs in it, not its ID (T210).
+          s (str " " (when (> (count (:servers m)) 1) (str (:label (model/server m)) " │ "))
+                 (or (some->> focused (model/pane-title m)) "-")
                  " │ agents " (count rows) " │ blocked " nb " │ attention " (count (:attention m))
                  (when-not (:sidecar-up m) " │ sidecar down")
                  (let [s (model/server m)]
@@ -197,5 +200,5 @@
       {:layout (vec (for [t ts :let [[x y cw ch] (content-rect t)]] {:block (:block t) :x x :y y :w cw :h ch}))
        :spans (persistent! spans)
        :cursor cursor
-       :title (str (if v (if (str/blank? (:label v)) (short (:session v)) (:label v)) "rex")
+       :title (str (if v (model/session-label m) "rex")
                    (let [n (count (filter #(= "blocked" (:state %)) (:agents m)))] (when (pos? n) (str " ! " n " blocked"))))})))

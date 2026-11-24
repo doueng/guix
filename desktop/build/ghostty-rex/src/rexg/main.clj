@@ -130,7 +130,7 @@
         rproc (p/process {:in :stream :out :inherit :err :stream} render)
         r {:in (:in rproc) :lock (Object.)}
         app (atom {:m (model/new-model servers {:startup (:startup cfg) :shell (:shell cfg) :prefer-session session
-                                                 :env (into {} (keep (fn [k] (when-let [v (System/getenv k)] [k v]))) ["REX_SERVER"])})
+                                                 :env (into {} (keep (fn [k] (when-let [v (System/getenv k)] [k v]))) ["REX_SERVER" "HOME"])})
                    :conns {} :tags {} :streams {} :sizes {} :wh [80 24] :text-reqs {} :next-req 0
                    :last-draw nil :title nil :sidecar (sidecar/initial-state cfg) :tx proto/sender})
         log (fn [& xs] (when-let [f (System/getenv "REXG_LOG")] (spit f (str (str/join " " xs) "\n") :append true)))

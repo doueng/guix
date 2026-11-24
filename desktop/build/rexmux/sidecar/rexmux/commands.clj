@@ -153,7 +153,7 @@
          {:id :tab/pick :title "Tabs: pick one" :category "tab" :source :local :needs #{:session-id}
           :run (fn [ctx _]
                  [[:ui/pick {:title "Tab" :then :tab/focus :arg :window
-                             :items (vec (map-indexed (fn [i [w l]] {:label (str (inc i) " " (if (str/blank? l) w l)) :value w})
+                             :items (vec (map-indexed (fn [i [w l]] {:label (str (inc i) (when-not (str/blank? l) (str " " l))) :value w})
                                                       (map vector (:window-ids ctx) (concat (:window-labels ctx) (repeat "")))))}]])}
          {:id :tab/focus :title "Tabs: show a tab" :category "tab" :source :local :needs #{:session-id}
           :args [{:name :window :type "string" :required true}]

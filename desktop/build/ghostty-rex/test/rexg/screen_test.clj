@@ -41,8 +41,8 @@
         {:keys [spans layout cursor]} (s/render model 100 30 {})]
     (is (str/includes? (row-text spans 0 100) "[1 shell]"))
     (is (str/includes? (row-text spans 0 100) "2 pi"))
-    (is (str/starts-with? (row-text spans 1 100) "▶ aaaaaa") "the focused pane's title")
-    (is (str/includes? (row-text spans 28 100) "focus aaaaaa") "the status line")
+    (is (str/starts-with? (row-text spans 1 100) "▶ ") "the focused pane's title")
+    (is (str/includes? (row-text spans 28 100) "│ agents 0 │ blocked 0") "the status line")
     (is (= [:focus "block:aaaaaa"] cursor))
     (is (= [{:block "block:aaaaaa" :x 0 :y 2 :w 50 :h 26} {:block "block:bbbbbb" :x 51 :y 2 :w 49 :h 26}] layout))))
 
@@ -60,7 +60,7 @@
     (is (= [\│ \│] [(at 10 25) (at 10 74)]) "left and right borders")
     (is (= \─ (at 21 40)) "a bottom rule")
     (is (= [\┌ \┐ \└ \┘] [(at 6 25) (at 6 74) (at 21 25) (at 21 74)]) "joined corners")
-    (is (str/includes? (row-text spans 6 100) "─ ffffff") "its title row")))
+    (is (str/starts-with? (subs (row-text spans 6 100) 26) "─ ") "its title row")))
 
 (deftest which-key-shows-under-a-prefix
   (let [model (-> (m/new-model [{:label "local"}]) (assoc-in [:servers 0 :view] view)

@@ -25,6 +25,16 @@ type View = {
   sidecarDown: boolean;
 };
 
+// Tab 1 runs no program: rexmux shows its label, ghostty-rex its directory.
+function appeared(labels: string[]): boolean {
+  return labels.length === STARTUP.length && (labels[0] === "shell" || labels[0] === "~") &&
+    labels.slice(1).join(",") === STARTUP.slice(1).join(",");
+}
+
+function stays(labels: string[]): boolean {
+  return labels.length === STARTUP.length && labels.every((l, i) => l === STARTUP[i] || l === "~");
+}
+
 function typed(a: any): string | null {
   if (!a || !a.TypeText) return null;
   return typeof a.TypeText === "string" ? a.TypeText : (a.TypeText.text ?? null);
@@ -44,7 +54,7 @@ const view = extract((s): View => {
   const last = (lines[n - 1] ?? "").trimEnd();
   const hm = last.match(/^(\d+) hints: type one/);
   const hints = hm ? Number(hm[1]) : 0;
-  if (labels.join(",") === STARTUP.join(",")) allSeen = true;
+  if (appeared(labels)) allSeen = true;
   const v: View = {
     labels,
     active,
@@ -63,10 +73,13 @@ const view = extract((s): View => {
 const v = () => view.current as View;
 
 // Startup: an empty server gets the four tabs, in Herdr's order.
-export const startupTabsAppear = eventually(() => v().labels.join(",") === STARTUP.join(",")).within(30, "seconds");
+export const startupTabsAppear = eventually(() => appeared(v().labels)).within(30, "seconds");
 
 // Once there, they stay: nothing the client does drops or reorders them.
-export const startupTabsStay = always(() => !v().allSeen || v().labels.join(",") === STARTUP.join(","));
+// ghostty-rex names a tab by its pane while no startup program runs in it
+// (T210): ~, the test HOME, for the shell tab, and for a tab a revive is
+// still bringing back.
+export const startupTabsStay = always(() => !v().allSeen || stays(v().labels));
 
 // Each program tab shows its program running.
 const runs = (tab: string) => () => v().active !== tab || v().hints > 0 || v().text.includes("STUB " + PROGRAM[tab]);

@@ -12,8 +12,10 @@ status line and an echo line. Ghostty's own tabs and splits are not used.
 - **Client** (bb, `src/rexg/`): the Rex control connection and data streams
   (`rex.clj`, `ws.clj`), keys from Ghostty through the Kitty keyboard
   protocol (`keys.clj`), the model (`model.clj`, a port of rexmux's model.rs
-  with the same rules and tests), the chrome (`screen.clj`), tiny fingers
-  (`hints.clj`) and the wiring (`main.clj`).
+  with the same rules and tests), the chrome (`screen.clj`), the names it
+  shows for tabs, panes and sessions in place of Rex IDs (`names.clj`, from
+  Rex's process, title and pwd of each block and their `*_changed` events),
+  tiny fingers (`hints.clj`) and the wiring (`main.clj`).
 - **Sidecar**: rexmux's `sidecar/rexmux/`, run in-process. It holds the command
   registry, M-x generated from Rex's API, the leader.edn keymap, agent status
   from OSC 7501, notifications, and bbh routing (`bbh say --from rex`).
@@ -74,7 +76,9 @@ reaches the client, and keeps copy, paste and font size.
   inline screenshots make it) must paint within 300 ms of a project switch
   (`bb switch-timing` runs only this, in about a minute). Then Bombadil types into
   `bb attach` with rexmux's specs (`../rexmux/test/bombadil/rexmux.ts` and
-  `startup.ts`), 60 s each (`--time N`, `--no-bombadil`, `--keep`), with
+  `startup.ts`) and its own `test/bombadil/names.ts` (tabs rename on cd, on a
+  program and by hand, and no Rex ID shows), 60 s each (`--time N`,
+  `--no-bombadil`, `--spec=names` for one, `--keep`), with
   `REXG_SYNC=0` so the renderer drops synchronized output and Bombadil
   judges the screen after a quiet gap, not at a pane-output frame. The
   client runs with Hyprland's PATH, which lacks ~/.local/bin, as the real

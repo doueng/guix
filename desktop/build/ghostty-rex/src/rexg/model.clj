@@ -13,7 +13,8 @@
   [:reload-after] [:ignore]."
   (:require [clojure.string :as str]
             [rexg.hints :as hints]
-            [rexg.keys :as keys]))
+            [rexg.keys :as keys]
+            [rexg.names :as names]))
 
 (def mx-key "alt+x")
 
@@ -87,10 +88,40 @@
 (defn session-id [m] (:session (view m)))
 (defn focused-block [m] (some-> (view m) active-window :focused))
 
+(declare procs)
+
+(defn home [m info] (or (:home info) (get-in m [:env "HOME"])))
+
+(defn pane-info
+  "What Rex told about BLOCK, with the app an agent in it reported."
+  [m block]
+  (when-let [info (get (procs m) block)]
+    (if-let [app (some #(when (= block (:block %)) (:app %)) (:agents m))]
+      (assoc info :app app)
+      info)))
+
+(defn tab-label
+  "What tab WIN shows after its number (rexg.names/tab-name), or nil."
+  [m win]
+  (let [info (pane-info m (or (:focused win) (:block (first (:tiles win)))))]
+    (names/tab-name win info (home m info) (get-in m [:startup :windows]))))
+
+(defn pane-title
+  "BLOCK's program and directory, or nil before Rex told them."
+  [m block]
+  (when-let [info (pane-info m block)]
+    (names/pane-title info (home m info))))
+
+(defn session-label
+  "The shown session's name: its label, else session N."
+  [m]
+  (when-let [v (view m)]
+    (names/session-name (:session v) (:label v) (:sessions (server m)))))
+
 (defn context [m]
   (let [v (view m) w (some-> v active-window)]
     (cond-> {:server (:label (server m))}
-      v (assoc :session-id (:session v) :window-ids (mapv :id (:windows v)) :window-labels (mapv :label (:windows v)))
+      v (assoc :session-id (:session v) :window-ids (mapv :id (:windows v)) :window-labels (mapv #(str (tab-label m %)) (:windows v)))
       w (assoc :window-id (:id w))
       (and w (:focused w)) (assoc :block-id (:focused w))
       (seq (:client-id (server m))) (assoc :client-id (:client-id (server m))))))
@@ -408,11 +439,56 @@
            (and focus? new) (conj [:rex srv "session.focus_block" {:session_id sid :block_id new} [:effect]]))]
       [m []])))
 
+;; ---- what runs in each pane (T210) ----
+
+(defn view-blocks [v] (distinct (mapcat #(map :block (:tiles %)) (:windows v))))
+
+(defn- ask-procs
+  "Keep SRV's :procs to the blocks of view V, and ask Rex what runs in each
+  new one: its foreground process, title and OSC 7 directory. Events keep
+  them current after that (proc-event)."
+  [m srv v]
+  (let [blocks (view-blocks v)
+        procs (select-keys (get-in m [:servers srv :procs]) blocks)
+        fresh (remove #(contains? procs %) blocks)]
+    [(assoc-in m [:servers srv :procs] (reduce #(assoc %1 %2 {}) procs fresh))
+     (vec (for [b fresh method ["process" "title" "pwd"]]
+            [:rex srv "block.method" {:session_id (:session v) :block_id b :method method} [:proc srv b method]]))]))
+
+(defn- proc-fields
+  "The :procs fields in a block.method process, title or pwd result, or the
+  payload of a process_changed, title_changed or pwd_changed event."
+  [what r]
+  (case what
+    "process" (cond-> {:fg (select-keys (:foreground r) [:name :argv0 :script :cwd :pid])}
+                (:home r) (assoc :home (:home r)))
+    "title" {:title (str (:title r)) :title-owner (:owner r)}
+    "pwd" {:pwd (:pwd r) :pwd-owner (:owner r)}
+    {}))
+
+(defn proc-answer
+  "Rex's answer about BLOCK of SRV: it fills what no event has told since."
+  [m srv block what r]
+  (if (contains? (get-in m [:servers srv :procs]) block)
+    (ctx-changed (update-in m [:servers srv :procs block] #(merge (proc-fields what r) %)))
+    [m []]))
+
+(defn proc-event
+  "A block_event of the shown session: what runs in a pane changed."
+  [m srv {:keys [block_id name payload]}]
+  (let [what ({"process_changed" "process" "title_changed" "title" "pwd_changed" "pwd"} name)]
+    (if (and what (contains? (get-in m [:servers srv :procs]) block_id))
+      (ctx-changed (update-in m [:servers srv :procs block_id] merge (proc-fields what payload)))
+      [m []])))
+
+(defn procs [m] (:procs (server m)))
+
 (defn set-view [m srv v]
   (let [old (get-in m [:servers srv :view])]
     (if (and old (= (:session old) (:session v)) (> (:revision old) (:revision v)))
       [m []]
       (let [m (assoc-in m [:servers srv :view] v)
+            [m o0] (ask-procs m srv v)
             [m o1] (if (= srv (:current m)) (refresh-streams m) [m []])
             o2 (if (:revive-pending m) (revive-checks m srv) [])
             first-w (first (:windows v))
@@ -421,7 +497,7 @@
                  [])
             m (assoc m :revive-pending false :focus-first-pending false)
             [m o4] (ctx-changed m)]
-        [m (vec (concat o1 o2 o3 o4))]))))
+        [m (vec (concat o0 o1 o2 o3 o4))]))))
 
 (defn local-server?
   "Whether SRV is the account's local Rex server, which the client starts
@@ -468,7 +544,7 @@
   (let [v (get-in m [:servers srv :view])
         cur? (= srv (:current m))
         s (get-in m [:servers srv])]
-    [(cond-> (update-in m [:servers srv] assoc :conn :down :lost true :client-id "" :view nil
+    [(cond-> (update-in m [:servers srv] assoc :conn :down :lost true :client-id "" :view nil :procs {}
                         :reattach (or (:session v) (:reattach s)))
        cur? (assoc :streams {}))
      (if cur? (mapv #(vector :close-stream %) (keys (:streams m))) [])]))
@@ -535,6 +611,8 @@
 (defn rex-response [m [tk srv & more :as tag] result]
   (cond
     (= tk :reload-after) [m [[:reload]]]
+    ;; A block that is not a terminal has no process; its tab keeps its number.
+    (= tk :proc) (if (contains? result :error) [m []] (apply proc-answer m srv (concat more [(:ok result)])))
     (contains? result :error)
     ;; A late request for a block a revive replaced is no news.
     (let [stale (some #(str/includes? (str (:error result)) %) (:replaced m))]
@@ -584,10 +662,13 @@
     (case kind
       "session_event" (let [sid (:session_id payload)
                             shown (= sid (get-in m [:servers srv :view :session]))]
-                        (if (and shown (#{"session_view_changed" "active_window_changed" "window_created" "window_closed" "block_closed"}
-                                        (get-in payload [:event :type])))
+                        (cond
+                          (and shown (#{"session_view_changed" "active_window_changed" "window_created" "window_closed" "block_closed"}
+                                      (get-in payload [:event :type])))
                           [m [[:rex srv "session.view" {:session_id sid} [:view srv]]]]
-                          [m []]))
+                          (and shown (= "block_event" (get-in payload [:event :type])))
+                          (proc-event m srv (get-in payload [:event :payload]))
+                          :else [m []]))
       ("session_created" "session_destroyed") [m [[:rex srv "session.list" {} [:sessions srv]]]]
       "client_perform_requested" (let [action (:action payload) request (str (:call_id payload))]
                                    (if-let [id (some #(when (= action (:action %)) (:id %)) (:catalogue m))]
@@ -647,7 +728,7 @@
                               (case (:complete spec)
                                 "commands" (mapv #(vector (:id %) (:id %)) (:catalogue m))
                                 "agents" (mapv #(vector (str (:state %) " " (:app %) " " (:msg %)) (:block %)) (:agents m))
-                                "session" (mapv (fn [[id l]] [(if (str/blank? l) id l) id]) (:sessions (server m)))
+                                "session" (let [ss (:sessions (server m))] (mapv (fn [[id l]] [(names/session-name id l ss) id]) ss))
                                 []))))
           scored (keep-indexed (fn [i it] (when-let [s (fuzzy (:input mb) (first it))] [s i it])) items)]
       (mapv #(nth % 2) (if (str/blank? (:input mb)) scored (sort-by (fn [[s i]] [(- s) i]) scored))))

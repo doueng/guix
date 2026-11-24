@@ -45,12 +45,18 @@ const view = extract((s): View => {
   for (let i = 0; i < n; i++) lines.push(s.grid.rowText(i));
   const status = lines[n - 2] ?? "";
   const last = (lines[n - 1] ?? "").trimEnd();
-  const titles = lines.slice(1, n - 2).flatMap((l) => [...l.matchAll(/([▶─]) ([0-9a-f]{6})( ! )?/g)]);
+  // A pane's title: rexmux's short block ID, or ghostty-rex's program and
+  // directory (T210), then an agent's state, as ▶ fish ~/guix ! pi ───.
+  const titles = lines.slice(1, n - 2).flatMap((l) => [...l.matchAll(/([▶─]) ([^─│┌┐└┘]*[^─│┌┐└┘ ])(?= *(?:─|│|$))/g)]);
   const marked = titles.filter((m) => m[1] === "▶");
+  const nameOf = (t: string) => t.replace(/ ↑ history.*$/, "").replace(/ [!●○✓✗?] .*$/, "");
   // The tty frontend puts the cursor on the last row only while the minibuffer is open.
   const mb = s.cursor.position.row === n - 1;
   const cands = lines.slice(1, n - 2).filter((l) => /^[> ] \S/.test(l));
-  const fm = status.match(/focus (\S+)/);
+  // rexmux says focus ID; ghostty-rex names the pane just before agents.
+  const fields = status.trim().split(" │ ");
+  const fm = status.match(/focus (\S+)/) ??
+    [null, fields[fields.findIndex((f) => f.startsWith("agents ")) - 1] ?? "-"];
   const bm = status.match(/blocked (\d+)/);
   const prefix = /^alt\+space( \S+)*-$/.test(last);
   const key = typed(s.lastAction);
@@ -58,8 +64,8 @@ const view = extract((s): View => {
     tabs: ((lines[0] ?? "").match(/(\[\d+|  \d+)/g) ?? []).length,
     panes: titles.length,
     markers: marked.length,
-    marked: marked.length ? marked[0][2] : null,
-    markedBlocked: marked.length > 0 && marked[0][3] !== undefined,
+    marked: marked.length ? nameOf(marked[0][2]) : null,
+    markedBlocked: marked.length > 0 && / ! /.test(marked[0][2]),
     focus: fm && fm[1] !== "-" ? fm[1] : null,
     blocked: bm ? parseInt(bm[1], 10) : 0,
     sidecarDown: /sidecar down/.test(status),
@@ -83,7 +89,8 @@ const v = () => view.current as View;
 
 // Pane focus: one focused pane, and the status line names it.
 export const oneFocusedPane = always(() => v().markers <= 1);
-const focusDisagrees = () => v().marked !== null && v().focus !== null && v().marked !== v().focus;
+// A narrow pane cuts its title, so the status line's name may run on.
+const focusDisagrees = () => v().marked !== null && v().focus !== null && !v().focus!.startsWith(v().marked!);
 export const statusNamesTheFocusedPane = always(
   now(focusDisagrees).implies(eventually(() => !focusDisagrees()).within(2, "seconds")));
 
