@@ -49,4 +49,39 @@
    :coverage-total 42,
    :trials 450,
    :ms 64,
+   :failures []}}
+ {:baseline-metrics
+  {:labels
+   [:cancel-sent :crash-after-send :router-batch :stale-file-deleted],
+   :states 566,
+   :transitions 876,
+   :coverage 35,
+   :histories 365,
+   :ngrams 325,
+   :coverage-total 42,
+   :trials 450,
+   :ms 62,
+   :failures []},
+  :new-regressions [],
+  :generator-sha "fc82f45742fae8da",
+  :note
+  "larger outboxes (up to 12 rows): Router batches of several rows and mixed row states per conversation kind",
+  :round 2,
+  :property-sha "ba1387527b3732ac",
+  :reason "slower: 110 ms against 62 ms",
+  :at "2026-11-25T13:24:35.689639276Z",
+  :verdict :rejected,
+  :by :agent,
+  :cost {:minutes 1},
+  :metrics
+  {:labels
+   [:cancel-sent :crash-after-send :router-batch :stale-file-deleted],
+   :states 691,
+   :transitions 1026,
+   :coverage 35,
+   :histories 378,
+   :ngrams 368,
+   :coverage-total 42,
+   :trials 450,
+   :ms 110,
    :failures []}}]
