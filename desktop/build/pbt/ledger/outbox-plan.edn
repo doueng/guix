@@ -84,4 +84,38 @@
    :coverage-total 42,
    :trials 450,
    :ms 110,
+   :failures []}}
+ {:baseline-metrics
+  {:labels
+   [:cancel-sent :crash-after-send :router-batch :stale-file-deleted],
+   :states 566,
+   :transitions 876,
+   :coverage 35,
+   :histories 365,
+   :ngrams 325,
+   :coverage-total 42,
+   :trials 450,
+   :ms 61,
+   :failures []},
+  :new-regressions [],
+  :generator-sha "85a729038dd5fd03",
+  :note "Router batches of several rows: Router rows twice as likely",
+  :round 3,
+  :property-sha "ba1387527b3732ac",
+  :reason "worse ngrams",
+  :at "2026-11-25T13:24:50.417008380Z",
+  :verdict :rejected,
+  :by :agent,
+  :cost {:minutes 1},
+  :metrics
+  {:labels
+   [:cancel-sent :crash-after-send :router-batch :stale-file-deleted],
+   :states 592,
+   :transitions 922,
+   :coverage 35,
+   :histories 377,
+   :ngrams 303,
+   :coverage-total 42,
+   :trials 450,
+   :ms 67,
    :failures []}}]
