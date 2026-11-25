@@ -14,4 +14,51 @@
    :trials 450,
    :ms 126,
    :failures []},
-  :round 0}]
+  :round 0}
+ {:baseline-metrics
+  {:labels
+   [:closed-before-connected
+    :hangup-kills-server
+    :late-delivered
+    :local-start-fails
+    :local-start-works
+    :retry-after-wait
+    :stale-connected-closed],
+   :states 53,
+   :transitions 160,
+   :coverage 28,
+   :histories 311,
+   :ngrams 287,
+   :coverage-total 34,
+   :trials 450,
+   :ms 122,
+   :failures []},
+  :new-regressions [],
+  :generator-sha "e3b192e189642361",
+  :note
+  "per-input action mix: held-back deliveries pile up answers/sockets; loss-heavy mix races stale answers",
+  :round 1,
+  :property-sha "6e0b034dcbb2d1d8",
+  :reason "more transitions",
+  :at "2026-11-25T13:26:03.414569851Z",
+  :verdict :accepted,
+  :by :agent,
+  :cost {:minutes 1},
+  :metrics
+  {:labels
+   [:closed-before-connected
+    :hangup-kills-server
+    :late-delivered
+    :local-start-fails
+    :local-start-works
+    :retry-after-wait
+    :stale-connected-closed],
+   :states 56,
+   :transitions 187,
+   :coverage 28,
+   :histories 358,
+   :ngrams 327,
+   :coverage-total 34,
+   :trials 450,
+   :ms 149,
+   :failures []}}]
