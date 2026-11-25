@@ -108,4 +108,51 @@
    :coverage-total 34,
    :trials 450,
    :ms 178,
+   :failures []}}
+ {:baseline-metrics
+  {:labels
+   [:closed-before-connected
+    :hangup-kills-server
+    :late-delivered
+    :local-start-fails
+    :local-start-works
+    :retry-after-wait
+    :stale-connected-closed],
+   :states 57,
+   :transitions 209,
+   :coverage 28,
+   :histories 382,
+   :ngrams 353,
+   :coverage-total 34,
+   :trials 450,
+   :ms 181,
+   :failures []},
+  :new-regressions [],
+  :generator-sha "31bff530045db134",
+  :note
+  "loss/recovery fragments up to three losses and a down-server retry ladder (hangup-kills-server rarest label)",
+  :round 3,
+  :property-sha "6e0b034dcbb2d1d8",
+  :reason "worse transitions",
+  :at "2026-11-25T13:26:47.482369916Z",
+  :verdict :rejected,
+  :by :agent,
+  :cost {:minutes 1},
+  :metrics
+  {:labels
+   [:closed-before-connected
+    :hangup-kills-server
+    :late-delivered
+    :local-start-fails
+    :local-start-works
+    :retry-after-wait
+    :stale-connected-closed],
+   :states 56,
+   :transitions 202,
+   :coverage 28,
+   :histories 386,
+   :ngrams 356,
+   :coverage-total 34,
+   :trials 450,
+   :ms 170,
    :failures []}}]
