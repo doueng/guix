@@ -40,10 +40,12 @@
 
 (defn rex-block
   "The Rex block the caller runs in: REX_BLOCK, when TERM_PROGRAM says Rex is
-  the innermost terminal (a Herdr inside Rex, or the reverse, sets its own)."
-  []
-  (when (= "rex" (System/getenv "TERM_PROGRAM"))
-    (not-empty (System/getenv "REX_BLOCK"))))
+  the innermost terminal (a Herdr inside Rex, or the reverse, sets its own).
+  ENV, a map of environment variables, defaults to the process's."
+  ([] (rex-block (System/getenv)))
+  ([env]
+   (when (= "rex" (get env "TERM_PROGRAM"))
+     (not-empty (get env "REX_BLOCK")))))
 (defn rex-session [] (not-empty (System/getenv "REX_SESSION")))
 
 (defn rex-call!

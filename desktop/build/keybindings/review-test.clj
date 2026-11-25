@@ -47,12 +47,11 @@
 
 (defn nav-calls [pane herdr]
   (let [calls (atom [])]
-    (with-redefs [keyleader/herdr-pane (constantly pane)
-                  keylog/log! (fn [& _] nil)
+    (with-redefs [keylog/log! (fn [& _] nil)
                   keyleader/herdr-json herdr
                   hypr/dispatch! (fn [d] (swap! calls conj d))
                   keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")]
-      (try (keyleader/nav! "left") (catch clojure.lang.ExceptionInfo e (swap! calls conj (ex-message e)))))
+      (try (keyleader/nav! (when pane [:herdr pane]) "left") (catch clojure.lang.ExceptionInfo e (swap! calls conj (ex-message e)))))
     @calls))
 
 (deftest herdr-failure-does-not-move-desktop-focus

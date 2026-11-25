@@ -83,7 +83,7 @@
   {:name "keybindings"
    :paths ["desktop/kanata.kbd" "desktop/build/keybindings/**" "desktop/lib/**"
            "desktop/configs/{keybindings,hypr,doom,nvim,kanata,ideavim,vimium,ghostty,herdr}/**"
-           "desktop/bin/{keyleader,keyguide,keylog,palette,winhint,hyprkan}"]
+           "desktop/bin/{keyleader,keyguide,keylog,palette,winhint,hyprkan}" "desktop/build/checks/common.clj"]
    :checks ["bb desktop/build/keybindings/check.bb"]
    :slow ["bb desktop/build/keybindings/hypr-nested.bb"]}
   {:name "chrome launcher rows"

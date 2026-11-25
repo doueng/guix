@@ -10,12 +10,11 @@
 
 (defn nav-with [pane edges]
   (let [calls (atom [])]
-    (with-redefs [keyleader/herdr-pane (constantly pane)
-                  keyleader/herdr-json (fn [& _] {:result {:edges edges}})
+    (with-redefs [keyleader/herdr-json (fn [& _] {:result {:edges edges}})
                   keylog/log! (fn [& _] nil)
                   hypr/dispatch! (fn [d] (swap! calls conj d))
                   keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")]
-      (keyleader/nav! "left"))
+      (keyleader/nav! (when pane [:herdr pane]) "left"))
     @calls))
 
 (deftest navigation-falls-through-from-herdr-to-hyprland
@@ -28,13 +27,65 @@
 
 (defn term-nav-with [program direction]
   (let [calls (atom [])]
-    (with-redefs [keyleader/herdr-pane (constantly "w1:p2")
-                  keyleader/foreground-programs (constantly [program])
+    (with-redefs [keyleader/foreground-programs (constantly [program])
                   keylog/log! (fn [& _] nil)
-                  keyleader/nav! (fn [d _] (swap! calls conj [:nav d]))
+                  keyleader/nav! (fn [_ d _] (swap! calls conj [:nav d]))
                   keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")]
-      (keyleader/term-nav! grammar direction))
+      (keyleader/term-nav! grammar [:herdr "w1:p2"] direction))
     @calls))
+
+;; Each terminal context on purpose: keyleader reads the environment only on
+;; its command line, so a test run from a Rex or Herdr pane cannot steer these.
+(deftest the-pane-comes-from-the-innermost-terminal
+  (is (nil? (keyleader/pane {})) "a plain shell or the desktop")
+  (is (nil? (keyleader/pane {"TERM_PROGRAM" "ghostty"})) "Ghostty without a multiplexer")
+  (is (= [:herdr "w1:p2"] (keyleader/pane {"TERM_PROGRAM" "ghostty" "HERDR_PANE_ID" "w1:p2"})))
+  (is (= [:herdr "w1:p3"] (keyleader/pane {"HERDR_PANE_ID" "" "HERDR_ACTIVE_PANE_ID" "w1:p3"}))
+      "Herdr's commands and popups name the pane as the active one")
+  (is (= [:rex "block:9"] (keyleader/pane {"TERM_PROGRAM" "rex" "REX_BLOCK" "block:9" "REX_SESSION" "session:1"})))
+  (is (= [:rex "block:9"] (keyleader/pane {"TERM_PROGRAM" "rex" "REX_BLOCK" "block:9" "HERDR_PANE_ID" "w1:p2"}))
+      "Rex inside a Herdr pane is the innermost terminal")
+  (is (= [:herdr "w1:p2"] (keyleader/pane {"TERM_PROGRAM" "ghostty" "REX_BLOCK" "block:9" "HERDR_PANE_ID" "w1:p2"}))
+      "a REX_BLOCK inherited from an outer Rex does not count once another terminal sets TERM_PROGRAM")
+  (is (nil? (keyleader/pane {"TERM_PROGRAM" "rex" "REX_BLOCK" ""}))))
+
+(defn rex-nav-with
+  "The calls nav! or term-nav! (F) makes in Rex block:9, where focus moves
+  when MOVED and PROGRAM runs in the foreground."
+  [f moved program]
+  (let [calls (atom [])]
+    (with-redefs [mux/rex-focus! (fn [d] (swap! calls conj [:rex-focus d]) moved)
+                  mux/rex-foreground (fn [b] (swap! calls conj [:rex-foreground b]) program)
+                  mux/rex-send-key! (fn [b k] (swap! calls conj [:rex-send-key b k]))
+                  keyleader/foreground-programs (fn [& _] (throw (ex-info "asked Herdr inside Rex" {})))
+                  keyleader/herdr-json (fn [& _] (throw (ex-info "asked Herdr inside Rex" {})))
+                  keylog/log! (fn [& row] (swap! calls conj (vec row)))
+                  hypr/dispatch! (fn [d] (swap! calls conj d))
+                  keyleader/run! (fn [argv & _] (swap! calls conj (vec argv)) "")]
+      (f [:rex "block:9"]))
+    @calls))
+
+(deftest rex-panes-navigate-through-rex
+  (is (= [[:rex-focus "left"] ["action" "rex" "focus left" "Focus left pane"]]
+         (rex-nav-with #(keyleader/nav! % "left") true nil)))
+  (is (= [[:rex-focus "left"] ["focus" {:direction "left"}] ["action" "hyprland" "focus left" "Focus left window"]]
+         (rex-nav-with #(keyleader/nav! % "left") false nil))
+      "at Rex's edge focus leaves for Hyprland")
+  (is (= [[:rex-foreground "block:9"] [:rex-send-key "block:9" "ctrl+h"] ["forward" "rex" "Ctrl+h" "Forwarded to neovim"]]
+         (rex-nav-with #(keyleader/term-nav! grammar % "left") true "nvim"))
+      "an editor in a Rex block keeps Ctrl+h")
+  (is (= [[:rex-foreground "block:9"] [:rex-focus "left"] ["action" "rex" "Ctrl+h" "Focus left pane"]]
+         (rex-nav-with #(keyleader/term-nav! grammar % "left") true "fish"))
+      "fish keeps only Ctrl+l, so Ctrl+h moves focus in Rex"))
+
+(deftest ghostty-and-the-desktop-navigate-through-hyprland
+  (let [calls (atom [])]
+    (with-redefs [keylog/log! (fn [& _] nil)
+                  hypr/dispatch! (fn [d] (swap! calls conj d))
+                  mux/rex-focus! (fn [& _] (throw (ex-info "asked Rex outside it" {})))
+                  keyleader/herdr-json (fn [& _] (throw (ex-info "asked Herdr outside it" {})))]
+      (keyleader/nav! nil "right"))
+    (is (= [["focus" {:direction "right"}]] @calls))))
 
 (deftest shells-keep-ctrl-l-and-editors-keep-all-four
   (is (= [["herdr" "pane" "send-keys" "w1:p2" "ctrl+l"]] (term-nav-with "fish" "right")))
@@ -174,11 +225,10 @@
 
 (deftest kept-keys-are-logged-as-forwarded-by-herdr
   (let [rows (atom [])]
-    (with-redefs [keyleader/herdr-pane (constantly "w1:p2")
-                  keyleader/foreground-programs (constantly [".emacs-31.1-rea"])
+    (with-redefs [keyleader/foreground-programs (constantly [".emacs-31.1-rea"])
                   keylog/log! (fn [& row] (swap! rows conj (vec row)))
                   keyleader/run! (fn [& _] "")]
-      (keyleader/term-nav! grammar "left"))
+      (keyleader/term-nav! grammar [:herdr "w1:p2"] "left"))
     (is (= [["forward" "herdr" "Ctrl+h" "Forwarded to emacs"]] @rows))))
 
 (defn desktop-run-with [keys]

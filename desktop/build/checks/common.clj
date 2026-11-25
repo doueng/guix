@@ -14,6 +14,17 @@
   (let [[opts args] (if (map? (first args)) [(first args) (rest args)] [{} args])]
     (apply p/shell (merge {:dir root :out :string :err :string :continue true} opts) args)))
 
+(def terminal-var
+  "Variables that say which terminal, multiplexer or Hyprland session a process
+  runs in. A test run from a Rex or Herdr pane would inherit them (T228)."
+  #"^(TERM_PROGRAM|TERM_PROGRAM_VERSION|MUX|REX_.*|HERDR_.*|HYPRLAND_.*|HL_.*|GHOSTTY_.*)$")
+
+(defn hermetic-env
+  "The process environment without terminal-var, plus EXTRA: what a test sees
+  in a plain shell, wherever make test runs. Tests that need a context set it."
+  [& [extra]]
+  (merge (into {} (remove (fn [[k _]] (re-matches terminal-var k))) (System/getenv)) extra))
+
 (defn lines [s] (remove str/blank? (str/split-lines (or s ""))))
 
 (defn tracked-files []

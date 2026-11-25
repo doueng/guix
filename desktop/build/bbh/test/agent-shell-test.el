@@ -1306,6 +1306,31 @@ saves the note and sends the thread; RET only saves it."
 (defun bbh-test--inbox-ids (from to)
   (mapcar (lambda (n) (format "T%d" n)) (number-sequence from to)))
 
+(ert-deftest bbh-inbox-jjui-in-a-rex-pane-runs-rex-jjui ()
+  "A frame in a Rex pane (TERM_PROGRAM=rex) gets rex-jjui with its block and
+session, whatever the environment that ran the tests (T228)."
+  (let* ((log (make-temp-file "rex-jjui-log"))
+         (eng/bbh-inbox-rex-jjui
+          (make-temp-file "rex-jjui" nil nil
+                          (format "#!/bin/sh\necho \"$TERM_PROGRAM $REX_BLOCK $REX_SESSION $*\" >> %s\n"
+                                  (shell-quote-argument log))))
+         (eng/bbh-inbox-herdr-jjui "false")
+         (eng/bbh-inbox-bbh (list "sh" "-c" "echo /tmp/T1-repo" "sh")))
+    (set-file-modes eng/bbh-inbox-rex-jjui #o755)
+    (cl-letf (((symbol-function 'eng/bbh-inbox--thread) (lambda () "T1"))
+              ((symbol-function 'getenv)
+               (let ((getenv (symbol-function 'getenv)))
+                 (lambda (var &optional f)
+                   (pcase var
+                     ("TERM_PROGRAM" "rex")
+                     ("REX_BLOCK" "block:9")
+                     ("REX_SESSION" "session:1")
+                     ("HERDR_SOCKET_PATH" "/run/herdr.sock")
+                     (_ (funcall getenv var f)))))))
+      (eng/bbh-inbox-jjui)
+      (should (bbh-test--wait (lambda () (= 1 (length (bbh-test--inbox-log log)))) 10)))
+    (should (equal "rex block:9 session:1 /tmp/T1-repo" (car (bbh-test--inbox-log log))))))
+
 (ert-deftest bbh-inbox-jjui-three-times-leaves-no-buffers-or-processes ()
   (let* ((log (make-temp-file "herdr-jjui-log"))
          (eng/bbh-inbox-herdr-jjui
@@ -1318,7 +1343,11 @@ saves the note and sends the thread; RET only saves it."
     (cl-letf (((symbol-function 'eng/bbh-inbox--thread) (lambda () "T1"))
               ((symbol-function 'getenv)
                (let ((getenv (symbol-function 'getenv)))
-                 (lambda (var &optional f) (if (equal var "HERDR_SOCKET_PATH") "/run/herdr.sock" (funcall getenv var f))))))
+                 (lambda (var &optional f)
+                   (pcase var
+                     ("HERDR_SOCKET_PATH" "/run/herdr.sock")
+                     ("TERM_PROGRAM" nil)
+                     (_ (funcall getenv var f)))))))
       (dotimes (_ 3) (eng/bbh-inbox-jjui))
       (should (bbh-test--wait (lambda () (= 3 (length (bbh-test--inbox-log log)))) 10))
       (eng/bbh-inbox-jjui-close)

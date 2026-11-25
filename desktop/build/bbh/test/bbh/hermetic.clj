@@ -1,7 +1,9 @@
 (ns bbh.hermetic
   "Run tests under the caller's environment minus the variables that tie a
   process to a bbh session, a super-agent role or a workflow run, so the suite
-  behaves the same in a clean shell and inside a Worker. HOME and the XDG dirs
+  behaves the same in a clean shell and inside a Worker, and minus the ones
+  that say which terminal it runs in (TERM_PROGRAM, REX_*, HERDR_*, HYPRLAND_*),
+  so it behaves the same in a Rex or Herdr pane as in Ghostty. HOME and the XDG dirs
   point at a temp root, so no test writes the person's bbh state, conversations,
   super.db or config."
   (:require [babashka.fs :as fs]
@@ -12,8 +14,10 @@
   "BB_TEST_HOME")
 
 (defn- session-var? [k]
-  (and (re-find #"^(BBH_|WF_|PI_CODING_AGENT_)" k)
-       (not= k "BBH_SQLITE_LIB")))
+  (or (and (re-find #"^(BBH_|WF_|PI_CODING_AGENT_)" k)
+           (not= k "BBH_SQLITE_LIB"))
+      ;; As desktop/build/checks/common.clj terminal-var (T228).
+      (re-matches #"TERM_PROGRAM|TERM_PROGRAM_VERSION|MUX|(REX|HERDR|HYPRLAND|HL|GHOSTTY)_.*" k)))
 
 (def ^:private own-root (delay (str (fs/create-temp-dir {:prefix "bbh-test-home"}))))
 

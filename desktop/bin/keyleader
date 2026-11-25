@@ -192,8 +192,19 @@
             (throw (ex-info (str "Herdr " method ": " (:message error)) error))
             (:result reply)))))))
 
-(defn herdr-pane []
-  (some not-empty [(System/getenv "HERDR_PANE_ID") (System/getenv "HERDR_ACTIVE_PANE_ID")]))
+(defn herdr-pane
+  ([] (herdr-pane (System/getenv)))
+  ([env] (some not-empty [(get env "HERDR_PANE_ID") (get env "HERDR_ACTIVE_PANE_ID")])))
+
+(defn pane
+  "The terminal pane the caller runs in, from ENV, a map of environment
+  variables: [:rex block] when Rex is the innermost terminal, [:herdr pane]
+  inside Herdr, and nil in Ghostty or on the desktop. Only the command line
+  reads the real environment; nav! and term-nav! take this as a parameter."
+  [env]
+  (if-let [block (mux/rex-block env)]
+    [:rex block]
+    (when-let [p (herdr-pane env)] [:herdr p])))
 
 (defn herdr-target
   "The pane, tab and workspace that a Herdr action applies to, from the
@@ -221,19 +232,20 @@
       :else (throw (ex-info "Herdr did not report pane edges" {:pane pane :direction direction})))))
 
 (defn nav!
-  "Focus DIRECTION in the innermost layer that has a neighbor: the Herdr or
-  Rex pane containing the caller, then Hyprland. Editors call this at their
-  own edge. Inside a multiplexer, focus leaves the terminal only at the edge
-  of its layout. A zoomed pane fills the terminal, so focus leaves it for
-  Hyprland."
-  [direction & [keys]]
-  (let [keys (or keys (str "focus " direction))]
-    (cond
-      (mux/rex-block) (if (mux/rex-focus! direction)
-                        (keylog/log! "action" "rex" keys (str "Focus " direction " pane"))
-                        (move-desktop-focus! direction keys))
-      (herdr-pane) (herdr-nav! (herdr-pane) direction keys)
-      :else (move-desktop-focus! direction keys))))
+  "Focus DIRECTION in the innermost layer that has a neighbor: HERE, the
+  Herdr or Rex pane containing the caller (see pane), then Hyprland. Editors
+  call this at their own edge. Inside a multiplexer, focus leaves the
+  terminal only at the edge of its layout. A zoomed pane fills the terminal,
+  so focus leaves it for Hyprland."
+  [here direction & [keys]]
+  (let [keys (or keys (str "focus " direction))
+        [kind id] here]
+    (case kind
+      :rex (if (mux/rex-focus! direction)
+             (keylog/log! "action" "rex" keys (str "Focus " direction " pane"))
+             (move-desktop-focus! direction keys))
+      :herdr (herdr-nav! id direction keys)
+      (move-desktop-focus! direction keys))))
 
 (def nav-keys {"left" "h" "down" "j" "up" "k" "right" "l"})
 
@@ -250,11 +262,13 @@
            program)))
 
 (defn term-nav!
-  "Bare Ctrl+h/j/k/l in Herdr or in rexmux. A program that keeps the key
-  under :terminal :keeps gets it; elsewhere focus moves like Ctrl+b h/j/k/l."
-  [grammar direction]
-  (let [block (mux/rex-block)
-        pane (when-not block (herdr-pane))
+  "Bare Ctrl+h/j/k/l in Herdr or in rexmux, for the pane HERE (see pane). A
+  program that keeps the key under :terminal :keeps gets it; elsewhere focus
+  moves like Ctrl+b h/j/k/l."
+  [grammar here direction]
+  (let [[kind id] here
+        block (when (= :rex kind) id)
+        pane (when (= :herdr kind) id)
         key (str "ctrl+" (nav-keys direction))
         keys (str "Ctrl+" (nav-keys direction))
         programs (if block [(mux/rex-foreground block)] (foreground-programs pane))]
@@ -263,7 +277,7 @@
             (mux/rex-send-key! block key)
             (run! ["herdr" "pane" "send-keys" pane key]))
           (keylog/log! "forward" (if block "rex" "herdr") keys (str "Forwarded to " (keylog/program-id program))))
-      (nav! direction keys))))
+      (nav! here direction keys))))
 
 (defn submap-panel
   "The which-key panel for Hyprland submap NAME, local-CONTEXT or
@@ -520,7 +534,7 @@
           pressed (str herdr-leader " " (str/join " " keys))]
       (when-not (:nav b) (keylog/log! "action" "herdr" pressed (:label b)))
       (cond
-        (:nav b) (nav! (:nav b) pressed)
+        (:nav b) (nav! (when pane [:herdr pane]) (:nav b) pressed)
         (vector? action) (run! (concat ["herdr"] (take 2 action) ["--pane" pane] (drop 2 action)))
         (= :close-pane action) (run! ["herdr" "pane" "close" pane])
         (= :edit-scrollback action) (herdr-api! "pane.edit_scrollback" {:pane_id pane})
@@ -629,8 +643,8 @@
 
 (defn dispatch [[command & args]]
   (case command
-    "nav" (nav! (first args) (second args))
-    "term-nav" (term-nav! (load-grammar) (first args))
+    "nav" (nav! (pane (System/getenv)) (first args) (second args))
+    "term-nav" (term-nav! (load-grammar) (pane (System/getenv)) (first args))
     ;; Its own name keeps earlyoom's bb preference off this long-lived listener.
     "listen" (do (spit "/proc/self/comm" "keyleader") (listen!))
     "run" (run-desktop! (load-grammar) (vec args))
