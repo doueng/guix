@@ -14,4 +14,35 @@
    :trials 450,
    :ms 61,
    :failures []},
-  :round 0}]
+  :round 0}
+ {:baseline-metrics
+  {:states 31,
+   :transitions 300,
+   :coverage 29,
+   :histories 449,
+   :ngrams 643,
+   :coverage-total 34,
+   :trials 450,
+   :ms 69,
+   :failures []},
+  :new-regressions [],
+  :generator-sha "f17575dae21a1c5a",
+  :note
+  "bursts of one move (late answers piling up in the queue while up): 3 abstract transitions of 303 reachable were missed",
+  :round 1,
+  :property-sha "78b5b285bc9dd04d",
+  :reason "more transitions",
+  :at "2026-11-25T13:20:52.878746040Z",
+  :verdict :accepted,
+  :by :agent,
+  :cost {:minutes 1},
+  :metrics
+  {:states 31,
+   :transitions 301,
+   :coverage 29,
+   :histories 448,
+   :ngrams 644,
+   :coverage-total 34,
+   :trials 450,
+   :ms 183,
+   :failures []}}]
