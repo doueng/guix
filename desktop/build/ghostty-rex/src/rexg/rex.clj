@@ -92,6 +92,22 @@
             (reset! pending (subs s cut))
             (vt parts (subs s 0 cut))))))))
 
+(defn stream-out
+  "Where pane BLOCK's reader thread sends PART, one of feed!'s parts, so
+  that rexg-render gets the pane's bytes and sizes in stream order (T225):
+  [\\d bytes] the VT as a 'd' frame's payload, [\\r text] a resize as an 'r'
+  frame's, [:msg m] any other message of Rex's for the main queue."
+  [block part]
+  (cond (not (map? part))
+        (let [^bytes b part
+              prefix (.getBytes (str block "\u0000") "UTF-8")
+              out (byte-array (+ (alength prefix) (alength b)))]
+          (System/arraycopy prefix 0 out 0 (alength prefix))
+          (System/arraycopy b 0 out (alength prefix) (alength b))
+          [\d out])
+        (= "resize" (:type part)) [\r (str block " " (:cols part 80) " " (:rows part 24))]
+        :else [:msg part]))
+
 (defn open-stream!
   "Open the data stream for TICKET (from data.connect) on SOCK. Calls (on-data
   bytes) with the snapshot and the VT that follows, (on-msg m) for Rex's own

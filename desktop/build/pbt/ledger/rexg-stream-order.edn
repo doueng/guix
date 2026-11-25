@@ -1,0 +1,23 @@
+[{:verdict :baseline,
+  :by :W307-setup,
+  :at "2026-11-25T13:57:43.697837896Z",
+  :note "T225 stage 0: stream order suite as written",
+  :generator-sha "db5764155ac7ca7e",
+  :property-sha "f10f8930f293eebf",
+  :metrics
+  {:labels
+   [:message-across-chunks
+    :prefix-released-as-vt
+    :size-between-bytes
+    :sizes-back-to-back
+    :utf8-message],
+   :states 12,
+   :transitions 142,
+   :coverage 17,
+   :histories 314,
+   :ngrams 27,
+   :coverage-total 17,
+   :trials 450,
+   :ms 74,
+   :failures []},
+  :round 0}]

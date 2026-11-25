@@ -207,19 +207,15 @@
                                  ;; A new pane needs the layout again to know its place.
                                  (swap! app assoc-in [:last-draw :layout] nil)
                                  (try
-                                   (let [prefix (.getBytes (str block "\u0000") "UTF-8")
-                                         close (rex/open-stream! sock ticket
-                                                                 (fn [^bytes b]
-                                                                   (let [out (byte-array (+ (alength prefix) (alength b)))]
-                                                                     (System/arraycopy prefix 0 out 0 (alength prefix))
-                                                                     (System/arraycopy b 0 out (alength prefix) (alength b))
-                                                                     (frame! r \d out)))
-                                                                 (fn [msg]
-                                                                   ;; A size goes to rexg-render from this thread,
-                                                                   ;; in order with the bytes around it (T225).
-                                                                   (if (= "resize" (:type msg))
-                                                                     (send-str! r \r (str block " " (:cols msg 80) " " (:rows msg 24)))
-                                                                     (put! [:stream-msg block msg])))
+                                   (let [;; Bytes and sizes go to rexg-render from the reader
+                                         ;; thread, in stream order (T225).
+                                         out! (fn [part]
+                                                (let [[k x] (rex/stream-out block part)]
+                                                  (case k
+                                                    \d (frame! r \d x)
+                                                    \r (send-str! r \r x)
+                                                    :msg (put! [:stream-msg block x]))))
+                                         close (rex/open-stream! sock ticket out! out!
                                                                  (fn [why] (put! [:stream-closed block why])))]
                                      (swap! app assoc-in [:streams block] close))
                                    (catch Exception e (put! [:stream-closed block (ex-message e)]))))
