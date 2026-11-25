@@ -100,9 +100,9 @@ scale 1.6  vrr false  availableModes [2560x1600@60.00Hz]</code></pre>
 <h2>2. Two chips: one draws, one shows</h2>
 <p>Someone has to fill that frame. The <b>GPU</b> is the chip that draws: it fills memory with pixels fast. On your M1 it is Apple's AGX, and Asahi's driver for it is called <code>asahi</code>. Another part only shows: it reads a finished frame and sends it to the panel. On Apple chips that is a small computer of its own, the <b>DCP</b> (display coprocessor), driven by <code>apple-drm</code>.</p>
 <pre><code>ls /sys/class/drm; grep DRIVER /sys/class/drm/card*/device/uevent</code></pre>
-<pre class=out><code>card1         DRIVER=asahi      apple,agx-t8103
-card2         DRIVER=apple-drm  apple,display-subsystem
-card2-eDP-1   (the panel)</code></pre>
+<pre class=out><code>card1        asahi      agx-t8103
+card2        apple-drm  display-subsystem
+card2-eDP-1  the panel</code></pre>
 <p>Linux's name for the drivers of both is <b>DRM</b>. The part that sets the panel's mode and says which frame to show is <b>KMS</b>. The usual way to show a new frame is a <b>page flip</b>: you hand KMS a finished frame and it swaps to it at the next refresh, so the panel never shows half a picture.</p>
 <figure><figcaption>On your Mac the two jobs sit on two devices. A program that drives the screen must open both: card1 to draw, card2 to show.</figcaption>
 <svg viewBox='0 0 360 120' role=img aria-label='GPU draws into memory, DCP shows it on the panel'>
@@ -110,7 +110,7 @@ card2-eDP-1   (the panel)</code></pre>
 <rect x=132 y=40 width=96 height=40 fill=none stroke='#33302e'/><text x=180 y=58 font-size=13 text-anchor=middle>frame</text><text x=180 y=74 font-size=12 text-anchor=middle fill='#66605c'>in memory</text>
 <rect x=260 y=40 width=96 height=40 fill=none stroke='#33302e'/><text x=308 y=58 font-size=13 text-anchor=middle>DCP</text><text x=308 y=74 font-size=12 text-anchor=middle fill='#66605c'>card2, shows</text>
 <line x1=100 y1=60 x2=130 y2=60 stroke='#33302e'/><line x1=228 y1=60 x2=258 y2=60 stroke='#33302e'/>
-<text x=308 y=104 font-size=12 text-anchor=middle fill='#990f3d'>page flip at each refresh</text>
+<text x=356 y=104 font-size=12 text-anchor=end fill='#990f3d'>page flip at each refresh</text>
 <text x=52 y=28 font-size=12 text-anchor=middle fill='#66605c'>fills pixels</text>
 </svg></figure>
 <p class=so><b>So:</b> the GPU draws a frame into memory, and KMS flips the display to it at a refresh.</p>
@@ -135,7 +135,7 @@ google-chrome      workspace 2  xwayland false</code></pre>
 Name="Apple SPI Trackpad"
 Name="kanata"
 Name="ydotoold virtual device"</code></pre>
-<p>On your Mac there is one more step. <b>kanata</b> grabs the real keyboard, remaps it (Caps as Ctrl, Cmd chords, layers) and replays the result through a virtual keyboard named <code>kanata</code>. Hyprland only ever sees that one <span class=dim>(measured)</span>. kanata does not know which window has focus. So a bb daemon, <b>hyprkan</b>, listens to Hyprland's events and tells kanata, over a local TCP port, which layer to use for the focused app.<span class=sn></span><span class=sidenote>kanata runs as root with 3.7&nbsp;MB resident and used 0.9&nbsp;s of CPU in 5 hours <span class=dim>(measured)</span>. It is cheap. Its config is /etc/kanata/kanata.kbd, 80 lines.</span></p>
+<p>On your Mac there is one more step. <b>kanata</b> grabs the real keyboard, remaps it (Caps as Ctrl, Cmd chords, layers) and replays the result through a virtual keyboard named <code>kanata</code>. Hyprland only ever sees that one <span class=dim>(measured)</span>. kanata does not know which window has focus. So a bb daemon, <b>hyprkan</b>, listens to Hyprland's events and tells kanata, over a local TCP port, which layer to use for the focused app.<span class=sn></span><span class=sidenote>kanata runs as root with 3.7&nbsp;MB resident and used 0.9&nbsp;s of CPU in 5 hours <span class=dim>(measured)</span>. It is cheap. Its config has 80 lines, in <code>/etc/kanata/kanata.kbd</code></span></p>
 <p class=so><b>So:</b> input goes keyboard, kanata, libinput, compositor, focused window; hyprkan exists only to tell kanata who has focus.</p>
 </section>
 
@@ -161,10 +161,10 @@ Name="ydotoold virtual device"</code></pre>
 
 <section id=s6>
 <h2>6. Your stack today</h2>
-<p>Here is every layer between the hardware and Rex, as it runs now. Hyprland starts the rest from /home/engstrand/guix/desktop/configs/hypr/startup.lua</p>
+<p>Here is every layer between the hardware and Rex, as it runs now. Hyprland starts the rest from <code>/home/engstrand/guix/desktop/configs/hypr/startup.lua</code></p>
 <ul>
 <li><b>Hyprland</b>: compositor, tiling (dwindle layout), workspaces, binds and window rules in 400 lines of Lua, groups for tabs. Blur (2 passes), shadows and rounded corners are on.</li>
-<li><b>Dusk</b>: your own shell, a Rust program built on Zed's GPUI (4,457 lines of Rust, 708 crates) that draws <i>layer-shell</i> surfaces described by a bb process it runs as a child. It draws the wallpaper, notification toasts (it is the D-Bus notification server), the volume and brightness pop-up, the launcher list, the leader-key hint panel and window hints. It has no bar.<span class=sn></span><span class=sidenote>/home/engstrand/guix/desktop/configs/dusk/config.clj and /home/engstrand/guix/desktop/build/dusk/decisions.tsv, which says the bar was left out on purpose when Dusk replaced Noctalia.</span></li>
+<li><b>Dusk</b>: your own shell, a Rust program built on Zed's GPUI (4,457 lines of Rust, 708 crates) that draws <i>layer-shell</i> surfaces described by a bb process it runs as a child. It draws the wallpaper, notification toasts (it is the D-Bus notification server), the volume and brightness pop-up, the launcher list, the leader-key hint panel and window hints. It has no bar.<span class=sn></span><span class=sidenote>Dusk's decision log says the bar was left out on purpose when Dusk replaced Noctalia. Sources: <code>/home/engstrand/guix/desktop/configs/dusk/config.clj</code> and <code>/home/engstrand/guix/desktop/build/dusk/decisions.tsv</code></span></li>
 <li><b>keyleader</b> (665 lines of bb): the leader-key menus. <b>palette</b> (347 lines): the Cmd+Space launcher of T208. <b>hyprkan</b> (84 lines): focus to kanata layer. Each is its own resident bb process.</li>
 <li><b>The ghostty-rex stack</b>: one Ghostty window; inside it the <b>bb client</b> (<code>ghostty-rex attach</code>), which owns keys, menus and the Rex connection; <b>rexg-render</b>, a C program that reads each pane's output with Ghostty's own terminal code and paints one grid; a <code>rex events</code> process. T225 is moving this to one Ghostty window per pane, tabbed by Hyprland.</li>
 <li><b>Rex server</b>: keeps every shell, its screen and scrollback. It stays in every option below.</li>
@@ -197,15 +197,15 @@ Name="ydotoold virtual device"</code></pre>
 <table><tr><th>process</th><th class=r>CPU s since login</th><th class=r>share of a core, 30 s sample</th></tr>
 <tr><td>Hyprland</td><td class=r>1,774</td><td class=r>8.9%</td></tr><tr><td>Dusk</td><td class=r>111</td><td class=r>0.6%</td></tr><tr><td>Ghostty</td><td class=r>27</td><td class=r>0</td></tr><tr><td>rexg-render</td><td class=r>15</td><td class=r>0</td></tr><tr><td>bb client</td><td class=r>12</td><td class=r>0</td></tr><tr><td>hyprkan, keyleader, palette, Dusk's bb</td><td class=r>0.3</td><td class=r>0</td></tr>
 <tr><td><i>Rex server (stays)</i></td><td class=r>23</td><td class=r>0.1%</td></tr></table>
-<p>Together the ten hold 178&nbsp;MB in RAM and 285&nbsp;MB in swap, 463&nbsp;MB in all <span class=dim>(measured)</span>. Five bb processes account for 261&nbsp;MB of that while doing nothing: each carries its own copy of the bb runtime and a heap that is allowed to grow.<span class=sn></span><span class=sidenote>T225 found a bare bb holds 25&nbsp;MB and that <code>-Xmx32m</code> cuts the client from 74 to 31&nbsp;MB: /home/engstrand/guix/docs/ghostty-rex-lean.html</span></p>
+<p>Together the ten hold 178&nbsp;MB in RAM and 285&nbsp;MB in swap, 463&nbsp;MB in all <span class=dim>(measured)</span>. Five bb processes account for 261&nbsp;MB of that while doing nothing: each carries its own copy of the bb runtime and a heap that is allowed to grow.<span class=sn></span><span class=sidenote>T225 found a bare bb holds 25&nbsp;MB and that <code>-Xmx32m</code> cuts the client from 74 to 31&nbsp;MB: <code>/home/engstrand/guix/docs/ghostty-rex-lean.html</code></span></p>
 <p>CPU is a different story. Hyprland did 91% of all the CPU work of these ten, about 9% of one core on average, all on its main thread <span class=dim>(measured)</span>. A second 20-second sample gave 9.4%. That is the compositor drawing frames: Chrome was on screen, and Hyprland redraws blur, shadows and rounded corners for every frame it composes <span class=dim>(inferred)</span>.</p>
 <p class=so><b>So:</b> memory is spread over idle helpers, mostly bb; CPU is almost all Hyprland's drawing.</p>
 </section>
 
 <section id=s8>
 <h2>8. One keypress today</h2>
-<p>Speed you feel is mostly the time from pressing a key to seeing its letter. T225 timed every hand-off of that trip on this machine today, with a throwaway Rex server and the test display, so I reuse its numbers rather than run them again.<span class=sn></span><span class=sidenote>Medians on a quiet machine. Evidence: /home/engstrand/.local/state/bbh/workflows/20261125-110600-429-investigation/evidence/measurements.edn and the page /home/engstrand/guix/docs/ghostty-rex-lean.html</span></p>
-<figure><figcaption>One keypress, median, 22&nbsp;px per ms. Gh is Ghostty reading the key (0.4&nbsp;ms); bb is the client passing it to Rex (0.7); Rex is the server's round trip (1.2); out is bb's relay and rexg-render's frame (1.5); Ghostty then draws (3.2). Red is the wait for the panel.</figcaption><svg viewBox='0 0 360 120' role=img aria-label='Keypress timeline today'><g><rect x=4 y=20 width=8.8 height=18 fill='#66605c' stroke='#fff1e5'/><text x=8.4 y=52 font-size=12 text-anchor=start fill='#33302e'>Gh</text><rect x=12.8 y=20 width=15.399999999999999 height=18 fill='#ccc1b7' stroke='#fff1e5'/><text x=20.5 y=66 font-size=12 text-anchor=middle fill='#33302e'>bb</text><rect x=28.2 y=20 width=26.4 height=18 fill='#66605c' stroke='#fff1e5'/><text x=41.4 y=52 font-size=12 text-anchor=middle fill='#33302e'>Rex</text><rect x=54.599999999999994 y=20 width=33.0 height=18 fill='#ccc1b7' stroke='#fff1e5'/><text x=71.1 y=66 font-size=12 text-anchor=middle fill='#33302e'>out</text><rect x=87.6 y=20 width=70.4 height=18 fill='#66605c' stroke='#fff1e5'/><text x=122.8 y=52 font-size=12 text-anchor=middle fill='#33302e'>Ghostty</text><rect x=158.0 y=20 width=182.60000000000002 height=18 fill='#990f3d' stroke='#fff1e5'/><text x=249.3 y=66 font-size=12 text-anchor=middle fill='#33302e'>refresh wait</text><text x=4 y=14 font-size=12 fill='#66605c'>key</text><text x=340 y=14 font-size=12 text-anchor=end fill='#66605c'>15.3 ms average</text><text x=4 y=108 font-size=12 fill='#66605c'>software 7.0 ms</text><text x=158 y=108 font-size=12 fill='#990f3d'>8.3 ms, the panel</text></g></svg></figure>
+<p>Speed you feel is mostly the time from pressing a key to seeing its letter. T225 timed every hand-off of that trip on this machine today, with a throwaway Rex server and the test display, so I reuse its numbers rather than run them again.<span class=sn></span><span class=sidenote>Medians on a quiet machine. Evidence: <code>/home/engstrand/.local/state/bbh/workflows/20261125-110600-429-investigation/evidence/measurements.edn</code> and the page <code>/home/engstrand/guix/docs/ghostty-rex-lean.html</code></span></p>
+<figure><figcaption>One keypress, median, 22&nbsp;px per ms. Gh is Ghostty reading the key (0.4&nbsp;ms); bb is the client passing it to Rex (0.7); Rex is the server's round trip (1.2); out is bb's relay and rexg-render's frame (1.5); Ghostty then draws (3.2). Red is the wait for the panel.</figcaption><svg viewBox='0 0 360 96' role=img aria-label='Keypress timeline today'><g><rect x=4 y=20 width=8.8 height=18 fill='#66605c' stroke='#fff1e5'/><text x=8.4 y=52 font-size=12 text-anchor=start fill='#33302e'>Gh</text><rect x=12.8 y=20 width=15.399999999999999 height=18 fill='#ccc1b7' stroke='#fff1e5'/><text x=20.5 y=66 font-size=12 text-anchor=middle fill='#33302e'>bb</text><rect x=28.2 y=20 width=26.4 height=18 fill='#66605c' stroke='#fff1e5'/><text x=41.4 y=52 font-size=12 text-anchor=middle fill='#33302e'>Rex</text><rect x=54.599999999999994 y=20 width=33.0 height=18 fill='#ccc1b7' stroke='#fff1e5'/><text x=71.1 y=66 font-size=12 text-anchor=middle fill='#33302e'>out</text><rect x=87.6 y=20 width=70.4 height=18 fill='#66605c' stroke='#fff1e5'/><text x=122.8 y=52 font-size=12 text-anchor=middle fill='#33302e'>Ghostty</text><rect x=158.0 y=20 width=182.60000000000002 height=18 fill='#990f3d' stroke='#fff1e5'/><text x=249.3 y=66 font-size=12 text-anchor=middle fill='#33302e'>refresh wait</text><text x=4 y=14 font-size=12 fill='#66605c'>key</text><text x=340 y=14 font-size=12 text-anchor=end fill='#66605c'>15.3 ms average</text><text x=4 y=88 font-size=12 fill='#66605c'>software 7.0 ms</text><text x=200 y=88 font-size=12 fill='#990f3d'>8.3 ms, the panel</text></g></svg></figure>
 <p>About 7&nbsp;ms is software and 8.3&nbsp;ms, on average, is the wait for a refresh <span class=dim>(inferred)</span>. Of the software, Rex's 1.2&nbsp;ms stays in every design. The rest, about 5.8&nbsp;ms, is Ghostty twice, the bb relay and rexg-render: exactly the layers a combined compositor would remove. Ghostty's draw alone is 3.2&nbsp;ms from bytes to a finished frame <span class=dim>(measured)</span> (T225).</p>
 <p>How steady the frames are, the <b>frame pacing</b>, I could not measure on your panel without putting a window on your screen. Hyprland reports that it composes every frame itself, since showing a window's buffer directly (direct scanout) is blocked by your config, and that the hardware cursor is in use <span class=dim>(measured)</span>.</p>
 <p class=so><b>So:</b> of a 15&nbsp;ms keypress, about 6&nbsp;ms belongs to layers a merged design would remove, and 8&nbsp;ms to the panel, which nothing removes.</p>
@@ -241,14 +241,15 @@ Name="ydotoold virtual device"</code></pre>
 <h2>11. river: window placement as a separate program</h2>
 <p>A compositor mixes two jobs. One is mechanism: buffers, extensions, drawing, flipping. The other is policy: where windows go, which has focus, what a key does. That second job is the <b>window manager</b>. river 0.4 splits them into two programs. river keeps the mechanism. A separate client, talking an extension called <code>river-window-management-v1</code>, makes every policy decision.</p>
 <figure><figcaption>river asks, the window manager answers. Both answers are batched, so a layout change lands in one frame with no half-moved windows.</figcaption>
-<svg viewBox='0 0 360 150' role=img aria-label='river manage and render loop'>
+<svg viewBox='0 0 360 190' role=img aria-label='river manage and render loop'>
+<defs><marker id=ah11 viewBox='0 0 8 8' refX=7 refY=4 markerWidth=7 markerHeight=7 orient=auto><path d='M0,1 L7,4 L0,7' fill=none stroke='#33302e'/></marker></defs>
 <g font-size=12 fill='#33302e'>
-<rect x=4 y=40 width=120 height=60 fill=none stroke='#33302e'/><text x=64 y=66 text-anchor=middle>river</text><text x=64 y=82 text-anchor=middle fill='#66605c'>mechanism</text>
-<rect x=236 y=40 width=120 height=60 fill=none stroke='#990f3d'/><text x=296 y=66 text-anchor=middle fill='#990f3d'>window manager</text><text x=296 y=82 text-anchor=middle fill='#66605c'>policy, any language</text>
-<line x1=124 y1=50 x2=236 y2=50 stroke='#33302e'/><text x=180 y=44 text-anchor=middle>new window, manage_start</text>
-<line x1=124 y1=70 x2=236 y2=70 stroke='#33302e'/><text x=180 y=64 text-anchor=middle fill='#66605c'>sizes, focus, manage_finish</text>
-<line x1=124 y1=90 x2=236 y2=90 stroke='#33302e'/><text x=180 y=84 text-anchor=middle>render_start</text>
-<text x=180 y=120 text-anchor=middle fill='#66605c'>positions, render_finish</text><line x1=124 y1=126 x2=236 y2=126 stroke='#33302e'/>
+<rect x=4 y=4 width=90 height=180 fill=none stroke='#33302e'/><text x=49 y=88 text-anchor=middle>river</text><text x=49 y=104 text-anchor=middle fill='#66605c'>mechanism</text>
+<rect x=266 y=4 width=90 height=180 fill=none stroke='#990f3d'/><text x=311 y=88 text-anchor=middle fill='#990f3d'>window</text><text x=311 y=102 text-anchor=middle fill='#990f3d'>manager</text><text x=311 y=120 text-anchor=middle fill='#66605c'>policy</text>
+<line x1=96 y1=40 x2=262 y2=40 stroke='#33302e' marker-end='url(#ah11)'/><text x=180 y=34 text-anchor=middle>new window, manage_start</text>
+<line x1=264 y1=76 x2=98 y2=76 stroke='#33302e' marker-end='url(#ah11)'/><text x=180 y=70 text-anchor=middle fill='#66605c'>sizes, focus, finish</text>
+<line x1=96 y1=124 x2=262 y2=124 stroke='#33302e' marker-end='url(#ah11)'/><text x=180 y=118 text-anchor=middle>render_start</text>
+<line x1=264 y1=160 x2=98 y2=160 stroke='#33302e' marker-end='url(#ah11)'/><text x=180 y=154 text-anchor=middle fill='#66605c'>positions, finish</text>
 </g></svg></figure>
 <p>The window-management extension passes no file handles, only numbers and strings <span class=dim>(measured)</span>. So a bb program can speak it with nothing but a Unix socket. I wrote one: a 107-line bb window manager that reads the message layouts from the protocol's XML files, tiles windows master-and-stack with 8-pixel gaps, focuses the newest, and re-tiles when one closes. It does not bind keys or draw tabs yet. In river inside the test display, with three Ghostty windows, it tiled, focused and re-tiled as intended, checked on two screenshots <span class=dim>(measured)</span>.</p>
 <table><tr><th>bb window manager in river</th><th class=r>value</th></tr>
@@ -290,19 +291,19 @@ Name="ydotoold virtual device"</code></pre>
 <h2>14. The combined design</h2>
 <p>Now the ambitious version, built from the steps above. One program owns the screen, the keyboard and the terminal panes. Rex stays outside it and keeps the shells.</p>
 <figure><figcaption>One compositor process (red) replaces Hyprland, Dusk, keyleader, palette, hyprkan, Ghostty, the bb client and rexg-render. The bb brain is policy only, as in step 11.</figcaption>
-<svg viewBox='0 0 360 270' role=img aria-label='Combined compositor design'>
+<svg viewBox='0 0 360 280' role=img aria-label='Combined compositor design'>
 <g font-size=12 fill='#33302e'>
-<rect x=4 y=236 width=352 height=28 fill=none stroke='#33302e'/><text x=180 y=255 text-anchor=middle>kernel: evdev (via kanata), DRM card1 + card2</text>
-<rect x=4 y=60 width=352 height=166 fill=none stroke='#990f3d'/><text x=12 y=76 fill='#990f3d'>compositor (wlroots or Smithay)</text>
-<rect x=14 y=86 width=104 height=40 fill=none stroke='#33302e'/><text x=66 y=103 text-anchor=middle>KMS, libinput,</text><text x=66 y=118 text-anchor=middle>extensions</text>
-<rect x=128 y=86 width=104 height=40 fill=none stroke='#33302e'/><text x=180 y=103 text-anchor=middle>tiling, tabs,</text><text x=180 y=118 text-anchor=middle>focus, key layers</text>
-<rect x=242 y=86 width=104 height=40 fill=none stroke='#33302e'/><text x=294 y=103 text-anchor=middle>bar, launcher,</text><text x=294 y=118 text-anchor=middle>hints, toasts</text>
-<rect x=14 y=136 width=218 height=40 fill=none stroke='#33302e'/><text x=123 y=153 text-anchor=middle>panes: libghostty-vt per pane,</text><text x=123 y=168 text-anchor=middle>glyph cache on the GPU</text>
-<rect x=242 y=136 width=104 height=40 fill=none stroke='#33302e'/><text x=294 y=153 text-anchor=middle>client windows</text><text x=294 y=168 text-anchor=middle fill='#66605c'>Chrome, others</text>
-<rect x=14 y=186 width=332 height=30 fill=none stroke='#ccc1b7'/><text x=180 y=205 text-anchor=middle fill='#66605c'>scene: one GPU pass, one page flip per refresh</text>
 <rect x=4 y=8 width=140 height=40 fill=none stroke='#33302e'/><text x=74 y=25 text-anchor=middle>Rex server</text><text x=74 y=40 text-anchor=middle fill='#66605c'>shells, scrollback</text>
 <rect x=216 y=8 width=140 height=40 fill='#e6d9ce' stroke='#33302e'/><text x=286 y=25 text-anchor=middle>bb brain</text><text x=286 y=40 text-anchor=middle fill='#66605c'>layouts, binds, rules</text>
-<line x1=74 y1=48 x2=74 y2=136 stroke='#33302e'/><line x1=286 y1=48 x2=286 y2=86 stroke='#33302e'/><line x1=180 y1=48 x2=180 y2=86 stroke='#ccc1b7'/>
+<rect x=4 y=60 width=352 height=178 fill=none stroke='#990f3d'/>
+<rect x=14 y=86 width=156 height=40 fill=none stroke='#33302e'/><text x=92 y=103 text-anchor=middle>panes: libghostty-vt,</text><text x=92 y=118 text-anchor=middle>glyph cache on GPU</text>
+<rect x=180 y=86 width=166 height=40 fill=none stroke='#33302e'/><text x=263 y=103 text-anchor=middle>tiling, tabs, key layers,</text><text x=263 y=118 text-anchor=middle>bar, launcher, toasts</text>
+<rect x=14 y=136 width=156 height=40 fill=none stroke='#33302e'/><text x=92 y=153 text-anchor=middle>KMS, libinput,</text><text x=92 y=168 text-anchor=middle>extensions</text>
+<rect x=180 y=136 width=166 height=40 fill=none stroke='#33302e'/><text x=263 y=153 text-anchor=middle>client windows:</text><text x=263 y=168 text-anchor=middle fill='#66605c'>Chrome, others</text>
+<rect x=14 y=186 width=332 height=28 fill=none stroke='#ccc1b7'/><text x=180 y=204 text-anchor=middle fill='#66605c'>one GPU pass, one page flip per refresh</text>
+<text x=14 y=230 fill='#990f3d'>one compositor process (wlroots or Smithay)</text>
+<line x1=74 y1=48 x2=74 y2=86 stroke='#33302e'/><line x1=286 y1=48 x2=286 y2=86 stroke='#33302e'/>
+<rect x=4 y=246 width=352 height=28 fill=none stroke='#33302e'/><text x=180 y=265 text-anchor=middle>kernel: evdev (via kanata), DRM card1 + card2</text>
 </g></svg></figure>
 <ul>
 <li><b>A keypress</b>: libinput gives the key to the compositor. If a pane has focus, it encodes the key the way a terminal would and writes it to Rex. No Ghostty, no bb on the way.</li>
@@ -318,7 +319,7 @@ Name="ydotoold virtual device"</code></pre>
 <section id=s15>
 <h2>15. What it would save, and what it would cost</h2>
 <h3>Speed</h3>
-<figure><figcaption>Average keypress to letter on the panel, 20&nbsp;px per ms. The middle row is T225's plan (bb heap cap, dirty rows, compressed history), which needs no new compositor.</figcaption>Unbound: #'user/svg15</figure>
+<figure><figcaption>Average keypress to letter on the panel, 20&nbsp;px per ms. The middle row is T225's plan (bb heap cap, dirty rows, compressed history), which needs no new compositor.</figcaption><svg viewBox='0 0 360 150' role=img aria-label='Keypress budget in three designs'><g><text x=4 y=18 font-size=12 fill='#33302e'>today: Ghostty, bb, rexg-render</text><rect x=4 y=22 width=140.0 height=14 fill='#66605c' stroke='#fff1e5'/><rect x=144.0 y=22 width=166.0 height=14 fill='#990f3d' stroke='#fff1e5'/><text x=314.0 y=33 font-size=12 fill='#66605c'>15.3</text><text x=4 y=62 font-size=12 fill='#33302e'>after T225's lean changes</text><rect x=4 y=66 width=108.0 height=14 fill='#66605c' stroke='#fff1e5'/><rect x=112.0 y=66 width=166.0 height=14 fill='#990f3d' stroke='#fff1e5'/><text x=282.0 y=77 font-size=12 fill='#66605c'>13.7</text><text x=4 y=106 font-size=12 fill='#33302e'>combined compositor</text><rect x=4 y=110 width=50.0 height=14 fill='#66605c' stroke='#fff1e5'/><rect x=54.0 y=110 width=166.0 height=14 fill='#990f3d' stroke='#fff1e5'/><text x=224.0 y=121 font-size=12 fill='#66605c'>10.8</text><text x=4 y=146 font-size=12 fill='#66605c'>grey software, red panel wait, ms</text></g></svg></figure>
 <p>The combined row is an estimate: Rex's measured 1.2&nbsp;ms, about 0.1&nbsp;ms to parse and draw the letter (step 12), and a guessed 1&nbsp;ms for input handling, composing and the flip <span class=dim>(inferred)</span>. The average keypress would go from about 15 to about 11&nbsp;ms. A quarter faster, and you would most notice it as less jitter when the machine is busy, since three processes no longer have to be scheduled in turn <span class=dim>(guess)</span>.</p>
 <h3>Memory and CPU</h3>
 <table><tr><th></th><th class=r>today</th><th class=r>combined, estimate</th></tr>
@@ -354,7 +355,7 @@ Name="ydotoold virtual device"</code></pre>
 </g></svg></figure>
 <h3>Option 1: keep Hyprland, merge the helpers</h3>
 <p>Dusk already runs a bb process and draws the launcher and leader panels. Move keyleader, palette and hyprkan into that runtime, so one bb process holds every key menu, the launcher catalogue and the focus-to-layer rule, and talks to Hyprland's event socket once. Saves about 150&nbsp;MB of the 261&nbsp;MB the five bb processes hold, three processes and three configs <span class=dim>(inferred)</span>. It does not touch speed.</p>
-<p><i>Gate:</i> the launcher opens no slower than today's 91&nbsp;ms median (the Emacs palette, /home/engstrand/guix/desktop/build/keybindings/palette-performance.md), and make verify ONLY=dusk stays green.</p>
+<p><i>Gate:</i> the launcher opens no slower than today's 91&nbsp;ms median for the Emacs palette, measured in <code>/home/engstrand/guix/desktop/build/keybindings/palette-performance.md</code> and make verify ONLY=dusk stays green.</p>
 <h3>Option 2: river with a bb window manager</h3>
 <p>Run river as the compositor and step 11's window manager, grown up: workspaces, your binds including hold-to-talk, window rules, tabs as hidden windows plus a tab strip drawn by Dusk. Ghostty windows per pane come from T225. Hyprland's Lua and hyprkan go away; Dusk stays. Try it on a second login from the text console, never replacing Hyprland until it wins.</p>
 <p><i>Gate:</i> river drives the panel through card2 with card1 rendering; Chrome shares a screen through xdg-desktop-portal-wlr; text is sharp at 1.6; frame pacing, measured with the presentation-time extension, is no worse than Hyprland's; the window manager answers in under 2&nbsp;ms at the 99th percentile while bb collects garbage; and a week of daily use finds nothing you cannot add in a day.</p>
@@ -362,13 +363,13 @@ Name="ydotoold virtual device"</code></pre>
 <p>Most of option 3's speed comes from dropping Ghostty and the bb relay, not from being inside the compositor. So first grow rexg-render into a GPU Wayland client that draws every pane as its own window, from Rex's stream (3a). That gets one parser on your side, no Ghostty, and about 4&nbsp;ms per key, while a renderer crash still loses only the panes. Move it into the compositor (3b) only if a measurement shows the extra hand-off between client and compositor costs a whole frame.</p>
 <p><i>Gate for 3a:</i> software part of a keypress under 3&nbsp;ms median; Emacs, pi, jj and fish look the same as in Ghostty on screenshots. <i>Gate for 3b:</i> a measured saving of at least one frame, 16.7&nbsp;ms, at the 90th percentile, or a feature only the compositor can give.</p>
 <p><b>My pick:</b> stage 0 and option 1 now. Option 2 as a weekend experiment, since the spike says bb can do the policy. Plan 3a only after option 2 passes its gate, and do not plan 3b.</p>
-<p>The spikes and raw numbers are in the evidence folder: /home/engstrand/.local/state/bbh/workflows/20261125-154042-983-investigation/evidence </p>
+<p>The spikes and raw numbers are in the evidence folder: <code>/home/engstrand/.local/state/bbh/workflows/20261125-154042-983-investigation/evidence</code> </p>
 <p class=so><b>So:</b> climb one rung at a time; the gates, not the vision, decide how far.</p>
 </section>
 
 <section id=whole>
 <h2>The whole picture</h2>
 <p>The panel shows a new frame 60 times a second, and the average wait for one, 8.3&nbsp;ms, is fixed. The GPU (card1) draws each frame and the DCP (card2) shows it, through a page flip. A compositor is the one program that takes every client's buffer, places it, draws the frame and owns the keyboard and touchpad, which come through kanata and libinput. Wayland and its extensions are how clients ask; your Hyprland offers 67, and river and dwl offer what your setup uses. Today ten processes sit between the hardware and Rex. They hold 463&nbsp;MB, mostly idle bb in swap, and Hyprland does 91% of their CPU work. A keypress takes about 15&nbsp;ms, of which 6 are layers a merge would remove. Small wlroots compositors cost 2 to 3% of a core and 30 to 50&nbsp;MB. river lets a separate program be the window manager, and a 107-line bb one worked. Drawing a pane yourself from libghostty-vt costs 0.06&nbsp;ms per letter; the real cost is the features. A combined compositor would save about 350&nbsp;MB, eight processes and 4&nbsp;ms per key, for a year of work, a bigger crash and a parser beside your keyboard. So go in stages with gates, starting with the cheap ones.</p>
-<p>Where your setup touches each part: the panel and the two devices in step 2; kanata and hyprkan in step 4; Dusk, keyleader, palette and the ghostty-rex chain in step 6; Hyprland's config at /home/engstrand/guix/desktop/configs/hypr/hyprland.lua and Dusk's at /home/engstrand/guix/desktop/configs/dusk/config.clj ; the keypress budget from T225 at /home/engstrand/guix/docs/ghostty-rex-lean.html</p>
+<p>Where your setup touches each part: the panel and the two devices in step 2; kanata and hyprkan in step 4; Dusk, keyleader, palette and the ghostty-rex chain in step 6; Hyprland's config at <code>/home/engstrand/guix/desktop/configs/hypr/hyprland.lua</code> and Dusk's at <code>/home/engstrand/guix/desktop/configs/dusk/config.clj</code> ; the keypress budget from T225 at <code>/home/engstrand/guix/docs/ghostty-rex-lean.html</code></p>
 </section>
 </article></body></html>
