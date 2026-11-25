@@ -32,6 +32,8 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <h1>Ghostty plus Rex with fewer parsers</h1>
 <p class='sub'>T225, 2026-11-24. An investigation: nothing on main changed. Every claim is marked <span class='tag measured'>measured</span>, <span class='tag inferred'>inferred</span> or <span class='tag guess'>guess</span>.</p>
 
+<div class='card'><b>Update, 2026-11-25 (W303): time and memory, hop by hop.</b> Every hop of a keypress and of a large cat is now measured, with three spikes: a heap cap for bb, compressed history in rexg-render, and dirty-row drawing. Together they cut the client side from about 233 to 104 MB and take about 1.6 ms off each keypress. The 60 Hz refresh, not our code, is the largest part of keypress-to-glyph. The ranked list and the revised plan, which adds a stage 0 before stage 1 below, are in /home/engstrand/guix/docs/ghostty-rex-lean.html</div>
+
 <div class='card good'><b>Short answer.</b>
 <ul>
 <li>Today each pane's output is parsed <b>three</b> times: by Rex's server, by rexg-render, and by Ghostty. <span class='tag measured'>measured</span></li>
