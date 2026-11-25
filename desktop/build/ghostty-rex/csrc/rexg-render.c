@@ -61,13 +61,13 @@ typedef struct {
   // The pane's own cells, of size pcw by pch, refreshed row by row as
   // libghostty marks rows dirty; pc_stale forces a full read. A frame that
   // finds mu held draws these too: the screen's front buffer, which a resize
-  // or a full redraw blanks, made the pane flash empty under its cursor (T223).
+  // or a full redraw blanks, would flash the pane empty under its cursor.
   Cell *gc; int pcw, pch, pc_stale;
   // Sizes from Rex's stream, each at the stream position it comes at (the
   // bytes before it), applied by the pane's thread in order with the bytes,
   // under qmu. Applied as they came, a program's redraw for a new size could
   // land in the old one, or old bytes in the new one: Emacs's mode line
-  // stayed on a wrong row (T225).
+  // stayed on a wrong row.
   struct { size_t at; int c, r; } sz[16]; int nsz;
   size_t taken;  // bytes of the current stream its thread has taken
   GhosttyTerminal term;
@@ -802,7 +802,84 @@ static void on_term(int sig) { (void)sig; restore(); _exit(0); }
 
 static long now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000L + t.tv_nsec / 1000000L; }
 
-int main(void) {
+// ---- rexg-render --vt: the first paint of a popped-out pane ----
+// stdin is one pane's data stream with Rex's messages taken out (a Ghostty
+// snapshot, then live VT); stdout is the pane's own Ghostty window. The
+// snapshot is decoded once and printed as the escape codes that make it,
+// history first, so Ghostty's copy starts exactly where Rex's live bytes go
+// on; then the bytes pass through untouched. No terminal stays in memory.
+typedef struct { uint8_t *fed; size_t len, cap, given; int eof; } VtRd;
+static bool vt_rd(void *u, uint8_t *buf, size_t cap, size_t *out) {
+  VtRd *r = u;
+  if (r->given == r->len && !r->eof) {
+    if (r->cap - r->len < (1 << 20)) { r->cap = r->cap * 2 + (1 << 20); r->fed = realloc(r->fed, r->cap); }
+    ssize_t n;
+    do n = read(0, r->fed + r->len, r->cap - r->len); while (n < 0 && errno == EINTR);
+    if (n < 0) return false;
+    if (n == 0) r->eof = 1; else r->len += (size_t)n;
+  }
+  size_t k = r->len - r->given < cap ? r->len - r->given : cap;
+  memcpy(buf, r->fed + r->given, k); r->given += k;
+  *out = k;
+  return true;
+}
+static bool vt_out(void *u, const uint8_t *b, size_t n) { (void)u; write_all(1, b, n); return true; }
+
+static int vt_main(void) {
+  signal(SIGPIPE, SIG_IGN);
+  VtRd r = { NULL, 0, 0, 0, 0 };
+  GhosttySnapshotDecoder dec = NULL; GhosttyTerminal term = NULL;
+  GhosttyReader reader = { vt_rd, &r };
+  GhosttyResult res = GHOSTTY_SUCCESS;
+  size_t off = 0;
+  // A snapshot can end inside an escape sequence the live bytes finish; the
+  // decoder keeps those unfinished bytes so they go out first.
+  bool yes = true;
+  if (ghostty_snapshot_decoder_new(NULL, &dec, reader) != GHOSTTY_SUCCESS ||
+      ghostty_snapshot_decoder_set(dec, GHOSTTY_SNAPSHOT_DECODER_OPT_RETAIN_CONTINUATION, &yes) != GHOSTTY_SUCCESS ||
+      ghostty_snapshot_decoder_ready(dec, &term) != GHOSTTY_SUCCESS) {
+    fprintf(stderr, "rexg-render --vt: the snapshot did not decode\n");
+    return 1;
+  }
+  do res = ghostty_snapshot_decoder_next(dec); while (res == GHOSTTY_SUCCESS);
+  if (res != GHOSTTY_NO_VALUE ||
+      ghostty_snapshot_decoder_get(dec, GHOSTTY_SNAPSHOT_DECODER_DATA_SOURCE_OFFSET, &off) != GHOSTTY_SUCCESS) {
+    fprintf(stderr, "rexg-render --vt: the snapshot did not decode\n");
+    return 1;
+  }
+  // A window shown before (a reconnect) starts over: normal screen, modes
+  // reset, screen and history cleared.
+  const char *reset = "\x1b[?1049l\x1b[!p\x1b[0m\x1b[H\x1b[2J\x1b[3J";
+  write_all(1, (const uint8_t *)reset, strlen(reset));
+  GhosttyFormatter f = NULL;
+  GhosttyFormatterFormat emit = GHOSTTY_FORMATTER_FORMAT_VT;
+  // Everything but the palette, so Ghostty keeps its own theme.
+  GhosttyFormatterExtras extras = GHOSTTY_FORMATTER_EXTRAS_ALL & ~GHOSTTY_FORMATTER_EXTRA_PALETTE;
+  GhosttyWriter w = { vt_out, NULL };
+  if (ghostty_formatter_terminal_new(NULL, &f, term) != GHOSTTY_SUCCESS ||
+      ghostty_formatter_set(f, GHOSTTY_FORMATTER_OPT_EMIT, &emit) != GHOSTTY_SUCCESS ||
+      ghostty_formatter_set(f, GHOSTTY_FORMATTER_OPT_EXTRAS, &extras) != GHOSTTY_SUCCESS ||
+      ghostty_formatter_format(f, w) != GHOSTTY_SUCCESS ||
+      ghostty_terminal_continuation_write(term, w) != GHOSTTY_SUCCESS) {
+    fprintf(stderr, "rexg-render --vt: the screen did not format\n");
+    return 1;
+  }
+  ghostty_formatter_free(f);
+  ghostty_snapshot_decoder_free(dec);
+  ghostty_terminal_free(term);
+  if (off < r.len) write_all(1, r.fed + off, r.len - off);
+  free(r.fed);
+  uint8_t b[65536];
+  for (;;) {
+    ssize_t n = read(0, b, sizeof b);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) return 0;
+    write_all(1, b, (size_t)n);
+  }
+}
+
+int main(int argc, char **argv) {
+  if (argc > 1 && !strcmp(argv[1], "--vt")) return vt_main();
   ctl = stderr;
   const char *sync_env = getenv("REXG_SYNC");
   if (sync_env && !strcmp(sync_env, "0")) sync_out = 0;

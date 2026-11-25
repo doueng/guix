@@ -1,5 +1,5 @@
 (ns rexg.stream-test
-  "Properties of a pane's data stream on its way to rexg-render (T225): what
+  "Properties of a pane's data stream on its way to rexg-render: what
   rexg.rex/feed! and rexg.rex/stream-out make of Rex's bytes, cut into any
   chunks, is the same VT and the same messages in the same order, and a size
   never trades places with the bytes around it. The resize race that left

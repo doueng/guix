@@ -10,7 +10,7 @@
 
 (deftest a-resize-stays-between-the-bytes-around-it
   ;; A redraw for the new size must not reach rexg-render before the size
-  ;; (T225: Emacs's mode line landed in the old size and stayed there).
+  ;; (else Emacs's mode line lands in the old size and stays there).
   (is (= ["old" {:type "resize" :cols 90 :rows 20} "new"]
          (parts (rex/splitter "7") "old\u001b_rex1;7;{\"type\":\"resize\",\"cols\":90,\"rows\":20}\u001b\\new"))))
 

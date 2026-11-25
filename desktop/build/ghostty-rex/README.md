@@ -28,6 +28,14 @@ status line and an echo line. Ghostty's own tabs and splits are not used.
   reach Ghostty, so terminal queries get one reply, from Rex. The Guix package
   `rexg-render` builds it on the `libghostty-vt` package, both in
   modules/engstrand/packages/ghostty.scm.
+- **Pop out** (docs/ghostty-rex-one-parser.html): M-x Pane: pop out
+  runs `ghostty-rex popout`, a Ghostty window of class `dev.engstrand.RexPane`
+  showing one pane with two parsers, Rex's and that Ghostty's. Its relay
+  (`pane.clj`) takes and sizes the block, prints the stream's snapshot once
+  through `rexg-render --vt` (libghostty's formatter), passes the live bytes on,
+  and sends keys back less Ghostty's second answers to the program's queries
+  (`replies.clj`). The main window leaves a popped-out block's size alone until
+  that window closes.
 
 Edit any `.clj` or config.edn and run `rex -C ghostty-rex do mx.client.reload` (M-x Client:
 reload): the client starts anew on the same session in the same window, with
@@ -89,10 +97,16 @@ reaches the client, and keeps copy, paste and font size.
   `bb verify` also runs Bombadil's `test/bombadil/cursor.ts` over modal panes
   (`test/rexg/modal.bb`) and fish with the shipped vi cursor, judging every synchronized frame;
   `bb bombadil:cursor` runs only that. `REXG_TRACE=FILE` keeps a copy of rexg-render's output.
-- Sizes (T225): `verify/quint/resize.qnt` models a pane's size against its bytes: Rex puts
+- Sizes: `verify/quint/resize.qnt` models a pane's size against its bytes: Rex puts
   a resize in the pane's stream, bb sends it to rexg-render from the stream's thread, and
   rexg-render applies it at its place among the bytes, so every byte lands at the size it
   was written for. Its `before` and `bbOnly` modules keep the traces that broke it.
+  `desktop/build/pbt`'s `rexg-stream-order` suite checks the splitter's order across any
+  chunks, and `bb mbt rexg-resize-mbt` replays resize.qnt's traces on it.
+- Pop out: `verify/quint/popout.qnt` models who sizes a popped-out pane; the
+  `rexg-replies` suite in `desktop/build/pbt` checks the reply filter against a model;
+  `bb verify` pops the shell pane out on the test display, types in it, and checks
+  Ghostty's answer to a DA1 query never reaches the pane.
 - `make verify ONLY=rexmux` model-checks the stream, link and agent rules this client
   shares with rexmux. The sidecar runs in-process here, so the model's Crash
   and Restart never happen, and a sidecar exception still answers its request.

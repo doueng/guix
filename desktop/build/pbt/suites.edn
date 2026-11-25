@@ -52,13 +52,23 @@
         :known {}}}
 
  :rexg-stream-order
- {:doc "a pane's data stream into rexg-render: VT and Rex's messages keep their order across any chunks (T225)"
+ {:doc "a pane's data stream into rexg-render: VT and Rex's messages keep their order across any chunks"
   :gen rexg.gens.stream/gen-input
   :check rexg.stream-test/check
   :observe rexg.stream-test/observe
   :generators ["desktop/build/ghostty-rex/test/rexg/gens/stream.clj"]
   :properties ["desktop/build/ghostty-rex/test/rexg/stream_test.clj"]
   :cover {rexg.rex #{splitter partial-suffix feed! stream-out}}
+  :budget {:seeds [1 2 3] :trials 150 :max-size 100}}
+
+ :rexg-replies
+ {:doc "a popped-out pane's reply filter: only Ghostty's answers to open questions are dropped, keys never"
+  :gen rexg.gens.replies/gen-input
+  :check rexg.replies-test/check
+  :observe rexg.replies-test/observe
+  :generators ["desktop/build/ghostty-rex/test/rexg/gens/replies.clj"]
+  :properties ["desktop/build/ghostty-rex/test/rexg/replies_test.clj"]
+  :cover {rexg.replies :all}
   :budget {:seeds [1 2 3] :trials 150 :max-size 100}}
 
  :rexg-resize-mbt

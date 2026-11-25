@@ -4,6 +4,11 @@
 ;;                            running ghostty-rex attach. mux-terminal runs it
 ;;                            when ~/.config/engstrand/mux says ghostty-rex.
 ;;   ghostty-rex attach ARGS  the client in this terminal (--session S).
+;;   ghostty-rex popout ARGS  a popped-out pane: a Ghostty window of class
+;;                            dev.engstrand.RexPane running ghostty-rex pane
+;;                            (--session S --block B [--address A]); M-x Pane:
+;;                            pop out runs it.
+;;   ghostty-rex pane ARGS    that pane in this terminal.
 ;; The client is bb run from this checkout, so an edit takes effect on the
 ;; next start. rexg-render, its C half, is REXG_RENDER, else the Guix
 ;; package's on PATH, else the target/ build of make build NAME=ghostty-rex in the checkout.
@@ -23,14 +28,31 @@
        (catch Exception _))
   (System/exit 1))
 
-(if (= "attach" (first *command-line-args*))
+(defn bb-task
+  "Run bb.edn's TASK in this terminal with ARGS."
+  [task args]
   (let [r (or (render) (fail! "ghostty-rex: rexg-render is missing: make build NAME=ghostty-rex, or make home with MUX=ghostty-rex"))]
     (apply p/exec {:extra-env {"REXG_RENDER" r}}
-;; The heap cap keeps the client near 35 MB: uncapped, bb grows to its
-           ;; peak and keeps it (T225, docs/ghostty-rex-lean.html step 9).
-           (or (some-> (fs/which "bb") str) "bb") "-Xmx32m" "--config" (str build "/bb.edn") "attach" (rest *command-line-args*)))
+           ;; The heap cap keeps the client near 35 MB: uncapped, bb grows to its
+           ;; peak and keeps it (docs/ghostty-rex-lean.html step 9).
+           (or (some-> (fs/which "bb") str) "bb") "-Xmx32m" "--config" (str build "/bb.edn") task args)))
+
+(defn window
+  "A Ghostty window of CLASS running this script with ARGS, with the
+  ghostty-rex config when CONF? (a popped-out pane keeps Ghostty's own keys,
+  scrollback and search)."
+  [class conf? args]
   (let [conf (str (fs/path (or (System/getenv "XDG_CONFIG_HOME") (str (fs/home) "/.config")) "ghostty-rex" "ghostty"))]
-    (apply p/exec "ghostty" "--class=dev.engstrand.Rex" "--gtk-single-instance=false"
-           (concat (when (fs/exists? conf) [(str "--config-file=" conf)])
-                   ["-e" (str (fs/real-path *file*)) "attach"]
-                   *command-line-args*))))
+    ;; Its own process, ended with its window: a pop-out's end is how the
+    ;; main window learns to size the pane again.
+    (apply p/exec "ghostty" (str "--class=" class) "--gtk-single-instance=false" "--quit-after-last-window-closed=true"
+           (concat (when (and conf? (fs/exists? conf)) [(str "--config-file=" conf)])
+                   ["-e" (str (fs/real-path *file*))]
+                   args))))
+
+(let [[cmd & more] *command-line-args*]
+  (case cmd
+    "attach" (bb-task "attach" more)
+    "pane" (bb-task "pane" more)
+    "popout" (window "dev.engstrand.RexPane" false (cons "pane" more))
+    (window "dev.engstrand.Rex" true (cons "attach" *command-line-args*))))

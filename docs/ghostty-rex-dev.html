@@ -52,8 +52,10 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td>Ghostty settings for this window</td><td><code>desktop/configs/ghostty-rex/ghostty</code></td><td>Ctrl+Shift+Alt+R in the window</td></tr>
 <tr><td>rexg-render, the C half</td><td><code>desktop/build/ghostty-rex/csrc/rexg-render.c</code></td><td><code>make home</code>, then reload</td></tr>
 <tr><td>Launcher, and the client's heap cap (<code>bb -Xmx32m</code>, T225)</td><td><code>desktop/bin/ghostty-rex</code></td><td>next window</td></tr>
+<tr><td>A popped-out pane (T225 stage 1): the relay, its reply filter, and <code>rexg-render --vt</code> for the first paint</td><td><code>src/rexg/pane.clj</code>, <code>src/rexg/replies.clj</code>, <code>csrc/rexg-render.c</code> (<code>vt_main</code>); <code>ghostty-rex popout</code> and <code>ghostty-rex pane</code></td><td>the next pop-out; <code>--vt</code> needs <code>make home</code></td></tr>
 <tr><td>Rex server</td><td>Guix package <code>rex</code>, modules/engstrand/packages/rex.scm</td><td>a server restart, which the window rides out</td></tr>
 </table></div>
+<p><b>Pop out.</b> M-x Pane: pop out (<code>rex -C ghostty-rex do mx.pane.pop_out</code>) makes the main client run <code>ghostty-rex popout --session S --block B</code>, a Ghostty window of class dev.engstrand.RexPane running the relay, and add the block to its <code>:popped</code> set. sync-sizes! skips popped blocks until that process ends, so only the pop-out window sizes the pane; <code>verify/quint/popout.qnt</code> models who sizes it and shows the main window taking it back without the set. The relay takes the block, sizes it, pipes the data stream (Rex's messages taken out) through <code>rexg-render --vt</code>, and sends stdin to <code>com.superlogical.terminal.write</code> through <code>rexg.replies</code>. <code>REXG_PANE_LOG=/tmp/pane.log</code> logs its stream closes and reconnects.</p>
 <p>The client runs bb straight from the checkout at /home/engstrand/guix, so an edited <code>.clj</code> needs no build. Rex holds the sessions, panes and programs, so a client restart loses nothing.</p>
 
 <h2 id=loop>Edit and reload</h2>
@@ -85,8 +87,9 @@ or choose <b>Client: reload its bb code and config</b> in M-x (Alt+Space Space).
 <h2 id=tests>Tests</h2>
 <div class=table><table>
 <tr><th>Command</th><th>Time</th><th>What</th></tr>
-<tr><td><code>make test ONLY=ghostty-rex</code></td><td>seconds; lint runs it</td><td>unit tests of keys, model (revive, reconnect), hints, screen and the stream splitter; <code>bb verify:quint</code> for the cursor and resize models</td></tr>
-<tr><td><code>make verify ONLY=ghostty-rex</code></td><td>about 6 min + Bombadil</td><td>a real Ghostty on the hidden test display against a throwaway Rex server: about 74 checks, then Bombadil over <code>tabs</code>, <code>startup</code>, <code>restored</code>, <code>cursor</code> (T223) and <code>names</code> (T210)</td></tr>
+<tr><td><code>make test ONLY=ghostty-rex</code></td><td>seconds; lint runs it</td><td>unit tests of keys, model (revive, reconnect), hints, screen and the stream splitter; property suites for the stream's order and the pop-out's reply filter; <code>bb verify:quint</code> for the cursor, resize and pop-out models</td></tr>
+<tr><td><code>cd desktop/build/pbt; bb measure rexg-replies</code>, <code>bb measure rexg-stream-order</code>, <code>bb mbt rexg-resize-mbt</code></td><td>seconds</td><td>the T231 harness on T225's code: generators apart from properties, coverage and behaviour counts; the mbt replays resize.qnt's traces on the real splitter</td></tr>
+<tr><td><code>make verify ONLY=ghostty-rex</code></td><td>about 6 min + Bombadil</td><td>a real Ghostty on the hidden test display against a throwaway Rex server: about 81 checks, pop-out ones among them, then Bombadil over <code>tabs</code>, <code>startup</code>, <code>restored</code>, <code>cursor</code> (T223) and <code>names</code> (T210)</td></tr>
 <tr><td><code>cd desktop/build/ghostty-rex; bb bombadil:cursor</code></td><td>about 75 s</td><td>only the cursor spec; it caught T225's resize race about one run in three, so run it a few times after a renderer change</td></tr>
 <tr><td><code>cd desktop/build/ghostty-rex; bb verify --no-bombadil --keep</code></td><td>about 6 min</td><td>the e2e alone, keeping screenshots and logs</td></tr>
 <tr><td><code>make test LIST=1</code></td><td>instant</td><td>the checks that cover what <code>@</code> changed</td></tr>

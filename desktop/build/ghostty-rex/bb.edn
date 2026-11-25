@@ -2,6 +2,9 @@
  :tasks {attach {:doc "The client in this terminal: shows the Rex session (the window runs this). Args: [--session S] [--render PATH]."
                  :requires ([rexg.main])
                  :task (apply rexg.main/-main *command-line-args*)}
+         pane {:doc "One Rex pane in this terminal, a popped-out pane's window runs this. Args: --session S --block B [--address A] [--render PATH]."
+               :requires ([rexg.pane])
+               :task (apply rexg.pane/-main *command-line-args*)}
          build {:doc "Compile rexg-render into target/ (make build NAME=ghostty-rex)."
                 :task (load-file "build.bb")}
          test {:doc "Unit and property tests of the client: keys, model, hints, screen (fast; make lint runs them)."

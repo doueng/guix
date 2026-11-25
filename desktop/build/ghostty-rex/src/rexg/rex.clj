@@ -94,7 +94,7 @@
 
 (defn stream-out
   "Where pane BLOCK's reader thread sends PART, one of feed!'s parts, so
-  that rexg-render gets the pane's bytes and sizes in stream order (T225):
+  that rexg-render gets the pane's bytes and sizes in stream order:
   [\\d bytes] the VT as a 'd' frame's payload, [\\r text] a resize as an 'r'
   frame's, [:msg m] any other message of Rex's for the main queue."
   [block part]

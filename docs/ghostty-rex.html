@@ -39,7 +39,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <p class='sub'>How the MUX=ghostty-rex terminal works, from the code as of T208 and T210: the parts, what happens when you press a key, how output reaches the screen, and how to debug it. Use this page to understand it. The dev page is for changing it.</p>
 <nav><details><summary>Contents</summary><ol>
 <li><a href='#short'>In short</a></li><li><a href='#picture'>The big picture</a></li><li><a href='#start'>Cmd+Return to a usable window</a></li>
-<li><a href='#keys'>A keypress</a></li><li><a href='#output'>Output to the screen</a></li><li><a href='#screen'>Reading the screen: main, tab and pane names, the status line</a></li>
+<li><a href='#keys'>A keypress</a></li><li><a href='#output'>Output to the screen</a></li><li><a href='#popout'>Pop out a pane</a></li><li><a href='#screen'>Reading the screen: main, tab and pane names, the status line</a></li>
 <li><a href='#agents'>Agent status and bbh</a></li><li><a href='#launcher'>Cmd+Space</a></li><li><a href='#guix'>Guix packaging and the MUX switch</a></li>
 <li><a href='#procs'>The processes, and how to see them</a></li><li><a href='#debug'>Debug and recover</a></li><li><a href='#more'>Other Rex docs</a></li></ol></details></nav>
 
@@ -210,6 +210,12 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td>A pane's new size reached rexg-render after the program's redraw for it, or before bytes still queued for the old size (T225).</td><td>Emacs's old mode line left on screen under its new cursor after a resize; lines on the wrong rows.</td><td>Bombadil (cursor.ts, one run in three once T225 made frames faster), read from a recorded byte replay; Quint (resize.qnt, before and bbOnly)</td></tr>
 </table></div>
 <p><code>REXG_TRACE=/tmp/rexg.trace</code> makes rexg-render keep a copy of everything it writes, which is how the last Bombadil failure was read frame by frame. <code>cd desktop/build/ghostty-rex && bb bombadil:cursor --time 240</code> runs the spec alone; <code>bb verify:quint</code> and <code>bb verify:quint-mc</code> check the model.</p>
+
+<h2 id='popout'>Pop out a pane</h2>
+<p><b>M-x Pane: pop out into its own window</b> opens the focused pane in a Ghostty window of its own, class <code>dev.engstrand.RexPane</code>, beside the main one (T225 stage 1). The pane stays in Rex and in the main window's layout. In its own window it has Ghostty's own scrollback, selection, search and pictures, because Ghostty reads the pane's bytes itself. There are two parsers, not three: Rex's server and that Ghostty.</p>
+<div class='card'><b>How it works.</b> The window runs <code>ghostty-rex pane</code> (<code>src/rexg/pane.clj</code>), a small bb relay. It takes the pane and sizes it to the window, so the snapshot Rex sends is already at the window's size. <code>rexg-render --vt</code> prints that snapshot once as escape codes, history first, then passes the live bytes on untouched. Your keys go from Ghostty to the pane as raw bytes. The pane's programs ask their terminal questions, such as a cursor report or a colour. Rex already answers them, so the relay drops Ghostty's second answer (<code>src/rexg/replies.clj</code>). When the server restarts, the relay prints the pane again. When the pane closes, the window closes.</div>
+<p><b>Sizes.</b> The pane has the pop-out window's size while that window is open. The main window leaves it alone, so the pane may look clipped or padded there. When you close the pop-out window, the main window sizes the pane again. If another client resizes the pane, the relay puts the window's size back within 2 s.</p>
+<p>The relay needs a rexg-render with <code>--vt</code>. That is <code>make home</code> with MUX=ghostty-rex, or <code>make build NAME=ghostty-rex</code> for the checkout. An older rexg-render makes the window say so and close.</p>
 
 <h2 id='screen'>Reading the screen</h2>
 <p>A sketch of the window with two panes. The lines are as wide as the real ones, so on a phone it scrolls sideways.</p>

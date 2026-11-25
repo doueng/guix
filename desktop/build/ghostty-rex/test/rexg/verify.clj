@@ -136,6 +136,12 @@
   (str/join ":" (remove #(or (= % (str (fs/path (fs/home) ".local" "bin"))) (str/includes? % "/bbh/shims"))
                          (str/split (str path) #":"))))
 
+(defn- display-socket
+  "The test display's Wayland socket as a full path."
+  []
+  (let [w (str/trim (str (:out (in-display "sh" "-c" "printf %s \"$WAYLAND_DISPLAY\""))))]
+    (if (str/starts-with? w "/") w (str (System/getenv "XDG_RUNTIME_DIR") "/" w))))
+
 (defn client-env
   "The client's environment against server S: the test HOME, the config,
   Hyprland's PATH, the checkout's leader.edn, and files in place of the
@@ -146,7 +152,10 @@
           "KEYLEADER_CONFIG" (str (fs/path checkout "desktop" "configs" "keybindings" "leader.edn"))
           "REXG_CONFIG" config "REXMUX_CONFIG" config "REXG_RENDER" (render-bin)
           "REXG_LOG" (str root "/client.log")
-          "REXG_CLIPBOARD_FILE" (str root "/clipboard") "REXG_OPEN_FILE" (str root "/opened")}
+          "REXG_CLIPBOARD_FILE" (str root "/clipboard") "REXG_OPEN_FILE" (str root "/opened")
+          ;; The test XDG_RUNTIME_DIR has no Wayland socket; a pop-out's Ghostty
+          ;; finds the test display by its full path.
+          "WAYLAND_DISPLAY" (display-socket)}
          ;; REXG_TRACE=FILE keeps what rexg-render wrote, to read a failure's frames.
          (some->> (System/getenv "REXG_TRACE") (hash-map "REXG_TRACE"))))
 
@@ -371,6 +380,52 @@
                 (= want shown) (str "shown " shown)))
       (api s "session.destroy" {:session_id sid}))))
 
+(defn- block-size [s sid block]
+  (let [r (api s "block.method" {:session_id sid :block_id block :method "size"})] [(:columns r) (:rows r)]))
+
+(defn- pop-out-checks!
+  "M-x Pane: pop out: the shell pane in a Ghostty window of
+  its own on the test display. Typing there reaches the pane, Ghostty's
+  answer to the pane's question is not typed into it a second time, the
+  main window leaves the pane's size alone, and when the window closes the
+  main window sizes the pane again."
+  [s root sid v shell]
+  (api s "session.focus_window" {:session_id sid :window_id (get-in v [:windows 0 :window_id])})
+  (Thread/sleep 800)
+  (let [before (block-size s sid shell)
+        {:keys [exit err]} (ts/rex! s "-C" "ghostty-rex" "do" "mx.pane.pop_out")
+        app "dev.engstrand.RexPane"
+        rect #(some (fn [n] (when (= app (:app_id n)) (:rect n)))
+                    (tree-seq map? (fn [n] (concat (:nodes n) (:floating_nodes n))) (json/parse-string (:out (in-display "swaymsg" "-t" "get_tree")) true)))]
+    (check! "pop out: rex -C ghostty-rex do mx.pane.pop_out answers ok" (zero? exit) err)
+    (check! "pop out: the pane opens in a Ghostty window of class dev.engstrand.RexPane" (wait-for 15000 rect))
+    ;; Floating at a fixed size, so sway's tiling changes neither window.
+    (in-display "swaymsg" (str "[app_id=\"" app "\"] floating enable, resize set 900 px 500 px, focus"))
+    (Thread/sleep 2500)
+    (let [popped (block-size s sid shell)]
+      (check! "pop out: the pane takes the new window's size" (not= before popped) (pr-str [before popped]))
+      (keys! "echo popped-$(math 6 x 7)" [:key "Return"])
+      (check! "pop out: typing in its window reaches the pane" (wait-for 5000 #(str/includes? (capture s sid shell) "popped-42")))
+      ;; The pane asks DA1 and reads one answer; Rex gives it. Ghostty's own
+      ;; answer must not reach the pane as typed text.
+      (keys! "bash --norc -c 'printf \"\\033[c\"; read -rs -d c r; sleep 1; echo da-answered'" [:key "Return"])
+      (wait-for 6000 #(str/includes? (capture s sid shell) "da-answered"))
+      (Thread/sleep 800)
+      (let [tail (last (str/split-lines (capture s sid shell)))]
+        (check! "pop out: Ghostty's answer to the pane's question is not typed into it"
+                (and (str/includes? (capture s sid shell) "da-answered") (not (re-find #"\d;\d+c|\?6" tail))) (pr-str tail)))
+      (shot! root "03b-pop-out")
+      ;; The main window shows another tab and back: it lays the pane out again.
+      (api s "session.focus_window" {:session_id sid :window_id (get-in v [:windows 1 :window_id])})
+      (Thread/sleep 500)
+      (api s "session.focus_window" {:session_id sid :window_id (get-in v [:windows 0 :window_id])})
+      (Thread/sleep 2500)
+      (check! "pop out: the main window leaves the popped-out pane's size alone" (= popped (block-size s sid shell))
+              (pr-str [popped (block-size s sid shell)]))
+      (in-display "swaymsg" (str "[app_id=\"" app "\"] kill"))
+      (check! "pop out: when its window closes, the main window sizes the pane again"
+              (wait-for 8000 #(= before (block-size s sid shell))) (pr-str [before (block-size s sid shell)])))))
+
 (defn e2e!
   "The window checks; returns the run directory."
   [root]
@@ -410,6 +465,7 @@
         ;; Before any tty client: they also call themselves ghostty-rex, and
         ;; rex -C ghostty-rex refuses an ambiguous target.
         (reload-checks! s root sid)
+        (pop-out-checks! s root sid v shell)
         (cursor-checks! s root config)
         ;; Tiny fingers on the shell tab.
         (api s "session.focus_window" {:session_id sid :window_id (get-in v [:windows 0 :window_id])})
@@ -552,7 +608,7 @@
                   (slurp? (str root "/notified")))
           (Thread/sleep 1500)
           (check! "the notification is sent once" (= 1 (count (re-seq #"needs you" (str (slurp? (str root "/notified")))))))
-          ;; The status comes over the client's own events connection (T225).
+          ;; The status comes over the client's own events connection.
           (let [cmds (map #(str/replace (str (slurp? (str "/proc/" % "/cmdline"))) "\u0000" " ") (client-pids root))]
             (check! "agent status needs no rex events process" (not-any? #(str/includes? % "events --all") cmds) (pr-str cmds)))
           (shot! root "08-blocked")

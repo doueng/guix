@@ -379,6 +379,9 @@
                       [(assoc m :echo "No border to move that way.") []]))
     "keymap/layer" [m (send-keymap m)]
     "client/reload" [(assoc m :echo "reloading the client") [[:reload]]]
+    "pane/pop-out" (if (and (session-id m) (focused-block m))
+                     [(assoc m :echo "popping the pane out") [[:pop-out (:current m) (session-id m) (focused-block m)]]]
+                     [(assoc m :echo "No focused pane.") []])
     [(assoc m :echo (str "unknown effect " kind)) []]))
 
 (defn apply-effects [m effects]

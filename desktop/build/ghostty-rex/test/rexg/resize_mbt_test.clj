@@ -67,7 +67,7 @@
     :write (update w :stream conj [:Bytes (:rexSize w)])
     :resize (-> w (assoc :rexSize s) (update :stream conj [:Size s]))
     :read (bb-read w)
-    ;; bb's main queue never carries a size now; relay would send one.
+    ;; bb's main queue never carries a size; relay would send one.
     :relay (-> w (update :pipe conj (first (:mainq w))) (update :mainq (comp vec rest)))
     ;; rexg-render, as RenderInOrder says.
     :take (-> w (update :paneq conj (first (:pipe w))) (update :pipe (comp vec rest)))

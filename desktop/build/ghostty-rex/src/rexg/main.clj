@@ -80,6 +80,24 @@
    :doc "Run the ghostty-rex client anew in this window, on this session, so an edit to its bb code or config.edn takes effect. Rex keeps the panes and their programs. rexg-render, the C half, needs make build NAME=ghostty-rex or make home."
    :run (fn [_ _] [[:client/reload {}]])})
 
+(def pop-out-command
+  "M-x Pane: pop out: the focused pane in a Ghostty window of
+  its own, beside this one (ghostty-rex popout, rexg.pane)."
+  {:id :pane/pop-out :title "Pane: pop out into its own window" :category "pane" :source :local
+   :doc "Open the focused pane in a Ghostty window of its own, with Ghostty's own scrollback, selection, search and pictures. The pane stays in this window's layout too; while the other window is open it holds the pane's size."
+   :run (fn [_ _] [[:pane/pop-out {}]])})
+
+(defn pop-out!
+  "Start ghostty-rex popout, desktop/bin/ghostty-rex beside this checkout's
+  bb.edn, for BLOCK of session SID on server ADDRESS. With REXG_LOG set, its
+  errors go to that file plus .popout."
+  [address sid block]
+  (let [launcher (str (fs/normalize (fs/path (fs/parent (System/getProperty "babashka.config")) ".." ".." "bin" "ghostty-rex")))]
+    (p/process (into [launcher "popout" "--session" sid "--block" block] (when address ["--address" address]))
+               (if-let [log (System/getenv "REXG_LOG")]
+                 {:out :discard :err :write :err-file (fs/file (str log ".popout"))}
+                 {:out :discard :err :discard}))))
+
 (defn reload!
   "Replace this process with a new client on SESSION: the same bb, bb.edn
   and options, so newly edited code loads."
@@ -130,7 +148,7 @@
   [{:keys [render config label session]}]
   (let [;; The client label Rex knows us by, for rex -C LABEL do mx.tab.select_N.
         client-label label
-        cfg (assoc (load-config (or config (config-path))) :extra-commands [reload-command])
+        cfg (assoc (load-config (or config (config-path))) :extra-commands [reload-command pop-out-command])
         servers (mapv #(select-keys % [:label :address]) (or (seq (:servers cfg)) [{:label "local" :address nil}]))
         q (LinkedBlockingQueue.)
         put! (fn [ev] (.put q ev))
@@ -208,7 +226,7 @@
                                  (swap! app assoc-in [:last-draw :layout] nil)
                                  (try
                                    (let [;; Bytes and sizes go to rexg-render from the reader
-                                         ;; thread, in stream order (T225).
+                                         ;; thread, in stream order.
                                          out! (fn [part]
                                                 (let [[k x] (rex/stream-out block part)]
                                                   (case k
@@ -220,6 +238,10 @@
                                      (swap! app assoc-in [:streams block] close))
                                    (catch Exception e (put! [:stream-closed block (ex-message e)]))))
                   :close-stream (close-stream! (first xs))
+                  :pop-out (let [[srv sid block] xs
+                                 proc (pop-out! (get-in @app [:m :servers srv :address]) sid block)]
+                             (swap! app update :popped (fnil conj #{}) block)
+                             (future (deref proc) (put! [:popped-closed block])))
                   ;; OSC 52: Ghostty puts it on the clipboard. Tests also get a file.
                   :clipboard (do (send-str! r \w (str "\u001b]52;c;" (base64 (first xs)) "\u0007"))
                                  (when-let [f (System/getenv "REXG_CLIPBOARD_FILE")] (spit f (first xs))))
@@ -267,9 +289,9 @@
               ;; Agents' status from OSC 7501, as the rexmux sidecar follows
               ;; it: every event of the server, on a control connection of its
               ;; own, so the model's connection keeps only its session's events
-              ;; and no other client's perform requests. It ran rex events
-              ;; --all, a 20 MB process, until T225. Opened again on each
-              ;; connect, since it ends with the server.
+              ;; and no other client's perform requests; a connection costs far
+              ;; less than a rex events --all process (about 20 MB). Opened
+              ;; again on each connect, since it ends with the server.
               (future
                 (try
                   (let [deliver! (fn [ev]
@@ -290,11 +312,13 @@
                 (swap! app assoc :m m)
                 (perform! outs)))
             (sync-sizes! []
-              (let [{:keys [m wh sizes]} @app
+              (let [{:keys [m wh sizes popped]} @app
                     [w h] wh
                     sid (model/session-id m)]
                 (when sid
-                  (doseq [[block [c rr]] (screen/content-sizes m w h) :when (not= [c rr] (get sizes block))]
+                  ;; A popped-out pane's own window holds its size until it closes.
+                  (doseq [[block [c rr]] (screen/content-sizes m w h)
+                          :when (and (not= [c rr] (get sizes block)) (not (contains? popped block)))]
                     (swap! app assoc-in [:sizes block] [c rr])
                     (rex-send! (:current m) "session.own_block" {:session_id sid :block_ids [block] :mode "take"} [:ignore])
                     (rex-send! (:current m) "com.superlogical.terminal.resize"
@@ -344,6 +368,8 @@
                          :closed (do (log "lost" srv gen (first more))
                                      (step! model/closed srv gen (first more)))))
                 :sidecar (step! model/sidecar (first xs))
+                ;; Its window closed: this window sizes the pane again.
+                :popped-closed (swap! app #(-> % (update :popped disj (first xs)) (update :sizes dissoc (first xs))))
                 :stream-msg (let [[block msg] xs]
                               (case (:type msg)
                                 "child_exited" (step! model/child-exited block (:exit_code msg 0))

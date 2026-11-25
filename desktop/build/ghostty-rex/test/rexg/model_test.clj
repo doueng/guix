@@ -235,3 +235,11 @@
       (is (nil? (:selection (first (m/mouse (assoc model :selection ["block:a" [0 0] [1 1]]) nil release))))))
     (testing "no session, no effect"
       (is (= [(with-startup) []] (m/mouse (with-startup) ["block:a" 1 1] press))))))
+
+(deftest pop-out-opens-the-focused-pane-in-its-own-window
+  ;; M-x Pane: pop out: main runs ghostty-rex popout for it.
+  (let [model (-> (with-startup)
+                  (assoc-in [:servers 0 :view] {:session "session:p" :label "" :revision 0 :active "w1"
+                                                :windows [{:id "w1" :focused "block:a" :layout {:block {:id "block:a"}}}]}))]
+    (is (= [[:pop-out 0 "session:p" "block:a"]] (second (m/apply-effect model [:pane/pop-out {}]))))
+    (is (= [] (second (m/apply-effect (with-startup) [:pane/pop-out {}]))) "no session: nothing to pop out")))

@@ -1,5 +1,5 @@
 // -*- mode: quint; -*-
-// A pane's size through ghostty-rex (T225): every byte a program writes
+// A pane's size through ghostty-rex: every byte a program writes
 // reaches rexg-render's terminal for that pane at the size the program wrote
 // it for.
 //
@@ -11,16 +11,16 @@
 // reads the pipe, queues a pane's bytes for that pane's thread, and the pane's
 // thread writes them to the pane's terminal (csrc/rexg-render.c).
 //
-// Two fixes, each a constant so the old behaviour can be checked too:
+// Two rules, each a constant so the other order can be checked too:
 // - BbInOrder: bb sends the 'r' frame from the stream's reader thread, in
-//   order with the bytes. Before, the size went through bb's main queue, so
-//   bytes after it could reach the pipe first.
+//   order with the bytes. Without it the size goes through bb's main queue,
+//   and bytes after it can reach the pipe first.
 // - RenderInOrder: rexg-render queues the size with the pane's bytes, at its
-//   place among them, and the pane's thread applies it there. Before, the
-//   main loop resized the terminal at once, ahead of bytes still queued.
+//   place among them, and the pane's thread applies it there. Without it the
+//   main loop resizes the terminal at once, ahead of bytes still queued.
 //
-// Before both, a redraw for 110x26 landed in a 90x20 terminal, and Emacs's
-// old mode line stayed on screen under its new cursor (W307's replay).
+// With neither, a redraw for 110x26 lands in a 90x20 terminal, and Emacs's
+// old mode line stays on screen under its new cursor.
 module resize {
   const BbInOrder: bool
   const RenderInOrder: bool
@@ -32,7 +32,7 @@ module resize {
   // Rex: the pane's size, and the stream bb has not read yet.
   var rexSize: int
   var stream: List[Item]
-  // bb: sizes waiting on its main queue (before BbInOrder).
+  // bb: sizes waiting on its main queue (without BbInOrder).
   var mainq: List[Item]
   // The pipe to rexg-render, its pane queue, and the pane's terminal.
   var pipe: List[Item]
@@ -121,7 +121,7 @@ module resize {
   }
 }
 
-// ghostty-rex as T225 leaves it: every rule holds.
+// Both rules, as the code has them: every rule holds.
 module fixed {
   import resize(BbInOrder = true, RenderInOrder = true).*
 
@@ -133,7 +133,7 @@ module fixed {
       .expect(bytesFit and termSize == 2 and settledSize)
 }
 
-// Before T225: each of these traces breaks a rule.
+// Neither rule: each of these traces breaks a rule.
 module before {
   import resize(BbInOrder = false, RenderInOrder = false).*
 
@@ -153,7 +153,7 @@ module before {
       .expect(not(bytesFit))
 }
 
-// Only bb fixed: rexg-render's immediate resize still overtakes queued bytes.
+// Only BbInOrder: rexg-render's immediate resize overtakes queued bytes.
 module bbOnly {
   import resize(BbInOrder = true, RenderInOrder = false).*
 

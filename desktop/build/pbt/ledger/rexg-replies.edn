@@ -1,0 +1,25 @@
+[{:verdict :baseline,
+  :by :W307-setup,
+  :at "2026-11-25T14:17:04.576288056Z",
+  :note "T225 stage 1: reply filter suite as written",
+  :generator-sha "adb3e559c99c2134",
+  :property-sha "132edf709f7455c5",
+  :metrics
+  {:labels
+   [:answer-and-key-in-one-read
+    :answer-dropped
+    :answer-passed
+    :lookalike-key-passed
+    :lookalike-key-taken
+    :question-cut
+    :question-expired],
+   :states 4,
+   :transitions 41,
+   :coverage 79,
+   :histories 414,
+   :ngrams 182,
+   :coverage-total 87,
+   :trials 450,
+   :ms 129,
+   :failures []},
+  :round 0}]
