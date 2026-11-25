@@ -309,7 +309,7 @@
       (for [f failures]
         (str "FAILURE   " (pr-str (:signature f)) " seed " (:seed f) " trial " (:trial f) ", shrunk in " (:shrink-steps f) " steps\n"
              "  input:    " (pr-str (:input f)) "\n  problems: " (subs (pr-str (:problems f)) 0 (min 400 (count (pr-str (:problems f)))))))
-      [(str "never reached (first 25 of " (count uncovered) "):")]
+      [(if (> (count uncovered) 25) (str "never reached (first 25 of " (count uncovered) "):") (str "never reached (" (count uncovered) "):"))]
       (for [{:keys [ns in line kind]} (take 25 uncovered)] (format "  %s/%s line %s %s" ns in line (name kind)))))))
 
 (defn ledger-table [s]
