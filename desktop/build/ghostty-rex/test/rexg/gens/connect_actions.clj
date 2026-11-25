@@ -38,7 +38,25 @@
     [1 (gen/return (assoc base-weights :deliver 1 :answer 5 :late 2))]
     [1 (gen/return (assoc base-weights :hangup 3 :serverStops 3 :serverStarts 3 :late 2))]]))
 
+(def race-fragments
+  "Short scripts that build a race on purpose: a socket closes before its
+  connected is delivered (deliver 0 takes [:Closed g], which sorts first),
+  then the stale connected arrives; or the live socket is hung up while a
+  late answer is queued. Steps the state does not enable are skipped."
+  [[[:tryConnect nil] [:answer 0] [:serverStops nil] [:deliver 0] [:deliver 0]]
+   [[:tryConnect nil] [:answer 0] [:hangup true] [:deliver 0] [:startLocal true] [:deliver 0]]
+   [[:tryConnect nil] [:answer 0] [:deliver 0] [:late nil] [:hangup false] [:deliver 0] [:deliver 0]]
+   [[:tryConnect nil] [:answer 0] [:deliver 0] [:serverStops nil] [:serverStarts nil] [:deliver 0] [:timer nil] [:tryConnect nil]]])
+
+(defn gen-chunk
+  "Random actions under WEIGHTS, or now and then a race fragment."
+  [weights]
+  (gen/frequency [[4 (gen/vector (gen-action-with weights) 2 16)]
+                  [1 (gen/elements race-fragments)]]))
+
 (def gen-input
   "{:up :local :actions}: Quint's init choices and the actions after."
   (gen/hash-map :up gen/boolean :local gen/boolean
-                :actions (gen/bind gen-weights #(gen/vector (gen-action-with %) 0 60))))
+                :actions (gen/bind gen-weights
+                                   (fn [w] (gen/fmap #(vec (take 60 (apply concat %)))
+                                                     (gen/vector (gen-chunk w) 0 10))))))
