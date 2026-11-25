@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<meta name="description" content="Guix explained bottom up in plain English, using this MacBook: the store, hashes, recipes, sealed builds, substitutes, packages, grafts, profiles, rollback (T216), gc, System and Home, Shepherd and channels.">
-<meta name="bbh-doc" content="T221">
+<meta name="description" content="Guix from the ground up in plain English, using this MacBook: the store, hashed names, sealed builds, substitutes, packages, the live openssl graft, profiles, generations and the T216 rollback, garbage collection, System and Home, Shepherd and channels.">
+<meta name="bbh-doc" content="T227">
 <title>Guix, from the ground up</title>
 <style>
 :root{--ink:#111;--soft:#666;--rule:#ccc;--accent:#a00000;--paper:#fffff8;
@@ -11,14 +11,14 @@
 html{font-size:15px;-webkit-text-size-adjust:100%}
 body{margin:0 auto;max-width:1400px;width:87.5%;padding:0 0 4rem 12.5%;background:var(--paper);color:var(--ink);
  font-family:var(--serif);counter-reset:sn;font-variant-numeric:oldstyle-nums}
-h1{font-weight:400;font-size:3.2rem;line-height:1;margin:4rem 0 1rem}
-h2{font-weight:400;font-style:italic;font-size:2rem;line-height:1.1;margin:3rem 0 .6rem}
-h3{font-weight:400;font-style:italic;font-size:1.5rem;margin:2rem 0 .4rem}
+h1{font-weight:400;font-size:3.2rem;line-height:1;margin:3rem 0 .8rem}
+h2{font-weight:400;font-style:italic;font-size:2rem;line-height:1.1;margin:2.2rem 0 .4rem}
+h3{font-weight:400;font-style:italic;font-size:1.5rem;line-height:1.2;margin:1.5rem 0 .3rem}
 h1,h2,h3{text-wrap:balance}
-.subtitle{font-style:italic;font-size:1.6rem;line-height:1.2;margin:0 0 2rem;width:55%}
+.subtitle{font-style:italic;font-size:1.6rem;line-height:1.2;margin:0 0 1.5rem;width:55%}
 p,ul,ol,dl,.so,.multiples,figure{width:55%}
-p,li,dd,.so{font-size:1.3rem;line-height:1.75}
-p{margin:1.1rem 0}ul,ol{padding-left:1.4rem}li{margin:.25rem 0}
+p,li,dd,.so{font-size:1.3rem;line-height:1.45}
+p{margin:.8em 0}ul,ol{margin:.8em 0;padding-left:1.4rem}li{margin:.3em 0}
 a{color:inherit;text-underline-offset:.12em;text-decoration-thickness:.05em}
 .newthought{font-variant:small-caps;letter-spacing:.03em;font-size:1.1em}
 b,strong{font-weight:600}
@@ -26,18 +26,18 @@ b,strong{font-weight:600}
 .sn{counter-increment:sn}
 .sn::after{content:counter(sn);font-size:.75rem;vertical-align:super;line-height:0;margin-left:.1rem;font-variant-numeric:lining-nums}
 .sidenote::before{content:counter(sn) ' ';font-size:.8rem;vertical-align:super;line-height:0;font-variant-numeric:lining-nums}
-.sidenote,.marginnote{float:right;clear:right;margin-right:-60%;width:50%;margin-top:.3rem;font-size:1.05rem;line-height:1.4;position:relative;color:var(--ink)}
+.sidenote,.marginnote{float:right;clear:right;margin-right:-60%;width:50%;margin-top:.2rem;font-size:1.05rem;line-height:1.3;position:relative;color:var(--ink)}
 .sidenote code,.marginnote code{font-size:.85rem}
 /* Code is set off by a hairline, not a box. Output is grey. */
 code{font-family:var(--mono);font-size:.85em;overflow-wrap:break-word}
-pre{font-family:var(--mono);font-size:1rem;line-height:1.45;margin:1rem 0;padding:.1rem 0 .1rem 1rem;border-left:1px solid var(--ink);overflow-x:auto;max-width:80%}
+pre{font-family:var(--mono);font-size:1rem;line-height:1.35;margin:.8rem 0;padding:.1rem 0 .1rem 1rem;border-left:1px solid var(--ink);overflow-x:auto;max-width:80%}
 pre code{font-size:inherit}
 pre.out{color:#444;border-left-color:var(--rule)}
-.so{margin:1rem 0 .4rem;padding-top:.5rem;border-top:1px solid var(--rule);font-style:italic}
+.so{margin:.9rem 0 .3rem;padding-top:.4rem;border-top:1px solid var(--rule);font-style:italic}
 .so b{font-style:normal;font-variant:small-caps;font-weight:400;letter-spacing:.05em;font-size:1.05em}
-figure{margin:1.5rem 0;padding:0}
+figure{margin:1.2rem 0;padding:0}
 figure svg{display:block;width:100%;height:auto;max-width:560px;overflow:visible}
-figcaption{float:right;clear:right;margin-right:-60%;width:50%;font-size:1.05rem;line-height:1.4}
+figcaption{float:right;clear:right;margin-right:-60%;width:50%;font-size:1.05rem;line-height:1.3}
 svg text{font-family:var(--serif);fill:var(--ink)}
 svg .mono{font-family:var(--mono)}
 /* Small multiples: the same little picture repeated, one change each. */
@@ -45,7 +45,7 @@ svg .mono{font-family:var(--mono)}
 .multiples figure{width:auto;margin:0}
 .multiples svg{max-width:none}
 .multiples figcaption{float:none;margin:.2rem 0 0;padding:0;border:0;width:auto;font-size:1rem}
-table{border-collapse:collapse;font-size:1.1rem;line-height:1.45;margin:1.2rem 0;max-width:55%}
+table{border-collapse:collapse;font-size:1.1rem;line-height:1.35;margin:1rem 0;max-width:55%}
 th{font-weight:400;font-style:italic;text-align:left;border-bottom:1px solid var(--ink);padding:.2rem 1rem .2rem 0}
 td{padding:.2rem 1rem .2rem 0;vertical-align:top;border-bottom:1px solid #eee}
 td.r,th.r{text-align:right;font-variant-numeric:lining-nums tabular-nums}
@@ -58,8 +58,8 @@ td.r,th.r{text-align:right;font-variant-numeric:lining-nums tabular-nums}
  h1{font-size:2.1rem;margin-top:2rem}h2{font-size:1.6rem}
  .subtitle,p,ul,ol,dl,.so,.multiples,figure{width:100%}
  table{max-width:100%}
- p,li,dd,.so{font-size:1.2rem;line-height:1.6}
- .sidenote,.marginnote,figcaption{display:block;float:none;width:auto;margin:.6rem 0 .6rem 1rem;padding-left:.7rem;border-left:1px solid var(--rule)}
+ p,li,dd,.so{font-size:1.2rem;line-height:1.45}
+ .sidenote,.marginnote,figcaption{display:block;float:none;width:auto;margin:.5rem 0 .5rem 1rem;padding-left:.7rem;border-left:1px solid var(--rule)}
  figure{display:flex;flex-direction:column}figure figcaption{order:2}
  .multiples{grid-template-columns:repeat(auto-fit,minmax(6rem,1fr))}
  .multiples figcaption{margin:.2rem 0 0;padding:0;border:0}
@@ -69,135 +69,128 @@ td.r,th.r{text-align:right;font-variant-numeric:lining-nums tabular-nums}
 </style></head>
 <body><article>
 <h1>Guix, from the ground up</h1>
+<p class=subtitle>Fifteen short steps. Each one uses only the steps before it. Every example comes from your own MacBook, and every command only looks.</p>
 
-<p class=subtitle>Sixteen short steps. Each one uses only the steps before it. Every example is from your own MacBook, and every command is safe to type: they only look.</p>
-
-<section>
-<h2 id=s1>1. A program is a file that needs other files</h2>
-<p>A program is a file. But it almost never works alone. It needs other files: libraries with shared code, data, other programs.</p>
-<p>Take <code>jq</code>. Ask it what it needs:</p>
+<section id=s1>
+<h2>1. A program is a file that needs other files</h2>
+<p><span class=newthought>A program is a file.</span> But it almost never works alone. It needs other files: libraries of shared code, data, other programs.</p>
+<p>Take <code>jq</code>. Ask what it needs:</p>
 <pre><code>ldd $(readlink -f $(which jq))</code></pre>
-<p>You get (trimmed):</p>
-<pre class=out><code>libonig.so.5 =&gt; /gnu/store/3sgrw…-oniguruma-6.9.10/lib/libonig.so.5
-libc.so.6    =&gt; /gnu/store/0mcy4…-glibc-2.41/lib/libc.so.6</code></pre>
-<p>So jq needs a regex library (oniguruma) and the C library (glibc). Without them, jq does not start. Ignore the odd <code>/gnu/store/…</code> folders for now. We will get there.</p>
-<p class=so><b>So:</b> every program is a file plus a list of other files it needs.</p>
-
+<pre class=out><code>libonig.so.5 =&gt; /gnu/store/3sgrw…-oniguruma-6.9.10/lib/…
+libc.so.6    =&gt; /gnu/store/0mcy4…-glibc-2.41/lib/…</code></pre>
+<p>jq needs a regex library, oniguruma, and the C library, glibc. Without them it does not start. Ignore the odd <code>/gnu/store/…</code> folders for now. Step 3 explains them.</p>
+<p class=so><b>So:</b> a program is a file plus a list of other files it needs.</p>
 </section>
-<section>
-<h2 id=s2>2. Why installing things usually breaks</h2>
-<p>On a normal Linux, everybody's files go into the same few shared folders. Libraries go in <code>/usr/lib</code>. There is exactly one <code>/usr/lib/libonig.so.5</code>.</p>
-<p>Now picture two programs. App A wants oniguruma 6.9. App B wants a newer one. There is one slot with that name. Installing the new one for B <i>overwrites</i> the file A was using. A breaks.</p>
+
+<section id=s2>
+<h2>2. Why installing things usually breaks</h2>
+<p>On most Linux systems, every program's files go into the same few shared folders. Libraries go in <code>/usr/lib</code>. There is exactly one <code>/usr/lib/libonig.so.5</code>.</p>
+<p>Now take two programs. App A wants oniguruma 6.9. App B wants 7.0. There is one file with that name. Installing 7.0 for B overwrites the file A was using, and A breaks.</p>
 <figure>
-<figcaption>Two apps share one slot in /usr/lib.</figcaption>
-<svg viewBox='0 0 340 150' role=img aria-label='Two apps share one slot in /usr/lib'>
-<rect x=10 y=10 width=90 height=34 rx=6 fill='none' stroke='#111'/><text x=55 y=32 text-anchor=middle font-size=13>App A</text>
-<rect x=240 y=10 width=90 height=34 rx=6 fill='none' stroke='#111'/><text x=285 y=32 text-anchor=middle font-size=13>App B</text>
-<rect x=85 y=96 width=170 height=40 rx=6 fill='none' stroke='#a00000'/><text x=170 y=114 text-anchor=middle font-size=12 class=mono>/usr/lib/libonig.so.5</text><text x=170 y=129 text-anchor=middle font-size=11 fill='#a00000'>one name, one slot</text>
-<path d='M55 44 L130 96' stroke='#666' stroke-width=2 fill='none'/><path d='M285 44 L210 96' stroke='#666' stroke-width=2 fill='none'/>
-<text x=14 y=76 font-size=11 fill='#666'>wants 6.9</text><text x=262 y=76 font-size=11 fill='#666'>wants 7.0</text>
+<figcaption>Two programs, one file name. Whoever installs last wins.</figcaption>
+<svg viewBox='0 0 360 150' role=img aria-label='Two apps need the same file name in /usr/lib'>
+<g font-size=14 text-anchor=middle>
+<rect x=10 y=8 width=110 height=34 fill=none stroke='#111'/><text x=65 y=30>App A</text>
+<rect x=240 y=8 width=110 height=34 fill=none stroke='#111'/><text x=295 y=30>App B</text>
+<text x=65 y=72 font-size=13 fill='#666'>wants 6.9</text><text x=295 y=72 font-size=13 fill='#666'>wants 7.0</text>
+<rect x=80 y=98 width=200 height=44 fill=none stroke='#a00000'/>
+<text x=180 y=117 font-size=13 class=mono>/usr/lib/libonig.so.5</text>
+<text x=180 y=135 font-size=13 fill='#a00000'>room for one</text>
+</g>
+<path d='M65 42 L140 98 M295 42 L220 98' stroke='#666' fill='none'/>
 </svg>
 </figure>
-<p>It gets worse. An upgrade copies hundreds of files one by one. If the power dies halfway, you have half an old system and half a new one. And there is no undo: the old files are gone, overwritten.</p>
-<p class=so><b>So:</b> the trouble is one shared shelf where each name has room for only one thing, and changes happen in place.</p>
-
+<p>Upgrades make it worse. An upgrade overwrites hundreds of files one at a time. If the power dies halfway, you have half an old system and half a new one. And there is no undo, because the old files are gone.</p>
+<p class=so><b>So:</b> the trouble is one shared folder where each name holds one file, and changes that overwrite in place.</p>
 </section>
-<section>
-<h2 id=s3>3. The store: a folder where nothing ever changes</h2>
-<p>Guix fixes this with one rule. Everything goes into <code>/gnu/store</code>, each thing in its own folder, and <b>once a folder is written, it never changes again</b>. Not edited, not overwritten. Only, much later, maybe deleted.</p>
-<p>Look at your store:</p>
+
+<section id=s3>
+<h2>3. A folder where nothing ever changes</h2>
+<p>Guix fixes this with one rule. Every program and library gets its own folder under <code>/gnu/store</code>, and once that folder is written, it never changes. Nothing edits it or overwrites it. Much later, Guix may delete it. That folder of folders is the <b>store</b>.</p>
 <pre><code>ls /gnu/store | grep -- '-jq-1.8.2$'</code></pre>
 <pre class=out><code>0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2
 dngb583q608v3acma2xd9smls2cyghpp-jq-1.8.2
 x8g0a13kma26kca8f5a1w6f0n54jyp65-jq-1.8.2</code></pre>
-<p>Three copies of jq 1.8.2, side by side, and none of them is in anybody's way. Each name starts with a 32-character code. That code is what keeps them apart.</p>
-<p>And remember the <code>ldd</code> output from step 1? jq does not look in <code>/usr/lib</code>. It points at one exact folder: <code>/gnu/store/3sgrw…-oniguruma-6.9.10</code>. Nobody can swap that file under it, because that folder never changes.</p>
-<p class=so><b>So:</b> every version of everything gets its own folder that never changes, and programs point at those folders by full name.</p>
-
+<p>Three copies of jq 1.8.2 sit side by side, and none is in another's way. Each name starts with a 32-character code. The code keeps them apart.</p>
+<p>Look back at step 1. jq does not look in <code>/usr/lib</code>. It points at one exact folder, <code>3sgrw…-oniguruma-6.9.10</code>. Nothing can swap that file under it, because that folder never changes.</p>
+<p class=so><b>So:</b> each version of each thing gets its own folder that never changes, and programs point at those folders by full name.</p>
 </section>
-<section>
-<h2 id=s4>4. Where the code in the name comes from</h2>
-<p>Before Guix builds anything, it writes down a <b>recipe</b>. Guix calls it a <i>derivation</i>, and stores it as a <code>.drv</code> file. The recipe says, in full:</p>
-<ul>
-<li>every input, named by its full store path (the compiler, the source code, oniguruma, glibc…),</li>
-<li>the build script to run,</li>
-<li>the settings it runs with.</li>
-</ul>
-<p>See jq's recipe:</p>
-<pre><code>guix build -d jq
-/gnu/store/yvn0aghzmw7l7b75byrkcmqxghvdx2vf-jq-1.8.2.drv
 
-head -c 400 /gnu/store/yvn0aghzmw7l7b75byrkcmqxghvdx2vf-jq-1.8.2.drv
-Derive([("out","/gnu/store/0cs828z5…-jq-1.8.2",…)],
+<section id=s4>
+<h2>4. Where the code in the name comes from</h2>
+<p>Before Guix builds anything, it writes down a <b>recipe</b>: every input by its full store name (compiler, source code, oniguruma, glibc), the build script, and its settings. Guix calls a recipe a <b>derivation</b> and saves it as a <code>.drv</code> file in the store.</p>
+<pre><code>guix build -d jq</code></pre>
+<pre class=out><code>/gnu/store/yvn0aghzmw7l7b75byrkcmqxghvdx2vf-jq-1.8.2.drv</code></pre>
+<pre><code>head -c 400 /gnu/store/yvn0aghzmw7l7b75byrkcmqxghvdx2vf-jq-1.8.2.drv</code></pre>
+<pre class=out><code>Derive([("out","/gnu/store/0cs828z5…-jq-1.8.2",…)],
        [("/gnu/store/1sfgckrz…-diffutils-3.12.drv",["out"]),
         ("/gnu/store/9qy0azyn…-oniguruma-6.9.10.drv",["out"]),
         ("/gnu/store/b6qd9vr6…-gcc-14.3.0.drv",["out"]), …</code></pre>
-<p>Now the key trick. The code at the front of <code>0cs828z5…-jq-1.8.2</code> is a <b>hash of that recipe</b>: a short fingerprint computed from all of it. Change one byte of the recipe and the fingerprint is completely different.</p>
-<p>The recipe lists its inputs by <i>their</i> names, which contain <i>their</i> fingerprints, which came from <i>their</i> recipes. So the fingerprint covers everything, all the way down:</p>
+<p>Now the key trick. The code at the front of <code>0cs828z5…-jq-1.8.2</code> is a <b>hash</b> of that recipe: a short fingerprint computed from every byte of it. Change one byte of the recipe and you get a completely different code.</p>
+<p>The recipe names its inputs by their store names. Those names hold their own hashes, which came from their own recipes. So jq's hash covers everything below it, all the way down.</p>
 <figure>
-<figcaption>Hashes chain up through inputs.</figcaption>
-<svg viewBox='0 0 340 190' role=img aria-label='Hashes chain up through inputs'>
-<rect x=110 y=8 width=120 height=36 rx=6 fill='none' stroke='#a00000'/><text x=170 y=30 text-anchor=middle font-size=12 class=mono>0cs8…-jq</text>
-<rect x=10 y=80 width=140 height=36 rx=6 fill='none' stroke='#111'/><text x=80 y=102 text-anchor=middle font-size=12 class=mono>3sgr…-oniguruma</text>
-<rect x=190 y=80 width=140 height=36 rx=6 fill='none' stroke='#a00000'/><text x=260 y=102 text-anchor=middle font-size=12 class=mono>0mcy…-glibc</text>
-<rect x=190 y=150 width=140 height=34 rx=6 fill='none' stroke='#a00000'/><text x=260 y=171 text-anchor=middle font-size=11>one patch changed</text>
-<path d='M80 80 L150 44 M260 80 L190 44 M260 150 L260 116' stroke='#666' stroke-width=2 fill='none'/>
-<text x=10 y=150 font-size=11 fill='#666'>change anything low down…</text><text x=10 y=166 font-size=11 fill='#666'>…and every name above it</text><text x=10 y=182 font-size=11 fill='#666'>changes too (red).</text>
+<figcaption>Change one patch in glibc, and every name above it changes too (red).</figcaption>
+<svg viewBox='0 0 360 170' role=img aria-label='Hashes chain up through inputs'>
+<g font-size=13 class=mono text-anchor=middle>
+<rect x=110 y=6 width=140 height=32 fill=none stroke='#a00000'/><text x=180 y=27 fill='#a00000'>0cs8…-jq</text>
+<rect x=4 y=70 width=160 height=32 fill=none stroke='#111'/><text x=84 y=91>3sgr…-oniguruma</text>
+<rect x=196 y=70 width=160 height=32 fill=none stroke='#a00000'/><text x=276 y=91 fill='#a00000'>0mcy…-glibc</text>
+<rect x=196 y=132 width=160 height=32 fill=none stroke='#a00000'/><text x=276 y=153 fill='#a00000'>one patch</text>
+</g>
+<path d='M84 70 L150 38 M276 70 L210 38 M276 132 V102' stroke='#666' fill='none'/>
+<text x=4 y=140 font-size=13 fill='#666'>unchanged</text><text x=4 y=156 font-size=13 fill='#666'>keeps its name</text>
 </svg>
 </figure>
-<p>You can see this on your disk. Ask each jq copy what it points at:</p>
+<p>Your disk shows this. Ask each jq copy which folders it points at:</p>
 <pre><code>guix gc --references /gnu/store/0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2
 guix gc --references /gnu/store/x8g0a13kma26kca8f5a1w6f0n54jyp65-jq-1.8.2</code></pre>
-<p>The first points at <code>0mcy4…-glibc-2.41</code>. The second points at <code>nhphq…-glibc-2.44-57</code>. Same jq, same version, built against a different glibc, so a different recipe, so a different name. The third copy, <code>dngb5…</code>, uses glibc 2.41 too, but a <i>different build</i> of it (<code>b34sh…</code>). Something deep below changed, and the name noticed.</p>
-<p class=so><b>So:</b> the name is a fingerprint of the full recipe, so two different recipes can never land in the same folder.</p>
-
+<p>The first points at <code>0mcy4…-glibc-2.41</code>, the second at <code>nhphq…-glibc-2.44-57</code>. Same jq, same version, built on a different glibc: a different recipe, so a different name. The third copy, <code>dngb5…</code>, uses glibc 2.41 too, but a different build of it, <code>b34sh…</code>. Something deep below changed, and the name changed with it.</p>
+<p class=so><b>So:</b> a store name is a fingerprint of the full recipe, so two different recipes never share a folder.</p>
 </section>
-<section>
-<h2 id=s5>5. Building: running the recipe in a sealed room</h2>
-<p>A recipe only means something if it is <i>really</i> complete. If the build script could quietly use <code>/usr/lib</code> or download something, the recipe would be lying.</p>
-<p>So a background program, the <b>Guix daemon</b>, runs every build in a sealed room:</p>
+
+<section id=s5>
+<h2>5. Building in a sealed room</h2>
+<p>A recipe is only worth something if it is complete. If the build script could quietly read <code>/usr/lib</code> or download a file, the recipe would leave something out.</p>
+<p>So a background program, the Guix <b>daemon</b>, runs every build in a sealed room:</p>
 <ul>
-<li>the only files it can see are the inputs the recipe lists,</li>
-<li>no network (except to download source whose exact hash is already written in the recipe),</li>
-<li>no home folder, a throwaway user, and file dates reset to 1970.</li>
+<li>it sees only the inputs the recipe lists,</li>
+<li>it has no network, except to fetch source whose hash the recipe already holds,</li>
+<li>it runs as a throwaway user with no home folder, and every file date is 1970.</li>
 </ul>
 <figure>
-<figcaption>The sealed build room.</figcaption>
-<svg viewBox='0 0 340 130' role=img aria-label='The sealed build room'>
-<defs><marker id='ab' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0 0L10 5L0 10z' fill='#111'/></marker></defs><defs><marker id='ag' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0 0L10 5L0 10z' fill='#111'/></marker></defs><rect x=90 y=10 width=160 height=110 rx=10 fill='none' stroke='#111' stroke-width='3'/>
-<text x=170 y=30 text-anchor=middle font-size=12 font-weight=700>sealed room</text>
-<text x=170 y=52 text-anchor=middle font-size=11>only the listed inputs</text>
-<text x=170 y=68 text-anchor=middle font-size=11>run the build script</text>
-<text x=170 y=84 text-anchor=middle font-size=11>no network, no /usr</text>
-<text x=6 y=58 font-size=11>recipe</text><text x=6 y=72 font-size=11>(.drv)</text><path d='M48 66 L90 66' stroke='#111' stroke-width='2.5' marker-end='url(#ab)'/>
-<path d='M252 66 L290 66' stroke='#111' stroke-width='2.5' marker-end='url(#ag)'/><text x=294 y=58 font-size=11>new</text><text x=294 y=72 font-size=11>store</text><text x=294 y=86 font-size=11>folder</text>
+<figcaption>Only listed inputs get in. Only the result folder comes out.</figcaption>
+<svg viewBox='0 0 360 120' role=img aria-label='The sealed build room'>
+<rect x=110 y=8 width=140 height=104 fill=none stroke='#111' stroke-width='3'/>
+<g font-size=13 text-anchor=middle>
+<text x=180 y=34>sealed room</text><text x=180 y=60 fill='#666'>no network</text><text x=180 y=80 fill='#666'>no /usr/lib</text><text x=180 y=100 fill='#666'>no home</text>
+<text x=50 y=52>listed</text><text x=50 y=68>inputs</text>
+<text x=316 y=52>result</text><text x=316 y=70 class=mono>0cs8…-jq</text>
+</g>
+<path d='M85 60 H108 M252 60 H275' stroke='#111' stroke-width='2'/>
 </svg>
 </figure>
-<p>The script writes its result to the folder whose name was already worked out from the recipe. When it finishes, the folder is made read-only. Then Guix scans the result for other store names written inside it. That is how it knows, without being told, that jq needs glibc. It is exactly what <code>guix gc --references</code> printed above.</p>
+<p>The script writes into the folder whose name the recipe already fixed. When it ends, Guix makes the folder read-only. Then it scans the result for store names written inside it. Those names are the folder's <b>references</b>, the list <code>guix gc --references</code> printed in step 4. That is how Guix knows, without being told, that jq needs glibc.</p>
 <p class=so><b>So:</b> the room holds only what the recipe lists, so the recipe really is everything that went in.</p>
-
 </section>
-<section>
-<h2 id=s6>6. Same recipe, same result: so you can skip the build</h2>
-<p>The room is sealed, so the result depends only on the recipe. Run the same recipe on another computer and you get the same thing, nearly always bit for bit.<span class=sn></span><span class=sidenote><code>guix challenge</code> checks that claim by comparing your build with the caches' builds.</span></p>
-<p>And here is the payoff. The name of the result is known <i>before</i> building, because it comes from the recipe. So before building, your daemon can ask a server: <i>"Do you already have <code>0cs828z5…-jq-1.8.2</code>?"</i> If yes, it downloads the finished folder, checks the server's signature, and puts it in the store. That download is called a <b>substitute</b>. A server that hands them out is a <b>binary cache</b>.</p>
-<p>Your daemon asks these, in this order:<span class=sn></span><span class=sidenote>Read from the daemon's command line: <code>ps -o args= -C guix-daemon</code></span></p>
-<ol>
-<li><code>http://guix-builder.tailbf68ad.ts.net:8080</code>, your own Hetzner build machine on Tailscale,</li>
-<li><code>https://bordeaux.guix.gnu.org</code>, the Guix project's cache,</li>
-<li><code>https://substitutes.asahi-guix.org</code> and <code>https://ci.guix.gnu.org</code>.</li>
-</ol>
-<p>Try it:</p>
+
+<section id=s6>
+<h2>6. Same recipe, same result, so you can skip the build</h2>
+<p>The room is sealed, so the result depends only on the recipe. Build the same recipe on another computer and you get the same folder, nearly always bit for bit.<span class=sn></span><span class=sidenote><code>guix challenge</code> tests that claim by comparing your build with the caches' builds.</span></p>
+<p>And the name of the result is known before the build, because it comes from the recipe. So your daemon first asks a server: do you already have <code>0cs828z5…-jq-1.8.2</code>? If yes, it downloads the finished folder, checks the server's signature and puts it in the store. That download is a <b>substitute</b>, and a server that hands them out is a <b>binary cache</b>.</p>
+<p>Your daemon asks three, in order:<span class=sn></span><span class=sidenote>From the daemon's command line: <code>ps -o args= -C guix-daemon</code>, checked 25 November 2026.</span> <code>guix-builder.tailbf68ad.ts.net</code>, your own Hetzner build machine on Tailscale; <code>bordeaux.guix.gnu.org</code>; and <code>ci.guix.gnu.org</code>.</p>
 <pre><code>guix weather jq</code></pre>
-<p>It says both guix-builder and bordeaux have jq: <i>100.0% substitutes available</i>.</p>
-<p>Some things nobody else has built. Your kernel uses your own config, so its recipe is yours alone and no public cache has its name. For those, the laptop <b>offloads</b>: it sends the recipe to guix-builder over SSH (listed in <code>/etc/guix/machines.scm</code>), which builds it in its own sealed room and sends back the result. The comment at the top of <code>modules/engstrand/asahi/kernel.scm</code> says just that: bump the version and build on guix-builder. <code>make prebuild</code> asks guix-builder to build your whole system ahead of time, so your next switch just downloads.</p>
-<p class=so><b>So:</b> a result is decided by its name, so anyone who already built that name can just hand it to you.</p>
-
+<pre class=out><code>http://guix-builder.tailbf68ad.ts.net:8080 ☀
+  100.0% substitutes available (1 out of 1)
+https://bordeaux.guix.gnu.org ☀
+  100.0% substitutes available (1 out of 1)</code></pre>
+<p>Some things nobody else builds. Your kernel uses your own config, so its recipe is yours alone, and no public cache has its name. For those the laptop <b>offloads</b>: it sends the recipe over SSH to guix-builder, which builds it in its own sealed room and sends the folder back.<span class=sn></span><span class=sidenote>The machine list is /etc/guix/machines.scm. The top of /home/engstrand/guix/modules/engstrand/asahi/kernel.scm says to bump the version and build on guix-builder.</span> <code>make prebuild</code> has guix-builder build your whole system ahead of time, so your next switch only downloads.</p>
+<p class=so><b>So:</b> a result is decided by its name, so anyone who already built that name can hand it to you.</p>
 </section>
-<section>
-<h2 id=s7>7. Packages: recipes written for humans</h2>
-<p>A <code>.drv</code> lists hundreds of store paths. Nobody writes those by hand. You write a <b>package</b> instead: a short description in Scheme, the language Guix is written in. Guix turns it into the <code>.drv</code> for you.</p>
-<p>Your own kernel from T212, trimmed, in <code>/home/engstrand/guix/modules/engstrand/asahi/kernel.scm</code>:</p>
+
+<section id=s7>
+<h2>7. Recipes written for people</h2>
+<p>A <code>.drv</code> lists hundreds of store names. Nobody writes that by hand. You write a <b>package</b> instead: a short description in Scheme, the language Guix is written in. Guix turns it into the <code>.drv</code>.</p>
+<p>Your own kernel from T212, trimmed, from /home/engstrand/guix/modules/engstrand/asahi/kernel.scm</p>
 <pre><code>(define %version "7.2.15")
 (define %revision "1")
 (define %hash "0w1kb68ki0fcdg7h9x6qqmbgmw2n2yq8wj1hcicp5gb8dipkk9g3")
@@ -213,44 +206,42 @@ guix gc --references /gnu/store/x8g0a13kma26kca8f5a1w6f0n54jyp65-jq-1.8.2</code>
   (inherit base)                     ; start from Guix's kernel package
   (native-inputs … clang-19 rust rust-bindgen-cli …)
   (synopsis "Linux for Apple Silicon Macs"))</code></pre>
-<p>A package says what any recipe says, just in friendly words: the source (with its hash, so the download is checked), the inputs (by variable name, like <code>rust</code>, not by store path), and how to build. Each input is itself a package, so Guix walks down the whole tree and writes a <code>.drv</code> for each one.</p>
-<p>Now step 4 tells you what a version bump does. Change <code>%version</code>: the recipe changes, so the name changes, so the new kernel goes into a <i>new</i> folder. The old kernel folder is still there, untouched.</p>
-<p>One more piece of that file: the part starting with <code>#~(</code>. That is code that is <i>not</i> run now. It is saved into the recipe and runs later, inside the sealed room. Inside it, <code>#$</code> drops in something from outside, such as a store path. Guix calls this a <b>G-expression</b>. You only need to know: <code>#~</code> means "run this in the build room".</p>
-<p class=so><b>So:</b> a package is a recipe written for people; Guix turns it into the exact <code>.drv</code> that the daemon builds.</p>
-
+<p>A package says what a recipe says, in friendly words. The source, with its hash, so the download is checked. The inputs, by variable name such as <code>rust</code>, not by store name. Each input is a package too, so Guix walks the whole tree and writes a <code>.drv</code> for each.</p>
+<p>Now step 4 tells you what a version bump does. Change <code>%version</code> and the recipe changes, so the name changes, so the new kernel lands in a new folder. The old kernel's folder stays, untouched.</p>
+<p>The file has one more kind of code, starting with <code>#~(</code>. It does not run now. Guix saves it into the recipe, and it runs later inside the sealed room. Inside it, <code>#$</code> drops in a value from outside, such as a store name.<span class=sn></span><span class=sidenote>Guix calls this a G-expression. You only need: <code>#~</code> means run this in the build room.</span></p>
+<p class=so><b>So:</b> a package is a recipe written for people, and Guix turns it into the exact <code>.drv</code> the daemon builds.</p>
 </section>
-<section>
-<h2 id=s8>8. Grafts: a quick patch without rebuilding everything</h2>
-<p>Steps 4 and 7 have a cost. Change one thing low down, and every name above it changes. Every name that changes means a new build.</p>
-<p>Most days that is fine. Now picture a security hole in openssl, the library that does encryption for almost every program that talks to the network. Ask Guix how much sits on top of it:</p>
-<pre><code>guix refresh -l openssl
-Building the following 7653 packages would ensure 27385 dependent packages are rebuilt</code></pre>
-<p>27,385 packages. The build farms need days for that, and the fix should reach you today. For glibc, which nearly every program uses, it would be the whole distribution.</p>
-<h3>The trick</h3>
-<p>Guix builds only the fixed library. Then, for each package that points at the old one, it makes a <b>copy</b> of the finished package and swaps the old library's store path for the new one, wherever that path is written inside. It does not compile anything. It is find-and-replace on bytes. Guix calls this a <b>graft</b>.</p>
+
+<section id=s8>
+<h2>8. Patching one library without rebuilding everything above it</h2>
+<p>Steps 4 and 7 have a cost. Change one thing low down and every name above it changes, and each new name means a new build.</p>
+<p>Most days that is fine. Now say a security hole turns up in openssl, the library that encrypts network traffic for almost every program. Ask how much sits on top of it:</p>
+<pre><code>guix refresh -l openssl</code></pre>
+<pre class=out><code>Building the following 7653 packages would ensure
+27385 dependent packages are rebuilt</code></pre>
+<p>27,385 packages take the build farms days, and the fix should reach you today.</p>
+<p>So Guix builds only the fixed openssl. Then, for each package that points at the old openssl, it copies the finished folder and swaps the old store name for the new one wherever it is written inside. Nothing is compiled. It is find-and-replace on bytes. This is a <b>graft</b>.</p>
 <figure>
-<figcaption>A graft copies a package and swaps one store path.</figcaption>
-<svg viewBox='0 0 340 190' role=img aria-label='A graft copies a package and swaps one store path'>
-<g font-size=11 class=mono text-anchor=middle>
-<rect x=8 y=8 width=150 height=60 rx=6 fill='none' stroke='#111'/><text x=83 y=26>lbbq…-mit-krb5</text><text x=83 y=44 font-size=10>…/4xfdc…-openssl-3.5.7/lib</text><text x=83 y=60 font-size=10 fill='#666'>built normally</text>
-<rect x=182 y=8 width=150 height=60 rx=6 fill='none' stroke='#111' stroke-width='2'/><text x=257 y=26>3znk…-mit-krb5</text><text x=257 y=44 font-size=10>…/xfzy3…-openssl-3.5.9/lib</text><text x=257 y=60 font-size=10 fill='#666'>the grafted copy</text>
-<rect x=8 y=120 width=150 height=34 rx=6 fill='none' stroke='#a00000'/><text x=83 y=141>4xfdc…-openssl-3.5.7</text>
-<rect x=182 y=120 width=150 height=34 rx=6 fill='none' stroke='#111'/><text x=257 y=141>xfzy3…-openssl-3.5.9</text>
+<figcaption>A graft copies mit-krb5 and swaps one store name inside. Nothing is compiled again.</figcaption>
+<svg viewBox='0 0 360 150' role=img aria-label='A graft copies a package and swaps one store name'>
+<g font-size=13 class=mono text-anchor=middle>
+<rect x=4 y=6 width=160 height=50 fill=none stroke='#111'/><text x=84 y=26>lbbq…-mit-krb5</text><text x=84 y=46 font-size=12 fill='#666' font-family='serif'>built normally</text>
+<rect x=196 y=6 width=160 height=50 fill=none stroke='#111' stroke-width='2'/><text x=276 y=26>3znk…-mit-krb5</text><text x=276 y=46 font-size=12 fill='#666'>grafted copy</text>
+<rect x=4 y=110 width=160 height=34 fill=none stroke='#a00000'/><text x=84 y=132 fill='#a00000'>4xfd…-openssl-3.5.7</text>
+<rect x=196 y=110 width=160 height=34 fill=none stroke='#111'/><text x=276 y=132>xfzy…-openssl-3.5.9</text>
 </g>
-<path d='M83 68 V120 M257 68 V120' stroke='#666' stroke-width='2'/>
-<path d='M158 38 H182' stroke='#a00000' stroke-width='3'/><text x=170 y=88 text-anchor=middle font-size=11 fill='#666'>copy and</text><text x=170 y=101 text-anchor=middle font-size=11 fill='#666'>swap the path</text>
-<text x=170 y=180 text-anchor=middle font-size=11 fill='#666'>Nothing is compiled again. Only the names inside change.</text>
+<path d='M84 56 V110 M276 56 V110' stroke='#666'/>
+<path d='M166 31 H194 M188 26 L194 31 L188 36' stroke='#111' stroke-width='2' fill=none/>
 </svg>
 </figure>
-<p>Remember step 5: Guix finds what a package needs by scanning it for store names. A graft uses the same fact the other way round. It scans the copy for the old name and writes the new one in its place.</p>
-<p>Because it swaps bytes in place, the new name must be <b>exactly as long</b> as the old one. Move anything in a compiled program and it breaks. The code at the front is always 32 characters, so the rest must match too. <code>openssl-3.5.7</code> and <code>openssl-3.5.9</code> are both 13 characters, so that works.</p>
-<h3>One is live on your laptop right now</h3>
-<p>Your pinned Guix has this in <code>gnu/packages/tls.scm</code> (trimmed):</p>
+<p>It works because of step 5: Guix already finds what a package needs by scanning it for store names. A graft scans the copy for the old name and writes the new one in its place.</p>
+<p>The new name must be exactly as long as the old one, since moving any byte in a compiled program breaks it. The hash part is always 32 characters, so the rest must match too. <code>openssl-3.5.7</code> and <code>openssl-3.5.9</code> are both 13.</p>
+<p><span class=newthought>One graft is live on your laptop.</span> Your pinned Guix has this in <code>gnu/packages/tls.scm</code>, trimmed:<span class=sn></span><span class=sidenote>The file is /home/engstrand/.config/guix/current/share/guile/site/3.0/gnu/packages/tls.scm line 554</span></p>
 <pre><code>(define-public openssl-3.5
   (package
     (name "openssl")
     (version "3.5.7")
-    (replacement openssl-3.5/fixed) ; graft
+    (replacement openssl-3.5/fixed)   ; the graft
     …))
 
 (define-public openssl-3.5/fixed
@@ -258,181 +249,174 @@ Building the following 7653 packages would ensure 27385 dependent packages are r
    (package
      (inherit openssl-3.5)
      (version "3.5.9") …)))</code></pre>
-<p>The <code>replacement</code> field is the whole switch. Every package still says it was built with openssl 3.5.7. Guix grafts 3.5.9 in its place.<span class=sn></span><span class=sidenote>The file is /home/engstrand/.config/guix/current/share/guile/site/3.0/gnu/packages/tls.scm</span></p>
-<p>Ask for both versions of a package that uses openssl. <code>--dry-run</code> only prints, and <code>--no-grafts</code> turns grafting off:</p>
-<pre><code>guix build --dry-run --no-grafts mit-krb5     # as built
-/gnu/store/lbbq1g41dr994hh8yq95p7bc0p5qqdkw-mit-krb5-1.21
-
-guix build --dry-run mit-krb5                 # grafted copy
+<p>The <code>replacement</code> line is the whole switch. Every package is still built against 3.5.7, and Guix grafts 3.5.9 in its place. See both forms of one package that uses openssl. <code>--dry-run</code> only prints, and <code>--no-grafts</code> turns grafting off:</p>
+<pre><code>guix build --dry-run --no-grafts mit-krb5
+guix build --dry-run mit-krb5</code></pre>
+<pre class=out><code>/gnu/store/lbbq1g41dr994hh8yq95p7bc0p5qqdkw-mit-krb5-1.21
 /gnu/store/3znk1rfg7qiqg0wkcxn3zinrc8ww5l8y-mit-krb5-1.21</code></pre>
-<p>Both are in your store. Ask each what it points at:</p>
-<pre><code>guix gc --references /gnu/store/lbbq1g41dr994hh8yq95p7bc0p5qqdkw-mit-krb5-1.21 | grep openssl
-/gnu/store/4xfdcm3ca7s72dcy59vg43v5ifpx0b1g-openssl-3.5.7
-
-guix gc --references /gnu/store/3znk1rfg7qiqg0wkcxn3zinrc8ww5l8y-mit-krb5-1.21 | grep openssl
+<p>Both are in your store. Ask each which openssl it points at:</p>
+<pre><code>guix gc --references /gnu/store/lbbq1g41…-mit-krb5-1.21 | grep openssl
+guix gc --references /gnu/store/3znk1rfg…-mit-krb5-1.21 | grep openssl</code></pre>
+<pre class=out><code>/gnu/store/4xfdcm3ca7s72dcy59vg43v5ifpx0b1g-openssl-3.5.7
 /gnu/store/xfzy3rq2lyi4h9jj342az01mc73mjc6y-openssl-3.5.9</code></pre>
-<p>Now look inside one file, the TLS plugin <code>lib/krb5/plugins/tls/k5tls.so</code>. Both copies are 199,120 bytes. <code>cmp -l</code> finds 64 bytes that differ, and all of them sit inside two names: openssl's, and mit-krb5's own, since the copy has a new name too.</p>
-<p>Grafts climb. curl does not use openssl directly, but it uses mit-krb5. So curl gets a grafted copy too (<code>x9b7p…-curl-8.21.0</code>), which points at the grafted mit-krb5. Even your own T212 kernel got one: it keeps a reference to rust, rust leads down to openssl, so <code>mb9wq…-linux-asahi-7.2.15-1</code> is a grafted copy. Of the 1,471 items your system and Home need, 274 are grafted copies.</p>
-<p>When a graft still has to be made, <code>guix build</code> says so. Try a package you do not have yet:</p>
-<pre><code>guix build --dry-run socat
-The following graft would be made:
+<p>Inside, the two copies of its TLS plugin, <code>lib/krb5/plugins/tls/k5tls.so</code>, are both 199,120 bytes. <code>cmp -l</code> finds 64 bytes that differ, all inside two names: openssl's, and mit-krb5's own, since the copy has a new name too.</p>
+<p>Grafts climb. curl does not use openssl directly, but it uses mit-krb5, so curl gets a grafted copy too, <code>x9b7p…-curl-8.21.0</code>. Even your T212 kernel, <code>mb9wq…-linux-asahi-7.2.15-1</code>, is a grafted copy: it keeps a reference to rust, and rust leads down to openssl.</p>
+<p>When a graft still has to be made, Guix says so:</p>
+<pre><code>guix build --dry-run socat</code></pre>
+<pre class=out><code>The following graft would be made:
    /gnu/store/dpx6b83arq6z5s8an0nd79qiwn57hrsn-socat-1.7.4.4.drv</code></pre>
-<p>A real build then prints <code>applying 1 graft for …socat-1.7.4.4.drv …</code> while it works.</p>
-<h3>What happened to “same recipe, same result”?</h3>
-<p>It still holds, one level up. A graft is a recipe like any other. That <code>.drv</code> for socat lists two inputs: the socat that was built normally, and the fixed openssl. Its job is “copy this and swap these names”. Its name is a fingerprint of that recipe, and the same swap gives the same bytes every time.</p>
-<p>What changes is the meaning. The grafted mit-krb5 was compiled against openssl 3.5.7, and no one ever compiled it against 3.5.9. That is only safe because 3.5.9 is a bug-fix release that keeps the same library interface.<span class=sn></span><span class=sidenote>The manual says the two must be binary-compatible, with the same <code>SONAME</code>.</span> Choosing grafts is the Guix developers' job, and they use them only for small fixes like this.</p>
-<p>Two more things follow. The caches hold only the builds made without grafts; Guix never downloads a grafted copy and always makes it on your laptop.<span class=sn></span><span class=sidenote><code>guix/grafts.scm</code> marks graft recipes <code>#:local-build? #t</code> and <code>#:substitutable? #f</code>.</span> And tools that care about the real build look past grafts: <code>guix size</code> measures the ungrafted package, and <code>guix shell -C --no-grafts</code> recreates a build environment exactly.</p>
-<h3>What grafts cost, and where they cannot reach</h3>
-<ul>
-<li><b>Time at install.</b> Every grafted copy is a full copy, made and scanned on your laptop. The manual says usually under a minute for an average package. This is why a <code>make switch</code> after <code>make pull</code> can keep printing <code>applying … graft</code> lines after the downloads finish, even when guix-builder built everything ahead of time. The old, ungrafted copies stay in the store too, until garbage collection.</li>
-<li><b>Only Guix-built things are fixed.</b> A graft fixes what Guix built and knows about. Anything that got onto your disk some other way still has whatever openssl it brought: a binary you built with <code>cargo build</code> in your home folder, a pip or npm package, something installed with Nix.</li>
-<li><b>Copied code is not a path.</b> A program linked against <code>openssl-3.5.7-static</code> contains openssl's code itself, not a path to it. There is nothing to swap, so it keeps the old code.</li>
-<li><b>Names must be written plainly.</b> The scan finds names written as plain text (and in the wide forms some programs use). A name packed inside a compressed file would be missed.</li>
-<li><b>You can turn it off.</b> Anything built with <code>--no-grafts</code> skips the fix. That is right for debugging and wrong for daily use.</li>
-</ul>
-<h3>When grafts go away</h3>
-<p>A graft is a stopgap. The proper fix still lands. Changes that would rebuild more than 300 packages go to a separate branch first (it used to be called <code>core-updates</code>), where the build farm rebuilds everything on top. There, openssl becomes 3.5.9 for real and the <code>replacement</code> line is deleted. Once the branch is merged into master, your next <code>make pull</code> and <code>make switch</code> download normally built packages that were compiled against the fixed openssl. No copies, no swaps. The 274 grafted copies become ordinary garbage for step 12 to collect.</p>
-<h3>Is this graft still needed? (checked 24 November 2026)</h3>
-<p><b>Yes, on the Guix you have now. A <code>make pull</code> removes it.</b> Your pinned Guix (commit <code>704ad8ce</code>, 26 October, in <code>channels.scm</code>) still has <code>(replacement openssl-3.5/fixed)</code>. <code>openssl</code> is 3.5.7 there, and every package is still built against 3.5.7. On your machine they all get 3.5.9 by graft. Neither closure has 3.5.7 in it at all. <code>openssl-3.0</code> (3.0.19, used only by ntp) and <code>openssl-1.1</code> have no replacement.</p>
-<p>The graft carries real fixes. Its commit (<code>66bdd5b0</code>, 30 September) lists 13 CVEs fixed between 3.5.7 and 3.5.9, and OpenSSL rates the worst of them High. Removing the graft by hand while you stay on this commit would bring them back. Don't.</p>
-<p>On your laptop it accounts for <b>211 grafted copies</b>: 211 in the system closure and 179 of those in Home. 35 of them link openssl directly, such as python, git, openssh, mit-krb5, qtbase, node and rust. The rest sit above those. Another 37 items, such as profiles and Shepherd files, were built normally on top of the copies. The count comes from <code>guix gc -R</code>, <code>--references</code> and <code>--derivers</code>: a graft's <code>.drv</code> takes the plain build of the same name as an input. The 274 above was counted another way, so the two numbers differ.</p>
-<p>The rebuild has already happened upstream. The <code>ungrafting</code> branch has <code>a310ed3e</code> “gnu: openssl: Ungraft.” (15 November). It makes 3.5.9 the plain openssl and deletes <code>openssl-3.5/fixed</code>. That branch reached master on 21 November, along with ungrafts for nss-certs, brotli, libpng, gstreamer and libgit2. Master's <code>tls.scm</code> has no <code>replacement</code> left. After your next <code>make pull</code> and <code>make switch</code>, you download packages built against 3.5.9, and the 211 copies become garbage. Nothing is lost, because 3.5.9 is still the newest 3.5 release. Run <code>guix weather</code> after the pull if you want to see substitute coverage first.</p>
-<p class=so><b>So:</b> a graft gets a fix out today by copying each package and swapping one store name for another of the same length; the full rebuild follows later and replaces it.</p>
-
+<p>Step 6 still holds, one level up. A graft is a recipe like any other: that <code>.drv</code> takes the normally built socat and the fixed openssl as inputs, and its job is to copy and swap. Same inputs, same swap, same bytes.</p>
+<p>What changes is the meaning. The grafted mit-krb5 was compiled against 3.5.7, and nobody compiled it against 3.5.9. That is safe only because 3.5.9 is a bug-fix release with the same library interface.<span class=sn></span><span class=sidenote>The Guix manual requires the two to be binary-compatible, with the same SONAME. The Guix developers choose grafts and use them only for small fixes like this one.</span></p>
+<p class=so><b>So:</b> a graft gets a fix out today by copying each package above it and swapping one store name for another of the same length.</p>
 </section>
-<section>
-<h2 id=s9>9. Profiles: making store folders feel like a normal system</h2>
-<p>So far everything sits in folders with unreadable names. But you just type <code>jq</code>. How does that find <code>0cs828z5…-jq-1.8.2</code>?</p>
-<p>Through a <b>profile</b>: a folder full of links (shortcuts) that point into store folders. Your shell's <code>PATH</code> includes <code>~/.guix-home/profile/bin</code>. Look at what is in it:</p>
-<pre><code>ls -l ~/.guix-home/profile/bin/jq
-… jq -&gt; /gnu/store/0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2/bin/jq</code></pre>
-<p>That folder has 283 such links: one for each command your Home gives you. To you it looks like one normal <code>bin</code> folder. Underneath, each entry points at a different store folder.</p>
-<p>The profile is built by a recipe too, so it is a store folder itself (<code>/gnu/store/plq4q…-profile</code>), and it never changes either.</p>
+
+<section id=s9>
+<h2>9. What a graft costs, and when it goes away</h2>
+<p><span class=newthought>A graft is a stopgap.</span> It has costs and limits, and it is meant to be replaced.</p>
+<p><b>It costs time at install.</b> Every grafted copy is a full copy, made and scanned on your laptop, because the caches only hold normal builds.<span class=sn></span><span class=sidenote>guix/grafts.scm marks graft recipes <code>#:local-build? #t</code> and <code>#:substitutable? #f</code>. The manual says a graft usually takes under a minute for an average package.</span> That is why <code>make switch</code> after <code>make pull</code> can keep printing <code>applying … graft</code> lines after the downloads finish, even when guix-builder built everything ahead of time. The ungrafted copies stay in the store too, until step 12 cleans up.</p>
+<p>It reaches only what Guix built:</p>
+<table>
+<tr><th>Holds old openssl after a graft</th><th>Why</th></tr>
+<tr><td>a binary from <code>cargo build</code>, pip, npm or Nix</td><td>Guix never built it, so never scans it</td></tr>
+<tr><td>a program linked to <code>openssl-3.5.7-static</code></td><td>it holds openssl's code, not a name to swap</td></tr>
+<tr><td>a name packed in a compressed file</td><td>the scan finds only names written plainly</td></tr>
+<tr><td>anything built with <code>--no-grafts</code></td><td>right for debugging, wrong for daily use</td></tr>
+</table>
+<p>Tools that care about the real build look past grafts: <code>guix size</code> measures the ungrafted package, and <code>guix shell -C --no-grafts</code> recreates a build environment exactly.</p>
+<p>The proper fix still lands. A change that would rebuild more than 300 packages goes first to a separate branch, where the build farm rebuilds everything on top. There openssl becomes 3.5.9 for real and the <code>replacement</code> line is deleted. Once that branch is merged, your next <code>make pull</code> and <code>make switch</code> download packages compiled against the fixed openssl. No copies, no swaps.</p>
+<p><span class=newthought>Is this graft still needed?</span> Yes, on the Guix you have now. A <code>make pull</code> removes it. Your pinned Guix, commit 704ad8c of 26 October, still has the <code>replacement</code> line, and on your laptop every package that uses openssl 3.5 gets 3.5.9 by graft. Nothing your machine uses has 3.5.7 in it at all.<span class=sn></span><span class=sidenote>openssl-3.0 (3.0.19, used only by ntp) and openssl-1.1 have no replacement.</span></p>
+<p>The graft carries real fixes. Its commit, 66bdd5b0 of 30 September, lists 13 CVEs fixed between 3.5.7 and 3.5.9, and OpenSSL rates the worst High. Removing it by hand while you stay on this commit would bring them back.</p>
+<p>On 24 November it accounted for 211 grafted copies on your machine. 35 link openssl directly, such as python, git, openssh, mit-krb5, qtbase, node and rust. The rest sit above those.<span class=sn></span><span class=sidenote>Counted in T226 with <code>guix gc -R</code>, <code>--references</code> and <code>--derivers</code>: a graft's <code>.drv</code> takes the plain build of the same name as an input.</span></p>
+<p>The rebuild has already happened upstream. Commit a310ed3e, “gnu: openssl: Ungraft.” of 15 November, makes 3.5.9 the plain openssl and deletes <code>openssl-3.5/fixed</code>. It reached master on 21 November, with ungrafts for nss-certs, brotli, libpng, gstreamer and libgit2. After your next <code>make pull</code> and <code>make switch</code>, you download packages built against 3.5.9 and the 211 copies become garbage. Run <code>guix weather</code> after the pull to see coverage first.</p>
+<p class=so><b>So:</b> a graft costs time and reaches only what Guix built; the full rebuild replaces it, and for openssl yours arrives with the next pull.</p>
+</section>
+
+<section id=s10>
+<h2>10. One folder that makes the store look like a normal system</h2>
+<p>Everything so far sits in folders with unreadable names. Yet you just type <code>jq</code>. How does that find <code>0cs828z5…-jq-1.8.2</code>?</p>
+<p>Through a <b>profile</b>: a folder of links, or shortcuts, each pointing into a store folder. Your shell's <code>PATH</code> includes <code>~/.guix-home/profile/bin</code>:</p>
+<pre><code>ls -l ~/.guix-home/profile/bin/jq</code></pre>
+<pre class=out><code>jq -&gt; /gnu/store/0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2/bin/jq</code></pre>
+<p>That folder holds 283 such links, one per command installed for you. It looks like one ordinary <code>bin</code> folder, but each entry points at a different store folder.</p>
+<p>Guix builds the profile from a recipe too, so it is a store folder itself, <code>fwyn5…-profile</code>, and it never changes either.</p>
 <p class=so><b>So:</b> a profile is one folder of links that makes many store folders look like one ordinary system.</p>
-
 </section>
-<section>
-<h2 id=s10>10. Generations and rollback: moving one arrow</h2>
-<p>If a profile never changes, how do you install or upgrade anything? You don't change it. You build a <b>new</b> profile next to the old one, and then move one link to point at the new one. Each saved version is a <b>generation</b>.</p>
-<p>Your whole machine works this way. Follow the links:</p>
-<pre><code>readlink /run/current-system
-/var/guix/profiles/system-109-link
 
-readlink /var/guix/profiles/system-109-link
-/gnu/store/ybz6s7a8wwbr7mm909c2mfzcchlsdnqa-system</code></pre>
+<section id=s11>
+<h2>11. Upgrading by moving one arrow</h2>
+<p>If a profile never changes, how do you install or upgrade anything? You build a new one beside the old one, then move one link to point at it. Each saved version is a <b>generation</b>. Your whole machine works this way:</p>
+<pre><code>readlink /run/current-system
+readlink /var/guix/profiles/system-110-link</code></pre>
+<pre class=out><code>/var/guix/profiles/system-110-link
+/gnu/store/k5rrnniwig0bmr49rjvp9x48h8kqcrb4-system</code></pre>
 <figure>
-<figcaption>Generation links point into the store.</figcaption>
-<svg viewBox='0 0 340 225' role=img aria-label='Generation links point into the store'><defs><marker id='gy' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto'><path d='M0 0L10 5L0 10z' fill='#a00000'/></marker></defs><text x='222' y='50' font-size='11' fill='#666'>/gnu/store</text>
-<text x='80' y='50' font-size='11' fill='#666'>generation links</text>
-<g font-size='11' class='mono' text-anchor='middle'>
-<rect x='80' y='60' width='118' height='26' rx='5' fill='none' stroke='#ccc'/><text x='139' y='78'>system-105-link</text>
-<rect x='80' y='96' width='118' height='26' rx='5' fill='none' stroke='#ccc'/><text x='139' y='114'>system-107-link</text>
-<rect x='80' y='132' width='118' height='26' rx='5' fill='none' stroke='#ccc'/><text x='139' y='150'>system-108-link</text>
-<rect x='80' y='168' width='118' height='26' rx='5' fill='none' stroke='#111' stroke-width='2'/><text x='139' y='186'>system-109-link</text>
-<rect x='222' y='60' width='114' height='26' rx='5' fill='none' stroke='#111'/><text x='279' y='78'>dzh4…-system</text>
-<rect x='222' y='96' width='114' height='26' rx='5' fill='none' stroke='#111'/><text x='279' y='114'>5fip…-system</text>
-<rect x='222' y='132' width='114' height='26' rx='5' fill='none' stroke='#111'/><text x='279' y='150'>ha0r…-system</text>
-<rect x='222' y='168' width='114' height='26' rx='5' fill='none' stroke='#111'/><text x='279' y='186'>ybz6…-system</text>
-<rect x='4' y='166' width='58' height='30' rx='6' fill='none' stroke='#a00000' stroke-width='2'/><text x='33' y='185'>system</text>
+<figcaption>Each generation is a link to a store folder. Switching moves only the red arrow.</figcaption>
+<svg viewBox='0 0 360 168' role=img aria-label='Generation links point into the store'>
+<g font-size=13>
+<text x=104 y=14 fill='#666'>generation links</text><text x=246 y=14 fill='#666'>/gnu/store</text>
 </g>
-<path d='M198 73 H222 M198 109 H222 M198 145 H222 M198 181 H222' stroke='#666' stroke-width='1.5'/>
-<path d='M62 181 H78' stroke='#a00000' stroke-width='3' marker-end='url(#gy)'/>
-<text x='4' y='216' font-size='12' fill='#111'>The yellow arrow is the only thing that ever moves.</text>
+<g font-size=13 class=mono>
+<text x=104 y=44>system-107</text><text x=104 y=78>system-108</text><text x=104 y=112>system-109</text><text x=104 y=146>system-110</text>
+<text x=246 y=44>5fip…-system</text><text x=246 y=78>ha0r…-system</text><text x=246 y=112>ybz6…-system</text><text x=246 y=146>k5rr…-system</text>
+<text x=0 y=146 fill='#a00000'>system</text>
+</g>
+<text x=0 y=44 font-size=13 fill='#666'>hung (T216)</text>
+<path d='M190 40 H240 M190 74 H240 M190 108 H240 M190 142 H240' stroke='#666'/>
+<path d='M54 142 H98 M92 137 L98 142 L92 147' stroke='#a00000' stroke-width=2 fill='none'/>
 </svg>
 </figure>
-<p>Upgrading is: build the new system folder, add <code>system-110-link</code>, then flip <code>system</code> to point at it. Flipping one link happens all at once. There is no half-upgraded moment.</p>
-<p><b>Rollback</b> is: flip the arrow back. Nothing is copied or repaired, because the old folder was never touched. <code>sudo guix system roll-back</code> does it, and so does the boot menu, which lists your old generations.</p>
-<p class=so><b>So:</b> upgrading builds the new beside the old and moves one arrow; rolling back moves the arrow back.</p>
-
-</section>
-<section>
-<h2 id=s11>11. The day this saved you (T216)</h2>
-<p>Generation 107, built on 22 November, was the first with your own kernel from T212 (<code>linux-asahi</code>). It also carried a broken startup file for your Home: the <code>camera-denoise</code> service forgot one import. After you typed your password, nothing started. The login just hung.</p>
-<p>The fix was not to repair anything. At boot you picked an older entry in the menu. You are still running it right now:</p>
+<p>An upgrade builds the new system folder, adds <code>system-110-link</code>, then points <code>system</code> at it. Moving one link happens all at once, so there is no half-upgraded moment.</p>
+<p>A <b>rollback</b> moves the arrow back. Nothing is copied or repaired, because the old folder was never touched. <code>sudo guix system roll-back</code> does it, and so does the boot menu, which lists your old generations.</p>
+<p><span class=newthought>This saved you on 22 November</span> (T216). Generation 107 was the first with your own kernel from T212. It also carried a broken file for your login: camera-denoise, a program that starts when you log in, was missing one import. After you typed your password, nothing started, and the login hung.</p>
+<p>Nothing was repaired in place. At boot you picked generation 105 in the menu and had a working machine. Generations 108 and 109 fixed the bug, and you have since booted 109:</p>
 <pre><code>cat /proc/cmdline
-BOOT_IMAGE=/gnu/store/6awkj…-asahi-linux-keyd-7.2.15-1/Image …
-  gnu.system=/var/guix/profiles/system-105-link …
-
-readlink -f /run/booted-system /run/current-system
-/gnu/store/dzh4wh4z4xysgf5c1hdlacf54f0xbv9f-system     ← 105, what you booted
-/gnu/store/ybz6s7a8wwbr7mm909c2mfzcchlsdnqa-system     ← 109, the newest</code></pre>
-<p>Read that slowly. You booted generation 105, with the old <code>asahi-linux-keyd</code> kernel. Since then, <code>make switch</code> built 108 and 109 and moved the arrow to 109. Your programs and services already come from 109. But a kernel can only change at boot, so the T212 kernel starts at your next reboot. <code>guix system list-generations</code> shows the whole list with labels.</p>
-<p class=so><b>So:</b> a broken generation costs you one reboot, because the old one is still there, whole and untouched.</p>
-
+readlink -f /run/booted-system /run/current-system</code></pre>
+<pre class=out><code>BOOT_IMAGE=/gnu/store/mb9wq…-linux-asahi-7.2.15-1/Image … gnu.system=/gnu/store/ybz6s…-system
+/gnu/store/ybz6s7a8wwbr7mm909c2mfzcchlsdnqa-system     ← 109, what you booted
+/gnu/store/k5rrnniwig0bmr49rjvp9x48h8kqcrb4-system     ← 110, the newest</code></pre>
+<p>Read that slowly. You booted 109, with the T212 kernel. This morning <code>make switch</code> built 110 and moved the arrow, so your programs and services already come from 110. A kernel changes only at boot, so 110's kernel waits for your next reboot.<span class=sn></span><span class=sidenote>Checked 25 November 2026. <code>guix system list-generations</code> lists them all with dates.</span></p>
+<p class=so><b>So:</b> an upgrade builds the new beside the old and moves one arrow; a bad one costs a reboot, because the old one is still there, whole.</p>
 </section>
-<section>
-<h2 id=s12>12. Garbage collection: deleting what no arrow reaches</h2>
-<p>Nothing in the store is ever overwritten, so the store only grows. Yours holds 41,963 items, about 67 GB.</p>
-<p>Cleaning up follows the arrows. Some links are <b>roots</b>: each generation link, <code>/run/current-system</code>, <code>/run/booted-system</code>, and a few more. Anything a root points at is kept. So is everything <i>that</i> points at, all the way down (step 5's references). Everything else can go.</p>
-<pre><code>guix gc --list-roots | wc -l      # you have 125 roots
-guix gc --requisites /gnu/store/0cs828z5in82ib1ml1rmv1vnima0j3p8-jq-1.8.2
-                                  # jq plus everything it needs</code></pre>
-<p><code>make gc</code> first deletes old generation links, then runs <code>guix gc</code>. So deleting a generation is the moment you give up rolling back to it. Generation 105 is safe for now: you booted it, so <code>/run/booted-system</code> keeps it alive.</p>
+
+<section id=s12>
+<h2>12. Deleting what no arrow reaches</h2>
+<p>Nothing in the store is overwritten, so the store only grows. Yours holds 42,159 items, about 68 GB.</p>
+<p>Cleanup follows the arrows. Some links are <b>roots</b>: each generation link, <code>/run/current-system</code>, <code>/run/booted-system</code> and a few more. Guix keeps anything a root points at, and everything that points at in turn, all the way down step 5's references. Deleting the rest is <b>garbage collection</b>.</p>
+<pre><code>guix gc --list-roots | wc -l</code></pre>
+<pre class=out><code>111</code></pre>
+<p><code>guix gc --requisites</code> on a store folder lists it plus everything it needs, which is what one root keeps alive.</p>
+<p><code>make gc</code> first deletes old generation links, then runs <code>guix gc</code>. So deleting a generation is the moment you give up rolling back to it. While you run 109, <code>/run/booted-system</code> keeps it alive even if its link goes.</p>
 <p class=so><b>So:</b> delete the arrows you no longer want, and the collector sweeps away whatever no arrow reaches.</p>
-
 </section>
-<section>
-<h2 id=s13>13. Guix System and Guix Home: one recipe for the whole machine</h2>
-<p>Now the big step, which is really a small one. If one program is a recipe, why not the whole computer?</p>
-<p>That is <b>Guix System</b>. You describe the machine: kernel, bootloader, disks, users, what runs at startup. Guix turns all of it into one recipe and builds one store folder. Look inside the one you are on:</p>
-<pre><code>ls /run/current-system
-activate  boot  channels.scm  configuration.scm  etc  initrd
+
+<section id=s13>
+<h2>13. One recipe for the whole machine</h2>
+<p>If one program is a recipe, why not the whole computer? That is <b>Guix System</b>. You describe the machine: kernel, bootloader, disks, users, what runs at startup. Guix turns it all into one recipe and builds one store folder:</p>
+<pre><code>ls /run/current-system</code></pre>
+<pre class=out><code>activate  boot  channels.scm  configuration.scm  etc  initrd
 kernel  locale  parameters  profile  provenance</code></pre>
-<p>The kernel, the startup disk image (<code>initrd</code>), all of <code>/etc</code>, the program profile: all inside one folder with one name. <b>Guix Home</b> is the same idea for your home folder. <code>~/.guix-home</code> points at <code>/gnu/store/znnhl…-home</code>, which holds your profile, your config files and the script that starts things when you log in.</p>
-<p>Your descriptions are tiny. <code>/home/engstrand/guix/desktop/system.scm</code> and <code>desktop/home.scm</code> are four lines each. Both use <code>%familiar-config</code> in <code>modules/engstrand/config.scm</code>, a list of rde <i>features</i> (desktop, shell, editor, kanata…). One feature list makes both the system and the home.</p>
-<p>And <code>make switch</code> is just steps 4 to 10 for the whole machine:</p>
-<ol>
-<li><code>guix system build</code>: turn the description into recipes and build them (or download them, or offload them),</li>
-<li><code>sudo guix system reconfigure</code>: add the next <code>system-N-link</code>, move the arrow, run <code>activate</code>, add the new boot menu entry.</li>
-</ol>
-<p class=so><b>So:</b> your whole computer is one recipe and one store folder, and <code>make switch</code> is build-then-move-the-arrow.</p>
-
+<p>The kernel, the startup disk image (<code>initrd</code>), all of <code>/etc</code> and the system profile sit in one folder with one name. <b>Guix Home</b> is the same idea for your home folder: <code>~/.guix-home</code> points at <code>nlqx5…-home</code>, which holds your profile, your config files and the script that starts things when you log in.</p>
+<p>Your descriptions are tiny. /home/engstrand/guix/desktop/system.scm and /home/engstrand/guix/desktop/home.scm are four lines each. Both use <code>%familiar-config</code> in /home/engstrand/guix/modules/engstrand/config.scm, one list of features from rde, a library of ready-made Guix settings (desktop, shell, editor, kanata…), that makes both the system and the Home.</p>
+<p><code>make switch</code> is steps 4 to 11 for the whole machine: <code>guix system build</code> turns the description into recipes and builds, downloads or offloads them; <code>sudo guix system reconfigure</code> adds the next generation link, moves the arrow, runs <code>activate</code> and adds a boot menu entry.</p>
+<p class=so><b>So:</b> your whole computer is one recipe and one store folder, and <code>make switch</code> builds it, then moves the arrow.</p>
 </section>
-<section>
-<h2 id=s14>14. Services and Shepherd: what keeps running</h2>
-<p>A machine is not just files. Some programs must keep running: audio, networking, your bbh daemons. In Guix's description, each such piece is a <b>service</b>. A service adds things to the build: a config file, a user account, or a program to keep running.</p>
-<p>The ones that run are handed to <b>Shepherd</b>, Guix's service manager. One Shepherd runs the system as process 1. Guix Home starts another one just for you. Ask yours:</p>
-<pre><code>herd status
-Started:
+
+<section id=s14>
+<h2>14. What keeps running</h2>
+<p>A machine is more than files. Some programs must keep running: audio, networking, your bbh daemons. In the description, each such piece is a <b>service</b>. A service adds to the build: a config file, a user account, or a program to keep running.</p>
+<p>Guix hands the programs to <b>Shepherd</b>, its service manager. One Shepherd runs the system as process 1. Guix Home starts another just for you:</p>
+<pre><code>herd status</code></pre>
+<pre class=out><code>Started:
  + bbh-super
  + camera-denoise
  + pipewire
  + …</code></pre>
-<p>Shepherd's list of services is a file built by a recipe, so it lives in the store like everything else. That is exactly what broke in T216: generation 107's Home Shepherd file crashed while loading, so your login waited forever for it. Since then, <code>desktop/build/home/check-shepherd.bb</code> loads that file after every build, before you switch.</p>
-<p class=so><b>So:</b> services say what should run, Shepherd runs it, and its config is just another store folder.</p>
-
+<p>Shepherd's list of services is a file built from a recipe, so it lives in the store too. That file is what broke in step 11: generation 107's Home Shepherd file crashed while loading, so the login waited forever. Since then, /home/engstrand/guix/desktop/build/home/check-shepherd.bb loads it after every build, before you switch.</p>
+<p class=so><b>So:</b> services say what should run, Shepherd runs it, and its config is one more store folder.</p>
 </section>
-<section>
-<h2 id=s15>15. Channels: where the recipes come from</h2>
-<p>Last question: where do packages like <code>jq</code> and <code>rust</code> come from? From <b>channels</b>: Git repositories full of package files. Yours are pinned in <code>/home/engstrand/guix/channels.scm</code>:</p>
-<pre><code>guix describe        # trimmed
-  guix 704ad8c   https://codeberg.org/guix/guix
+
+<section id=s15>
+<h2>15. Where the recipes come from</h2>
+<p>Last question: where do packages like jq and rust come from? From <b>channels</b>: Git repositories full of package files. Yours are pinned in /home/engstrand/guix/channels.scm</p>
+<pre><code>guix describe</code></pre>
+<pre class=out><code>  guix 704ad8c   https://codeberg.org/guix/guix
   rde  9300ace   https://git.sr.ht/~abcdw/rde</code></pre>
-<p>Plus your own <code>modules/</code>, which <code>make</code> adds with <code>-L</code>. Since T212 your kernel lives there, and the asahi-guix channel is gone.</p>
-<p><code>make pull</code> runs <code>guix pull</code> with that file. It fetches those exact commits, checks they are signed by the right people (the <code>introduction</code> lines), and builds a new <code>guix</code> command from them. That command is a profile with generations too: <code>~/.config/guix/current</code> leads, link by link, to <code>current-guix-9-link</code>, your ninth pull.</p>
-<p>Now see why <b>pinning</b> matters, from the bottom up. The commits fix the package files. The package files fix the recipes. The recipes fix every name. So the commits fix your entire system, down to the last byte. That is why guix-builder can build your system ahead of time and get exactly the names your laptop will ask for. Each system generation even records its channels: <code>cat /run/current-system/channels.scm</code>.</p>
-<p class=so><b>So:</b> two commit IDs plus your repo decide every recipe, every name, and so your whole machine.</p>
-
+<p>Your own <code>modules/</code> come on top, added by <code>make</code> with <code>-L</code>. Since T212 your kernel lives there.</p>
+<p><code>make pull</code> runs <code>guix pull</code> with that file. It fetches those exact commits, checks they are signed by the right people, and builds a new <code>guix</code> command from them. That command lives in a profile with generations too: <code>~/.config/guix/current</code> leads to <code>current-guix-9-link</code>, your ninth pull.</p>
+<p>Now see why pinning matters, from the bottom up. The commits fix the package files. The package files fix the recipes. The recipes fix every name. So two commits fix your whole system, to the last byte. That is why guix-builder can build your system ahead of time and get exactly the names your laptop will ask for. Each generation records its channels in <code>/run/current-system/channels.scm</code>.</p>
+<p class=so><b>So:</b> two commits plus your repo decide every recipe, every name, and so your whole machine.</p>
 </section>
-<section>
-<h2 id=s16>16. The whole picture</h2>
+
+<section id=whole>
+<h2>The whole picture</h2>
 <figure>
-<figcaption>The whole chain.</figcaption>
-<svg viewBox='0 0 340 300' role=img aria-label='The whole chain'>
-<g font-size=12 text-anchor=middle>
-<rect x=50 y=6 width=240 height=32 rx=6 fill='none' stroke='#111'/><text x=170 y=27>channels.scm + your repo</text>
-<rect x=50 y=56 width=240 height=32 rx=6 fill='none' stroke='#111'/><text x=170 y=77>packages + system description</text>
-<rect x=50 y=106 width=240 height=32 rx=6 fill='none' stroke='#111'/><text x=170 y=127>recipes (.drv), names = hashes</text>
-<rect x=50 y=156 width=240 height=32 rx=6 fill='none' stroke='#111' stroke-width='2'/><text x=170 y=177>sealed build, or download, or offload</text>
-<rect x=50 y=206 width=240 height=32 rx=6 fill='none' stroke='#111'/><text x=170 y=227>/gnu/store, never changes</text>
-<rect x=50 y=256 width=240 height=32 rx=6 fill='none' stroke='#111'/><text x=170 y=277>generation links: move = switch</text>
+<figcaption>Read top to bottom: each box is decided by the one above it. Only the last arrow ever moves.</figcaption>
+<svg viewBox='0 0 360 300' role=img aria-label='From channels to the running machine'>
+<g font-size=14 text-anchor=middle>
+<rect x=40 y=4 width=280 height=34 fill=none stroke='#111'/><text x=180 y=26>channels.scm + your repo (15)</text>
+<rect x=40 y=56 width=280 height=34 fill=none stroke='#111'/><text x=180 y=78>packages, system and Home (7, 13)</text>
+<rect x=40 y=108 width=280 height=34 fill=none stroke='#111'/><text x=180 y=130>recipes; name = hash (4)</text>
+<rect x=40 y=160 width=280 height=34 fill=none stroke='#111'/><text x=180 y=182>build sealed, download, graft (5, 6, 8)</text>
+<rect x=40 y=212 width=280 height=34 fill=none stroke='#111'/><text x=180 y=234>/gnu/store, never changes (3)</text>
+<rect x=40 y=264 width=280 height=34 fill=none stroke='#a00000'/><text x=180 y=286 fill='#a00000'>generations: move = switch (10, 11)</text>
 </g>
-<path d='M170 38 V56 M170 88 V106 M170 138 V156 M170 188 V206 M170 238 V256' stroke='#666' stroke-width='2'/>
+<path d='M180 38 V56 M180 90 V108 M180 142 V160 M180 194 V212 M180 246 V264' stroke='#666'/>
 </svg>
 </figure>
-<p>Programs need files (1). Sharing one folder breaks things (2). So every build gets its own folder that never changes (3), named by a fingerprint of its full recipe (4). The recipe is built in a sealed room, so it is honest (5). Honest recipes give the same result anywhere, so you can download instead of build (6). Packages are how people write recipes (7). A graft patches a low-level fix in fast by swapping store names, until the full rebuild arrives (8). Profiles make store folders feel normal (9). New versions sit beside old ones, and one arrow picks which is live (10), which is why T216 cost you only a reboot (11). Cleanup deletes what no arrow reaches (12). Your whole machine and home are one recipe (13), services and Shepherd keep the running parts (14), and the pinned channels decide all of it (15).</p>
-<p class=dim>Want to build this yourself? The course in <code>/home/engstrand/projects/build-your-own-guix</code> walks the same steps in code: store paths, derivations, the sealed build, profiles, rollback, garbage collection and substitutes. Deeper reading: <code>/home/engstrand/guix/docs/guix-in-depth.html</code> and the Guix manual, https://guix.gnu.org/manual/en/html_node/Features.html</p>
-<p class=dim>Companion piece, in the same style: <a href='quint-explained.html'>Quint, from the ground up</a>, /home/engstrand/guix/docs/quint-explained.html</p>
-
+<p>Programs need other files (1). One shared folder makes them overwrite each other (2). So each build gets its own folder that never changes (3), named by a fingerprint of its full recipe (4). The recipe runs in a sealed room, so it is complete (5). Complete recipes give the same result anywhere, so you can download instead of build (6). Packages are how people write recipes (7). A graft swaps in a low-level fix fast (8), until the full rebuild replaces it (9). Profiles make store folders look normal (10). New versions sit beside old ones, and one arrow picks the live one, which is why T216 cost you only a reboot (11). Cleanup deletes what no arrow reaches (12). Your machine and Home are each one recipe (13), Shepherd keeps the running parts going (14), and the pinned channels decide all of it (15).</p>
+<p>Where your setup touches each part:</p>
+<table>
+<tr><th>Your file or command</th><th class=r>Step</th></tr>
+<tr><td>/home/engstrand/guix/channels.scm, <code>make pull</code></td><td class=r>15</td></tr>
+<tr><td>/home/engstrand/guix/modules/engstrand/config.scm</td><td class=r>13</td></tr>
+<tr><td>/home/engstrand/guix/modules/engstrand/asahi/kernel.scm</td><td class=r>7</td></tr>
+<tr><td>guix-builder, /etc/guix/machines.scm, <code>make prebuild</code></td><td class=r>6</td></tr>
+<tr><td>the openssl graft</td><td class=r>8, 9</td></tr>
+<tr><td><code>make switch</code>, the boot menu</td><td class=r>11, 13</td></tr>
+<tr><td><code>make gc</code></td><td class=r>12</td></tr>
+<tr><td>/home/engstrand/guix/desktop/build/home/check-shepherd.bb</td><td class=r>14</td></tr>
+</table>
+<p>To build this yourself, the course in /home/engstrand/projects/build-your-own-guix walks the same steps in code: store names, derivations, the sealed build, profiles, rollback, garbage collection and substitutes. For more depth, /home/engstrand/guix/docs/guix-in-depth.html and the Guix manual, https://guix.gnu.org/manual/en/html_node/Features.html</p>
+<p>A companion in the same style: /home/engstrand/guix/docs/quint-explained.html</p>
 </section>
 </article></body></html>

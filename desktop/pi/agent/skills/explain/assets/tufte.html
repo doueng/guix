@@ -14,14 +14,14 @@
 html{font-size:15px;-webkit-text-size-adjust:100%}
 body{margin:0 auto;max-width:1400px;width:87.5%;padding:0 0 4rem 12.5%;background:var(--paper);color:var(--ink);
  font-family:var(--serif);counter-reset:sn;font-variant-numeric:oldstyle-nums}
-h1{font-weight:400;font-size:3.2rem;line-height:1;margin:4rem 0 1rem}
-h2{font-weight:400;font-style:italic;font-size:2rem;line-height:1.1;margin:3rem 0 .6rem}
-h3{font-weight:400;font-style:italic;font-size:1.5rem;margin:2rem 0 .4rem}
+h1{font-weight:400;font-size:3.2rem;line-height:1;margin:3rem 0 .8rem}
+h2{font-weight:400;font-style:italic;font-size:2rem;line-height:1.1;margin:2.2rem 0 .4rem}
+h3{font-weight:400;font-style:italic;font-size:1.5rem;line-height:1.2;margin:1.5rem 0 .3rem}
 h1,h2,h3{text-wrap:balance}
-.subtitle{font-style:italic;font-size:1.6rem;line-height:1.2;margin:0 0 2rem;width:55%}
+.subtitle{font-style:italic;font-size:1.6rem;line-height:1.2;margin:0 0 1.5rem;width:55%}
 p,ul,ol,dl,.so,.multiples,figure{width:55%}
-p,li,dd,.so{font-size:1.3rem;line-height:1.75}
-p{margin:1.1rem 0}ul,ol{padding-left:1.4rem}li{margin:.25rem 0}
+p,li,dd,.so{font-size:1.3rem;line-height:1.45}
+p{margin:.8em 0}ul,ol{margin:.8em 0;padding-left:1.4rem}li{margin:.3em 0}
 a{color:inherit;text-underline-offset:.12em;text-decoration-thickness:.05em}
 .newthought{font-variant:small-caps;letter-spacing:.03em;font-size:1.1em}
 b,strong{font-weight:600}
@@ -29,18 +29,18 @@ b,strong{font-weight:600}
 .sn{counter-increment:sn}
 .sn::after{content:counter(sn);font-size:.75rem;vertical-align:super;line-height:0;margin-left:.1rem;font-variant-numeric:lining-nums}
 .sidenote::before{content:counter(sn) ' ';font-size:.8rem;vertical-align:super;line-height:0;font-variant-numeric:lining-nums}
-.sidenote,.marginnote{float:right;clear:right;margin-right:-60%;width:50%;margin-top:.3rem;font-size:1.05rem;line-height:1.4;position:relative;color:var(--ink)}
+.sidenote,.marginnote{float:right;clear:right;margin-right:-60%;width:50%;margin-top:.2rem;font-size:1.05rem;line-height:1.3;position:relative;color:var(--ink)}
 .sidenote code,.marginnote code{font-size:.85rem}
 /* Code is set off by a hairline, not a box. Output is grey. */
 code{font-family:var(--mono);font-size:.85em;overflow-wrap:break-word}
-pre{font-family:var(--mono);font-size:1rem;line-height:1.45;margin:1rem 0;padding:.1rem 0 .1rem 1rem;border-left:1px solid var(--ink);overflow-x:auto;max-width:80%}
+pre{font-family:var(--mono);font-size:1rem;line-height:1.35;margin:.8rem 0;padding:.1rem 0 .1rem 1rem;border-left:1px solid var(--ink);overflow-x:auto;max-width:80%}
 pre code{font-size:inherit}
 pre.out{color:#444;border-left-color:var(--rule)}
-.so{margin:1rem 0 .4rem;padding-top:.5rem;border-top:1px solid var(--rule);font-style:italic}
+.so{margin:.9rem 0 .3rem;padding-top:.4rem;border-top:1px solid var(--rule);font-style:italic}
 .so b{font-style:normal;font-variant:small-caps;font-weight:400;letter-spacing:.05em;font-size:1.05em}
-figure{margin:1.5rem 0;padding:0}
+figure{margin:1.2rem 0;padding:0}
 figure svg{display:block;width:100%;height:auto;max-width:560px;overflow:visible}
-figcaption{float:right;clear:right;margin-right:-60%;width:50%;font-size:1.05rem;line-height:1.4}
+figcaption{float:right;clear:right;margin-right:-60%;width:50%;font-size:1.05rem;line-height:1.3}
 svg text{font-family:var(--serif);fill:var(--ink)}
 svg .mono{font-family:var(--mono)}
 /* Small multiples: the same little picture repeated, one change each. */
@@ -48,7 +48,7 @@ svg .mono{font-family:var(--mono)}
 .multiples figure{width:auto;margin:0}
 .multiples svg{max-width:none}
 .multiples figcaption{float:none;margin:.2rem 0 0;padding:0;border:0;width:auto;font-size:1rem}
-table{border-collapse:collapse;font-size:1.1rem;line-height:1.45;margin:1.2rem 0;max-width:55%}
+table{border-collapse:collapse;font-size:1.1rem;line-height:1.35;margin:1rem 0;max-width:55%}
 th{font-weight:400;font-style:italic;text-align:left;border-bottom:1px solid var(--ink);padding:.2rem 1rem .2rem 0}
 td{padding:.2rem 1rem .2rem 0;vertical-align:top;border-bottom:1px solid #eee}
 td.r,th.r{text-align:right;font-variant-numeric:lining-nums tabular-nums}
@@ -61,8 +61,8 @@ td.r,th.r{text-align:right;font-variant-numeric:lining-nums tabular-nums}
  h1{font-size:2.1rem;margin-top:2rem}h2{font-size:1.6rem}
  .subtitle,p,ul,ol,dl,.so,.multiples,figure{width:100%}
  table{max-width:100%}
- p,li,dd,.so{font-size:1.2rem;line-height:1.6}
- .sidenote,.marginnote,figcaption{display:block;float:none;width:auto;margin:.6rem 0 .6rem 1rem;padding-left:.7rem;border-left:1px solid var(--rule)}
+ p,li,dd,.so{font-size:1.2rem;line-height:1.45}
+ .sidenote,.marginnote,figcaption{display:block;float:none;width:auto;margin:.5rem 0 .5rem 1rem;padding-left:.7rem;border-left:1px solid var(--rule)}
  figure{display:flex;flex-direction:column}figure figcaption{order:2}
  .multiples{grid-template-columns:repeat(auto-fit,minmax(6rem,1fr))}
  .multiples figcaption{margin:.2rem 0 0;padding:0;border:0}
