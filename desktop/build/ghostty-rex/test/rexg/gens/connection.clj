@@ -18,9 +18,17 @@
   (gen/bind gen-move
             (fn [mv] (gen/fmap #(repeat % mv) (gen/frequency [[8 (gen/return 1)] [1 (gen/choose 2 4)]])))))
 
+(def gen-answer-late
+  "The server answers the attempt in flight and, with it, two or three
+  answers the client already handled arrive again: when that answer is a
+  failure the client starts the local server with the late ones queued."
+  (gen/fmap #(cons :answer (repeat % :replay)) (gen/choose 2 3)))
+
 (def gen-moves
-  "What happens next, a move or a burst at a time, at most 80 moves."
-  (gen/fmap #(vec (take 80 (apply concat %))) (gen/vector gen-burst 0 80)))
+  "What happens next, a move, a burst or an answer with late ones at a
+  time, at most 80 moves."
+  (gen/fmap #(vec (take 80 (apply concat %)))
+            (gen/vector (gen/frequency [[12 gen-burst] [1 gen-answer-late]]) 0 80)))
 
 (def gen-case
   "[kind starts-work? moves]: the server the client talks to, whether starting
