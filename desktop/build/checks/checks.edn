@@ -167,6 +167,10 @@
   {:name "skill-diet"
    :paths ["desktop/pi/agent/skills/skill-diet/**" "desktop/build/skill-diet/**"]
    :checks ["node desktop/pi/agent/skills/skill-diet/scripts/eval.mjs check desktop/pi/agent/skills/skill-diet && bb desktop/build/skill-diet/adapter-test.bb"]}
+  {:name "rexctl"
+   :paths ["desktop/bin/rexctl" "desktop/lib/rexctl.clj" "desktop/build/rexctl/**" "desktop/pi/agent/skills/rexmux/**"]
+   :checks ["make lint" "bb desktop/build/rexctl/test.bb" "bb desktop/build/rexctl/test.bb --live"
+            "node desktop/pi/agent/skills/skill-diet/scripts/eval.mjs check desktop/pi/agent/skills/rexmux"]}
   {:name "explain"
    :paths ["desktop/pi/agent/skills/explain/**"]
    :checks ["node desktop/pi/agent/skills/skill-diet/scripts/eval.mjs check desktop/pi/agent/skills/explain"]}

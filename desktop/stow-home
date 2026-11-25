@@ -21,7 +21,7 @@
 (stow-package! repo (str home "/.local/bin") "bin")
 (stow-package! (str repo "/pi") (str home "/.pi/agent") "agent")
 ;; Claude Code reads ~/.claude/skills; Pi and bbh already see every skill above.
-(doseq [skill ["explain"]]
+(doseq [skill ["explain" "rexmux"]]
   (stow-package! (str repo "/pi/agent/skills") (str home "/.claude/skills/" skill) skill))
 
 (defn dangling-repo-link? [path]

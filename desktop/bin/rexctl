@@ -1,0 +1,111 @@
+#!/usr/bin/env bb
+;; rexctl: read and drive Rex panes from an agent, with stable verbs that print
+;; JSON (T229). The rexmux skill (desktop/pi/agent/skills/rexmux/SKILL.md) teaches it;
+;; the code is desktop/lib/rexctl.clj.
+(require '[babashka.classpath :as classpath] '[babashka.fs :as fs])
+(classpath/add-classpath (str (fs/normalize (fs/path (fs/parent (fs/real-path *file*)) ".." "lib"))))
+(require '[rexctl :as r] '[cheshire.core :as json] '[clojure.pprint :as pprint] '[clojure.string :as str])
+
+(def usage "rexctl [-S SERVER] [--edn] VERB ...   (JSON out; errors as JSON on stderr, exit 1)
+  whoami                                   where this agent runs (REX_SESSION, REX_BLOCK) and the server
+  ls [-s SESSION] [--all-servers]          every terminal pane with its tab, cwd, foreground, status
+  read [PANE] [--lines N] [--visible] [--format text|html|vt]   a pane's text (prints text)
+  send PANE TEXT [--force]                 type TEXT (no Enter)
+  keys PANE KEY... [--force]               press keys: enter, ctrl+c, escape, up ...
+  run PANE CMD [--wait] [--timeout MS] [--lines N] [--force]   type CMD and Enter at a shell prompt
+  split [PANE] [--dir right|below|left|above] [--ratio PCT] [--cwd DIR] [--label L] [--focus] [--keep-open] [-- CMD...]
+  tab [-s SESSION] [--name N] [--cwd DIR] [--label L] [--focus] [--keep-open] [-- CMD...]
+  exec [--anchor PANE | --tab] [--dir D] [--cwd DIR] [--label L] [--timeout MS] [--lines N] -- CMD...
+                                           run CMD in a new pane, wait, return exit code and output
+  wait PANE (--match TEXT | --regex RE | --prompt | --status S[,S] | --exit) [--new] [--timeout MS] [--lines N]
+                                           --new: only text that appears after the wait starts
+  status [PANE]                            OSC 7501 agent status (blocked, error, done, working, idle)
+  close PANE [--force]                     close a pane you created
+  snapshot [-s SESSION] [--dir DIR]        every pane's text and the layout, written to files
+  servers                                  this machine's server and your Rex hosts
+  mx [--client C] [--grep Q]               list a Rex app's actions (M-x commands)
+  mx [--client C] NAME [KEY=VALUE...]      do one; it acts on the person's window
+PANE is a full block ID, an ID suffix or a label; omitted, it is your own pane (REX_BLOCK).")
+
+(def valued #{"-S" "-s" "--lines" "--format" "--timeout" "--dir" "--ratio" "--cwd" "--label"
+              "--name" "--anchor" "--match" "--regex" "--status" "--client" "--grep"})
+
+(defn parse
+  "{:opts {kw value-or-true} :args [positional] :cmd [after --]}."
+  [argv]
+  (loop [[a & more :as xs] argv opts {} args []]
+    (cond (empty? xs) {:opts opts :args args :cmd []}
+          (= "--" a) {:opts opts :args args :cmd (vec more)}
+          (valued a) (if (seq more)
+                       (recur (rest more) (assoc opts (keyword (str/replace a #"^-+" "")) (first more)) args)
+                       (throw (ex-info (str a " needs a value") {:usage true})))
+          (and (str/starts-with? a "--") (> (count a) 2)) (recur more (assoc opts (keyword (subs a 2)) true) args)
+          :else (recur more opts (conj args a)))))
+
+(defn num [s] (when s (parse-long s)))
+
+(def key-order [:server :session :session_label :tab :tab_index :tab_label :tab_active :pane :label :self :focused :viewed
+                :floating :fg :at_prompt :cwd :exited :status :state :app :msg :kind :ok :exit :elapsed_ms :error])
+
+(defn ordered
+  "V with each map's keys in key-order, then the rest by name, so output reads the same every run."
+  [v]
+  (cond (map? v) (let [rank (zipmap key-order (range))
+                       ks (sort-by (fn [k] [(rank k 999) (str k)]) (keys v))]
+                   (apply array-map (mapcat (fn [k] [k (ordered (get v k))]) ks)))
+        (sequential? v) (mapv ordered v)
+        :else v))
+
+(defn emit [edn? v]
+  (cond (string? v) (println v)
+        edn? (pprint/pprint v)
+        :else (println (json/generate-string v {:pretty true}))))
+
+(defn dispatch [verb {:keys [opts args cmd]}]
+  (let [o {:session (:s opts) :lines (num (:lines opts)) :timeout (num (:timeout opts)) :force (:force opts)
+           :cwd (:cwd opts) :label (:label opts) :focus (:focus opts) :keep-open (:keep-open opts)
+           :dir (:dir opts) :ratio (num (:ratio opts)) :cmd (seq cmd)}
+        need (fn [n] (when (< (count args) n) (throw (ex-info (str verb " needs " n " argument(s)") {:usage true}))))]
+    (case verb
+      "whoami" (r/whoami)
+      "ls" (if (:all-servers opts)
+              (vec (mapcat (fn [{:keys [label endpoint]}]
+                             (binding [r/*server* (or endpoint label)]
+                               (try (map #(assoc % :server (or label endpoint)) (r/ls o))
+                                    (catch Exception e [{:server (or label endpoint) :error (ex-message e)}]))))
+                           (r/servers)))
+              (r/ls o))
+      "read" (r/read-pane (first args) (assoc o :visible (:visible opts) :format (:format opts)))
+      "send" (do (need 2) (r/send-text (first args) (str/join " " (rest args)) o))
+      "keys" (do (need 2) (r/send-keys (first args) (rest args) o))
+      "run" (do (need 2) (r/run-in (first args) (str/join " " (rest args)) (assoc o :wait (:wait opts))))
+      "split" (r/split-pane (first args) o)
+      "tab" (r/new-tab (assoc o :name (:name opts)))
+      "exec" (do (when-not (seq cmd) (throw (ex-info "exec needs -- CMD..." {:usage true})))
+                 (r/exec-cmd (assoc o :anchor (:anchor opts) :tab (:tab opts))))
+      "wait" (r/wait-pane (first args) (assoc o :match (:match opts) :regex (:regex opts) :prompt (:prompt opts)
+                                              :status (:status opts) :exit (:exit opts) :new (:new opts)))
+      "status" (r/status (first args))
+      "close" (do (need 1) (r/close-pane (first args) o))
+      "snapshot" (r/snapshot o)
+      "servers" (r/servers)
+      "mx" (r/mx {:client (:client opts) :query (:grep opts) :name (first args) :kvs (rest args)})
+      (throw (ex-info (str "unknown verb " verb) {:usage true})))))
+
+(let [argv *command-line-args*
+      {:keys [server edn verb more]} (loop [[a & m :as xs] argv acc {}]
+                                        (cond (= "-S" a) (recur (rest m) (assoc acc :server (first m)))
+                                              (= "--edn" a) (recur m (assoc acc :edn true))
+                                              :else (assoc acc :verb a :more (vec m))))]
+  (when (or (nil? verb) (#{"-h" "--help" "help"} verb))
+    (println usage)
+    (System/exit (if verb 0 2)))
+  (try
+    (let [parsed (parse more)]
+      (binding [r/*server* (or server (get-in parsed [:opts :S]) r/*server*)]
+        (emit (or edn (get-in parsed [:opts :edn])) (ordered (dispatch verb parsed)))))
+    (catch clojure.lang.ExceptionInfo e
+      (binding [*out* *err*]
+        (println (json/generate-string (cond-> {:error (ex-message e)} (:pane (ex-data e)) (assoc :pane (:pane (ex-data e)))))))
+      (when (:usage (ex-data e)) (binding [*out* *err*] (println usage)))
+      (System/exit (if (:usage (ex-data e)) 2 1)))))
