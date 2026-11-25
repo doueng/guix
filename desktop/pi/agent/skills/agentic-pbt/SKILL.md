@@ -47,9 +47,10 @@ refuses generator files that assert and property files that generate.
 6. **Judge it**: `bb try SUITE --note "<the gap you aimed at>" --tokens N
    --minutes M`, with your token and time spend for the round if you know
    them. It measures the last accepted generator and yours on the same code,
-   seeds and trial budget, and accepts only if coverage or transitions rose,
-   neither fell, and it ran no slower than 1.25x + 100 ms (or it found a new
-   failure). Exit 0 accepted, 3 rejected. A rejected change: revert the
+   seeds and trial budget, and accepts only if coverage or transitions rose
+   (or a new failure appeared), none of coverage, transitions and 3-grams
+   fell, no label the old one reached is lost, and the faster of two runs
+   took at most 1.25x + 20 ms. Exit 0 accepted, 3 rejected. A rejected change: revert the
    generator file (`jj restore <file>`) and try another gap.
 7. **A failure** is shrunk and saved to `regressions/SUITE.edn`, replayed
    first on every run (`bb replay SUITE`). Triage it as STARTUP.md of Ephyra
