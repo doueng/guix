@@ -24,11 +24,17 @@
   failure the client starts the local server with the late ones queued."
   (gen/fmap #(cons :answer (repeat % :replay)) (gen/choose 2 3)))
 
+(def gen-answer-die-late
+  "The server answers and dies before the client handles that answer: the
+  client adopts a connection whose close is already queued, and a late
+  answer arrives behind that close."
+  (gen/return [:answer :die :process :replay]))
+
 (def gen-moves
-  "What happens next, a move, a burst or an answer with late ones at a
-  time, at most 80 moves."
+  "What happens next, a move, a burst, an answer with late ones or
+  an answer the server dies after at a time, at most 80 moves."
   (gen/fmap #(vec (take 80 (apply concat %)))
-            (gen/vector (gen/frequency [[12 gen-burst] [1 gen-answer-late]]) 0 80)))
+            (gen/vector (gen/frequency [[12 gen-burst] [1 gen-answer-late] [1 gen-answer-die-late]]) 0 80)))
 
 (def gen-case
   "[kind starts-work? moves]: the server the client talks to, whether starting
