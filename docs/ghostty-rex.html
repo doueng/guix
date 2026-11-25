@@ -69,7 +69,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <text x='36' y='181' font-size='11'>M-x, leader.edn keys</text>
 <text x='36' y='195' font-size='11'>agent status, notify-send</text>
 <text x='36' y='209' font-size='11'>bbh inbox, bbh say</text>
-<text x='36' y='223' font-size='11'>child: rex events --all</text>
+<text x='36' y='223' font-size='11'>events connection (attach_all)</text>
 <rect x='214' y='96' width='126' height='148' rx='7' fill='#e4f3ea' stroke='#2e7d4f'/>
 <text x='222' y='113' font-size='12' font-weight='700' fill='#2e7d4f'>rexg-render</text>
 <text x='222' y='128' font-size='11'>C, libghostty-vt</text>
@@ -105,8 +105,9 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <ul>
 <li><b>Ghostty</b> is started with its own class and an extra config, /home/engstrand/.config/ghostty-rex/ghostty, which clears Ghostty's tab and split keys so every key reaches the client. Its only job is to show what rexg-render writes and to send keys and mouse reports back.</li>
 <li><b>bb attach</b> (desktop/build/ghostty-rex/src/rexg/) runs straight from the checkout, so an edit needs no build. One thread handles every change in order: keys, Rex replies and events, sidecar messages, renderer lines. After each batch it draws once.</li>
-<li><b>The sidecar</b> is rexmux's command layer (desktop/build/rexmux/sidecar/), loaded into the same bb process. It owns M-x, the leader keys, agent status and bbh. It starts one child, <code>rex events --all --json</code>, to follow agent reports.</li>
-<li><b>rexg-render</b> (csrc/rexg-render.c, about 580 lines of C) keeps one libghostty-vt terminal per visible pane. bb tells it the layout, the chrome text and the cursor, and it writes only changed cells to Ghostty.</li>
+<li><b>The sidecar</b> is rexmux's command layer (desktop/build/rexmux/sidecar/), loaded into the same bb process. It owns M-x, the leader keys, agent status and bbh. It follows agent reports over a second control connection of its own, labelled <code>ghostty-rex-events</code>, which asks Rex for every event (<code>session.attach_all</code>). Until T225 that was a child process, <code>rex events --all --json</code>, which cost about 20 MB.</li>
+<li><b>rexg-render</b> (csrc/rexg-render.c, about 860 lines of C) keeps one libghostty-vt terminal per visible pane. bb tells it the layout, the chrome text and the cursor, and it writes only changed cells to Ghostty. Since T225 it re-reads only the rows libghostty marks changed, about a third of the work per frame, and compresses a pane's history after a second without output, so a pane that printed 15 MB holds about 7 MB instead of 71.</li>
+<li><b>Memory.</b> The launcher runs the bb client with <code>-Xmx32m</code>: uncapped, bb's heap grew to its peak and kept it (75 to 110 MB); capped it stays near 32 MB. Measured in /home/engstrand/guix/docs/ghostty-rex-lean.html</li>
 <li><b>The Rex server</b> owns sessions, tabs, panes and their programs. bb talks to it over the socket through one control WebSocket (requests, replies, events) and one data WebSocket per visible pane.</li>
 </ul>
 <div class='card'><b>Why two halves?</b> Pane bytes never reach Ghostty itself. Rex's own terminal already answers a program's queries (cursor position, colours), so nothing answers twice. Ghostty's library does the parsing, and Babashka keeps all the logic editable without Rust or Zig. The cost is that Kitty graphics inside panes are not shown. The design is in /home/engstrand/guix/docs/rex-client-languages.html (option 1).</div>
@@ -191,7 +192,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <text x='20' y='280'>only changed cells, inside a synchronized update</text>
 </g></svg>
 <ul>
-<li>Output from panes is never queued behind keys. Each stream's reader thread writes its bytes straight to rexg-render, tagged with the pane ID. Only Rex's own messages, a resize or a program exiting, go through bb's queue.</li>
+<li>Output from panes is never queued behind keys. Each stream's reader thread writes its bytes straight to rexg-render, tagged with the pane ID. Rex's own messages come in the same stream. A resize goes to rexg-render from that same thread, in order with the bytes, and rexg-render applies it at its place among them; a program exiting goes through bb's queue. Sending the size through the queue let a redraw for the new size land in the old one (T225).</li>
 <li>rexg-render does not choose where a pane goes. bb sends it the layout (<code>l</code>: pane, x, y, width, height), the chrome (<code>v</code>: tab bar, titles, status line, menus), and the cursor (<code>c</code>: in the focused pane, at a point, or hidden). It sends each only when it changed, all of one view in one write ended by <code>k</code>, and rexg-render draws no frame while a view is half read.</li>
 <li>rexg-render reports back on stderr: the window size, each pane's mouse and scroll mode, errors, and the text of a pane for tiny fingers and mouse copies.</li>
 <li>A pane that hides its cursor (<code>ESC [ ?25 l</code>) shows none, and a pane scrolled into history says <code>↑ history (type to return)</code> in its title.</li>
@@ -206,6 +207,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td>A pane shown again drew its last cursor until Rex's new snapshot was in.</td><td>The old mode's cursor on returning to a tab whose program changed mode meanwhile.</td><td>Quint (before.staleCursorTest)</td></tr>
 <tr><td>A pane whose lock was busy copied its cells from the screen buffer, which a resize or full redraw has just blanked.</td><td>A pane flashing empty under its cursor on a resize.</td><td>Reading the code for the Quint model</td></tr>
 <tr><td>Panes drew in slot order, not layout order.</td><td>An older floating pane drawn over a newer one.</td><td>Bombadil (floats it opened)</td></tr>
+<tr><td>A pane's new size reached rexg-render after the program's redraw for it, or before bytes still queued for the old size (T225).</td><td>Emacs's old mode line left on screen under its new cursor after a resize; lines on the wrong rows.</td><td>Bombadil (cursor.ts, one run in three once T225 made frames faster), read from a recorded byte replay; Quint (resize.qnt, before and bbOnly)</td></tr>
 </table></div>
 <p><code>REXG_TRACE=/tmp/rexg.trace</code> makes rexg-render keep a copy of everything it writes, which is how the last Bombadil failure was read frame by frame. <code>cd desktop/build/ghostty-rex && bb bombadil:cursor --time 240</code> runs the spec alone; <code>bb verify:quint</code> and <code>bb verify:quint-mc</code> check the model.</p>
 

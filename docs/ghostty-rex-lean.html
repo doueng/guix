@@ -264,6 +264,28 @@ td.r,th.r{text-align:right;font-variant-numeric:lining-nums tabular-nums}
 <p class=so><b>So:</b> do the cheap proven changes first; they help whichever window design wins.</p>
 </section>
 
+<section id=milestones>
+<h2>Milestones</h2>
+<p><b>Stage 0 landed (W307, 2026-11-25).</b> Changes 1 to 4 are in: the client runs with <code>bb -Xmx32m</code>; rexg-render loads history compressed, keeps no image pixels, compresses a pane's history after a quiet second, and re-reads only the rows libghostty marks changed; agent status comes over a second control connection (<code>session.attach_all</code>) in place of the <code>rex events</code> process. Each number below compares stock (the code before W307) and stage 0 in the same run, with the scripts in perf/ of W307's evidence folder. <small>measured</small></p>
+<div class=table><table>
+<tr><th>Budget item</th><th>stock</th><th>stage 0</th></tr>
+<tr><td>bb client PSS, after start / at the end</td><td>75 / 97&nbsp;MB</td><td>31 / 30&nbsp;MB</td></tr>
+<tr><td>rexg-render PSS after the 15&nbsp;MB cat, idle</td><td>72&nbsp;MB</td><td>8&nbsp;MB</td></tr>
+<tr><td>rexg-render PSS at the end (cat and a 24&nbsp;MB image pane)</td><td>98&nbsp;MB</td><td>36&nbsp;MB</td></tr>
+<tr><td>rex events process</td><td>about 20&nbsp;MB</td><td>gone</td></tr>
+<tr><td>Client side in total at the end (Rex not counted)</td><td>about 215&nbsp;MB</td><td>66&nbsp;MB</td></tr>
+<tr><td>Echo through the client, median / 90th (360 keys)</td><td>6.1 / 8.2&nbsp;ms</td><td>4.1 / 6.5&nbsp;ms</td></tr>
+<tr><td>rexg-render CPU, token stream / typing</td><td>7.6% / 2.7 to 6.8%</td><td>1.7% / 1.1 to 1.8%</td></tr>
+<tr><td>Wakeups while idle, bb and rexg-render</td><td>0</td><td>0</td></tr>
+<tr><td>Attach, first prompt on screen</td><td>96 to 125&nbsp;ms</td><td>105 to 150&nbsp;ms (noise)</td></tr>
+<tr><td>Switch back to a shell tab, first paint</td><td>36 to 40&nbsp;ms</td><td>31 to 42&nbsp;ms</td></tr>
+<tr><td>A 24&nbsp;MB image pane whole</td><td>651 to 684&nbsp;ms</td><td>597 to 639&nbsp;ms</td></tr>
+</table></div>
+<p>Gate: bb under 40&nbsp;MB (31), rexg-render under 15&nbsp;MB after the cat (8), echo median at least 1&nbsp;ms lower in the same run (2.1&nbsp;ms lower), and make verify ONLY=ghostty-rex passes (74 e2e checks and five Bombadil specs, cursor and names among them). Passed.</p>
+<p><b>A bug stage 0 brought to light.</b> With faster frames, Bombadil's cursor spec failed about one run in three: Emacs's old mode line stayed on screen under its new cursor. A replay of the exact bytes rexg-render received showed why, and that compression had nothing to do with it. Rex puts a pane's new size inside its data stream, but bb passed the size to rexg-render through its main queue while the bytes went straight on, and rexg-render resized at once while older bytes still waited. A redraw for 110x26 landed in a 90x20 terminal. Now bb sends the size from the stream's thread and rexg-render applies it at its place among the bytes; the spec passed 10 runs of 10 after, and /home/engstrand/guix/desktop/build/ghostty-rex/verify/quint/resize.qnt models the rule (every byte lands at the size it was written for), with the two broken orders kept as traces. <small>measured</small></p>
+<p class=so><b>So:</b> the client side went from about 215 to 66&nbsp;MB and our share of a keypress dropped by about 2&nbsp;ms, as the spikes said.</p>
+</section>
+
 <section id=whole>
 <h2>The whole picture</h2>
 <p>A keypress passes Ghostty, bb, Rex, bb again, rexg-render and Ghostty again, and then waits for the panel. At the median that is about 7&nbsp;ms of software and 8&nbsp;ms of waiting for the 60&nbsp;Hz refresh. Our two programs own about 2.5&nbsp;ms of it. Under 10&nbsp;ms on glass is luck at 60&nbsp;Hz; under 5&nbsp;ms of software is a fair target. Big output and idle are already fine. Memory is the big win: bb keeps a heap it does not need, and rexg-render keeps a second, uncompressed copy of every pane's history. Three small changes, each spiked and measured here, cut the client side from 233 to 104&nbsp;MB and rexg-render's work per frame by two thirds, which takes about 1.6&nbsp;ms off each keypress.</p>

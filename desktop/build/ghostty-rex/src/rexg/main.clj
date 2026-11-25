@@ -22,7 +22,6 @@
             [rexg.screen :as screen]
             [rexg.ws :as ws]
             [rexmux.proto :as proto]
-            [rexmux.rex :as rexcli]
             [rexmux.sidecar :as sidecar])
   (:import [java.util.concurrent LinkedBlockingQueue]))
 
@@ -215,7 +214,12 @@
                                                                      (System/arraycopy prefix 0 out 0 (alength prefix))
                                                                      (System/arraycopy b 0 out (alength prefix) (alength b))
                                                                      (frame! r \d out)))
-                                                                 (fn [msg] (put! [:stream-msg block msg]))
+                                                                 (fn [msg]
+                                                                   ;; A size goes to rexg-render from this thread,
+                                                                   ;; in order with the bytes around it (T225).
+                                                                   (if (= "resize" (:type msg))
+                                                                     (send-str! r \r (str block " " (:cols msg 80) " " (:rows msg 24)))
+                                                                     (put! [:stream-msg block msg])))
                                                                  (fn [why] (put! [:stream-closed block why])))]
                                      (swap! app assoc-in [:streams block] close))
                                    (catch Exception e (put! [:stream-closed block (ex-message e)]))))
@@ -265,16 +269,26 @@
                   nil)))
             (follow-events! [srv]
               ;; Agents' status from OSC 7501, as the rexmux sidecar follows
-              ;; it; started again on each connect, since it ends with the server.
-              (when-let [old (get-in @app [:events srv])] (p/destroy old))
-              (swap! app assoc-in [:events srv]
-                     (rexcli/events! (nth servers srv)
-                                     (fn [ev] (.submit sc-exec ^Runnable
-                                                       (fn [] (try (let [ev {:op :rex/event :event ev :server (get-in @app [:m :servers srv :label])}
-                                                                         [s msgs] (sidecar/settle! sc-io (:sidecar @app) #(sidecar/deliver % sc-io ev))]
-                                                                     (swap! app assoc :sidecar s)
-                                                                     (doseq [o msgs] (put! [:sidecar o])))
-                                                                   (catch Throwable e (log "sidecar event" (ex-message e))))))))))
+              ;; it: every event of the server, on a control connection of its
+              ;; own, so the model's connection keeps only its session's events
+              ;; and no other client's perform requests. It ran rex events
+              ;; --all, a 20 MB process, until T225. Opened again on each
+              ;; connect, since it ends with the server.
+              (future
+                (try
+                  (let [deliver! (fn [ev]
+                                   (.submit sc-exec ^Runnable
+                                            (fn [] (try (let [ev {:op :rex/event :event ev :server (get-in @app [:m :servers srv :label])}
+                                                              [s msgs] (sidecar/settle! sc-io (:sidecar @app) #(sidecar/deliver % sc-io ev))]
+                                                          (swap! app assoc :sidecar s)
+                                                          (doseq [o msgs] (put! [:sidecar o])))
+                                                        (catch Throwable e (log "sidecar event" (ex-message e)))))))
+                        c (rex/connect! (rex/socket-path (get-in @app [:m :servers srv :address])) (str client-label "-events")
+                                        (fn [[k payload]] (when (= :event k) (deliver! payload))))]
+                    ((:send! c) "session.attach_all" {:event_scope "all"})
+                    (let [[old] (swap-vals! app assoc-in [:events srv] c)]
+                      (some-> (get-in old [:events srv]) :ws ws/close!)))
+                  (catch Exception e (log "events" (ex-message e))))))
             (step! [f & args]
               (let [[m outs] (apply f (:m @app) args)]
                 (swap! app assoc :m m)
@@ -336,7 +350,6 @@
                 :sidecar (step! model/sidecar (first xs))
                 :stream-msg (let [[block msg] xs]
                               (case (:type msg)
-                                "resize" (send-str! r \r (str block " " (:cols msg 80) " " (:rows msg 24)))
                                 "child_exited" (step! model/child-exited block (:exit_code msg 0))
                                 nil))
                 :stream-closed (let [[block why] xs]
@@ -378,7 +391,7 @@
           (if (= :quit (first ev))
             (do (log "quit" (second ev))
                 (doseq [[_ close] (:streams @app)] (try (close) (catch Exception _)))
-                (doseq [[_ proc] (:events @app)] (try (p/destroy proc) (catch Exception _)))
+                (doseq [[_ c] (:events @app)] (try (ws/close! (:ws c)) (catch Exception _)))
                 ;; Close the control connections, so Rex drops this client at once:
                 ;; a reload's exec must not leave a second ghostty-rex for rex -C.
                 (doseq [[_ c] (:conns @app)] (try (ws/close! (:ws c)) (catch Exception _)))

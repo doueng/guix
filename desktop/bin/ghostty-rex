@@ -26,7 +26,9 @@
 (if (= "attach" (first *command-line-args*))
   (let [r (or (render) (fail! "ghostty-rex: rexg-render is missing: make build NAME=ghostty-rex, or make home with MUX=ghostty-rex"))]
     (apply p/exec {:extra-env {"REXG_RENDER" r}}
-           (or (some-> (fs/which "bb") str) "bb") "--config" (str build "/bb.edn") "attach" (rest *command-line-args*)))
+;; The heap cap keeps the client near 35 MB: uncapped, bb grows to its
+           ;; peak and keeps it (T225, docs/ghostty-rex-lean.html step 9).
+           (or (some-> (fs/which "bb") str) "bb") "-Xmx32m" "--config" (str build "/bb.edn") "attach" (rest *command-line-args*)))
   (let [conf (str (fs/path (or (System/getenv "XDG_CONFIG_HOME") (str (fs/home) "/.config")) "ghostty-rex" "ghostty"))]
     (apply p/exec "ghostty" "--class=dev.engstrand.Rex" "--gtk-single-instance=false"
            (concat (when (fs/exists? conf) [(str "--config-file=" conf)])

@@ -5,4 +5,9 @@
 [{:file "cursor.qnt" :main "fixed" :states 3830112
   :invariants ["typeOK" "settledCursor" "noMixedFrame" "noStaleCursor"]}
  ;; rexg-render before T223: only its tests, each a trace that breaks a rule.
- {:file "cursor.qnt" :main "before"}]
+ {:file "cursor.qnt" :main "before"}
+ ;; A pane's size in order with its bytes (T225).
+ {:file "resize.qnt" :main "fixed" :states 6750
+  :invariants ["typeOK" "bytesFit" "settledSize"]}
+ {:file "resize.qnt" :main "before"}
+ {:file "resize.qnt" :main "bbOnly"}]

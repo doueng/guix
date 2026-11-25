@@ -66,7 +66,8 @@
 
 (defn splitter
   "A splitter for Rex's APC messages (ESC _ rex1;NONCE;JSON ESC \\) in a pane's
-  bytes, across chunks: (feed! s bytes) returns [vt-bytes msgs]."
+  bytes, across chunks: (feed! s bytes) returns the chunk's parts in stream
+  order, each VT bytes or a message."
   [nonce]
   {:marker (str "\u001b_rex1;" nonce ";") :pending (atom "")})
 
@@ -77,27 +78,25 @@
 
 (defn feed!
   [{:keys [^String marker pending]} ^bytes input]
-  (let [s (str @pending (String. input latin1))]
-    (loop [s s out (StringBuilder.) msgs []]
+  (let [vt (fn [parts ^String t] (cond-> parts (seq t) (conj (.getBytes t latin1))))]
+    (loop [s (str @pending (String. input latin1)) parts []]
       (let [i (str/index-of s marker)]
         (if i
           (let [body (+ i (count marker))
                 j (str/index-of s "\u001b\\" body)]
             (if j
               (let [m (try (json/parse-string (String. (.getBytes (subs s body j) latin1) "UTF-8") true) (catch Exception _ nil))]
-                (.append out (subs s 0 i))
-                (recur (subs s (+ j 2)) out (cond-> msgs m (conj m))))
-              (do (.append out (subs s 0 i)) (reset! pending (subs s i)) [(.getBytes (str out) latin1) msgs])))
-          (let [keep (partial-suffix s marker)
-                cut (- (count s) keep)]
-            (.append out (subs s 0 cut))
+                (recur (subs s (+ j 2)) (cond-> (vt parts (subs s 0 i)) m (conj m))))
+              (do (reset! pending (subs s i)) (vt parts (subs s 0 i)))))
+          (let [cut (- (count s) (partial-suffix s marker))]
             (reset! pending (subs s cut))
-            [(.getBytes (str out) latin1) msgs]))))))
+            (vt parts (subs s 0 cut))))))))
 
 (defn open-stream!
   "Open the data stream for TICKET (from data.connect) on SOCK. Calls (on-data
   bytes) with the snapshot and the VT that follows, (on-msg m) for Rex's own
-  messages, and (on-close why) once. Returns a function that closes it."
+  messages, both from one reader thread in stream order, and (on-close why)
+  once. Returns a function that closes it."
   [sock ticket on-data on-msg on-close]
   (let [raw (.decode (Base64/getUrlDecoder) ^String ticket)
         d (ws/connect sock "/api/data" "rex.data.terminal.v1")
@@ -114,10 +113,9 @@
                       (loop []
                         (let [[k b] (ws/read-msg d)]
                           (case k
-                            :binary (let [[vt msgs] (feed! sp b)]
-                                      (when (pos? (alength ^bytes vt)) (on-data vt))
-                                      (doseq [m msgs] (on-msg m))
-                                      (recur))
+                            :binary (do (doseq [part (feed! sp b)]
+                                          (if (map? part) (on-msg part) (on-data part)))
+                                        (recur))
                             :close "stream closed"
                             (recur))))))
                   (catch Exception e (if @stopped "stopped" (str (ex-message e)))))]

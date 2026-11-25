@@ -156,8 +156,9 @@
   [s root config]
   (let [f (str root "/attach.sh")]
     (spit f (str "#!/bin/sh\n"
+                 ;; The heap cap the launcher desktop/bin/ghostty-rex gives the client.
                  (str/join "\n" (for [[k v] (client-env s root config)] (str "export " k "='" v "'")))
-                 "\ncd '" here "' && exec '" (fs/which "bb") "' attach \"$@\" 2>>'" root "/client.err'\n"))
+                 "\ncd '" here "' && exec '" (fs/which "bb") "' -Xmx32m attach \"$@\" 2>>'" root "/client.err'\n"))
     (fs/set-posix-file-permissions f "rwxr-xr-x")
     f))
 
@@ -314,7 +315,7 @@
         (dusk-msg "quit")
         (when-not (deref dusk 3000 nil) (p/destroy-tree dusk))))))
 
-(declare switch-checks! term-checks!)
+(declare switch-checks! term-checks! client-pids)
 
 (defn- client-ids [s]
   (set (keep #(when (and (= "ghostty-rex" (get-in % [:info :label])) (not= "lost" (:connection_state %))) (:client_id %))
@@ -551,6 +552,9 @@
                   (slurp? (str root "/notified")))
           (Thread/sleep 1500)
           (check! "the notification is sent once" (= 1 (count (re-seq #"needs you" (str (slurp? (str root "/notified")))))))
+          ;; The status comes over the client's own events connection (T225).
+          (let [cmds (map #(str/replace (str (slurp? (str "/proc/" % "/cmdline"))) "\u0000" " ") (client-pids root))]
+            (check! "agent status needs no rex events process" (not-any? #(str/includes? % "events --all") cmds) (pr-str cmds)))
           (shot! root "08-blocked")
           (when-let [agent-w (first (remove before-windows (map :window_id (:windows (view s sid)))))]
             (api s "session.close_window" {:session_id sid :window_id agent-w})))
@@ -625,7 +629,8 @@
                              (tree-seq map? (comp (juxt :before :after) :split))
                              (keep :block_id))]
       (check! "switch: the window reconnects to a server from another build by itself"
-              (wait-for 20000 #(str/includes? (pr-str (api s3 "client.list")) "ghostty-rex")))
+              ;; The label exactly: the events connection is ghostty-rex-events.
+              (wait-for 20000 #(re-find #":label \"ghostty-rex\"" (pr-str (api s3 "client.list")))))
       (Thread/sleep 1500)
       (api s3 "session.focus_window" {:session_id sid :window_id (get-in (view s3 sid) [:windows 0 :window_id])})
       (Thread/sleep 1500)

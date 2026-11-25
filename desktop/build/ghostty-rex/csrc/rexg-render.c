@@ -58,8 +58,18 @@ typedef struct {
   pthread_mutex_t qmu; pthread_cond_t qcv;
   uint8_t *q; size_t qoff, qn, qcap; int qclosed;
   volatile size_t got;  // bytes of the current stream so far
-  // A resize that came while the pane's thread held mu, which it applies.
-  volatile int pend; int pc, pr;
+  // The pane's own cells, of size pcw by pch, refreshed row by row as
+  // libghostty marks rows dirty; pc_stale forces a full read. A frame that
+  // finds mu held draws these too: the screen's front buffer, which a resize
+  // or a full redraw blanks, made the pane flash empty under its cursor (T223).
+  Cell *gc; int pcw, pch, pc_stale;
+  // Sizes from Rex's stream, each at the stream position it comes at (the
+  // bytes before it), applied by the pane's thread in order with the bytes,
+  // under qmu. Applied as they came, a program's redraw for a new size could
+  // land in the old one, or old bytes in the new one: Emacs's mode line
+  // stayed on a wrong row (T225).
+  struct { size_t at; int c, r; } sz[16]; int nsz;
+  size_t taken;  // bytes of the current stream its thread has taken
   GhosttyTerminal term;
   GhosttyRenderState rs;
   GhosttyRenderStateRowIterator rows;
@@ -70,10 +80,6 @@ typedef struct {
   // separate read could miss the lock and drop the cursor with nothing left
   // to redraw it (T223). Screen cells; cur_ok 0 when hidden or out of view.
   int cur_ok, cur_x, cur_y, cur_style;  // cur_x, cur_y in the pane
-  // The cells the pane last drew, CW x CH: a frame that finds mu held draws
-  // these. It took them from the screen's front buffer, which a resize or a
-  // full redraw blanks, so the pane flashed empty under its cursor (T223).
-  Cell *cache; int cw, ch;
   // The terminal is from the current stream's snapshot. A pane shown again
   // keeps its last screen until then, but not its last cursor, which can be
   // stale: the program may have changed mode meanwhile (T223).
@@ -175,10 +181,61 @@ static size_t qtake(Pane *p, uint8_t *buf, size_t cap) {
   pthread_mutex_lock(&p->qmu);
   while (p->qoff == p->qn && !p->qclosed) pthread_cond_wait(&p->qcv, &p->qmu);
   size_t k = p->qn - p->qoff < cap ? p->qn - p->qoff : cap;
-  memcpy(buf, p->q + p->qoff, k); p->qoff += k;
+  memcpy(buf, p->q + p->qoff, k); p->qoff += k; p->taken += k;
   pthread_mutex_unlock(&p->qmu);
   return k;
 }
+
+// Under qmu: how many queued bytes come before the next size, and whether
+// that size is due (none do).
+static size_t qlimit(Pane *p) {
+  size_t k = p->qn - p->qoff;
+  if (p->nsz) { size_t gap = p->sz[0].at > p->taken ? p->sz[0].at - p->taken : 0; if (gap < k) k = gap; }
+  return k;
+}
+static int qdue(Pane *p) { return p->nsz && p->sz[0].at <= p->taken; }
+
+// Under qmu: take the due size into *C, *R.
+static void qpop(Pane *p, int *c, int *r) {
+  *c = p->sz[0].c; *r = p->sz[0].r;
+  memmove(&p->sz[0], &p->sz[1], (size_t)(p->nsz - 1) * sizeof p->sz[0]); p->nsz--;
+}
+
+// Up to CAP bytes before the next size, waiting up to MS for some (MS < 0:
+// as long as it takes). Returns 0 with *IDLE set after MS with nothing; 0 without it when a size is due or
+// the stream closed.
+static size_t qtake_idle(Pane *p, uint8_t *buf, size_t cap, int ms, int *idle) {
+  pthread_mutex_lock(&p->qmu);
+  if (!qlimit(p) && !qdue(p) && !p->qclosed && ms < 0)
+    while (!qlimit(p) && !qdue(p) && !p->qclosed) pthread_cond_wait(&p->qcv, &p->qmu);
+  if (!qlimit(p) && !qdue(p) && !p->qclosed) {
+    struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += ms / 1000; ts.tv_nsec += (long)(ms % 1000) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+    while (!qlimit(p) && !qdue(p) && !p->qclosed)
+      if (pthread_cond_timedwait(&p->qcv, &p->qmu, &ts) == ETIMEDOUT) { *idle = 1; pthread_mutex_unlock(&p->qmu); return 0; }
+  }
+  size_t k = qlimit(p) < cap ? qlimit(p) : cap;
+  memcpy(buf, p->q + p->qoff, k); p->qoff += k; p->taken += k;
+  pthread_mutex_unlock(&p->qmu);
+  return k;
+}
+
+// The pane's thread applies the next size if it comes at or before stream
+// position AT; 1 if it did.
+static int apply_due(Pane *p, size_t at) {
+  int c, r, due;
+  pthread_mutex_lock(&p->qmu);
+  if ((due = p->nsz && p->sz[0].at <= at)) qpop(p, &c, &r);
+  pthread_mutex_unlock(&p->qmu);
+  if (!due) return 0;
+  pthread_mutex_lock(&p->mu);
+  if (p->term) ghostty_terminal_resize(p->term, (uint16_t)c, (uint16_t)r, 0, 0);
+  pthread_mutex_unlock(&p->mu);
+  dirty = 1; poke();
+  return 1;
+}
+static int qready(Pane *p) { pthread_mutex_lock(&p->qmu); int r = p->qoff != p->qn || p->qclosed || qdue(p); pthread_mutex_unlock(&p->qmu); return r; }
 
 typedef struct { Pane *p; uint8_t *fed; size_t len, cap, given; } Rd;
 static bool rd(void *u, uint8_t *buf, size_t cap, size_t *out) {
@@ -193,11 +250,6 @@ static bool rd(void *u, uint8_t *buf, size_t cap, size_t *out) {
   return true;
 }
 
-// Under P's mu: a resize the main loop could not apply itself.
-static void apply_pending(Pane *p) {
-  if (p->pend && p->term) { ghostty_terminal_resize(p->term, (uint16_t)p->pc, (uint16_t)p->pr, 0, 0); p->pend = 0; }
-}
-
 // The stream: a Ghostty snapshot, then live VT. The snapshot is decoded in
 // pieces: READY gives the visible screen, which shows at once, then each
 // next call adds a history page or an image's pixels. A whole decode first
@@ -207,7 +259,12 @@ static void *pane_thread(void *arg) {
   Rd r = { p, NULL, 0, 0, 0 };
   GhosttySnapshotDecoder dec = NULL; GhosttyTerminal term = NULL;
   GhosttyReader reader = { rd, &r };
+  // History is restored compressed and no image pixels are kept: this
+  // terminal only feeds cells to Ghostty, which never sees a pane's images.
+  bool yes = true; uint64_t no_images = 0;
   if (ghostty_snapshot_decoder_new(NULL, &dec, reader) != GHOSTTY_SUCCESS ||
+      ghostty_snapshot_decoder_set(dec, GHOSTTY_SNAPSHOT_DECODER_OPT_COMPRESS_HISTORY, &yes) != GHOSTTY_SUCCESS ||
+      ghostty_snapshot_decoder_set(dec, GHOSTTY_SNAPSHOT_DECODER_OPT_KITTY_IMAGE_STORAGE_LIMIT, &no_images) != GHOSTTY_SUCCESS ||
       ghostty_snapshot_decoder_ready(dec, &term) != GHOSTTY_SUCCESS) {
     say("err %s snapshot\n", p->id);
     pthread_mutex_lock(&p->mu); p->failed = 1; pthread_mutex_unlock(&p->mu);
@@ -224,10 +281,10 @@ static void *pane_thread(void *arg) {
   if (p->term) ghostty_terminal_free(p->term);
   p->term = term;
   ghostty_render_state_new(NULL, &p->rs);
+  p->pc_stale = 1;
   ghostty_render_state_row_iterator_new(NULL, &p->rows);
   ghostty_render_state_row_cells_new(NULL, &p->cells);
   p->ready = 1; p->fresh = 1;
-  apply_pending(p);
   pthread_mutex_unlock(&p->mu);
   // How long the screen took, and later the whole snapshot: REXG_LOG has
   // these lines, which would have shown T210's 10 s decode at first look.
@@ -239,7 +296,6 @@ static void *pane_thread(void *arg) {
   do {
     pthread_mutex_lock(&p->mu);
     res = ghostty_snapshot_decoder_next(dec);
-    apply_pending(p);
     pthread_mutex_unlock(&p->mu);
     dirty = 1; poke();
   } while (res == GHOSTTY_SUCCESS);
@@ -253,20 +309,59 @@ static void *pane_thread(void *arg) {
     free(r.fed);
     return NULL;
   }
-  pthread_mutex_lock(&p->mu);
-  if (r.len > off) ghostty_terminal_vt_write(p->term, r.fed + off, r.len - off);
-  pthread_mutex_unlock(&p->mu);
+  // The bytes the decoder read past the snapshot, with the sizes that came
+  // among them, in order.
+  for (size_t pos = off;;) {
+    if (apply_due(p, pos)) continue;
+    if (pos >= r.len) break;
+    pthread_mutex_lock(&p->qmu);
+    size_t lim = p->nsz && p->sz[0].at < r.len ? p->sz[0].at : r.len;
+    pthread_mutex_unlock(&p->qmu);
+    pthread_mutex_lock(&p->mu);
+    ghostty_terminal_vt_write(p->term, r.fed + pos, lim - pos);
+    pthread_mutex_unlock(&p->mu);
+    pos = lim;
+  }
   dirty = 1; poke();  // these bytes, and a frame that found the lock held
   say("done %s %zu %ld\n", p->id, off, now_ms() - p->opened_at);
   ghostty_snapshot_decoder_free(dec);
   free(r.fed);
   uint8_t b[65536];
   size_t n;
-  while ((n = qtake(p, b, 65536)) > 0) {
+  { uint64_t z = 0; pthread_mutex_lock(&p->mu); ghostty_terminal_set(p->term, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &z); pthread_mutex_unlock(&p->mu); }
+  uint64_t done_at = (uint64_t)-1;  // activity token when compression last completed
+  // Output since compression last completed: only then does a quiet second
+  // compress, so a pane that stays idle never wakes.
+  int wrote = 1;
+  for (;;) {
+    if (apply_due(p, p->taken)) continue;
+    int idle = 0;
+    n = qtake_idle(p, b, 65536, wrote ? 1000 : -1, &idle);
+    if (idle) {
+      // A second with no output: compress history a bounded step at a time,
+      // releasing the lock between steps so frames are not held.
+      uint64_t act = 0;
+      pthread_mutex_lock(&p->mu); ghostty_terminal_compression_activity(p->term, &act); pthread_mutex_unlock(&p->mu);
+      if (act == done_at) { wrote = 0; continue; }
+      GhosttyTerminalCompressionResult res = GHOSTTY_TERMINAL_COMPRESSION_RESULT_PENDING;
+      while (res == GHOSTTY_TERMINAL_COMPRESSION_RESULT_PENDING && !qready(p)) {
+        pthread_mutex_lock(&p->mu);
+        ghostty_terminal_compress(p->term, GHOSTTY_TERMINAL_COMPRESSION_MODE_INCREMENTAL, &res);
+        if (res != GHOSTTY_TERMINAL_COMPRESSION_RESULT_PENDING) { ghostty_terminal_compression_activity(p->term, &done_at); wrote = 0; }
+        pthread_mutex_unlock(&p->mu);
+      }
+      continue;
+    }
+    if (n == 0) {
+      // A size is due, or the stream closed.
+      pthread_mutex_lock(&p->qmu); int closed = p->qclosed && !qdue(p) && p->qoff == p->qn; pthread_mutex_unlock(&p->qmu);
+      if (closed) break;
+      continue;
+    }
     pthread_mutex_lock(&p->mu);
-    apply_pending(p);
     ghostty_terminal_vt_write(p->term, b, n);
     pthread_mutex_unlock(&p->mu);
+    wrote = 1;
     dirty = 1; poke();
   }
   return NULL;
@@ -277,7 +372,7 @@ static void pane_free(Pane *p) {
   if (p->rows) ghostty_render_state_row_iterator_free(p->rows);
   if (p->rs) ghostty_render_state_free(p->rs);
   if (p->term) ghostty_terminal_free(p->term);
-  free(p->q); free(p->cache);
+  free(p->q); free(p->gc);
   pthread_mutex_destroy(&p->mu); pthread_mutex_destroy(&p->qmu); pthread_cond_destroy(&p->qcv);
   p->used = 0;
   full = 1;
@@ -315,6 +410,7 @@ static void pane_open(const char *id) {
     p->used = 1;
   }
   p->open = 1; p->failed = 0; p->got = 0; p->qclosed = 0; p->qoff = p->qn = 0; p->opened_at = now_ms();
+  p->taken = 0; p->nsz = 0;
   // Its thread is not running yet, so mu is free.
   pthread_mutex_lock(&p->mu); p->fresh = 0; p->cur_ok = 0; pthread_mutex_unlock(&p->mu);
   pthread_create(&p->th, NULL, pane_thread, p);
@@ -339,16 +435,16 @@ static void draw_pane(Pane *p) {
   // The pane's thread holds mu while it decodes a piece of the snapshot:
   // keep what the pane showed, and try again next frame.
   if (pthread_mutex_trylock(&p->mu) != 0) {
-    for (int y = 0; y < p->h && y < p->ch; y++)
-      for (int x = 0; x < p->w && x < p->cw; x++) {
+    for (int y = 0; p->gc && y < p->h && y < p->pch; y++)
+      for (int x = 0; x < p->w && x < p->pcw; x++) {
         int sx = p->x + x, sy = p->y + y;
         if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
-        Cell c = p->cache[y * p->cw + x];
-        if (c.wide == 1 && x + 1 >= p->w) blank(&c);  // its tail is cut off
+        Cell c = p->gc[y * p->pcw + x];
+        if (c.wide == 1 && (x + 1 >= p->w || sx + 1 >= W)) blank(&c);  // its tail is cut off
         back[sy * W + sx] = c;
       }
     // The cursor was where the program had it in a pane of that size.
-    if (p->cw != p->w || p->ch != p->h) p->cur_ok = 0;
+    if (p->pcw != p->w || p->pch != p->h) p->cur_ok = 0;
     dirty = 1;
     return;
   }
@@ -371,15 +467,22 @@ static void draw_pane(Pane *p) {
   }
   ghostty_render_state_update(p->rs, p->term);
   ghostty_render_state_get(p->rs, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR, &p->rows);
-  int y = 0;
-  while (ghostty_render_state_row_iterator_next(p->rows) && y < p->h) {
+  // Keep the pane's cells and re-read only the rows libghostty marks dirty;
+  // a new size or a new terminal reads them all.
+  int all = !p->gc || p->pcw != p->w || p->pch != p->h || p->pc_stale;
+  if (all) {
+    free(p->gc); p->gc = calloc((size_t)(p->w * p->h), sizeof(Cell)); p->pcw = p->w; p->pch = p->h; p->pc_stale = 0;
+  }
+  uint16_t ry = 0; int yy = 0;
+  while (all ? (ghostty_render_state_row_iterator_next(p->rows) && (ry = (uint16_t)yy++, 1))
+             : ghostty_render_state_row_iterator_next_dirty(p->rows, &ry)) {
+    if (ry >= p->h) { if (all) break; else continue; }
     ghostty_render_state_row_get(p->rows, GHOSTTY_RENDER_STATE_ROW_DATA_CELLS, &p->cells);
+    Cell *row = &p->gc[ry * p->w];
+    for (int i = 0; i < p->w; i++) blank(&row[i]);
     int x = 0;
     while (ghostty_render_state_row_cells_next(p->cells) && x < p->w) {
-      int sx = p->x + x, sy = p->y + y;
-      if (sx < 0 || sy < 0 || sx >= W || sy >= H) { x++; continue; }
-      Cell *c = &back[sy * W + sx];
-      blank(c);
+      Cell *c = &row[x];
       GhosttyCell raw = 0;
       ghostty_render_state_row_cells_get(p->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW, &raw);
       GhosttyCellWide wide = GHOSTTY_CELL_WIDE_NARROW;
@@ -397,8 +500,7 @@ static void draw_pane(Pane *p) {
       if (wide == GHOSTTY_CELL_WIDE_SPACER_TAIL) { c->wide = 2; x++; continue; }
       if (wide == GHOSTTY_CELL_WIDE_SPACER_HEAD) { x++; continue; }
       if (wide == GHOSTTY_CELL_WIDE_WIDE) {
-        // A wide character that does not fit the pane is drawn as a blank.
-        if (x + 1 >= p->w || sx + 1 >= W) { x++; continue; }
+        if (x + 1 >= p->w) { x++; continue; }
         c->wide = 1;
       }
       uint32_t len = 0;
@@ -413,9 +515,16 @@ static void draw_pane(Pane *p) {
       }
       x++;
     }
-    y++;
   }
   ghostty_render_state_clean(p->rs);
+  for (int y = 0; y < p->h; y++)
+    for (int x = 0; x < p->w; x++) {
+      int sx = p->x + x, sy = p->y + y;
+      if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
+      Cell c = p->gc[y * p->w + x];
+      if (c.wide == 1 && sx + 1 >= W) blank(&c);
+      back[sy * W + sx] = c;
+    }
   GhosttyRenderStateCursor cu = GHOSTTY_INIT_SIZED(GhosttyRenderStateCursor);
   p->cur_ok = p->fresh && ghostty_render_state_get(p->rs, GHOSTTY_RENDER_STATE_DATA_CURSOR, &cu) == GHOSTTY_SUCCESS &&
               cu.viewport_has_value && cu.visible && cu.viewport_x < p->w && cu.viewport_y < p->h;
@@ -429,14 +538,6 @@ static void draw_pane(Pane *p) {
   // bb routes clicks and the wheel by whether the program wants them, and
   // marks a pane scrolled into its history.
   if (m != p->mouse) { p->mouse = m; say("mode %s %d\n", p->id, m); }
-  if (p->cw * p->ch < p->w * p->h) p->cache = realloc(p->cache, (size_t)(p->w * p->h) * sizeof(Cell));
-  p->cw = p->w; p->ch = p->h;
-  for (int y = 0; y < p->h; y++)
-    for (int x = 0; x < p->w; x++) {
-      int sx = p->x + x, sy = p->y + y;
-      if (sx < 0 || sy < 0 || sx >= W || sy >= H) blank(&p->cache[y * p->w + x]);
-      else p->cache[y * p->w + x] = back[sy * W + sx];
-    }
 }
 
 static int same(const Cell *a, const Cell *b) { return !memcmp(a, b, sizeof *a); }
@@ -580,6 +681,8 @@ static void text_reply(const char *req, Pane *p) {
   if (!p || pthread_mutex_trylock(&p->mu) != 0) { say("t %s 0 0\n.\n", req); return; }
   if (!p->ready) { pthread_mutex_unlock(&p->mu); say("t %s 0 0\n.\n", req); return; }
   ghostty_render_state_update(p->rs, p->term);
+  // This update took rows' dirty marks that the next frame needs.
+  p->pc_stale = 1;
   ghostty_render_state_get(p->rs, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR, &p->rows);
   uint16_t cols = 0, rows = 0;
   ghostty_render_state_get(p->rs, GHOSTTY_RENDER_STATE_DATA_COLS, &cols);
@@ -628,10 +731,20 @@ static void handle(int type, char *pl, size_t len) {
       if (sscanf(pl, "%127s %d %d", id, &c, &r) == 3) {
         Pane *p = find(id);
         if (p) {
-          if (pthread_mutex_trylock(&p->mu) == 0) {
+          // In a stream, at its place among the bytes, for the pane's thread.
+          pthread_mutex_lock(&p->qmu);
+          int queued = p->open && !p->failed;
+          if (queued) {
+            if (p->nsz == (int)(sizeof p->sz / sizeof p->sz[0])) p->nsz--;  // the newest is replaced
+            p->sz[p->nsz].at = p->got; p->sz[p->nsz].c = c; p->sz[p->nsz].r = r; p->nsz++;
+            pthread_cond_signal(&p->qcv);
+          }
+          pthread_mutex_unlock(&p->qmu);
+          if (!queued) {
+            pthread_mutex_lock(&p->mu);
             if (p->term) ghostty_terminal_resize(p->term, (uint16_t)c, (uint16_t)r, 0, 0);
             pthread_mutex_unlock(&p->mu);
-          } else { p->pc = c; p->pr = r; p->pend = 1; }  // its thread applies it
+          }
           dirty = 1;
         }
       }

@@ -51,7 +51,7 @@ svg{width:100%;height:auto;display:block}svg text{font-family:system-ui,-apple-s
 <tr><td>Client config: servers, shell, startup tabs</td><td><code>desktop/configs/ghostty-rex/config.edn</code></td><td>reload</td></tr>
 <tr><td>Ghostty settings for this window</td><td><code>desktop/configs/ghostty-rex/ghostty</code></td><td>Ctrl+Shift+Alt+R in the window</td></tr>
 <tr><td>rexg-render, the C half</td><td><code>desktop/build/ghostty-rex/csrc/rexg-render.c</code></td><td><code>make home</code>, then reload</td></tr>
-<tr><td>Launcher</td><td><code>desktop/bin/ghostty-rex</code></td><td>next window</td></tr>
+<tr><td>Launcher, and the client's heap cap (<code>bb -Xmx32m</code>, T225)</td><td><code>desktop/bin/ghostty-rex</code></td><td>next window</td></tr>
 <tr><td>Rex server</td><td>Guix package <code>rex</code>, modules/engstrand/packages/rex.scm</td><td>a server restart, which the window rides out</td></tr>
 </table></div>
 <p>The client runs bb straight from the checkout at /home/engstrand/guix, so an edited <code>.clj</code> needs no build. Rex holds the sessions, panes and programs, so a client restart loses nothing.</p>
@@ -85,8 +85,9 @@ or choose <b>Client: reload its bb code and config</b> in M-x (Alt+Space Space).
 <h2 id=tests>Tests</h2>
 <div class=table><table>
 <tr><th>Command</th><th>Time</th><th>What</th></tr>
-<tr><td><code>make test ONLY=ghostty-rex</code></td><td>seconds; lint runs it</td><td>unit tests of keys, model (revive, reconnect), hints and screen</td></tr>
-<tr><td><code>make verify ONLY=ghostty-rex</code></td><td>about 6 min + Bombadil</td><td>a real Ghostty on the hidden test display against a throwaway Rex server: about 58 checks, then Bombadil over <code>tabs</code>, <code>startup</code> and <code>restored</code></td></tr>
+<tr><td><code>make test ONLY=ghostty-rex</code></td><td>seconds; lint runs it</td><td>unit tests of keys, model (revive, reconnect), hints, screen and the stream splitter; <code>bb verify:quint</code> for the cursor and resize models</td></tr>
+<tr><td><code>make verify ONLY=ghostty-rex</code></td><td>about 6 min + Bombadil</td><td>a real Ghostty on the hidden test display against a throwaway Rex server: about 74 checks, then Bombadil over <code>tabs</code>, <code>startup</code>, <code>restored</code>, <code>cursor</code> (T223) and <code>names</code> (T210)</td></tr>
+<tr><td><code>cd desktop/build/ghostty-rex; bb bombadil:cursor</code></td><td>about 75 s</td><td>only the cursor spec; it caught T225's resize race about one run in three, so run it a few times after a renderer change</td></tr>
 <tr><td><code>cd desktop/build/ghostty-rex; bb verify --no-bombadil --keep</code></td><td>about 6 min</td><td>the e2e alone, keeping screenshots and logs</td></tr>
 <tr><td><code>make test LIST=1</code></td><td>instant</td><td>the checks that cover what <code>@</code> changed</td></tr>
 </table></div>
@@ -98,7 +99,7 @@ or choose <b>Client: reload its bb code and config</b> in M-x (Alt+Space Space).
 <ul>
 <li><b>Client log.</b> Set <code>REXG_LOG</code> when starting a window from a terminal: <code>REXG_LOG=/tmp/rexg.log /home/engstrand/guix/desktop/bin/ghostty-rex</code>. It records keys, every request the client sends (<code>out</code>), <code>lost</code> and reconnects, <code>rex server start</code> results, and <code>quit</code> with its reason.</li>
 <li><b>Rex server log.</b> /home/engstrand/.local/state/rex/servers/ has one <code>&lt;hash&gt;.log</code> per server. Grep it for <code>Rex server ready</code>, <code>stopped</code> and <code>not replaying creation options on restore</code>. <code>rex server status</code> says whether a server runs and where.</li>
-<li><b>Clients.</b> <code>rex client list</code> shows who is attached; two <code>ghostty-rex</code> entries make <code>rex -C ghostty-rex</code> ambiguous.</li>
+<li><b>Clients.</b> <code>rex client list</code> shows who is attached. Each window is two clients: <code>ghostty-rex</code>, and <code>ghostty-rex-events</code>, which follows every event for agent status (T225; it was a <code>rex events</code> process). Two <code>ghostty-rex</code> entries make <code>rex -C ghostty-rex</code> ambiguous.</li>
 <li><b>Test runs.</b> With <code>--keep</code>, the run directory under /tmp/ghostty-rex-e2e-* has <code>client.log</code>, <code>client.err</code>, <code>ghostty.log</code>, <code>results.edn</code> and a screenshot per step.</li>
 </ul>
 
@@ -113,6 +114,7 @@ guix home roll-back        # also restores the previous choice</code></pre>
 <div class=card><b>A window that won't close</b><br>SIGTERM ends both the client and rexg-render (the e2e checks it), so <code>pkill -f 'ghostty-rex/bb.edn attach'</code> without -9 is enough. Closing the Ghostty window does the same.</div>
 <div class=card><b>A tab shows bash, or a restored tab lacks its program</b><br>The client revives restored tabs only for the startup session it finds itself; a window opened with <code>--session</code> skips this. A reload keeps its session and skips this; close the window and open it again (Super+B) to go through it.</div>
 <div class=card><b><code>rexg-render is missing</code></b><br>Run <code>make home</code> with MUX=ghostty-rex, or <code>make build NAME=ghostty-rex</code> for the checkout build.</div>
+<div class=card><b>A pane's lines land on the wrong rows after a resize</b><br>Rex sends a pane's new size inside its data stream, and the program's redraw for it follows. bb passes the size to rexg-render from the stream's own thread, and rexg-render applies it at its place among the bytes (T225; <code>verify/quint/resize.qnt</code>). Anything that sends a size around the stream brings the bug back: a redraw for 110x26 landed in a 90x20 terminal and left Emacs's old mode line on screen.</div>
 <div class=card><b>A fix doesn't show up</b><br>bb and config edits need a reload; C edits need <code>make home</code> (or REXG_RENDER) and then a reload; a Ghostty config edit needs Ctrl+Shift+Alt+R.</div>
 <p class=cite>Sources: desktop/build/ghostty-rex/README.md, src/rexg/main.clj (connect, lost!, reload!), src/rexg/model.clj (revive, disconnected), test/rexg/verify.clj, desktop/build/rexmux/test/rexmux/testserver.clj.</p>
 

@@ -89,6 +89,10 @@ reaches the client, and keeps copy, paste and font size.
   `bb verify` also runs Bombadil's `test/bombadil/cursor.ts` over modal panes
   (`test/rexg/modal.bb`) and fish with the shipped vi cursor, judging every synchronized frame;
   `bb bombadil:cursor` runs only that. `REXG_TRACE=FILE` keeps a copy of rexg-render's output.
+- Sizes (T225): `verify/quint/resize.qnt` models a pane's size against its bytes: Rex puts
+  a resize in the pane's stream, bb sends it to rexg-render from the stream's thread, and
+  rexg-render applies it at its place among the bytes, so every byte lands at the size it
+  was written for. Its `before` and `bbOnly` modules keep the traces that broke it.
 - `make verify ONLY=rexmux` model-checks the stream, link and agent rules this client
   shares with rexmux. The sidecar runs in-process here, so the model's Crash
   and Restart never happen, and a sidecar exception still answers its request.
