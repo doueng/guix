@@ -9,6 +9,7 @@
             [bbh.conversation :as conversation]
             [bbh.super.client :as client :refer [call! data-dir new-id super-dir]]
             [bbh.super.emacs :as emacs]
+            [bbh.super.final :as final]
             [bbh.super.model :as model]
             [bbh.super.notify :as notify]
             [bbh.super.process :as process]
@@ -264,6 +265,41 @@
         (.update md (fs/read-all-bytes f)))
       (apply str (map #(format "%02x" %) (.digest md))))))
 
+(defn- final-of
+  "The last message of the latest Worker of thread T in ST, as {:worker
+  :text}, once that Worker's turn is over: it finished, or waits on a stopped
+  ask. A Worker still in its turn, or one that never ran, has none."
+  [{:keys [conversations]} st t]
+  (let [w (get-in st [:workers (or (:worker t) (peek (:history t)))])]
+    (when (and (:conversation w) (#{:done :failed :cancelled :waiting} (model/shown-state st w)))
+      (let [dir (conversation/dir conversations (:conversation w))]
+        (when-let [text (and (fs/exists? dir) (final/message (conversation/root dir)))]
+          {:worker (:id w) :text text})))))
+
+(defn- with-final
+  "Thread row T with its latest Worker's last message: :final-from and a
+  one-line :final-preview, and with FULL the whole text as :final."
+  [c st full t]
+  (if-let [{:keys [worker text]} (final-of c st t)]
+    (cond-> (assoc t :final-from worker :final-preview (final/preview text))
+      full (assoc :final text))
+    t))
+
+(defn- worker-final-preview
+  "The preview of Worker ID's last message, when it is still its thread's
+  latest Worker and its turn is over, for a notification of its finish."
+  [{:keys [state] :as c} id]
+  (let [st @state
+        {:keys [worker text]} (final-of c st (get-in st [:threads (get-in st [:workers id :thread])]))]
+    (when (= id worker) (final/preview text))))
+
+(defn- sections-with-final
+  "SECTIONS with each row's last message: a preview, and the whole text
+  outside Archived when FINAL is :full, as the Emacs Inbox asks."
+  [c st sections final]
+  (vec (for [{:keys [section] :as s} sections]
+         (update s :threads #(mapv (partial with-final c st (and (= :full final) (not= :archived section))) %)))))
+
 (defn- read-command
   "Reads never write and need no command id."
   [{:keys [db state] :as c} {:keys [command args]}]
@@ -274,7 +310,7 @@
       :thread (let [{:keys [id]} args
                     t (some->> (get-in st [:threads id]) (model/thread-view st))
                     of (fn [kind order] (vec (sort-by order (keep #(when (= id (:thread %)) (model/linked st kind (:id %))) (vals (kind st))))))]
-                (when t (assoc t :asks (of :asks :seq) :replies (of :replies :seq) :workers (of :workers :generation))))
+                (when t (assoc (with-final c st true t) :asks (of :asks :seq) :replies (of :replies :seq) :workers (of :workers :generation))))
       :events (store/events db (or (:after args) 0) (:thread args))
       :ask (model/linked st :asks (:id args))
       :reply (model/linked st :replies (:id args))
@@ -283,7 +319,7 @@
       :machine @(:machine c)
       :sections (let [sections (model/sections st)
                       {held :sections fresh :fresh} (when (:shown args) (model/hold (:shown args) sections))]
-                  {:sections (or held sections) :badge (model/badge sections) :machine @(:machine c)
+                  {:sections (sections-with-final c st (or held sections) (:final args)) :badge (model/badge sections) :machine @(:machine c)
                    :order (model/order sections) :fresh (or fresh 0)})
       ::unknown)))
 
@@ -837,7 +873,8 @@ still running (T163)."
            :boot-at (System/currentTimeMillis) :now now :recovery-lock (Object.) :restart-grace-ms restart-grace-ms :last-health (atom 0) :wf-root wf-root
            :db db :state (atom (store/replay db)) :server server :lock channel :stopped (atom false) :dispatcher (atom nil)
            :in-flight (atom 0) :manage-router manage-router :router-tried (atom 0) :router-idle-since (atom nil) :router-idle-ms router-idle-ms :web (atom nil)
-           :notifier (some-> notify (notify/new-notifier (fs/path dir "notifications.edn") (- (now) notify/replay-grace-ms)))}]
+           :notifier (some-> notify (notify/new-notifier (fs/path dir "notifications.edn") (- (now) notify/replay-grace-ms)))}
+        c (cond-> c (:notifier c) (assoc-in [:notifier :final-of] #(worker-final-preview c %)))]
     (ensure-owner-token! c)
     (some-> (:notifier c) (notify/resume! @(:state c) (now)))
     (spit (str (fs/path dir "port")) (str (.getLocalPort server)))

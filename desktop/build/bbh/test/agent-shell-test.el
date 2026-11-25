@@ -1052,6 +1052,24 @@ used to be erased when it answered, with whatever you typed meanwhile
       (should (bbh-test--wait (lambda () (funcall logged "inbox select T2")) 10)))
     (kill-buffer "*bbh inbox*")))
 
+(ert-deftest bbh-inbox-a-last-message-follows-the-asks-and-folds-on-its-own ()
+  (bbh-test--with-fake-inbox (view log)
+    (let ((outline (concat bbh-test--outline "\n** Last message from W2\n   Done; see /tmp/r.html now")))
+      (eng/bbh-inbox--render (concat "head\n" (replace-regexp-in-string "\\*\\*\\* Answer\n\n" "*** Answer\n\n** Last message from W1\n   Pick one; see /tmp/e.md for why\n" outline)) t)
+      ;; The message is neither an ask nor part of the ask's answer.
+      (should (equal '("a1") (eng/bbh-inbox--asks "T1")))
+      (should (equal "" (eng/bbh-inbox--answer-text "a1")))
+      (should (equal '("T1/Last message" "T2/Last message")
+                     (seq-filter (lambda (k) (string-suffix-p "/Last message" k)) (mapcar #'car (eng/bbh-inbox--headings)))))
+      ;; Folded by default in the one-buffer outline, like Details; the ask stays open, first.
+      (should (invisible-p (save-excursion (goto-char (point-min)) (search-forward "Pick one") (point))))
+      (should-not (invisible-p (save-excursion (goto-char (point-min)) (search-forward "2. Yes") (point))))
+      (goto-char (point-min))
+      (search-forward "see /tmp/e.md")
+      ;; The path selects whole, and no pick key lands on the ask from inside the message.
+      (should (equal "/tmp/e.md" (thing-at-point 'filename t)))
+      (should-not (eng/bbh-inbox--ask)))))
+
 (ert-deftest bbh-inbox-reload-keeps-unsaved-answers-and-folds ()
   (bbh-test--with-fake-inbox (view log)
     (eng/bbh-inbox--render (concat "head\n" bbh-test--outline) t)

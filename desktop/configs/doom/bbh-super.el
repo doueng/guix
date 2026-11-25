@@ -257,6 +257,7 @@ Pushes inside that time make one reload, and none runs while you type.")
 (defconst eng/bbh-inbox--thread-re "^\\* \\([A-Z-]+\\) \\(T[0-9]+\\)\\_>")
 (defconst eng/bbh-inbox--ask-re "^\\*\\* \\(a[0-9]+\\)\\_>")
 (defconst eng/bbh-inbox--part-re "^\\*\\*\\* \\(Details\\|Answer\\)$")
+(defconst eng/bbh-inbox--final-re "^\\*\\* Last message from ")
 
 (defun eng/bbh-inbox--command (&rest args)
   (append (or eng/bbh-inbox-bbh
@@ -360,9 +361,10 @@ next heading, END after the body's last newline."
       (nreverse threads))))
 
 (defun eng/bbh-inbox--key ()
-  "The key of the heading at the start of this line: a thread or ask id, or
-ASK/Details and ASK/Answer."
+  "The key of the heading at the start of this line: a thread or ask id,
+ASK/Details and ASK/Answer, or THREAD/Last message."
   (cond ((looking-at eng/bbh-inbox--thread-re) (match-string-no-properties 2))
+        ((looking-at eng/bbh-inbox--final-re) (concat (eng/bbh-inbox--at-point) "/Last message"))
         ((looking-at eng/bbh-inbox--ask-re) (match-string-no-properties 1))
         ((looking-at eng/bbh-inbox--part-re)
          (let ((part (match-string-no-properties 1)))
@@ -458,7 +460,8 @@ rendered, and put back the answers in EDITED, typed but unsaved."
 
 (defun eng/bbh-inbox--fold (before)
   "Fold the headings that BEFORE, from `eng/bbh-inbox--folds', had folded,
-and new ones by default: Details, archived threads and threads with no ask."
+and new ones by default: Details, archived threads and threads with no ask,
+and outside the split view a thread's Last message."
   (when (fboundp 'org-fold-show-all)
     (org-fold-show-all)
     (pcase-dolist (`(,key . ,start) (reverse (eng/bbh-inbox--headings)))
@@ -467,6 +470,7 @@ and new ones by default: Details, archived threads and threads with no ask."
               (save-excursion
                 (goto-char start)
                 (cond ((string-suffix-p "/Details" key) t)
+                      ((string-suffix-p "/Last message" key) (not (eq eng/bbh-inbox-view 'split)))
                       ((looking-at eng/bbh-inbox--thread-re)
                        (and (not (eq eng/bbh-inbox-view 'split))
                             (or (equal "ARCHIVED" (match-string 1))

@@ -85,13 +85,20 @@
                       ["*** Answer"]
                       [(if (str/blank? answer) "" (indent "    " answer))]))))
 
+(defn- org-final
+  "The org subtree of the last message W wrote, TEXT whole or else its
+  PREVIEW. Indented, so no line of it reads as a heading."
+  [w text preview]
+  (str "** Last message from " w "\n" (indent "   " (or text preview))))
+
 (defn org-view
   "The Inbox outline of SECTIONS, in section order: each thread's heading
-  starts with its section and id, then its open asks, else its line."
+  starts with its section and id, then its open asks, else its line, then the
+  last message its latest Worker wrote once that Worker's turn is over."
   [{:keys [sections]}]
   (str/join "\n"
             (for [{:keys [section threads]} sections
-                  {:keys [id title line came-back updated-at execution asks draft model]} threads]
+                  {:keys [id title line came-back updated-at execution asks draft model final final-from final-preview]} threads]
               (str/join "\n"
                         (concat [(str "* " (str/upper-case (name section)) " " id " " title
                                       (if came-back " (came back)" "")
@@ -101,7 +108,8 @@
                                 (if (seq asks)
                                   (map #(org-ask % draft) asks)
                                   (when-let [l (some-> line first-line not-empty)] [(str "  " l)]))
-                                (when-let [n (not-empty (:note draft))] [(str "  note: " n)]))))))
+                                (when-let [n (not-empty (:note draft))] [(str "  note: " n)])
+                                (when (and final-from (or final final-preview)) [(org-final final-from final final-preview)]))))))
 
 (defn header
   "The Inbox's first line: what needs you, the processes on older code, then the keys."
@@ -112,7 +120,7 @@
 (defn- sections
   "The controller's sections in the current order."
   []
-  (call! {:command :sections}))
+  (call! {:command :sections :args {:final :full}}))
 
 (defn- thread [id] (call! {:command :thread :args {:id id}}))
 

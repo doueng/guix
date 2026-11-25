@@ -219,6 +219,27 @@
     (is (= 60 (notify/window-pid [{:pid 60 :class "rexmux" :focusHistoryID 0}] [300] parent)) "or to the rexmux window")
     (is (nil? (notify/window-pid [{:pid 50 :class "google-chrome"}] [300] parent)))))
 
+(deftest a-finish-shows-the-worker-s-last-message-and-waits-a-little-for-it
+  (let [done (-> base (assoc-in [:workers "W1"] {:id "W1" :thread "T1" :state :done :started-at 0 :state-at 1000000})
+                 (assoc-in [:threads "T1"] {:id "T1" :title "Alt+W closes windows" :milestone-seq 4 :read-seq 3 :summary "W1 done"}))
+        due (notify/due done 2000000 {})
+        log (atom [])
+        notifier (fn [final-of] (assoc (notify/new-notifier {:show! (fn [n _] (swap! log conj (:body n)) {}) :close! (fn [_])}) :final-of final-of))]
+    (is (= [[:finished "W1"]] (keys due)))
+    (testing "with a message, the finish carries its preview under the summary"
+      (is (= "W1 done\nIt works, see /tmp/r.html" (:body (first (notify/plan (notify/with-final due {"W1" "It works, see /tmp/r.html"} 1000001) done)))))
+      (notify/tick! (notifier {"W1" "It works"}) done 1000001 {:notify-delay-seconds 0})
+      (is (= ["W1 done\nIt works"] @log)))
+    (testing "without one yet, the finish waits for it, then shows the summary alone"
+      (reset! log [])
+      (is (empty? (notify/tick! (notifier (constantly nil)) done 1000001 {:notify-delay-seconds 0})) "held back, so not recorded as notified")
+      (is (= [] @log))
+      (is (= [[:finished "W1"]] (keys (notify/tick! (notifier (constantly nil)) done (+ 1000000 notify/final-wait-ms) {:notify-delay-seconds 0}))))
+      (is (= ["W1 done"] @log)))
+    (testing "an ask is not held back for a message"
+      (let [s (ask base "a1" "T1" "Bind it?" "Yes")]
+        (is (= [[:ask "a1"]] (keys (notify/with-final (notify/due s 0 {:notify-delay-seconds 0}) (constantly nil) 0))))))))
+
 (deftest tick-shows-with-the-policy-expiry
   (let [shown (atom [])
         n (notify/new-notifier {:show! (fn [n _] (swap! shown conj (:expire-ms n)) {}) :close! (fn [_])})

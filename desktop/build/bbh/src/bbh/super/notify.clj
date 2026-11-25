@@ -82,10 +82,12 @@
 
 (def ^:private max-options 3)
 
-(defn- item-line [{:keys [text options]}]
-  (str text (when (seq options)
-              (str "  [" (str/join " | " (take max-options options))
-                   (when (> (count options) max-options) " | …") "]"))))
+(defn- item-line [{:keys [text options final]}]
+  (str text
+       (when final (str "\n" final))
+       (when (seq options)
+         (str "  [" (str/join " | " (take max-options options))
+              (when (> (count options) max-options) " | …") "]"))))
 
 (defn- urgency [items]
   (if (some #(= :critical (:urgency %)) items) :critical :normal))
@@ -238,13 +240,33 @@
   [{:keys [shown]}]
   (doseq [entry (vals @shown)] (some-> entry :handle :proc p/destroy)))
 
+(def final-wait-ms
+  "How long a finish waits for its Worker's last message, which the Worker
+  writes as its turn ends, after the finish is recorded."
+  60000)
+
+(defn with-final
+  "DUE with each finish's preview of its Worker's last message, from FINAL-OF
+  (worker id to text or nil), as :final. A finish whose message has not
+  appeared waits, for up to final-wait-ms after it began at NOW."
+  [due final-of now]
+  (if-not final-of
+    due
+    (into {} (keep (fn [[[kind w :as k] item]]
+                     (if (not= :finished kind)
+                       [k item]
+                       (if-let [f (final-of w)]
+                         [k (assoc item :final f)]
+                         (when (>= (- now (:at item)) final-wait-ms) [k item])))))
+          due)))
+
 (defn tick!
   "Once a dispatcher pass: show the plan for what is due on STATE at NOW, or
   nothing under :do-not-disturb; when STATE changed, close shown notifications
   that no longer wait. The Inbox key's overrides win over POLICY. Returns the
   due items, for the caller to record as notified."
-  [{:keys [effects shown seen live-from] :as notifier} state now policy]
-  (let [due (due state now policy)
+  [{:keys [effects shown seen live-from final-of] :as notifier} state now policy]
+  (let [due (with-final (due state now policy) final-of now)
         news (into {} (remove #(and live-from (< (or (:news-at (val %)) (:at (val %))) live-from))) due)]
     (when (seq news)
       (let [{dnd :do-not-disturb expire-ms :notify-expire-ms} (merge default-policy policy (overrides))

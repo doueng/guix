@@ -466,6 +466,44 @@
               (is (nil? (pane/send! "T1")) "nothing left to send sends nothing")
               (locking (:db c) (is (= (store/replay (:db c)) @(:state c)))))))))))
 
+(deftest the-inbox-carries-the-last-message-a-worker-wrote-once-its-turn-is-over
+  (with-controller
+    (fn [_ dir conversations]
+      (call dir {:command :thread! :args {:title "Fix it"}})
+      (let [token (run-worker dir "T1")
+            transcript (str (fs/path conversations "super-W1" "messages.jsonl"))
+            say! (fn [& ms] (spit transcript (apply str (map #(str (cheshire.core/generate-string %) "\n") ms)) :append true))
+            sections (fn [args] (:ok (call dir {:command :sections :args args})))
+            row (fn [args] (first (mapcat :threads (:sections (sections args)))))
+            thread (fn [] (:ok (call dir {:command :thread :args {:id "T1"}})))]
+        (say! {:role "user" :content "brief"} {:role "assistant" :content "Looking at it now."})
+        (testing "a Worker in its turn has no last message yet"
+          (is (not-any? #(contains? % :final-from) [(row {}) (row {:final :full}) (thread)]))
+          (is (not (str/includes? (pane/org-view (sections {:final :full})) "Last message"))))
+        (call dir {:token token :command :ask! :args {:kind :question :text "Keep it?" :stopped true
+                                                       :options [{:id "no" :label "No"} {:id "yes" :label "Yes"}]}})
+        (say! {:role "assistant" :content "I need a pick; the evidence is in `/tmp/e.md`."})
+        (testing "a stopped ask ends the turn: the ask stays first and the message follows it"
+          (is (= "Keep it?" (:line (row {}))) "the row's line is still the ask")
+          (is (re-find #"(?s)^\* STOPPED T1 Fix it.*\n\*\* a1 Keep it\?\n.*\*\*\* Answer\n\n\*\* Last message from W1\n   I need a pick; the evidence is in /tmp/e\.md \.$"
+                       (pane/org-view (sections {:final :full})))))
+        (call dir {:command :finish-worker! :args {:worker "W1" :state-after :done}})
+        (say! {:role "assistant" :content "" :tool_calls [{:id "t1" :type "function" :function {:name "clojure" :arguments "{}"}}]}
+              {:role "tool" :tool_call_id "t1" :content "=> \"W1\""}
+              {:role "assistant" :content "It works. The report is at /tmp/report.html.\n\n**Checks:** all pass."})
+        (testing "a finished Worker's report: whole in the thread and the Emacs outline, a preview in every row"
+          (is (= "It works. The report is at /tmp/report.html .\n\n**Checks:** all pass." (:final (thread))))
+          (is (= "W1" (:final-from (thread))))
+          (is (= "It works. The report is at /tmp/report.html . Checks: all pass." (:final-preview (row {}))))
+          (is (nil? (:final (row {}))) "the phone's list carries only the preview")
+          (is (str/ends-with? (pane/org-view (sections {:final :full}))
+                              "** Last message from W1\n   It works. The report is at /tmp/report.html .\n   \n   **Checks:** all pass.")))
+        (call dir {:command :archive! :args {:thread "T1"}})
+        (testing "an archived thread keeps the preview, not the whole text"
+          (is (nil? (:final (row {:final :full}))))
+          (is (str/ends-with? (pane/org-view (sections {:final :full}))
+                              "** Last message from W1\n   It works. The report is at /tmp/report.html . Checks: all pass.")))))))
+
 (deftest a-finished-worker-s-row-shows-how-it-ended-not-its-last-note
   (let [base [{:seq 1 :kind :thread-created :thread "T1" :data {:id "T1" :title "Fix it"}}
               {:seq 2 :kind :worker-started :thread "T1" :data {:id "W1" :state :starting :generation 1}}

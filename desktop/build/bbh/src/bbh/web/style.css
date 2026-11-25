@@ -342,6 +342,9 @@ button:disabled { opacity: 0.5; }
 .ev .k { color: var(--muted); font: var(--label); letter-spacing: 0.04em; text-transform: uppercase; }
 .ev.ms { color: var(--black); font-weight: 600; }
 .summary { color: var(--ink); font: 16px/1.45 var(--serif); }
+.ln.last { color: var(--muted); }
+.final .md { color: var(--ink); font: 16px/1.45 var(--serif); overflow-wrap: anywhere; }
+.final .md ul, .final .md ol { padding-left: 1.2em; }
 .acts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
 .acts button { min-height: 46px; color: var(--teal); background: transparent; border: 1px solid var(--teal); font: 600 14px/1 var(--sans); }
 .conflict { margin: 0 0 12px; padding: 8px 10px; color: var(--claret); background: #fff; border: 1px solid var(--claret); font: 15px/1.4 var(--sans); }

@@ -177,6 +177,8 @@ Execution state, attention state and read state are independent facts. The secti
 
 The badge counts the first three. Progress notes update the thread's summary line without making it New; only milestones (a `wf` phase change, a push, an ask) do. When a Worker finishes, the controller replaces the summary with how it ended (`W3 done, landed abcd1234. Last note: …`, or `failed:` or `cancelled:` with the reason), and a new Worker starts with no summary, so a row never shows an old note as current. Each row also shows the thread's execution (queued, working, waiting, done, failed, cancelled), which the controller derives from its latest Worker. The list order holds while you look, and new rows wait behind an "N new" line.
 
+Once the latest Worker's turn is over (it finished, or waits on a stopped ask), the thread also carries the last message that Worker wrote, which is usually its report. The controller reads it from the Worker's transcript (`messages.jsonl`, newest rollover first) each time it builds a view, caching it by file size and time, so no event stores a copy and no model is called. Paths and URLs in it are set off by spaces so they select whole. The Emacs Inbox shows it whole under `** Last message from W3`, after any asks (folded by default in the one-buffer outline, open in the split view; archived threads get the preview). The phone shows a one-line preview on rows that are not on you or stuck, and the whole message, as Markdown, under the ask cards in the thread view. A long finish's notification adds the preview under the summary, waiting up to a minute for the Worker to write it.
+
 ## 6. Architecture
 
 ```
