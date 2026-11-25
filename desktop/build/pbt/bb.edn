@@ -1,0 +1,30 @@
+{:paths ["src" "test" "../bbh/src" "../bbh/test" "../ghostty-rex/src" "../ghostty-rex/test"
+         "../rexmux/sidecar" "../quint/src"]
+ :tasks {list {:doc "The property suites in suites.edn."
+               :requires ([pbt.harness :as h])
+               :task (h/-main "list")}
+         measure {:doc "Measure SUITE's generator under its fixed budget: coverage, behaviour, failures shrunk. Args: SUITE [--save true]."
+                  :requires ([pbt.harness :as h])
+                  :task (apply h/-main "measure" *command-line-args*)}
+         baseline {:doc "Human: record SUITE's current generator and properties as the baseline. Args: SUITE [--note TEXT] [--by WHO]."
+                   :requires ([pbt.harness :as h])
+                   :task (apply h/-main "baseline" *command-line-args*)}
+         try {:doc "Judge the working copy's generator of SUITE against the last accepted one and record the verdict; exit 0 accepted, 3 rejected. Args: SUITE [--base REV] [--note TEXT] [--tokens N] [--minutes N]."
+              :requires ([pbt.harness :as h])
+              :task (apply h/-main "try" *command-line-args*)}
+         ledger {:doc "SUITE's rounds: verdicts and metrics. Args: SUITE."
+                 :requires ([pbt.harness :as h])
+                 :task (apply h/-main "ledger" *command-line-args*)}
+         replay {:doc "Replay SUITE's saved regression cases. Args: SUITE."
+                 :requires ([pbt.harness :as h])
+                 :task (apply h/-main "replay" *command-line-args*)}
+         mbt {:doc "Replay quint run --mbt traces of SUITE's spec on the real code. Args: SUITE [--traces N] [--seed N] [--steps N]."
+              :requires ([pbt.harness :as h])
+              :task (apply h/-main "mbt" *command-line-args*)}
+         guard {:doc "make lint's check: generators apart from properties, and no agent round that changed a property."
+                :requires ([pbt.guard :as g])
+                :task (g/-main)}
+         test {:doc "The harness's own tests: coverage rewriting, the verdict, the guard, a short Quint replay."
+               :requires ([clojure.test :as t] [pbt.harness-test])
+               :task (let [{:keys [fail error]} (t/run-tests 'pbt.harness-test)]
+                       (System/exit (if (zero? (+ fail error)) 0 1)))}}}

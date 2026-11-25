@@ -10,8 +10,8 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
-            [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [rexg.gens.connection :as gens]
             [rexg.model :as m]))
 
 (defn- model [kind]
@@ -107,26 +107,49 @@
     (if (or (> n 80) (every? empty? ((juxt :queue :timers :inflight) w))) w
         (recur (-> w (step :process) (step :answer) (step :fire)) (inc n)))))
 
-(def ^:private gen-moves
-  (gen/vector (gen/frequency [[6 (gen/return :process)] [3 (gen/return :answer)] [2 (gen/return :fire)]
-                              [1 (gen/return :die)] [1 (gen/return :answer-die)] [1 (gen/return :revive)] [1 (gen/return :hangup)]
-                              [1 (gen/return :replay)]])
-              0 80))
+(defn check
+  "What the moves of [KIND STARTS-WORK? MOVES] break, [] when nothing:
+  stranded, the model and client disagree on the live connection, a wait out
+  of range, not attached once the server stays up, a leaked connection, or a
+  remote client that started a server. desktop/build/pbt runs this property
+  with agent-written generators."
+  [[kind starts-work? moves]]
+  (let [ws (reductions step (world kind starts-work?) moves)
+        after (calm (last ws))
+        s (get-in after [:mod :servers 0])]
+    (cond-> []
+      (some stranded? ws) (conj [:stranded])
+      (not-every? agrees? ws) (conj [:model-disagrees-with-client])
+      (not-every? #(<= 250 % 4000) (:waits after)) (conj [:wait-out-of-range (:waits after)])
+      (not= :up (:conn s)) (conj [:not-attached (:conn s)])
+      (not= #{(:gen s)} (:open after)) (conj [:leaked (:open after)])
+      (not (or (= :local kind) (zero? (:starts after)))) (conj [:started-a-remote-server]))))
+
+(defn- abstract
+  "World W as the connection's shape: the model's state, server up, open
+  sockets, attempts in flight, queued events and timers (0, 1 or more), and
+  whether the client adopted a connection."
+  [w]
+  (let [n #(min 2 (count %))]
+    [(get-in w [:mod :servers 0 :conn]) (:up? w) (n (:open w)) (n (:inflight w)) (n (:queue w)) (n (:timers w))
+     (some? (:live w))]))
+
+(defn observe
+  "The moves of [KIND STARTS-WORK? MOVES] as the harness sees them: the
+  abstract world after each, and labels for the paths that matter."
+  [[kind starts-work? moves]]
+  (let [ws (vec (reductions step (world kind starts-work?) moves))
+        conns (map #(get-in % [:mod :servers 0 :conn]) ws)]
+    {:steps (map (fn [w a] {:state (abstract w) :action a}) ws (cons kind moves))
+     :labels (set (concat
+                   (when (some #(> (count (:open %)) 1) ws) [:two-sockets-open])
+                   (when (some (fn [[a b]] (and (= :up a) (not= :up b))) (partition 2 1 conns)) [:lost-live-connection])
+                   (when (some (fn [[a b c]] (and (= :up a) (not= :up b) (= :up c))) (partition 3 1 (dedupe conns))) [:reattached])
+                   (when (pos? (:starts (last ws))) [:started-local-server])
+                   (when (some #(>= (count (:waits %)) 3) ws) [:backoff-3])))}))
 
 (deftest property-the-client-always-reattaches-and-leaks-no-connection
-  (let [r (tc/quick-check 400
-                          (prop/for-all [kind (gen/elements [:local :rex-server :remote])
-                                         starts-work? gen/boolean
-                                         moves gen-moves]
-                            (let [ws (reductions step (world kind starts-work?) moves)
-                                  after (calm (last ws))
-                                  s (get-in after [:mod :servers 0])]
-                              (and (not-any? stranded? ws)
-                                   (every? agrees? ws)
-                                   (every? #(<= 250 % 4000) (:waits after))
-                                   (= :up (:conn s))
-                                   (= #{(:gen s)} (:open after))
-                                   (or (= :local kind) (zero? (:starts after)))))))]
+  (let [r (tc/quick-check 400 (prop/for-all [c gens/gen-case] (empty? (check c))))]
     (is (:pass? r) (pr-str (select-keys r [:seed :shrunk])))))
 
 (deftest a-duplicate-is-closed-and-its-late-close-changes-nothing

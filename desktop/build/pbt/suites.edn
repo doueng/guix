@@ -1,0 +1,50 @@
+;; Property suites the harness runs (bb run|try|baseline SUITE). Human-owned:
+;; :check and :observe live in the :properties files, which an agent never
+;; edits; it rewrites only the :generators file. :cover is the code under
+;; test whose branch arms count, {ns :all} or {ns #{def-name ...}}.
+{:outbox-plan
+ {:doc "bbh super's outbox plan: each row sent once, never to a finished Worker, across crashes"
+  :gen bbh.gens.outbox-plan/gen-case
+  :check bbh.outbox-plan-property-test/check
+  :observe bbh.outbox-plan-property-test/observe
+  :generators ["desktop/build/bbh/test/bbh/gens/outbox_plan.clj"]
+  :properties ["desktop/build/bbh/test/bbh/outbox_plan_property_test.clj"]
+  :cover {bbh.super.model #{outbox-plan dead-letter? router-row? message-id
+                            "decide* :outbox-sent!" "decide* :outbox-acked!" "decide* :outbox-dropped!"
+                            "fold* :outbox-sent" "fold* :outbox-acked" "fold* :outbox-dropped"}}
+  :budget {:seeds [1 2 3] :trials 150 :max-size 100}}
+
+ :rexg-connection
+ {:doc "ghostty-rex's control connection against a server that dies, answers late and drops"
+  :gen rexg.gens.connection/gen-case
+  :check rexg.connection-test/check
+  :observe rexg.connection-test/observe
+  :generators ["desktop/build/ghostty-rex/test/rexg/gens/connection.clj"]
+  :properties ["desktop/build/ghostty-rex/test/rexg/connection_test.clj"]
+  :cover {rexg.model #{connect connected connect-failed closed failed disconnected down retry-ms current? local-server?}}
+  :budget {:seeds [1 2 3] :trials 150 :max-size 100}}
+
+ :rexg-connect-mbt
+ {:doc "rexg.model driven by rexmux.qnt's connect actions; Quint traces replayed (bb mbt)"
+  :gen rexg.gens.connect-actions/gen-input
+  :check rexg.connect-mbt-test/check
+  :observe rexg.connect-mbt-test/observe
+  :generators ["desktop/build/ghostty-rex/test/rexg/gens/connect_actions.clj"]
+  :properties ["desktop/build/ghostty-rex/test/rexg/connect_mbt_test.clj"
+               "desktop/build/rexmux/verify/quint/rexmux.qnt"]
+  :cover {rexg.model #{connect connected connect-failed closed failed disconnected down retry-ms current? local-server?}}
+  :budget {:seeds [1 2 3] :trials 150 :max-size 100}
+  :mbt {:file "desktop/build/rexmux/verify/quint/rexmux.qnt" :main "connect"
+        :replay rexg.connect-mbt-test/replay-trace}}
+
+ :bbh-workers-mbt
+ {:doc "bbh.super.model's Worker lifecycle replaying super.qnt's workers traces (bb mbt only)"
+  :properties ["desktop/build/bbh/test/bbh/workers_mbt_test.clj" "desktop/build/bbh/verify/quint/super.qnt"]
+  :mbt {:file "desktop/build/bbh/verify/quint/super.qnt" :main "workers"
+        :replay bbh.workers-mbt-test/replay-trace
+        ;; Triaged divergences: reported, not failures.
+        :known {[:cancel :states-differ [:csig]]
+                "A Worker cancelled while :starting, before :worker-prepared! gives it a conversation, gets no cancel row,
+                 so cancel-plan ends it at once; super.qnt counts every launched Worker as told (csig Owed). The
+                 launch's :worker-prepared! is then refused. bbh.workers-mbt-test/replay-trace-prepared closes the
+                 window and agrees with the spec."}}}}

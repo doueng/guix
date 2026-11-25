@@ -128,6 +128,16 @@
                                   files)
                           {:dir c/root} ["bb" "desktop/build/stale/test.bb"])]))
 
+(defn pbt-problems
+  "The property suites (T231): generators apart from properties, and no
+  agent round in a ledger that changed a property (desktop/build/pbt, bb guard)."
+  []
+  (let [suites (edn/read-string (slurp (str c/root "/desktop/build/pbt/suites.edn")))
+        named (set (mapcat #(concat (:generators %) (:properties %)) (vals suites)))]
+    (keep identity [(tested "desktop/build/pbt: bb guard" "pbt" "guard"
+                            (filter #(or (str/starts-with? % "desktop/build/pbt/") (named %)) files)
+                            {:dir (str c/root "/desktop/build/pbt")} ["bb" "guard"])])))
+
 (defn keybindings-file? [f]
   (or (#{"desktop/bin/keyleader" "desktop/bin/palette" "desktop/bin/keyguide" "desktop/configs/dusk/config.clj"} f)
       (re-find #"^desktop/(configs/keybindings|configs/hypr|build/keybindings|lib/dusk|lib/hypr|build/rexmux/sidecar)/" f)))
@@ -171,6 +181,7 @@
    ["rexmux" rexmux-problems]
    ["ghostty-rex" ghostty-rex-problems]
    ["stale" stale-problems]
+   ["pbt" pbt-problems]
    ["keybindings" keybindings-problems]
    ["fish" #(run-each (fn [f] ["fish" "--no-execute" f]) (filter (fn [f] (str/ends-with? f ".fish")) files))]
    ["babashka" #(parse-each (fn [s] (edamame.core/parse-string-all s {:all true :auto-resolve name :readers (fn [_] identity)}))

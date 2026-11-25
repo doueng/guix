@@ -1,0 +1,17 @@
+[{:verdict :baseline,
+  :by :W310-setup,
+  :at "2026-11-25T13:16:59.178568173Z",
+  :note "generator as split from the original test",
+  :generator-sha "5768560632dbd660",
+  :property-sha "ba1387527b3732ac",
+  :metrics
+  {:states 549,
+   :transitions 760,
+   :coverage 35,
+   :histories 281,
+   :ngrams 257,
+   :coverage-total 42,
+   :trials 450,
+   :ms 53,
+   :failures []},
+  :round 0}]

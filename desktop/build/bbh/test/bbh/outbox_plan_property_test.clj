@@ -9,32 +9,11 @@
   the message it wrote, a row's message id never changes, a pass repeated
   changes nothing, each row's message is delivered at most once, and every
   row that someone will read ends done, after it was read."
-  (:require [bbh.props :as props]
+  (:require [bbh.gens.outbox-plan :as gens]
+            [bbh.props :as props]
             [bbh.super.model :as model]
             [clojure.test :refer [deftest]]
-            [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]))
-
-(def ^:private gen-row
-  (gen/hash-map :state (gen/elements [:pending :pending :sent :done :dropped])
-                :conversation (gen/elements ["router" "c1" "c2" "c3"])
-                :delivery (gen/elements [nil nil :summary :steer :cancel])
-                ;; A :sent row whose file the session has not taken yet.
-                :file? gen/boolean))
-
-(def ^:private gen-round
-  "One round: a pass that crashes after CRASH effects (nil: it completes),
-  then the sessions that scan their mailbox (one flag per conversation)."
-  (gen/hash-map :crash (gen/one-of [(gen/return nil) (gen/choose 0 6)])
-                :scans (gen/vector gen/boolean 4)))
-
-(def ^:private gen-case
-  (gen/hash-map
-   :rows (gen/vector gen-row 0 8)
-   :workers (gen/hash-map "c1" (gen/elements [:working :done :failed])
-                          "c2" (gen/elements [:working :cancelled])
-                          "c3" (gen/elements [:working :working :done]))
-   :rounds (gen/vector gen-round 1 5)))
 
 (def ^:private conversations ["router" "c1" "c2" "c3"])
 
@@ -118,15 +97,20 @@
     (some #(< 1 (count %)) (vals (:ids world))) (conj [:message-id-changed (:ids world)])
     (some #(< 1 %) (vals (:delivered world))) (conj [:delivered-twice (:delivered world)])))
 
-(defn- run-case [{:keys [rounds] :as c}]
+(defn- run-case
+  "What case C breaks of the rules, round by round. NOTE!, when given, sees
+  each round as [world-before plan crash world-after]."
+  [{:keys [rounds] :as c} & [note!]]
   (loop [[{:keys [crash scans]} & more :as rs] rounds world (world-of c)]
     (if (seq rs)
-      (let [plan (plan-of world)
+      (let [before world
+            plan (plan-of world)
             problems (plan-problems (:state world) plan)
             world (perform (note-ids world plan) (if crash (take crash plan) plan))
             again (when-not crash (plan-of world))
             problems (cond-> (into problems (world-problems world))
                        (some #(#{:mailbox/send :mailbox/delete} (first %)) again) (conj [:repeat-pass-acts again]))]
+        (when note! (note! before plan crash world))
         (if (seq problems)
           problems
           (recur more (reduce scan world (keep-indexed (fn [i conv] (when (nth scans i) conv)) conversations)))))
@@ -145,7 +129,47 @@
           (seq left) (conj [:rows-never-done left (:files w)])
           (seq lost) (conj [:done-but-never-read lost]))))))
 
+(defn check
+  "The rules case C breaks, [] when it keeps them. desktop/build/pbt runs this
+  property with agent-written generators."
+  [c]
+  (vec (run-case c)))
+
+(defn- abstract
+  "WORLD as the row states each kind of conversation holds (the Router's, a
+  live Worker's, a finished Worker's), and whether a mailbox file waits."
+  [{:keys [state files]}]
+  (let [finished (set (keep #(when (#{:done :failed :cancelled} (:state %)) (:conversation %)) (vals (:workers state))))
+        who #(cond (= "router" %) :router (finished %) :finished :else :live)]
+    [(into (sorted-map) (update-vals (group-by (comp who :conversation) (vals (:outbox state)))
+                                     #(vec (sort (distinct (map :state %))))))
+     (boolean (seq files))]))
+
+(defn observe
+  "Case C as the harness sees it: each round's abstract world, the kinds of
+  effect its pass planned, whether it crashed, and labels for the paths that
+  matter (a crash between a send and its record, a resend, a cancel row)."
+  [c]
+  (let [rounds (atom [])]
+    (run-case c (fn [before plan crash after] (swap! rounds conj [before plan crash after])))
+    (let [kinds (fn [plan] (vec (sort (distinct (map (fn [[k x]] (if (= :command k) (:command x) k)) plan)))))]
+      {:steps (into (if-let [[w] (first @rounds)] [{:state (abstract w) :action :start}] [])
+                    (for [[_ plan crash after] @rounds]
+                      {:state (abstract after) :action [(kinds plan) (some? crash)]}))
+       :labels (set (concat
+                     (for [[_ plan crash] @rounds
+                           :when (and crash (< 0 crash (count plan)) (= :mailbox/send (first (nth plan (dec crash)))))]
+                       :crash-after-send)
+                     (for [[before plan] @rounds :when (some #(= :mailbox/delete (first %)) plan)
+                           :when (seq (:files before))]
+                       :stale-file-deleted)
+                     (for [[_ plan] @rounds [k _ y] plan :when (and (= :mailbox/send k) (= :cancel (:kind y)))]
+                       :cancel-sent)
+                     (for [[_ plan] @rounds :let [n (count (filter #(and (= :mailbox/send (first %)) (= "router" (second %))) plan))]
+                           :when (> n 1)]
+                       :router-batch)))})))
+
 (deftest property-the-outbox-plan-sends-each-row-once-and-never-to-the-finished
   (props/check "outbox-plan" 300
-               (prop/for-all [c gen-case] (empty? (run-case c)))
+               (prop/for-all [c gens/gen-case] (empty? (run-case c)))
                :explain run-case))
