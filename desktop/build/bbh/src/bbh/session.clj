@@ -8,6 +8,7 @@
             [bbh.conversation :as conversation]
             [bbh.delimiters :as delimiters]
             [bbh.inbox :as inbox]
+            [bbh.limits :as limits]
             [bbh.repl :as repl]
             [bbh.runs :as runs]
             [bbh.transcript :as transcript]
@@ -647,6 +648,49 @@
           (:reply value) {:reply (str (:reply value))}
           :else {:prompt text})))
 
+(def retry-delays
+  "Waits in ms before each retry of a turn that a transient failure, such as
+  an overloaded or rate-limited API, stopped. A session's :retry-delays
+  overrides them."
+  [15000 60000 240000])
+
+(defn- wait! [s ms]
+  (let [end (+ (System/currentTimeMillis) ms)]
+    (while (and (not (:interrupted @s)) (< (System/currentTimeMillis) end))
+      (Thread/sleep (long (min 200 ms))))))
+
+(defn limit-note
+  "What the transcript says when LIMIT, the session's :limit, stopped a turn."
+  [{:keys [window until]}]
+  (str "[bbh] Paused at the " (limits/label window)
+       (if until (str " until " (limits/clock until)) ", with no reset time given")
+       ". bbh super resumes this conversation after the reset; a prompt you type tries again now.\n\n"))
+
+(defn- run-turn!
+  "Run turn! on S. A transient failure is retried after each of the retry
+  delays with a recorded request to continue; a usage limit ends the turn,
+  noted in the transcript and kept as S's :limit {:at :until :window :text}
+  for agent.json, and returns :limited. A turn that completes clears :limit."
+  [s]
+  (loop [delays (:retry-delays @s retry-delays)]
+    (let [failure (try (turn! s) nil (catch Exception e e))
+          why (some-> failure ex-message)
+          c (when (and failure (not (:interrupted @s))) (limits/classify why :windows (:limits @s)))]
+      (cond
+        (nil? failure) (do (swap! s dissoc :limit) nil)
+        (= :limit (:kind c))
+        (let [limit (assoc (select-keys c [:window :until]) :at (System/currentTimeMillis) :text why)]
+          (swap! s assoc :limit limit)
+          (emit! s {:type :text :text (str "\n\n" (limit-note limit))})
+          :limited)
+        (and (= :transient (:kind c)) (seq delays))
+        (do (emit! s {:type :text :text (format "\n\n[bbh] %s; retrying in %d s.\n\n" why (quot (first delays) 1000))})
+            (wait! s (first delays))
+            (when-not (:interrupted @s)
+              (record! s {:role "user" :content (str "[bbh] The model request failed (" why "); continue where you left off.")})
+              (recur (rest delays))))
+        :else (throw failure)))))
+
 (defn prompt!
   "Handle one user input: a bbh command, an env reply, a mail wake or a model
   turn. Returns :end-turn or :cancelled, and throws for a /command nothing
@@ -688,9 +732,10 @@
                 _ (when (and wake? mail) (emit! s {:type :text :text (str mail "\n\n")}))]
             (record! s {:role "user"
                         :content (if (seq notes) (str "[bbh] " (str/join " " notes) "\n\n" prompt) prompt)})
-            (try (turn! s)
-                 (catch Exception e
-                   (finish! {:status "error" :error (ex-message e)})
-                   (throw e)))
-            (finish! (when (:interrupted @s) {:status "interrupted"}))
+            (let [limited (try (run-turn! s)
+                               (catch Exception e
+                                 (finish! {:status "error" :error (ex-message e)})
+                                 (throw e)))]
+              (finish! (cond (:interrupted @s) {:status "interrupted"}
+                             limited {:status "limited" :error (:text (:limit @s))})))
             (if (:interrupted @s) :cancelled :end-turn)))))))

@@ -229,12 +229,15 @@
     (run! c :controller {:id (str "resumed-" id) :command :worker-prepared! :args {:worker worker :buffer buffer}})))
 
 (defn- resume*
-  "Commit resume! CMD for PRINCIPAL, then reopen the Worker's buffer. Returns
-  the Worker's id."
+  "Commit resume! CMD for PRINCIPAL, then reopen the Worker's buffer unless
+  its session lives and a usage limit only paused it. Returns the Worker's id."
   [c principal cmd]
-  (let [t (new-token)
+  (let [st @(:state c)
+        w (get-in st [:workers (get-in st [:threads (get-in cmd [:args :thread]) :worker])])
+        live? (and w (not (model/session-ended? w)))
+        t (new-token)
         r (run! c principal (assoc cmd :token-hash (sha256 t) :policy (policy c)))]
-    (when-not (:repeat? r) (reopen! c (:result r) t (:id cmd)))
+    (when-not (or live? (:repeat? r)) (reopen! c (:result r) t (:id cmd)))
     (:result r)))
 
 (defn- steer*
@@ -320,7 +323,7 @@
       :sections (let [sections (model/sections st)
                       {held :sections fresh :fresh} (when (:shown args) (model/hold (:shown args) sections))]
                   {:sections (sections-with-final c st (or held sections) (:final args)) :badge (model/badge sections) :machine @(:machine c)
-                   :order (model/order sections) :fresh (or fresh 0)})
+                   :order (model/order sections) :fresh (or fresh 0) :router (model/router-view st)})
       ::unknown)))
 
 (declare reconcile! ensure-router! conversation-root conversation-jobs)
@@ -812,6 +815,21 @@ still running (T163)."
                       (fs/delete-if-exists f)
                       :restarted))))))
 
+(defn observe-limits!
+  "Pause each session whose agent.json names a usage limit newer than the last
+  one recorded: the Router and the working Workers. A limit is committed under
+  an id of its session and time, so a pass that sees it again changes nothing."
+  [{:keys [state] :as c}]
+  (let [st @state
+        router (get-in st [:router :router :conversation])]
+    (doseq [[subject conversation] (cons ["router" router]
+                                         (for [w (vals (:workers st)) :when (= :working (:state w))] [(:id w) (:conversation w)]))
+            :let [{:keys [at until window text]} (some->> conversation (conversation-root c) inbox/agent :limit)
+                  seen (if (= "router" subject) (get-in st [:router :router :limit-seen]) (get-in st [:workers subject :limit-seen]))]
+            :when (and (integer? at) (> at (or seen 0)))]
+      (run! c :controller {:id (str "limit-" subject "-" at) :command :limit-hit!
+                           :args {:subject subject :at at :until (when (integer? until) until) :window window :text text}}))))
+
 (defn dispatch!
   "One pass: read which sent rows' mailbox files are still there, then perform
   model/outbox-plan, which sends, acks and drops outbox rows."
@@ -898,7 +916,7 @@ still running (T163)."
                           (reset! (:last-machine c) (System/currentTimeMillis))
                           (try (observe-machine! c)
                                (catch Exception e (binding [*out* *err*] (println "bbh super: observing sessions failed:" (ex-message e))))))
-                        (observe-jobs! c) (dispatch! c) (watch-ended! c)
+                        (observe-jobs! c) (observe-limits! c) (dispatch! c) (watch-ended! c)
                         (fire-timers! c)
                         (try (restart-router-when-idle! c)
                              (catch Exception e (binding [*out* *err*] (println "bbh super: restarting the Router failed:" (ex-message e)))))

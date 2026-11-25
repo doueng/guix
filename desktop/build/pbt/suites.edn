@@ -37,6 +37,20 @@
   :mbt {:file "desktop/build/rexmux/verify/quint/rexmux.qnt" :main "connect"
         :replay rexg.connect-mbt-test/replay-trace}}
 
+ :bbh-pause-mbt
+ {:doc "bbh.super.model's usage-limit pause: generated pause, mail, timer and cancel sequences, and super.qnt's pause traces replayed (bb mbt)"
+  :gen bbh.gens.pause/gen-input
+  :check bbh.pause-mbt-test/check
+  :observe bbh.pause-mbt-test/observe
+  :generators ["desktop/build/bbh/test/bbh/gens/pause.clj"]
+  :properties ["desktop/build/bbh/test/bbh/pause_mbt_test.clj" "desktop/build/bbh/verify/quint/super.qnt"]
+  :cover {bbh.super.model #{pauses paused-conversations due resume-at pause-subject pause-ended outbox-plan
+                            "decide* :limit-hit!" "decide* :pause-ended!" "fold* :session-paused" "fold* :session-resumed"}}
+  :budget {:seeds [1 2 3] :trials 150 :max-size 100}
+  :mbt {:file "desktop/build/bbh/verify/quint/super.qnt" :main "pause"
+        :replay bbh.pause-mbt-test/replay-trace
+        :known {}}}
+
  :bbh-workers-mbt
  {:doc "bbh.super.model's Worker lifecycle replaying super.qnt's workers traces (bb mbt only)"
   :properties ["desktop/build/bbh/test/bbh/workers_mbt_test.clj" "desktop/build/bbh/verify/quint/super.qnt"]

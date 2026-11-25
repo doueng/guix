@@ -20,6 +20,9 @@
  {:file "super.qnt" :main "timers" :states 28888
   :invariants ["capRespected" "oneWorkerPerThread" "overdueStartingLaunched"]
   :properties ["timerKillsNothing"]}
+ {:file "super.qnt" :main "pause" :states 64949
+  :invariants ["inOrder"]
+  :properties ["heldWhilePaused" "continueToLive" "pauseFailsNothing" "cancelEnds" "pauseEnds" "mailArrives" "turnContinues"]}
  {:file "super.qnt" :main "workers" :states 852884
   :invariants ["capRespected" "oneWorkerPerThread" "cancelledAfterTold"]
   :properties ["noLaunchOnArchived"]}]

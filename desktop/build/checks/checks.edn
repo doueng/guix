@@ -173,7 +173,7 @@
             "node desktop/pi/agent/skills/skill-diet/scripts/eval.mjs check desktop/pi/agent/skills/rexmux"]}
   {:name "pbt"
    :paths ["desktop/build/pbt/**" "desktop/pi/agent/skills/agentic-pbt/**"
-           "desktop/build/bbh/test/bbh/gens/**" "desktop/build/bbh/test/bbh/workers_mbt_test.clj"
+           "desktop/build/bbh/test/bbh/gens/**" "desktop/build/bbh/test/bbh/workers_mbt_test.clj" "desktop/build/bbh/test/bbh/pause_mbt_test.clj"
            "desktop/build/bbh/test/bbh/outbox_plan_property_test.clj" "desktop/build/bbh/src/bbh/super/model.clj"
            "desktop/build/bbh/verify/quint/super.qnt"
            "desktop/build/ghostty-rex/test/rexg/gens/**" "desktop/build/ghostty-rex/test/rexg/connect_mbt_test.clj"
@@ -181,7 +181,8 @@
            "desktop/build/rexmux/verify/quint/rexmux.qnt"]
    :checks ["make lint" "cd desktop/build/pbt && bb test"
             "node desktop/pi/agent/skills/skill-diet/scripts/eval.mjs check desktop/pi/agent/skills/agentic-pbt"]
-   :slow ["cd desktop/build/pbt && bb mbt rexg-connect-mbt --traces 200" "cd desktop/build/pbt && bb mbt bbh-workers-mbt --traces 200"]}
+   :slow ["cd desktop/build/pbt && bb mbt rexg-connect-mbt --traces 200" "cd desktop/build/pbt && bb mbt bbh-workers-mbt --traces 200"
+            "cd desktop/build/pbt && bb mbt bbh-pause-mbt --traces 200"]}
   {:name "explain"
    :paths ["desktop/pi/agent/skills/explain/**"]
    :checks ["node desktop/pi/agent/skills/skill-diet/scripts/eval.mjs check desktop/pi/agent/skills/explain"]}

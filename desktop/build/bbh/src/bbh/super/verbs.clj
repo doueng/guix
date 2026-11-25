@@ -39,6 +39,8 @@
           'super-cancel! {:command :cancel! :args [:thread :reason] :options #{:for} :doc "Cancel THREAD's Worker, saying REASON. THREAD may be the Worker's id."}
           'super-abandon-job! {:command :abandon-job! :args [:thread :job] :options #{:for}
                                :doc "Let THREAD's cancelling Worker finish without job JOB, which its cancel waits on because nobody can identify its process. Do it only when the person says so."}
+          'super-resume! {:command :pause-ended! :args [:subject] :fixed {:how :now}
+                          :doc "Resume now THREAD's Worker that a usage limit paused, which otherwise resumes after the reset. THREAD may be the Worker's id."}
           'super-note! {:command :note! :args [:thread :text] :doc "Set THREAD's summary line."}
           'super-milestone! {:command :milestone! :args [:thread :text] :doc "Mark progress on THREAD worth the person's notice."}}))
 

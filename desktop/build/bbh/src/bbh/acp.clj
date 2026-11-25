@@ -77,14 +77,15 @@
 
 (defn- announce!
   "Mark session S live, and BUSY or not, in the agent.json of the conversation
-  it is on now, with when the person last typed a prompt into it, and withdraw
+  it is on now, with when the person last typed a prompt into it and the usage
+  limit that stopped its last turn, and withdraw
   it from one it left through /resume."
   [s busy]
   (let [root (session/mail-root s)]
     (when-let [old (:announced @s)]
       (when (not= old root) (inbox/withdraw! old)))
     (swap! s assoc :announced root)
-    (inbox/announce! {:root root :project (:cwd @s) :prompted-at (:prompted-at @s)} busy)))
+    (inbox/announce! {:root root :project (:cwd @s) :prompted-at (:prompted-at @s) :limit (:limit @s)} busy)))
 
 (defn- new-session [{:keys [cwd]}]
   (let [[resume] (reset-vals! resume-dir nil)

@@ -42,6 +42,10 @@
               (emit {:type "stream_event" :event {:type "content_block_delta" :delta {:type "text_delta" :text "partial"}}}))
           "fail"
           (emit {:type "result" :is_error true :subtype "error_during_execution" :errors ["synthetic provider failure"]})
+          "limit"
+          (do (emit {:type "rate_limit_event" :rate_limit_info {:status "rejected" :unifiedWindows {:five_hour {:status "rejected"}}}})
+              (emit {:type "assistant" :message {:content [{:type "text" :text "You've hit your 5-hour limit · resets 3:20pm (Europe/London)"}]}})
+              (emit {:type "result" :is_error true :subtype "success" :result "You've hit your 5-hour limit · resets 3:20pm (Europe/London)"}))
           "overflow"
           (emit {:type "result" :is_error true :subtype "success" :result "Prompt is too long"})
           (reset! pending

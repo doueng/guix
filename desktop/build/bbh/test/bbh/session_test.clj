@@ -33,6 +33,7 @@
                             (swap! script rest)
                             (when (= :overflow s)
                               (throw (ex-info "OpenRouter 400: maximum context length" {:overflow true})))
+                            (when (and (map? s) (:throw s)) (throw (ex-info (:throw s) {})))
                             (when (string? s) (on-text s))
                             (cond-> {:message (reply (cond-> s (map? s) (dissoc :usage)))
                                      :usage usage}
@@ -57,6 +58,33 @@
     (session/prompt! (:s h) "use x")
     (stop! h)
     (is (= ["=> #'user/x" "out:\n:hi\n=> 42"] (tool-results h)))))
+
+(deftest a-usage-limit-pauses-the-turn-instead-of-failing-it
+  (let [h (harness "" [{:throw "Claude Code: You've hit your 5-hour limit · resets 3:20pm (Europe/London)"} "back"])
+        s (:s h)]
+    (is (= :end-turn (session/prompt! s "work")) "the front end sees a turn that ended, not an error")
+    (let [{:keys [window until at text]} (:limit @s)]
+      (is (= "5-hour" window))
+      (is (and (integer? until) (< (System/currentTimeMillis) until (+ (System/currentTimeMillis) 86400000))))
+      (is (integer? at))
+      (is (str/includes? text "hit your 5-hour limit")))
+    (is (some #(and (= :text (:type %)) (str/includes? (:text %) "Paused at the 5-hour limit until ")) @(:events h)))
+    (is (some #(= "work" (:content %)) (:messages @s)) "the prompt stays in the transcript for the resume")
+    (is (= :end-turn (session/prompt! s "[Resumed] continue")))
+    (stop! h)
+    (is (nil? (:limit @s)) "a turn that completes clears the limit")))
+
+(deftest a-transient-failure-is-retried-then-given-up
+  (let [h (harness "" [{:throw "Claude Code: API Error: 529 Overloaded"} "done"
+                        {:throw "API Error: 429 rate_limit_error"} {:throw "API Error: 429 rate_limit_error"}])
+        s (:s h)]
+    (swap! s assoc :retry-delays [1])
+    (is (= :end-turn (session/prompt! s "work")))
+    (is (some #(str/starts-with? (str (:content %)) "[bbh] The model request failed (Claude Code: API Error: 529 Overloaded)") (:messages @s)))
+    (is (= "done" (:content (peek (:messages @s)))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"429" (session/prompt! s "again")) "one retry, then the failure stands")
+    (stop! h)
+    (is (nil? (:limit @s)))))
 
 (deftest a-router-session-evaluates-only-in-the-sandbox
   (let [secret (str (fs/create-temp-file {:prefix "bbh-secret"}))

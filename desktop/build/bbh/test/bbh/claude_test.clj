@@ -118,6 +118,22 @@
                                (session/prompt! s "fail")))
           (finally (session/close! s)))))))
 
+(deftest a-claude-usage-limit-ends-the-turn-paused-with-its-reset-time
+  (with-cli
+    (fn []
+      (let [{:keys [s events]} (harness)]
+        (try
+          (is (= :end-turn (session/prompt! s "limit")) "a limit is not a failure")
+          (let [{:keys [window until text]} (:limit @s)]
+            (is (= "5-hour" window))
+            (is (some? until) "the reset time is parsed")
+            (is (re-find #"5-hour limit" (str text))))
+          (is (some #(re-find #"\[bbh\] Paused at the" (str (:text %))) @events)
+              "the transcript says the session paused")
+          (is (= :end-turn (session/prompt! s "hi")))
+          (is (nil? (:limit @s)) "a completed turn clears the limit")
+          (finally (session/close! s)))))))
+
 (deftest a-crash-leaves-its-exit-code-and-output-in-claude-log
   (with-cli
     (fn []

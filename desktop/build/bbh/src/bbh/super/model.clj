@@ -2,7 +2,8 @@
   "The super-agent's state machine, pure. `decide` turns a command into events
   or refuses it, and `fold` applies one event, so the state is a function of the
   event log alone. Nothing here knows SQL, sockets or mailboxes."
-  (:require [clojure.string :as str]))
+  (:require [bbh.limits :as limits]
+            [clojure.string :as str]))
 
 (def empty-state
   {:counters {} :threads {} :workers {} :asks {} :replies {} :outbox {} :tokens {} :router {}})
@@ -11,9 +12,9 @@
   (throw (ex-info (or message (name error)) (assoc (dissoc more :message) :error error))))
 
 (def ^:private grants
-  {:router #{:thread! :start-worker! :steer! :cancel! :abandon-job! :note! :milestone!}
+  {:router #{:thread! :start-worker! :steer! :cancel! :abandon-job! :note! :milestone! :pause-ended!}
    :worker #{:ask! :note! :milestone! :answered! :finish-worker!}
-   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :machine-observed! :finish-worker! :cancel-delivered! :cancel-blocked! :effect-done! :effect-failed! :timer-fired!}})
+   :controller #{:promote-worker! :issue-token! :register-router! :outbox-sent! :outbox-acked! :outbox-dropped! :worker-running! :worker-prepared! :job-exited! :health! :machine-observed! :finish-worker! :cancel-delivered! :cancel-blocked! :effect-done! :effect-failed! :timer-fired! :limit-hit! :pause-ended!}})
 
 (def default-policy
   "What policy.edn says when it is absent: the Worker cap, how long a live
@@ -236,20 +237,122 @@
         :starting (format "%s has been starting for %d minutes and its session has not opened." (:id w) minutes)
         :cancelling (format "%s was told to stop %d minutes ago and has not." (:id w) minutes)))))
 
+(def pause-timing
+  "When a paused session resumes, in ms: GRACE after the reset it names, else
+  a PROBE after the limit hit, which then repeats while the limit lasts. The
+  Router goes first; each Worker paused before another waits STAGGER more, and
+  each adds JITTER below that, so they do not all spend the new window at once.
+  The timers end at most one pause per STAGGER."
+  {:grace-ms 60000 :probe-ms 900000 :stagger-ms 45000 :jitter-ms 30000})
+
+(defn pauses
+  "The sessions a usage limit paused, [[subject pause] ...]: \"router\" first,
+  then Workers by id. A pause is {:at :until :window :text :resume-at}."
+  [state]
+  (concat (when-let [p (get-in state [:router :router :paused])] [["router" p]])
+          (for [w (sort-by (comp id-order :id) (vals (:workers state))) :when (:paused w)] [(:id w) (:paused w)])))
+
+(defn paused-conversations
+  "The conversations whose mail the controller holds while a limit pauses them."
+  [state]
+  (set (for [[subject _] (pauses state)]
+         (if (= "router" subject) (get-in state [:router :router :conversation]) (get-in state [:workers subject :conversation])))))
+
 (defn due
   "The timer commands due in STATE at NOW, epoch ms, each under an id that is a
-  function of the timer, so it commits once."
+  function of the timer, so it commits once: the deadlines of :starting and
+  :cancelling Workers, and the end of a pause of the Router or a working
+  Worker."
   [state now]
-  (vec (for [w (sort-by (comp id-order :id) (vals (:workers state)))
-             :let [limit (deadlines (:state w))]
-             :when (and limit (:state-at w) (not (overdue w)) (>= (- now (:state-at w)) limit))]
-         {:id (str "timer-" (name (:state w)) "-" (:id w)) :command :timer-fired! :args {:kind (:state w) :subject (:id w)}})))
+  (vec (concat
+        (for [w (sort-by (comp id-order :id) (vals (:workers state)))
+              :let [limit (deadlines (:state w))]
+              :when (and limit (:state-at w) (not (overdue w)) (>= (- now (:state-at w)) limit))]
+          {:id (str "timer-" (name (:state w)) "-" (:id w)) :command :timer-fired! :args {:kind (:state w) :subject (:id w)}})
+        ;; One pause ends per stagger, the earliest first, also when a restart finds several past due.
+        (when-let [[subject p] (and (>= (- now (or (:last-resume state) 0)) (:stagger-ms pause-timing))
+                                    (->> (pauses state)
+                                         (filter (fn [[subject p]] (and (>= now (:resume-at p))
+                                                                        (or (= "router" subject) (= :working (get-in state [:workers subject :state]))))))
+                                         (sort-by (comp :resume-at second))
+                                         first))]
+          [{:id (str "resume-" subject "-" (:at p)) :command :pause-ended! :args {:subject subject :how :timer :at (:at p)}}]))))
 
 (defmethod decide* :timer-fired! [state {{:keys [kind subject since] :as args} :args}]
   (let [w (get-in state [:workers subject])
         moot? (if (= :notify kind) (= since (get-in state [:notified subject])) (not= kind (:state w)))]
     {:events (if moot? [] [{:kind :timer-fired :thread (:thread w) :data args}])
      :result subject}))
+
+(defn- resume-at [state subject at until]
+  (let [{:keys [grace-ms probe-ms stagger-ms jitter-ms]} pause-timing
+        rank (if (= "router" subject)
+               0
+               (inc (count (remove #(= subject (first %)) (filter #(not= "router" (first %)) (pauses state))))))]
+    (+ (if until (max until at) (+ at probe-ms)) grace-ms (* rank stagger-ms) (mod (hash [subject at]) jitter-ms))))
+
+(defmethod decide* :limit-hit! [state {{:keys [subject at until window text]} :args}]
+  (when-not (and (string? subject) (integer? at)) (refuse :invalid :field :at))
+  (when-not (or (nil? until) (integer? until)) (refuse :invalid :field :until))
+  (let [router? (= "router" subject)
+        holder (if router? (get-in state [:router :router]) (get-in state [:workers subject]))
+        live? (if router? (some? holder) (= :working (:state holder)))]
+    {:events (if (or (not live?) (<= at (or (:limit-seen holder) 0)))
+               []
+               [{:kind :session-paused :thread (:thread holder)
+                 :data {:subject subject :at at :until until :window window :text (str text)
+                        :resume-at (resume-at state subject at until)}}])
+     :result subject}))
+
+(defn- pause-subject
+  "The subject SUBJECT names for a pause: \"router\", a Worker id, or a
+  thread, for its Worker."
+  [state subject]
+  (cond (= "router" subject) subject
+        (get-in state [:workers subject]) subject
+        :else (or (:worker (thread-of state subject)) (refuse :no-worker :thread subject))))
+
+(defn- resume-text [p how]
+  (str "[Resumed] " (if (= :now how) "The person resumed you before the reset." "The usage limit has reset.")
+       " Your last turn stopped at the " (limits/label (:window p)) " at " (limits/clock (:at p))
+       ". Continue where you left off. Messages held while you were paused come with this one, oldest first."))
+
+(defn- pause-ended
+  "The event that ends SUBJECT's pause P HOW: :timer or :now owes the session
+  a request to continue, unless it is a Worker no longer working; :cancel
+  only lifts the hold on its mail."
+  [state subject p how]
+  (let [w (get-in state [:workers subject])
+        conversation (if (= "router" subject) (get-in state [:router :router :conversation]) (:conversation w))
+        continue? (and (not= :cancel how) conversation (or (= "router" subject) (= :working (:state w))))]
+    {:kind :session-resumed :thread (:thread w)
+     :data (cond-> {:subject subject :how how :at (:at p)}
+             continue? (assoc :outbox (next-id state :outbox "o") :conversation conversation :text (resume-text p how)))}))
+
+(defmethod decide* :pause-ended! [state {{:keys [subject how at]} :args :keys [principal]}]
+  (let [how (keyword how)
+        subject (pause-subject state subject)
+        p (first (keep (fn [[s p]] (when (= subject s) p)) (pauses state)))]
+    (when-not (#{:timer :now :cancel} how) (refuse :invalid :field :how))
+    (when (and (= :timer how) (not= :controller principal)) (refuse :forbidden :command :pause-ended! :how how))
+    (when (and (= :router principal) (= "router" subject)) (refuse :forbidden :command :pause-ended! :subject subject))
+    (cond (and (nil? p) (not= :timer how))
+          (refuse :not-paused :subject subject :message (str (if (= "router" subject) "the Router" subject) " is not paused"))
+          (or (nil? p) (and at (not= at (:at p)))) {:events [] :result subject}
+          :else {:events [(pause-ended state subject p how)] :result subject})))
+
+(defn pause-line
+  "How a view says pause P: paused until 15:20, 5-hour limit."
+  [{:keys [until resume-at window]}]
+  (if until
+    (format "paused until %s, %s" (limits/clock until) (limits/label window))
+    (format "paused at the %s, trying again at %s" (limits/label window) (limits/clock resume-at))))
+
+(defn router-view
+  "The Router as views show it: {:paused P :line text} while a limit pauses it."
+  [state]
+  (when-let [p (get-in state [:router :router :paused])]
+    {:paused p :line (str "Router " (pause-line p))}))
 
 (defn- owed-effect!
   "The finished Worker that owes effect KIND, or a refusal."
@@ -537,24 +640,32 @@
   [w]
   (keep #(when (= :rebooted (:state %)) (:id %)) (get-in w [:health :jobs])))
 
+(declare pause-ended)
+
 (defmethod decide* :resume! [state {{:keys [thread]} :args :keys [token-hash policy]}]
   (let [t (thread-of state thread)
         w (or (get-in state [:workers (:worker t)]) (refuse :no-worker :thread thread))
         rebooted (rebooted-jobs w)]
-    (when-not (and (session-ended? w) (= :working (:state w)))
-      (refuse :not-ended :worker (:id w) :message (str (:id w) "'s session has not ended")))
-    (when (= :missing (get-in w [:health :workflow :status]))
-      (refuse :wf-missing :worker (:id w) :message (str (:id w) "'s wf run " (:wf-run w) " is missing, so it cannot be resumed")))
-    (when-let [reason (blocked-by state (merge default-policy policy) w)]
-      (refuse :cap-full :message (str reason "; resume " thread " when one finishes")))
-    {:events [{:kind :worker-resumed :thread thread
-               :data {:id (:id w) :outbox (next-id state :outbox "o") :conversation (:conversation w)
-                      :text (str "[Recovery] Your session ended and the person resumed it. Continue the existing wf run " (:wf-run w)
-                                 " and conversation. Inspect existing jobs before acting; do not relaunch surviving jobs."
-                                 (when (seq rebooted)
-                                   (str " The machine rebooted, so jobs " (str/join ", " rebooted) " died unfinished; do not wait on them, and rerun one only if you still need it, mindful of resources.")))}}
-              {:kind :token-issued :thread thread :data {:hash token-hash :principal [:worker (:id w)]}}]
-     :result (:id w)}))
+    (if (and (:paused w) (= :working (:state w)) (not (session-ended? w)))
+      ;; A live session a usage limit paused resumes now.
+      {:events [(pause-ended state (:id w) (:paused w) :now)] :result (:id w)}
+      (do
+        (when-not (and (session-ended? w) (= :working (:state w)))
+          (refuse :not-ended :worker (:id w) :message (str (:id w) "'s session has not ended")))
+        (when (= :missing (get-in w [:health :workflow :status]))
+          (refuse :wf-missing :worker (:id w) :message (str (:id w) "'s wf run " (:wf-run w) " is missing, so it cannot be resumed")))
+        (when-let [reason (blocked-by state (merge default-policy policy) w)]
+          (refuse :cap-full :message (str reason "; resume " thread " when one finishes")))
+        {:events (cond-> [{:kind :worker-resumed :thread thread
+                           :data {:id (:id w) :outbox (next-id state :outbox "o") :conversation (:conversation w)
+                                  :text (str "[Recovery] Your session ended and the person resumed it. Continue the existing wf run " (:wf-run w)
+                                             " and conversation. Inspect existing jobs before acting; do not relaunch surviving jobs."
+                                             (when (seq rebooted)
+                                               (str " The machine rebooted, so jobs " (str/join ", " rebooted) " died unfinished; do not wait on them, and rerun one only if you still need it, mindful of resources.")))}}
+                          {:kind :token-issued :thread thread :data {:hash token-hash :principal [:worker (:id w)]}}]
+                   ;; The recovery message asks it to continue, so a pause it had only lifts.
+                   (:paused w) (conj (pause-ended state (:id w) (:paused w) :cancel)))
+         :result (:id w)}))))
 
 (defn- deliverable?
   "Whether Worker W has a session that takes mailbox messages now."
@@ -861,7 +972,8 @@
   row ids whose mailbox file is still there, which the controller read. The
   Router's pending rows go together, oldest first and each opening with its
   id, unless all are summaries, which wait for a row that is not; every
-  other pending row goes to its Worker's mailbox; a sent row whose file is
+  other pending row goes to its Worker's mailbox, except that a conversation
+  a usage limit paused gets nothing but a cancel; a sent row whose file is
   gone is done; a row whose Worker has finished is dropped and its file
   deleted. Effects: [:mailbox/send conversation {:message-id :text :kind}],
   [:mailbox/delete conversation message-id] and [:command cmd], each command
@@ -871,18 +983,20 @@
         rows (sort-by (comp id-order :id) (vals (:outbox state)))
         router-row? (fn [o] (and (= :pending (:state o)) (= router (:conversation o))))
         batch (filter router-row? rows)
+        held (paused-conversations state)
         send (fn [{:keys [id conversation]} text kind]
                ;; Named after the row, so a pass that died before recording the send rewrites the same message.
                (let [m (message-id id)]
                  [[:mailbox/send conversation (cond-> {:message-id m :text text} kind (assoc :kind kind))]
                   [:command {:id (str "sent-" id) :command :outbox-sent! :args {:outbox id :message m}}]]))]
     (vec (concat
-          (when (some #(not= :summary (:delivery %)) batch)
+          (when (and (not (held router)) (some #(not= :summary (:delivery %)) batch))
             (mapcat (fn [{:keys [id text delivery] :as o}] (send o (str (when-not (= :summary delivery) (str id " ")) text) nil)) batch))
           (mapcat (fn [{:keys [id conversation text message] :as o}]
                     (cond (dead-letter? state o)
                           [[:command {:id (str "dropped-" id) :command :outbox-dropped! :args {:outbox id}}]
                            [:mailbox/delete conversation (or message (message-id id))]]
+                          (and (= :pending (:state o)) (held conversation) (not= :cancel (:delivery o))) []
                           (= :pending (:state o)) (send o text (#{:steer :cancel} (:delivery o)))
                           (and (= :sent (:state o)) (not (contains? waiting id)))
                           [[:command {:id (str "acked-" id) :command :outbox-acked! :args {:outbox id}}]]))
@@ -998,7 +1112,7 @@
   (let [t (get-in state [:threads thread])
         w (get-in state [:workers id])]
     (-> state
-        (update-in [:workers id] #(cond-> (assoc % :state outcome :reason reason) landed (assoc :landed landed) (not-empty owes) (assoc :owes owes)))
+        (update-in [:workers id] #(cond-> (dissoc (assoc % :state outcome :reason reason) :paused) landed (assoc :landed landed) (not-empty owes) (assoc :owes owes)))
         (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= [:worker id] (:principal t)) (assoc :revoked true))]) %)))
         (update :asks #(into {} (map (fn [[aid a]] [aid (cond-> a (and (= id (:worker a)) (= :open (:state a))) (assoc :state :superseded))]) %)))
         (update :replies update-vals #(cond-> % (and (= id (:worker %)) (= :sent (:state %))) (assoc :state :closed)))
@@ -1154,6 +1268,7 @@
                          ask (ask-line state (:id t))]]
                (assoc t :section s :status (status s (:execution t)) :unread (unread? t) :ask ask :asks (vec (sort-by :seq (vals (open-asks state (:id t)))))
                       :line (or (:text ask)
+                                (some-> (get-in state [:workers (:worker t) :paused]) pause-line)
                                 (some-> (get-in state [:workers (:worker t)]) cancel-blocked)
                                 (get-in state [:workers (:worker t) :health :problem])
                                 (when (= :failed (:execution t)) (get-in state [:workers (peek (:history t)) :reason]))
@@ -1216,7 +1331,21 @@
 (defmethod fold* :router-registered [state {{:keys [conversation]} :data}]
   (-> state
       (update :tokens #(into {} (map (fn [[h t]] [h (cond-> t (= :router (:principal t)) (assoc :revoked true))]) %)))
-      (assoc-in [:router :router] {:id :router :conversation conversation})))
+      ;; A new session on the same conversation, as a restart opens, stays paused.
+      (update-in [:router :router] #(merge (when (= conversation (:conversation %)) (select-keys % [:paused :limit-seen]))
+                                           {:id :router :conversation conversation}))))
+
+(defmethod fold* :session-paused [state {{:keys [subject at] :as data} :data}]
+  (update-in state (if (= "router" subject) [:router :router] [:workers subject])
+             assoc :paused (dissoc data :subject) :limit-seen at))
+
+(defmethod fold* :session-resumed [state {{:keys [subject outbox conversation text]} :data :keys [thread at]}]
+  (cond-> (-> state
+              (update-in (if (= "router" subject) [:router :router] [:workers subject]) dissoc :paused)
+              (assoc :last-resume (event-ms at)))
+    outbox (-> (bump :outbox)
+               (assoc-in [:outbox outbox] {:id outbox :thread thread :reply nil :conversation conversation
+                                           :text text :state :pending :message nil}))))
 
 (defmethod fold* :note [state {{:keys [text]} :data :keys [thread]}]
   (assoc-in state [:threads thread :summary] text))

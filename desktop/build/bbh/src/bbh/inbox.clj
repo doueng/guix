@@ -70,18 +70,20 @@
 
 (defn announce!
   "Mark conversation ROOT's session, this process, as live in agent.json, with
-  its PROJECT, whether it is BUSY in a turn and, as epoch ms, when the person
-  last typed a prompt into it (PROMPTED-AT)."
+  its PROJECT, whether it is BUSY in a turn, as epoch ms when the person
+  last typed a prompt into it (PROMPTED-AT), and the usage LIMIT that stopped
+  its last turn, {:at :until :window :text}, which bbh super pauses it on."
   [{:keys [root] :as p} busy]
   (let [tmp (fs/create-temp-file {:dir (fs/create-dirs root) :prefix ".agent"})]
     (spit (str tmp) (json/generate-string (cond-> {:pid (.pid (java.lang.ProcessHandle/current))
                                                    :start (:start (process/identity-of (.pid (java.lang.ProcessHandle/current))))
                                                    :project (:project p) :busy busy}
-                                            (:prompted-at p) (assoc :prompted-at (:prompted-at p)))))
+                                            (:prompted-at p) (assoc :prompted-at (:prompted-at p))
+                                            (:limit p) (assoc :limit (:limit p)))))
     (fs/move tmp (agent-file root) {:atomic-move true :replace-existing true})))
 
 (defn agent
-  "The live session of conversation ROOT as {:pid :project :busy :prompted-at}, or nil."
+  "The live session of conversation ROOT as {:pid :project :busy :prompted-at :limit}, or nil."
   [root]
   (let [f (agent-file root)]
     (when (fs/exists? f)

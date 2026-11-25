@@ -405,6 +405,7 @@
       [:a.link {:href "#docs" :on {:click (fn [e] (.preventDefault e) (go! "#docs"))}} "Docs"]
       [:span.live {:class (when-not live "off")} (if live "live" "offline")]]
      [:div.chips (chip f "all" "All") (chip f "you" (str "Needs you " n-you)) (chip f "archived" (str "Archived " n-archived))]
+     (when-let [l (get-in inbox [:router :line])] [:p.paused l])
      (cond inbox-error [:p.empty inbox-error]
            (nil? inbox) [:p.empty "Loading"]
            (empty? shown) [:p.empty (if (= f "you") "Nothing needs you" "No threads")])

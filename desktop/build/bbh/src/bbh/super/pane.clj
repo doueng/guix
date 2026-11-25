@@ -112,9 +112,10 @@
                                 (when (and final-from (or final final-preview)) [(org-final final-from final final-preview)]))))))
 
 (defn header
-  "The Inbox's first line: what needs you, the processes on older code, then the keys."
-  [{:keys [badge]} stale]
-  (format "bbh inbox · %d need you%s   1-9 pick  . recommended  i answer  s/C-n send  S send all  TAB fold  RET open  A approve  r note  m read  M all read  U unread  D dismiss  a archive  x cancel  R router  J jjui (q closes)  gJ close jjui  gr reload  g? help" badge
+  "The Inbox's first line: what needs you, a paused Router, the processes on older code, then the keys."
+  [{:keys [badge router]} stale]
+  (format "bbh inbox · %d need you%s%s   1-9 pick  . recommended  i answer  s/C-n send  S send all  TAB fold  RET open  A approve  r note  m read  M all read  U unread  D dismiss  a archive  x cancel  R router  J jjui (q closes)  gJ close jjui  gr reload  g? help" badge
+          (if-let [l (:line router)] (str " · " l) "")
           (if (seq stale) (str " · old code: " (str/join ", " stale)) "")))
 
 (defn- sections
@@ -274,7 +275,10 @@
                (note! id line))
       "approve" (approve! id n)
       "dismiss" (call! {:command :dismiss! :args {:thread id}})
-      "resume" (call! {:command :resume! :args {:thread id}})
+      "resume" (if (= "router" id)
+                 (call! {:command :pause-ended! :args {:subject "router" :how :now}})
+                 (call! {:command :resume! :args {:thread id}}))
+      "unpause" (call! {:command :pause-ended! :args {:subject id :how :cancel}})
       "archive" (call! {:command :archive! :args {:thread id}})
       "cancel" (println (cancel! id))
       "abandon" (println (call! {:command :abandon-job! :args {:thread id :job n}}))
@@ -287,7 +291,7 @@
               (println (if (notify/toggle-dnd! (when (fs/exists? f) (edn/read-string (slurp (str f)))))
                          "Do not disturb: bbh notifications are off; gn turns them on"
                          "bbh notifications are on")))
-      (println "usage: bbh inbox [org|split [T [select]]|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|archive T|cancel T|abandon T JOB|read T...|all|unread T...|buffer T|dir T|register PORT|dnd]"))
+      (println "usage: bbh inbox [org|split [T [select]]|select T [ASK]|pick T N [ASK]|answer T ASK TEXT|send T [ANSWERS]|clear T|approve T [ASK]|note T TEXT|dismiss T|resume T|resume router|unpause T|unpause router|archive T|cancel T|abandon T JOB|read T...|all|unread T...|buffer T|dir T|register PORT|dnd]"))
     (catch clojure.lang.ExceptionInfo e
       (binding [*out* *err*] (println "bbh inbox:" (ex-message e)))
       (System/exit 1))))
