@@ -133,6 +133,8 @@
         replays (vec (for [r (regressions s)]
                        {:signature (:signature r) :still-fails? (boolean (seq (problems-of chk (:input r))))}))
         run (explore g chk budget)
+        ;; The faster of two timings, so one slow run does not decide a verdict.
+        run (update run :ms min (:ms (explore g chk budget)))
         seen (observe-all s g chk obs budget)]
     (merge {:budget budget :replays replays} run seen)))
 
@@ -197,6 +199,7 @@
   {:coverage (get-in m [:coverage :hit]) :coverage-total (get-in m [:coverage :total])
    :transitions (get-in m [:behaviour :transitions]) :states (get-in m [:behaviour :states])
    :histories (get-in m [:behaviour :histories]) :ngrams (get-in m [:behaviour :ngrams])
+   :labels (vec (sort (keys (get-in m [:behaviour :labels]))))
    :ms (:ms m) :trials (:trials m) :failures (mapv :signature (:failures m))})
 
 ;; The guard
@@ -231,21 +234,23 @@
 ;; Acceptance
 
 (def slack
-  "How much slower a candidate may run: 25% plus 100 ms of noise."
-  {:factor 1.25 :ms 100})
+  "How much slower a candidate may run: 25% plus 20 ms of noise."
+  {:factor 1.25 :ms 20})
 
 (defn judge
   "The verdict on candidate measurement CAND against baseline BASE: accepted
-  when no primary metric (coverage hits, transitions) falls, one rises or a
-  new failure signature appears, and the time stays within slack."
+  when coverage hits or transitions rise, or a new failure signature appears;
+  and none of coverage, transitions and action 3-grams falls, no label the
+  baseline reached is lost, and the time stays within slack."
   [base cand]
   (let [b (summary base) c (summary cand)
-        prim [:coverage :transitions]
-        worse (filter #(< (c %) (b %)) prim)
-        better (filter #(> (c %) (b %)) prim)
+        worse (filter #(< (c %) (b %)) [:coverage :transitions :ngrams])
+        better (filter #(> (c %) (b %)) [:coverage :transitions])
+        lost (remove (set (:labels c)) (:labels b))
         new-sigs (remove (set (:failures b)) (:failures c))
         slow? (> (:ms c) (+ (* (:factor slack) (:ms b)) (:ms slack)))]
     (cond (seq worse) {:verdict :rejected :reason (str "worse " (str/join ", " (map name worse)))}
+          (seq lost) {:verdict :rejected :reason (str "lost labels " (str/join ", " (map name lost)))}
           slow? {:verdict :rejected :reason (format "slower: %d ms against %d ms" (:ms c) (:ms b))}
           (seq new-sigs) {:verdict :accepted :reason (str "new failure " (pr-str (vec new-sigs)))}
           (seq better) {:verdict :accepted :reason (str "more " (str/join ", " (map name better)))}

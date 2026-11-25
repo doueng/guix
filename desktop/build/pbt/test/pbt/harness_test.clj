@@ -44,13 +44,17 @@
     (is (pos? (get-in m [:behaviour :transitions])))))
 
 (deftest the-verdict-wants-more-without-less-or-slower
-  (let [m (fn [cov tr ms & [fails]] {:coverage {:hit cov} :behaviour {:transitions tr} :ms ms :failures (mapv #(hash-map :signature %) fails)})]
+  (let [m (fn [cov tr ms & {:keys [fails ngrams labels] :or {ngrams 5 labels {:a 1}}}]
+            {:coverage {:hit cov} :behaviour {:transitions tr :ngrams ngrams :labels labels} :ms ms
+             :failures (mapv #(hash-map :signature %) fails)})]
     (is (= :accepted (:verdict (h/judge (m 10 10 100) (m 11 10 100)))))
     (is (= :accepted (:verdict (h/judge (m 10 10 100) (m 10 12 120)))))
     (is (= :rejected (:verdict (h/judge (m 10 10 100) (m 10 10 100)))) "nothing rose")
     (is (= :rejected (:verdict (h/judge (m 10 10 100) (m 12 9 100)))) "transitions fell")
-    (is (= :rejected (:verdict (h/judge (m 10 10 100) (m 12 12 400)))) "too slow")
-    (is (= :accepted (:verdict (h/judge (m 10 10 100) (m 10 10 100 [[:boom]])))) "a new failure")))
+    (is (= :rejected (:verdict (h/judge (m 10 10 100) (m 12 12 100 :ngrams 4)))) "3-grams fell")
+    (is (= :rejected (:verdict (h/judge (m 10 10 100) (m 12 12 100 :labels {:b 1})))) "a label was lost")
+    (is (= :rejected (:verdict (h/judge (m 10 10 60) (m 12 12 183)))) "too slow")
+    (is (= :accepted (:verdict (h/judge (m 10 10 100) (m 10 10 100 :fails [[:boom]])))) "a new failure")))
 
 (deftest the-guard-refuses-files-outside-the-generators
   (let [s (h/suite :rexg-connection)]
