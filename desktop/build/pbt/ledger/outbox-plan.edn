@@ -14,4 +14,39 @@
    :trials 450,
    :ms 53,
    :failures []},
-  :round 0}]
+  :round 0}
+ {:baseline-metrics
+  {:labels
+   [:cancel-sent :crash-after-send :router-batch :stale-file-deleted],
+   :states 549,
+   :transitions 760,
+   :coverage 35,
+   :histories 281,
+   :ngrams 257,
+   :coverage-total 42,
+   :trials 450,
+   :ms 52,
+   :failures []},
+  :new-regressions [],
+  :generator-sha "36c3b3e890f7007c",
+  :note
+  "crash between a send and its record, followed by a recovery pass (odd crash points, 2-7 rounds)",
+  :round 1,
+  :property-sha "ba1387527b3732ac",
+  :reason "more transitions",
+  :at "2026-11-25T13:24:09.237042875Z",
+  :verdict :accepted,
+  :by :agent,
+  :cost {:minutes 1},
+  :metrics
+  {:labels
+   [:cancel-sent :crash-after-send :router-batch :stale-file-deleted],
+   :states 566,
+   :transitions 876,
+   :coverage 35,
+   :histories 365,
+   :ngrams 325,
+   :coverage-total 42,
+   :trials 450,
+   :ms 64,
+   :failures []}}]

@@ -14,7 +14,9 @@
 (def gen-round
   "One round: a pass that crashes after CRASH effects (nil: it completes),
   then the sessions that scan their mailbox (one flag per conversation)."
-  (gen/hash-map :crash (gen/one-of [(gen/return nil) (gen/choose 0 6)])
+  ;; A send is followed by its :outbox-sent! command, so an odd count often
+  ;; crashes between the two: the resend-after-crash path.
+  (gen/hash-map :crash (gen/frequency [[2 (gen/return nil)] [1 (gen/choose 0 6)] [2 (gen/elements [1 3 5 7])]])
                 :scans (gen/vector gen/boolean 4)))
 
 (def gen-case
@@ -25,4 +27,4 @@
    :workers (gen/hash-map "c1" (gen/elements [:working :done :failed])
                           "c2" (gen/elements [:working :cancelled])
                           "c3" (gen/elements [:working :working :done]))
-   :rounds (gen/vector gen-round 1 5)))
+   :rounds (gen/vector gen-round 2 7)))
