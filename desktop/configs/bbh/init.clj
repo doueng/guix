@@ -1025,6 +1025,13 @@ sh and $ throw on cat, head, tail, sed -n, grep, rg, ls, find or wc -l, naming t
   (spit (str path) (explainer/page opts))
   (str (fs/absolutize path)))
 
+(defn image!
+  "Make images with bbh.image on the ChatGPT subscription and return {:dir :images :gallery :org :estimate-usd}.
+  OPTS as for bbh.image/generate!: :n :size :quality :format :background, :images (paths to edit), :mask (inpaint),
+  :thread (lists the gallery in the phone's Docs) and :confirmed. Read the image-gen skill first."
+  [prompt & {:as opts}]
+  ((requiring-resolve 'bbh.image/generate!) (assoc opts :prompt prompt)))
+
 (defn look
   "Have a Claude delegate view the png PATHS and answer QUESTION in text."
   [question & paths]

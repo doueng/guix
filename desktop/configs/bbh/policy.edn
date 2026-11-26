@@ -26,4 +26,5 @@
  :notify-expire-ms 5000
  :docs ["~/guix/docs" "~/guix/desktop/build/bbh/doc" "~/guix/desktop/build/bbh/docs"
         ["~/guix/desktop/build/pi-sci" "*.html"] ["~/guix/desktop/configs/keybindings" "*.html"]
-        ["/tmp" "*.html"] ["~/.local/state/bbh/workflows" "*/evidence/**.html"]]}
+        ["/tmp" "*.html"] ["~/.local/state/bbh/workflows" "*/evidence/**.html"]
+        ["~/Pictures/bbh-images" "**/gallery.html"]]}

@@ -108,5 +108,6 @@
     "web" (web/-main (super/data-dir))
     "super" (apply super/-main (rest args))
     "say" (apply voice/-main (rest args))
+    "image" (apply (requiring-resolve 'bbh.image/-main) (rest args))
     "inbox" (apply pane/-main (rest args))
     (terminal args)))

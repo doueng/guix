@@ -56,6 +56,10 @@ Switching models mid-conversation keeps the transcript. A Claude Code session th
 
 Skills come from Pi's directories, so the pstack pack and project skills load as they do in Pi.
 
+## Images
+
+`bbh.image` (`image!` in a Worker REPL, `bbh image PROMPT...` in a shell) makes, edits and varies images with the Codex Responses API's `image_generation` tool on the same `openai-codex` login, so they spend ChatGPT plan quota rather than money. Each batch goes to `~/Pictures/bbh-images/DATE/TIME-slug/` (`BBH_IMAGE_DIR`) with an EDN sidecar per image, a `gallery.html` that the phone's Docs list (through policy.edn's `:docs`) and `view` show, and an `index.org` for Emacs. A batch over $0.50 in API terms or over four images needs `:confirmed true`; `ledger.edn` in the folder records every batch. The image-gen skill says when and how to use it.
+
 ## Layout
 
 - `src/bbh/session.clj` owns a conversation: transcript, REPL, commands, events and the bbh tool loop.
